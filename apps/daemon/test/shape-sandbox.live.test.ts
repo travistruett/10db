@@ -30,7 +30,7 @@ import {
   shapeSystemPrompt,
   shapeToolset,
 } from '../src/shape';
-import { createTempRepo } from './fixtures';
+import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
 const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
@@ -173,6 +173,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     try {
       const handle = adapter.open({
         sessionId: mintId('Session'),
+        policy: testPolicy('plan'),
         profile: {
           kind: 'explore',
           shapeId: shape.id,

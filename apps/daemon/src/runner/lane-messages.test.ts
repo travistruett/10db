@@ -13,7 +13,7 @@ import {
   type TaskMessageRow,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { tempDir, type TempDir, testPolicy } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { pictureLimitsFor } from '../screens';
@@ -71,6 +71,7 @@ const say = (body: string, pictures = 0): TaskMessageRow => {
 function startSession(adapter: FakeAdapter): SessionHandle {
   const spec: LaneSessionSpec = {
     sessionId: mintId('Session'),
+    policy: testPolicy(),
     profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',

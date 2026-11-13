@@ -6,6 +6,7 @@ import {
   type LaneSessionSpec,
   type SessionEvent,
 } from './index';
+import { testPolicy } from '../../test/fixtures';
 
 describe('createUnavailableAdapter', () => {
   it('ends the session at once with the message', async () => {
@@ -14,6 +15,7 @@ describe('createUnavailableAdapter', () => {
     );
     const spec: LaneSessionSpec = {
       sessionId: mintId('Session'),
+      policy: testPolicy(),
       profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
       cwd: '/tmp',
       prompt: 'Task: Alpha\n',

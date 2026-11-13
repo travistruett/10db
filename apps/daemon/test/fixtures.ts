@@ -10,7 +10,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import {
+  TRUST_DEFAULTS,
+  type ProjectDto,
+  type TaskDto,
+  type TrustPolicy,
+  type TrustSurface,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import {
   getSession,
   insertSession,
@@ -25,6 +32,7 @@ import { inject } from 'vitest';
 import type { Keychain } from '../src/environment';
 import type { Logger } from '../src/log';
 import type { SandboxRuntime } from '../src/sandbox';
+import { buildTrustPolicy } from '../src/trust';
 
 export interface TempDir {
   path: string;
@@ -405,4 +413,16 @@ export function capturingLogger(): Logger & { readonly lines: () => string[] } {
     lines: () => [...lines],
   };
   return logger;
+}
+
+/** A session's trust policy as the runner or Plan builds one, for a spec a test opens by hand. */
+export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
+  return buildTrustPolicy({
+    surface,
+    projectName: 'demo',
+    checkout: '/repo',
+    gateCommand: null,
+    liveSystems: [],
+    switches: TRUST_DEFAULTS,
+  });
 }

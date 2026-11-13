@@ -6,7 +6,6 @@ export {
   SYSTEM_READS,
   type LaneProfileInput,
 } from './profile';
-export { autoModeRules } from './auto-mode-rules';
 export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';

@@ -60,7 +60,7 @@ import {
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { bashWrites } from './bash-writes';
-import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
+import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
@@ -412,6 +412,7 @@ async function runLane(opts: {
     let providerSessionId: string | null = null;
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      policy: testPolicy(),
       profile: {
         kind: 'lane',
         workstreamId: run.workstreamId,

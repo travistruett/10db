@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import { TRUST_DEFAULTS } from '@10db/contracts';
+import type { LaneSandboxSpec } from '../sandbox';
+import { buildTrustPolicy } from '../trust';
+import { renderClaudeAutoMode } from './claude-auto-mode';
 import {
   claudeQueryOptions,
   type ClaudeProfile,
@@ -33,9 +36,20 @@ const sandbox: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   shellEnv: {},
   disallowedTools: ['Read(//h/.claude.json)'],
-  autoMode: autoModeRules(null),
   askRules: ['Edit(//repo/.mcp.json)'],
 };
+
+/** The rules a lane's policy renders for auto mode; the profile carries them through. */
+const rendered = renderClaudeAutoMode(
+  buildTrustPolicy({
+    surface: 'lane',
+    projectName: 'demo',
+    checkout: '/repo',
+    gateCommand: 'make gate',
+    liveSystems: [],
+    switches: TRUST_DEFAULTS,
+  }),
+);
 
 const noSetup: ClaudeProfileSetup = { instructions: null, plugins: [] };
 const withSetup: ClaudeProfileSetup = { instructions: 'Use pnpm.', plugins: ['/setup/yours'] };
@@ -44,6 +58,7 @@ const lane = (permissionMode: LanePermissionMode, setup = noSetup): ClaudeProfil
   allowedTools: ['Read', 'mcp__10db__*'],
   permissionMode,
   pluginDir: '/harness',
+  autoMode: rendered,
   setup,
 });
 const explore = (setup = noSetup): ClaudeProfile => ({
@@ -66,7 +81,7 @@ const sandboxedLane = {
   settings: {
     autoCompactEnabled: true,
     permissions: { ask: sandbox.askRules },
-    autoMode: sandbox.autoMode,
+    autoMode: rendered,
   },
   sandbox: sandbox.settings,
   disallowedTools: sandbox.disallowedTools,
@@ -102,7 +117,7 @@ describe('claudeQueryOptions', () => {
       },
     },
     {
-      name: 'lane, sandboxed in default mode: the scrub on',
+      name: 'lane, sandboxed in default mode: the scrub on, and the rendered rules too, as today',
       profile: lane('default'),
       sandbox,
       want: {

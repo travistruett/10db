@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  TrustSurface,
   ClaimKind,
   ConflictError,
   currentStep,
@@ -56,6 +57,7 @@ import {
   type TaskId,
   type TaskDto,
 } from '@10db/contracts';
+import { buildTrustPolicy, projectLiveSystems } from '../trust';
 import {
   activeClaims,
   clearLease,
@@ -2107,6 +2109,19 @@ export function createRunner(opts: RunnerOptions): Runner {
             })
           ? 'auto'
           : 'default';
+    const policy = buildTrustPolicy({
+      surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
+      projectName: project.name,
+      checkout,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(db, project.id, (stored) => {
+        opts.logger.warn(
+          { stored },
+          'the stored live systems are not a list 10db reads, so it reads none',
+        );
+      }),
+      switches,
+    });
     // Where auto mode judges the web, WebSearch and WebFetch go to its classifier instead of a card.
     const webJudged = switches.web && nativeJudge(account.kind, lanePermissionMode);
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
@@ -2394,6 +2409,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     try {
       handle = opts.adapter.open({
         sessionId: session.id,
+        policy,
         cwd: checkout,
         prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
         ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),

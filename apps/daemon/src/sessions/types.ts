@@ -5,6 +5,7 @@ import type {
   SessionId,
   ShapeId,
   SupportedAccountKind,
+  TrustPolicy,
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
@@ -98,6 +99,11 @@ export interface AgentSessionCore {
    * or has no Bash (an explore session).
    */
   readonly sandbox: LaneSandboxSpec | null;
+  /**
+   * What the session is held to, whoever judges it (trust line §3): the limits, its environment, the
+   * coordination lines of its surface and whether a person is in it. Claude renders it for auto mode.
+   */
+  readonly policy: TrustPolicy;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /**

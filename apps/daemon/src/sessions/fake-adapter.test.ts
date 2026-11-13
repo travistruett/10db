@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { tempDir } from '../../test/fixtures';
+import { tempDir, testPolicy } from '../../test/fixtures';
 import { FakeSessionClashError } from './fake-session';
 import {
   FakeAdapter,
@@ -31,6 +31,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    policy: testPolicy(),
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',
     model: 'sonnet',

@@ -60,7 +60,7 @@ import {
   type FakeResponses,
   type FakeStep,
 } from './fake-responses';
-import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG } from './fixtures';
+import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { noisePng } from './png';
 
 const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
@@ -661,6 +661,7 @@ async function runOnLane(
   const prompt = world.model.script(steps);
   const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
+    policy: testPolicy(),
     profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: world.checkout,
     prompt,

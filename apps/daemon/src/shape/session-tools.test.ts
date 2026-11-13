@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { autoModeRules, EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
+import { EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { SessionEvent, ToolRequest } from '../sessions';
 import { must } from './conversation-fixture';
 import type { ShapePrepareInput, ShapePrepared } from './service';
@@ -34,7 +34,6 @@ const SANDBOX: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/t/x' },
   shellEnv: {},
   disallowedTools: [],
-  autoMode: autoModeRules(null),
   askRules: [],
 };
 

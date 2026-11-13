@@ -1,6 +1,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
+  TrustSurface,
   ConflictError,
   EventType,
   InvalidError,
@@ -33,6 +34,8 @@ import {
   type StartShapeInput,
   type SupportedAccountKind,
 } from '@10db/contracts';
+import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import {
   countShapeFiles,
   endSession,
@@ -1137,8 +1140,21 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const toolset = shapeToolset(commands !== undefined);
     // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
     const skipped = ready?.note ?? null;
+    const project = getProject(state.db, shape.projectId);
+    // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next one.
+    const policy = buildTrustPolicy({
+      surface: TrustSurface.Plan,
+      projectName: project.name,
+      checkout: launch.cwd,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
+        log.warn({ stored }, 'the stored live systems are not a list 10db reads, so it reads none');
+      }),
+      switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+    });
     const spec: ExploreSessionSpec = {
       sessionId: row.id,
+      policy,
       profile: {
         kind: 'explore',
         shapeId,

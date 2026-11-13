@@ -48,7 +48,7 @@ import {
   shapeSystemPrompt,
 } from '../src/shape';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
-import { createTempRepo } from './fixtures';
+import { createTempRepo, testPolicy } from './fixtures';
 import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
 
@@ -120,6 +120,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
         shapeId: mintId('Shape'),
@@ -289,6 +290,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
         shapeId: shape.id,
@@ -409,6 +411,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
         shapeId: mintId('Shape'),
@@ -627,6 +630,7 @@ async function readInSession(
   const reads: ShapeToolRequest[] = [];
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
       shapeId: mintId('Shape'),

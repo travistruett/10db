@@ -45,7 +45,6 @@ import {
 import type { SetupInput } from './setup-input';
 import { holdsSessionGround, setupReadRefusal } from './setup-reads';
 import { allowlisted, type SandboxRuntime } from './srt-launch';
-import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import {
   createLaneTempDir,
   laneTempRoot,
@@ -85,8 +84,6 @@ export interface LaneSandboxSpec {
   readonly disallowedTools: readonly string[];
   /** Permission rules that make Claude Code ask before the call, whatever the allow rules say. */
   readonly askRules: readonly string[];
-  /** The rules Claude Code's auto-mode classifier weighs every call against. */
-  readonly autoMode: AutoModeSettings;
 }
 
 /** One session's sandbox: its profile, its file-tool context and its temp dir. */
@@ -489,7 +486,6 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Write(${ruleScope(path)}/**)`,
             ]),
           ],
-          autoMode: autoModeRules(input.project.gateCommand),
         };
         let providerSessionId = input.resumeProviderSessionId;
         const fileAccess: FileAccessContext = {

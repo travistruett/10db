@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { AccountKind, AccountProblem, mintId } from '@10db/contracts';
 import { parse } from 'smol-toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FAKE_SRT, SANDBOXED } from '../../test/fixtures';
+import { FAKE_SRT, SANDBOXED, testPolicy } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock } from '../clock';
 import { silentLogger, type Logger } from '../log';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec } from '../sandbox';
 import { codexThreadConfig } from './codex-lane-config';
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
@@ -114,7 +114,6 @@ const sandbox: LaneSandboxSpec = {
   shellEnv: { PATH: '/usr/bin', TMPDIR: '/tmp/lane-1' },
   disallowedTools: [],
   askRules: [],
-  autoMode: autoModeRules('make gate'),
 };
 
 let root: string;
@@ -135,6 +134,7 @@ afterEach(async () => {
 function specOf(over: Partial<LaneSessionSpec> = {}): LaneSessionSpec {
   return {
     sessionId: mintId('Session'),
+    policy: testPolicy(),
     profile: {
       kind: 'lane',
       workstreamId: mintId('Workstream'),

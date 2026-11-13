@@ -4,7 +4,7 @@ import { idUuid, mintId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
-import { createTempRepo, type TempDir } from '../../test/fixtures';
+import { createTempRepo, type TempDir, testPolicy } from '../../test/fixtures';
 import { loadEnv } from '../env';
 import {
   AgentTool,
@@ -83,6 +83,7 @@ async function liveSession(spec: {
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    policy: testPolicy(),
     profile: {
       kind: 'lane',
       workstreamId: mintId('Workstream'),
@@ -157,6 +158,7 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
       shapeId: mintId('Shape'),

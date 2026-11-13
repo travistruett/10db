@@ -1,5 +1,6 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { LaneSandboxSpec } from '../sandbox';
+import type { ClaudeAutoModeSettings } from './claude-auto-mode';
 import { setupPromptText } from './setup-prompt';
 import type { LanePermissionMode, ShapeAgentDefinition } from './types';
 
@@ -17,6 +18,8 @@ export type ClaudeProfile =
       /** The mode a sandboxed lane runs in, already resolved (`laneMode`); an unsandboxed one runs in default. */
       readonly permissionMode: LanePermissionMode;
       readonly pluginDir: string;
+      /** The session's policy as auto mode's rules; Claude Code reads them only while it runs in auto mode. */
+      readonly autoMode: ClaudeAutoModeSettings;
       readonly setup: ClaudeProfileSetup;
     }
   | {
@@ -78,12 +81,12 @@ function laneOptions(
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback. Claude Code reads `autoMode` only from user,
     // managed or inline settings, never the repository's, so a repository cannot loosen the classifier's rules. The
-    // SDK's `settings` type has no `autoMode`; the object comes from `autoModeRules`, which validates it.
+    // SDK's `settings` type has no `autoMode`; the object comes from `renderClaudeAutoMode`, which validates it.
     settings: sandbox
       ? {
           autoCompactEnabled: true,
           permissions: { ask: [...sandbox.askRules] },
-          autoMode: sandbox.autoMode,
+          autoMode: profile.autoMode,
         }
       : { autoCompactEnabled: true },
     ...(sandbox

@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
-import { SANDBOXED, tempDir } from '../../test/fixtures';
+import { SANDBOXED, tempDir, testPolicy } from '../../test/fixtures';
 import { captureLogs } from '../../test/log-capture';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock, systemClock, type Clock } from '../clock';
@@ -27,6 +27,7 @@ import {
   UNSANDBOXED_REFUSAL,
   type QueryFn,
 } from './claude-session';
+import { renderClaudeAutoMode } from './claude-auto-mode';
 import {
   assistantMessage,
   initMessage,
@@ -39,7 +40,7 @@ import {
 import { AccountProbeError } from './index';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec } from '../sandbox';
 import {
   CompletionError,
   type SessionEvent,
@@ -57,6 +58,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    policy: testPolicy(),
     cwd: '/repo',
     prompt: 'Task: Alpha\nDo it.',
     model: 'claude-sonnet-5-5',
@@ -94,6 +96,7 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    policy: testPolicy('plan'),
     cwd: '/repo',
     prompt: 'First message',
     model: 'claude-sonnet-5-5',
@@ -387,7 +390,6 @@ const laneSandbox: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   shellEnv: {},
   disallowedTools: ['Read(//h/.claude.json)', 'Read(//repo/.env)'],
-  autoMode: autoModeRules('make gate'),
   askRules: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'],
 };
 
@@ -497,16 +499,13 @@ describe('buildQueryOptions', () => {
     });
   });
 
-  it('hands a sandboxed session the classifier rules, keeping the built-in ones', () => {
-    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
-    const settings = options.settings as {
-      autoMode: { hard_deny: string[]; soft_deny: string[] };
-    };
-    expect(settings.autoMode.hard_deny).toHaveLength(3);
-    expect(settings.autoMode.soft_deny).toHaveLength(2);
-    expect(settings.autoMode.hard_deny[0]).toBe('$defaults');
-    expect(settings.autoMode.soft_deny[0]).toBe('$defaults');
-    expect(options.settings).toMatchObject({ permissions: { ask: laneSandbox.askRules } });
+  it('hands a sandboxed session its policy as the classifier rules, keeping the built-in ones', () => {
+    const lane = spec({ sandbox: laneSandbox });
+    const options = buildQueryOptions(lane, deps);
+    expect(options.settings).toMatchObject({
+      autoMode: renderClaudeAutoMode(lane.policy),
+      permissions: { ask: laneSandbox.askRules },
+    });
   });
 
   it.each<[string, 'auto' | 'default' | undefined, 'auto' | 'default' | undefined, string, string]>(

@@ -33,6 +33,7 @@ import {
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
+import { renderClaudeAutoMode } from './claude-auto-mode';
 import { claudeQueryOptions } from './claude-query-options';
 import {
   canUseToolBridge,
@@ -189,6 +190,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
       allowedTools: spec.profile.allowedTools,
       permissionMode: laneMode(spec, deps),
       pluginDir: deps.pluginDir,
+      autoMode: renderClaudeAutoMode(spec.policy),
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
     },
     spec.sandbox ?? null,

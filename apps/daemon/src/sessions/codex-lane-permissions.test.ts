@@ -2,7 +2,7 @@ import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec } from '../sandbox';
 import { lanePermissions } from './codex-lane-permissions';
 
 let root: TempDir;
@@ -50,7 +50,6 @@ function spec(allowRead: readonly string[]): LaneSandboxSpec {
     shellEnv: {},
     disallowedTools: [],
     askRules: [],
-    autoMode: autoModeRules(null),
   };
 }
 

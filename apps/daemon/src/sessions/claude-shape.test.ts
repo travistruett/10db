@@ -8,7 +8,7 @@ import type {
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec } from '../sandbox';
 import { createChannel } from './channel';
 import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
 import { SKILL_NAMES_LINE } from './setup-prompt';
@@ -21,6 +21,7 @@ import type {
   ShapeToolResult,
   ToolRequest,
 } from './types';
+import { testPolicy } from '../../test/fixtures';
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
@@ -32,6 +33,7 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    policy: testPolicy('plan'),
     cwd: '/repo',
     prompt: 'First message',
     model: 'claude-sonnet-5-5',
@@ -87,7 +89,6 @@ const readOnlySandbox: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   shellEnv: {},
   disallowedTools: ['Read(//h/.claude.json)'],
-  autoMode: autoModeRules(null),
   askRules: ['Edit(//repo/.mcp.json)'],
 };
 
