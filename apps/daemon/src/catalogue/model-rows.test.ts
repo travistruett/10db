@@ -170,6 +170,28 @@ describe('buildModelRows', () => {
         ...(asked === undefined ? {} : { account: asked }),
       })[0];
 
+    it('takes the row’s Coding and Agentic from the Max effort when another effort ranks first', () => {
+      const [row] = buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [
+          profile({ effort: 'high', scores: scored(60), costPerTaskUsd: 1 }),
+          profile({ effort: 'max', scores: scored(60), costPerTaskUsd: 2 }),
+        ],
+        offers: [offer(subscription.id)],
+        openRouter: new Map([
+          ['claude-opus-5-5', [measure({ kind: 'score_aa', coding: 31, agentic: 22 })]],
+        ]),
+      });
+      expect(row?.efforts.map((e) => e.effort)).toEqual(['high', 'max']);
+      expect(row).toMatchObject({ coding: 31, agentic: 22 });
+      expect(row?.sources).toMatchObject({
+        coding: 'aa_via_openrouter',
+        agentic: 'aa_via_openrouter',
+      });
+    });
+
     it('shows the score OpenRouter relays on the Max effort alone, and names it', () => {
       const row = rowsWith([
         measure({ kind: 'score_aa', intelligence: 55, coding: 31, agentic: 22 }),

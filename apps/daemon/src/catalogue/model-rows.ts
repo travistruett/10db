@@ -198,6 +198,8 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       measured,
     );
     const first = efforts[0];
+    // Only the Max effort can carry OpenRouter's Coding and Agentic, so the row reads them there.
+    const max = efforts.find((e) => e.effort === Effort.Max);
 
     // Speed is the model's: OpenRouter's, else Artificial Analysis's from the first effort or any profile.
     const speed = modelSpeed({
@@ -221,12 +223,16 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       intelligence: first?.intelligence ?? null,
       costPerTaskUsd: first?.costPerTaskUsd ?? null,
       outputTokensPerSecond: speed.tokensPerSecond,
-      coding: first?.coding ?? null,
-      agentic: first?.agentic ?? null,
+      coding: first?.coding ?? max?.coding ?? null,
+      agentic: first?.agentic ?? max?.agentic ?? null,
       sources: {
         intelligence: first?.sources.intelligence ?? null,
-        coding: first?.sources.coding ?? null,
-        agentic: first?.sources.agentic ?? null,
+        coding:
+          first?.coding === null ? (max?.sources.coding ?? null) : (first?.sources.coding ?? null),
+        agentic:
+          first?.agentic === null
+            ? (max?.sources.agentic ?? null)
+            : (first?.sources.agentic ?? null),
         costPerTask: first?.sources.costPerTask ?? null,
         speed: speed.source,
       },
