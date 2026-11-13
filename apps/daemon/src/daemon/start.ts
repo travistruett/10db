@@ -210,6 +210,7 @@ import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
+import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
@@ -1834,6 +1835,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
+    planRecord: createPlanRecordServices({ state, dataDir: opts.dataDir }),
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,

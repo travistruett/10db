@@ -1,4 +1,8 @@
 import type {
+  PlanImportInput,
+  PlanImportIssue,
+  PlanImportPreview,
+  PlanImportResult,
   AaModelDto,
   AccountConfig,
   AccountModelDto,
@@ -192,6 +196,18 @@ export type ShapeConvertOutcome =
   | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
   | { readonly kind: 'refused'; readonly errors: string[] };
 
+/** What importing a planning effort came to: written, a dry run's preview, or every reason it was refused. */
+export type PlanImportOutcome =
+  | { readonly kind: 'imported'; readonly result: PlanImportResult }
+  | { readonly kind: 'previewed'; readonly preview: PlanImportPreview }
+  | { readonly kind: 'refused'; readonly errors: PlanImportIssue[] };
+
+/** A Plan's record: importing a bundle into it (the route and the builder's `import_plan`). */
+export interface PlanRecordServices {
+  /** Reads, checks and imports a bundle into one Plan, all or nothing; a dry run writes nothing. */
+  importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome>;
+}
+
 /** The setting that lets 10db install main's build by itself. */
 export interface SelfUpdateServices {
   /** The one app-wide setting (on until the builder turns it off) and the commits involved. */
@@ -237,7 +253,7 @@ export interface TaskLookupServices {
 }
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
-export interface ApiServices {
+export interface ApiServices extends PlanRecordServices {
   /** The judge's status, key, connection test and call log. */
   judgeStatus(): Promise<JudgeStatusDto>;
   patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;

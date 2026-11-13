@@ -88,3 +88,46 @@ describe('start_task', () => {
     expect(startTask).not.toHaveBeenCalled();
   });
 });
+
+describe('import_plan', () => {
+  const projectId = mintId('Project');
+  const result = {
+    kind: 'previewed',
+    preview: { dryRun: true, shapeId: null, title: 'Remote host', changes: {} },
+  } as const;
+
+  it('import_plan reads a bundle path and answers the import', async () => {
+    const importPlan = vi.fn(() => Promise.resolve(result));
+    const tools = createBuilderTools({ importPlan } as unknown as BuilderServices);
+    const answer = await tools[BuilderToolName.ImportPlan]({
+      projectId,
+      bundlePath: '/tmp/effort/bundle.json',
+      dryRun: true,
+    });
+    expect(importPlan).toHaveBeenCalledWith(projectId, {
+      bundlePath: '/tmp/effort/bundle.json',
+      dryRun: true,
+    });
+    expect(answer).toEqual(result.preview);
+  });
+
+  it('import_plan answers a refusal as the route does, every issue listed', async () => {
+    const errors = [{ path: 'Task t1, areas: docs', message: 'is not an area of the project' }];
+    const importPlan = vi.fn(() => Promise.resolve({ kind: 'refused', errors }));
+    const tools = createBuilderTools({ importPlan } as unknown as BuilderServices);
+    expect(await tools[BuilderToolName.ImportPlan]({ projectId, bundlePath: '/b.json' })).toEqual({
+      errors,
+    });
+  });
+
+  it('import_plan refuses an inline bundle field', async () => {
+    const importPlan = vi.fn();
+    const tools = createBuilderTools({ importPlan } as unknown as BuilderServices);
+    await expect(
+      Promise.resolve(
+        tools[BuilderToolName.ImportPlan]({ projectId, bundlePath: '/b.json', bundle: {} }),
+      ),
+    ).rejects.toThrow(/bundle/);
+    expect(importPlan).not.toHaveBeenCalled();
+  });
+});

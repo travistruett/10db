@@ -42,6 +42,7 @@ export type BuilderServices = Pick<
   | 'listBoardColumns'
   | 'listInbox'
   | 'startShape'
+  | 'importPlan'
   | 'listKnowledge'
   | 'recordDecision'
   | 'supersedeDecision'
@@ -228,6 +229,20 @@ export function createBuilderTools(
     [BuilderToolName.StartShape]: (args) => {
       const shape = services.startShape(BuilderToolInputs.start_shape.parse(args));
       return { id: shape.id, title: shape.title };
+    },
+    // A planning effort hands over through the same service as POST /projects/:id/plans/import,
+    // and answers what the route answers.
+    [BuilderToolName.ImportPlan]: async (args) => {
+      const { projectId, bundlePath, dryRun } = BuilderToolInputs.import_plan.parse(args);
+      const outcome = await services.importPlan(projectId, { bundlePath, dryRun });
+      switch (outcome.kind) {
+        case 'imported':
+          return outcome.result;
+        case 'previewed':
+          return outcome.preview;
+        case 'refused':
+          return { errors: outcome.errors };
+      }
     },
     // Card text is written by managed sessions (an ask_human question becomes the title), so the
     // builder's clients get the title alone: no body, options or detail to act on.
