@@ -36,11 +36,12 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
       <Group justify="space-between" align="flex-start">
         <Stack gap={2}>
           <Text size="sm" c="dimmed">
-            A question goes to the first route that matches, most specific first. When none does,{' '}
+            A question goes to the first route that matches, most specific first.
+          </Text>
+          <Text size="sm" c="dimmed">
             {judgeOn
-              ? "Jev picks from the project's categories and topics."
-              : "the lane's own category and topic decide."}{' '}
-            Anything left comes to you.
+              ? "When none does, Jev picks from the project's categories and topics. Anything left comes to you."
+              : "Without Jev, the lane's own category and topic decide. Anything left comes to you."}
           </Text>
         </Stack>
         <Button
