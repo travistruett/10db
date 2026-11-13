@@ -40,7 +40,7 @@ export const P1_REVISION_2 = [
 ].join('\n');
 
 /** The sections `indexSections` gives a body: each heading's slug, level, title and offsets. */
-function sectionsOf(
+export function sectionsOf(
   body: string,
 ): { slug: string; level: number; title: string; start: number; end: number }[] {
   const lines = body.split('\n');

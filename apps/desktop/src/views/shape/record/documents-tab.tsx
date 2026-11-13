@@ -12,9 +12,9 @@ import { Markdown } from '../../../conversation';
 import { usePlanRevision } from '../../../daemon/plan-record-queries';
 import { RecordTab, type RecordSearch } from './record-tabs';
 
-// Documents: pick a document and a revision, read its outline, and read it whole. The body is drawn in
-// pieces cut at its section headings, so a section picked in the outline (or named in the address) is
-// scrolled to by its own piece.
+// Documents: pick a document and a revision, read its outline, and read it whole. The body is drawn
+// once, so a footnote or a reference link keeps its definition wherever it is; a section picked in the
+// outline (or named in the address) is scrolled to by its heading's line.
 
 const KIND_LABELS: Readonly<Record<PlanRecordDocument['kind'], string>> = {
   research: 'Research',
@@ -35,20 +35,12 @@ function revisionLabel(r: PlanRecordDocument['revisions'][number]): string {
     .join(' · ');
 }
 
-/** The body cut at every section's start: what comes before the first heading, then one piece per heading. */
-export function bodyPieces(
-  body: string,
-  sections: readonly SectionIndexEntry[],
-): { readonly slug: string | null; readonly text: string }[] {
-  const starts = [...new Set(sections.map((s) => s.start))]
-    .filter((start) => start > 0 && start < body.length)
-    .sort((a, b) => a - b);
-  const slugAt = new Map(sections.map((s) => [s.start, s.slug]));
-  const cuts = [0, ...starts, body.length];
-  return cuts.slice(0, -1).map((start, i) => ({
-    slug: slugAt.get(start) ?? null,
-    text: body.slice(start, cuts[i + 1]),
-  }));
+/**
+ * The line a section's heading is on, counted as markdown counts lines (CR LF, LF or a lone CR each
+ * end one), so it names the heading the drawn body marks with `data-line`.
+ */
+export function sectionLine(body: string, start: number): number {
+  return (body.slice(0, start).match(/\r\n|\r|\n/g)?.length ?? 0) + 1;
 }
 
 function Body({
@@ -65,22 +57,24 @@ function Body({
   readonly section: string | undefined;
 }) {
   const revision = usePlanRevision(shapeId, doc, number);
-  const pieces = useRef(new Map<string, HTMLElement>());
+  const drawn = useRef<HTMLDivElement>(null);
   const body = revision.data?.body;
+  const start = sections.find((s) => s.slug === section)?.start;
+  const line = body === undefined || start === undefined ? undefined : sectionLine(body, start);
   useEffect(() => {
-    if (section === undefined || body === undefined) return;
-    // The pieces draw over a few frames, which moves the section down; it is scrolled to again each
+    if (line === undefined) return;
+    // The body draws over a few frames, which moves the heading down; it is scrolled to again each
     // time it moves, until it has stayed put for a few frames.
     let last = Number.NaN;
     let still = 0;
     let frames = 0;
     let id = 0;
     const settle = (): void => {
-      const piece = pieces.current.get(section);
-      if (piece) {
-        const top = piece.offsetTop;
+      const heading = drawn.current?.querySelector<HTMLElement>(`[data-line="${String(line)}"]`);
+      if (heading) {
+        const top = heading.offsetTop;
         if (top !== last) {
-          piece.scrollIntoView({ block: 'start' });
+          heading.scrollIntoView({ block: 'start' });
           last = top;
           still = 0;
         } else still += 1;
@@ -92,7 +86,7 @@ function Body({
     return () => {
       cancelAnimationFrame(id);
     };
-  }, [section, body]);
+  }, [line]);
   if (revision.isError)
     return (
       <Alert color="red" title="Couldn't load this revision">
@@ -101,21 +95,8 @@ function Body({
     );
   if (body === undefined) return <Loader size="sm" aria-label="Loading the document" />;
   return (
-    <Box>
-      {bodyPieces(body, sections).map((piece, i) => (
-        <Box
-          // A piece is its place in the body; two revisions are never drawn at once.
-          key={`${String(i)}:${piece.slug ?? ''}`}
-          data-section={piece.slug ?? undefined}
-          ref={(el: HTMLElement | null) => {
-            if (piece.slug === null) return;
-            if (el === null) pieces.current.delete(piece.slug);
-            else pieces.current.set(piece.slug, el);
-          }}
-        >
-          <Markdown text={piece.text} />
-        </Box>
-      ))}
+    <Box ref={drawn}>
+      <Markdown text={body} />
     </Box>
   );
 }

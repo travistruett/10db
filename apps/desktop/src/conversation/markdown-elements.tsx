@@ -1,18 +1,28 @@
 import { Code, List, Table, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
-import type { Components } from 'streamdown';
+import type { Components, ExtraProps } from 'streamdown';
 import classes from './markdown.module.css';
 
 // One Mantine element per markdown tag. A link is drawn as its text and its address, never an
 // anchor: nothing in drawn markdown navigates the window until the opener that confirms exists.
 
+/** A heading, marked with the source line it starts on so a view can scroll to a section. */
 function Heading(props: {
   readonly order: 1 | 2 | 3 | 4 | 5 | 6;
   readonly size: number;
+  readonly node: ExtraProps['node'];
   readonly children: ReactNode;
 }) {
   return (
-    <Title order={props.order} fz={props.size} fw={600} c="bright" mt="sm" mb={4}>
+    <Title
+      order={props.order}
+      fz={props.size}
+      fw={600}
+      c="bright"
+      mt="sm"
+      mb={4}
+      data-line={props.node?.position?.start.line}
+    >
       {props.children}
     </Title>
   );
@@ -48,33 +58,33 @@ export const MARKDOWN_ELEMENTS: Components = {
       {children}
     </Text>
   ),
-  h1: ({ children }) => (
-    <Heading order={1} size={17}>
+  h1: ({ node, children }) => (
+    <Heading order={1} size={17} node={node}>
       {children}
     </Heading>
   ),
-  h2: ({ children }) => (
-    <Heading order={2} size={15}>
+  h2: ({ node, children }) => (
+    <Heading order={2} size={15} node={node}>
       {children}
     </Heading>
   ),
-  h3: ({ children }) => (
-    <Heading order={3} size={14}>
+  h3: ({ node, children }) => (
+    <Heading order={3} size={14} node={node}>
       {children}
     </Heading>
   ),
-  h4: ({ children }) => (
-    <Heading order={4} size={14}>
+  h4: ({ node, children }) => (
+    <Heading order={4} size={14} node={node}>
       {children}
     </Heading>
   ),
-  h5: ({ children }) => (
-    <Heading order={5} size={14}>
+  h5: ({ node, children }) => (
+    <Heading order={5} size={14} node={node}>
       {children}
     </Heading>
   ),
-  h6: ({ children }) => (
-    <Heading order={6} size={14}>
+  h6: ({ node, children }) => (
+    <Heading order={6} size={14} node={node}>
       {children}
     </Heading>
   ),

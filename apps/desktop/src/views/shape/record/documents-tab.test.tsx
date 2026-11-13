@@ -10,16 +10,17 @@ import {
   planRecordDto,
   planRecordHandlers,
   RECORD_SHAPE_ID,
+  sectionsOf,
 } from '../../../test/plan-record-fixtures';
-import { bodyPieces, DocumentsTab } from './documents-tab';
+import { DocumentsTab, sectionLine } from './documents-tab';
 import type { RecordSearch } from './record-tabs';
 
-// jsdom has no layout and no scrollIntoView; the stub records which piece was asked to scroll.
+// jsdom has no layout and no scrollIntoView; the stub records which heading was asked to scroll.
 const scrolled: string[] = [];
 beforeEach(() => {
   scrolled.length = 0;
   Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
-    scrolled.push(this.getAttribute('data-section') ?? '');
+    scrolled.push(this.textContent);
   });
 });
 afterEach(() => {
@@ -39,17 +40,22 @@ function Holder({
   );
 }
 
-describe('bodyPieces', () => {
-  it('cuts a body at its sections and loses nothing', () => {
+describe('sectionLine', () => {
+  it.each<[string, string, number]>([
+    ['the first line', '# A\nb\n', 1],
+    ['after LF lines', 'a\nb\n## C\n', 3],
+    ['after CR LF lines', 'a\r\nb\r\n## C\r\n', 3],
+    ['after a lone CR', 'a\rb\n## C\n', 3],
+  ])('%s', (_, body, line) => {
+    expect(sectionLine(body, body.indexOf('#'))).toBe(line);
+  });
+
+  it("names each fixture section's heading line", () => {
     const sections = planRecordDto().documents[0]?.revisions[1]?.sections ?? [];
-    const pieces = bodyPieces(P1_REVISION_2, sections);
-    expect(pieces.map((p) => p.text).join('')).toBe(P1_REVISION_2);
-    expect(pieces.map((p) => p.slug)).toEqual([
-      'remote-host-plan',
-      'starting-point',
-      'what-holds',
-      'task-12',
-    ]);
+    const lines = P1_REVISION_2.split('\n');
+    expect(sections.map((s) => lines[sectionLine(P1_REVISION_2, s.start) - 1])).toEqual(
+      sections.map((s) => `${'#'.repeat(s.level)} ${s.title}`),
+    );
   });
 });
 
@@ -79,7 +85,7 @@ describe('DocumentsTab', () => {
     await screen.findByText('Revoke it over the tailnet.');
     fireEvent.click(within(outline).getByRole('button', { name: 'Task 12: Revoke a device' }));
     await waitFor(() => {
-      expect(scrolled).toContain('task-12');
+      expect(scrolled).toContain('Task 12: Revoke a device');
     });
     expect(
       within(outline)
@@ -94,7 +100,7 @@ describe('DocumentsTab', () => {
       <Holder initial={{ doc: P1_DOCUMENT_ID, rev: 2, section: 'what-holds' }} />,
     );
     await waitFor(() => {
-      expect(scrolled).toEqual(['what-holds']);
+      expect(scrolled).toEqual(['What holds']);
     });
   });
 
@@ -131,5 +137,45 @@ describe('DocumentsTab', () => {
     expect(docs.getByRole('button', { name: /Pairing eval/ }).getAttribute('data-active')).toBe(
       'true',
     );
+  });
+
+  it('a footnote and a reference link keep their definitions in a later section', async () => {
+    const body = [
+      '# Notes',
+      'See the port[^1] and [the docs][docs].',
+      '## Sources',
+      '[^1]: Port 7443 over the tailnet.',
+      '',
+      '[docs]: https://ok.example/docs',
+      '',
+    ].join('\n');
+    const id = mintId('ShapeAttachment');
+    const [revision] = planRecordDto().documents[1]?.revisions ?? [];
+    if (!revision) throw new Error('no revision');
+    const record = planRecordDto({
+      documents: [
+        {
+          id,
+          key: 'n1',
+          kind: 'research',
+          title: 'Notes',
+          effortKey: null,
+          revisions: [{ ...revision, sections: sectionsOf(body) }],
+        },
+      ],
+    });
+    server.use(...planRecordHandlers({ record, bodies: { [`${id}#1`]: body } }), ...baseHandlers());
+    await renderWithDaemonAndRouter(<Holder record={record} initial={{ section: 'sources' }} />);
+    const region = await screen.findByRole('region', { name: 'Notes' });
+    await waitFor(() => {
+      expect(region.textContent).toContain('Port 7443 over the tailnet.');
+    });
+    const shown = region.textContent.replace(/\s+/g, ' ');
+    expect(shown).toContain('the docs (https://ok.example/docs)');
+    expect(shown).not.toContain('[^1]');
+    expect(shown).not.toContain('[docs]');
+    await waitFor(() => {
+      expect(scrolled).toContain('Sources');
+    });
   });
 });
