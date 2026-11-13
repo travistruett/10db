@@ -695,11 +695,11 @@ export interface ApiServices extends PlanRecordServices {
    */
   listModels(accountId?: AccountId): ModelRowDto[];
   /**
-   * What routing chooses for each role on an account at the role's starting need, for a task and a project with
-   * no settings of their own, from the cells of `rigor` (Standard when left out). Throws NotFoundError for an
-   * unknown or archived account.
+   * What routing chooses for each role on an account at the role's starting need, for a task with no settings
+   * of its own, from the cells of `rigor` (Standard when left out) in a project's playbook, or the global one
+   * when no project is given. Throws NotFoundError for an unknown or archived account or a missing project.
    */
-  modelPicks(accountId: AccountId, rigor?: Rigor): RolePicksDto;
+  modelPicks(accountId: AccountId, rigor?: Rigor, projectId?: ProjectId): RolePicksDto;
   /**
    * The playbook a project sees (its own overrides over the global ones over 10db's defaults), or, with null,
    * the global one. Throws NotFoundError for a missing project.

@@ -743,14 +743,16 @@ export function createServices(deps: {
         catalogue: deps.catalogue.catalogue(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
-    modelPicks: (accountId, rigor) => {
+    modelPicks: (accountId, rigor, projectId) => {
       const account = liveAccount(db, accountId);
+      // A missing project is a 404, not the global playbook.
+      if (projectId !== undefined) getProject(db, projectId);
       return {
         accountId,
         picks: rolePicks(
           {
             ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
-            playbook: playbookInputs(db, null).playbook,
+            playbook: playbookInputs(db, projectId ?? null).playbook,
           },
           rigor,
         ),

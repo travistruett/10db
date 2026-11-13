@@ -1155,17 +1155,24 @@ describe('team, routing and benchmark routes', () => {
 
 describe('picks and a conversation’s model carry their new fields to the service', () => {
   it('passes the rigor the picks ask for, and none when the query leaves it out', async () => {
-    const asked: (string | undefined)[] = [];
+    const asked: unknown[] = [];
     const services = stubServices({
-      modelPicks: (accountId, rigor) => {
-        asked.push(rigor);
+      modelPicks: (accountId, rigor, projectId) => {
+        asked.push([rigor, projectId]);
         return { accountId, picks: [] };
       },
     });
     const account = mintId('Account');
-    await app(services).request(`/models/picks?account=${account}&rigor=critical`, auth);
+    const project = mintId('Project');
+    await app(services).request(
+      `/models/picks?account=${account}&rigor=critical&project=${project}`,
+      auth,
+    );
     await app(services).request(`/models/picks?account=${account}`, auth);
-    expect(asked).toEqual(['critical', undefined]);
+    expect(asked).toEqual([
+      ['critical', project],
+      [undefined, undefined],
+    ]);
   });
 
   it('passes the effort with the model, null when the body gives none', async () => {

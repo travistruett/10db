@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
 import { DomainError } from './errors';
-import { AccountId, KindId, PersonaId } from './ids';
+import { AccountId, KindId, PersonaId, ProjectId } from './ids';
 import { HyphenatedKey } from './keys';
 import { Effort, RiskTag, StepRole } from './states';
 
@@ -191,12 +191,14 @@ export const KindOrderInput = z.strictObject({ kindId: KindId, position: z.int()
 export type KindOrderInput = z.infer<typeof KindOrderInput>;
 
 /**
- * Which account's offer the router's picks are made on, and at which rigor's cells (Standard when
- * left out). The query string carries the rigor as its word.
+ * Which account's offer the router's picks are made on, at which rigor's cells (Standard when left
+ * out), and for which project's playbook (the global one when left out). The query string carries the
+ * rigor as its word.
  */
 export const ModelPicksQuery = z.strictObject({
   account: AccountId,
   rigor: z.enum(Rigor).optional(),
+  project: ProjectId.optional(),
 });
 export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
 

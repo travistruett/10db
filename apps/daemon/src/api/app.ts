@@ -1383,8 +1383,8 @@ export function createApp(deps: ApiDeps) {
       '/models/picks',
       validator('query', (query) => ModelPicksQuery.parse(query)),
       (c) => {
-        const { account, rigor } = c.req.valid('query');
-        return c.json(deps.services.modelPicks(account, rigor));
+        const { account, rigor, project } = c.req.valid('query');
+        return c.json(deps.services.modelPicks(account, rigor, project));
       },
     )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))

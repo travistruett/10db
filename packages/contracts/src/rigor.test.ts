@@ -213,6 +213,12 @@ describe('the query, order and refusal the routes add', () => {
   it.each([
     { name: 'an account alone', query: { account }, ok: true },
     { name: 'an account and a rigor', query: { account, rigor: 'careful' }, ok: true },
+    {
+      name: 'an account, a rigor and a project',
+      query: { account, rigor: 'careful', project: mintId('Project') },
+      ok: true,
+    },
+    { name: 'a project that is not an ID', query: { account, project: 'mine' }, ok: false },
     { name: 'a rigor that does not exist', query: { account, rigor: 'extreme' }, ok: false },
     { name: 'no account', query: { rigor: 'light' }, ok: false },
   ])('ModelPicksQuery reads $name', ({ query, ok }) => {
