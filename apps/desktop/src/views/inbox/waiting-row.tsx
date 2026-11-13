@@ -1,22 +1,12 @@
 import type { InboxItemDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Anchor,
-  Button,
-  Group,
-  Menu,
-  Paper,
-  Stack,
-  Text,
-  UnstyledButton,
-} from '@mantine/core';
+import { ActionIcon, Button, Group, Menu, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useAnswerInbox } from '../../daemon/queries';
-import { isTauri, openInBrowser } from '../../desktop/tauri';
 import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from '../factory/short-ago';
 import { cardAnswer } from './card-answer';
+import { ThreadLink } from './thread-link';
 import { ConversationView } from './conversation-view';
 import { defaultRecording } from './record-decision';
 import { TakeBackModal } from './take-back-modal';
@@ -94,22 +84,7 @@ export function WaitingRow({ item, now }: { readonly item: InboxItemDto; readonl
             </Group>
           </UnstyledButton>
           <ProjectLabel projectId={item.projectId} />
-          {permalink === null ? null : (
-            <Anchor
-              href={permalink}
-              target="_blank"
-              rel="noreferrer"
-              size="xs"
-              style={{ whiteSpace: 'nowrap' }}
-              onClick={(event) => {
-                if (!isTauri()) return;
-                event.preventDefault();
-                openInBrowser(permalink).catch(() => undefined);
-              }}
-            >
-              Open in Slack
-            </Anchor>
-          )}
+          {permalink === null ? null : <ThreadLink permalink={permalink} />}
           <Menu position="bottom-end">
             <Menu.Target>
               <ActionIcon variant="subtle" aria-label="More for this question">

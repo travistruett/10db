@@ -252,7 +252,13 @@ describe('what leaves Waiting for Open', () => {
 describe('Resolved cards answered in Slack', () => {
   const answered = (send: Record<string, unknown>, answer: Record<string, unknown>) =>
     card(
-      { state: 'answered', answeredAt: ago(2), ...send },
+      {
+        state: 'answered',
+        sentAt: ago(5),
+        answeredAt: ago(3),
+        permalink: 'https://acme.slack.com/archives/D1/p1',
+        ...send,
+      },
       {
         state: 'ANSWERED',
         answer: { choice: 'Cut access at once', answeredBy: 'mark', via: 'slack', ...answer },
@@ -260,7 +266,12 @@ describe('Resolved cards answered in Slack', () => {
     );
 
   it.each([
-    ['an option', { readAs: 'option' }, {}, ['Answered by Mark Ellis in Slack', 'Read as B']],
+    [
+      'an option',
+      { readAs: 'option' },
+      {},
+      ['Answered by Mark Ellis in Slack · 2h after asking', 'Read as B'],
+    ],
     [
       'own words',
       { readAs: 'own_words' },
@@ -286,5 +297,8 @@ describe('Resolved cards answered in Slack', () => {
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
     for (const text of texts) expect(await screen.findByText(new RegExp(text))).toBeTruthy();
+    // The thread it was answered in.
+    const thread = await screen.findByRole('link', { name: 'Open in Slack' });
+    expect(thread.getAttribute('href')).toBe('https://acme.slack.com/archives/D1/p1');
   });
 });

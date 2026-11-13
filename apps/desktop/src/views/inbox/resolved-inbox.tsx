@@ -14,6 +14,8 @@ import { useResolvedInbox } from '../../daemon/queries';
 import { ProjectLabel } from '../../shell/project-label';
 import { useSelectedProject } from '../../shell/selected-project';
 import { inProject } from './in-project';
+import { elapsedWords } from '../board/task-state';
+import { ThreadLink } from './thread-link';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 
 /** The builder's answer as the card offered it; a choice no option matches reads as it was stored. */
@@ -34,7 +36,13 @@ function slackAnswer(item: InboxItemDto, people: readonly PersonDto[]): string[]
   if (answer?.via !== 'slack') return null;
   const who =
     people.find((p) => p.handle === answer.answeredBy)?.name ?? answer.answeredBy ?? 'Someone';
-  const lines = [`Answered by ${who} in Slack`];
+  const send = item.send;
+  // How long the answer took, from the question going out to the reply.
+  const gap =
+    send?.sentAt != null && send.answeredAt != null
+      ? ` · ${elapsedWords(send.sentAt, new Date(send.answeredAt).getTime())} after asking`
+      : '';
+  const lines = [`Answered by ${who} in Slack${gap}`];
   const letter = letterOf(item, answer.choice);
   const readAs = item.send?.readAs;
   if (readAs === 'option') lines.push(`Read as ${letter}`);
@@ -103,6 +111,9 @@ export function ResolvedInbox({ project }: { readonly project: ProjectId | undef
                     {index === 0 || line.length > 0 ? line : ''}
                   </Text>
                 ))}
+                {item.send?.permalink != null && item.answer?.via === 'slack' ? (
+                  <ThreadLink permalink={item.send.permalink} />
+                ) : null}
                 {proposed.length === 0 ? null : (
                   <Group gap="xs">
                     <Text size="xs" c="dimmed">
