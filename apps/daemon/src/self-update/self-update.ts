@@ -16,7 +16,7 @@ import {
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
-import { GhError, GhFailure } from '../github';
+import { GhError, GhFailure, SIGN_IN_IN_SETTINGS } from '../github';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 
@@ -292,7 +292,7 @@ function unreachableMessage(cause: unknown): string {
   if (cause instanceof GhError) {
     switch (cause.kind) {
       case GhFailure.SignedOut:
-        return `gh is signed out, so 10db cannot see new builds. Run gh auth login in a terminal; ${again}`;
+        return `gh is signed out, so 10db cannot see new builds. ${SIGN_IN_IN_SETTINGS} ${again}`;
       case GhFailure.Unreachable:
         // The network works but the certificate does not check out (a TLS-inspecting proxy, a captive
         // portal, a wrong clock): the machine is not offline, and gh's text names the cause.
@@ -303,7 +303,7 @@ function unreachableMessage(cause: unknown): string {
           return `gh lost its connection to GitHub, so 10db cannot see new builds (${detail}). ${again}`;
         return `This machine looks offline: gh could not reach GitHub, so 10db cannot see new builds. ${again}`;
       case GhFailure.NotInstalled:
-        return `gh is not installed any more, so 10db cannot see new builds. Install it (brew install gh) and sign in with gh auth login; ${again}`;
+        return `gh is not installed any more, so 10db cannot see new builds. Install it (brew install gh). ${SIGN_IN_IN_SETTINGS} ${again}`;
       case GhFailure.Timeout:
         return `GitHub gave gh no answer in time, so 10db cannot see new builds (${detail}). ${again}`;
       case GhFailure.Failed:

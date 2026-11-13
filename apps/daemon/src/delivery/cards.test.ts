@@ -135,6 +135,31 @@ describe('the cards of a batch that failed to ship', () => {
   });
 });
 
+describe('the cards that name gh sign-in', () => {
+  const SIGN_IN = 'Sign in to GitHub in Settings › Integrations.';
+  const rows: Record<string, string> = {
+    'ship, signed out': shipCards.network(batch, 'gh pr create', new GhError('signed_out', 'x'))
+      .card.body,
+    'ship, not installed': shipCards.network(
+      batch,
+      'gh pr create',
+      new GhError('not_installed', 'x'),
+    ).card.body,
+    'pr watch, signed out': prCards.ghUnavailableText(new GhError('signed_out', 'x')).body,
+    'pr watch, not installed': prCards.ghUnavailableText(new GhError('not_installed', 'x')).body,
+  };
+
+  it.each(Object.entries(rows))('%s sends the builder to Settings, not a terminal', (_n, body) => {
+    expect(body).toContain('Settings › Integrations');
+    expect(body).not.toMatch(/gh auth login|in a terminal/);
+  });
+
+  it('signed out gives the sign-in sentence as is', () => {
+    expect(rows['pr watch, signed out']).toContain(SIGN_IN);
+    expect(rows['ship, signed out']).toContain(SIGN_IN);
+  });
+});
+
 describe('the card of a migration a merge of the base lost', () => {
   it('asks for the migration again and offers Retry and Abandon', () => {
     const { card, failure } = shipCards.migrationsLost(batch, { note: '0042_x is missing.' });

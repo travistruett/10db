@@ -468,7 +468,10 @@ describe('tick', () => {
   it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
     const reasons: string[] = [];
     for (const error of [
-      new GhError(GhFailure.SignedOut, 'gh is not signed in. Run gh auth login in a terminal.'),
+      new GhError(
+        GhFailure.SignedOut,
+        'gh is not signed in. Sign in to GitHub in Settings › Integrations.',
+      ),
       new GhError(GhFailure.Unreachable, 'gh api failed (exit 1): error connecting to github.com'),
       new GhError(GhFailure.Failed, 'gh api failed (exit 1): gh: Not Found (HTTP 404)'),
     ]) {
@@ -478,7 +481,7 @@ describe('tick', () => {
       reasons.push(update.status().problem?.message ?? '');
     }
     expect(reasons[0]).toMatch(/signed out/i);
-    expect(reasons[0]).toMatch(/gh auth login/);
+    expect(reasons[0]).toContain('Sign in to GitHub in Settings › Integrations.');
     expect(reasons[1]).toMatch(/offline/i);
     expect(reasons[1]).not.toMatch(/signed out/i);
     expect(reasons[2]).toMatch(/HTTP 404/);

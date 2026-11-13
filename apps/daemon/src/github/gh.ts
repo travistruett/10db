@@ -275,10 +275,13 @@ export interface GhTools {
   readonly git: string;
 }
 
+/** What a builder does about a signed-out gh: the card in Settings runs the login, no terminal. */
+export const SIGN_IN_IN_SETTINGS = 'Sign in to GitHub in Settings › Integrations.';
+
 const notInstalled = (): GhError =>
   new GhError(
     GhFailure.NotInstalled,
-    `10db found no gh in ${INSTALL_PREFIXES_TEXT}. Install the GitHub CLI (brew install gh) and sign in with gh auth login.`,
+    `10db found no gh in ${INSTALL_PREFIXES_TEXT}. Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS}`,
   );
 
 /**
@@ -544,10 +547,7 @@ export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
 export { failure as ghFailureOf };
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
-    return new GhError(
-      GhFailure.SignedOut,
-      'gh is not signed in. Run gh auth login in a terminal.',
-    );
+    return new GhError(GhFailure.SignedOut, `gh is not signed in. ${SIGN_IN_IN_SETTINGS}`);
   return new GhError(
     UNREACHABLE.test(out.stderr) ? GhFailure.Unreachable : GhFailure.Failed,
     `gh ${args.slice(0, 2).join(' ')} failed (exit ${String(out.exitCode)}): ${out.stderr.trim().slice(0, 500)}`,
@@ -691,10 +691,7 @@ export function createGh(exec: GhExec): Gh {
     async authStatus(call) {
       const out = await exec(['auth', 'status', '--active'], call);
       if (out.exitCode !== 0)
-        throw new GhError(
-          GhFailure.SignedOut,
-          'gh is not signed in. Run gh auth login in a terminal.',
-        );
+        throw new GhError(GhFailure.SignedOut, `gh is not signed in. ${SIGN_IN_IN_SETTINGS}`);
     },
     async authLogin(call) {
       const args = ['api', 'user', '--jq', '.login'];

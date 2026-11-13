@@ -24,7 +24,7 @@ import {
   type CheckoutPlace,
   type PassDirtRecord,
 } from '../git';
-import { GhError } from '../github';
+import { GhError, SIGN_IN_IN_SETTINGS } from '../github';
 import type { GateResult } from '../verify';
 import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
@@ -217,12 +217,12 @@ function ghCard(prefix: string, error: unknown, then: string): Card | null {
     case 'not_installed':
       return {
         title: `${prefix}: gh is not installed`,
-        body: `Install the GitHub CLI (brew install gh) and sign in with gh auth login, then ${then}.`,
+        body: `Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS} Then ${then}.`,
       };
     case 'signed_out':
       return {
         title: `${prefix}: gh is signed out`,
-        body: `Run gh auth login in a terminal, then ${then}.`,
+        body: `${SIGN_IN_IN_SETTINGS} Then ${then}.`,
       };
     case 'timeout':
     case 'aborted':
@@ -1257,13 +1257,13 @@ export const prCards = {
       return {
         foldKey,
         title: 'Pull request status unknown: gh is signed out',
-        body: `10db reads your pull requests' checks and merge state with gh. Run gh auth login in a terminal. ${until}`,
+        body: `10db reads your pull requests' checks and merge state with gh. ${SIGN_IN_IN_SETTINGS} ${until}`,
       };
     if (kind === 'not_installed')
       return {
         foldKey,
         title: 'Pull request status unknown: gh is not installed',
-        body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh) and sign in with gh auth login. ${until}`,
+        body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS} ${until}`,
       };
     return {
       foldKey,

@@ -9,6 +9,7 @@ export {
   parseRequiredChecks,
   PrMergeable,
   PrState,
+  SIGN_IN_IN_SETTINGS,
   createSystemGhExec,
   summariseChecks,
   UNREADABLE_CHECK,
