@@ -273,4 +273,40 @@ describe('Thread', () => {
     // Sent once, it is not offered to send again.
     expect(send).toHaveProperty('disabled', true);
   });
+
+  it('a notice with allowThis shows Allow this and sends it', async () => {
+    const denied = taskMessageDto(page.taskId, {
+      author: 'system',
+      kind: 'notice',
+      body: 'Auto mode stopped this Bash call:\n\n```\nnpx vercel deploy\n```',
+      createdAt: minutesBeforeNow(1),
+      sendable: true,
+      allowThis: true,
+    });
+    const posted: { taskId: string; messageId: string }[] = [];
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/thread/:messageId/send-to-agent'), ({ params }) => {
+        posted.push({
+          taskId: String(params['taskId']),
+          messageId: String(params['messageId']),
+        });
+        return HttpResponse.json(
+          taskMessageDto(page.taskId, { body: 'I approve this exact Bash call.' }),
+          {
+            status: 201,
+          },
+        );
+      }),
+    );
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [reply, denied] }));
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
+    const allow = await screen.findByRole('button', { name: 'Allow this' });
+    expect(screen.queryByRole('button', { name: 'Send to Agent' })).toBeNull();
+    fireEvent.click(allow);
+    await waitFor(() => {
+      expect(posted).toEqual([{ taskId: page.taskId, messageId: denied.id }]);
+    });
+    expect(await screen.findByText('Sent to the agent')).toBeTruthy();
+    expect(allow).toHaveProperty('disabled', true);
+  });
 });

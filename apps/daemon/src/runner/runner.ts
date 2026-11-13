@@ -60,10 +60,13 @@ import {
 } from '@10db/contracts';
 import {
   buildTrustPolicy,
+  deniedNoticeText,
   FloorReason,
   floorNoticeText,
   floorReason,
+  goAheadText,
   judgeForCall,
+  offersAllowThis,
   projectLiveSystems,
   startingJudge,
 } from '../trust';
@@ -93,6 +96,7 @@ import {
   insertSource,
   insertSystemNotice,
   listTaskThread,
+  offerAllowThis,
   deleteSignOffWait,
   lastTakeOut,
   listAccountModels,
@@ -2694,6 +2698,24 @@ export function createRunner(opts: RunnerOptions): Runner {
               } else if (current === S.HandingOff && !st.handoffRequested) {
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
               }
+            });
+            break;
+          }
+          case 'judge_denied': {
+            const denied = event.call;
+            // A lane has no thread to show it on; the skips T4 records are where it will show.
+            if (!pass) {
+              log.info(
+                { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },
+                'auto mode denied a call',
+              );
+              break;
+            }
+            // The notice and its offer are one write, so a notice never shows a button with no offer.
+            const offers = offersAllowThis(denied);
+            opts.state.write((ctx) => {
+              const notice = insertSystemNotice(ctx, task.id, deniedNoticeText(denied, offers));
+              if (offers) offerAllowThis(ctx, notice.id, goAheadText(denied));
             });
             break;
           }

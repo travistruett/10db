@@ -52,10 +52,16 @@ const toFileDto = (row: TaskFileRow): TaskFileDto => ({
 /** Where the text Send to Agent sends for a notice is kept, by the notice's id. */
 const sendToAgentKey = (id: TaskMessageId): string => `send_to_agent.${id}`;
 
+/** Whether the offer on a notice is the builder's go-ahead for a denied call, by the notice's id. */
+const allowThisKey = (id: TaskMessageId): string => `allow-this.${id}`;
+
 const toMessageDto = (
   row: MessageRow,
   files: readonly TaskFileRow[],
-  sendable = false,
+  offer: { readonly sendable: boolean; readonly allowThis: boolean } = {
+    sendable: false,
+    allowThis: false,
+  },
 ): TaskMessageDto => ({
   id: row.id,
   taskId: row.taskId,
@@ -66,7 +72,8 @@ const toMessageDto = (
   pushedAt: row.pushedAt,
   deliveredAt: row.deliveredAt,
   files: files.map(toFileDto),
-  sendable,
+  sendable: offer.sendable,
+  allowThis: offer.allowThis,
 });
 
 /** Appends the builder's message and its pictures to a task's thread, in the caller's write. */
@@ -174,7 +181,7 @@ export function listTaskThread(db: DbReader, taskId: TaskId): TaskMessageDto[] {
   const rows = listTaskThreadRows(db, taskId);
   const keys = rows
     .filter((r) => r.kind === TaskMessageKind.Notice)
-    .map((r) => sendToAgentKey(r.id));
+    .flatMap((r) => [sendToAgentKey(r.id), allowThisKey(r.id)]);
   const offered = new Set(
     keys.length === 0
       ? []
@@ -185,7 +192,14 @@ export function listTaskThread(db: DbReader, taskId: TaskId): TaskMessageDto[] {
           .all()
           .map((s) => s.key),
   );
-  return rows.map((row) => toMessageDto(row, row.files, offered.has(sendToAgentKey(row.id))));
+  return rows.map((row) => {
+    const sendable = offered.has(sendToAgentKey(row.id));
+    // Allow this is a kind of offer: without the offer's text there is nothing to allow.
+    return toMessageDto(row, row.files, {
+      sendable,
+      allowThis: sendable && offered.has(allowThisKey(row.id)),
+    });
+  });
 }
 
 /**
@@ -197,13 +211,53 @@ export function offerToAgent(ctx: WriteContext, id: TaskMessageId, text: string)
 }
 
 /**
+ * Offers thread notice `id` with Allow this, in the caller's write: Send to Agent's offer of `text`,
+ * which is the builder's go-ahead for the call auto mode denied, marked so the button reads so.
+ */
+export function offerAllowThis(ctx: WriteContext, id: TaskMessageId, text: string): void {
+  offerToAgent(ctx, id, text);
+  setAppSetting(ctx, allowThisKey(id), true);
+}
+
+/** Whether thread notice `id`'s standing offer is an Allow this. */
+export function isAllowThisOffer(db: DbReader, id: TaskMessageId): boolean {
+  return offeredText(db, id) !== null && getAppSetting(db, allowThisKey(id)) === true;
+}
+
+/**
  * Takes thread notice `id`'s Send to Agent offer, in the caller's write: answers the text it sends
- * and drops the offer, so the notice is sent once; null when it offers none.
+ * and drops the offer, an Allow this mark with it, so the notice is sent once; null when it offers none.
  */
 export function takeOffer(ctx: WriteContext, id: TaskMessageId): string | null {
   const text = offeredText(ctx.tx, id);
-  if (text !== null) deleteAppSetting(ctx, sendToAgentKey(id));
+  if (text !== null) {
+    deleteAppSetting(ctx, sendToAgentKey(id));
+    deleteAppSetting(ctx, allowThisKey(id));
+  }
   return text;
+}
+
+/**
+ * Drops every Allow this offer on these tasks' notices, in the caller's write: the go-ahead of a pass
+ * that has closed has no page to go to. Other offers on the same notices stay.
+ */
+export function dropAllowThisOffers(ctx: WriteContext, taskIds: readonly TaskId[]): void {
+  if (taskIds.length === 0) return;
+  const notices = ctx.tx
+    .select({ id: schema.taskMessages.id })
+    .from(schema.taskMessages)
+    .where(
+      and(
+        inArray(schema.taskMessages.taskId, [...taskIds]),
+        eq(schema.taskMessages.kind, TaskMessageKind.Notice),
+      ),
+    )
+    .all();
+  for (const { id } of notices) {
+    if (getAppSetting(ctx.tx, allowThisKey(id)) === undefined) continue;
+    deleteAppSetting(ctx, allowThisKey(id));
+    deleteAppSetting(ctx, sendToAgentKey(id));
+  }
 }
 
 /** The text Send to Agent sends for thread notice `id`; null when it offers none. */

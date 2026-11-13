@@ -48,6 +48,38 @@ export function createHookCwds(): HookCwds {
   };
 }
 
+/** A call as the PreToolUse hook saw it, which is all a later denial of the call can be shown with. */
+export interface HookCall {
+  readonly toolName: string;
+  readonly input: unknown;
+}
+
+/** The hook's calls by tool use id, read once when Claude Code reports that call denied. */
+export interface HookCalls {
+  remember(toolUseId: string, call: HookCall): void;
+  take(toolUseId: string): HookCall | undefined;
+}
+
+/**
+ * Keeps the newest 256 calls, since a call that ran is never read again. A `Map`, because the ids
+ * come from the SDK and an id such as `__proto__` must name nothing.
+ */
+export function createHookCalls(): HookCalls {
+  const calls = new Map<string, HookCall>();
+  return {
+    remember(toolUseId, call) {
+      calls.set(toolUseId, call);
+      const oldest = calls.keys().next();
+      if (calls.size > HOOK_CWDS_KEPT && !oldest.done) calls.delete(oldest.value);
+    },
+    take(toolUseId) {
+      const call = calls.get(toolUseId);
+      calls.delete(toolUseId);
+      return call;
+    },
+  };
+}
+
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
  * classifier sets them; a marked call becomes a card that no stored rule answers. The SDK passes

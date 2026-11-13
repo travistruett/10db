@@ -43,6 +43,14 @@ export const FakeStep = z.discriminatedUnion('do', [
     limitType: z.string().optional(),
   }),
   z.object({ do: z.literal('compact') }),
+  /** Auto mode refuses a call: the session reports it, as a Claude lane does, and the run goes on. */
+  z.object({
+    do: z.literal('judge_denied'),
+    toolName: z.string(),
+    summary: z.string(),
+    reason: z.string(),
+    by: z.enum(['classifier', 'safety_check']),
+  }),
   /** The commands running in the background now (none: they all finished). */
   z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),
   z.object({ do: z.literal('crash'), message: z.string() }),

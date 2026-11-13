@@ -38,13 +38,16 @@ import { renderClaudeAutoMode } from './claude-auto-mode';
 import { claudeQueryOptions } from './claude-query-options';
 import {
   canUseToolBridge,
+  createHookCalls,
   createHookCwds,
   isClassifierEscalation,
   measurementHooks,
   preToolUseHook,
   settingsRecheckHooks,
+  type HookCalls,
   type ToolGate,
 } from './claude-session-hooks';
+import { deniedCallOf } from './permission-denied';
 import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
@@ -127,6 +130,8 @@ export interface QueryDeps {
   readonly lanePermissionMode?: LanePermissionMode;
   /** The tool names the session has now, asked for a call to an MCP tool and handed to `canUseTool` with it. */
   readonly listedTools?: () => Promise<readonly string[]>;
+  /** Where the PreToolUse hook keeps each call it judged, for the session to show it if auto mode denies it. */
+  readonly calls?: HookCalls;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -199,6 +204,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
   const sandbox = spec.sandbox ?? null;
   const gate: ToolGate = { verified: deps.billingVerified, refused: deps.isRefused };
   const cwds = createHookCwds();
+  const calls = deps.calls ?? createHookCalls();
   return {
     cwd: spec.cwd,
     model: spec.model,
@@ -219,17 +225,25 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
         preToolUseHook({
           gate,
           cwds,
-          judge: (hookInput) =>
-            toShapeHookOutput(
-              spec.preToolUse({
-                toolName: hookInput.tool_name,
-                input: hookInput.tool_input,
-                cwd: hookInput.cwd,
-                // Each call carries the mode Claude Code reports with it; none is not auto mode.
-                reportedMode:
-                  hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
-              }),
-            ),
+          judge: (hookInput) => {
+            const verdict = spec.preToolUse({
+              toolName: hookInput.tool_name,
+              input: hookInput.tool_input,
+              cwd: hookInput.cwd,
+              // Each call carries the mode Claude Code reports with it; none is not auto mode.
+              reportedMode:
+                hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
+            });
+            // The call as it will run: an input the guard rewrote is the one auto mode may deny.
+            calls.remember(hookInput.tool_use_id, {
+              toolName: hookInput.tool_name,
+              input:
+                verdict.decision === 'allow' && 'updatedInput' in verdict
+                  ? verdict.updatedInput
+                  : hookInput.tool_input,
+            });
+            return toShapeHookOutput(verdict);
+          },
         }),
       ],
       ...(sandbox ? {} : settingsRecheckHooks(deps.recheckSettings)),
@@ -510,6 +524,7 @@ function startSession(
     : "Check the project's account and any env block in the repo's .claude/settings.json.";
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
+  const calls = createHookCalls();
   const abortController = new AbortController();
   const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   let account: AccountInfo | undefined;
@@ -643,6 +658,7 @@ function startSession(
             abortController,
             billingVerified,
             listedTools,
+            calls,
             ...(session.lanePermissionMode === undefined
               ? {}
               : { lanePermissionMode: session.lanePermissionMode }),
@@ -915,6 +931,16 @@ function startSession(
           msg.permissionMode !== undefined
         ) {
           log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
+        }
+        // Auto mode's refusals reach the lane's owner as an event; the run goes on, the agent told.
+        if (
+          session.profile === 'lane' &&
+          msg.type === 'system' &&
+          msg.subtype === 'permission_denied'
+        ) {
+          const call = deniedCallOf(msg, calls);
+          if (call !== null) emit({ type: 'judge_denied', call });
+          continue;
         }
         for (const event of mapSdkMessage(msg, { pid })) {
           if (event.type === 'turn_complete') {

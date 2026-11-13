@@ -5125,6 +5125,35 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(floorNotices(task.id)).toEqual([]);
     });
 
+    it("a lane's denial makes no notice", async () => {
+      const { task, workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [
+              {
+                do: 'judge_denied' as const,
+                toolName: 'Bash',
+                summary: 'npx vercel deploy --prod --yes',
+                reason: 'The classifier judged this action dangerous',
+                by: 'classifier' as const,
+              },
+              turn,
+            ],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(
+        listTaskThread(engine.store.db, task.id).filter((m) =>
+          m.body.startsWith('Auto mode stopped'),
+        ),
+      ).toEqual([]);
+      expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+    });
+
     it('a gateway lane refuses the same deploy and says why once', async () => {
       const { specs, task, workstream } = await start(
         GATEWAY,

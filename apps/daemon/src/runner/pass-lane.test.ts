@@ -45,6 +45,7 @@ import {
   endPassTurn,
   listTaskThread,
   leavePass,
+  offeredText,
   listWorkstreams,
   openPassTurn,
   patchAccount,
@@ -339,6 +340,57 @@ describe('a pass task turn by turn', () => {
         .filter((m) => m.author === 'builder')
         .every((m) => m.deliveredAt !== null),
     ).toBe(true);
+  });
+});
+
+describe("auto mode's denial in a pass", () => {
+  const denial = (summary: string, by: 'classifier' | 'safety_check' = 'classifier'): FakeStep => ({
+    do: 'judge_denied',
+    toolName: 'Bash',
+    summary,
+    reason: 'The classifier judged this action dangerous',
+    by,
+  });
+  /** The page's notices that report a denial. */
+  const denials = (task: TaskDto) =>
+    listTaskThread(engine.store.db, task.id).filter((m) => m.body.startsWith('Auto mode stopped'));
+
+  it.each([
+    {
+      name: 'a classifier denial is a notice with Allow this, and the go-ahead it sends names the call',
+      step: denial('npx vercel deploy --prod --yes'),
+      offered: true,
+      shows: 'npx vercel deploy --prod --yes',
+    },
+    {
+      name: "a safety check's denial is a notice with no Allow this",
+      step: denial('rm -rf $(cat list)', 'safety_check'),
+      offered: false,
+      shows: 'only you can run it, in a terminal',
+    },
+    {
+      name: 'a denial too long to approve in one message has no Allow this',
+      step: denial(`echo ${'a'.repeat(4000)}`),
+      offered: false,
+      shows: '(cut)',
+    },
+  ])('$name', async ({ step, offered, shows }) => {
+    const summary = step.do === 'judge_denied' ? step.summary : '';
+    const { task, pass, id } = await openPage([
+      [{ do: 'consume' }, step, { do: 'turn_complete', text: 'Stopped.' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    const [notice, ...others] = denials(task);
+    expect(others).toEqual([]);
+    expect(notice).toMatchObject({ author: 'system', kind: 'notice', allowThis: offered });
+    expect(notice?.body).toContain(shows);
+    // Allow this is Send to Agent's offer, whose text is the go-ahead for exactly this call.
+    expect(notice === undefined ? null : offeredText(engine.store.db, notice.id)).toBe(
+      offered
+        ? `I approve this exact Bash call. Run it again as it was:\n\n\`\`\`\n${summary}\n\`\`\``
+        : null,
+    );
+    expect(getPass(engine.store.db, pass.id).state).toBe('OPEN');
   });
 });
 

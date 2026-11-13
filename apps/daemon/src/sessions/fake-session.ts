@@ -5,7 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { AccountProblem, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
-import type { ReportedMode } from '../trust';
+import { limitOfDenial, type ReportedMode } from '../trust';
 import { credentialProblem, modelMatches } from './account-check';
 import { createChannel } from './channel';
 import {
@@ -390,6 +390,19 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         return 'continue';
       case 'compact':
         emit({ type: 'compacted', trigger: 'auto' });
+        return 'continue';
+      case 'judge_denied':
+        emit({
+          type: 'judge_denied',
+          call: {
+            toolUseId: `fake-denied-${String(index)}`,
+            toolName: step.toolName,
+            summary: step.summary,
+            reason: step.reason,
+            by: step.by,
+            limit: limitOfDenial(step.reason),
+          },
+        });
         return 'continue';
       case 'background':
         emit({

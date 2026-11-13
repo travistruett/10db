@@ -24,6 +24,7 @@ import {
 import {
   clearPassNotice,
   closePass,
+  dropAllowThisOffers,
   getBatch,
   getPass,
   getPassProgress,
@@ -478,6 +479,11 @@ export async function closeSteps(
   const settled = await settlesAtClose(deps, pass);
   deps.state.write((ctx) => {
     if (!closePass(ctx, passId, { settled })) return;
+    // The pass's pages take no go-ahead any more.
+    dropAllowThisOffers(
+      ctx,
+      listPassTasks(ctx.tx, passId).map((t) => t.id),
+    );
     const batch = getBatch(ctx.tx, pass.batchId);
     if (batch.state === BatchState.Shipping)
       transitionBatch(ctx, batch.id, { to: BatchState.Shipped, reason: 'the pass closed' });

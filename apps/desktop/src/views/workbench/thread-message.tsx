@@ -53,7 +53,7 @@ function Body({ text }: { readonly text: string }) {
 /**
  * A notice, dimmed. One the daemon offers with Send to Agent (D19: a review finding or a failed
  * check) has the button, which sends its text to this page as the builder's own message; nothing
- * sends it by itself.
+ * sends it by itself. The button of a denied call reads Allow this: its text is the builder's go-ahead.
  */
 function Notice({
   message,
@@ -94,7 +94,7 @@ function Notice({
           send.mutate({ taskId: message.taskId, noticeId: message.id });
         }}
       >
-        Send to Agent
+        {message.allowThis ? 'Allow this' : 'Send to Agent'}
       </Button>
     </Group>
   );

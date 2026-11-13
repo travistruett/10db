@@ -1,13 +1,23 @@
 import {
   Delivery,
+  PassOpenedDto,
   ProjectDto,
+  TakeOutStep,
   TaskDto,
   TaskId,
   TaskMessageAuthor,
   TaskMessageDto,
 } from '@10db/contracts';
-import { insertSystemNotice, listTaskThread, offerToAgent } from '@10db/db';
+import {
+  advanceTakeOut,
+  insertSystemNotice,
+  insertTakeOut,
+  listTaskThread,
+  offerAllowThis,
+  offerToAgent,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { checkNoticeLine, checkOffer } from '../src/runner/check-targets';
 import { FakeAdapter } from '../src/sessions';
@@ -29,7 +39,9 @@ beforeEach(async () => {
     sandbox: null,
     dataDir: data.path,
     port: 0,
-    adapter: new FakeAdapter({}),
+    adapter: new FakeAdapter({
+      'Settings: tidy': [[{ do: 'consume' }, { do: 'await_message', contains: 'never sent' }]],
+    }),
     logLevel: 'debug',
     caffeinate: () => null,
     watch: false,
@@ -127,5 +139,104 @@ describe('POST /tasks/:taskId/thread/:messageId/send-to-agent', () => {
     expect(
       listTaskThread(daemon.state.db, taskId).filter((m) => m.author === TaskMessageAuthor.Builder),
     ).toEqual([]);
+  });
+});
+
+describe('Allow this', () => {
+  const GO_AHEAD =
+    'I approve this exact Bash call. Run it again as it was:\n\n```\nnpx vercel deploy\n```';
+
+  /** A page of an open pass, with a denied call's notice offered with Allow this. */
+  async function pageWithDenial() {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: null,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
+    const page = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+      title: 'Settings: tidy',
+      acceptanceCriteria: ['x'],
+      areas: ['settings'],
+      dependsOn: [],
+    });
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish',
+      taskIds: [page.id],
+    });
+    const notice = denial(TaskId.parse(page.id));
+    return { taskId: TaskId.parse(page.id), passId: opened.pass.id, notice };
+  }
+
+  const denial = (taskId: TaskId) =>
+    daemon.state.write((ctx) => {
+      const made = insertSystemNotice(ctx, taskId, 'Auto mode stopped this Bash call');
+      offerAllowThis(ctx, made.id, GO_AHEAD);
+      return made;
+    });
+  const builderMessages = (taskId: TaskId) =>
+    listTaskThread(daemon.state.db, taskId)
+      .filter((m) => m.author === TaskMessageAuthor.Builder)
+      .map((m) => m.body);
+
+  it("sends the go-ahead to an open pass's page once", async () => {
+    const { taskId, notice } = await pageWithDenial();
+
+    const res = await send(taskId, notice.id);
+
+    expect(res.status).toBe(201);
+    expect(TaskMessageDto.parse(await res.json())).toMatchObject({
+      author: TaskMessageAuthor.Builder,
+      body: GO_AHEAD,
+    });
+    expect(listTaskThread(daemon.state.db, taskId).find((m) => m.id === notice.id)).toMatchObject({
+      sendable: false,
+      allowThis: false,
+    });
+    expect((await send(taskId, notice.id)).status).toBe(409);
+    expect(builderMessages(taskId)).toEqual([GO_AHEAD]);
+  });
+
+  it('refuses the go-ahead with 409 once the pass is gone, sending nothing', async () => {
+    const { taskId, passId, notice } = await pageWithDenial();
+    await api().post(`/passes/${passId}/abandon`, z.unknown());
+
+    const res = await send(taskId, notice.id);
+
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('That go-ahead can only go to a page of an open pass');
+    expect(builderMessages(taskId)).toEqual([]);
+  });
+
+  it('refuses the go-ahead with 409 for a task that is not a page of an open pass', async () => {
+    const outside = await task();
+    const notice = denial(outside);
+
+    const res = await send(outside, notice.id);
+
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('That go-ahead can only go to a page of an open pass');
+    expect(builderMessages(outside)).toEqual([]);
+  });
+
+  it('puts the offer back when the send fails, and the next send posts', async () => {
+    const { taskId, passId, notice } = await pageWithDenial();
+    daemon.state.write((ctx) => insertTakeOut(ctx, { taskId, passId, drops: [] }));
+
+    const refused = await send(taskId, notice.id);
+
+    expect(refused.status).toBe(409);
+    expect(listTaskThread(daemon.state.db, taskId).find((m) => m.id === notice.id)).toMatchObject({
+      sendable: true,
+      allowThis: true,
+    });
+    daemon.state.write((ctx) =>
+      advanceTakeOut(ctx, { taskId, passId }, { step: TakeOutStep.Done }),
+    );
+    expect((await send(taskId, notice.id)).status).toBe(201);
+    expect(builderMessages(taskId)).toEqual([GO_AHEAD]);
   });
 });

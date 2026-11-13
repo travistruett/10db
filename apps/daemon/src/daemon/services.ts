@@ -95,6 +95,8 @@ import {
   setTeam,
   takeOffer,
   undoHazardAddition,
+  isAllowThisOffer,
+  offerAllowThis,
   offeredText,
   offerToAgent,
 } from '@10db/db';
@@ -527,6 +529,10 @@ export function createServices(deps: {
       if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
       // A thread notice is sent once: its offer is taken as it is sent, and put back if the send fails.
       const offered = message.success && onThread !== null ? message.data : null;
+      // A go-ahead names a call of this pass's page; with no open pass there is nothing to approve.
+      const allowThis = offered !== null && isAllowThisOffer(db, offered);
+      if (allowThis && pass?.state !== PassState.Open)
+        throw new ConflictError('That go-ahead can only go to a page of an open pass');
       if (offered !== null && deps.state.write((ctx) => takeOffer(ctx, offered)) === null)
         throw new ConflictError('That notice was sent to the agent already');
       try {
@@ -534,7 +540,10 @@ export function createServices(deps: {
       } catch (error) {
         if (offered !== null)
           deps.state.write((ctx) => {
-            offerToAgent(ctx, offered, text);
+            // A pass that closed while the send was pending has dropped its go-aheads for good.
+            if (!allowThis) offerToAgent(ctx, offered, text);
+            else if (passHoldingTask(ctx.tx, getTask(ctx.tx, taskId))?.state === PassState.Open)
+              offerAllowThis(ctx, offered, text);
           });
         throw error;
       }

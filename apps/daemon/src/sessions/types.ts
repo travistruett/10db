@@ -15,7 +15,7 @@ import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
 import type { ToolTarget } from './tool-target';
-import type { ReportedMode } from '../trust';
+import type { DeniedCall, ReportedMode } from '../trust';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -259,6 +259,14 @@ export type SessionEvent =
       readonly limitType: string | null;
     }
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
+  | {
+      /**
+       * Auto mode refused a call (Claude Code's classifier, or one of its own safety checks). Only a
+       * Claude lane reports it; the run goes on, the agent having been told.
+       */
+      readonly type: 'judge_denied';
+      readonly call: DeniedCall;
+    }
   | {
       /**
        * The client uuids of the user messages the running turn has taken in so far, as an assistant

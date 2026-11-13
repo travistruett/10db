@@ -5,6 +5,7 @@ import type {
   SDKAssistantMessage,
   SDKBackgroundTasksChangedMessage,
   SDKCompactBoundaryMessage,
+  SDKPermissionDeniedMessage,
   SDKRateLimitEvent,
   SDKRateLimitInfo,
   SDKResultSuccess,
@@ -169,5 +170,19 @@ export function compactBoundary(trigger: 'manual' | 'auto'): SDKCompactBoundaryM
     compact_metadata: { trigger, pre_tokens: 150_000 },
     uuid: randomUUID(),
     session_id: PROVIDER_SESSION,
+  };
+}
+
+export function permissionDenied(
+  fields: Pick<SDKPermissionDeniedMessage, 'tool_name' | 'tool_use_id'> &
+    Partial<SDKPermissionDeniedMessage>,
+): SDKPermissionDeniedMessage {
+  return {
+    type: 'system',
+    subtype: 'permission_denied',
+    message: 'denied',
+    uuid: randomUUID(),
+    session_id: PROVIDER_SESSION,
+    ...fields,
   };
 }
