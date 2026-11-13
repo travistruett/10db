@@ -252,7 +252,7 @@ the existing event stream, as an account's Connect does. `isSignInUrl` grows `gi
 ### 7.2 Slack
 
 As built, plus the four-part layout: For "Asks the people who answer your questions, and reads their replies.";
-Without it: "Questions for other people stay in your Inbox; nothing is sent." (The plan checks this line against the stakeholder code.)
+Without it: "Questions for other people stay in your Inbox; nothing is sent." (With no connection a question's draft is still written, but no post is attempted and none can be made by hand, so the card stays the builder's.)
 
 ### 7.3 Artificial Analysis
 
@@ -260,7 +260,7 @@ Without it: "Questions for other people stay in your Inbox; nothing is sent." (T
 - State: "Key set · synced 2 h ago · <n> models" · "No key" · "AA refused this key" · "Rate limited, retrying" ·
   "Sync failed: <message>".
 - Actions: a key field with Set Key or Replace Key, Remove Key, and Sync Now.
-- Without it: "Models are compared without scores." The plan checks what routing does with no scores and names it here.
+- Without it: "Models are compared without scores: each role takes its tier's model at its default effort." (With no scored profile routing falls back to the role's default effort inside the tier's pool, and a floor raises the step to the pool's top model, one effort up.)
 - The card carries AA's name and link, as `ArtificialAnalysisCredit` does, per AA's attribution terms. No AA
   number appears in the repo, fixtures or docs.
 

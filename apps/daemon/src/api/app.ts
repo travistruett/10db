@@ -38,6 +38,7 @@ import {
   InboxItemId,
   InboxState,
   JudgeConfigPatch,
+  BenchmarkKeyInput,
   JudgeKeyInput,
   KeepAwakeInput,
   LanePermissionsDto,
@@ -1242,7 +1243,13 @@ export function createApp(deps: ApiDeps) {
       validator('query', (query) => JudgeCallsQuery.parse(query)),
       (c) => c.json(deps.services.listJudgeCalls(c.req.valid('query').limit)),
     )
-    .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
+    .get('/benchmarks/status', async (c) => c.json(await deps.services.benchmarkStatus()))
+    .put(
+      '/benchmarks/key',
+      validator('json', (value): BenchmarkKeyInput => BenchmarkKeyInput.parse(value)),
+      async (c) => c.json(await deps.services.setBenchmarkKey(c.req.valid('json'))),
+    )
+    .delete('/benchmarks/key', async (c) => c.json(await deps.services.removeBenchmarkKey()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
     .get('/models', (c) => c.json(deps.services.listModels()))

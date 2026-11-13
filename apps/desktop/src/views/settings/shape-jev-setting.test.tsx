@@ -7,7 +7,7 @@ import { SHAPE_JEV_LABEL } from './shape-jev-setting';
 
 // Shape spec §9: a project's opt-in, off by default, names where the messages go.
 
-describe('Settings › General › Send brainstorm messages to fast models', () => {
+describe('Settings › Planning › Send brainstorm messages to fast models', () => {
   it('is off by default, names OpenRouter, and sends the change', async () => {
     const put: unknown[] = [];
     server.use(
@@ -19,7 +19,7 @@ describe('Settings › General › Send brainstorm messages to fast models', () 
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const toggle = await screen.findByRole('switch', { name: SHAPE_JEV_LABEL });
     await waitFor(() => {
       expect(toggle).toHaveProperty('disabled', false);

@@ -6,8 +6,8 @@ import {
   Group,
   List,
   Menu,
-  Paper,
   PasswordInput,
+  Skeleton,
   Stack,
   Text,
 } from '@mantine/core';
@@ -22,16 +22,47 @@ import {
 } from '../../../daemon/people';
 import { ConfirmModal } from '../../../shell/confirm-modal';
 import { ExternalLink } from '../../board/pull-request-link';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
+import { IntegrationCard } from './integration-card';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
 import { WhichIsYou } from './which-is-you';
 
 /** "Ampsio · posts as @10db · you're @Travis Truett": the connection in one line. */
-function ConnectedLine({ connection }: { readonly connection: SlackConnectionDto }) {
+function ConnectedStatus({ connection }: { readonly connection: SlackConnectionDto }) {
   const builder = usePeople().data?.find((p) => p.isBuilder);
   const member = useSlackMember(builder?.slack?.userId ?? null);
   const parts = [connection.teamName ?? 'Slack', 'posts as @10db'];
   if (builder?.slack) parts.push(`you're @${member?.name ?? builder.name}`);
-  return <Text size="sm">{parts.join(' · ')}</Text>;
+  return <ConnectionStatus tone={ConnectionTone.Works} label={parts.join(' · ')} />;
+}
+
+/** The state and identity on the card's header. */
+function StateLine({
+  connection,
+  failed,
+}: {
+  readonly connection: SlackConnectionDto | undefined;
+  readonly failed: boolean;
+}) {
+  if (failed) return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Couldn't read this" />;
+  if (!connection) return null;
+  switch (connection.state) {
+    case 'connected':
+      return <ConnectedStatus connection={connection} />;
+    case 'none':
+      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Not connected" />;
+    case 'refused':
+      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Token refused" />;
+    case 'unreachable':
+      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Can't be reached" />;
+    case 'off':
+      return (
+        <ConnectionStatus
+          tone={ConnectionTone.Off}
+          label="Off: 10db was started with TENDB_SLACK=off"
+        />
+      );
+  }
 }
 
 /** The three steps that connect Slack, ending in the token field. */
@@ -40,9 +71,6 @@ function SetupSteps() {
   const [copied, setCopied] = useState(false);
   return (
     <Stack gap="sm">
-      <Text size="sm" c="dimmed">
-        Ask the people who answer your questions in Slack, and read their replies there.
-      </Text>
       <List type="ordered" size="sm" spacing="xs">
         <List.Item>
           <Group gap="sm">
@@ -132,79 +160,81 @@ export function SlackCard() {
   const [changing, setChanging] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const data = connection.data;
-  const state = data?.state ?? 'off';
+  const state = data?.state;
   const live = state === 'connected' || state === 'unreachable' || state === 'refused';
   const builder = people.data?.find((p) => p.isBuilder);
   const bound = builder !== undefined && builder.slack !== null;
 
+  // The card appears once its state is read, so a link's focus lands on its controls.
+  if (!data && !connection.isError) return <Skeleton height={160} radius="md" />;
   return (
-    <Paper withBorder radius="md" p="md">
-      <Stack gap="sm">
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
-            <IconBrandSlack size={20} stroke={1.5} aria-hidden />
-            <Text fw={600}>Slack</Text>
-          </Group>
-          {live ? (
-            <Menu position="bottom-end">
-              <Menu.Target>
-                <ActionIcon variant="subtle" aria-label="Slack options">
-                  <IconDots size={16} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {state === 'connected' && bound ? (
-                  <Menu.Item
-                    onClick={() => {
-                      setChanging(true);
-                    }}
-                  >
-                    Change Who You Are
-                  </Menu.Item>
-                ) : null}
+    <IntegrationCard
+      mark={<IconBrandSlack size={20} stroke={1.5} aria-hidden />}
+      name="Slack"
+      focusName="slack"
+      status={<StateLine connection={data} failed={connection.isError} />}
+      purpose="Asks the people who answer your questions, and reads their replies."
+      withoutIt="Questions for other people stay in your Inbox; nothing is sent."
+    >
+      {live ? (
+        <Group justify="flex-end">
+          <Menu position="bottom-end">
+            <Menu.Target>
+              <ActionIcon variant="subtle" aria-label="Slack options">
+                <IconDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {state === 'connected' && bound ? (
                 <Menu.Item
-                  color="red"
                   onClick={() => {
-                    setDisconnecting(true);
+                    setChanging(true);
                   }}
                 >
-                  Disconnect
+                  Change Who You Are
                 </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          ) : null}
+              ) : null}
+              <Menu.Item
+                color="red"
+                onClick={() => {
+                  setDisconnecting(true);
+                }}
+              >
+                Disconnect
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
-        {connection.isError ? (
-          <Alert color="red" title="Couldn't load the Slack connection">
-            {connection.error.message}
-          </Alert>
-        ) : null}
-        {connection.isSuccess && !live ? <SetupSteps /> : null}
-        {state === 'connected' && data ? <ConnectedLine connection={data} /> : null}
-        {state === 'connected' && builder && (!bound || changing) ? (
-          <WhichIsYou
-            builder={builder}
-            changing={bound}
-            onDone={() => {
-              setChanging(false);
-            }}
-          />
-        ) : null}
-        {state === 'refused' ? (
-          <>
-            <Text size="sm">Slack refused 10db's token. Paste a new one to reconnect.</Text>
-            <TokenField setter={setToken} />
-          </>
-        ) : null}
-        {state === 'unreachable' ? (
-          <Text size="sm">Slack can't be reached. 10db keeps trying, once a minute.</Text>
-        ) : null}
-        {data?.error ? (
-          <Text size="xs" c="dimmed">
-            {data.error}
-          </Text>
-        ) : null}
-      </Stack>
+      ) : null}
+      {connection.isError ? (
+        <Alert color="red" title="Couldn't load the Slack connection">
+          {connection.error.message}
+        </Alert>
+      ) : null}
+      {state === 'none' ? <SetupSteps /> : null}
+      {state === 'connected' && builder && (!bound || changing) ? (
+        <WhichIsYou
+          builder={builder}
+          changing={bound}
+          onDone={() => {
+            setChanging(false);
+          }}
+        />
+      ) : null}
+      {state === 'refused' ? (
+        <>
+          <Text size="sm">Slack refused 10db's token. Paste a new one to reconnect.</Text>
+          <TokenField setter={setToken} />
+        </>
+      ) : null}
+      {state === 'unreachable' ? (
+        <Text size="sm">Slack can't be reached. 10db keeps trying, once a minute.</Text>
+      ) : null}
+      {data?.error ? (
+        <Text size="xs" c="dimmed">
+          {data.error}
+        </Text>
+      ) : null}
       <ConfirmModal
         opened={disconnecting}
         title="Disconnect Slack?"
@@ -226,6 +256,6 @@ export function SlackCard() {
         10db stops sending and reading Slack at once and removes its token from your Keychain.
         Questions already sent stay in your Inbox for you to answer yourself.
       </ConfirmModal>
-    </Paper>
+    </IntegrationCard>
   );
 }

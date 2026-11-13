@@ -86,6 +86,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     listJudgeCalls: track('listJudgeCalls'),
     benchmarkStatus: track('benchmarkStatus'),
     syncBenchmarks: track('syncBenchmarks'),
+    setBenchmarkKey: track('setBenchmarkKey'),
+    removeBenchmarkKey: track('removeBenchmarkKey'),
     listAaModels: track('listAaModels'),
     getModelSettings: track('getModelSettings'),
     setGlobalModelSettings: track('setGlobalModelSettings'),

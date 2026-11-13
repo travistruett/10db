@@ -26,7 +26,7 @@ export function IntegrationCard({
   /** The actions: connect, replace, remove. */
   readonly children?: ReactNode;
 }) {
-  const { ref } = useFocusTarget(focusName);
+  const { ref } = useFocusTarget<HTMLDivElement>(focusName);
   return (
     <Paper ref={ref} withBorder radius="md" p="md" aria-label={name} role="group">
       <Stack gap="sm">

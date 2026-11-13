@@ -16,6 +16,7 @@ import type {
   BatchDto,
   BatchId,
   BatchStartInput,
+  BenchmarkKeyInput,
   BenchmarkStatusDto,
   BoardColumnDelete,
   CatalogueStatusDto,
@@ -621,8 +622,12 @@ export interface ApiServices {
   patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
-  benchmarkStatus(): BenchmarkStatusDto;
+  /** The sync's last outcome; whether a key is set is read from the Keychain now. */
+  benchmarkStatus(): Promise<BenchmarkStatusDto>;
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
+  /** Keeps the Artificial Analysis key in the Keychain and starts a sync with it; the status says it is running. */
+  setBenchmarkKey(input: BenchmarkKeyInput): Promise<BenchmarkStatusDto>;
+  removeBenchmarkKey(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
   /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */

@@ -648,6 +648,20 @@ describe('team, routing and benchmark routes', () => {
       service: 'syncBenchmarks',
     },
     {
+      name: 'PUT /benchmarks/key',
+      method: 'PUT',
+      path: '/benchmarks/key',
+      body: { key: 'aa-key' },
+      service: 'setBenchmarkKey',
+    },
+    {
+      name: 'DELETE /benchmarks/key',
+      method: 'DELETE',
+      path: '/benchmarks/key',
+      body: undefined,
+      service: 'removeBenchmarkKey',
+    },
+    {
       name: 'GET /benchmarks/models',
       method: 'GET',
       path: '/benchmarks/models',
