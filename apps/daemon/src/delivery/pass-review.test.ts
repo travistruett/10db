@@ -20,7 +20,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
-import type { SessionAdapter } from '../sessions';
+import type { AgentAdapter } from '../sessions';
 import { openPass, type PutBackKeptWork } from './index';
 import { findingTargets, reviewPassTip, type PassReviewDeps } from './pass-review';
 
@@ -98,7 +98,7 @@ function setup(answer: string): {
   h.commit('src/people/page.tsx', 'people\n');
   h.git$('push', '-q', 'origin', 'main');
   const asked: Asked[] = [];
-  const adapter: Pick<SessionAdapter, 'complete'> = {
+  const adapter: Pick<AgentAdapter, 'complete'> = {
     complete: (ask) => {
       asked.push({ prompt: ask.prompt, effort: ask.effort, timeoutMs: ask.timeoutMs });
       return Promise.resolve(answer);

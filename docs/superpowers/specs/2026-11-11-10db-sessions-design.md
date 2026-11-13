@@ -278,9 +278,11 @@ line and claims keep their inputs.
   - `builder`: the builder denied a card
   - `10db`: the guard refused it, by a coordination rule or the `rules` floor
   - `judge`: the session's judge denied it. `limit` names the limit when the denial is one of the policy's limits
-    (trust line §2), and `soft` says whether the builder's go-ahead clears it. The policy's limits are soft denies;
-    auto mode's own `$defaults` hard denies are `soft: false`, with no `limit`. An attended row offers **Allow
-    This** only when `soft` (§6.6), so it never loops on a hard deny. M2c adds this value, `limit` and `soft`, from
+    (trust line §2), and `soft` says whether the builder's go-ahead may clear it. In an attended session every
+    classifier denial is `soft: true`, with or without a `limit`: Claude Code's denial doesn't say whether a soft
+    deny or one of its own `$defaults` hard denies fired, so the row offers **Allow This** (§6.6), as Claude Code
+    lets the user approve what auto mode blocked; against a hard deny the go-ahead is denied again, and the notice
+    says so. A lane's denial and one of Claude Code's own safety checks are `soft: false`. M2c adds this value, `limit` and `soft`, from
     the limits the trust line's T3 names (each soft-deny line names its limit, trust line §3), since T3 lands
     first.
 

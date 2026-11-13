@@ -35,6 +35,7 @@ import {
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
+import { createSecretReadsDir, removeSecretReadsDir } from './secret-reads';
 import {
   createSetupDir,
   EMPTY_SETUP,
@@ -45,7 +46,6 @@ import {
 import type { SetupInput } from './setup-input';
 import { holdsSessionGround, setupReadRefusal } from './setup-reads';
 import { allowlisted, type SandboxRuntime } from './srt-launch';
-import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import {
   createLaneTempDir,
   laneTempRoot,
@@ -85,8 +85,6 @@ export interface LaneSandboxSpec {
   readonly disallowedTools: readonly string[];
   /** Permission rules that make Claude Code ask before the call, whatever the allow rules say. */
   readonly askRules: readonly string[];
-  /** The rules Claude Code's auto-mode classifier weighs every call against. */
-  readonly autoMode: AutoModeSettings;
 }
 
 /** One session's sandbox: its profile, its file-tool context and its temp dir. */
@@ -103,6 +101,12 @@ export interface LaneSession {
   readonly mcpFailures: readonly McpSandboxFailure[];
   /** What the session's setup brought along, as the sandbox kept it; empty without a setup. */
   readonly setup: SessionSetup;
+  /**
+   * Where a Read of the checkout's secret the builder allowed is served from, as a copy: a folder of
+   * its own in the files root, which the kernel and the file-access judge close and no deny rule of
+   * Claude Code's names. Null where no person is in the session to allow one.
+   */
+  readonly secretReadsDir: string | null;
   setProviderSession(id: string): void;
   /**
    * Starts watching the processes under the session's own process, the lane's commands among them.
@@ -155,6 +159,12 @@ export interface LaneSessionInput {
    * It never gets the Docker socket, whatever the project's switch says.
    */
   readonly readOnly?: boolean;
+  /**
+   * A person is in the session (a pass): a Read of one of the checkout's `.env*` files asks the
+   * builder on a card instead of being refused, as in Claude Code. The kernel still denies them to
+   * commands, and every other file tool and search is refused as in a lane.
+   */
+  readonly attended?: boolean;
   /**
    * The pictures pasted into the lane's task's thread, which its file tools may read though the data
    * directory holds them (Workbench spec §13). Its commands read none. Plan has no task, so none.
@@ -327,6 +337,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const { checkout, toolchain, readList } = access;
       const protectedList = access.protectedReads;
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
+      const secretsOnCard = input.attended === true ? [...access.checkoutSecrets] : [];
       const tmpDir = createLaneTempDir(roots.temp, tempDirLimit(input.provider ?? Provider.Claude));
       // The session's own temp dir root is closed to every other sandbox too.
       const sandboxRoots = [...new Set([...access.sandboxRoots, roots.temp])];
@@ -340,6 +351,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
       let setupDir: ReturnType<typeof createSetupDir> | null = null;
+      let readsDir: string | null = null;
       try {
         // Lane-writable ground, a protected read, a secret or a sandbox root never opens.
         if (input.setup !== undefined)
@@ -361,6 +373,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // this one's sweep does too until the session is gone.
         ledger = createProcessLedger(filesRoot, processDeps.ownPid ?? process.pid);
         ledgers.hold(ledger);
+        if (input.attended === true) readsDir = createSecretReadsDir(filesRoot);
         const told = new Set<LaneProcessFailure>();
         // A job a command hands to launchd at once is named by a path it holds in the lane's own
         // temp dir (its working dir, or the output file Claude Code gives each command there).
@@ -477,6 +490,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,
             ]),
+            // Every secret stays denied to the file tools, Grep and Glob among them, even where a
+            // person may allow a Read: that Read is served from a copy (`secretReadsDir`).
             ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
           ],
           askRules: [
@@ -489,7 +504,6 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Write(${ruleScope(path)}/**)`,
             ]),
           ],
-          autoMode: autoModeRules(input.project.gateCommand),
         };
         let providerSessionId = input.resumeProviderSessionId;
         const fileAccess: FileAccessContext = {
@@ -497,6 +511,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           home: deps.home,
           protectedReads: protectedList,
           secretFiles: [...secretFiles, ...setupSecrets],
+          ...(secretsOnCard.length === 0 ? {} : { secretsOnCard }),
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
           ...(input.taskFiles === undefined ? {} : { filesDir: input.taskFiles }),
@@ -517,6 +532,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const ownLedger = ledger;
         const ownMcp = mcp;
         const ownSetup = setupDir;
+        const ownReads = readsDir;
         let disposed = false;
         return {
           spec,
@@ -526,6 +542,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           mcpServers: ownMcp.servers,
           mcpFailures: ownMcp.failures,
           setup,
+          secretReadsDir: ownReads,
           setProviderSession(id) {
             providerSessionId = id;
           },
@@ -543,6 +560,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               },
               () => {
                 ownSetup?.remove();
+              },
+              () => {
+                if (ownReads !== null) removeSecretReadsDir(ownReads);
               },
               () => {
                 // Processes it could not stop stay named: the sweep tries them again while the
@@ -571,6 +591,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             },
             () => {
               setupDir?.remove();
+            },
+            () => {
+              if (readsDir !== null) removeSecretReadsDir(readsDir);
             },
             ...(ledger === null
               ? []

@@ -136,7 +136,7 @@ were made.
   repo hooks).
 - **MCP:** 10db's server over HTTP with a token per session, and approved repo servers (§4.6).
 
-**Built, for every lane** (`apps/daemon/src/sandbox/`, `sessions/claude-adapter.ts`; only fake sessions run
+**Built, for every lane** (`apps/daemon/src/sandbox/`, `sessions/claude-session.ts` and `sessions/claude-query-options.ts`; only fake sessions run
 without it):
 
 - **No repo settings.** `settingSources: []`. A repo's `.claude/settings.json` never loads, so a hook, allow rule,
@@ -158,11 +158,61 @@ without it):
   that brings its own host list (`allowed_domains`). A hook `ask` reaches `canUseTool` in auto mode, as does a
   content-scoped `permissions.ask` rule (spike rows g and h). A Bash command that reaches a host the project does
   not list is refused by the sandbox proxy with no card (the builder accepted that; the briefing tells the lane to
-  ask). Inline `autoMode` rules, with `$defaults` first, hard-deny the full gate and CPU load and soft-deny paths
-  outside the worktree; the exact gate command is not in the allow list. Claude Code forces `default` mode while
+  ask). The inline `autoMode` rules are the session's `TrustPolicy` (`trust/policy.ts`) rendered by
+  `sessions/claude-auto-mode.ts`, `$defaults` first in all four lists: the environment the classifier reads (the
+  project, the sandbox, the checkout's tracked files as the session's to change, the project's live systems), the
+  four limits (destroying data the session didn't create, sending data out, reading secrets, writing to live
+  systems) as `soft_deny` where a person is in the session (a pass) and `hard_deny` where none is (a lane), and the
+  coordination lines (the full gate, git and gh commits, pushes and merges, CPU load) as `hard_deny` everywhere.
+  In a pass a plain `git commit`, `git push <remote> <branch>`, `git merge <branch>` or `gh pr merge [<number>]`
+  alone on its line, with only options that read nothing outside the checkout (`guard/pass-git.ts`), is the
+  builder's instead: the hook asks, so the classifier never sees it, the broker raises one card (Allow once or
+  Deny), and once allowed 10db runs that exact call (`git/run-as-builder.ts`) at the checkout's root with
+  `GIT_DIR` and `GIT_WORK_TREE` set to its own `.git` folder, `core.fsmonitor` off and the project env with no
+  account credential. A commit or a merge runs inside the gate's sandbox, because the hook runners it starts read
+  files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`): the checkout and its `.git` are
+  writable there but not `.git/hooks`, `.git/config`, `.git/info`, `HEAD`, a half-done rebase or sequencer, the
+  files that point at another git dir or any branch's ref but the current one's (a call that moved HEAD anyway
+  holds the pass's next call until HEAD is back),
+  and the builder's global git config is readable for their identity. A push or a `gh pr merge` needs the
+  builder's credentials, so it runs outside the sandbox with `core.hooksPath` at `/dev/null`, and the card says
+  the repository's push hooks don't run. The agent's Bash call then prints what it printed and ends with its exit
+  code (on Codex, whose hook can't rewrite a call, the hook's refusal carries that instead). A push goes only to
+  a remote the checkout lists. A force push, a push of or to `main` or the base branch, a call
+  that reads a file outside the checkout, another repository, git's own options and every other spelling stay
+  refused, and lanes are unchanged
+  (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
+  `classifyAllShell` is on, so an allow rule that matches a narrow Bash command no longer settles it before the
+  classifier (live check G5). Every value 10db didn't write (the project name, the checkout, the gate command, a
+  live system) is a JSON string inside its line, and a live system can hold no control or line-separator
+  character and never `$defaults` (`LiveSystem`). Claude Code forces `default` mode while
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so an auto-mode session sets it to `0` (see Environment). The classifier is
   policy, not a boundary: the sandbox is the boundary
   (`decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`).
+- **The judge, per call.** A session starts on its agent's judge (`capabilities.judge`: Claude Code's auto mode
+  where it runs on the account kind and model, `trust/auto-mode-models.ts`) when it asks for auto mode, else on
+  the `rules` floor (`startingJudge`). Each call is then judged by the mode Claude Code reports with it, the
+  PreToolUse hook's `permission_mode` (`judgeForCall`): anything but `auto` is the floor for that call (live check
+  G6: a model auto mode doesn't run reports `default`). On the floor the guard is today's whole guard. Where a
+  judge runs, `guard/judged-rules.ts` hands it deploys, unreadable shell (unread words, a hidden redirection,
+  `env -S`), a pipe into a shell and an `rm -r` the guard can't judge, plus WebFetch, WebSearch and a Monitor
+  socket (`ws`, which opens from Claude Code's own process like WebFetch) with the Web switch on, and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
+  under an allow rule that covers the call, but for a deploy, which the builder's allow rule lets run: the hook
+  settles it, so neither the classifier nor a card stands in its way, as an allow rule does in Claude Code
+  (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`). They stand
+  too for any command whose text names git, gh, `.git` or `sudo` (for `sudo`, read as the shell may join the
+  word: quotes taken out, ANSI-C words decoded, substitutions dropped), so `sudo` behind `env -S` or a pipe into a shell is
+  refused as on the floor. A line that runs a job beside the session (an `&`, a coprocess, the Bash tool's
+  background flag, a Monitor) keeps the unread-shell and pipe-into-shell refusals too, since a segment the guard
+  can't read there may hide a loop with no end, whose card a judge would otherwise lose. The repo MCP
+  tools and the MCP resource tools keep their card under every judge (live check G8 could not show the classifier
+  judging an MCP call). A session on the floor says why in its task's thread, once (`trust/floor-notice.ts`).
+- **The bound under a judge.** What the guard hands a judge is bounded by the kernel or the closed credentials: a
+  hidden `git commit`, branch change or removal of git's refs fails in the kernel (`gitState` is `denyWrite`;
+  `test/judged-shell.seatbelt.test.ts`), and a hidden `git push` or `gh pr merge` has no credentials (the Keychain
+  and gh's config are protected reads) and is refused by its text anyway. `sudo`, `allowed_domains`, `rm -r` of a
+  plain `.git` path or a path outside the repository, an over-long path, hazards and their unread forms, claims,
+  pass pages and every file-access rule apply under every judge.
 - **What comes along (Settings › Trust,** `session-setup/`, `sandbox/setup-dir.ts`). Each lane and pass reads
   the trust switches and plans its setup when its session starts; a switch flipped meanwhile applies from the next
   session.
@@ -176,26 +226,26 @@ without it):
     `` !`…` `` line dropped, and without a `.env*` file or folder in any case, a checkout secret or a skill's
     `agents/openai.yaml`, which Codex reads to install and run what it names) and one wrapper per kept installed plugin, after 10db's own harness. A plugin never
     loads by its install path.
-  - **Plugin hooks don't run in 10db sessions.** The wrapper carries no `hooks/` and no `hooks` key (fallback F2).
-    The live check showed why (research, L3b): a plugin's `PreToolUse` answer can rewrite a call's input after
-    10db's guard allowed it, so the rewritten call runs unjudged, and a plugin's allow skips 10db's broker, so a
-    call that would wait on a card runs without one. Each plugin's hooks are named in the left-out list and
-    Settings says so. Bringing them back, with the guard and the broker seeing their answers, is a follow-up.
-  - **Definitions come along without their hooks or grants.** A builder's or a plugin's skill, command or agent
-    whose frontmatter holds `hooks`, `allowed-tools` or `mcpServers` (any case, `-` or `_`) is re-emitted from
-    its parsed frontmatter without them, every other key and the body kept, and its folder is laid out in the
-    setup dir as links with that file written in place (`sandbox/setup-definitions.ts`); one 10db can't parse
-    whose text could name such a key is left out. The live check showed why (research, L3c): a skill's hook runs
-    once the skill is invoked and its rewrite of a call holds, and its `allowed-tools` skips the broker for a call
-    the guard passes on and lets its `` !`…` `` lines run. Each is named in the left-out list and in Settings
-    ("hooks left out", "pre-approved tools left out", "MCP servers left out").
+  - **Plugin hooks run, as in Claude Code.** The builder installed them. The wrapper re-emits a plugin's
+    `hooks/hooks.json` with each command hook prefixed by `cd '<wrapper>' &&`, so a hook starts in the
+    wrapper's folder, not the checkout: a program it resolves from its working directory (`npx`, `node`, a bin)
+    is the plugin's, never a lane's. The hooks folder's scripts are linked. The live check (research, L3b) showed
+    a plugin's `PreToolUse` answer can rewrite a call after 10db's guard judged it, and its allow skips 10db's
+    broker; the builder accepted that for what they installed, as Claude Code does.
+  - **Definitions come along as Claude Code reads them.** A builder's or a plugin's skill, command or agent keeps
+    its `hooks` and `allowed-tools`. L3c showed a skill's hook runs once the skill is invoked and its rewrite holds,
+    and its `allowed-tools` skips the broker for a call the guard passes on; a guard deny still holds, and the
+    agent's own commands stay in the kernel sandbox. Only an agent's `mcpServers` is left out until Your MCP
+    servers (T6): its definition is re-emitted without it, every other key and the body kept
+    (`sandbox/setup-definitions.ts`), and Settings names it. What a lane can write (the project's definitions)
+    keeps its allowlist.
   - **Plugin MCP servers stay out** until 10db runs the builder's MCP servers (T6). The wrapper carries no
     `.mcp.json`, `.lsp.json`, `settings.json` or `mcpServers`: it links only `skills`, `agents` and `commands`,
     matched by their names folded as APFS folds them (case and Unicode normalization), so `Hooks/` or `.MCP.json`
     reaches no wrapper. The live check found `strictMcpConfig: true` alone also kept a plugin's `.mcp.json` server
     from starting on 2.1.302; 10db relies on the wrapper either way.
-  - **The web, where auto mode judges it.** In a sandboxed lane in auto mode on a Claude plan, the API or Bedrock,
-    with the Web switch on (`sessions/native-judge.ts`), the guard leaves WebSearch and WebFetch to Claude Code's
+  - **The web, where auto mode judges it.** In a sandboxed lane whose call is judged by auto mode (see "The judge,
+    per call"), with the Web switch on (`GuardInput.webOn`), the guard leaves WebSearch and WebFetch to Claude Code's
     classifier instead of sending them to the broker. No web tool is in `allowedTools`, so no allow rule settles
     a call before the classifier. A gateway lane, a lane in `default` mode, a model auto mode doesn't support and
     every lane with the Web switch off still card them. The classifier is policy, not a boundary (live check L2:
@@ -266,7 +316,19 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   listed in `disallowedTools` and judged by real path; a secret that is a directory is closed with its tree, to
   the judge and in a `Read(<path>/**)` rule beside its own. A `.env*` link is denied by its own path and by the
   real path it leads to, wherever that is; a link that can't be resolved (dangling, or a loop) reads nothing and
-  is skipped. The walk is asynchronous. A secret file whose path
+  is skipped. In a pass, where the builder is in the session, a Read of one of the checkout's own `.env*` files
+  (a file, or a file in a `.env*` folder, whose real path is in the checkout) asks the builder on a card instead,
+  as in Claude Code. Its `disallowedTools` rule stays, because Claude Code's Grep and Glob run ripgrep in its own
+  process and honour only that rule (a Grep over `.` with `glob: ".env*"` would otherwise print the file with no
+  card), and a deny rule beats a hook's `ask`. So the guard asks, the PreToolUse hook settles the call itself
+  through the broker (`settleAsk` in `sessions/claude-session-hooks.ts`), and once the builder allows it the broker
+  reads the file as a before-text is read (one plain file in the checkout, opened without following a link) and
+  writes the text to a new file in the session's own `10db-read-<hex>` folder in the files root, which the kernel
+  and the file-access judge close and no deny rule names; the hook answers `allow` with `file_path` pointing
+  there. The folder goes with the session's sandbox and a stale one is swept. The kernel still denies the secret
+  to commands, a search over it is still refused, and a `.env*` link out of the checkout stays a protected read
+  (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
+  The walk is asynchronous. A secret file whose path
   holds `*`, `?`, `[`, `]`, `{`, `}`, `\` or a newline refuses the lane: Claude Code drops the whole sandbox,
   without an error, on a value it can't parse (spike 14 check 11).
 
@@ -881,18 +943,19 @@ advance a conversation, or choose its model, is refused before it writes anythin
 
 ## 5. What the daemon reads, runs or sends for a lane
 
-| Surface                                                                                                            | Worst outcome today                                                                                                                                                                                                                                                           | Protection today                                                                                                      | Design        |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------- |
-| The data directory: `ui-token`, `daemon.json`, `10db.sqlite`, `logs/`, `delivery/`                                 | **A lane reads `ui-token` and calls the API:** it answers its own cards, sets a gate command (unsandboxed code), or approves its own MCP server. **A link planted at `delivery/<batch>-pr-body.md` or a gate log path** makes the daemon overwrite a file the link points to. | `feat/accounts`: the guard's text rules                                                                               | R3, R5, R8    |
-| `.github/pull_request_template.md` (`delivery/pr-template.ts`)                                                     | Links are followed, with no size cap and no check for a regular file. A lane commits the template as a link to a credential file, and its text goes into the PR body on GitHub. A FIFO blocks the daemon.                                                                     | none                                                                                                                  | R8            |
-| `.mcp.json`, `.10db/mcp-hosts.json`, `.claude/settings.json` (`sessions/repo-config-file.ts`)                      | `O_NOFOLLOW` covers the last path component only, so a linked `.claude/` directory is followed; a linked `.10db/` is refused, checked before the open, so a swap in between is not caught. The text is only parsed, never forwarded.                                          | regular file, 256 KiB cap, no link on the last component, zod                                                         | R8            |
-| `git add` and `git commit` through the MCP `commit` tool; `git switch` when a batch starts and back when it ends   | No hook, filter or submodule git runs. A commit lands only on its workstream's pinned branch, in the pinned checkout.                                                                                                                                                         | plumbing commit over a private index; compare and swap on the branch; persisted pins (D13)                            | R9            |
-| Git config keys that name programs: `core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, filter and diff drivers | None run in the daemon's git. A filter in the builder's global config can still run in the builder's own git.                                                                                                                                                                 | plumbing that reads no such key; transport programs pinned from global config for fetch and push; the allowlist (D13) | R9            |
-| `git push` (`git/git.ts`)                                                                                          | The push goes to origin's URL as pinned with the project. A branch that needs Git LFS is refused.                                                                                                                                                                             | never forced; fixed refspec; prompts off; no pre-push hook; pinned URL (D13)                                          | R9            |
-| The gate (`verify/gate-runner.ts`)                                                                                 | Lane-written tests and Makefile targets run in the sandbox: they read what lanes read, write the checkout and their own temp dir, and reach the project's hosts.                                                                                                              | srt (Seatbelt) with the lane profile, allowlisted env, own process group, timeout (decision 132)                      | built         |
-| MCP tool inputs (`mcp/tools.ts`)                                                                                   | All are zod-parsed. Only `commit` names paths, and they are checked as writes within claims, links resolved. No tool makes the daemon read a path.                                                                                                                            | as described                                                                                                          | as is         |
-| Text a lane writes: handoffs, evidence, proposals, decisions                                                       | It reaches later lanes' prompts and the builder's screen. An accepted proposal's text becomes a task, and then a PR body.                                                                                                                                                     | rendered as data; a builder's accept                                                                                  | accepted (§7) |
-| The PR body (`delivery/pr-text.ts`)                                                                                | It is built from records, never from logs or diffs; the template row above is the exception.                                                                                                                                                                                  | as described                                                                                                          | R8            |
+| Surface                                                                                                                               | Worst outcome today                                                                                                                                                                                                                                                                  | Protection today                                                                                                                                                                                                                                                                                                                                                                                                   | Design        |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| The data directory: `ui-token`, `daemon.json`, `10db.sqlite`, `logs/`, `delivery/`                                                    | **A lane reads `ui-token` and calls the API:** it answers its own cards, sets a gate command (unsandboxed code), or approves its own MCP server. **A link planted at `delivery/<batch>-pr-body.md` or a gate log path** makes the daemon overwrite a file the link points to.        | `feat/accounts`: the guard's text rules                                                                                                                                                                                                                                                                                                                                                                            | R3, R5, R8    |
+| `.github/pull_request_template.md` (`delivery/pr-template.ts`)                                                                        | Links are followed, with no size cap and no check for a regular file. A lane commits the template as a link to a credential file, and its text goes into the PR body on GitHub. A FIFO blocks the daemon.                                                                            | none                                                                                                                                                                                                                                                                                                                                                                                                               | R8            |
+| `.mcp.json`, `.10db/mcp-hosts.json`, `.claude/settings.json` (`sessions/repo-config-file.ts`)                                         | `O_NOFOLLOW` covers the last path component only, so a linked `.claude/` directory is followed; a linked `.10db/` is refused, checked before the open, so a swap in between is not caught. The text is only parsed, never forwarded.                                                 | regular file, 256 KiB cap, no link on the last component, zod                                                                                                                                                                                                                                                                                                                                                      | R8            |
+| `git add` and `git commit` through the MCP `commit` tool; `git switch` when a batch starts and back when it ends                      | No hook, filter or submodule git runs. A commit lands only on its workstream's pinned branch, in the pinned checkout.                                                                                                                                                                | plumbing commit over a private index; compare and swap on the branch; persisted pins (D13)                                                                                                                                                                                                                                                                                                                         | R9            |
+| Git config keys that name programs: `core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, filter and diff drivers                    | None run in the daemon's git. A filter in the builder's global config can still run in the builder's own git.                                                                                                                                                                        | plumbing that reads no such key; transport programs pinned from global config for fetch and push; the allowlist (D13)                                                                                                                                                                                                                                                                                              | R9            |
+| `git push` (`git/git.ts`)                                                                                                             | The push goes to origin's URL as pinned with the project. A branch that needs Git LFS is refused.                                                                                                                                                                                    | never forced; fixed refspec; prompts off; no pre-push hook; pinned URL (D13)                                                                                                                                                                                                                                                                                                                                       | R9            |
+| The gate (`verify/gate-runner.ts`)                                                                                                    | Lane-written tests and Makefile targets run in the sandbox: they read what lanes read, write the checkout and their own temp dir, and reach the project's hosts.                                                                                                                     | srt (Seatbelt) with the lane profile, allowlisted env, own process group, timeout (decision 132)                                                                                                                                                                                                                                                                                                                   | built         |
+| An edit card's before-text (`sessions/before-text.ts`) and a checkout file a session's setup reads (`session-setup/checkout-file.ts`) | The daemon reads a file a lane can write: the file an agent is about to write, to diff the card, and the project's instructions and definitions. A lane can swap a folder on the way for a link and back between the daemon's checks by path, which no sequence of such checks sees. | regular file, one link, opened by `openInRoot` (`sessions/open-in-root.ts`) in one call that refuses a link at any component past the checkout's real path (`O_NOFOLLOW_ANY` on macOS; on Linux the descriptor's `/proc/self/fd` path must be the one asked for; elsewhere nothing is read), non-blocking and checked by `fstat` (device, inode, size), the folder's `realpath` checked before and after; 1 MB cap | none          |
+| MCP tool inputs (`mcp/tools.ts`)                                                                                                      | All are zod-parsed. Only `commit` names paths, and they are checked as writes within claims, links resolved. No tool makes the daemon read a path.                                                                                                                                   | as described                                                                                                                                                                                                                                                                                                                                                                                                       | as is         |
+| Text a lane writes: handoffs, evidence, proposals, decisions                                                                          | It reaches later lanes' prompts and the builder's screen. An accepted proposal's text becomes a task, and then a PR body.                                                                                                                                                            | rendered as data; a builder's accept                                                                                                                                                                                                                                                                                                                                                                               | accepted (§7) |
+| The PR body (`delivery/pr-text.ts`)                                                                                                   | It is built from records, never from logs or diffs; the template row above is the exception.                                                                                                                                                                                         | as described                                                                                                                                                                                                                                                                                                                                                                                                       | R8            |
 
 ## 6. Requirements
 
@@ -917,6 +980,20 @@ guard task tests each one.
 
 ## 7. Known and accepted
 
+- **Auto mode's classifier is policy.** Where it judges a call, a call it lets through still runs inside the
+  sandbox; a call it refuses names no rule (live checks L2 and the T3 gate: every classifier denial said "it gave
+  no explanation"), so a denial maps to a limit only when its text names one (`limitOfDenial`), which is rare.
+- **Allow this can't tell a soft deny from a hard one.** Claude Code's denial doesn't say whether one of the
+  policy's soft limits or one of its own `$defaults` hard denies fired, so a pass offers Allow this on every
+  classifier denial short enough to name whole. Against a hard deny the go-ahead is refused again, and the notice
+  says so. A built-in safety check (`safetyCheck`) is shown with no Allow this: only the builder can run it, in a
+  terminal.
+- **Reviewed tools go to the judge.** A tool the pinned Claude Code lists and 10db has reviewed as running inside
+  the session (`guard/reviewed-tools.ts`) is judged, not carded, where a judge runs; a Claude Code bump fails a repo
+  test until its tools are reviewed again. A tool no list names still asks under every judge.
+- **The T3 gate ran on the Claude plan only.** Its rows (inline settings, a custom soft deny and its go-ahead, a
+  deploy denied with and without an allow rule, the per-call mode, a safety check, a tracked file's delete, an MCP
+  call) passed there; none ran on Bedrock in this build, and the gateway has no judge but the rules.
 - **Its own account.** A lane's claude process holds its own account's credential. A steered lane can spend
   its account's quota, up to the monthly cap on a metered account.
 - **Its own checkout.** A lane reads and changes everything there except the project's secret files, including
@@ -950,16 +1027,15 @@ guard task tests each one.
   skill's `.git` and a `.env*` inside an opened folder are listed when the session starts. With a setup open,
   the data directory's `Read(...)` deny in Claude Code's rules is the snapshot `besideTheWays` takes then; an
   entry made in it later is refused by the guard and the file-access judge behind that rule, not by the rule.
-- **Plugin hooks are left out.** A builder's plugin comes along without its hooks (§4.3), so a plugin that needs
-  one runs without it, until 10db can order or judge their answers. The same holds for the hooks and
-  pre-approved tools in a builder's or a plugin's skill, command or agent: a skill that relies on them runs with
-  cards and without its hook.
+- **The builder's hooks and pre-approved tools run as in Claude Code.** A plugin's hooks, and the hooks and
+  `allowed-tools` in a builder's or a plugin's skill, command or agent, come along (§4.3). The guard does not
+  judge a hook's rewritten input again, and a skill's `allowed-tools` skips the card for a call the guard passes
+  on (never a guard deny). The builder installed them; a lane can't write them.
 - **A builder skill's `` !`…` `` lines run, unjudged by the guard.** Claude Code runs one when it expands the
   skill, inside the kernel sandbox (research, L3c), after its own permission check against the session's allow
-  rules; the guard and the broker never see it. With the skill's `allowed-tools` stripped, only the lane's own
-  allow rules can pass one, so such a line runs only a command 10db already lets a lane run without a card. A
-  project definition's `!` lines are dropped (§4.3); `disableSkillShellExecution` is not set.
-- **Setup is judged when it is read.** A builder's skill or plugin file that gains a hook or a grant between the
+  rules and the skill's `allowed-tools`; the guard and the broker never see it. The kernel sandbox holds what it
+  runs. A project definition's `!` lines are dropped (§4.3); `disableSkillShellExecution` is not set.
+- **Setup is judged when it is read.** A builder's skill or plugin file that gains MCP servers between the
   setup's judgement and the setup dir's write, or while the session runs, is linked without a second look, so
   Claude Code loads what it then holds. Neither is ground a lane can write.
 - **The file tools' snapshot.** Where a setup read or a task's pictures lie under a protected read, Claude Code's

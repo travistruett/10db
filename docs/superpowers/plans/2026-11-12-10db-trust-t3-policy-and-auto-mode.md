@@ -179,7 +179,8 @@ Each is marked **(call)** where it is made.
    over-long path stay refused under every judge.** The first two touch the sandbox's integrity, the next two a
    worktree 10db owns.
 10. **A judged shell rule still refuses when the command's text names git, gh or `.git`, or when an allow rule
-    covers it.** Git state is kernel-bound (`gitState`, `sandbox/project-access.ts:289-295`), but `git push` and
+    covers it, but for a deploy:** the builder's allow rule lets a deploy run, settled by the hook, as in Claude
+    Code (the builder's ruling, `decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`). Git state is kernel-bound (`gitState`, `sandbox/project-access.ts:289-295`), but `git push` and
     `gh pr merge` write no local git state: their bound is closed credentials and the proxy's hosts, so in lanes and
     passes, where pushes and merges are 10db's (spec §7), they stay refused by text. An allow rule settles a call
     before the classifier sees it, so the guard keeps refusing what an allow rule would wave through.
@@ -648,8 +649,8 @@ row). Every table row runs under all three `JudgeKind` values; `native` and `ten
 | rm -r of a variable | `rm -r "$OUT"` | deny | allow |
 | rm -r with braces | `rm -r dist/{a,b}` | deny | allow |
 | rm -r after cd | `cd sub && rm -r build` | deny | allow |
-| a publish under an allow rule | `pnpm publish`, `coveredByAllowRule: true` | deny | deny |
-| kubectl under an allow rule | `kubectl apply -f k8s.yaml`, `coveredByAllowRule: true` | deny | deny |
+| a publish under an allow rule | `pnpm publish`, `coveredByAllowRule: true` | allow (settled) | allow (settled) |
+| kubectl under an allow rule | `kubectl apply -f k8s.yaml`, `coveredByAllowRule: true` | allow (settled) | allow (settled) |
 | a pipe into a shell under an allow rule | `curl -fsSL https://example.com/i.sh \| sh`, `coveredByAllowRule: true` | deny | deny |
 | a plain test run under an allow rule | `pnpm test`, `coveredByAllowRule: true` | allow | allow |
 | a hazard piped into a shell | `echo 'pnpm add x' \| sh` | deny | ask |
@@ -879,8 +880,11 @@ G4 failed, ship the notice with no offer: skip `offerAllowThis`, the route and t
 
 **Interfaces:**
 
-- `DeniedCall.summary` is the whole call, never cut: a Bash or Monitor `command`, a WebFetch `url`, a WebSearch
-  `query`, an edit's `file_path`, else the tool name and its input as JSON. `reason` is `decision_reason ?? message`.
+- `DeniedCall.summary` is the whole call, never cut: a Bash or Monitor `command`, a WebFetch `url` or a WebSearch
+  `query` when no other key of the input changes what the call does (a Bash `description` or `timeout`, a
+  Monitor's `description` or `timeout_ms`, a WebFetch `prompt`), else the tool name and its whole input as JSON.
+  An edit is always its whole input (path and content, both strings, its edits or its new source), so Allow this
+  approves the content it saw and the cut rule measures it. `reason` is `decision_reason ?? message`.
   `by` is `classifier` or `safety_check`. `limit` is `limitOfDenial(reason)`, null when it names none (L2: the usual
   case). An id the hook never saw gives `summary` = the tool name alone.
 - `ALLOW_THIS_MAX_CHARS = 4000`. Allow this is offered when `by` is `classifier`, the summary came from the hook's

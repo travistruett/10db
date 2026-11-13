@@ -1,6 +1,8 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
+  DeniedBy,
+  TrustSurface,
   ConflictError,
   EventType,
   InvalidError,
@@ -33,6 +35,8 @@ import {
   type StartShapeInput,
   type AgentAccountKind,
 } from '@10db/contracts';
+import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import {
   countShapeFiles,
   endSession,
@@ -75,13 +79,14 @@ import { stringField } from '../guard';
 import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
+import { streamEventLogFields } from '../sessions';
 import type {
-  SessionAdapter,
+  AgentAdapter,
+  ExploreSessionSpec,
   SessionEvent,
+  SessionHandle,
   SessionMcpServer,
   ShapeImage,
-  ShapeSessionHandle,
-  ShapeSessionSpec,
   ShapeVerdict,
   ToolDecision,
   ToolRequest,
@@ -223,7 +228,7 @@ export interface ShapePrepared {
 
 export interface ShapeServiceDeps {
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly clock: Clock;
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
@@ -478,7 +483,7 @@ type TurnEnd =
   | { readonly kind: 'ended' };
 
 interface Live {
-  readonly handle: ShapeSessionHandle;
+  readonly handle: SessionHandle;
   readonly sessionId: SessionId;
   /**
    * Ends what the session was prepared with: its cards are withdrawn, what its commands left running is
@@ -764,10 +769,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
         break;
+      case 'text_delta':
+      case 'reasoning_delta':
+      case 'message':
+      case 'tool_call':
+      case 'commands':
+      case 'plan_update':
+        log.debug({ shapeId, ...streamEventLogFields(event) }, 'session stream event');
+        break;
+      // Plan runs in default mode, so auto mode never denies one of its calls (`judge_denied`).
       case 'activity':
       case 'compacted':
       case 'background_tasks':
       case 'consumed':
+      case 'judge_denied':
         break;
     }
   };
@@ -1137,11 +1152,31 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const toolset = shapeToolset(commands !== undefined);
     // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
     const skipped = ready?.note ?? null;
-    const spec: ShapeSessionSpec = {
+    const project = getProject(state.db, shape.projectId);
+    // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next one.
+    const policy = buildTrustPolicy({
+      surface: TrustSurface.Plan,
+      projectName: project.name,
+      checkout: launch.cwd,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
+        log.warn({ stored }, 'the stored live systems are not a list 10db reads, so it reads none');
+      }),
+      switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+    });
+    const spec: ExploreSessionSpec = {
       sessionId: row.id,
-      shapeId,
+      policy,
+      profile: {
+        kind: 'explore',
+        shapeId,
+        systemPrompt: shapeSystemPrompt(launch.agentModels),
+        tools: [...toolset.tools],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...toolset.disallowedTools],
+        agents: toolset.agents,
+      },
       cwd: launch.cwd,
-      systemPrompt: shapeSystemPrompt(launch.agentModels),
       instructions: ready?.instructions ?? null,
       ...(setup === null
         ? {}
@@ -1153,16 +1188,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       resumeProviderSessionId: resumeId,
       env: launch.env,
       account: launch.account,
-      tools: [...toolset.tools],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...toolset.disallowedTools],
-      agents: toolset.agents,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       sandbox: ready?.sandbox ?? null,
       projectMcpServers: ready?.projectMcpServers ?? {},
       canUseTool: (req) =>
         ready === null
-          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK })
+          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
           : ready.canUseTool(req),
       preToolUse: (req) => {
         let verdict: ShapeVerdict = judgeShapeCall(
@@ -1280,9 +1311,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       },
     };
-    let handle: ShapeSessionHandle;
+    let handle: SessionHandle;
     try {
-      handle = adapter.startShape(spec);
+      handle = adapter.open(spec);
     } catch (error) {
       // The row was written with its token hash before the adapter ran; end it so no live row
       // keeps a token that getLiveSessionByTokenHash would accept.

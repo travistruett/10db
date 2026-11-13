@@ -18,6 +18,7 @@ import {
   REVIEW_ROLES,
   StepRole,
   ToolAccess,
+  JudgeKind,
   Urgency,
   WorkspaceMode,
   type McpToolInputs,
@@ -783,13 +784,16 @@ export function createToolHandlers(
       if (pass) {
         // A pass lane's work is kept at its task's ref, never committed on the pass's branch.
         const claimed = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
-        const inPass = { pages: passPageAreas(db, pass.id) };
+        // A commit tool call writes paths, never a push, so the base branch only completes the shape.
+        const inPass = { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch };
         const kept = await keepCommitToolPaths(deps, {
           workstreamId,
           paths: input.paths,
           opId: input.opId,
           judge: (path) => {
             const verdict = judgeToolUse({
+              judge: JudgeKind.Rules,
+              coveredByAllowRule: false,
               toolName: 'Write',
               toolInput: { file_path: path },
               repoPath: checkout,
@@ -815,6 +819,8 @@ export function createToolHandlers(
       const claims = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
       for (const path of input.paths) {
         const verdict = judgeToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
           toolName: 'Write',
           toolInput: { file_path: path },
           repoPath: checkout,

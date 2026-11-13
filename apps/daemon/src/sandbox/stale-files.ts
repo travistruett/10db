@@ -17,8 +17,8 @@ import {
 const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
 /** What `createProcessLedger` makes, and the next content a ledger is given beside it. */
 const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\.tmp)?$/;
-/** A session's setup dir (`createSetupDir`), in the files root. */
-const SETUP_DIR = /^10db-setup-[0-9a-f]{12}$/;
+/** A session's setup dir (`createSetupDir`) or secret reads dir (`createSecretReadsDir`), in the files root. */
+const SETUP_DIR = /^10db-(?:setup|read)-[0-9a-f]{12}$/;
 /** A running daemon's mark in a sandbox root, named by its pid. */
 const DAEMON_MARK = /^10db-daemon-([1-9][0-9]*)$/;
 /** A 10db daemon's entry on its command line: a bundle's `daemon.mjs`, or `src/main.ts` from source. */

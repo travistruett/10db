@@ -32,6 +32,7 @@ import * as schema from '../schema';
 import { findUnfinishedBatch, getBatchRow, insertBatch, transitionBatch } from './batches';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { dropAllowThisOffers } from './task-thread';
 import { getTask } from './tasks';
 
 type PassRow = typeof schema.passes.$inferSelect;
@@ -299,12 +300,15 @@ export function renamePass(ctx: WriteContext, passId: PassId, name: string): Pas
 
 /**
  * Ends the task's membership of its pass (a take-out, an Abandon, a close): the pass no longer holds
- * it, so the scheduler, `countLanes` and the guard treat it as ordinary work. A task in no pass is left
- * as it is.
+ * it, so the scheduler, `countLanes` and the guard treat it as ordinary work, and its Allow this offers
+ * go. A task in no pass is left as it is.
  */
 export function leavePass(ctx: WriteContext, taskId: TaskId): void {
   const task = getTask(ctx.tx, taskId);
   if (task.passId == null) return;
+  // A go-ahead is for the session that made the call; once the task leaves, no open pass's page
+  // session made it, and a later one would take it as the builder's word.
+  dropAllowThisOffers(ctx, [taskId]);
   ctx.tx
     .update(schema.tasks)
     .set({ passId: null, updatedAt: ctx.now })

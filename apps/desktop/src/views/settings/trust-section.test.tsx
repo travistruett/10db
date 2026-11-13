@@ -1,14 +1,21 @@
-import { TRUST_DEFAULTS, TrustSwitches, type TrustSettingsDto } from '@10db/contracts';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import {
+  JudgeKind,
+  mintId,
+  TRUST_DEFAULTS,
+  TrustSwitches,
+  type TrustSettingsDto,
+} from '@10db/contracts';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { TRUST_ROWS } from './trust-rows';
 
 // Trust spec §9: Settings › Trust switches what comes along into each session, app-wide.
 
-function serve(initial: TrustSettingsDto) {
-  let settings = initial;
+function serve(initial: Omit<TrustSettingsDto, 'judges'> & Partial<TrustSettingsDto>) {
+  let settings: TrustSettingsDto = { judges: [], ...initial };
   const put: TrustSwitches[] = [];
   server.use(
     http.get(daemonUrl('/settings/trust'), () => HttpResponse.json(settings)),
@@ -16,6 +23,7 @@ function serve(initial: TrustSettingsDto) {
       const switches = TrustSwitches.parse(await request.json());
       put.push(switches);
       settings = {
+        ...settings,
         switches,
         plugins: settings.plugins.map((p) => ({
           ...p,
@@ -112,6 +120,45 @@ describe('Settings › Trust', () => {
     const toggle = await screen.findByRole('switch', { name: 'p@m' });
     expect(toggle).toHaveProperty('checked', false);
     expect(toggle).toHaveProperty('disabled', true);
+  });
+
+  it("shows each account's judge, and why a rules account has no judge", async () => {
+    serve({
+      switches: TRUST_DEFAULTS,
+      plugins: [],
+      judges: [
+        {
+          accountId: DEFAULT_ACCOUNT.id,
+          label: 'Claude plan',
+          model: 'claude-opus-5-5',
+          judge: JudgeKind.Native,
+          why: null,
+        },
+        {
+          accountId: mintId('Account'),
+          label: 'Gateway',
+          model: null,
+          judge: JudgeKind.Rules,
+          why: "Auto mode doesn't run through a gateway account yet.",
+        },
+      ],
+    });
+    renderApp('/settings/trust');
+    const list = await screen.findByRole('region', { name: 'Judge' });
+    const plan = await within(list).findByRole('listitem', { name: 'Claude plan' });
+    expect(within(plan).getByText('claude-opus-5-5')).toBeTruthy();
+    expect(within(plan).getByText("Claude Code's auto mode")).toBeTruthy();
+    expect(
+      within(plan).getByText(
+        "On a model auto mode doesn't run, a session falls back to 10db's rules and says so in its thread.",
+      ),
+    ).toBeTruthy();
+    const rules = within(list).getByRole('listitem', { name: 'Gateway' });
+    expect(within(rules).getByText('No model offered')).toBeTruthy();
+    expect(within(rules).getByText("10db's rules: a card where they can't decide")).toBeTruthy();
+    expect(
+      within(rules).getByText("Auto mode doesn't run through a gateway account yet."),
+    ).toBeTruthy();
   });
 
   it("shows the daemon's refusal when the read is refused", async () => {

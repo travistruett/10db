@@ -5,13 +5,16 @@ import type {
   SDKAssistantMessage,
   SDKMessage,
   SDKUserMessage,
+  SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
+import { z } from 'zod';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
+  AgentCommand,
   InterruptReceipt,
   SessionEvent,
   SessionMcpServer,
@@ -20,10 +23,10 @@ import type {
   ToolDecision,
   TurnResult,
 } from './types';
-import { claudeToolTarget } from './tool-target';
+import { mapClaudeStreamEvent, unstreamedTextId, type ClaudeStreamState } from './claude-stream';
+import type { ClaudeToolCalls } from './claude-tool-calls';
 
 export const SUMMARY_CHARS = 200;
-const BRIEF_CHARS = 80;
 /** The most of a turn's last message a turn_complete event carries: what a step result may hold. */
 const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 /** Unix seconds stay below this until the year 33658; milliseconds are already above it. */
@@ -42,20 +45,6 @@ export function modelRefusalOf(
   if (!firstReply) return msg.error === MODEL_NOT_FOUND_ERROR ? ModelMarkBasis.Error : null;
   const text = msg.message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []));
   return modelRefusalBasis(msg.error, text.join('\n'), launched);
-}
-
-/** What a tool call is about, in a few words: the command, or the file it touches. */
-export function toolBrief(input: unknown): string {
-  if (typeof input === 'object' && input !== null) {
-    for (const key of ['command', 'file_path', 'notebook_path', 'path']) {
-      // The SDK types tool input as unknown; the value is checked to be a string before it is used.
-      const value: unknown = Reflect.get(input, key);
-      if (typeof value === 'string') return value.slice(0, BRIEF_CHARS);
-    }
-  }
-  // JSON.stringify returns undefined for undefined and functions, despite its declared type.
-  const json = JSON.stringify(input) as string | undefined;
-  return (json ?? '').slice(0, BRIEF_CHARS);
 }
 
 /** The SDK reports reset times as Unix seconds or milliseconds depending on the CLI build; accept both. */
@@ -79,15 +68,52 @@ function consumedBy(
   );
 }
 
+/** Claude Code's slash commands as the session reports them; an empty hint is left out. */
+export function agentCommands(commands: readonly SlashCommand[]): AgentCommand[] {
+  return commands.map((c) => ({
+    name: c.name,
+    description: c.description,
+    ...(c.argumentHint === '' ? {} : { argumentHint: c.argumentHint }),
+  }));
+}
+
+/** What one session's mapping keeps between messages: its stream and its tool calls. */
+export interface ClaudeMapContext {
+  readonly pid: number | null;
+  readonly stream: ClaudeStreamState;
+  readonly calls: ClaudeToolCalls;
+}
+
+// A user frame's content is the Messages API's; only tool results are read, loosely.
+const ToolResultBlock = z.looseObject({
+  type: z.literal('tool_result'),
+  tool_use_id: z.string().min(1),
+  is_error: z.boolean().optional(),
+  content: z.unknown(),
+});
+
 /**
  * Maps one SDK message to session events. Never emits `context` or `ended`; the adapter owns those.
  * `if` rather than `switch`: the SDK adds message types often, and every other type maps to nothing.
  */
-export function mapSdkMessage(
-  msg: SDKMessage,
-  ctx: { readonly pid: number | null },
-): SessionEvent[] {
+export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEvent[] {
+  if (msg.type === 'stream_event') return mapClaudeStreamEvent(msg, ctx.stream);
+  if (msg.type === 'user') {
+    const content = msg.message.content;
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((block) => {
+      const result = ToolResultBlock.safeParse(block);
+      return result.success
+        ? ctx.calls.result(result.data.tool_use_id, {
+            isError: result.data.is_error === true,
+            content: result.data.content,
+          })
+        : [];
+    });
+  }
   if (msg.type === 'system') {
+    if (msg.subtype === 'commands_changed')
+      return [{ type: 'commands', commands: agentCommands(msg.commands) }];
     if (msg.subtype === 'init')
       return [{ type: 'started', providerSessionId: msg.session_id, pid: ctx.pid }];
     if (msg.subtype === 'compact_boundary')
@@ -105,18 +131,24 @@ export function mapSdkMessage(
   }
   if (msg.type === 'assistant') {
     const events: SessionEvent[] = [];
+    // A subagent's text is its own conversation: it shows as activity, never as the session's message.
+    const own = msg.parent_tool_use_id === null;
     for (const block of msg.message.content) {
       if (block.type === 'text') {
         const text = block.text.trim();
         if (text)
           events.push({ type: 'activity', kind: 'text', summary: text.slice(0, SUMMARY_CHARS) });
+        const itemId = own && text ? unstreamedTextId(ctx.stream, msg.message.id) : null;
+        if (itemId !== null) events.push({ type: 'message', itemId, text: block.text });
       } else if (block.type === 'tool_use') {
-        events.push({
-          type: 'activity',
-          kind: 'tool',
-          summary: `${block.name} ${toolBrief(block.input)}`.slice(0, SUMMARY_CHARS),
-          tool: claudeToolTarget(block.name, block.input),
-        });
+        events.push(
+          ...ctx.calls.use({
+            id: block.id,
+            name: block.name,
+            input: block.input,
+            parentId: msg.parent_tool_use_id,
+          }),
+        );
       }
     }
     const taken = consumedBy(msg);
@@ -132,6 +164,7 @@ export function mapSdkMessage(
     return events;
   }
   if (msg.type === 'result') {
+    ctx.calls.turnEnded();
     const usage = msg.usage;
     const result: TurnResult =
       msg.subtype === 'error_max_turns'

@@ -119,6 +119,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/lane-permissions': 'No screen draws a setting.',
   '/settings/trust': 'No screen draws a setting.',
   '/projects/:projectId/trust': 'No screen draws a setting.',
+  '/projects/:projectId/live-systems': 'No screen draws a setting.',
   '/settings/self-update': 'No screen draws a setting.',
   '/projects/:projectId/knowledge': 'Only the Knowledge view draws it, and it is not a screen.',
   '/dev-ui/connection': "The dev UI's token is for the app's Open Page, not for a screen.",

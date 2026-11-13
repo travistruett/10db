@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTestStore,
   deleteUnsentBuilderMessage,
+  dropAllowThisOffers,
   getTaskFile,
   getTaskMessageRow,
   insertBuilderMessage,
@@ -24,7 +25,9 @@ import {
   markTaskMessagesPushed,
   markTaskMessagesTakenUnder,
   offeredText,
+  offerAllowThis,
   offerToAgent,
+  takeOffer,
   seedProject,
   type Store,
 } from './index';
@@ -375,5 +378,51 @@ describe('a task thread', () => {
       'Fix the cut-off label in src/settings/page.tsx',
     );
     expect(offeredText(store.db, plain.id)).toBeNull();
+  });
+
+  it('an Allow this offer shows on the notice, and taking it clears both', () => {
+    const denied = store.write((ctx) => {
+      const made = insertSystemNotice(ctx, taskId, 'Auto mode stopped this Bash call');
+      offerAllowThis(ctx, made.id, 'I approve this exact Bash call.');
+      return made;
+    }).value;
+
+    expect(listTaskThread(store.db, taskId).map((m) => [m.sendable, m.allowThis])).toEqual([
+      [true, true],
+    ]);
+    expect(store.write((ctx) => takeOffer(ctx, denied.id)).value).toBe(
+      'I approve this exact Bash call.',
+    );
+    expect(listTaskThread(store.db, taskId).map((m) => [m.sendable, m.allowThis])).toEqual([
+      [false, false],
+    ]);
+    // Taken once: a second take finds nothing.
+    expect(store.write((ctx) => takeOffer(ctx, denied.id)).value).toBeNull();
+  });
+
+  it("dropping a pass's offers clears them and leaves a Send to Agent offer", () => {
+    const { allow, finding, elsewhere } = store.write((ctx) => {
+      const allowed = insertSystemNotice(ctx, taskId, 'Auto mode stopped this Bash call');
+      offerAllowThis(ctx, allowed.id, 'I approve this exact Bash call.');
+      const found = insertSystemNotice(ctx, taskId, 'Review: the label is cut off');
+      offerToAgent(ctx, found.id, 'Fix the label');
+      const other = insertSystemNotice(ctx, otherTaskId, 'Auto mode stopped this Bash call');
+      offerAllowThis(ctx, other.id, 'I approve this exact Bash call.');
+      return { allow: allowed, finding: found, elsewhere: other };
+    }).value;
+
+    store.write((ctx) => {
+      dropAllowThisOffers(ctx, [taskId]);
+    });
+
+    expect(offeredText(store.db, allow.id)).toBeNull();
+    expect(listTaskThread(store.db, taskId).map((m) => [m.id, m.sendable, m.allowThis])).toEqual([
+      [allow.id, false, false],
+      [finding.id, true, false],
+    ]);
+    // Another task's offer is its own pass's.
+    expect(listTaskThread(store.db, otherTaskId).map((m) => [m.id, m.allowThis])).toEqual([
+      [elsewhere.id, true],
+    ]);
   });
 });

@@ -1,0 +1,46 @@
+[
+  {
+    "plan": [
+      {
+        "status": "pending",
+        "step": "x"
+      }
+    ],
+    "threadId": "x",
+    "turnId": "x",
+    "explanation": "x"
+  },
+  {
+    "plan": [
+      {
+        "status": "inProgress",
+        "step": "x"
+      }
+    ],
+    "threadId": "x",
+    "turnId": "x",
+    "explanation": "x"
+  },
+  {
+    "plan": [
+      {
+        "status": "completed",
+        "step": "x"
+      }
+    ],
+    "threadId": "x",
+    "turnId": "x",
+    "explanation": "x"
+  },
+  {
+    "plan": [
+      {
+        "status": "pending",
+        "step": "x"
+      }
+    ],
+    "threadId": "x",
+    "turnId": "x",
+    "explanation": null
+  }
+]

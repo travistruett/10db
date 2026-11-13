@@ -1,5 +1,6 @@
 import {
   effectiveTrust,
+  LiveSystemsDto,
   TRUST_DEFAULTS,
   TrustOverrides,
   type ProjectTrustDto,
@@ -15,21 +16,47 @@ import { projectDto } from '../../test/fixtures';
 
 const project = projectDto();
 
-function serve(preview: SetupPreviewDto, overrides: TrustOverrides = {}) {
+function serve(
+  preview: SetupPreviewDto,
+  overrides: TrustOverrides = {},
+  liveSystems: readonly string[] = [],
+) {
   let current: ProjectTrustDto = {
     overrides,
     effective: effectiveTrust(TRUST_DEFAULTS, overrides),
     preview,
   };
   const put: TrustOverrides[] = [];
+  let live: LiveSystemsDto = { liveSystems: [...liveSystems] };
+  const sentLive: string[][] = [];
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
     http.get(daemonUrl('/settings/trust'), () =>
       HttpResponse.json({
         switches: TRUST_DEFAULTS,
         plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: true }],
+        judges: [],
       }),
     ),
+    http.get(daemonUrl('/projects/:projectId/live-systems'), () => HttpResponse.json(live)),
+    http.put(daemonUrl('/projects/:projectId/live-systems'), async ({ request }) => {
+      const body: unknown = await request.json();
+      const parsed = LiveSystemsDto.safeParse(body);
+      if (!parsed.success)
+        return HttpResponse.json(
+          {
+            error: 'invalid',
+            issues: parsed.error.issues.map((i) => ({
+              path: i.path.join('.'),
+              message: i.message,
+            })),
+          },
+          { status: 400 },
+        );
+      sentLive.push(parsed.data.liveSystems);
+      live = parsed.data;
+      return HttpResponse.json(live);
+    }),
     http.get(daemonUrl('/projects/:projectId/trust'), () => HttpResponse.json(current)),
     http.put(daemonUrl('/projects/:projectId/trust'), async ({ request }) => {
       const next = TrustOverrides.parse(await request.json());
@@ -39,7 +66,7 @@ function serve(preview: SetupPreviewDto, overrides: TrustOverrides = {}) {
     }),
     ...baseHandlers(),
   );
-  return { put };
+  return { put, sentLive };
 }
 
 const NOTHING: SetupPreviewDto = { skills: [], plugins: [], leftOut: [] };
@@ -109,6 +136,41 @@ describe('Settings › project Trust', () => {
     fireEvent.click(within(list).getByRole('button', { name: 'Show Left out' }));
     expect(within(list).getByText('~/.claude/skills/lane')).toBeTruthy();
     expect(within(list).getByText('it lies in, or holds, a folder a lane can write')).toBeTruthy();
+  });
+
+  it('adds a live system and sends it', async () => {
+    const { sentLive } = serve(NOTHING, {}, ['prod']);
+    renderApp('/settings/project-trust');
+    const input = await screen.findByRole('combobox', { name: 'Live systems' });
+    expect(
+      screen.getByText(
+        'Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. Applies from the next session.',
+      ),
+    ).toBeTruthy();
+    expect(await screen.findByText('prod')).toBeTruthy();
+    input.focus();
+    fireEvent.change(input, { target: { value: 'api.example.com' } });
+    fireEvent.blur(input);
+    await waitFor(() => {
+      expect(sentLive).toEqual([['prod', 'api.example.com']]);
+    });
+    expect(await screen.findByText('api.example.com')).toBeTruthy();
+  });
+
+  it("shows the daemon's refusal under the input", async () => {
+    const { sentLive } = serve(NOTHING, {}, ['prod']);
+    renderApp('/settings/project-trust');
+    const input = await screen.findByRole('combobox', { name: 'Live systems' });
+    expect(await screen.findByText('prod')).toBeTruthy();
+    input.focus();
+    fireEvent.change(input, { target: { value: '$defaults' } });
+    fireEvent.blur(input);
+    expect(await screen.findByText('A live system cannot name $defaults')).toBeTruthy();
+    expect(sentLive).toEqual([]);
+    await waitFor(() => {
+      expect(screen.queryByText('$defaults')).toBeNull();
+    });
+    expect(screen.getByText('prod')).toBeTruthy();
   });
 
   it("shows the daemon's refusal when the read is refused", async () => {

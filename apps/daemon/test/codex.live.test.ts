@@ -44,14 +44,15 @@ import {
   type SetupInput,
 } from '../src/sandbox';
 import {
+  CODEX_COMMANDS,
   createCodexAdapter,
   guardSocketPath,
   patchPaths,
   spawnAppServer,
   type CodexChild,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
-  type SessionSpec,
+  type LaneSessionSpec,
   type ShapeImage,
 } from '../src/sessions';
 import {
@@ -60,7 +61,7 @@ import {
   type FakeResponses,
   type FakeStep,
 } from './fake-responses';
-import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG } from './fixtures';
+import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { noisePng } from './png';
 
 const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
@@ -418,7 +419,7 @@ interface World {
   readonly mcp: FakeMcp;
   /** The bearer token of the session's MCP server, which Codex alone holds. */
   readonly mcpToken: string;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly laneSandbox: LaneSandbox;
   /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
   readonly roots: SandboxRoots;
@@ -428,7 +429,7 @@ interface World {
   /** Every line the daemon's logger wrote. */
   readonly logs: string[];
   /** Run on each guard call before it is judged, for a test that acts mid-session. */
-  onCall: (call: GuardCall, spec: SessionSpec) => void;
+  onCall: (call: GuardCall, spec: LaneSessionSpec) => void;
   close(): Promise<void>;
 }
 
@@ -436,7 +437,7 @@ interface SessionRun {
   readonly events: readonly SessionEvent[];
   readonly threadId: string | null;
   readonly request: FakeRequest | undefined;
-  readonly spec: SessionSpec;
+  readonly spec: LaneSessionSpec;
 }
 
 let codexPath: string;
@@ -659,10 +660,10 @@ async function runOnLane(
   laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
 ): Promise<SessionRun> {
   const prompt = world.model.script(steps);
-  const spec: SessionSpec = {
+  const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    policy: testPolicy(),
+    profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: world.checkout,
     prompt,
     ...(opts.promptUuid === undefined ? {} : { promptUuid: opts.promptUuid }),
@@ -673,7 +674,6 @@ async function runOnLane(
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: [],
     sandbox: laneSession.spec,
     ...(opts.instructions === undefined ? {} : { instructions: opts.instructions }),
     setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
@@ -686,9 +686,10 @@ async function runOnLane(
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
     },
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
-  const handle = world.adapter.start(spec);
+  const handle = world.adapter.open(spec);
   const events: SessionEvent[] = [];
   try {
     for await (const event of handle.events) {
@@ -1099,12 +1100,26 @@ describe.skipIf(!live)(
 
     it('runs with the real toolchain: node and git status', async () => {
       writeFileSync(join(world.checkout, 'untracked.txt'), 'new\n');
-      const outputs = expectTurn(
-        await runSession(world, [
-          run('node -v; echo node=$?; git status --short; echo git=$?'),
-          { say: 'done' },
-        ]),
+      const session = await runSession(world, [
+        run('node -v; echo node=$?; git status --short; echo git=$?'),
+        { say: 'done' },
+      ]);
+      const outputs = expectTurn(session);
+      // It streams: the message's deltas are its text, the command runs from start to its exit, and
+      // the session lists the commands 10db sends as calls.
+      const message = session.events.find((e) => e.type === 'message');
+      if (message?.type !== 'message') throw new Error('no message streamed');
+      const deltas = session.events.flatMap((e) =>
+        e.type === 'text_delta' && e.itemId === message.itemId ? [e.text] : [],
       );
+      expect(deltas.length).toBeGreaterThan(0);
+      expect(deltas.join('')).toBe(message.text);
+      const command = session.events.flatMap((e) =>
+        e.type === 'tool_call' && e.call.kind === 'command' ? [e.call] : [],
+      );
+      expect(command[0]?.status).toBe('running');
+      expect(command.at(-1)).toMatchObject({ status: 'done', exitCode: 0 });
+      expect(session.events).toContainEqual({ type: 'commands', commands: CODEX_COMMANDS });
       expect(outputs[0]).toMatch(/v\d+\.\d+\.\d+/);
       expect(outputs[0]).toContain('node=0');
       expect(outputs[0]).toContain('?? untracked.txt');

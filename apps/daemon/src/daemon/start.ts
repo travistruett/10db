@@ -273,7 +273,7 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import type { SessionAdapter } from '../sessions';
+import type { AgentAdapter } from '../sessions';
 import { routingInputs, seedTeam } from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
@@ -313,7 +313,7 @@ export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
   /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
-  readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
+  readonly adapter: AgentAdapter | ((logger: Logger) => AgentAdapter);
   readonly logLevel: LogLevel;
   /**
    * The sandbox every lane and every gate runs under. Its roots (tests) move what it makes off the
@@ -1445,9 +1445,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
   const createdRunner = createRunner({
+    gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
     laneSandbox,
+    gateSandbox: sandboxes?.gate ?? null,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
     builderHome,
@@ -1877,6 +1879,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       builderHome,
       laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
       laneSandbox,
+      adapter,
       log: logger.child({ component: 'trust' }),
     }),
     judge: createJudgeServices({

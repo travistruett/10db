@@ -26,8 +26,8 @@ beforeEach(async () => {
   repo = createTempRepo();
   atLaunch = [];
   const adapter = new FakeAdapter({ [TITLE]: [[{ do: 'hang' }]] });
-  const start = adapter.start.bind(adapter);
-  adapter.start = (spec) => {
+  const start = adapter.open.bind(adapter);
+  adapter.open = (spec) => {
     atLaunch.push(readFileSync(join(spec.cwd, 'src/settings.ts'), 'utf8'));
     return start(spec);
   };

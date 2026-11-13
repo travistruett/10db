@@ -701,9 +701,9 @@ describe('the pictures a Shape session pulls in with Read', () => {
         shots();
         // Quitting ends the live session; the next turn resumes the conversation's session.
         await f.restart();
-        const start = f.adapter.startShape.bind(f.adapter);
+        const start = f.adapter.open.bind(f.adapter);
         let failures = 1;
-        f.adapter.startShape = (spec) => {
+        f.adapter.open = (spec) => {
           if (failures-- > 0) throw new Error('Claude is not available');
           return start(spec);
         };

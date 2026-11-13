@@ -29,8 +29,8 @@ export interface TaskActivity {
 }
 
 /**
- * The tools that may change a file: Claude Code's writers and any Bash call, and Codex's commands and
- * patches (`sessions/tool-target.ts`).
+ * The tools that may change a file, by the `harnessTool` a tool call carries: Claude Code's writers
+ * and any Bash call, and Codex's commands (whatever card they show as) and patches.
  */
 const WRITING_TOOLS: readonly string[] = [
   'Write',

@@ -460,40 +460,51 @@ describe('keepSetup and createSetupDir', () => {
     expect(readdirSync(filesRoot)).toEqual([]);
   });
 
+  // The builder installed it: a skill's hooks and pre-approved tools run as in Claude Code.
   it.each([
-    ['hooks', 'hooks:\n  PreToolUse: []\n', 'hooks left out'],
-    ['allowed-tools', 'allowed-tools: Bash\n', 'pre-approved tools left out'],
-  ])(
-    'lays out a builder skill whose SKILL.md holds %s as links, the SKILL.md re-emitted without it',
-    (_name, keys, note) => {
-      const dir = skillAt(join(home, '.claude/skills/s'));
-      writeFileSync(join(dir, 'SKILL.md'), `---\nname: s\n${keys}---\nBody !\`date\`\n`);
-      writeFileSync(join(dir, 'run.sh'), 'echo hi\n');
-      const s = builderSkill('s', dir);
-      const leftOut = [{ what: '~/.claude/skills/s', why: note }];
-      // The Settings preview names it as the session does.
-      expect(keepSetup(input({ skills: [s] }), judge, home).leftOut).toEqual(leftOut);
-      const made = createSetupDir(filesRoot, input({ skills: [s] }), judge, home);
-      const linked = join(made.setup.pluginDirs[0] ?? '', 'skills/s');
-      expect(readFileSync(join(linked, 'SKILL.md'), 'utf8')).toBe(
-        '---\nname: s\n---\nBody !`date`\n',
-      );
-      expect(readlinkSync(join(linked, 'run.sh'))).toBe(join(dir, 'run.sh'));
-      expect(made.setup.loaded.skills).toEqual(['s']);
-      expect(made.setup.leftOut).toEqual(leftOut);
-      made.remove();
-    },
-  );
-
-  it('leaves out a builder skill whose frontmatter it cannot read and that could name hooks', () => {
+    ['hooks', 'hooks:\n  PreToolUse: []\n'],
+    ['allowed-tools', 'allowed-tools: Bash\n'],
+  ])('links a builder skill whose SKILL.md holds %s as written', (_name, keys) => {
     const dir = skillAt(join(home, '.claude/skills/s'));
-    writeFileSync(join(dir, 'SKILL.md'), '---\nname: s\n"\\x68ooks": [\n---\nBody\n');
+    writeFileSync(join(dir, 'SKILL.md'), `---\nname: s\n${keys}---\nBody\n`);
+    const s = builderSkill('s', dir);
+    expect(keepSetup(input({ skills: [s] }), judge, home).leftOut).toEqual([]);
+    const made = createSetupDir(filesRoot, input({ skills: [s] }), judge, home);
+    const linked = join(made.setup.pluginDirs[0] ?? '', 'skills/s');
+    expect(readlinkSync(linked)).toBe(realpathSync(dir));
+    expect(made.setup.loaded.skills).toEqual(['s']);
+    made.remove();
+  });
+
+  it('lays out a builder skill whose SKILL.md holds mcpServers as links, the SKILL.md re-emitted without it', () => {
+    const dir = skillAt(join(home, '.claude/skills/s'));
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: s\nmcpServers: {}\n---\nBody !`date`\n');
+    writeFileSync(join(dir, 'run.sh'), 'echo hi\n');
+    const s = builderSkill('s', dir);
+    const leftOut = [
+      { what: '~/.claude/skills/s', why: 'MCP servers arrive with Your MCP servers (T6)' },
+    ];
+    // The Settings preview names it as the session does.
+    expect(keepSetup(input({ skills: [s] }), judge, home).leftOut).toEqual(leftOut);
+    const made = createSetupDir(filesRoot, input({ skills: [s] }), judge, home);
+    const linked = join(made.setup.pluginDirs[0] ?? '', 'skills/s');
+    expect(readFileSync(join(linked, 'SKILL.md'), 'utf8')).toBe(
+      '---\nname: s\n---\nBody !`date`\n',
+    );
+    expect(readlinkSync(join(linked, 'run.sh'))).toBe(join(dir, 'run.sh'));
+    expect(made.setup.leftOut).toEqual(leftOut);
+    made.remove();
+  });
+
+  it('leaves out a builder skill whose frontmatter it cannot read and that could name MCP servers', () => {
+    const dir = skillAt(join(home, '.claude/skills/s'));
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: s\n"\\x6dcpServers": [\n---\nBody\n');
     const kept = keepSetup(input({ skills: [builderSkill('s', dir)] }), judge, home);
     expect(kept.keptSkills).toEqual([]);
     expect(kept.leftOut).toEqual([
       {
         what: '~/.claude/skills/s',
-        why: 'left out: its frontmatter is not YAML 10db reads, and it may hold hooks or pre-approved tools',
+        why: 'left out: its frontmatter is not YAML 10db reads, and it may hold MCP servers',
       },
     ]);
   });

@@ -1,18 +1,22 @@
 import type {
   AccountRefusal,
+  DeniedBy,
   Effort,
   ModelMarkBasis,
   SessionId,
   ShapeId,
   AgentAccountKind,
+  ToolCallView,
+  TrustPolicy,
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
+import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
-import type { ToolTarget } from './tool-target';
+import type { DeniedCall, ReportedMode } from '../trust';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -34,11 +38,34 @@ export interface ToolRequest {
    * MCP tool offers "every tool of this server" over the ones listed here. Absent where the adapter has none.
    */
   readonly listedTools?: readonly string[];
+  /**
+   * The call waits on its card inside the PreToolUse hook, which Claude Code cancels at its timeout
+   * or with the turn: the card is withdrawn with `signal` then, in a lane too.
+   */
+  readonly cardGoesWithCall?: boolean;
 }
 
 export type ToolDecision =
-  | { readonly behavior: 'allow'; readonly updatedInput?: Record<string, unknown> }
-  | { readonly behavior: 'deny'; readonly message: string; readonly interrupt?: boolean };
+  | {
+      readonly behavior: 'allow';
+      readonly updatedInput?: Record<string, unknown>;
+      /**
+       * 10db already ran the call for the builder (a pass's allowed commit, push or merge), and
+       * `updatedInput` replays it. An agent whose hook can't change a call is told this instead.
+       */
+      readonly ranForBuilder?: {
+        readonly command: string;
+        readonly exitCode: number;
+        readonly output: string;
+      };
+    }
+  | {
+      readonly behavior: 'deny';
+      readonly message: string;
+      readonly interrupt?: boolean;
+      /** The builder, on a card's Deny; 10db for every other refusal. */
+      readonly by: DeniedBy;
+    };
 
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
@@ -52,28 +79,30 @@ export interface SessionSetupDirs {
   readonly skillRoots: readonly string[];
 }
 
-export interface SessionSpec {
+/** Which kind of session an `AgentSessionSpec` opens: a task's lane, or the engine's attended conversation. */
+export const AgentProfileKind = { Lane: 'lane', Explore: 'explore' } as const;
+export type AgentProfileKind = (typeof AgentProfileKind)[keyof typeof AgentProfileKind];
+
+/** What every session carries, whatever it is for. */
+export interface AgentSessionCore {
   readonly sessionId: SessionId;
-  readonly workstreamId: WorkstreamId;
-  readonly sequence: number;
   readonly cwd: string;
+  /** The first message; later ones come from `send`. */
   readonly prompt: string;
+  /** Pictures that go with the first message as image blocks. */
+  readonly images?: readonly ShapeImage[];
   /**
    * The client uuid the prompt carries, when it holds a builder message: the turn that takes it lists
    * it (Claude Code's `user_message_uuids`, the `clientId` of Codex's user message item), the evidence
    * it was consumed (Workbench spec §6.3).
    */
   readonly promptUuid?: string;
-  /** Pictures that go with the prompt as image blocks. */
-  readonly images?: readonly ShapeImage[];
   readonly model: string;
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
   readonly env: Readonly<Record<string, string>>;
   /** The account the session must prove it is, before its prompt (accounts spec §5). */
   readonly account: AccountExpectation;
-  /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
-  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /**
    * The project's and the builder's instructions, read when the session started (`session-setup`). A
    * lane takes them as its custom system prompt, Plan after its own; Codex as developer instructions.
@@ -84,32 +113,72 @@ export interface SessionSpec {
    * Absent without a sandbox.
    */
   readonly setup?: SessionSetupDirs;
+  readonly mcp: {
+    readonly url: string;
+    readonly token: string;
+    readonly toolTimeoutMs: number;
+  };
+  /**
+   * The lane sandbox: Claude Code runs the session's commands under its profile, loads no settings
+   * file and asks before every call no allow rule covers. Null, the session runs unsandboxed (a lane)
+   * or has no Bash (an explore session).
+   */
+  readonly sandbox: LaneSandboxSpec | null;
+  /**
+   * What the session is held to, whoever judges it (trust line §3): the limits, its environment, the
+   * coordination lines of its surface and whether a person is in it. Claude renders it for auto mode.
+   */
+  readonly policy: TrustPolicy;
+  /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
+  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
+  /**
+   * Runs before every tool call, before permission rules. An explore session's call also names the
+   * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.
+   */
+  preToolUse(req: ShapeToolRequest): ShapeVerdict;
+  /** Called for questions and for tool calls no allow rule covers. */
+  canUseTool(req: ToolRequest): Promise<ToolDecision>;
+  /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
+  readonly postToolUse?: (req: ShapeToolResult) => void;
+  /** Runs when a call failed: what the daemon counted for a Read that returned nothing comes back. */
+  readonly toolFailed?: (req: ShapeToolRequest) => void;
+}
+
+/** A task's session: one workstream's sequence-th run. */
+export interface LaneProfile {
+  readonly kind: typeof AgentProfileKind.Lane;
+  readonly workstreamId: WorkstreamId;
+  readonly sequence: number;
   readonly allowedTools: readonly string[];
   /**
    * The permission mode a sandboxed session runs in, read from the app-wide setting when the session
    * starts. Unset means the adapter's default. An unsandboxed session always runs in `default`.
    */
   readonly lanePermissionMode?: LanePermissionMode;
-  /**
-   * The lane sandbox: Claude Code runs the session's commands under its profile, loads no settings
-   * file and asks before every call no allow rule covers. Null or absent, the session runs unsandboxed.
-   */
-  readonly sandbox?: LaneSandboxSpec | null;
-  readonly mcp: {
-    readonly url: string;
-    readonly token: string;
-    readonly toolTimeoutMs: number;
-  };
-  /** The workspace guard: runs before every tool call, before permission rules. */
-  preToolUse(req: {
-    readonly toolName: string;
-    readonly input: unknown;
-    /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
-    readonly cwd?: string;
-  }): GuardVerdict;
-  /** Called for questions and for tool calls no allow rule covers. */
-  canUseTool(req: ToolRequest): Promise<ToolDecision>;
 }
+
+/**
+ * A Shape conversation's session (Shape spec §5.1, §5.2): it loads no settings or plugins, has no
+ * lane, claim or area, and runs in `default` mode. Its commands run in a read-only lane sandbox; a
+ * call its PreToolUse hook doesn't settle reaches `canUseTool`, the lanes' permission broker.
+ */
+export interface ExploreProfile {
+  readonly kind: typeof AgentProfileKind.Explore;
+  readonly shapeId: ShapeId;
+  /** Appended to Claude Code's own system prompt. */
+  readonly systemPrompt: string;
+  /** The built-in tools the session has; every other built-in is left out. */
+  readonly tools: readonly string[];
+  /** Calls approved without a prompt: the read tools and the Shape tools. */
+  readonly allowedTools: readonly string[];
+  readonly disallowedTools: readonly string[];
+  readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
+}
+
+/** Everything an adapter needs to open a session: the core every session shares, and what it is for. */
+export type LaneSessionSpec = AgentSessionCore & { readonly profile: LaneProfile };
+export type ExploreSessionSpec = AgentSessionCore & { readonly profile: ExploreProfile };
+export type AgentSessionSpec = LaneSessionSpec | ExploreSessionSpec;
 
 /** A tool call as a Shape session's PreToolUse hook sees it; `agentId` is set only inside a subagent. */
 export interface ShapeToolRequest {
@@ -119,6 +188,11 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
   /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
   readonly cwd?: string | undefined;
+  /**
+   * The permission mode the agent reported with this call: Claude Code's `auto`, or anything else.
+   * Absent where the agent reports none (Codex, the fake, a Plan session until it runs in auto mode).
+   */
+  readonly reportedMode?: ReportedMode;
 }
 
 /** A tool call that has run, as a Shape session's PostToolUse hook sees it, with what it returned. */
@@ -145,64 +219,6 @@ export interface ShapeAgentDefinition {
   readonly model?: string;
 }
 
-/**
- * A Shape conversation's SDK session (Shape spec §5.1, §5.2): it loads no settings or plugins, has no
- * lane, claim or area, and runs in `default` mode. Its commands run in a read-only lane sandbox; a
- * call its PreToolUse hook doesn't settle reaches `canUseTool`, the lanes' permission broker.
- */
-export interface ShapeSessionSpec {
-  readonly sessionId: SessionId;
-  readonly shapeId: ShapeId;
-  readonly cwd: string;
-  /** Appended to Claude Code's own system prompt. */
-  readonly systemPrompt: string;
-  /**
-   * The project's and the builder's instructions, read when the session started (`session-setup`). A
-   * lane takes them as its custom system prompt, Plan after its own; Codex as developer instructions.
-   */
-  readonly instructions?: string | null;
-  /**
-   * What the lane sandbox kept of the session's setup: Claude's plugin dirs and Codex's skill roots.
-   * Absent without a sandbox.
-   */
-  readonly setup?: SessionSetupDirs;
-  /** The first message; later ones come from `send`. */
-  readonly prompt: string;
-  /** Images that go with the first message. */
-  readonly images?: readonly ShapeImage[];
-  readonly model: string;
-  readonly effort: Effort;
-  readonly resumeProviderSessionId: string | null;
-  readonly env: Readonly<Record<string, string>>;
-  readonly account: AccountExpectation;
-  /** The built-in tools the session has; every other built-in is left out. */
-  readonly tools: readonly string[];
-  /** Calls approved without a prompt: the read tools and the Shape tools. */
-  readonly allowedTools: readonly string[];
-  readonly disallowedTools: readonly string[];
-  readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
-  readonly mcp: {
-    readonly url: string;
-    readonly token: string;
-    readonly toolTimeoutMs: number;
-  };
-  /**
-   * The read-only lane sandbox its commands run in. Null (a daemon with no sandbox) leaves Bash out of
-   * the session, so it runs no command at all.
-   */
-  readonly sandbox: LaneSandboxSpec | null;
-  /** The project's approved MCP servers; a stdio one only as its sandboxed launch. */
-  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
-  /** Runs before every tool call, the session's and its subagents'. */
-  preToolUse(req: ShapeToolRequest): ShapeVerdict;
-  /** A call the hook answered `ask` for: the permission broker, which may raise a card. */
-  canUseTool(req: ToolRequest): Promise<ToolDecision>;
-  /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
-  readonly postToolUse?: (req: ShapeToolResult) => void;
-  /** Runs when a call failed: what the daemon counted for a Read that returned nothing comes back. */
-  readonly toolFailed?: (req: ShapeToolRequest) => void;
-}
-
 export const SessionEndReason = {
   Completed: 'completed',
   Stopped: 'stopped',
@@ -219,19 +235,58 @@ export const SessionEndReason = {
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
+export const PlanStepStatus = {
+  Pending: 'pending',
+  InProgress: 'in_progress',
+  Completed: 'completed',
+} as const;
+export type PlanStepStatus = (typeof PlanStepStatus)[keyof typeof PlanStepStatus];
+
+/** One step of the plan an agent keeps for its turn: Claude's todo list, Codex's turn plan. */
+export interface PlanStep {
+  readonly text: string;
+  readonly status: PlanStepStatus;
+}
+
+/** A slash command the agent offers in the session. */
+export interface AgentCommand {
+  readonly name: string;
+  readonly description: string;
+  readonly argumentHint?: string;
+}
+
 /** How a turn ended: normally, at the session's turn limit, or with an error (including a spent budget). */
 export type TurnResult = 'success' | 'max_turns' | 'error';
 
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
+  /** What the session is saying, for the live line; a tool call's activity comes from its `tool_call`. */
   | { readonly type: 'activity'; readonly kind: 'text'; readonly summary: string }
+  /** Text the agent is writing; `offset` is the item's JS string length before this piece. */
   | {
-      readonly type: 'activity';
-      readonly kind: 'tool';
-      readonly summary: string;
-      /** What the call aims at and the files it writes. */
-      readonly tool: ToolTarget;
+      readonly type: 'text_delta';
+      readonly itemId: string;
+      readonly offset: number;
+      readonly text: string;
     }
+  /** Reasoning the agent shows as it thinks, offset as a text delta is. */
+  | {
+      readonly type: 'reasoning_delta';
+      readonly itemId: string;
+      readonly offset: number;
+      readonly text: string;
+    }
+  /** A finished message: the whole text its deltas built. */
+  | { readonly type: 'message'; readonly itemId: string; readonly text: string }
+  /**
+   * A tool call as it starts, changes and finishes, each time whole. `appended` is the output this
+   * update added, when it came from a stream of output.
+   */
+  | { readonly type: 'tool_call'; readonly call: ToolCallView; readonly appended?: string }
+  /** The slash commands the session offers, replacing the last list. */
+  | { readonly type: 'commands'; readonly commands: readonly AgentCommand[] }
+  /** The agent's plan for its turn, replacing the last one. */
+  | { readonly type: 'plan_update'; readonly steps: readonly PlanStep[] }
   | {
       readonly type: 'context';
       readonly percentage: number;
@@ -265,6 +320,14 @@ export type SessionEvent =
       readonly limitType: string | null;
     }
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
+  | {
+      /**
+       * Auto mode refused a call (Claude Code's classifier, or one of its own safety checks). Only a
+       * Claude lane reports it; the run goes on, the agent having been told.
+       */
+      readonly type: 'judge_denied';
+      readonly call: DeniedCall;
+    }
   | {
       /**
        * The client uuids of the user messages the running turn has taken in so far, as an assistant
@@ -326,9 +389,6 @@ export interface ShapeImage {
    */
   readonly path?: string;
 }
-
-/** A Plan conversation's session, which takes the same messages and interrupts a lane's does. */
-export type ShapeSessionHandle = SessionHandle;
 
 export interface AccountProbeSpec {
   /** The account's kind, which picks the agent that reports who it is. */
@@ -415,12 +475,16 @@ export class CompletionError extends Error {
   override readonly name = 'CompletionError';
 }
 
-export interface SessionAdapter {
+export interface AgentAdapter {
+  /**
+   * What this agent can do on the account, and for the model a session opens with (null: none yet).
+   * Answers from a table, so it works while the agent's copy is still downloading.
+   */
+  capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities;
   /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
   complete(spec: CompletionSpec): Promise<string>;
-  start(spec: SessionSpec): SessionHandle;
-  /** Starts a Shape conversation's session (Shape spec §5.1). */
-  startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
+  /** Opens a session of the spec's profile: a task's lane, or a Shape conversation (Shape spec §5.1). */
+  open(spec: AgentSessionSpec): SessionHandle;
   /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
   /**

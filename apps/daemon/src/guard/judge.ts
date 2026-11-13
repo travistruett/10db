@@ -1,13 +1,28 @@
 import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
+import {
+  ClaimKind,
+  type AreaDef,
+  type Delivery,
+  type HazardDef,
+  type JudgeKind,
+} from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
+import {
+  JudgedRule,
+  judgedRuleApplies,
+  namesGitOrGh,
+  namesSudo,
+  type JudgedContext,
+} from './judged-rules';
+import { runsInBackground } from './background-loops';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
+import { passGitCall } from './pass-git';
 import {
   classifyPath,
   foldPathCase,
@@ -50,7 +65,14 @@ export interface GuardInput {
    * page's alone, so only the lane holding it may write it, whatever shared area or hazard it holds
    * that also matches.
    */
-  readonly inPass?: { readonly pages: readonly string[] };
+  readonly inPass?: {
+    readonly pages: readonly string[];
+    /**
+     * The project's base branch: a push to it, or to `main`, stays refused in a pass, while the
+     * builder may allow another commit, push or merge on a card (`passGitCall`).
+     */
+    readonly baseBranch: string;
+  };
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
   /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
@@ -68,11 +90,12 @@ export interface GuardInput {
   };
   /** Present for a sandboxed lane: refuses reads and writes by the real path they name. */
   readonly fileAccess?: FileAccessJudge;
-  /**
-   * The agent judges this lane's web calls itself (Claude Code's auto mode), so WebSearch and WebFetch go
-   * to its judge instead of a card.
-   */
-  readonly webJudged?: boolean;
+  /** Who judges this call: where a judge runs, the guard leaves it the rules in `JudgedRule`. */
+  readonly judge: JudgeKind;
+  /** An allow rule of the session covers this call, so it is settled before any judge sees it. */
+  readonly coveredByAllowRule: boolean;
+  /** The project's Web switch is on, so WebSearch and WebFetch go to a judge that runs, not a card. */
+  readonly webOn?: boolean;
 }
 
 /**
@@ -99,6 +122,14 @@ export type GuardVerdict =
   | { readonly decision: 'deny' | 'ask'; readonly reason: string };
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
+/**
+ * A deploy the builder's allow rule covers runs, as in Claude Code: the hook settles it, so no
+ * classifier (which `classifyAllShell` would otherwise hand it to) or card stands in its way.
+ */
+const COVERED_DEPLOY: GuardVerdict = {
+  decision: 'allow',
+  settled: "The builder's allow rule covers this deploy, so it runs, as in Claude Code.",
+};
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -203,6 +234,8 @@ const UNREAD_WORDS =
   "The command has words the guard cannot read: an ANSI-C escape it does not decode (such as $'\\q' or a NUL), a / or newline decoded inside a word, or a lone { or } in the middle of a command. Write the words plainly.";
 const HIDDEN_BY_REDIRECTION =
   "A redirection among a wrapper's words, or one the guard does not recognize, hides which command runs. Put redirections after the command.";
+const HIDDEN_BY_ENV =
+  'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.';
 const UNJUDGED_RM = 'rm -r argument uses shell syntax the guard does not judge; name the paths.';
 
 function hasGitPart(path: string): boolean {
@@ -257,14 +290,16 @@ function isDirectory(path: string): boolean {
  * listed or matched: the directory must be inside the repository and hold no `.git` entry, since
  * `dotglob` or `GLOB_DOTS` set in the same command would let the wildcard reach it.
  */
-function rmWildcard(input: GuardInput, arg: string): GuardVerdict | null {
+function rmWildcard(input: GuardInput, ctx: JudgedContext, arg: string): GuardVerdict | null {
+  // Syntax this judge does not read: with a judge running, the argument is left to it.
+  const unjudged = judgedRuleApplies(JudgedRule.UnjudgedRm, ctx) ? deny(UNJUDGED_RM) : null;
   const cut = arg.lastIndexOf('/');
   const prefix = cut === -1 ? '' : arg.slice(0, Math.max(cut, 1));
   const segment = arg.slice(cut + 1);
   const wildcards = segment.replace(/[^*?]/g, '').length;
   if (!WILDCARD_SEGMENT.test(segment) || wildcards === 0 || wildcards > MAX_WILDCARDS)
-    return deny(UNJUDGED_RM);
-  if (!PLAIN_PATH.test(prefix)) return deny(UNJUDGED_RM);
+    return unjudged;
+  if (!PLAIN_PATH.test(prefix)) return unjudged;
   let root: string;
   try {
     root = realPathOf(input.repoPath);
@@ -314,26 +349,41 @@ function rmArguments(words: readonly string[]): string[] {
  */
 function rmVerdict(
   input: GuardInput,
+  ctx: JudgedContext,
   words: readonly string[],
   afterCd: boolean,
   segment: { readonly raw: string; readonly separator: string; readonly words: readonly string[] },
 ): GuardVerdict | null {
   if (!isRecursiveRm(words)) return null;
-  if (afterCd)
-    return deny('rm -r after cd is not allowed: the working directory is not the repository.');
+  const refusesUnjudged = judgedRuleApplies(JudgedRule.UnjudgedRm, ctx);
   // A `(` straight after the arguments is zsh glob grouping, never a subshell.
-  if (segment.separator === '(') return deny(UNJUDGED_RM);
-  if (REDIRECTION.test(segment.raw) || segment.words.some((w) => REDIRECTION.test(w)))
-    return deny(UNJUDGED_RM);
+  const unjudgedSyntax =
+    segment.separator === '(' ||
+    REDIRECTION.test(segment.raw) ||
+    segment.words.some((w) => REDIRECTION.test(w));
+  if (afterCd || unjudgedSyntax) {
+    if (refusesUnjudged) {
+      return deny(
+        afterCd
+          ? 'rm -r after cd is not allowed: the working directory is not the repository.'
+          : UNJUDGED_RM,
+      );
+    }
+    // Paths cannot be judged from here, but an over-long one is refused whatever judge runs.
+    return rmArguments(words).some(isOverLongPath) ? deny(OVER_LONG_PATH_REFUSAL) : null;
+  }
   for (const arg of rmArguments(words)) {
     if (isOverLongPath(arg)) return deny(OVER_LONG_PATH_REFUSAL);
-    if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
+    if (arg.includes('$')) {
+      if (refusesUnjudged) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
+      continue;
+    }
     if (PLAIN_PATH.test(arg)) {
       const target = rmPath(input, arg, expandTilde(arg));
       if ('verdict' in target) return target.verdict;
       continue;
     }
-    const verdict = rmWildcard(input, arg);
+    const verdict = rmWildcard(input, ctx, arg);
     if (verdict) return verdict;
   }
   return null;
@@ -557,46 +607,69 @@ interface NestedScript {
    * may still run as shell elsewhere.
    */
   readonly forwarded?: boolean;
+  /**
+   * The script runs beside the session (an `&`, a coprocess, the Bash tool's background flag, a
+   * Monitor), where a loop with no end holds a core. A segment the guard can't read there may hide
+   * one, so the unread-shell and pipe-into-shell refusals stand under every judge and the loop's
+   * card is never lost to one.
+   */
+  readonly background?: boolean;
+}
+
+/** Whether a segment of the line starts a job that runs beside it: an `&` or a coprocess. */
+function startsJob(segments: readonly ShellSegment[]): boolean {
+  return segments.some((segment) => segment.separator === '&' || segment.words.includes('coproc'));
 }
 
 function judgeShell(
   input: GuardInput,
+  ctx: JudgedContext,
   command: string,
   depth = 0,
   nested: NestedScript = {},
 ): GuardVerdict {
   const bracesAsData = nested.bracesAsData === true;
   const parse = parseShell(command);
+  const background = nested.background === true || startsJob(parse.segments);
+  const applies = (rule: JudgedRule): boolean =>
+    (background && (rule === JudgedRule.UnreadShell || rule === JudgedRule.PipeIntoShell)) ||
+    judgedRuleApplies(rule, ctx);
   const forwarded = nested.forwarded === true || forwardsOutput(parse.segments);
   const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
   const ordered = parse.certain && !segments.some((s) => s.outOfOrder);
   // Whether the shell may have changed directory by now, which `rm -r` needs to know. When the
   // order is not certain (a loop, a function), a `cd` anywhere may come before any segment.
   let afterCd = !ordered && changesDirectory(parse.segments);
+  let coveredDeploy = false;
   let previousSeparator = '';
   for (const { segment, words, hiddenByEnv, hiddenByRedirection } of segments) {
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
-    if (!segment.wordsCertain) return deny(UNREAD_WORDS);
-    if (!bracesAsData && !segment.bracesCertain) return deny(UNREAD_WORDS);
-    if (hiddenByRedirection) return deny(HIDDEN_BY_REDIRECTION);
+    const unread = !segment.wordsCertain || (!bracesAsData && !segment.bracesCertain);
+    if (unread || hiddenByRedirection || hiddenByEnv) {
+      if (applies(JudgedRule.UnreadShell)) {
+        if (unread) return deny(UNREAD_WORDS);
+        if (hiddenByRedirection) return deny(HIDDEN_BY_REDIRECTION);
+        if (head !== 'sudo') return deny(HIDDEN_BY_ENV);
+      }
+      // A segment the guard cannot read is left to the judge; sudo is never allowed.
+      if (head === 'sudo') return deny('sudo is never allowed.');
+      continue;
+    }
     if (head === 'sudo') return deny('sudo is never allowed.');
-    if (hiddenByEnv)
-      return deny(
-        'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
-      );
     // Substitutions always run as shell, and their output may reach a shell the guard does not
     // see (`watch "$(…)"`, a here-document a shell reads), so a here-document inside one is never
     // data.
     for (const body of segment.nested) {
-      const verdict = judgeShell(input, body, depth, { forwarded: true });
+      const verdict = judgeShell(input, ctx, body, depth, { forwarded: true, background });
       if (verdict.decision === 'deny') return verdict;
     }
     // A script this segment runs (`sh -c`, `find -exec`, `eval`) writes where the segment writes.
     const inner: NestedScript = {
       bracesAsData,
       forwarded: forwarded || segment.outputForwarded,
+      background,
     };
     // A here-document body is always judged as shell. Its braces are data only when a known data
     // reader takes it and its output is not forwarded (a pipe, a process substitution, a group or
@@ -605,30 +678,31 @@ function judgeShell(
     // that reaches a shell through the reader's output, is still judged with the brace-group rule.
     const bodyIsData = DATA_READERS.has(head) && !segment.outputForwarded && !forwarded;
     for (const body of segment.hereDocuments) {
-      const verdict = judgeShell(input, body, depth, {
+      const verdict = judgeShell(input, ctx, body, depth, {
         bracesAsData: bracesAsData || bodyIsData,
         forwarded,
+        background,
       });
       if (verdict.decision === 'deny') return verdict;
     }
     const shells = shellLines(words);
-    if (shells.length > 0 && piped) {
+    if (shells.length > 0 && piped && applies(JudgedRule.PipeIntoShell)) {
       return deny('Piping into a shell runs commands the guard cannot see.');
     }
     for (const script of shells.flatMap(shellScripts)) {
       if (depth >= 3) break;
-      const verdict = judgeShell(input, script, depth + 1, inner);
+      const verdict = judgeShell(input, ctx, script, depth + 1, inner);
       if (verdict.decision === 'deny') return verdict;
     }
     if (head === 'find' && depth < 3) {
       for (const exec of findExecCommands(words)) {
-        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, inner);
+        const verdict = judgeShell(input, ctx, exec.map(shellQuote).join(' '), depth + 1, inner);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'eval' && depth < 3) {
       const script = words.slice(1).join(' ');
-      const verdict = judgeShell(input, script, depth + 1, inner);
+      const verdict = judgeShell(input, ctx, script, depth + 1, inner);
       if (verdict.decision === 'deny') return verdict;
       // eval runs in this shell, so a `cd` in it moves this shell.
       if (changesDirectory(parseShell(script).segments)) afterCd = true;
@@ -640,13 +714,16 @@ function judgeShell(
     const refused = fedRefusal(leadingWords(segment.words).command);
     if (refused) return deny(refused);
     if (head === 'rm') {
-      const verdict = rmVerdict(input, words, afterCd, segment);
+      const verdict = rmVerdict(input, ctx, words, afterCd, segment);
       if (verdict) return verdict;
     }
     if (DIRECTORY_CHANGES.has(head)) afterCd = true;
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
-    if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l)))))
-      return deny('Deploy and publish commands are never run by agents.');
+    if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))) {
+      if (applies(JudgedRule.Deploy))
+        return deny('Deploy and publish commands are never run by agents.');
+      if (ctx.coveredByAllowRule) coveredDeploy = true;
+    }
     const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
@@ -661,7 +738,7 @@ function judgeShell(
       }
     }
   }
-  return ALLOW;
+  return coveredDeploy ? COVERED_DEPLOY : ALLOW;
 }
 
 /** Tools a read-only step may call besides Bash and the 10db MCP server's own tools. */
@@ -680,6 +757,8 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'ListMcpResourcesTool',
   'ReadMcpResourceTool',
 ]);
+const PASS_GIT_ASK =
+  'A commit, a push or a merge in a pass runs once the builder allows it: 10db runs it outside the sandbox, with their git.';
 const READ_ONLY_REFUSAL =
   'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.';
 
@@ -732,7 +811,22 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
       const refusal = readOnlyShellRefusal(command);
       if (refusal) return deny(refusal);
     }
-    return judgeShell(input, command);
+    // In a pass the builder may let a plain commit, push or merge run, on a card, as in Claude Code.
+    if (input.toolName === 'Bash' && input.inPass !== undefined) {
+      const call = passGitCall(command, input.inPass.baseBranch);
+      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK };
+      if (call?.kind === 'refuse') return deny(call.reason);
+    }
+    const ctx = {
+      judge: input.judge,
+      coveredByAllowRule: input.coveredByAllowRule,
+      namesGit: namesGitOrGh(command),
+      namesSudo: namesSudo(command),
+    };
+    const background =
+      input.toolName === 'Monitor' ||
+      runsInBackground(ToolInput.safeParse(input.toolInput).data ?? {});
+    return judgeShell(input, ctx, command, 0, { background });
   }
   if (
     input.readOnly &&

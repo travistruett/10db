@@ -41,8 +41,8 @@ function cleaned(children: readonly HastChild[]): HastChild[] {
 }
 
 /**
- * The rehype plugin. This step walks the tree with a stack, but the parser and the other plugins
- * recurse, so `Markdown` never hands them a text nested past `MARKDOWN_MAX_DEPTH`.
+ * The rehype plugin. This step walks the tree with a stack; the parser and the other plugins
+ * recurse, and a text nested too deep for them throws, which `MarkdownBoundary` shows plain.
  */
 export function rehypeAgentSafety() {
   return (tree: { children: HastChild[] }): void => {

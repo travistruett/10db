@@ -57,17 +57,18 @@ export function agentKind(kind: SupportedAccountKind): AgentAccountKind {
   return kind;
 }
 
+/** The adapter id of the agent that runs a session on each kind: a new kind is one row. */
+const ADAPTER_OF_KIND = {
+  [AccountKind.ClaudeSubscription]: Provider.Claude,
+  [AccountKind.AnthropicApiKey]: Provider.Claude,
+  [AccountKind.Bedrock]: Provider.Claude,
+  [AccountKind.Gateway]: Provider.Claude,
+  [AccountKind.CodexSignin]: Provider.Codex,
+} as const satisfies Readonly<Record<AgentAccountKind, Provider>>;
+
 /** The agent that runs a session on the kind. */
 export function providerOf(kind: AgentAccountKind): Provider {
-  switch (kind) {
-    case AccountKind.ClaudeSubscription:
-    case AccountKind.AnthropicApiKey:
-    case AccountKind.Bedrock:
-    case AccountKind.Gateway:
-      return Provider.Claude;
-    case AccountKind.CodexSignin:
-      return Provider.Codex;
-  }
+  return ADAPTER_OF_KIND[kind];
 }
 
 /** What a Shape conversation is told while its project's account is a ChatGPT account. */

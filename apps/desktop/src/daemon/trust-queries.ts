@@ -1,4 +1,5 @@
 import {
+  LiveSystemsDto,
   ProjectTrustDto,
   TrustSettingsDto,
   type ProjectId,
@@ -14,6 +15,7 @@ import { useDaemon } from './provider';
 export const trustKeys = {
   app: ['trust'],
   project: (projectId: ProjectId) => ['trust', 'project', projectId],
+  liveSystems: (projectId: ProjectId) => ['trust', 'live-systems', projectId],
 } as const;
 
 /** The app-wide switches and the builder's installed plugins. */
@@ -81,6 +83,39 @@ export function useSetProjectTrust(projectId: ProjectId) {
     },
     onSuccess: (trust) => {
       queryClient.setQueryData(trustKeys.project(projectId), trust);
+    },
+  });
+}
+
+/** The hosts, cloud profiles and namespaces the judge treats as live in a project. */
+export function useLiveSystems(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.liveSystems(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['live-systems'].$get({ param: { projectId } }),
+        LiveSystemsDto,
+      ),
+  });
+}
+
+/** Replaces a project's live systems, one change at a time; a refused list leaves the saved one. */
+export function useSetLiveSystems(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    scope: { id: `live-systems ${projectId}` },
+    mutationFn: async (liveSystems: readonly string[]) =>
+      readJson(
+        await client.projects[':projectId']['live-systems'].$put({
+          param: { projectId },
+          json: { liveSystems: [...liveSystems] },
+        }),
+        LiveSystemsDto,
+      ),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(trustKeys.liveSystems(projectId), saved);
     },
   });
 }

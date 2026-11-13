@@ -12,6 +12,9 @@ export const ROLE_NEED: Readonly<Record<StepRole, number>> = {
 /** The need a Plan conversation's model is chosen for: the plan step's. */
 export const PLAN_NEED = ROLE_NEED.plan;
 
+/** The need a task's implement step is chosen for. */
+export const IMPLEMENT_NEED = ROLE_NEED.implement;
+
 export const DEFAULT_FLOWS: readonly FlowInput[] = [
   { name: 'quick', steps: [{ role: StepRole.Implement, need: ROLE_NEED.implement }] },
   {

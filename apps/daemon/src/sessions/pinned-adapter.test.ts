@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  codexCapabilities,
   createPinnedAdapter,
   createUnavailableAdapter,
   type AdapterSource,
-  type SessionAdapter,
+  type AgentAdapter,
 } from './index';
 
 const probe = {
@@ -13,7 +14,7 @@ const probe = {
   identity: null,
   env: {},
   cwd: '/tmp',
-} as unknown as Parameters<SessionAdapter['probeAccount']>[0];
+} as unknown as Parameters<AgentAdapter['probeAccount']>[0];
 
 describe('createPinnedAdapter', () => {
   it('refuses with the reason while the copy is not ready, and runs on it once it is', async () => {
@@ -27,12 +28,16 @@ describe('createPinnedAdapter', () => {
       (path) => {
         built.push(path);
         return {
-          ...createUnavailableAdapter('unused'),
+          ...createUnavailableAdapter('unused', (a) => codexCapabilities(a.kind)),
           probeAccount: () => Promise.reject(new Error(`ran ${path}`)),
         };
       },
+      (a) => codexCapabilities(a.kind),
     );
     await expect(adapter.probeAccount(probe)).rejects.toThrow('being downloaded');
+    expect(adapter.capabilities({ kind: 'codex_signin' }, null)).toEqual(
+      codexCapabilities('codex_signin'),
+    );
     expect(built).toEqual([]);
     source = { ready: true, path: '/data/tools/claude/claude' };
     await expect(adapter.probeAccount(probe)).rejects.toThrow('ran /data/tools/claude/claude');
@@ -45,9 +50,10 @@ describe('createPinnedAdapter', () => {
     const adapter = createPinnedAdapter(
       () => source,
       () => ({
-        ...createUnavailableAdapter('unused'),
+        ...createUnavailableAdapter('unused', (a) => codexCapabilities(a.kind)),
         probeAccount: () => Promise.reject(new Error('ran')),
       }),
+      (a) => codexCapabilities(a.kind),
     );
     await expect(adapter.probeAccount(probe)).rejects.toThrow('ran');
     source = { ready: false, message: 'Codex 0.167.0 was refused: its files changed' };

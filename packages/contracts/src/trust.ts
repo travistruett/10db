@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { JudgeKind } from './agent-capabilities';
+import { AccountId } from './ids';
 
 // What comes along into each lane, pass and Plan session (Settings › Trust): one switch per kind of
 // setup, on by default, app-wide with a per-project override. A session reads them when it starts.
@@ -74,10 +76,24 @@ export const InstalledPluginDto = z.object({
 });
 export type InstalledPluginDto = z.infer<typeof InstalledPluginDto>;
 
+/** Who judges a new task's calls on an account: its default model, and why 10db's rules do when they do. */
+export const AccountJudgeDto = z.strictObject({
+  accountId: AccountId,
+  label: z.string(),
+  /** The model a new task gets on the account; null when the account offers none. */
+  model: z.string().nullable(),
+  judge: z.enum(JudgeKind),
+  /** Why the account's sessions are on 10db's rules, in one sentence; null when a judge runs. */
+  why: z.string().nullable(),
+});
+export type AccountJudgeDto = z.infer<typeof AccountJudgeDto>;
+
 /** `GET|PUT /settings/trust`. */
 export const TrustSettingsDto = z.object({
   switches: TrustSwitches,
   plugins: z.array(InstalledPluginDto),
+  /** One row per account. */
+  judges: z.array(AccountJudgeDto),
 });
 export type TrustSettingsDto = z.infer<typeof TrustSettingsDto>;
 
