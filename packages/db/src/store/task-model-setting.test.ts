@@ -24,13 +24,13 @@ describe('a task’s own model setting', () => {
     const task = store.write((ctx) => insertTask(ctx, project.id, base)).value;
     expect(task.modelSetting).toBeNull();
     const set = store.write((ctx) =>
-      patchTask(ctx, task.id, { modelSetting: { kind: 'tier', tier: 'strongest' } }),
+      patchTask(ctx, task.id, { modelSetting: { kind: 'tier', tier: 'capable' } }),
     ).value;
-    expect(set.modelSetting).toEqual({ kind: 'tier', tier: 'strongest' });
-    expect(getTask(store.db, task.id).modelSetting).toEqual({ kind: 'tier', tier: 'strongest' });
+    expect(set.modelSetting).toEqual({ kind: 'tier', tier: 'capable' });
+    expect(getTask(store.db, task.id).modelSetting).toEqual({ kind: 'tier', tier: 'capable' });
     // Another edit leaves the setting alone; null removes the override, which Automatic does not.
     const titled = store.write((ctx) => patchTask(ctx, task.id, { title: 'Beta' })).value;
-    expect(titled.modelSetting).toEqual({ kind: 'tier', tier: 'strongest' });
+    expect(titled.modelSetting).toEqual({ kind: 'tier', tier: 'capable' });
     const automatic = store.write((ctx) =>
       patchTask(ctx, task.id, { modelSetting: { kind: 'automatic' } }),
     ).value;

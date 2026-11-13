@@ -19,10 +19,10 @@ const NOW = '2026-11-07T12:00:00.000Z';
 
 /** Invented models, each with a tier and an output price: never a real model's. */
 const MODELS = [
-  { model: 'small', tier: ModelTier.Fast, price: 1 },
+  { model: 'small', tier: ModelTier.Efficient, price: 1 },
   { model: 'mid', tier: ModelTier.Balanced, price: 5 },
-  { model: 'big', tier: ModelTier.Strongest, price: 25 },
-  { model: 'peak', tier: ModelTier.Strongest, price: 50 },
+  { model: 'big', tier: ModelTier.Capable, price: 25 },
+  { model: 'peak', tier: ModelTier.Capable, price: 50 },
 ] as const;
 
 /** Every model at every effort, ranked and priced but not yet scored: what an account sees before a sync. */
@@ -144,7 +144,7 @@ describe('resolveStep', () => {
     {
       name: 'a planned model the account has marked unusable, in a tier with another model',
       rows: [row('big', { unusable: true }), row('peak')],
-      step: planned('big@high', { setting: tier(ModelTier.Strongest) }),
+      step: planned('big@high', { setting: tier(ModelTier.Capable) }),
       want: 'peak@',
       says: /big is marked unusable on Bedrock/,
     },
@@ -262,7 +262,7 @@ describe('resolveStep', () => {
   it('takes the tier’s next model when the one a step ran on is refused, and the tier has one', () => {
     const { rows, profiles } = offering([row('big', { unusable: true }), row('mid'), row('peak')]);
     const out = resolveStep(
-      planned('big@high', { setting: tier(ModelTier.Strongest) }),
+      planned('big@high', { setting: tier(ModelTier.Capable) }),
       ACCOUNT,
       profiles,
       rows,
@@ -321,13 +321,13 @@ describe('resolveStep', () => {
     {
       name: 'an override naming the model the account has marked unusable',
       rows: [row('big', { unusable: true }), row('peak')],
-      overrides: { strongest: 'big' },
+      overrides: { capable: 'big' },
       want: 'peak',
     },
     {
       name: 'an override naming a model absent from a list the account has',
       rows: [row('big'), row('peak')],
-      overrides: { strongest: 'ghost' },
+      overrides: { capable: 'ghost' },
       want: 'big',
     },
   ])(
@@ -335,7 +335,7 @@ describe('resolveStep', () => {
     ({ rows: listed, overrides, want }) => {
       const { rows, profiles } = offering(listed);
       const out = resolveStep(
-        planned('mid@high', { setting: tier(ModelTier.Strongest) }),
+        planned('mid@high', { setting: tier(ModelTier.Capable) }),
         ACCOUNT,
         profiles,
         rows,
@@ -358,12 +358,12 @@ describe('resolveStep', () => {
       ACCOUNT,
       profiles,
       rows,
-      context({ plannedTier: ModelTier.Strongest }),
+      context({ plannedTier: ModelTier.Capable }),
     );
     expect(out.model).toBe('peak');
     expect(out.setting).toEqual({ kind: 'automatic' });
     expect(out.reason).toBe(
-      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (strongest): by role default: the cheapest model of the strongest tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
+      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (capable): by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
     );
   });
 

@@ -35,9 +35,10 @@ export interface ModelFilter {
 export const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const TIER_RANK: Readonly<Record<ModelTier, number>> = {
-  [ModelTier.Fast]: 0,
+  [ModelTier.Efficient]: 0,
   [ModelTier.Balanced]: 1,
-  [ModelTier.Strongest]: 2,
+  [ModelTier.Capable]: 2,
+  [ModelTier.Frontier]: 3,
 };
 
 /** What a row is ordered by in a column; null when it has no data there. */

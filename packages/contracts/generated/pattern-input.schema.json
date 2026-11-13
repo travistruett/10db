@@ -75,9 +75,10 @@
             "tier": {
               "type": "string",
               "enum": [
-                "fast",
+                "efficient",
                 "balanced",
-                "strongest"
+                "capable",
+                "frontier"
               ]
             }
           },

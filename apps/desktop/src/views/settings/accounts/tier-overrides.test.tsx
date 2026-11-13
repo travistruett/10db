@@ -11,14 +11,15 @@ const OTHER = someAccountId();
 
 /** The catalogue's rows: three the gateway lists, one it does not, one superseded. */
 const rows = (account: AccountDto) => [
-  modelRowDto({ model: 'small', name: 'Small', tier: 'fast', availableOn: [account.id] }),
+  modelRowDto({ model: 'small', name: 'Small', tier: 'efficient', availableOn: [account.id] }),
   modelRowDto({ model: 'mid', name: 'Mid', tier: 'balanced', availableOn: [account.id] }),
-  modelRowDto({ model: 'large', name: 'Large', tier: 'strongest', availableOn: [account.id] }),
-  modelRowDto({ model: 'elsewhere', name: 'Elsewhere', tier: 'fast', availableOn: [OTHER] }),
+  modelRowDto({ model: 'large', name: 'Large', tier: 'capable', availableOn: [account.id] }),
+  modelRowDto({ model: 'top', name: 'Top', tier: 'frontier', availableOn: [account.id] }),
+  modelRowDto({ model: 'elsewhere', name: 'Elsewhere', tier: 'efficient', availableOn: [OTHER] }),
   modelRowDto({
     model: 'old',
     name: 'Old',
-    tier: 'fast',
+    tier: 'efficient',
     status: 'superseded',
     availableOn: [account.id],
   }),
@@ -32,7 +33,7 @@ function serve(account: AccountDto, listed: boolean): unknown[] {
     http.get(daemonUrl('/models/offers'), () =>
       HttpResponse.json(
         listed
-          ? ['small', 'mid', 'large', 'old'].map((model) =>
+          ? ['small', 'mid', 'large', 'top', 'old'].map((model) =>
               accountModelDto({ accountId: account.id, model }),
             )
           : [accountModelDto({ accountId: OTHER, model: 'elsewhere' })],
@@ -62,11 +63,11 @@ async function choose(label: string, option: string) {
 }
 
 describe('the tier overrides in an account’s settings', () => {
-  it('lists, for each tier, Automatic and only the models the account offers, grouped by tier and a replaced one marked', async () => {
+  it('lists, for each of the four tiers, Automatic and only the models the account offers, grouped by tier and a replaced one marked', async () => {
     const account = gateway();
     serve(account, true);
     renderWithDaemon(<EditAccountForm account={account} />);
-    for (const label of ['Fast model', 'Balanced model', 'Strongest model']) {
+    for (const label of ['Efficient model', 'Balanced model', 'Capable model', 'Frontier model']) {
       fireEvent.click(await screen.findByRole('combobox', { name: label }));
       const list = within(await screen.findByRole('listbox', { name: label, hidden: true }));
       await waitFor(() => {
@@ -76,6 +77,7 @@ describe('the tier overrides in an account’s settings', () => {
           'Old (superseded)',
           'Mid',
           'Large',
+          'Top',
         ]);
       });
       fireEvent.keyDown(screen.getByRole('combobox', { name: label }), { key: 'Escape' });
@@ -83,38 +85,39 @@ describe('the tier overrides in an account’s settings', () => {
   });
 
   it('saves a chosen model as that tier’s override, and Automatic takes it away again', async () => {
-    const account = gateway({ strongest: 'large' });
+    const account = gateway({ capable: 'large' });
     const patches = serve(account, true);
     renderWithDaemon(<EditAccountForm account={account} />);
-    await choose('Fast model', 'Small');
+    await choose('Efficient model', 'Small');
+    await choose('Frontier model', 'Top');
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
       expect(patches).toEqual([
         {
           settings: {
             baseUrl: 'https://gw.example.com/v1',
-            tierOverrides: { fast: 'small', strongest: 'large' },
+            tierOverrides: { efficient: 'small', capable: 'large', frontier: 'top' },
           },
         },
       ]);
     });
-    await choose('Strongest model', 'Automatic');
+    await choose('Capable model', 'Automatic');
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
       expect(patches[1]).toEqual({
         settings: {
           baseUrl: 'https://gw.example.com/v1',
-          tierOverrides: { fast: 'small' },
+          tierOverrides: { efficient: 'small', frontier: 'top' },
         },
       });
     });
   });
 
   it('keeps a saved override the account no longer offers on show, marked, so the field is never blank', async () => {
-    const account = gateway({ fast: 'retired-one' });
+    const account = gateway({ efficient: 'retired-one' });
     serve(account, true);
     renderWithDaemon(<EditAccountForm account={account} />);
-    const fast = await screen.findByRole('combobox', { name: 'Fast model' });
+    const fast = await screen.findByRole('combobox', { name: 'Efficient model' });
     await waitFor(() => {
       expect(fast).toHaveProperty('value', 'retired-one (not offered)');
     });
@@ -124,10 +127,11 @@ describe('the tier overrides in an account’s settings', () => {
     const account = gateway();
     const patches = serve(account, false);
     renderWithDaemon(<EditAccountForm account={account} />);
-    const fast = await screen.findByRole('textbox', { name: 'Fast model' });
-    expect(screen.queryByRole('combobox', { name: 'Fast model' })).toBeNull();
+    const fast = await screen.findByRole('textbox', { name: 'Efficient model' });
+    expect(screen.queryByRole('combobox', { name: 'Efficient model' })).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Balanced model' })).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: 'Strongest model' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Capable model' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Frontier model' })).toBeTruthy();
     fireEvent.change(fast, { target: { value: 'vendor/small' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
@@ -135,7 +139,7 @@ describe('the tier overrides in an account’s settings', () => {
         {
           settings: {
             baseUrl: 'https://gw.example.com/v1',
-            tierOverrides: { fast: 'vendor/small' },
+            tierOverrides: { efficient: 'vendor/small' },
           },
         },
       ]);
@@ -146,8 +150,8 @@ describe('the tier overrides in an account’s settings', () => {
     const account = gateway();
     const patches = serve(account, false);
     renderWithDaemon(<EditAccountForm account={account} />);
-    const strongest = await screen.findByRole('textbox', { name: 'Strongest model' });
-    fireEvent.change(strongest, { target: { value: 'fast' } });
+    const strongest = await screen.findByRole('textbox', { name: 'Capable model' });
+    fireEvent.change(strongest, { target: { value: 'efficient' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     const message = await screen.findByText(
       'Enter a model ID of up to 200 characters, not a tier name',
@@ -160,7 +164,7 @@ describe('the tier overrides in an account’s settings', () => {
     const account = gateway();
     const patches = serve(account, false);
     renderWithDaemon(<EditAccountForm account={account} />);
-    const fast = await screen.findByRole('textbox', { name: 'Fast model' });
+    const fast = await screen.findByRole('textbox', { name: 'Efficient model' });
     fireEvent.change(fast, { target: { value: 'x'.repeat(201) } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     const message = await screen.findByText(

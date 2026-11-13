@@ -17,7 +17,7 @@ const B = someAccountId();
 const rows = [
   modelRowDto({
     model: 'm-low',
-    tier: ModelTier.Fast,
+    tier: ModelTier.Efficient,
     availableOn: [A],
     intelligence: 20,
     costPerTaskUsd: 0.1,
@@ -39,7 +39,7 @@ const rows = [
   }),
   modelRowDto({
     model: 'm-top',
-    tier: ModelTier.Strongest,
+    tier: ModelTier.Capable,
     availableOn: [B],
     intelligence: 60,
     costPerTaskUsd: 5,
@@ -85,14 +85,14 @@ describe('filtering the model list', () => {
     {
       name: 'a tier keeps only that tier',
       query: '',
-      tiers: [ModelTier.Fast],
+      tiers: [ModelTier.Efficient],
       account: null,
       expected: 1,
     },
     {
       name: 'several tiers keep each',
       query: '',
-      tiers: [ModelTier.Fast, ModelTier.Strongest],
+      tiers: [ModelTier.Efficient, ModelTier.Capable],
       account: null,
       expected: 2,
     },
@@ -107,7 +107,7 @@ describe('filtering the model list', () => {
     {
       name: 'a tier nothing has is empty',
       query: '',
-      tiers: [ModelTier.Strongest],
+      tiers: [ModelTier.Capable],
       account: A,
       expected: 0,
     },

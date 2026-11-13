@@ -5,7 +5,7 @@ import { label, unscoredCatalogue } from './test-catalogue';
 
 describe('strongerDefault', () => {
   const profiles = unscoredCatalogue({}, ['small', 'mid', 'big', 'peak']);
-  const threeStrongest = unscoredCatalogue({}, ['small', 'mid', 'big', 'peak', 'apex']);
+  const threeAboveBalanced = unscoredCatalogue({}, ['small', 'mid', 'big', 'peak', 'apex']);
   const at = (l: string, pool = profiles) => {
     const p = pool.find((x) => label(x) === l);
     if (!p) throw new Error(l);
@@ -35,7 +35,7 @@ describe('strongerDefault', () => {
     { name: 'the top of a tier of three from the middle', from: 'peak@high', want: 'apex@high' },
     { name: 'the next effort once on the top of three', from: 'apex@high', want: 'apex@xhigh' },
   ])('with three models in one tier goes to $name', ({ from, want }) => {
-    expect(climb(from, threeStrongest)).toBe(want);
+    expect(climb(from, threeAboveBalanced)).toBe(want);
   });
 
   it('skips a model the account does not offer', () => {
@@ -52,8 +52,8 @@ describe('strongerDefault', () => {
 
   it.each([
     { name: 'the balanced tier', tier: ModelTier.Balanced, want: 'mid@high' },
-    { name: 'the strongest tier', tier: ModelTier.Strongest, want: 'peak@high' },
-    { name: 'the fast tier', tier: ModelTier.Fast, want: 'small@high' },
+    { name: 'the capable tier', tier: ModelTier.Capable, want: 'peak@high' },
+    { name: 'the efficient tier', tier: ModelTier.Efficient, want: 'small@high' },
   ])('climbs from $name for a model with no tier or price, never downward', ({ tier, want }) => {
     const house = { ...at('small@high'), model: 'house', tier: null, outputPrice: null };
     const next = strongerDefault(house, profiles, tier);

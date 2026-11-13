@@ -30,7 +30,7 @@ const KEYED: AccountDto = accountDto({ label: 'Work key', kind: 'anthropic_api_k
 const FAST = modelRowDto({
   model: 'alpha-fast',
   name: 'Alpha Fast',
-  tier: 'fast',
+  tier: 'efficient',
   availableOn: [KEYED.id],
   inputPrice: 1,
   outputPrice: 5,
@@ -42,7 +42,7 @@ const FAST = modelRowDto({
 const STRONG = modelRowDto({
   model: 'alpha-max',
   name: 'Alpha Max',
-  tier: 'strongest',
+  tier: 'capable',
   availableOn: [SUBSCRIPTION.id, KEYED.id],
   inputPrice: 5,
   outputPrice: 25,
@@ -192,7 +192,7 @@ describe('the Models page', () => {
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
     expect(row.getByText('alpha-max')).toBeTruthy();
-    expect(row.getByText('Strongest')).toBeTruthy();
+    expect(row.getByText('Capable')).toBeTruthy();
     expect(row.getByText('Claude plan, Work key')).toBeTruthy();
     for (const cell of ['60', '$2.50', '$5.00', '$25.00', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
@@ -409,12 +409,12 @@ describe('the Models page', () => {
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tier' }));
     const tiers = await screen.findByRole('group', { name: 'Tier' });
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Efficient' }));
     expect(shownNames()).toEqual(['Alpha Fast']);
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Capable' }));
     expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast']);
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Efficient' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Capable' }));
     expect(shownNames()).toHaveLength(4);
   });
 
@@ -456,7 +456,7 @@ describe('the Models page', () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(within(rowOf('Alpha Max')).getByText('Strongest'));
+    fireEvent.click(within(rowOf('Alpha Max')).getByText('Capable'));
     expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
   });
 

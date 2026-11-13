@@ -16,7 +16,15 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import { higherFloor, stepFloor, type Floor } from './floors';
-import { atEffort, automatic, effortAbove, tierPool, topModel, type TierPool } from './pools';
+import {
+  atEffort,
+  automatic,
+  effortAbove,
+  tierPool,
+  topModel,
+  withTopSpan,
+  type TierPool,
+} from './pools';
 import { defaultTier, pickByDefault, ROLE_DEFAULT } from './role-defaults';
 import { route, UnmeasuredError, type RouteChoice } from './router';
 import type { TaskShape } from './skip-rules';
@@ -337,7 +345,9 @@ export function chooseModel(input: ChooseInput): ModelChoice {
 
   /** The tier's automatic choice, or the account's override for the tier. */
   const inTier = (tier: ModelTier, top: boolean, note: string): ModelChoice => {
-    const pool = tierPool(tier, input.profiles);
+    // A top pick, or a floored step, takes the dearest model of every tier its tier spans.
+    const found = tierPool(tier, input.profiles);
+    const pool = found && (top || floored) ? withTopSpan(found, input.profiles) : found;
     const moved =
       pool === undefined || pool.tier === tier
         ? ''

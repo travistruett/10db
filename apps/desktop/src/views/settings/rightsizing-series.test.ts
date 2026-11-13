@@ -12,11 +12,11 @@ const effort = (
 const row = (model: string, tier: ModelRowDto['tier'], efforts: ReturnType<typeof effort>[]) =>
   modelRowDto({ model, name: model.toUpperCase(), tier, efforts });
 
-const small = row('small', 'fast', [effort('low', 20, 0.05), effort('high', 30, 0.4)]);
+const small = row('small', 'efficient', [effort('low', 20, 0.05), effort('high', 30, 0.4)]);
 const mid = row('mid', 'balanced', [effort('low', 38, 0.4), effort('high', 46, 1)]);
-const big = row('big', 'strongest', [effort('high', 50, 2)]);
+const big = row('big', 'capable', [effort('high', 50, 2)]);
 const unmeasured = row('plain', null, [effort('high', null, null)]);
-const free = row('free', 'fast', [effort('high', 40, 0)]);
+const free = row('free', 'efficient', [effort('high', 40, 0)]);
 
 const NEEDS: Record<StepRole, number> = {
   plan: 45,
@@ -65,9 +65,9 @@ describe('rightsizingSeries points', () => {
   it('draws one point per measured effort, in a series per tier', () => {
     const result = build();
     expect(result.series.map((s) => [s.name, s.data.length])).toEqual([
-      ['Fast', 2],
+      ['Efficient', 2],
       ['Balanced', 2],
-      ['Strongest', 1],
+      ['Capable', 1],
     ]);
     expect(result.omitted).toBe(0);
   });

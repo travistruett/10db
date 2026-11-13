@@ -16,7 +16,7 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 const MODELS = {
   default: 'claude-opus-5-5',
   offered: [
-    { model: 'claude-opus-5-5', tier: 'strongest' as const },
+    { model: 'claude-opus-5-5', tier: 'capable' as const },
     { model: 'claude-sonnet-5-5', tier: 'balanced' as const },
   ],
 };

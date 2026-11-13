@@ -181,10 +181,10 @@ export function shapeViewDto(
     models: {
       default: 'claude-opus-5-5',
       offered: [
-        { model: 'claude-haiku-5-5', tier: 'fast' },
+        { model: 'claude-haiku-5-5', tier: 'efficient' },
         { model: 'claude-sonnet-5-5', tier: 'balanced' },
-        { model: 'claude-opus-5-5', tier: 'strongest' },
-        { model: 'claude-fable-5-1', tier: 'strongest' },
+        { model: 'claude-opus-5-5', tier: 'capable' },
+        { model: 'claude-fable-5-1', tier: 'frontier' },
         { model: 'house-model', tier: null },
       ],
     },

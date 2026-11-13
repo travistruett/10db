@@ -89,15 +89,17 @@ export function costTickLabel(value: number): string {
 }
 
 const SERIES_COLORS: Readonly<Record<ModelTier, string>> = {
-  [ModelTier.Fast]: 'teal',
+  [ModelTier.Efficient]: 'teal',
   [ModelTier.Balanced]: 'blue',
-  [ModelTier.Strongest]: 'violet',
+  [ModelTier.Capable]: 'violet',
+  [ModelTier.Frontier]: 'grape',
 };
 const NO_TIER = { name: 'No tier', color: 'gray' } as const;
 const TIER_ORDER: readonly (ModelTier | null)[] = [
-  ModelTier.Fast,
+  ModelTier.Efficient,
   ModelTier.Balanced,
-  ModelTier.Strongest,
+  ModelTier.Capable,
+  ModelTier.Frontier,
   null,
 ];
 
