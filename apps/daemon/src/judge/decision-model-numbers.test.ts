@@ -25,8 +25,15 @@ describe('typicalDecisionTokens', () => {
   it.each([
     {
       name: 'one priced model: its cost over the price of a token',
+      stats: [stat({ model: 'a/priced', costedCalls: 10, totalCostUsd: 0.008 })],
+      expected: 400,
+      assumed: false,
+    },
+    {
+      name: 'a measured size that equals the guess is still measured',
       stats: [stat({ model: 'a/priced', costedCalls: 10, totalCostUsd: 0.006 })],
       expected: 300,
+      assumed: false,
     },
     {
       name: 'two priced models are summed, not averaged',
@@ -35,6 +42,7 @@ describe('typicalDecisionTokens', () => {
         stat({ model: 'b/priced', costedCalls: 10, totalCostUsd: 0.036 }),
       ],
       expected: 700,
+      assumed: false,
     },
     {
       name: 'a free model is skipped, not divided by',
@@ -43,27 +51,36 @@ describe('typicalDecisionTokens', () => {
         stat({ model: 'a/priced', costedCalls: 10, totalCostUsd: 0.01 }),
       ],
       expected: 500,
+      assumed: false,
     },
     {
       name: 'only a free model: the fallback',
       stats: [stat({ model: 'c/free', totalCostUsd: 0 })],
       expected: TYPICAL_TOKENS_FALLBACK,
+      assumed: true,
     },
     {
       name: 'a model with no price: the fallback',
       stats: [stat({ model: 'd/unknown' })],
       expected: TYPICAL_TOKENS_FALLBACK,
+      assumed: true,
     },
     {
       name: 'a priced model with no costed call: the fallback',
       stats: [stat({ model: 'a/priced', costedCalls: 0, totalCostUsd: 0 })],
       expected: TYPICAL_TOKENS_FALLBACK,
+      assumed: true,
     },
-    { name: 'no calls at all: the fallback', stats: [], expected: TYPICAL_TOKENS_FALLBACK },
-  ])('$name', ({ stats, expected }) => {
+    {
+      name: 'no calls at all: the fallback',
+      stats: [],
+      expected: TYPICAL_TOKENS_FALLBACK,
+      assumed: true,
+    },
+  ])('$name', ({ stats, expected, assumed }) => {
     const typical = typicalDecisionTokens(stats, (m) => prices[m] ?? null);
     expect(typical.tokens).toBeCloseTo(expected, 6);
-    expect(typical.assumed).toBe(expected === TYPICAL_TOKENS_FALLBACK);
+    expect(typical.assumed).toBe(assumed);
   });
 });
 
