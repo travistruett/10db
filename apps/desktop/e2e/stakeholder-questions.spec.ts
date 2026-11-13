@@ -84,25 +84,32 @@ test('routes a question to someone outside Slack from its card, and the table sh
   seedQuestion(project);
   await claudeIsInstalled(page);
 
-  // Settings › People: add Priya, who is not in Slack.
+  // Settings › Integrations: with Slack off on this daemon, the Slack card is its setup steps.
+  await page.goto('/settings/integrations');
+  await expect(page.getByRole('button', { name: 'Copy Manifest' })).toBeVisible();
+  await expectAccessible(page, 'integrations, dark');
+
+  // Settings › People: add Priya, who is not in Slack. With Slack off the modal opens on a name.
   await page.goto('/settings/people');
   await expect(page.getByRole('heading', { name: 'People', level: 3 })).toBeVisible();
   await page.getByRole('button', { name: 'Add Person' }).click();
   const person = page.getByRole('dialog', { name: 'Add Person' });
-  await person.getByRole('radio', { name: 'Someone not in Slack' }).check();
+  await expect(person.getByText("10db can't message them.", { exact: false })).toBeVisible();
   await person.getByLabel('Name').fill('Priya Shah');
   await person.getByRole('button', { name: 'Save Person' }).click();
   await expect(person).toBeHidden();
-  await expect(page.getByRole('row', { name: /Priya Shah/ })).toContainText('not in Slack');
+  const priya = page.getByRole('row', { name: /Priya Shah/ });
+  await expect(priya).toContainText('Not on Slack');
+  await expect(priya).toContainText('You pass it on');
   await expectAccessible(page, 'people, dark');
 
-  // The question card offers Ask Someone…; Priya, Product, on the whole project.
+  // The question card offers Ask Someone; Priya, Product, on the whole project.
   await page.goto('/inbox');
-  await expect(page.getByText(QUESTION)).toBeVisible();
+  await expect(page.getByText(QUESTION, { exact: true })).toBeVisible();
   // The first row opens by itself; with 10db's own cards above it, it is a row to select.
   const questionRow = page.getByRole('button', { name: new RegExp(QUESTION) });
   if ((await questionRow.count()) > 0) await questionRow.click();
-  await page.getByRole('button', { name: 'Ask Someone…' }).click();
+  await page.getByRole('button', { name: 'Ask Someone', exact: true }).click();
   const ask = page.getByRole('dialog');
   await ask.getByRole('combobox', { name: 'Person' }).click();
   await page.getByRole('option', { name: /Priya Shah/ }).click();
@@ -117,7 +124,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
 
   // The daemon remembers whom the card was asked of: after a reload Copy is still there.
   await page.reload();
-  await expect(page.getByText(QUESTION)).toBeVisible();
+  await expect(page.getByText(QUESTION, { exact: true })).toBeVisible();
   const reselect = page.getByRole('button', { name: new RegExp(QUESTION) });
   if ((await reselect.count()) > 0) await reselect.click();
   await expect(page.getByRole('button', { name: 'Copy for Priya Shah' })).toBeVisible();
@@ -126,7 +133,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await page.getByRole('radio', { name: /Seven days/ }).check();
   await page.getByRole('button', { name: 'Send answer' }).click();
   // Other cards may be open; this one is gone, with the message copied for Priya.
-  await expect(page.getByText(QUESTION)).toHaveCount(0);
+  await expect(page.getByText(QUESTION, { exact: true })).toHaveCount(0);
 
   // Who Answers shows the route the card wrote.
   await page.goto('/settings/routing-rules');

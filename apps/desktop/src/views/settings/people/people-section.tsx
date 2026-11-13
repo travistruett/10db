@@ -61,6 +61,8 @@ function ConnectSlackLine({ builder }: { readonly builder: PersonDto | undefined
         : "Slack isn't connected, so 10db can't message anyone yet."}{' '}
       <Anchor
         size="sm"
+        // Inside a line of text, so it is underlined rather than told apart by color alone.
+        underline="always"
         renderRoot={(props) => (
           <Link
             {...props}
