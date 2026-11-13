@@ -54,6 +54,9 @@ favors legibility and calm over decoration.
   own sides fade while columns are. A column's footer (Add Task, Show All) sits 10 px from the tray's
   edges, wider than the cards, and Add Task is an unfilled dashed slot that takes the card tone on hover,
   so it never reads as a card.
+- **Page panels:** a Settings page's tables and charts can sit on the raised panel tone
+  (`--tendb-color-panel`, `bg_1` in both schemes) through `RaisedPanel` or a table's `backgroundColor`, so
+  they stand off the page body. Settings › Models uses it; other pages adopt it one at a time.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
   paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A
   card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state

@@ -1,5 +1,6 @@
 import {
   isSearch,
+  KNOWLEDGE_PAGE_SIZE,
   KnowledgeItemKind,
   KnowledgeSort,
   PrincipleKind,
@@ -18,7 +19,8 @@ import {
   type ListControls,
 } from './knowledge-filters';
 import { dateText, PRINCIPLE_KIND_LABELS, scopeText, shortDateText } from './knowledge-labels';
-import { orderOf, usePaging, type SortColumns } from './knowledge-paging';
+import { usePaging } from '../../shell/table-pager';
+import { orderOf, type SortColumns } from './knowledge-paging';
 import { KnowledgeShelf } from './knowledge-shelf';
 import {
   ACTIONS_COLUMN,
@@ -74,7 +76,7 @@ export function PrincipleList({
     sort === null && !isSearch(filter.q)
       ? { by: KnowledgeSort.Kind, dir: SortDirection.Asc }
       : orderOf(sort, SORTS);
-  const paging = usePaging(JSON.stringify([filter, order, kinds]));
+  const paging = usePaging(JSON.stringify([filter, order, kinds]), KNOWLEDGE_PAGE_SIZE);
   const principles = useKnowledgePrinciples(filter, {
     page: paging.page,
     pageSize: paging.pageSize,

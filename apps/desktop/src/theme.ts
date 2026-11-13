@@ -163,6 +163,11 @@ function boardVariables(
   };
 }
 
+/** The raised tone a page's tables and charts sit on, one step off the body in either scheme. */
+function panelVariables(variant: SelenizedVariant): Record<string, string> {
+  return { '--tendb-color-panel': variant.bg1 };
+}
+
 /** Mantine's scheme variables, each one a value from `variant`. */
 function schemeVariables(
   names: readonly string[],
@@ -196,7 +201,12 @@ export const cssVariablesResolver: CSSVariablesResolver = (t) => {
     light: {
       ...schemeVariables(names, SelenizedLight),
       ...boardVariables(SelenizedLight, 'light'),
+      ...panelVariables(SelenizedLight),
     },
-    dark: { ...schemeVariables(names, SelenizedDark), ...boardVariables(SelenizedDark, 'dark') },
+    dark: {
+      ...schemeVariables(names, SelenizedDark),
+      ...boardVariables(SelenizedDark, 'dark'),
+      ...panelVariables(SelenizedDark),
+    },
   };
 };

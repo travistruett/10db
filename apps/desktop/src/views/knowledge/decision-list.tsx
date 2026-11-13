@@ -1,4 +1,9 @@
-import { KnowledgeItemKind, KnowledgeSort, type DecisionItem } from '@10db/contracts';
+import {
+  KNOWLEDGE_PAGE_SIZE,
+  KnowledgeItemKind,
+  KnowledgeSort,
+  type DecisionItem,
+} from '@10db/contracts';
 import { Stack, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
@@ -14,7 +19,8 @@ import {
   type ListControls,
 } from './knowledge-filters';
 import { dateText, scopeText, shortDateText } from './knowledge-labels';
-import { orderOf, usePaging, type SortColumns } from './knowledge-paging';
+import { usePaging } from '../../shell/table-pager';
+import { orderOf, type SortColumns } from './knowledge-paging';
 import { KnowledgeShelf } from './knowledge-shelf';
 import { ACTIONS_COLUMN, ActionsCell, KnowledgeTable, OpenRecordText } from './knowledge-table';
 import { emptyText, ListStates, StateBadge } from './record-cells';
@@ -50,7 +56,7 @@ export function DecisionList({
   const [sort, setSort] = useState<DataTableSortStatus<DecisionItem> | null>(null);
   const past = controls.shelf === KnowledgeShelf.Past;
   const order = orderOf(sort, SORTS);
-  const paging = usePaging(JSON.stringify([filter, order]));
+  const paging = usePaging(JSON.stringify([filter, order]), KNOWLEDGE_PAGE_SIZE);
   const decisions = useKnowledgeDecisions(filter, {
     page: paging.page,
     pageSize: paging.pageSize,

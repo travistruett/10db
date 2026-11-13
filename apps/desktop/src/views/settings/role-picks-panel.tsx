@@ -4,7 +4,7 @@ import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { formatCost, NO_DATA } from './model-format';
 import { ROLES } from './role-labels';
 
-/** The colour that marks a role's pick: its dot here, its ring on the chart and the Used by column. */
+/** The colour that marks a role's pick: its dot here and its ring on the chart. */
 export const PICK_COLOR = 'violet';
 
 interface RoleLine {
@@ -116,6 +116,7 @@ export function RolePicksPanel({
         columns={columns}
         idAccessor="role"
         withTableBorder
+        backgroundColor="var(--tendb-color-panel)"
         borderRadius="md"
         verticalSpacing="xs"
         horizontalSpacing="md"

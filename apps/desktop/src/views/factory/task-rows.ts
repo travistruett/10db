@@ -18,7 +18,7 @@ const S = WorkstreamState;
 /** What a running row says of its step: its role, its place in the plan, then the model it runs on. */
 const STEP_LABEL: Readonly<Record<StepRole, string>> = {
   [StepRole.Plan]: 'Plan',
-  [StepRole.PlanReview]: 'Plan review',
+  [StepRole.PlanReview]: 'Plan Review',
   [StepRole.Implement]: 'Implement',
   [StepRole.Review]: 'Review',
   [StepRole.Qa]: 'QA',

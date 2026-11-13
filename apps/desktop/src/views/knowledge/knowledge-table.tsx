@@ -4,14 +4,14 @@ import {
   DataTable,
   useDataTableColumns,
   type DataTableColumn,
-  type DataTablePaginationProps,
   type DataTableSortStatus,
 } from 'mantine-datatable';
 import type { ReactNode } from 'react';
 import { withColumnHeader } from '../../shell/column-header';
 import { columnChoices, ColumnsMenu, hiddenColumns, toggleColumn } from '../../shell/columns-menu';
 import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels';
-import { PAGE_SIZES, type Paging } from './knowledge-paging';
+import { pagerProps, type TablePage } from '../../shell/table-pager';
+import { PAGE_SIZES } from './knowledge-paging';
 import './knowledge-table.css';
 
 /** The accessor of a list's last column, the row's menu, whose header holds the Columns menu. */
@@ -62,38 +62,6 @@ export function ActionsCell({ children }: { readonly children: ReactNode }) {
       {children}
     </Box>
   );
-}
-
-/** The names of the pager's arrows, which Mantine leaves unnamed. */
-const PAGER_CONTROLS: Readonly<Record<'first' | 'last' | 'previous' | 'next', string>> = {
-  first: 'First page',
-  last: 'Last page',
-  previous: 'Previous page',
-  next: 'Next page',
-};
-
-/** One page of a list as the daemon answered it, and how to ask for another. */
-export interface TablePage extends Paging {
-  /** How many records the list holds on every page together. */
-  readonly total: number;
-}
-
-/** The pager under a list with a daemon page and at least one record; none otherwise. */
-function pagerProps(paging: TablePage | undefined): DataTablePaginationProps {
-  if (paging === undefined || paging.total === 0) return {};
-  return {
-    totalRecords: paging.total,
-    recordsPerPage: paging.pageSize,
-    page: paging.page,
-    onPageChange: paging.onPage,
-    recordsPerPageOptions: [...PAGE_SIZES],
-    onRecordsPerPageChange: paging.onPageSize,
-    recordsPerPageLabel: 'Per page',
-    paginationText: ({ from, to, totalRecords }) =>
-      `${String(from)}–${String(to)} of ${String(totalRecords)}`,
-    getPaginationControlProps: (control) => ({ 'aria-label': PAGER_CONTROLS[control] }),
-    getPaginationItemProps: (page) => ({ 'aria-label': `Page ${String(page)}` }),
-  };
 }
 
 /**
@@ -187,7 +155,7 @@ export function KnowledgeTable<T>({
             },
           }
         : {})}
-      {...pagerProps(paging)}
+      {...pagerProps(paging, PAGE_SIZES)}
     />
   );
 }
