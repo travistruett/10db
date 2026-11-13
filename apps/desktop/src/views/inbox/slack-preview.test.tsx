@@ -122,6 +122,31 @@ describe('a card with a draft', () => {
     expect(posted).toEqual([]);
   });
 
+  it('Edit alone does not release a scan hold; changing the text does, and changing it back holds again', async () => {
+    const held = 'key AKIA-ish on line 3';
+    const posted = serve(
+      card({
+        text: held,
+        heldBy: 'scan',
+        hits: [{ pattern: 'aws_access_key', line: 3, severity: 'hold' }],
+      }),
+    );
+    const send = await screen.findByRole('button', { name: /Send to Mark/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(send).toHaveProperty('disabled', true);
+    const box = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.change(box, { target: { value: 'safe words' } });
+    expect(send).toHaveProperty('disabled', false);
+    fireEvent.change(box, { target: { value: held } });
+    expect(send).toHaveProperty('disabled', true);
+    fireEvent.change(box, { target: { value: 'safe words' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(send);
+    await waitFor(() => {
+      expect(posted).toEqual([{ path: 'send', body: { text: 'safe words' } }]);
+    });
+  });
+
   it('a limit hold says so and Send Anyway overrides it', async () => {
     const posted = serve(card({ heldBy: 'limit' }));
     expect(await screen.findByText(/Mark has had 10 new questions today/)).toBeTruthy();

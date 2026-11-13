@@ -76,8 +76,8 @@ export function SlackPreview({
   const hold = send.hits.find((h) => h.severity === 'hold');
   const warnings = send.hits.filter((h) => h.severity === 'warn');
   const limitHeld = send.heldBy === 'limit';
-  // An unedited message with a held pattern cannot go; an edit is scanned again when it is sent.
-  const blocked = send.heldBy === 'scan' && edited === null;
+  // A held message cannot go as it is: opening Edit changes nothing, and only different text is scanned again.
+  const blocked = send.heldBy === 'scan' && (edited === null || edited === send.text);
   const limit = people.find((p) => p.id === send.people[0]?.personId)?.slack?.dailyLimit ?? null;
   const line = routeLine(item, people);
 
