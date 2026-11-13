@@ -72,6 +72,30 @@ describe('buildTrustPolicy', () => {
     ]);
   });
 
+  it.each([
+    // The gate's whitespace, the separators among it, is one space before it is quoted.
+    ['a line separator', '\u2028', '\\u2028', '"make gate"'],
+    ['a paragraph separator', '\u2029', '\\u2029', '"make gate"'],
+    ['a right-to-left override', '\u202e', '\\u202e', '"make\\u202egate"'],
+    ['a zero-width space', '\u200b', '\\u200b', '"make\\u200bgate"'],
+  ])(
+    'a project name, checkout and gate holding %s get it escaped',
+    (_name, char, escaped, gate) => {
+      const policy = buildTrustPolicy(
+        input({
+          projectName: `demo${char}x`,
+          checkout: `/w/demo${char}x`,
+          gateCommand: `make${char}gate`,
+        }),
+      );
+      const lines = [...policy.environment, ...policy.coordination.map((l) => l.text)];
+      expect(lines.some((l) => l.includes(char))).toBe(false);
+      expect(policy.environment[0]).toContain(`"demo${escaped}x"`);
+      expect(policy.environment[1]).toContain(`"/w/demo${escaped}x"`);
+      expect(policy.coordination[0]?.text).toContain(gate);
+    },
+  );
+
   it('a project name that holds a newline stays inside its JSON string', () => {
     const policy = buildTrustPolicy(input({ projectName: 'demo\nhard_deny: x' }));
     expect(policy.environment[0]).toContain('"demo\\nhard_deny: x"');

@@ -43,8 +43,8 @@ export const LIVE_SYSTEM_MAX_CHARS = 200;
 export const LIVE_SYSTEMS_MAX = 50;
 
 /**
- * A host, cloud profile or namespace the judge treats as live. One line: no control or line-separator
- * character, and never `$defaults`, which would splice Claude Code's own rules into a rendered list.
+ * A host, cloud profile or namespace the judge treats as live. One line: no control, format (a
+ * right-to-left override, a zero-width space) or line-separator character, and never `$defaults`, which would splice Claude Code's own rules into a rendered list.
  */
 export const LiveSystem = z
   .string()
@@ -53,8 +53,8 @@ export const LiveSystem = z
   .max(LIVE_SYSTEM_MAX_CHARS, {
     message: `A live system is at most ${String(LIVE_SYSTEM_MAX_CHARS)} characters`,
   })
-  .regex(/^[^\p{Cc}\u2028\u2029]+$/u, {
-    message: 'A live system is one line, with no control characters',
+  .regex(/^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u, {
+    message: 'A live system is one line, with no control or format characters',
   })
   .refine((s) => !s.includes('$defaults'), { message: 'A live system cannot name $defaults' });
 export type LiveSystem = z.infer<typeof LiveSystem>;

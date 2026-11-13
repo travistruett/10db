@@ -11,6 +11,12 @@ describe('LiveSystem', () => {
     ['a tab fails', 'api\texample', false],
     ['a NUL fails', 'api\u0000example', false],
     ['a U+2028 fails', 'api\u2028example', false],
+    ['a U+2029 fails', 'api\u2029example', false],
+    ['a zero-width space fails', 'api\u200bexample', false],
+    ['a right-to-left override fails', 'api\u202eexample', false],
+    ['a byte order mark fails', 'api\ufeffexample', false],
+    ['a soft hyphen fails', 'api\u00adexample', false],
+    ['a letter with an accent passes', 'café.example.com', true],
     ['$defaults fails', '$defaults', false],
   ])('%s', (_name, value, ok) => {
     expect(LiveSystem.safeParse(value).success).toBe(ok);

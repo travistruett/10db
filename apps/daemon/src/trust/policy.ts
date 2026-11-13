@@ -1,6 +1,7 @@
 import { TrustPolicy, TrustSurface, type TrustSwitches } from '@10db/contracts';
 import { coordinationLines } from './coordination';
 import { LIMIT_ORDER, LIMITS } from './limits';
+import { quotedValue } from './quoted-value';
 
 export interface TrustPolicyInput {
   readonly surface: TrustSurface;
@@ -29,13 +30,13 @@ function works(surface: TrustSurface): boolean {
 }
 
 /**
- * The environment the judge reads the limits in. Every value 10db didn't write is a JSON string, so a
+ * The environment the judge reads the limits in. Every value 10db didn't write is a quoted value, so a
  * project name, a path or a live system cannot end a line or read as one of 10db's sentences.
  */
 function environmentLines(input: TrustPolicyInput): string[] {
-  const checkout = JSON.stringify(input.checkout);
+  const checkout = quotedValue(input.checkout);
   return [
-    `Organization: one builder working alone on their own Mac, with 10db running agent sessions for the project ${JSON.stringify(input.projectName)}.`,
+    `Organization: one builder working alone on their own Mac, with 10db running agent sessions for the project ${quotedValue(input.projectName)}.`,
     works(input.surface)
       ? `Host containment: a macOS sandbox. This session writes only in ${checkout} and its own temp folder, and the commands it runs reach only the project's allowed network hosts; other folders, other sessions' copies and credentials are closed to it.`
       : `Host containment: a macOS sandbox. This session reads ${checkout} and writes nothing outside its own temp folder.`,
@@ -46,7 +47,7 @@ function environmentLines(input: TrustPolicyInput): string[] {
       : []),
     ...(input.liveSystems.length > 0
       ? [
-          `Sensitive remote targets: ${input.liveSystems.map((s) => JSON.stringify(s)).join(', ')}. These are live: treat a write to any of them as writing to a live system.`,
+          `Sensitive remote targets: ${input.liveSystems.map(quotedValue).join(', ')}. These are live: treat a write to any of them as writing to a live system.`,
         ]
       : []),
   ];

@@ -1,4 +1,5 @@
 import { TrustSurface, type PolicyLine } from '@10db/contracts';
+import { quotedValue } from './quoted-value';
 
 /**
  * What 10db coordinates for the sessions that do the work (trust line §7): it runs the gate, commits and
@@ -12,9 +13,8 @@ export function coordinationLines(surface: TrustSurface, gateCommand: string | n
     case TrustSurface.Lane:
     case TrustSurface.Pass: {
       const command = (gateCommand ?? '').replaceAll(/\s+/g, ' ').trim();
-      // A JSON string quotes any command, backticks and quotes included, so it cannot break the sentence.
-      const gate =
-        command === '' ? 'full gate' : `full gate, the command ${JSON.stringify(command)}`;
+      // A quoted value holds any command, backticks and quotes included, so it cannot break the sentence.
+      const gate = command === '' ? 'full gate' : `full gate, the command ${quotedValue(command)}`;
       return [
         {
           label: '10db Runs The Gate',
