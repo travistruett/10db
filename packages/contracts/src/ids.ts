@@ -241,16 +241,16 @@ export const ConversationFileId = ID_SCHEMAS.ConversationFile;
 export type ConversationFileId = IdOf<'ConversationFile'>;
 export const ChatId = ID_SCHEMAS.Chat;
 export type ChatId = IdOf<'Chat'>;
-/** A Plan message is a conversation item; the name stays for the code that reads Plan's rows. */
+/** A Plan message is a conversation item; the name stays for the code that reads Plan's rows. @alias */
 export const ShapeMessageId = ConversationItemId;
 export type ShapeMessageId = ConversationItemId;
-/** A file dropped into Plan is a conversation file. */
+/** A file dropped into Plan is a conversation file. @alias */
 export const ShapeFileId = ConversationFileId;
 export type ShapeFileId = ConversationFileId;
-/** A task's thread message is a conversation item. */
+/** A task's thread message is a conversation item. @alias */
 export const TaskMessageId = ConversationItemId;
 export type TaskMessageId = ConversationItemId;
-/** A picture pasted into a task's thread is a conversation file. */
+/** A picture pasted into a task's thread is a conversation file. @alias */
 export const TaskFileId = ConversationFileId;
 export type TaskFileId = ConversationFileId;
 export const AccountId = ID_SCHEMAS.Account;

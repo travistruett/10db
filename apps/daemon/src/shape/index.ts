@@ -13,7 +13,6 @@ export {
   shapeToolset,
 } from './policy';
 export { createShapeJev, shadowAgreement } from './jev';
-export { READ_CHARGE_MAX_BYTES } from './read-budget';
 export {
   createShapeService,
   DEFAULT_SHAPE_TITLE,
