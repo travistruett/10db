@@ -12,7 +12,13 @@ import { z } from 'zod';
 import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
-import { JudgedRule, judgedRuleApplies, namesGitOrGh, type JudgedContext } from './judged-rules';
+import {
+  JudgedRule,
+  judgedRuleApplies,
+  namesGitOrGh,
+  namesSudo,
+  type JudgedContext,
+} from './judged-rules';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
 import {
@@ -772,6 +778,7 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
       judge: input.judge,
       coveredByAllowRule: input.coveredByAllowRule,
       namesGit: namesGitOrGh(command),
+      namesSudo: namesSudo(command),
     };
     return judgeShell(input, ctx, command);
   }

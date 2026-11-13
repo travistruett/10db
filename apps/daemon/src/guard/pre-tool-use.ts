@@ -119,12 +119,13 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
  * permission mode may decide it.
  */
 function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
-  // A rule the guard hands to a judge that runs. Only shell rules read the text, so none names git.
+  // A rule the guard hands to a judge that runs. Only shell rules read the text, so none names git or sudo.
   const handedToJudge = (rule: JudgedRule): boolean =>
     !judgedRuleApplies(rule, {
       judge: input.judge,
       coveredByAllowRule: input.coveredByAllowRule,
       namesGit: false,
+      namesSudo: false,
     });
   // The web goes to a judge that runs, and only while the project's Web switch is on. MCP calls
   // stay with the broker under every judge: nothing yet shows the classifier judging them.

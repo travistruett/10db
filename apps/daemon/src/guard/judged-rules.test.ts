@@ -104,6 +104,13 @@ const SHELL_ROWS: readonly Row[] = [
   bash('gh pr merge', 'gh pr merge 12', 'deny', 'deny'),
   bash('git fed by xargs', 'echo status | xargs git', 'deny', 'deny'),
   bash('sudo', 'sudo ls', 'deny', 'deny'),
+  // sudo in a segment the guard can't read keeps the judged refusal, as git does.
+  bash('sudo behind env -S', "env -S 'sudo ls'", 'deny', 'deny'),
+  bash('sudo piped into a shell', "echo 'sudo ls' | sh", 'deny', 'deny'),
+  bash('sudo after unread words', "echo $'\\q'; sudo ls", 'deny', 'deny'),
+  bash('sudo split by quotes, piped into a shell', `echo "s''udo ls" | sh`, 'deny', 'deny'),
+  bash('sudo split by a backslash, behind env -S', "env -S 's\\udo ls'", 'deny', 'deny'),
+  bash('a read that names sudo', 'grep sudo notes.txt', 'allow', 'allow'),
   bash('rm -r of .git', 'rm -r .git', 'deny', 'deny'),
   bash('rm -r outside the repository', 'rm -r ../other', 'deny', 'deny'),
   bash('rm -r of an over-long path', `rm -r ${'x'.repeat(5000)}`, 'deny', 'deny'),
