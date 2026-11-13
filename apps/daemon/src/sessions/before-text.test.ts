@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import {
   linkSync,
@@ -192,6 +193,18 @@ const rows: readonly Row[] = [
     hooks: {
       afterLstat: () => {
         linkD(outside);
+      },
+    },
+    expected: UNREAD,
+  },
+  {
+    // Opening a FIFO for reading waits for a writer, which would stop the daemon's event loop.
+    name: 'a file swapped for a FIFO after its lstat',
+    path: () => 'a.ts',
+    hooks: {
+      afterLstat: () => {
+        unlinkSync(join(checkout, 'a.ts'));
+        execFileSync('/usr/bin/mkfifo', [join(checkout, 'a.ts')]);
       },
     },
     expected: UNREAD,

@@ -103,7 +103,9 @@ export function readCheckoutText(
     if (!seen.isFile()) return UNREAD;
     let fd: number;
     try {
-      fd = fs.openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+      // Non-blocking, so a FIFO swapped in after the lstat opens at once instead of waiting for a
+      // writer and holding the event loop; the fstat below refuses it.
+      fd = fs.openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     } catch {
       return UNREAD;
     }
