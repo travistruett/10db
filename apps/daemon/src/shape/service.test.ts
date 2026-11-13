@@ -420,7 +420,7 @@ describe('Propose', () => {
         'propose_plan',
       )(
         ShapeToolInputs.propose_plan.parse({
-          draft: PlanDraft.parse(looseDraft(mintId('ShapeMessage'), 'a')),
+          draft: PlanDraft.parse(looseDraft(mintId('ConversationItem'), 'a')),
         }),
       ).catch(() => undefined);
       return { text: 'tried' };

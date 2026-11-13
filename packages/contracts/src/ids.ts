@@ -47,12 +47,10 @@ const ID_SCHEMAS = {
   GoalCriterion: idSchema(['gcr'], 'GoalCriterionId'),
   JudgeCall: idSchema(['jdg'], 'JudgeCallId'),
   Shape: idSchema(['shp'], 'ShapeId'),
-  ShapeMessage: idSchema(['shm'], 'ShapeMessageId'),
   ShapeProposal: idSchema(['spp'], 'ShapeProposalId'),
   ShapeLink: idSchema(['slk'], 'ShapeLinkId'),
   ShapeFinding: idSchema(['shf'], 'ShapeFindingId'),
   ShapeQuestion: idSchema(['sqn'], 'ShapeQuestionId'),
-  ShapeFile: idSchema(['sfl'], 'ShapeFileId'),
   ShapeAttachment: idSchema(['sat'], 'ShapeAttachmentId'),
   ShapeAttachmentRevision: idSchema(['sar'], 'ShapeAttachmentRevisionId'),
   ShapeEntry: idSchema(['sen'], 'ShapeEntryId'),
@@ -103,12 +101,10 @@ const ID_PREFIX = {
   GoalCriterion: 'gcr',
   JudgeCall: 'jdg',
   Shape: 'shp',
-  ShapeMessage: 'shm',
   ShapeProposal: 'spp',
   ShapeLink: 'slk',
   ShapeFinding: 'shf',
   ShapeQuestion: 'sqn',
-  ShapeFile: 'sfl',
   ShapeAttachment: 'sat',
   ShapeAttachmentRevision: 'sar',
   ShapeEntry: 'sen',
@@ -209,8 +205,6 @@ export const JudgeCallId = ID_SCHEMAS.JudgeCall;
 export type JudgeCallId = IdOf<'JudgeCall'>;
 export const ShapeId = ID_SCHEMAS.Shape;
 export type ShapeId = IdOf<'Shape'>;
-export const ShapeMessageId = ID_SCHEMAS.ShapeMessage;
-export type ShapeMessageId = IdOf<'ShapeMessage'>;
 export const ShapeProposalId = ID_SCHEMAS.ShapeProposal;
 export type ShapeProposalId = IdOf<'ShapeProposal'>;
 export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
@@ -219,8 +213,6 @@ export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;
 export type ShapeFindingId = IdOf<'ShapeFinding'>;
 export const ShapeQuestionId = ID_SCHEMAS.ShapeQuestion;
 export type ShapeQuestionId = IdOf<'ShapeQuestion'>;
-export const ShapeFileId = ID_SCHEMAS.ShapeFile;
-export type ShapeFileId = IdOf<'ShapeFile'>;
 export const ShapeAttachmentId = ID_SCHEMAS.ShapeAttachment;
 export type ShapeAttachmentId = IdOf<'ShapeAttachment'>;
 export const ShapeAttachmentRevisionId = ID_SCHEMAS.ShapeAttachmentRevision;
@@ -257,5 +249,11 @@ export const ConversationFileId = ID_SCHEMAS.ConversationFile;
 export type ConversationFileId = IdOf<'ConversationFile'>;
 export const ChatId = ID_SCHEMAS.Chat;
 export type ChatId = IdOf<'Chat'>;
+/** A Plan message is a conversation item; the name stays for the code that reads Plan's rows. */
+export const ShapeMessageId = ConversationItemId;
+export type ShapeMessageId = ConversationItemId;
+/** A file dropped into Plan is a conversation file. */
+export const ShapeFileId = ConversationFileId;
+export type ShapeFileId = ConversationFileId;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

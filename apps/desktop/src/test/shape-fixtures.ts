@@ -33,7 +33,7 @@ export function shapeMessageDto(
   overrides: Partial<ShapeMessageDto> = {},
 ): ShapeMessageDto {
   return ShapeMessageDto.parse({
-    id: mintId('ShapeMessage'),
+    id: mintId('ConversationItem'),
     shapeId,
     author: 'builder',
     kind: 'text',
@@ -52,7 +52,7 @@ interface ProposalOverrides {
   readonly sourceMessageIds?: ShapeProposalDto['sourceMessageIds'];
 }
 
-const SOURCE = mintId('ShapeMessage');
+const SOURCE = mintId('ConversationItem');
 
 const proposalBase = (overrides: ProposalOverrides) => ({
   id: mintId('ShapeProposal'),

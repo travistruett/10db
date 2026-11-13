@@ -2066,7 +2066,7 @@ export const shapeShadowAnswers = sqliteTable(
     messageId: text('message_id')
       .$type<ShapeMessageId>()
       .notNull()
-      .references(() => shapeMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     decision: text('decision').$type<JudgeDecision>().notNull(),
     /** `yes` or `no`. */
     answer: text('answer').$type<'yes' | 'no'>().notNull(),

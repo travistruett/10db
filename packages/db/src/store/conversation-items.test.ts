@@ -2,8 +2,8 @@ import {
   InvalidError,
   idUuid,
   mintId,
+  ConversationItemId,
   type ConversationId,
-  type ConversationItemId,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -51,7 +51,7 @@ const add = (into: ConversationId, text: string) =>
 
 /** An item written as the copy leaves a migrated row: its old id, at `seq`, with `next_seq` past it. */
 function migrated(prefix: 'shm' | 'tmg', seq: number, pushUuids: readonly string[] = []) {
-  const id = `${prefix}_${idUuid(mintId('ConversationItem'))}`;
+  const id = ConversationItemId.parse(`${prefix}_${idUuid(mintId('ConversationItem'))}`);
   store.db.$client
     .prepare(
       `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, push_uuids, created_at,
@@ -63,7 +63,7 @@ function migrated(prefix: 'shm' | 'tmg', seq: number, pushUuids: readonly string
   store.db.$client
     .prepare('UPDATE conversations SET next_seq = ? WHERE id = ?')
     .run(seq + 1, conversation);
-  return id as ConversationItemId;
+  return id;
 }
 
 describe('conversation items', () => {

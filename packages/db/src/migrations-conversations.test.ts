@@ -1,7 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { idUuid, mintId, ToolCallView, type IdKind, type IdOf } from '@10db/contracts';
+import {
+  ConversationFileId,
+  ConversationItemId,
+  idUuid,
+  mintId,
+  ToolCallView,
+  type IdKind,
+  type IdOf,
+} from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
@@ -42,7 +50,7 @@ const PA = mintId('Pass');
 const PT1 = mintId('PassTurn');
 
 interface ShapeRow {
-  readonly id: IdOf<'ShapeMessage'>;
+  readonly id: ConversationItemId;
   readonly shapeId: IdOf<'Shape'>;
   readonly author: 'builder' | 'claude' | 'note';
   readonly kind:
@@ -51,7 +59,7 @@ interface ShapeRow {
   readonly createdAt: string;
 }
 interface TaskRow {
-  readonly id: IdOf<'TaskMessage'>;
+  readonly id: ConversationItemId;
   readonly taskId: IdOf<'Task'>;
   readonly author: 'builder' | 'agent' | 'system';
   readonly kind: 'message' | 'reply' | 'notice';
@@ -85,10 +93,15 @@ const S3_LINES: readonly Pick<ShapeRow, 'author' | 'kind' | 'body'>[] = [
 
 const shapeRows: ShapeRow[] = [];
 const taskRows: TaskRow[] = [];
-const s1Files = { told: mintId('ShapeFile'), unreadable: mintId('ShapeFile') };
-const s3File = mintId('ShapeFile');
-const t1File = mintId('TaskFile');
-const t3File = mintId('TaskFile');
+/** An id minted now under a prefix the conversation kinds still read, as the old tables minted them. */
+const legacyItem = (prefix: 'shm' | 'tmg') =>
+  ConversationItemId.parse(`${prefix}_${idUuid(mintId('ConversationItem'))}`);
+const legacyFile = (prefix: 'sfl' | 'tfl') =>
+  ConversationFileId.parse(`${prefix}_${idUuid(mintId('ConversationFile'))}`);
+const s1Files = { told: legacyFile('sfl'), unreadable: legacyFile('sfl') };
+const s3File = legacyFile('sfl');
+const t1File = legacyFile('tfl');
+const t3File = legacyFile('tfl');
 const sessions = {
   s1Old: mintId('Session'),
   s1New: mintId('Session'),
@@ -103,14 +116,14 @@ function mintRows(): void {
   for (let i = 0; i < S1_LINES.length; i += 1) {
     const line = S1_LINES[i];
     if (line !== undefined)
-      shapeRows.push({ id: mintId('ShapeMessage'), shapeId: S1, ...line, createdAt: at(10 + i) });
+      shapeRows.push({ id: legacyItem('shm'), shapeId: S1, ...line, createdAt: at(10 + i) });
     const other = S3_LINES[i];
     if (other !== undefined)
-      shapeRows.push({ id: mintId('ShapeMessage'), shapeId: S3, ...other, createdAt: at(30 + i) });
+      shapeRows.push({ id: legacyItem('shm'), shapeId: S3, ...other, createdAt: at(30 + i) });
   }
   const none = { pushedAt: null, pushUuids: [], deliveredAt: null, turnId: null };
   const message = (taskId: IdOf<'Task'>, minute: number, fields: Partial<TaskRow>): TaskRow => ({
-    id: mintId('TaskMessage'),
+    id: legacyItem('tmg'),
     taskId,
     author: 'builder',
     kind: 'message',

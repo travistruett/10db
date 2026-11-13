@@ -1032,14 +1032,15 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     // session never started) is told what the builder has said so far, and about every file.
     let files = intake.files;
     if (resumeId === null) {
+      // Before the turn's message by its place in the transcript, never by id: a migrated message
+      // keeps an older id that sorts after every new one as text.
+      const at = transcript.findIndex((m) => m.id === turn.messageId);
       if (!spoken)
         parts.push(
           ...transcript
+            .slice(0, at < 0 ? transcript.length : at)
             .filter(
-              (m) =>
-                m.author === ShapeMessageAuthor.Builder &&
-                m.kind === ShapeMessageKind.Text &&
-                m.id < turn.messageId,
+              (m) => m.author === ShapeMessageAuthor.Builder && m.kind === ShapeMessageKind.Text,
             )
             .map((m) => `[m:${m.id}] ${m.body}`),
         );

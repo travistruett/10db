@@ -13,7 +13,7 @@ import {
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §5.5, §6, §13.
 
-const message = mintId('ShapeMessage');
+const message = mintId('ConversationItem');
 
 /** The six-item list of the spec's §1, cut down: a goal, a loose task, a landing, a record, a question. */
 const DRAFT = {

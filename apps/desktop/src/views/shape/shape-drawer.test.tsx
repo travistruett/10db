@@ -338,7 +338,7 @@ describe('Shape: the conversation across a layout change', () => {
   const uploaded = () =>
     HttpResponse.json(
       {
-        id: mintId('ShapeFile'),
+        id: mintId('ConversationFile'),
         shapeId: shape.id,
         name: 'brief.md',
         mediaType: 'text/markdown',

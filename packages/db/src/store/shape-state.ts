@@ -1,7 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import {
+  ConversationOwnerKind,
   EventType,
   mintId,
   NotFoundError,
+  ShapeId,
+  ShapeMessageAuthor,
+  ShapeMessageKind,
   ShapeProposalBody,
   ShapeProposalState,
   type DecisionId,
@@ -9,24 +14,39 @@ import {
   type PrincipleId,
   type ShapeDto,
   type ShapeFileId,
-  type ShapeId,
   type ShapeLinkId,
-  type ShapeMessageAuthor,
   type ShapeMessageDto,
   type ShapeMessageId,
-  type ShapeMessageKind,
   type ShapeProposalId,
   type ShapeProposalKind,
   type ShapeQuestionId,
   type ShapeState,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
-import { patchConversation } from './conversations';
+import {
+  getFile,
+  insertFiles,
+  listFiles,
+  listUntoldFiles,
+  markFilesInline,
+  markFilesTold,
+  markFilesUnreadableTold,
+  type ConversationFileRow,
+} from './conversation-files';
+import {
+  getItem,
+  insertItem,
+  lastItems,
+  listItems,
+  type ConversationItemRow,
+} from './conversation-items';
+import { getConversation, patchConversation } from './conversations';
 import { getShape, shapeConversation } from './shapes';
 import type { DbReader, WriteContext } from './store';
+import { shapeItemOf, shapeMessageOf } from './transcript-kinds';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §5.3, §6 Rows, §11.
 // The daemon's shape module decides what these rows say; these functions only keep them.
@@ -76,18 +96,21 @@ export function getShapeSdkSessionId(db: DbReader, id: ShapeId): string | null {
 
 // --- The transcript -----------------------------------------------------------------------------
 
-type MessageRow = typeof schema.shapeMessages.$inferSelect;
+// Plan's rows are its conversation's items (decision
+// 2026-11-13-one-conversation-store-keeps-ids-and-orders-by-seq.md), mapped by transcript-kinds.
 
-const toMessageDto = (row: MessageRow): ShapeMessageDto => ({
-  id: row.id,
-  shapeId: row.shapeId,
-  author: row.author,
-  kind: row.kind,
-  body: row.body,
-  createdAt: row.createdAt,
-});
+const toMessageDto = (shapeId: ShapeId, item: ConversationItemRow): ShapeMessageDto | null => {
+  const message = shapeMessageOf(item);
+  return message === null ? null : { id: item.id, shapeId, ...message, createdAt: item.createdAt };
+};
 
-/** Appends a row to the transcript. */
+const toMessageDtos = (shapeId: ShapeId, items: readonly ConversationItemRow[]) =>
+  items.flatMap((item) => toMessageDto(shapeId, item) ?? []);
+
+/**
+ * Appends a row to the transcript. A builder's message is delivered as it is written: Plan sends it
+ * to its session in the same turn, and keeps no queue a restart could find.
+ */
 export function insertShapeMessage(
   ctx: WriteContext,
   shapeId: ShapeId,
@@ -98,22 +121,19 @@ export function insertShapeMessage(
   },
 ): ShapeMessageDto {
   const shape = getShape(ctx.tx, shapeId);
-  const row: MessageRow = {
-    id: mintId('ShapeMessage'),
-    shapeId,
-    author: input.author,
-    kind: input.kind,
-    body: input.body,
-    createdAt: ctx.now,
-  };
-  ctx.tx.insert(schema.shapeMessages).values(row).run();
+  const builderText =
+    input.author === ShapeMessageAuthor.Builder && input.kind === ShapeMessageKind.Text;
+  const item = insertItem(ctx, shapeConversation(ctx.tx, shapeId).id, {
+    ...shapeItemOf({ ...input, createdAt: ctx.now }, randomUUID()),
+    deliveredAt: builderText ? ctx.now : null,
+  });
   ctx.emit({
     type: EventType.ShapeChanged,
     entityType: 'shape',
     entityId: shapeId,
     data: { projectId: shape.projectId },
   });
-  return toMessageDto(row);
+  return { id: item.id, shapeId, ...input, createdAt: item.createdAt };
 }
 
 /** The conversation's transcript, oldest first; `after` skips up to and including that message. */
@@ -122,17 +142,11 @@ export function listShapeMessages(
   shapeId: ShapeId,
   after?: ShapeMessageId,
 ): ShapeMessageDto[] {
-  return db
-    .select()
-    .from(schema.shapeMessages)
-    .where(
-      after === undefined
-        ? eq(schema.shapeMessages.shapeId, shapeId)
-        : and(eq(schema.shapeMessages.shapeId, shapeId), gt(schema.shapeMessages.id, after)),
-    )
-    .orderBy(asc(schema.shapeMessages.id))
-    .all()
-    .map(toMessageDto);
+  const conversation = shapeConversation(db, shapeId).id;
+  if (after === undefined) return toMessageDtos(shapeId, listItems(db, conversation));
+  const from = getItem(db, after);
+  if (from.conversationId !== conversation) throw new NotFoundError('shape message', after);
+  return toMessageDtos(shapeId, listItems(db, conversation, { afterSeq: from.seq }));
 }
 
 /** The newest `count` rows of the transcript, oldest first. */
@@ -141,15 +155,7 @@ export function lastShapeMessages(
   shapeId: ShapeId,
   count: number,
 ): ShapeMessageDto[] {
-  return db
-    .select()
-    .from(schema.shapeMessages)
-    .where(eq(schema.shapeMessages.shapeId, shapeId))
-    .orderBy(desc(schema.shapeMessages.id))
-    .limit(count)
-    .all()
-    .reverse()
-    .map(toMessageDto);
+  return toMessageDtos(shapeId, lastItems(db, shapeConversation(db, shapeId).id, count));
 }
 
 // --- Proposals ----------------------------------------------------------------------------------
@@ -219,7 +225,36 @@ export function listShapeProposals(db: DbReader, shapeId: ShapeId): ShapeProposa
 
 // --- Files --------------------------------------------------------------------------------------
 
-export type ShapeFileRow = typeof schema.shapeFiles.$inferSelect;
+/** A file dropped into a conversation, as Plan reads it. */
+export interface ShapeFileRow {
+  readonly id: ShapeFileId;
+  readonly shapeId: ShapeId;
+  readonly name: string;
+  readonly mediaType: string;
+  readonly size: number;
+  /** Where the daemon copied it, under the data directory. */
+  readonly storedPath: string;
+  /** When a turn first carried it to Claude; null until then. */
+  readonly toldAt: string | null;
+  /** Whether the live session's history holds it as an image block. */
+  readonly inlineSent: boolean;
+  /** When a notice first told the builder Claude can't Read this image; null until then. */
+  readonly unreadableToldAt: string | null;
+  readonly createdAt: string;
+}
+
+const toShapeFile = (shapeId: ShapeId, row: ConversationFileRow): ShapeFileRow => ({
+  id: row.id,
+  shapeId,
+  name: row.name,
+  mediaType: row.mediaType,
+  size: row.size,
+  storedPath: row.storedPath,
+  toldAt: row.toldAt,
+  inlineSent: row.inlineSent,
+  unreadableToldAt: row.unreadableToldAt,
+  createdAt: row.createdAt,
+});
 
 export function insertShapeFile(
   ctx: WriteContext,
@@ -231,69 +266,50 @@ export function insertShapeFile(
     readonly storedPath: string;
   },
 ): ShapeFileRow {
-  const shape = getShape(ctx.tx, input.shapeId);
-  const row: ShapeFileRow = {
-    id: mintId('ShapeFile'),
-    ...input,
-    toldAt: null,
-    inlineSent: false,
-    unreadableToldAt: null,
-    createdAt: ctx.now,
-  };
-  ctx.tx.insert(schema.shapeFiles).values(row).run();
+  const { shapeId, ...file } = input;
+  const shape = getShape(ctx.tx, shapeId);
+  const [row] = insertFiles(ctx, shapeConversation(ctx.tx, shapeId).id, null, [
+    { ...file, sha256: null },
+  ]);
+  if (row === undefined) throw new Error('insertFiles wrote no row for one file');
   ctx.emit({
     type: EventType.ShapeChanged,
     entityType: 'shape',
-    entityId: input.shapeId,
+    entityId: shapeId,
     data: { projectId: shape.projectId },
   });
-  return row;
+  return toShapeFile(shapeId, row);
 }
 
 export function getShapeFile(db: DbReader, id: ShapeFileId): ShapeFileRow {
-  const row = db.select().from(schema.shapeFiles).where(eq(schema.shapeFiles.id, id)).get();
-  if (!row) throw new NotFoundError('shape file', id);
-  return row;
+  const row = getFile(db, id);
+  const conversation = getConversation(db, row.conversationId);
+  if (conversation.ownerKind !== ConversationOwnerKind.Shape)
+    throw new NotFoundError('shape file', id);
+  // A shape's conversation names the shape as its owner; parsed, as text read from the database.
+  return toShapeFile(ShapeId.parse(conversation.ownerId), row);
 }
 
 /** The conversation's files, oldest first. */
 export function listShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
-  return db
-    .select()
-    .from(schema.shapeFiles)
-    .where(eq(schema.shapeFiles.shapeId, shapeId))
-    .orderBy(asc(schema.shapeFiles.id))
-    .all();
+  return listFiles(db, shapeConversation(db, shapeId).id).map((row) => toShapeFile(shapeId, row));
 }
 
 /** The conversation's files no turn has carried to Claude yet, oldest first. */
 export function listUntoldShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
-  return db
-    .select()
-    .from(schema.shapeFiles)
-    .where(and(eq(schema.shapeFiles.shapeId, shapeId), isNull(schema.shapeFiles.toldAt)))
-    .orderBy(asc(schema.shapeFiles.id))
-    .all();
+  return listUntoldFiles(db, shapeConversation(db, shapeId).id).map((row) =>
+    toShapeFile(shapeId, row),
+  );
 }
 
 /** Records that a turn carried these files to Claude; one already told keeps its first time. */
 export function markShapeFilesTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
-  if (ids.length === 0) return;
-  ctx.tx
-    .update(schema.shapeFiles)
-    .set({ toldAt: ctx.now })
-    .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.toldAt)))
-    .run();
+  markFilesTold(ctx, ids);
 }
 
 /** Records that a notice named these images as ones Claude can't Read; one already named keeps its first time. */
 export function markShapeFilesUnreadableTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
-  if (ids.length === 0) return;
-  ctx.tx
-    .update(schema.shapeFiles)
-    .set({ unreadableToldAt: ctx.now })
-    .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.unreadableToldAt)))
-    .run();
+  markFilesUnreadableTold(ctx, ids);
 }
 
 /**
@@ -306,18 +322,7 @@ export function markShapeFilesInline(
   ids: readonly ShapeFileId[],
   fresh: boolean,
 ): void {
-  if (fresh)
-    ctx.tx
-      .update(schema.shapeFiles)
-      .set({ inlineSent: false })
-      .where(eq(schema.shapeFiles.shapeId, shapeId))
-      .run();
-  if (ids.length === 0) return;
-  ctx.tx
-    .update(schema.shapeFiles)
-    .set({ inlineSent: true })
-    .where(inArray(schema.shapeFiles.id, [...ids]))
-    .run();
+  markFilesInline(ctx, shapeConversation(ctx.tx, shapeId).id, ids, fresh);
 }
 
 export function countShapeFiles(db: DbReader, shapeId: ShapeId): number {

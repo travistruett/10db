@@ -1,5 +1,7 @@
 import {
+  ConversationItemId,
   EventType,
+  idUuid,
   mintId,
   ProposalKind,
   ShapeOrigin,
@@ -18,16 +20,20 @@ import {
   getShapeSdkSessionId,
   getSession,
   insertConversation,
+  insertItem,
   insertPrinciple,
   insertSession,
   insertShape,
+  insertShadowAnswer,
   insertShapeLink,
+  insertShapeMessage,
   insertShapeProposal,
   insertShapeQuestion,
   insertSource,
   insertTask,
   insertWorkstream,
   listShapeLinks,
+  listShapeMessages,
   listShapeQuestions,
   listShapes,
   markShapeLinksSizeTold,
@@ -200,6 +206,78 @@ describe('the Shape tables', () => {
     expect(getShape(store.db, shape.id).model).toBe('fable');
     store.write((ctx) => patchShape(ctx, shape.id, { model: null }));
     expect(getShape(store.db, shape.id).model).toBeNull();
+  });
+
+  it('lists a migrated row first and new ones after it, by seq, though new ids sort first', () => {
+    const shape = newShape().value;
+    const conversation = shapeConversation(store.db, shape.id).id;
+    const migrated = ConversationItemId.parse(`shm_${idUuid(mintId('ConversationItem'))}`);
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, delivered_at, created_at,
+           updated_at)
+         VALUES (?, ?, 1, 'builder', 'message', '{"text":"old"}', ?, ?, ?)`,
+      )
+      .run(migrated, conversation, ...Array<string>(3).fill('2026-11-01T00:00:00.000Z'));
+    store.db.$client
+      .prepare('UPDATE conversations SET next_seq = 2 WHERE id = ?')
+      .run(conversation);
+    const say = (body: string) =>
+      store.write((ctx) =>
+        insertShapeMessage(ctx, shape.id, { author: 'builder', kind: 'text', body }),
+      ).value;
+    const first = say('one');
+    const second = say('two');
+    expect(listShapeMessages(store.db, shape.id).map((m) => [m.id, m.body])).toEqual([
+      [migrated, 'old'],
+      [first.id, 'one'],
+      [second.id, 'two'],
+    ]);
+    expect(
+      store.db.$client
+        .prepare('SELECT seq FROM conversation_items WHERE id = ?')
+        .pluck()
+        .get(first.id),
+    ).toBe(2);
+    expect(listShapeMessages(store.db, shape.id, migrated).map((m) => m.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
+  });
+
+  it('keeps a tool line of 150 emoji whole', () => {
+    const shape = newShape().value;
+    const line = '🙂'.repeat(150);
+    store.write((ctx) =>
+      insertShapeMessage(ctx, shape.id, { author: 'claude', kind: 'tool', body: line }),
+    );
+    expect(listShapeMessages(store.db, shape.id).map((m) => [m.kind, m.body])).toEqual([
+      ['tool', line],
+    ]);
+  });
+
+  it('logs a shadow answer on a message of the conversation', () => {
+    const shape = newShape().value;
+    const message = store.write((ctx) =>
+      insertItem(ctx, shapeConversation(ctx.tx, shape.id).id, {
+        author: 'builder',
+        kind: 'message',
+        body: { text: 'hi' },
+      }),
+    ).value;
+    store.db.$client.pragma('foreign_keys = ON');
+    expect(() =>
+      store.write((ctx) => {
+        insertShadowAnswer(ctx, {
+          shapeId: shape.id,
+          messageId: message.id,
+          decision: 'shape_ready',
+          answer: 'yes',
+          confidence: 0.9,
+          judgeCallId: mintId('JudgeCall'),
+        });
+      }),
+    ).not.toThrow();
   });
 
   it('keeps one proposal per key in a conversation', () => {

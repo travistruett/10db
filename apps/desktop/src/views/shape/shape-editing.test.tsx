@@ -335,7 +335,7 @@ describe('dropping files', () => {
       });
       return HttpResponse.json(
         {
-          id: mintId('ShapeFile'),
+          id: mintId('ConversationFile'),
           shapeId: mintId('Shape'),
           name: url.searchParams.get('name'),
           mediaType: 'text/markdown',
@@ -390,7 +390,7 @@ describe('dropping files', () => {
         uploaded.push(String(params['shapeId']));
         return HttpResponse.json(
           {
-            id: mintId('ShapeFile'),
+            id: mintId('ConversationFile'),
             shapeId: view.shape.id,
             name: new URL(request.url).searchParams.get('name'),
             mediaType: 'text/markdown',
@@ -429,7 +429,7 @@ describe('dropping files', () => {
       return { held, release };
     };
     const fileDto = (view: ShapeViewDto) => ({
-      id: mintId('ShapeFile'),
+      id: mintId('ConversationFile'),
       shapeId: view.shape.id,
       name: 'brief.md',
       mediaType: 'text/markdown',
@@ -869,7 +869,7 @@ describe('dropping files', () => {
       ...base,
       files: [
         {
-          id: mintId('ShapeFile'),
+          id: mintId('ConversationFile'),
           shapeId: base.shape.id,
           name: 'brief.md',
           mediaType: 'text/markdown',

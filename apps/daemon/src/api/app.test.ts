@@ -1317,7 +1317,7 @@ describe('shape routes', () => {
   it('reopens a conversation with an event, refusing an empty one', async () => {
     const resumed: unknown[] = [];
     const note = {
-      id: mintId('ShapeMessage'),
+      id: mintId('ConversationItem'),
       shapeId,
       author: 'note',
       kind: 'event',
@@ -1505,7 +1505,7 @@ describe('shape routes', () => {
   it('takes a message (202), refuses an empty one, and Propose answers started or ignored', async () => {
     const sent: string[] = [];
     const message = {
-      id: mintId('ShapeMessage'),
+      id: mintId('ConversationItem'),
       shapeId,
       author: 'builder',
       kind: 'text',
@@ -1738,7 +1738,7 @@ describe('shape routes', () => {
       body,
     });
     const stored = (name: string) => ({
-      id: mintId('ShapeFile'),
+      id: mintId('ConversationFile'),
       shapeId,
       name,
       mediaType: 'text/markdown',

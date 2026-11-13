@@ -16,7 +16,7 @@ import {
 
 const AT = '2026-11-02T12:00:00.000Z';
 const shapeId = mintId('Shape');
-const source = mintId('ShapeMessage');
+const source = mintId('ConversationItem');
 
 const base = {
   id: mintId('ShapeProposal'),
@@ -140,7 +140,7 @@ describe('ShapeViewDto', () => {
       heard: ['Thinner scrollbars'],
       files: [
         {
-          id: mintId('ShapeFile'),
+          id: mintId('ConversationFile'),
           shapeId,
           name: 'brief.md',
           mediaType: 'text/markdown',

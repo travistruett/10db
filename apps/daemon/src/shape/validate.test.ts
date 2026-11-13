@@ -4,7 +4,7 @@ import { validatePlan, type PlanWorld } from './validate';
 
 // Shape spec §6 Validation: every error at once, naming the field.
 
-const message: ShapeMessageId = mintId('ShapeMessage');
+const message: ShapeMessageId = mintId('ConversationItem');
 const finished: TaskId = mintId('Task');
 const unfinished: TaskId = mintId('Task');
 const converted: TaskId = mintId('Task');
@@ -188,7 +188,7 @@ const REFUSED: readonly (readonly [string, Record<string, unknown>, RegExp])[] =
   ['an XL task', { looseTasks: [loose('a', { size: 'XL' })] }, /Loose task 1, size: XL — split it/],
   [
     'a source that is not a builder message',
-    { looseTasks: [loose('a', { sourceMessageIds: [mintId('ShapeMessage')] })] },
+    { looseTasks: [loose('a', { sourceMessageIds: [mintId('ConversationItem')] })] },
     /Loose task 1, sources: .* is not one of the builder’s messages in this conversation/,
   ],
   [

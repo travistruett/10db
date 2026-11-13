@@ -1,4 +1,5 @@
 import {
+  idUuid,
   mintId,
   NotFoundError,
   PlanDraft,
@@ -22,6 +23,7 @@ import {
   patchShape,
   schema,
   setTaskStatus,
+  shapeConversation,
   type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -130,6 +132,27 @@ describe('resuming a conversation', () => {
     expect(messages().some((m) => m.id === note.id)).toBe(true);
     await f.service.settled(shapeId());
     expect(prompts()).toEqual([]);
+  });
+
+  it('tells a session whose agent never spoke a migrated message before a new one', async () => {
+    const conversation = shapeConversation(f.c.store.db, shapeId()).id;
+    const migrated = `shm_${idUuid(mintId('ConversationItem'))}`;
+    f.c.store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, delivered_at, created_at,
+           updated_at)
+         VALUES (?, ?, 1, 'builder', 'message', '{"text":"From before the upgrade."}', ?, ?, ?)`,
+      )
+      .run(migrated, conversation, ...Array<string>(3).fill('2026-11-01T00:00:00.000Z'));
+    f.c.store.db.$client
+      .prepare('UPDATE conversations SET next_seq = 2 WHERE id = ?')
+      .run(conversation);
+    const sent = f.service.send(shapeId(), 'And now this.');
+    await f.service.settled(shapeId());
+    const prompt = must(prompts()[0], 'prompt');
+    const old = prompt.indexOf(`[m:${migrated}] From before the upgrade.`);
+    expect(old).toBeGreaterThanOrEqual(0);
+    expect(prompt.indexOf(`[m:${sent.id}] And now this.`)).toBeGreaterThan(old);
   });
 
   it('refuses a conversation that does not exist', () => {
