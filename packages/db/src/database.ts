@@ -69,6 +69,37 @@ export class NewerSchemaError extends SchemaMismatchError {
   }
 }
 
+/**
+ * The database already holds rows that name a row that does not exist, so a migration could carry them
+ * where nothing reads them, or drop them; it is left as it was until they are removed.
+ */
+export class DanglingRowsError extends SchemaMismatchError {
+  override readonly name = 'DanglingRowsError';
+  readonly tables: Readonly<Record<string, number>>;
+
+  constructor(path: string, tables: Readonly<Record<string, number>>) {
+    const named = Object.entries(tables)
+      .map(([table, rows]) => `${table} (${String(rows)})`)
+      .join(', ');
+    super(
+      path,
+      `${path} holds rows that name a row that no longer exists: ${named}. 10db left the database as it was and will not upgrade it until those rows are removed.`,
+    );
+    this.tables = tables;
+  }
+}
+
+const ForeignKeyViolation = z.looseObject({ table: z.string() });
+
+/** The tables holding a row that names a missing row, with how many each holds. */
+function danglingRows(db: TendbDatabase): Record<string, number> {
+  const tables = new Map<string, number>();
+  // Read from SQLite's own check: parsed, as at every boundary.
+  for (const row of z.array(ForeignKeyViolation).parse(db.$client.pragma('foreign_key_check')))
+    tables.set(row.table, (tables.get(row.table) ?? 0) + 1);
+  return Object.fromEntries(tables);
+}
+
 /** A migration left rows that reference a row that does not exist; the schema change is unsafe. */
 export class MigrationIntegrityError extends Error {
   override readonly name = 'MigrationIntegrityError';
@@ -109,6 +140,12 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
+  // A migration copies rows by the references they hold and may drop the table they came from, so a
+  // row that already names a missing one stops the upgrade before anything changes.
+  if (applied.length < baseline.length) {
+    const dangling = danglingRows(db);
+    if (Object.keys(dangling).length > 0) throw new DanglingRowsError(db.$client.name, dangling);
+  }
   // SQLite rebuilds a table to drop a NOT NULL, and a rebuilt table that others reference can only be
   // dropped with foreign keys off. The pragma is a no-op inside the migration's transaction, so it is
   // switched off around it and restored after.

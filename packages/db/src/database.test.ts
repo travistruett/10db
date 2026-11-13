@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DB_MIGRATIONS_DIR,
+  DanglingRowsError,
   MigrationIntegrityError,
   migrateDatabase,
   openDatabase,
@@ -103,6 +104,36 @@ describe('migrateDatabase', () => {
     expect(refusal).toBeInstanceOf(Error);
     expect(refusal).toMatchObject({ name: expected });
     expect(String(refusal)).toContain(join(dir, '10db.sqlite'));
+  });
+});
+
+describe('a database that already holds a dangling reference', () => {
+  it('is refused before any migration runs, naming the rows, and left as it was', () => {
+    // The last migration before the conversation copy, which would move an orphan row and drop its table.
+    migrateDatabase(db, migrationsThrough('0068_first_expediter'));
+    db.$client.pragma('foreign_keys = OFF');
+    db.$client
+      .prepare(
+        `INSERT INTO shape_messages (id, shape_id, author, kind, body, created_at)
+         VALUES ('shm_orphan', 'shp_gone', 'builder', 'text', 'hi', '2026-11-13T00:00:00.000Z')`,
+      )
+      .run();
+    db.$client.pragma('foreign_keys = ON');
+    const applied = db.$client.prepare('SELECT count(*) FROM __drizzle_migrations').pluck().get();
+    let refusal: unknown;
+    try {
+      migrateDatabase(db);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(DanglingRowsError);
+    expect(String(refusal)).toContain('shape_messages');
+    expect(db.$client.prepare('SELECT count(*) FROM __drizzle_migrations').pluck().get()).toBe(
+      applied,
+    );
+    expect(
+      db.$client.prepare("SELECT name FROM sqlite_master WHERE name = 'conversations'").get(),
+    ).toBeUndefined();
   });
 });
 
