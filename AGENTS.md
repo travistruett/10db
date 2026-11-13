@@ -59,8 +59,9 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff
   touches and their dependents); the pre-push hook runs `make precheck`. `make gate` runs every check on the Mac
   and is optional (`docs/architecture/decisions/2026-11-13-ci-is-the-gate-before-a-merge.md`). Docs are part
-  of done. An agent in a 10db lane leaves the gate to 10db, which runs it after each implement step: it runs only the checks for what it changed (the
-  changed packages' tests, typecheck and lint, or the failing step's command) and never the full gate.
+  of done. An agent in a 10db lane leaves the gate to 10db, which runs it after each implement step: it runs
+  only the checks for what it changed (the changed packages' tests, typecheck and lint, or the failing step's
+  command) and never the full gate.
 
 ## Git
 
