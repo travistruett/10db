@@ -138,15 +138,31 @@ describe('wrapPlugin', () => {
     expect(readlinkSync(join(into, 'hooks/run.sh'))).toBe(join(plugin, 'hooks/run.sh'));
   });
 
-  it('re-emits a Hooks folder spelled in another case under hooks, once', () => {
-    rmSync(join(plugin, 'hooks'), { recursive: true });
-    write(join(plugin, 'Hooks/Hooks.json'), hooksJson('npx thing'));
-    wrapPlugin(plugin, into, []);
-    expect(readdirSync(into).filter((entry) => entry.toLowerCase() === 'hooks')).toEqual(['hooks']);
-    expect(readFileSync(join(into, 'hooks/hooks.json'), 'utf8')).toContain(
-      JSON.stringify(`cd '${into}' && npx thing`),
-    );
-  });
+  // Only where the disk folds case does Claude Code read `Hooks/` as `hooks/`.
+  it.skipIf(process.platform !== 'darwin')(
+    're-emits a Hooks folder spelled in another case under hooks, once',
+    () => {
+      rmSync(join(plugin, 'hooks'), { recursive: true });
+      write(join(plugin, 'Hooks/Hooks.json'), hooksJson('npx thing'));
+      wrapPlugin(plugin, into, []);
+      expect(readdirSync(into).filter((entry) => entry.toLowerCase() === 'hooks')).toEqual([
+        'hooks',
+      ]);
+      expect(readFileSync(join(into, 'hooks/hooks.json'), 'utf8')).toContain(
+        JSON.stringify(`cd '${into}' && npx thing`),
+      );
+    },
+  );
+
+  it.skipIf(process.platform === 'darwin' || process.platform === 'win32')(
+    'leaves a Hooks folder spelled in another case out where the disk keeps case',
+    () => {
+      rmSync(join(plugin, 'hooks'), { recursive: true });
+      write(join(plugin, 'Hooks/Hooks.json'), hooksJson('npx thing'));
+      wrapPlugin(plugin, into, []);
+      expect(readdirSync(into).filter((entry) => entry.toLowerCase() === 'hooks')).toEqual([]);
+    },
+  );
 
   it('lists a hooks.json it cannot read as left out', () => {
     write(join(plugin, 'hooks/hooks.json'), '{"hooks": 3}');
