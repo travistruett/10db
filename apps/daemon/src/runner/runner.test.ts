@@ -5216,12 +5216,17 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       ]);
     });
 
-    it('a project allowing kubectl still refuses kubectl apply in a judged lane', async () => {
+    it("a project allowing kubectl runs kubectl apply in a judged lane: the builder's allow rule wins", async () => {
       const { specs, workstream } = await start(PLAN, { allowedCommands: ['kubectl'] });
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
       const apply = { ...deploy, input: { command: 'kubectl apply -f deploy.yaml' } };
-      expect(spec.preToolUse(apply).decision).toBe('deny');
+      const verdict = spec.preToolUse(apply);
+      expect(
+        verdict.decision === 'allow' && 'settled' in verdict ? verdict.settled : null,
+      ).toContain('allow rule');
+      const unlisted = { ...deploy, input: { command: 'vercel deploy --prod' } };
+      expect(spec.preToolUse(unlisted)).toEqual({ decision: 'allow' });
       await engine.runner.idle();
     });
 
