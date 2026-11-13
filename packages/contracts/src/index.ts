@@ -53,6 +53,7 @@ export * from './shape-review';
 export * from './shape-screens';
 export * from './shape-view';
 export * from './states';
+export * from './agent-capabilities';
 export * from './steps';
 export * from './system';
 export * from './task-screens';

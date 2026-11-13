@@ -1,4 +1,10 @@
 export { createClaudeAdapter } from './claude-adapter';
+export {
+  capabilitiesOf,
+  claudeCapabilities,
+  codexCapabilities,
+  type AgentCapabilities,
+} from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
 export { patchPaths } from './codex-guard';
 export { spawnAppServer, type CodexChild } from './codex-rpc';
