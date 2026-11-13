@@ -97,6 +97,24 @@ export default defineConfig(
     },
   },
   {
+    // The conversation kit draws what an agent's capabilities say, never what its harness is.
+    files: ['apps/desktop/src/conversation/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: 'TSEnumDeclaration', message: 'Use an `as const` object and a derived type.' },
+        ...[
+          'BinaryExpression[operator=/^[!=]==?$/] > Literal[value=/^(claude|codex)$/]',
+          'SwitchCase > Literal.test[value=/^(claude|codex)$/]',
+          "CallExpression[callee.property.name='includes'] > Literal[value=/^(claude|codex)$/]",
+        ].map((selector) => ({
+          selector,
+          message: 'The kit reads capabilities, never a harness (sessions UI spec §11).',
+        })),
+      ],
+    },
+  },
+  {
     files: ['apps/desktop/e2e/**/*.ts'],
     languageOptions: { globals: globals.node },
   },

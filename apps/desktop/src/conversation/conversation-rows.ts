@@ -92,3 +92,43 @@ export function conversationRows(
   close();
   return rows;
 }
+
+/** One message as a screen reader meets it: the builder's, or the agent's turn up to the next. */
+export interface ConversationArticle {
+  /** Its first row's id. */
+  readonly id: string;
+  readonly speaker: 'builder' | 'agent';
+  readonly rows: readonly ConversationRow[];
+}
+
+/** A row's id: its entry's, or its group's. */
+export function rowId(row: ConversationRow): string {
+  switch (row.kind) {
+    case 'entry':
+    case 'tool':
+      return row.entry.id;
+    case 'tool_group':
+    case 'edit_group':
+      return row.id;
+  }
+}
+
+/**
+ * The articles `rows` draw as: each builder message is one, and every other row joins the agent's
+ * article that runs from the last builder message to the next.
+ */
+export function conversationArticles(
+  rows: readonly ConversationRow[],
+): readonly ConversationArticle[] {
+  const out: { id: string; speaker: 'builder' | 'agent'; rows: ConversationRow[] }[] = [];
+  for (const row of rows) {
+    if (row.kind === 'entry' && row.entry.kind === 'builder') {
+      out.push({ id: row.entry.id, speaker: 'builder', rows: [row] });
+      continue;
+    }
+    const last = out.at(-1);
+    if (last?.speaker === 'agent') last.rows.push(row);
+    else out.push({ id: rowId(row), speaker: 'agent', rows: [row] });
+  }
+  return out;
+}

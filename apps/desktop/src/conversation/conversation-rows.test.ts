@@ -6,7 +6,7 @@ import {
   subagentCall,
   toolEntry,
 } from '../test/tool-call-fixtures';
-import { conversationRows, type ConversationRow } from './conversation-rows';
+import { conversationArticles, conversationRows, type ConversationRow } from './conversation-rows';
 import type { ConversationEntry } from './entry';
 
 const read = (id: string, parentId: string | null = null) => toolEntry(readCall({ id, parentId }));
@@ -15,6 +15,7 @@ const command = (id: string) => toolEntry(commandCall({ id }));
 const subagent = (id: string) => toolEntry(subagentCall({ id }));
 const nestedSubagent = (id: string, parentId: string) => toolEntry(subagentCall({ id, parentId }));
 const reply = (id: string): ConversationEntry => ({ kind: 'reply', id, text: id, partial: false });
+const builder = (id: string): ConversationEntry => ({ kind: 'builder', id, text: id, extra: null });
 
 /** Each row as a short string: its kind and the ids it holds. */
 function shape(rows: readonly ConversationRow[]): string[] {
@@ -75,5 +76,40 @@ describe('conversationRows', () => {
   it('keeps the group id of its first entry', () => {
     const [row] = conversationRows([read('first'), read('second')]);
     expect(row?.kind === 'tool_group' ? row.id : null).toBe('first');
+  });
+});
+
+describe('conversationArticles', () => {
+  /** Each article as its speaker and the ids of its rows. */
+  const articles = (entries: ConversationEntry[]) =>
+    conversationArticles(conversationRows(entries)).map(
+      (a) => `${a.speaker} ${shape(a.rows).join(', ')}`,
+    );
+
+  it.each<[string, ConversationEntry[], string[]]>([
+    [
+      'a builder message, a reply and a tool, then a builder message',
+      [builder('b1'), reply('t1'), command('c1'), builder('b2')],
+      ['builder entry b1', 'agent entry t1, tool c1', 'builder entry b2'],
+    ],
+    [
+      'a conversation that opens with agent rows',
+      [reply('t1'), builder('b1')],
+      ['agent entry t1', 'builder entry b1'],
+    ],
+    [
+      'two builder messages in a row',
+      [builder('b1'), builder('b2')],
+      ['builder entry b1', 'builder entry b2'],
+    ],
+  ])('%s', (_name, entries, expected) => {
+    expect(articles(entries)).toEqual(expected);
+  });
+
+  it('keys each article by its first row', () => {
+    const ids = conversationArticles(
+      conversationRows([builder('b1'), reply('t1'), command('c1')]),
+    ).map((a) => a.id);
+    expect(ids).toEqual(['b1', 't1']);
   });
 });
