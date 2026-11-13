@@ -708,7 +708,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           logger: logger.child({ component: 'benchmarks' }),
         })
       : null;
-  openRouterSync?.start();
   // With the judge off no Keychain item is read, `openrouter-api-key` included.
   if (opts.judgeOff !== true)
     await moveOpenRouterKey({
@@ -716,6 +715,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keychain: judgeKeychain,
       logger: logger.child({ component: 'judge' }),
     });
+  // After the key move, so the first run sees the account a key left in the old item became.
+  openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,

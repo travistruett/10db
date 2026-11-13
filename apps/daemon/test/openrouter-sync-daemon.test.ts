@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
+import { OPENROUTER_KEY_ACCOUNT, type Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
@@ -62,14 +63,14 @@ function answer(url: string): Response {
   });
 }
 
-async function start(opts: { judgeOff?: boolean } = {}) {
+async function start(opts: { judgeOff?: boolean; keychain?: Keychain } = {}) {
   daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
     logLevel: 'warn',
     adapter: new FakeAdapter({}),
-    keychain: createMemoryKeychain(),
+    keychain: opts.keychain ?? createMemoryKeychain(),
     openRouterSync: true,
     ...(opts.judgeOff === undefined ? {} : { judgeOff: opts.judgeOff }),
     fetch: (input, init) => {
@@ -113,6 +114,15 @@ describe('the OpenRouter sync in a daemon', () => {
     expect(keyed.every((r) => r.authorization === `Bearer ${KEY}`)).toBe(true);
     // Reading measures never touches the profiles routing reads.
     expect(await api.get('/models', z.array(ModelRowDto))).toEqual(modelsBefore);
+  });
+
+  it('reads at the first boot with the key an older version left in its own Keychain item', async () => {
+    const api = await start({ keychain: createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY }) });
+    const status = await waitForAsync(async () => {
+      const s = await openRouterStatus(api);
+      return s.outcome === null ? undefined : s;
+    });
+    expect(status).toMatchObject({ outcome: 'ok', keyConfigured: true });
   });
 
   it('with the judge off says so and makes no request', async () => {
