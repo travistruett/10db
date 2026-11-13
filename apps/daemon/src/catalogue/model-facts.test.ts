@@ -1,7 +1,13 @@
 import { AccountKind, mintId, ModelProfileDto, ModelStatus, ModelTier } from '@10db/contracts';
 import type { OpenRouterMeasure } from '@10db/db';
 import { describe, expect, it } from 'vitest';
-import { effortFacts, modelSpeed, SPEED_STALE_MS, speedProviderFor } from './model-facts';
+import {
+  effortFacts,
+  modelSpeed,
+  openRouterLatencyMs,
+  SPEED_STALE_MS,
+  speedProviderFor,
+} from './model-facts';
 
 const NOW = new Date('2026-11-13T12:00:00.000Z');
 const FRESH = '2026-11-13T06:00:00.000Z';
@@ -218,6 +224,23 @@ describe('modelSpeed', () => {
     const b = effortFacts({ aa: aaProfile({ speed: 7 }), isMax: false, ...args });
     expect([a.outputTokensPerSecond, a.speedProvider]).toEqual([80, 'Anthropic']);
     expect([b.outputTokensPerSecond, b.speedProvider]).toEqual([80, 'Anthropic']);
+  });
+});
+
+describe('openRouterLatencyMs', () => {
+  const at = (provider: string, latencyMs: number | null, measuredAt = FRESH) =>
+    relayed({ kind: 'speed', key: provider, tokensPerSecond: 10, latencyMs, measuredAt });
+  it.each([
+    {
+      name: 'the median of the providers that have one',
+      rows: [at('A', 100), at('B', 300), at('C', null)],
+      expected: 200,
+    },
+    { name: 'a stale row is ignored', rows: [at('A', 100, STALE), at('B', 300)], expected: 300 },
+    { name: 'no latency anywhere is null', rows: [at('A', null)], expected: null },
+    { name: 'a score row is not a latency', rows: [relayed({ intelligence: 5 })], expected: null },
+  ])('reads $name', ({ rows, expected }) => {
+    expect(openRouterLatencyMs(rows, NOW)).toBe(expected);
   });
 });
 

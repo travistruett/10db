@@ -1950,6 +1950,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       onAccountChanged: () => {
         void openRouterSync?.poke();
       },
+      clock,
     }),
     stakeholders: createStakeholderApiServices({
       state,

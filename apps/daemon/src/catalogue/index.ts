@@ -8,3 +8,4 @@ export { reconcileProfiles } from './profiles';
 export { clearModelMark, markModelUnusable, resumeModelMarks } from './model-marks';
 export { buildModelRows } from './model-rows';
 export { groupMeasuresByModel, joinOpenRouterId, openRouterProvider } from './openrouter-join';
+export { openRouterLatencyMs, SPEED_STALE_MS } from './model-facts';

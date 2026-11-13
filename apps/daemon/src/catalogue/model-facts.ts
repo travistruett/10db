@@ -38,6 +38,19 @@ function median(values: readonly number[]): number | null {
   return sorted.length % 2 === 1 || low === undefined ? high : (low + high) / 2;
 }
 
+/** The median p50 latency across a model's providers' fresh speed rows that have one; null when none does. */
+export function openRouterLatencyMs(rows: readonly OpenRouterMeasure[], now: Date): number | null {
+  return median(
+    rows.flatMap((m) =>
+      m.kind === OpenRouterMeasureKind.Speed &&
+      m.latencyMs !== null &&
+      now.getTime() - Date.parse(m.measuredAt) <= SPEED_STALE_MS
+        ? [m.latencyMs]
+        : [],
+    ),
+  );
+}
+
 export interface ModelSpeed {
   readonly tokensPerSecond: number | null;
   readonly source: ModelSource | null;

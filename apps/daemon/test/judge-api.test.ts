@@ -511,6 +511,56 @@ describe('GET /judge/models', () => {
     expect(openRouterRequests).toEqual([{ url: MODEL_LIST_URL, authorization: null }]);
   });
 
+  it("gives each model its cost and time, from the builder's own calls when it has any, and never changes the list held", async () => {
+    const { api, daemon: d } = await start();
+    const before = await api.get('/judge/models', DecisionModelListDto);
+    expect(before.models.find((m) => m.id === 'liquid/d1')).toMatchObject({
+      costSource: 'assumed',
+      timeSource: null,
+    });
+    d.state.write((ctx) => {
+      insertJudgeCall(ctx, {
+        decision: 'review_size',
+        model: 'liquid/d1',
+        state: 's',
+        question: 'q',
+        answer: 'skip',
+        confidence: 0.9,
+        outcome: 'acted',
+        latencyMs: 250,
+        costUsd: 0.000002,
+        workstreamId: null,
+        taskId: null,
+      });
+      insertJudgeCall(ctx, {
+        decision: 'review_size',
+        model: 'liquid/d1',
+        state: 's',
+        question: 'q',
+        answer: null,
+        confidence: null,
+        outcome: 'fallback_timeout',
+        latencyMs: 4000,
+        costUsd: 9,
+        workstreamId: null,
+        taskId: null,
+      });
+    });
+    const first = await api.get('/judge/models', DecisionModelListDto);
+    expect(first.models.find((m) => m.id === 'liquid/d1')).toMatchObject({
+      costPerMillionUsd: 2,
+      costSource: 'your_calls',
+      secondsPerDecision: 0.25,
+      timeSource: 'your_calls',
+    });
+    // The other model has no calls: its price over the size your calls show.
+    expect(first.models.find((m) => m.id === 'typesafe/jev-1.14')).toMatchObject({
+      costSource: 'openrouter_price',
+    });
+    expect(await api.get('/judge/models', DecisionModelListDto)).toEqual(first);
+    expect(openRouterRequests).toEqual([{ url: MODEL_LIST_URL, authorization: null }]);
+  });
+
   it('answers 502 naming why when OpenRouter cannot be read', async () => {
     modelListAnswer = () => new Response('down', { status: 503 });
     const { raw } = await start();

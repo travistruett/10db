@@ -59,5 +59,6 @@ export { createTestStore, seedAccount, seedProject, TEST_ACCOUNT_EMAIL } from '.
 export * from './settings';
 export * from './stock-hazards';
 export * from './judge-calls';
+export * from './judge-call-stats';
 export * from './judge-config';
 export * from './small-proposal-limit';
