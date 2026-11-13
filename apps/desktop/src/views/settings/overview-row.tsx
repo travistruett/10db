@@ -1,49 +1,19 @@
 import { Box, Button, Group, Skeleton, Stack, Text, UnstyledButton } from '@mantine/core';
-import {
-  IconBrandAws,
-  IconBrandGithub,
-  IconBrandOpenai,
-  IconBrandSlack,
-  IconChevronRight,
-  IconDatabase,
-  IconGauge,
-  IconKey,
-  IconRefresh,
-  IconTerminal2,
-  IconUserCircle,
-  type Icon,
-} from '@tabler/icons-react';
+import { IconChevronRight } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
 import { useFocusTarget } from './focus-target';
-import type { OverviewRow, RowMark } from './overview-rows';
-
-const MARK_ICON: Readonly<Record<RowMark, Icon>> = {
-  key: IconKey,
-  claude: IconUserCircle,
-  openai: IconBrandOpenai,
-  aws: IconBrandAws,
-  github: IconBrandGithub,
-  slack: IconBrandSlack,
-  gauge: IconGauge,
-  database: IconDatabase,
-  terminal: IconTerminal2,
-  refresh: IconRefresh,
-};
+import type { OverviewRow } from './overview-rows';
+import { RowMarkIcon } from './row-mark';
 
 const MARK_SIZE = 16;
 const ROW_HEIGHT = 52;
-
-function Mark({ mark }: { readonly mark: RowMark }) {
-  const Glyph = MARK_ICON[mark];
-  return <Glyph size={MARK_SIZE} stroke={1.5} aria-hidden style={{ flex: 'none' }} />;
-}
 
 /** The mark and the name: the left of every row. */
 function Name({ row }: { readonly row: OverviewRow }) {
   return (
     <Group gap="sm" wrap="nowrap" w={200} style={{ flex: 'none' }}>
-      <Mark mark={row.mark} />
+      <RowMarkIcon mark={row.mark} />
       <Text size="sm" fw={500} truncate>
         {row.name}
       </Text>

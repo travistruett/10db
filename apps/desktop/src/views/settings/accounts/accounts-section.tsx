@@ -24,6 +24,7 @@ import { AccountDrawer } from './account-drawer';
 import { AccountPause } from './account-pause';
 import { AddAccountModal } from './add-account-modal';
 import { settingsSearch } from '../focus-target';
+import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
@@ -84,6 +85,7 @@ function AccountRow({
       <Table.Td>
         <Stack gap={4}>
           <Group gap="xs" wrap="nowrap">
+            <RowMarkIcon mark={MARK_OF_KIND[account.kind]} />
             <UnstyledButton
               aria-label={`Open ${account.label}`}
               onClick={() => {

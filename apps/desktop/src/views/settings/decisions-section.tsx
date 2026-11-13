@@ -243,6 +243,30 @@ function failureText(error: unknown): string {
   return error instanceof DaemonRequestError ? error.message : UNREACHABLE;
 }
 
+function AccountLink({
+  account,
+  children,
+}: {
+  readonly account: NonNullable<JudgeStatusDto['account']>;
+  readonly children: string;
+}) {
+  return (
+    <Anchor
+      size="xs"
+      renderRoot={(props) => (
+        <Link
+          {...props}
+          to="/settings/$section"
+          params={{ section: SettingsSectionKey.Accounts }}
+          search={{ focus: account.id }}
+        />
+      )}
+    >
+      {children}
+    </Anchor>
+  );
+}
+
 /** The state of the account decisions run on, beside the select. */
 function RunsOnState({
   account,
@@ -253,25 +277,16 @@ function RunsOnState({
 }) {
   if (account.secretState === 'set')
     return (
-      <ConnectionStatus tone={off ? ConnectionTone.Off : ConnectionTone.Works} label="Key set" />
+      <Group gap="sm">
+        <ConnectionStatus tone={off ? ConnectionTone.Off : ConnectionTone.Works} label="Key set" />
+        <AccountLink account={account}>View account</AccountLink>
+      </Group>
     );
   const problem = account.secretState === 'changed' ? 'Key changed outside 10db' : 'No key';
   return (
     <Stack gap={2}>
       <ConnectionStatus tone={ConnectionTone.NeedsYou} label={problem} />
-      <Anchor
-        size="xs"
-        renderRoot={(props) => (
-          <Link
-            {...props}
-            to="/settings/$section"
-            params={{ section: SettingsSectionKey.Accounts }}
-            search={{ focus: account.id }}
-          />
-        )}
-      >
-        Set the key again in Accounts
-      </Anchor>
+      <AccountLink account={account}>Set the key again in Accounts</AccountLink>
     </Stack>
   );
 }
@@ -298,6 +313,10 @@ function RunsOn({
       >
         {accounts.isPending ? (
           <Loader size="sm" aria-label="Loading accounts" />
+        ) : accounts.data === undefined ? (
+          <Text size="sm" c="red" role="alert">
+            Accounts could not be loaded. Check that the daemon is running.
+          </Text>
         ) : hasRouter ? (
           <Stack gap={4}>
             <AccountSelect

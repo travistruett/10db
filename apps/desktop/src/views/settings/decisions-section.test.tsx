@@ -57,6 +57,17 @@ describe('Settings › Decisions', () => {
       expect(within(dialog).getByLabelText('OpenRouter key', { selector: 'input' })).toBeTruthy();
     });
 
+    it('says the accounts could not be read, instead of asking for an account', async () => {
+      open();
+      server.use(
+        http.get(daemonUrl('/accounts'), () =>
+          HttpResponse.json({ message: 'down' }, { status: 500 }),
+        ),
+      );
+      expect(await screen.findByText(/Accounts could not be loaded/)).toBeTruthy();
+      expect(screen.queryByText('No account can run decisions yet.')).toBeNull();
+    });
+
     it('shows the account decisions run on with its key set, and no key row or Test', async () => {
       const work = router('Work key');
       open({ status: status(work), accounts: [work] });
@@ -65,6 +76,9 @@ describe('Settings › Decisions', () => {
         expect(select).toHaveProperty('value', 'Work key');
       });
       expect(screen.getByText('Key set')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'View account' }).getAttribute('href')).toBe(
+        `/settings/accounts?focus=${work.id}`,
+      );
       expect(screen.getByTestId('connection-dot').getAttribute('data-color')).toBe('teal');
       expect(screen.queryByRole('button', { name: /Set Key|Replace Key|Remove Key/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Test Connection' })).toBeNull();

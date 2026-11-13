@@ -30,6 +30,7 @@ import {
   type RowState,
   type Summary,
 } from './overview-rows';
+import { MARK_OF_KIND } from './row-mark';
 import { SettingsSectionKey } from './sections';
 
 interface Shell {
@@ -62,15 +63,6 @@ function fromQuery<T>(
   if (query.data === undefined) return unread(query, shell);
   return { ...shell, state: read(query.data), retry: null };
 }
-
-const MARK_OF_KIND: Readonly<Record<AccountDto['kind'], RowMark>> = {
-  claude_subscription: 'claude',
-  anthropic_api_key: 'key',
-  gateway: 'key',
-  bedrock: 'aws',
-  codex_signin: 'openai',
-  openrouter: 'key',
-};
 
 function accountRows(
   query: UseQueryResult<AccountDto[]>,

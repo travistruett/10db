@@ -75,6 +75,32 @@ describe('an OpenRouter account in Accounts', () => {
     expect(within(plan).getByText("Used by: Renewals' agents")).toBeTruthy();
   });
 
+  it.each([
+    { label: 'Claude plan', glyph: 'tabler-icon-user-circle' },
+    { label: 'Work key', glyph: 'tabler-icon-key' },
+    { label: 'Client codex', glyph: 'tabler-icon-brand-openai' },
+    { label: 'Client aws', glyph: 'tabler-icon-brand-aws' },
+  ])('marks the $label row with its provider', async ({ label, glyph }) => {
+    serve();
+    server.use(
+      http.get(daemonUrl('/accounts'), () =>
+        HttpResponse.json([
+          DEFAULT_ACCOUNT,
+          accountDto({ kind: 'openrouter', label: 'Work key' }),
+          accountDto({ kind: 'codex_signin', label: 'Client codex', expectedIdentity: 'a@b.c' }),
+          accountDto({
+            kind: 'bedrock',
+            label: 'Client aws',
+            settings: { region: 'us-west-2', awsProfile: 'p' },
+          }),
+        ]),
+      ),
+    );
+    renderApp('/settings/accounts');
+    const row = (await screen.findByRole('button', { name: `Open ${label}` })).closest('tr');
+    expect(row?.querySelector(`.${glyph}`)).not.toBeNull();
+  });
+
   it('opens its drawer from ?focus=<id>, with Test and none of an agent account’s controls', async () => {
     const { tested } = serve();
     renderApp(`/settings/accounts?focus=${DECISIONS.id}`);
