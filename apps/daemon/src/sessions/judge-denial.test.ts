@@ -26,8 +26,17 @@ describe('judgeDenial', () => {
     },
   );
 
+  it('a classifier denial naming no limit in an attended session is soft, as Allow this offers', () => {
+    expect(judgeDenial(denied({}), true)).toEqual({
+      by: 'judge',
+      reason: 'it gave no explanation',
+      limit: null,
+      soft: true,
+    });
+  });
+
   it.each<[string, Partial<DeniedCall>, boolean]>([
-    ['a reason that names no limit (one of auto mode’s own)', {}, true],
+    ['a reason that names no limit in a session no one is in', {}, false],
     [
       'a limit in a session no one is in, where limits are hard',
       { limit: LimitName.WritesLive },

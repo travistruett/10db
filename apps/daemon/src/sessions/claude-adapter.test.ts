@@ -3798,10 +3798,11 @@ describe('a lane streams its turn, and reports its tool calls and commands', () 
       { limit: 'sends_data_out', soft: true },
     ],
     [
-      'one of auto mode’s own hard denies, which names no limit',
+      // Allow this is offered on it, as Claude Code lets the user approve what auto mode blocked.
+      'a denial in a pass whose reason names no limit, which is soft too',
       'The classifier judged this action dangerous (it gave no explanation)',
       'pass',
-      { limit: null, soft: false },
+      { limit: null, soft: true },
     ],
     [
       'a limit in a lane, where no one is in to clear it',
