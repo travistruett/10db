@@ -73,7 +73,8 @@ describe('spawnGhLogin', () => {
     expect(ended.code).toBeNull();
   });
   it('kill stops a gh that is waiting', async () => {
-    const { gh } = scriptedGh('sleep 30');
+    // exec, so the waiting gh is one process as the real gh is: a shell's child would hold the pipes open.
+    const { gh } = scriptedGh('exec sleep 30');
     const child = spawnGhLogin({ git: '/usr/bin/git' })(gh, { PATH: '/usr/bin:/bin' });
     const ended = run(child);
     child.kill('SIGTERM');
