@@ -7,8 +7,9 @@ import { LinkConfirmHost } from './link-confirm';
 import { MarkdownBoundary } from './markdown-boundary';
 
 // Markdown an agent or a planning effort wrote is drawn, never trusted: no image, frame or script
-// loads, and no link navigates the window. An `https:` link is an anchor that opens only after the
-// builder confirms its host; every other link is its text.
+// loads, and no link navigates the window. An `https:` link reads as a link and opens only after the
+// builder confirms its host, and its address is never in the page, so no middle-click, context menu
+// or drag opens it unasked; every other link is its text.
 
 /** Draws `text` and answers the element that holds it, without the theme's style tags. */
 function draw(text: string): HTMLElement {
@@ -26,15 +27,14 @@ function expectInert(container: HTMLElement): void {
     container.querySelectorAll('img, iframe, script, video, audio, link, object'),
   ).toHaveLength(0);
   expect(container.querySelectorAll('[src]')).toHaveLength(0);
-  const hrefs = [...container.querySelectorAll('[href]')].map((e) => e.getAttribute('href'));
-  expect(hrefs.filter((href) => href?.startsWith('https://') !== true)).toEqual([]);
+  expect(container.querySelectorAll('[href]')).toHaveLength(0);
 }
 
-/** The links a reader can follow, by their accessible name and address. */
+/** The links a reader can follow, by their accessible name and the address their title shows. */
 const links = (c: HTMLElement): [string, string | null][] =>
   within(c)
     .queryAllByRole('link')
-    .map((a) => [a.textContent, a.getAttribute('href')]);
+    .map((a) => [a.textContent, a.getAttribute('title')]);
 
 /** The text a reader sees, with runs of white space as one space. */
 const text = (c: HTMLElement): string => c.textContent.replace(/\s+/g, ' ');
@@ -214,6 +214,24 @@ describe('a link', () => {
     });
     draw('[docs](https://ok.example/a)');
     fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    await vi.waitFor(() => {
+      expect(calls).toEqual([{ cmd: 'open_web_link', args: { url: 'https://ok.example/a' } }]);
+    });
+  });
+
+  it('is focusable and opens on Enter, with no address in the page to open unasked', async () => {
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return true;
+    });
+    const c = draw('[docs](https://ok.example/a)');
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(c.querySelectorAll('[href]')).toHaveLength(0);
+    expect(link.getAttribute('title')).toBe('https://ok.example/a');
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
     await vi.waitFor(() => {
       expect(calls).toEqual([{ cmd: 'open_web_link', args: { url: 'https://ok.example/a' } }]);
     });

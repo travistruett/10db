@@ -5,7 +5,8 @@ import { openWebLink } from '../desktop/tauri';
 import classes from './markdown.module.css';
 
 // One Mantine element per markdown tag. A link never navigates the window: a click asks the
-// builder to confirm its host, then opens it in the browser (`openWebLink`).
+// builder to confirm its host, then opens it in the browser (`openWebLink`), and its address is
+// never in the page.
 
 /** A heading, marked with the source line it starts on so a view can scroll to a section. */
 function Heading(props: {
@@ -38,17 +39,33 @@ function NotShown({ children }: { readonly children: ReactNode }) {
   );
 }
 
-/** An `https:` link (10db's safety step has unwrapped every other kind) that opens after a confirm. */
+function open(href: string): void {
+  openWebLink(href).catch((error: unknown) => {
+    console.warn('10db: the link did not open', error);
+  });
+}
+
+/**
+ * An `https:` link (10db's safety step has unwrapped every other kind). Its address lives only in
+ * this closure and in its title, never in an `href`, so a middle-click, a context menu's Open or a
+ * drag has nothing to open; a click or Enter asks the builder through `openWebLink`.
+ */
 function Link({ href, children }: { readonly href: unknown; readonly children: ReactNode }) {
   if (typeof href !== 'string') return <>{children}</>;
   return (
     <Anchor
-      href={href}
+      role="link"
+      tabIndex={0}
+      title={href}
+      style={{ cursor: 'pointer' }}
       onClick={(event) => {
         event.preventDefault();
-        openWebLink(href).catch((error: unknown) => {
-          console.warn('10db: the link did not open', error);
-        });
+        open(href);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        open(href);
       }}
     >
       {children}
