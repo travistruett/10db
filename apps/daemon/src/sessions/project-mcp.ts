@@ -11,7 +11,7 @@ import { AwsCredentialsError, type AwsCredentialsExporter } from '../environment
 import { describeIssues } from './config-issues';
 import { MCP_HOSTS_FILE, McpHostsFileError, readMcpHosts } from './mcp-hosts-file';
 import { McpServerName } from './mcp-server-name';
-import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
+import { readRepoConfigFileIn, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
 export const TENDB_MCP_SERVER = '10db';
@@ -136,9 +136,9 @@ export class ProjectMcpError extends Error {
   override readonly name = 'ProjectMcpError';
 }
 
-function readMcpFile(path: string): string | null {
+function readMcpFile(repoPath: string, path: string): string | null {
   try {
-    return readRepoConfigFile(path);
+    return readRepoConfigFileIn(repoPath, PROJECT_MCP_FILE);
   } catch (error) {
     if (error instanceof RepoConfigFileError)
       throw new ProjectMcpError(`${path} could not be read (${error.message})`);
@@ -280,7 +280,7 @@ function strayHosts(
  */
 export function readRepoMcp(repoPath: string): RepoMcp {
   const path = join(repoPath, PROJECT_MCP_FILE);
-  const text = readMcpFile(path);
+  const text = readMcpFile(repoPath, path);
   const hosts = readHosts(repoPath);
   if (text === null) return { servers: [], warnings: strayHosts(hosts, []) };
   const file = parseMcpFile(path, text);

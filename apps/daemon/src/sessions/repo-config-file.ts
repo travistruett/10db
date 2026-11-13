@@ -1,4 +1,12 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { LinkInPathError, openInRoot } from './open-in-root';
 
@@ -111,4 +119,23 @@ function readOpened(fd: number, maxBytes: number): RepoFileBytes {
 /** A config file the repo commits, as UTF-8, through `readRepoFileBytes` at `REPO_CONFIG_MAX_BYTES`. */
 export function readRepoConfigFile(path: string): string | null {
   return readRepoFileBytes(path, REPO_CONFIG_MAX_BYTES)?.bytes.toString('utf8') ?? null;
+}
+
+/**
+ * A config file the repo commits, at `relative` under the checkout `root`, as UTF-8, opened by `openInRoot`
+ * at `REPO_CONFIG_MAX_BYTES`: a link anywhere below the root is refused at the open. The root is resolved to
+ * its real path first; a lane can write inside a checkout but not swap the checkout itself.
+ */
+export function readRepoConfigFileIn(root: string, relative: string): string | null {
+  let realRoot: string;
+  try {
+    realRoot = realpathSync.native(root);
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw new RepoConfigFileError(code ?? 'error');
+  }
+  return (
+    readRepoFileBytesIn(realRoot, relative, REPO_CONFIG_MAX_BYTES)?.bytes.toString('utf8') ?? null
+  );
 }
