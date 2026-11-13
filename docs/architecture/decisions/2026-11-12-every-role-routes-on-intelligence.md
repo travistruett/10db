@@ -7,7 +7,7 @@
 
 Every step role (plan, plan review, implement, review and QA) is routed on the Artificial Analysis
 Intelligence Index. 10db keeps no Coding or Agentic score: a model profile's `scores` holds `intelligence` alone,
-`model_profiles` has no `coding` or `agentic` column (migration `0063_drop_retired_scores`), a step records no
+`model_profiles` has no `coding` or `agentic` column (migration `0066_drop_retired_scores`), a step records no
 score kind, and the benchmark status lists no missing scores. The router has no fallback from a role's own
 score to Intelligence, so its reasons say "at or above N intelligence" for every role. The starting needs
 (`routing/catalogue.ts`) and the rule floors (`routing/floors.ts`) keep their numbers and are read as
