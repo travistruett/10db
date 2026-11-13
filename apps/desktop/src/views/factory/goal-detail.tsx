@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { OpenConversation } from '../shape/open-conversation';
+import { PlannedIn } from './planned-in';
 import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
 import { BatchSheet } from '../board/batch/batch-sheet';
 import { goalReadyForPass } from '../workbench/start-pass-rules';
@@ -114,6 +115,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
       <Stack gap="xs">
         <SinceYouLooked opened={opened} />
         <AboutGoal goal={goal} />
+        <PlannedIn goalId={goal.id} />
         <OpenConversation
           target={{ goalId: goal.id }}
           onOpen={(shapeId) => {

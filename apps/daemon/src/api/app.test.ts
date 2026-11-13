@@ -648,6 +648,20 @@ describe('team, routing and benchmark routes', () => {
       service: 'syncBenchmarks',
     },
     {
+      name: 'PUT /benchmarks/key',
+      method: 'PUT',
+      path: '/benchmarks/key',
+      body: { key: 'aa-key' },
+      service: 'setBenchmarkKey',
+    },
+    {
+      name: 'DELETE /benchmarks/key',
+      method: 'DELETE',
+      path: '/benchmarks/key',
+      body: undefined,
+      service: 'removeBenchmarkKey',
+    },
+    {
       name: 'GET /benchmarks/models',
       method: 'GET',
       path: '/benchmarks/models',
@@ -1332,13 +1346,14 @@ describe('shape routes', () => {
     const goalId = mintId('Goal');
     const taskId = mintId('Task');
     const services = stubServices({
-      getGoalShape: (id) => ({ shapeId: id === goalId ? shapeId : null }),
-      getTaskShape: () => ({ shapeId: null }),
+      getGoalShape: (id) =>
+        id === goalId ? { shapeId, title: 'Remote host' } : { shapeId: null, title: null },
+      getTaskShape: () => ({ shapeId: null, title: null }),
     });
     const goal = await app(services).request(`/goals/${goalId}/shape`, auth);
-    expect(await goal.json()).toEqual({ shapeId });
+    expect(await goal.json()).toEqual({ shapeId, title: 'Remote host' });
     const task = await app(services).request(`/tasks/${taskId}/shape`, auth);
-    expect(await task.json()).toEqual({ shapeId: null });
+    expect(await task.json()).toEqual({ shapeId: null, title: null });
   });
 
   it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {
@@ -2138,14 +2153,11 @@ describe('judge routes', () => {
       service: 'patchJudge',
     },
     {
-      route: 'PUT /judge/key',
-      method: 'PUT',
-      path: '/judge/key',
-      body: { key: 'a-key' },
-      service: 'setJudgeKey',
+      route: 'POST /accounts/:id/test',
+      method: 'POST',
+      path: `/accounts/${mintId('Account')}/test`,
+      service: 'testAccount',
     },
-    { route: 'DELETE /judge/key', method: 'DELETE', path: '/judge/key', service: 'removeJudgeKey' },
-    { route: 'POST /judge/test', method: 'POST', path: '/judge/test', service: 'testJudge' },
     { route: 'GET /judge/calls', method: 'GET', path: '/judge/calls', service: 'listJudgeCalls' },
   ])('$route reaches $service behind the token', async ({ method, path, body, service }) => {
     const init = { ...json, method, ...(body ? { body: JSON.stringify(body) } : {}) };
@@ -2162,9 +2174,7 @@ describe('judge routes', () => {
       '/judge',
       { decisions: { review_size: { floor: 2 } } },
     ],
-    ['PUT /judge/key with an empty key', 'PUT', '/judge/key', { key: '' }],
-    ['PUT /judge/key with a space in the key', 'PUT', '/judge/key', { key: 'a b' }],
-    ['PUT /judge/key with an extra field', 'PUT', '/judge/key', { key: 'a-key', more: 1 }],
+    ['PATCH /judge with an account that is no id', 'PATCH', '/judge', { accountId: 'nope' }],
   ])('answers 400 for %s without reaching a service', async (_name, method, path, body) => {
     const res = await app().request(path, { ...json, method, body: JSON.stringify(body) });
     expect(res.status).toBe(400);

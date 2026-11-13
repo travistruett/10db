@@ -12,7 +12,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId } from '@10db/contracts';
+import { agentKind, mintId } from '@10db/contracts';
 import {
   createTestStore,
   insertSession,
@@ -100,7 +100,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: account.kind,
+      kind: agentKind(account.kind),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -271,7 +271,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: account.kind,
+      kind: agentKind(account.kind),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -393,7 +393,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: defaultAccount.kind,
+      kind: agentKind(defaultAccount.kind),
       cwd: checkout,
       env: launcher.probe(defaultAccount).env,
     });
@@ -612,7 +612,7 @@ async function readInSession(
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: account.kind,
+    kind: agentKind(account.kind),
     cwd: checkout,
     env: launcher.probe(account).env,
   });

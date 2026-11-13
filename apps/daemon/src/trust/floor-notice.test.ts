@@ -1,9 +1,9 @@
-import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { FloorReason, floorNoticeText, floorReason } from './floor-notice';
 
 describe('floorReason', () => {
-  it.each<[string, SupportedAccountKind, string | null, boolean, FloorReason | null]>([
+  it.each<[string, AgentAccountKind, string | null, boolean, FloorReason | null]>([
     [
       'a plan on a supported model, setting on',
       AccountKind.ClaudeSubscription,

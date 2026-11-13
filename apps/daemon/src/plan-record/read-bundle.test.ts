@@ -75,8 +75,15 @@ describe('readBundleFile', () => {
     expect(await refused(folder)).toMatch(/regular file/);
   });
 
-  it('a missing bundlePath is refused', async () => {
-    expect(await refused(join(folder, 'none.json'))).toMatch(/regular file|not found|no file/i);
+  it.each([
+    ['bundlePath', () => join(folder, 'none.json'), 'none.json does not exist'],
+    [
+      'bodyPath',
+      () => writeBundle([{ number: 1, bodyPath: 'p1-r1.md', at: AT }]),
+      'p1-r1.md does not exist',
+    ],
+  ] as const)('a missing %s is refused, naming it', async (_, path, message) => {
+    expect(await refused(path())).toContain(message);
   });
 
   it('a link to a bundle elsewhere reads by its real path', async () => {

@@ -6,8 +6,18 @@ import {
   type SetupPreviewDto,
   type TrustSwitchKey,
 } from '@10db/contracts';
-import { Alert, List, SegmentedControl, Stack, TagsInput, Text, Title } from '@mantine/core';
-import { useId } from 'react';
+import {
+  Alert,
+  Button,
+  Group,
+  List,
+  SegmentedControl,
+  Stack,
+  TagsInput,
+  Text,
+  Title,
+} from '@mantine/core';
+import { useId, useState, type ReactNode } from 'react';
 import { z } from 'zod';
 import { DaemonRequestError } from '../../daemon/client';
 import {
@@ -78,6 +88,38 @@ function boolOf(choice: Choice): boolean | undefined {
   return choice === Choice.On;
 }
 
+/** A list that starts folded under how many items it holds, with a control to show it. */
+function FoldedList({
+  title,
+  count,
+  children,
+}: {
+  readonly title: string;
+  readonly count: number;
+  readonly children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Stack gap="xs">
+      <Group gap="sm">
+        <Text size="sm">{count === 1 ? '1 item' : String(count) + ' items'}</Text>
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          aria-expanded={open}
+          aria-label={`${open ? 'Hide' : 'Show'} ${title}`}
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          {open ? 'Hide' : 'Show'}
+        </Button>
+      </Group>
+      {open ? children : null}
+    </Stack>
+  );
+}
+
 /** What would load into the project's next session, and what was left out and why. */
 function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined }) {
   const headingId = useId();
@@ -95,32 +137,34 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
           {loaded.length === 0 ? (
             <Text size="sm">Nothing of yours or the project's.</Text>
           ) : (
-            <List size="sm">
-              {loaded.map((name) => (
-                <List.Item key={name}>{name}</List.Item>
-              ))}
-            </List>
+            <FoldedList title="Comes along" count={loaded.length}>
+              <List size="sm">
+                {loaded.map((name) => (
+                  <List.Item key={name}>{name}</List.Item>
+                ))}
+              </List>
+            </FoldedList>
           )}
           {preview.leftOut.length === 0 ? null : (
             <>
-              <Text size="sm" fw={500}>
-                Left out
-              </Text>
-              <List size="sm">
-                {preview.leftOut.map((item) => (
-                  <List.Item key={`${item.what} ${item.why}`}>
-                    <Text component="span" size="sm">
-                      {item.what}
-                    </Text>
-                    <Text component="span" size="sm" c="dimmed">
-                      {': '}
-                    </Text>
-                    <Text component="span" size="sm" c="dimmed">
-                      {item.why}
-                    </Text>
-                  </List.Item>
-                ))}
-              </List>
+              <Title order={5}>Left out</Title>
+              <FoldedList title="Left out" count={preview.leftOut.length}>
+                <List size="sm">
+                  {preview.leftOut.map((item) => (
+                    <List.Item key={`${item.what} ${item.why}`}>
+                      <Text component="span" size="sm">
+                        {item.what}
+                      </Text>
+                      <Text component="span" size="sm" c="dimmed">
+                        {': '}
+                      </Text>
+                      <Text component="span" size="sm" c="dimmed">
+                        {item.why}
+                      </Text>
+                    </List.Item>
+                  ))}
+                </List>
+              </FoldedList>
             </>
           )}
         </>

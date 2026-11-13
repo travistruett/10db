@@ -1,4 +1,4 @@
-import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type AgentAccountKind } from '@10db/contracts';
 import { autoModeRuns } from './auto-mode-models';
 
 type ValueOf<T> = T[keyof T];
@@ -19,7 +19,7 @@ export type FloorReason = ValueOf<typeof FloorReason>;
  * whatever the setting.
  */
 export function floorReason(input: {
-  kind: SupportedAccountKind;
+  kind: AgentAccountKind;
   model: string | null;
   autoMode: boolean;
 }): FloorReason | null {

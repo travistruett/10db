@@ -53,6 +53,7 @@ import {
   PassTurnId,
   JudgeKind,
   Provider,
+  agentKind,
   providerOf,
   TakeOutStep,
   type PassId,
@@ -2033,7 +2034,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read before the briefing: the briefing follows the account this session runs on, which can
     // differ from the last session's when the project moved. Reading has no side effects.
     const account = getAccountRow(db, ctl.accountId);
-    const provider = providerOf(account.kind);
+    const provider = providerOf(agentKind(account.kind));
     const skills = persona?.skills ?? [];
     // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
@@ -2121,7 +2122,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
+    const configDir = sessionConfigDir(agentKind(account.kind), launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
@@ -2199,7 +2200,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       laneSession === null
         ? null
         : floorReason({
-            kind: account.kind,
+            kind: agentKind(account.kind),
             model: launch.model,
             autoMode: lanePermissionMode === 'auto',
           });
@@ -2369,7 +2370,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: providerOf(account.kind),
+          provider: providerOf(agentKind(account.kind)),
           model: launchStep.model,
           effort: launchStep.effort,
           mode: 'managed',

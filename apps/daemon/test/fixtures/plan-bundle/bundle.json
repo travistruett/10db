@@ -1,0 +1,178 @@
+{
+  "id": "pairing-acceptance",
+  "projectId": "prj_00000000-0000-7000-8000-000000000000",
+  "title": "Pairing",
+  "origin": {
+    "kind": "claude_code",
+    "session": "ses-acceptance",
+    "model": "claude-opus-5-5",
+    "at": "2026-11-12T08:00:00.000Z"
+  },
+  "intent": [
+    {
+      "key": "i1",
+      "quote": "Plans never go in the repo.\nThey stay local, byte for byte.",
+      "speaker": "builder",
+      "saidAt": "2026-11-12"
+    }
+  ],
+  "documents": [
+    {
+      "key": "research",
+      "kind": "research",
+      "title": "Pairing research",
+      "revisions": [
+        {
+          "number": 1,
+          "bodyPath": "research.md",
+          "note": "the research",
+          "author": "researcher",
+          "at": "2026-11-12T08:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "key": "plan",
+      "kind": "plan",
+      "title": "Pairing plan",
+      "revisions": [
+        {
+          "number": 1,
+          "bodyPath": "plan.md",
+          "note": "after review",
+          "author": "plan writer",
+          "at": "2026-11-12T08:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "key": "f1",
+      "kind": "fact",
+      "title": "A pairing code is six digits",
+      "body": { "claim": "PAIR_CODE_DIGITS is 6.", "detail": "Read in the code at 818d3644." },
+      "anchors": [
+        {
+          "kind": "code",
+          "path": "src/api/pairing.ts",
+          "line": 3,
+          "commit": "818d3644",
+          "excerpt": "export const PAIR_CODE_DIGITS = 6;"
+        }
+      ],
+      "sources": ["the code read"],
+      "verified": true,
+      "checkedAt": "2026-11-12"
+    },
+    {
+      "key": "x1",
+      "kind": "experiment",
+      "title": "Ping over the tailnet",
+      "body": {
+        "setup": "Two Macs on one tailnet.",
+        "command": "tailscale ping host",
+        "output": "pong from host in 3ms\n",
+        "shows": "The tailnet reaches the host."
+      },
+      "verified": true,
+      "checkedAt": "2026-11-12"
+    },
+    {
+      "key": "cost",
+      "kind": "fact",
+      "title": "What the effort cost",
+      "body": {
+        "kind": "cost",
+        "rows": [
+          { "phase": "Research", "agents": 2, "tokens": 240000, "approximate": true },
+          { "phase": "Total", "agents": null, "tokens": 240000, "approximate": true }
+        ],
+        "note": "From the subagents' reported totals."
+      },
+      "verified": true,
+      "checkedAt": "2026-11-12"
+    }
+  ],
+  "decisions": [
+    {
+      "key": "d1",
+      "question": "Where does the record live?",
+      "choice": "In the database, local only",
+      "rationale": "A plan in the repository leaks",
+      "alternatives": [{ "option": "Docs PRs", "whyNot": "They land in the repo" }],
+      "quote": "Plans never go in the repo.",
+      "lasting": true,
+      "scope": "project",
+      "decidedAt": "2026-11-12"
+    }
+  ],
+  "findings": [
+    {
+      "key": "plan-r1-1",
+      "document": "plan",
+      "revision": 1,
+      "section": "task-2",
+      "reviewer": "fable plan reviewer",
+      "round": 1,
+      "severity": "high",
+      "severityText": "blocking, security",
+      "text": "A revoked device keeps its session",
+      "state": "open",
+      "outcomeText": "partial: the session column is a stub"
+    },
+    {
+      "key": "plan-r1-2",
+      "document": "plan",
+      "revision": 1,
+      "reviewer": "fable plan reviewer",
+      "round": 1,
+      "severity": "low",
+      "severityText": "follow-up",
+      "text": "The code's lifetime is not named",
+      "state": "resolved",
+      "outcomeText": "fixed: ten minutes, in Calls made",
+      "how": "Named it",
+      "howDetail": "Calls made now says a code lasts ten minutes."
+    }
+  ],
+  "questions": [
+    { "key": "q1", "text": "Which port?", "owner": "designer", "about": "t1", "blocks": "pairing" }
+  ],
+  "goals": [
+    {
+      "key": "g1",
+      "title": "Pairing",
+      "objective": "A device pairs with the host.",
+      "cares_most": "Nothing leaks",
+      "ceremony": "direct",
+      "tasks": [
+        {
+          "key": "t1",
+          "title": "Pair a device",
+          "criteria": ["A device pairs"],
+          "areas": ["api"],
+          "planRef": {
+            "document": "plan",
+            "revision": 1,
+            "section": "task-1",
+            "shared": ["starting-point", "global-constraints"]
+          }
+        },
+        {
+          "key": "t2",
+          "title": "Revoke a device",
+          "criteria": ["A device is revoked"],
+          "areas": ["api"],
+          "planRef": {
+            "document": "plan",
+            "revision": 1,
+            "section": "task-2",
+            "shared": ["starting-point", "global-constraints"]
+          },
+          "cites": ["f1", "d1", "i1"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { BatchDto, mintId } from '@10db/contracts';
+import { BatchDto, mintId, OPEN_INTEGRATIONS_DETAIL } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchCardFields } from './batch-card';
 import { GhError } from '../github';
@@ -8,6 +8,7 @@ import {
   LostChoice,
   prCards,
   shipCards,
+  startCards,
   worktreeCards,
   wrongBranchCard,
   type Card,
@@ -132,6 +133,52 @@ describe('the cards of a batch that failed to ship', () => {
   // Each offers Retry and Abandon, which the Inbox card shows as buttons over the ship and abandon routes.
   it.each(Object.entries(failures))('%s offers Retry and Abandon of its batch', (_name, f) => {
     expect(f.card.detail).toMatchObject({ batchId: batch.id, actions: ['retry', 'abandon'] });
+  });
+});
+
+describe('the cards that name gh sign-in', () => {
+  const SIGN_IN = 'Sign in to GitHub in Settings › Integrations.';
+  const rows: Record<string, string> = {
+    'ship, signed out': shipCards.network(batch, 'gh pr create', new GhError('signed_out', 'x'))
+      .card.body,
+    'ship, not installed': shipCards.network(
+      batch,
+      'gh pr create',
+      new GhError('not_installed', 'x'),
+    ).card.body,
+    'pr watch, signed out': prCards.ghUnavailableText(new GhError('signed_out', 'x')).body,
+    'pr watch, not installed': prCards.ghUnavailableText(new GhError('not_installed', 'x')).body,
+  };
+
+  it.each(Object.entries(rows))('%s sends the builder to Settings, not a terminal', (_n, body) => {
+    expect(body).toContain('Settings › Integrations');
+    expect(body).not.toMatch(/gh auth login|in a terminal/);
+  });
+
+  const cards = {
+    'ship, signed out': shipCards.network(batch, 'gh pr create', new GhError('signed_out', 'x'))
+      .card,
+    'ship, not installed': shipCards.network(
+      batch,
+      'gh pr create',
+      new GhError('not_installed', 'x'),
+    ).card,
+    'start, signed out': startCards.ghUnavailable(new GhError('signed_out', 'x')),
+    'pr watch, signed out': prCards.ghUnavailableText(new GhError('signed_out', 'x')),
+    'pr watch, not installed': prCards.ghUnavailableText(new GhError('not_installed', 'x')),
+  };
+
+  it.each(Object.entries(cards))('%s links to the GitHub card', (_n, card) => {
+    expect(card.detail).toMatchObject({ [OPEN_INTEGRATIONS_DETAIL]: 'github' });
+  });
+
+  it('keeps the ship card Retry and Abandon beside the link', () => {
+    expect(cards['ship, signed out'].detail).toMatchObject({ actions: ['retry', 'abandon'] });
+  });
+
+  it('signed out gives the sign-in sentence as is', () => {
+    expect(rows['pr watch, signed out']).toContain(SIGN_IN);
+    expect(rows['ship, signed out']).toContain(SIGN_IN);
   });
 });
 

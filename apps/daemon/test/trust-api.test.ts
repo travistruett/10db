@@ -262,6 +262,10 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       'claude-opus-5-5',
     );
     const codex = await accountOn({ kind: 'codex_signin', label: 'ChatGPT' }, 'gpt-5.5');
+    // An OpenRouter account answers decisions only: it runs no session, so it has no judge to list.
+    const openRouter = (
+      await api().post('/accounts', AccountCreatedDto, { kind: 'openrouter', label: 'OpenRouter' })
+    ).account;
 
     const { judges } = await settings('GET');
     const byId = new Map(judges.map((row) => [row.accountId, row]));
@@ -299,6 +303,7 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       judge: JudgeKind.Rules,
       why: 'Codex has no judge in 10db yet.',
     });
+    expect(byId.has(openRouter.id)).toBe(false);
     expect(judges).toHaveLength(5);
   });
 });

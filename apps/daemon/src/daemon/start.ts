@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   Provider,
   RoutedBy,
+  agentKind,
   providerOf,
   StepRole,
   type Effort,
@@ -63,6 +64,7 @@ import {
   createListRefresh,
   createMoveBack,
   MoveCause,
+  moveOpenRouterKey,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -78,7 +80,8 @@ import {
   type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
-import { createJudgeServices } from './judge-services';
+import { createBenchmarkServices } from './benchmark-services';
+import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
   createReplyWatch,
@@ -146,7 +149,6 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
-  OPENROUTER_KEY_ACCOUNT,
   SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
@@ -157,7 +159,16 @@ import {
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
-import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
+import {
+  createGh,
+  createSystemGhExec,
+  resolveGh,
+  spawnGhLogin,
+  type Gh,
+  type GhLoginSpawn,
+  type GhTools,
+} from '../github';
+import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
@@ -355,6 +366,8 @@ export interface DaemonOptions {
   readonly tickMs?: number;
   /** The GitHub CLI wrapper; tests pass a fake. */
   readonly gh?: Gh;
+  /** Starts `gh auth login` for Sign In; tests pass a fake, so none signs in for real. */
+  readonly githubLoginSpawn?: GhLoginSpawn;
   /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
   readonly networkEnv?: () => Readonly<Record<string, string>>;
   readonly deliveryLimits?: Partial<DeliveryLimits>;
@@ -370,6 +383,8 @@ export interface DaemonOptions {
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
+  /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
+  readonly benchmarksOff?: boolean;
   readonly fetch?: typeof fetch;
   /**
    * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
@@ -489,7 +504,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
   // gh from the same prefixes; a missing one fails each gh call as not installed, as the system check says.
-  const ghBin = resolveGh();
+  let ghBin = resolveGh();
+  // Read on every call, so a gh installed after startup (found again on Check Again) is the one run.
+  const ghTools: GhTools = {
+    get gh() {
+      return ghBin;
+    },
+    git: gitBin,
+  };
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -630,13 +652,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    readKey: () =>
-      opts.judgeOff === true
-        ? Promise.resolve(null)
-        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
+    readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  // With the judge off no Keychain item is read, `openrouter-api-key` included.
+  if (opts.judgeOff !== true)
+    await moveOpenRouterKey({
+      state,
+      keychain: judgeKeychain,
+      logger: logger.child({ component: 'judge' }),
+    });
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,
@@ -807,7 +833,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconcileProfiles(ctx, from);
     });
     modelWait.release((id) => {
-      const provider = providerOf(getAccountRow(db, id).kind);
+      const provider = providerOf(agentKind(getAccountRow(db, id).kind));
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
@@ -1035,7 +1061,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const delivery: DeliveryContext = {
     state,
     git,
-    gh: opts.gh ?? createGh(createSystemGhExec({ gh: ghBin, git: gitBin })),
+    gh: opts.gh ?? createGh(createSystemGhExec(ghTools)),
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
@@ -1313,7 +1339,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Judged on the account the conversation runs on, which can differ from the project's provider.
   const brainstormRefusal = (projectId: ProjectId): string | null =>
-    providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
+    providerOf(agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind)) ===
+    Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
   // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
@@ -1403,7 +1430,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         model: session.model,
         modelId,
         effort: profile.effort,
-        agentModels: shapeAgentModels(row.kind),
+        agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,
         access: {
@@ -1790,8 +1817,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  const github = createGithubServices({
+    clock,
+    spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
+    resolveGh: () => {
+      ghBin = resolveGh();
+      return ghBin;
+    },
+    readLogin: () =>
+      delivery.gh.authLogin({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+    env: () => delivery.networkEnv(),
+    emit: (data) => {
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.GithubLoginEnded,
+          entityType: 'github',
+          entityId: 'login',
+          data,
+        });
+      });
+    },
+  });
   const services = createServices({
     state,
+    github: {
+      githubStatus: github.githubStatus,
+      startGithubSignin: github.startGithubSignin,
+      cancelGithubSignin: github.cancelGithubSignin,
+    },
     clock,
     bus,
     runner: createdRunner,
@@ -1810,6 +1866,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : noSystemCheck(),
     agents: opts.agents ?? null,
     benchmarks,
+    benchmarkApi: createBenchmarkServices({
+      benchmarks,
+      keychain: judgeKeychain,
+      off: opts.benchmarksOff === true,
+    }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
@@ -1948,7 +2009,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (installer === null) {
       updateLogger.warn({}, 'gh is not installed, so the app cannot update itself');
     } else {
-      const ghExec = createSystemGhExec({ gh: ghBin, git: gitBin });
+      const ghExec = createSystemGhExec(ghTools);
       const ghCall = () => ({
         env: delivery.networkEnv(),
         timeoutMs: delivery.limits.networkTimeoutMs,
@@ -2172,6 +2233,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       createdScheduler.stop();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
       // before the database closes, so a slow stop does not eat the window the lanes need.
+      github.stop();
       const loginStopped = accountService.stop().catch((error: unknown) => {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });

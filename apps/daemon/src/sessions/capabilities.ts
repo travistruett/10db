@@ -7,7 +7,7 @@ import {
   providerOf,
   SteerMode,
   type AgentCapabilitiesDto,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { autoModeRuns } from '../trust';
 
@@ -22,7 +22,7 @@ const IMAGES = [ImageFormat.Png, ImageFormat.Jpeg, ImageFormat.Webp];
  * §12).
  */
 export function claudeCapabilities(
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
   model: string | null,
 ): AgentCapabilities {
   return {
@@ -47,7 +47,7 @@ export function claudeCapabilities(
  * Codex through app-server: the guard's rules judge its calls until 10db's judge exists. Codex can do
  * the same on every kind it runs on.
  */
-export const codexCapabilities: (kind: SupportedAccountKind) => AgentCapabilities = () => ({
+export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = () => ({
   harness: Provider.Codex,
   label: 'Codex',
   steer: SteerMode.Inject,
@@ -65,16 +65,13 @@ export const codexCapabilities: (kind: SupportedAccountKind) => AgentCapabilitie
 });
 
 const CAPABILITIES_BY_ADAPTER: Readonly<
-  Record<Provider, (kind: SupportedAccountKind, model: string | null) => AgentCapabilities>
+  Record<Provider, (kind: AgentAccountKind, model: string | null) => AgentCapabilities>
 > = {
   [Provider.Claude]: claudeCapabilities,
   [Provider.Codex]: (kind) => codexCapabilities(kind),
 };
 
 /** The capabilities of whichever agent runs the kind: for a stand-in, such as the fake, that is both. */
-export function capabilitiesOf(
-  kind: SupportedAccountKind,
-  model: string | null,
-): AgentCapabilities {
+export function capabilitiesOf(kind: AgentAccountKind, model: string | null): AgentCapabilities {
   return CAPABILITIES_BY_ADAPTER[providerOf(kind)](kind, model);
 }

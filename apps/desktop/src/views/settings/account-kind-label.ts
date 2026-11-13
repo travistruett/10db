@@ -7,4 +7,5 @@ export const ACCOUNT_KIND_LABEL: Readonly<Record<SupportedAccountKind, string>> 
   [AccountKind.Bedrock]: 'Amazon Bedrock',
   [AccountKind.Gateway]: 'Gateway',
   [AccountKind.CodexSignin]: 'ChatGPT plan',
+  [AccountKind.OpenRouter]: 'OpenRouter key',
 };

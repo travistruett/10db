@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { usePatchProject } from '../../daemon/queries';
 import { AccountSelect } from './account-select';
+import { cantRunAgents } from './accounts/used-by';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const MIN_PCT = Math.round(USAGE_HANDOFF_MIN * 100);
@@ -35,6 +36,7 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
           <AccountSelect
             aria-label="Account"
             accounts={accounts}
+            isDisabled={cantRunAgents}
             value={project.accountId}
             allowDeselect={false}
             disabled={patch.isPending}
@@ -56,6 +58,7 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             accounts={accounts.filter(
               (a) => a.id !== project.accountId || a.id === project.fallbackAccountId,
             )}
+            isDisabled={cantRunAgents}
             value={project.fallbackAccountId}
             clearable
             disabled={patch.isPending}

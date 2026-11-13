@@ -12,6 +12,7 @@ import {
   Delivery,
   TaskStatus,
   InvalidError,
+  agentKind,
   NotFoundError,
   providerOf,
   isDaemonAddress,
@@ -109,6 +110,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import type { BenchmarkApiServices } from './benchmark-services';
 import { buildModelRows, type CatalogueSync } from '../catalogue';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -162,6 +164,7 @@ import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } 
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
+import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
@@ -196,6 +199,8 @@ export function createServices(deps: {
   /** The pinned Claude Code and Codex, read for each request; null where none are managed. */
   readonly agents: AgentTools | null;
   readonly benchmarks: BenchmarkSync;
+  /** The sync's status and the Artificial Analysis key. */
+  readonly benchmarkApi: BenchmarkApiServices;
   /** The model catalogue in use, for the model list's names and runnability. */
   readonly catalogue: Pick<CatalogueSync, 'status' | 'catalogue'>;
   /** Fetches the catalogue and reads every account's list; a call during a run joins it. */
@@ -203,6 +208,8 @@ export function createServices(deps: {
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
   readonly judge: JudgeApiServices;
+  /** gh's login and the Sign In that changes it. */
+  readonly github: GithubApiServices;
   /** People, the Slack connection, timers, routes and sends. */
   readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
@@ -688,6 +695,7 @@ export function createServices(deps: {
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
+    ...deps.github,
     ...deps.stakeholders,
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
@@ -702,8 +710,7 @@ export function createServices(deps: {
       getProject(db, projectId);
       await deps.preview.restart(projectId);
     },
-    benchmarkStatus: () => deps.benchmarks.status(),
-    syncBenchmarks: () => deps.benchmarks.sync(),
+    ...deps.benchmarkApi,
     listAaModels: () => listAaModels(db),
     listModels: (accountId) =>
       buildModelRows({
@@ -718,7 +725,7 @@ export function createServices(deps: {
       return {
         accountId,
         picks: rolePicks({
-          ...routingInputs(db, { accountId, provider: providerOf(account.kind) }),
+          ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
           personas: listPersonas(db),
         }),
       };

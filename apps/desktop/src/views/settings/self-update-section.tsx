@@ -3,7 +3,8 @@ import {
   SELF_UPDATE_SWITCH,
   type SelfUpdateStatusDto,
 } from '@10db/contracts';
-import { Button, NumberInput, Switch, Text } from '@mantine/core';
+import { Anchor, Button, NumberInput, Switch, Text } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   useInstallNow,
@@ -12,8 +13,12 @@ import {
   useSetSelfUpdateWait,
 } from '../../daemon/self-update-queries';
 import { absoluteTime } from '../../shell/relative';
+import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
 import { updateWaitsFor } from './update-waits-for';
+
+/** The sentence the daemon's reasons use to send the builder to GitHub's card. */
+const SIGN_IN_SENTENCE = 'Settings › Integrations';
 
 const SHORT = 7;
 const short = (commit: string): string => commit.slice(0, SHORT);
@@ -98,6 +103,22 @@ export function SelfUpdateSection() {
         >
           {blocker.message}
         </Text>
+      ) : null}
+      {blocker?.message.includes(SIGN_IN_SENTENCE) ? (
+        <Anchor
+          size="sm"
+          px="md"
+          renderRoot={(props) => (
+            <Link
+              {...props}
+              to="/settings/$section"
+              params={{ section: SettingsSectionKey.Integrations }}
+              search={{ focus: 'github' }}
+            />
+          )}
+        >
+          Open Integrations
+        </Anchor>
       ) : null}
       {data !== undefined ? (
         <SettingRow

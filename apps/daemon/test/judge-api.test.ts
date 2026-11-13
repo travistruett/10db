@@ -1,10 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AccountCreatedDto,
+  AccountDto,
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
   JudgeStatusDto,
   JudgeTestResultDto,
+  mintId,
 } from '@10db/contracts';
 import { insertJudgeCall } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -80,12 +83,26 @@ async function start(opts: { keychain?: Keychain; judgeOff?: boolean } = {}) {
   return { api, raw, keychain, daemon };
 }
 
+/** An OpenRouter account with its key set; decisions run on it unless `pick` is false. */
+async function openRouterAccount(
+  api: ReturnType<typeof apiClient>,
+  opts: { label?: string; key?: string; pick?: boolean } = {},
+) {
+  const { account } = await api.post('/accounts', AccountCreatedDto, {
+    kind: 'openrouter',
+    label: opts.label ?? 'OpenRouter',
+  });
+  await api.put(`/accounts/${account.id}/secret`, AccountDto, { secret: opts.key ?? KEY });
+  if (opts.pick !== false) await api.patch('/judge', JudgeStatusDto, { accountId: account.id });
+  return account;
+}
+
 describe('GET /judge', () => {
   it('answers the defaults, with no key and the judge on', async () => {
     const { api } = await start();
     expect(await api.get('/judge', JudgeStatusDto)).toEqual({
       config: DEFAULT_JUDGE_CONFIG,
-      keySet: false,
+      account: null,
       off: false,
     });
   });
@@ -96,37 +113,106 @@ describe('GET /judge', () => {
   });
 
   it('reads the key without blocking: the synchronous read is never used', async () => {
-    const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
+    const memory = createMemoryKeychain();
     const { api } = await start({
       keychain: {
         ...memory,
-        read: () => {
+        read: (account) => {
+          if (account.startsWith('account:')) return memory.read(account);
           throw new Error('the synchronous read blocks the event loop');
         },
       },
     });
-    expect(await api.get('/judge', JudgeStatusDto)).toMatchObject({ keySet: true });
+    const account = await openRouterAccount(api);
+    expect(await api.get('/judge', JudgeStatusDto)).toMatchObject({
+      account: { id: account.id, label: 'OpenRouter', secretSet: true, secretState: 'set' },
+    });
   });
 
-  it('reports a daemon started with the judge off, without reading the key', async () => {
-    let reads = 0;
-    const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
-    const { api } = await start({
-      judgeOff: true,
-      keychain: {
-        ...memory,
-        read: (account) => {
-          reads += 1;
-          return memory.read(account);
-        },
-        readAsync: (account) => {
-          reads += 1;
-          return memory.readAsync(account);
-        },
+  it.each([
+    {
+      name: 'changed outside 10db',
+      tamper: (k: Keychain, ref: string) => {
+        k.write(ref, 'sk-or-v1-someone-elses-key');
       },
+      state: 'changed',
+    },
+    {
+      name: 'gone from the Keychain',
+      tamper: (k: Keychain, ref: string) => {
+        k.remove(ref);
+      },
+      state: 'missing',
+    },
+  ] as const)('says the account key is $state when it was $name', async ({ tamper, state }) => {
+    const { api, keychain } = await start();
+    const account = await openRouterAccount(api);
+    tamper(keychain, `account:${account.id}`);
+    expect(await api.get('/judge', JudgeStatusDto)).toMatchObject({
+      account: { id: account.id, secretSet: false, secretState: state },
     });
-    expect(await api.get('/judge', JudgeStatusDto)).toMatchObject({ keySet: false, off: true });
-    expect(reads).toBe(0);
+  });
+
+  it('answers no account when the one named no longer resolves', async () => {
+    const { api } = await start();
+    const account = await openRouterAccount(api);
+    await api.post(`/accounts/${account.id}/archive`, AccountDto);
+    expect((await api.get('/judge', JudgeStatusDto)).account).toBeNull();
+  });
+
+  it('with the judge off reads no Keychain item at all: not the status, a list refresh, the identity route or the old key', async () => {
+    const calls: string[] = [];
+    const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
+    const watching: Keychain = {
+      read: (account) => {
+        calls.push(`read ${account}`);
+        return memory.read(account);
+      },
+      readAsync: (account) => {
+        calls.push(`readAsync ${account}`);
+        return memory.readAsync(account);
+      },
+      write: (account, secret) => {
+        calls.push(`write ${account}`);
+        memory.write(account, secret);
+      },
+      remove: (account) => {
+        calls.push(`remove ${account}`);
+        memory.remove(account);
+      },
+    };
+    const { api, raw, daemon: d } = await start({ judgeOff: true, keychain: watching });
+    // Start must not touch the OpenRouter item or any account secret.
+    expect(
+      calls.filter((c) => c.includes(OPENROUTER_KEY_ACCOUNT) || c.includes('account:')),
+    ).toEqual([]);
+    // The account is made and keyed through the routes, whose writes are not reads; the reads are counted after.
+    const account = await openRouterAccount(api);
+    calls.length = 0;
+    const status = await api.get('/judge', JudgeStatusDto);
+    expect(status).toMatchObject({ off: true, account: { id: account.id, secretState: 'set' } });
+    await d.refreshModels({ force: true });
+    const identity = await raw('GET', `/accounts/${account.id}/identity`);
+    expect(identity.status).toBe(400);
+    expect((await raw('POST', `/accounts/${account.id}/test`)).status).toBe(409);
+    expect(calls).toEqual([]);
+    expect(memory.read(OPENROUTER_KEY_ACCOUNT)).toBe(KEY);
+  });
+});
+
+describe('the old OpenRouter key at start', () => {
+  it('moves into an OpenRouter account that decisions run on, and the old item goes', async () => {
+    const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
+    const { api } = await start({ keychain: memory });
+    const status = await api.get('/judge', JudgeStatusDto);
+    expect(status.account).toMatchObject({
+      label: 'OpenRouter',
+      secretSet: true,
+      secretState: 'set',
+    });
+    expect(status.config.accountId).toBe(status.account?.id);
+    expect(memory.read(`account:${status.account?.id ?? ''}`)).toBe(KEY);
+    expect(memory.read(OPENROUTER_KEY_ACCOUNT)).toBeNull();
   });
 });
 
@@ -139,12 +225,35 @@ describe('PATCH /judge', () => {
     });
     expect(status.config).toEqual({
       enabled: false,
+      accountId: null,
       decisions: {
         ...DEFAULT_JUDGE_CONFIG.decisions,
         review_size: { enabled: true, model: 'anthropic/claude-haiku-5.5', floor: 0.95 },
       },
     });
     expect(await api.get('/judge', JudgeStatusDto)).toEqual(status);
+  });
+
+  it('runs decisions on an OpenRouter account, keeps it through a patch that names none, and clears it', async () => {
+    const { api } = await start();
+    const account = await openRouterAccount(api, { pick: false });
+    const picked = await api.patch('/judge', JudgeStatusDto, { accountId: account.id });
+    expect(picked.account).toMatchObject({ id: account.id, label: 'OpenRouter' });
+    expect((await api.patch('/judge', JudgeStatusDto, { enabled: false })).account?.id).toBe(
+      account.id,
+    );
+    expect((await api.patch('/judge', JudgeStatusDto, { accountId: null })).account).toBeNull();
+  });
+
+  it('refuses an account that is not an OpenRouter account, and an unknown one', async () => {
+    const { api, raw } = await start();
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'claude_subscription',
+      label: 'Company A',
+    });
+    expect((await raw('PATCH', '/judge', { accountId: account.id })).status).toBe(400);
+    expect((await raw('PATCH', '/judge', { accountId: 'acc_nope' })).status).toBe(400);
+    expect((await api.get('/judge', JudgeStatusDto)).config.accountId).toBeNull();
   });
 
   it.each([
@@ -158,37 +267,17 @@ describe('PATCH /judge', () => {
   });
 });
 
-describe('the OpenRouter key', () => {
-  it('goes to the Keychain, shows as set, and is removed again', async () => {
-    const { api, raw, keychain } = await start();
-    const set = await api.put('/judge/key', JudgeStatusDto, { key: `  ${KEY}  ` });
-    expect(set.keySet).toBe(true);
-    expect(keychain.read(OPENROUTER_KEY_ACCOUNT)).toBe(KEY);
-    const removed = await raw('DELETE', '/judge/key');
-    expect(removed.status).toBe(200);
-    expect(JudgeStatusDto.parse(await removed.json()).keySet).toBe(false);
-    expect(keychain.read(OPENROUTER_KEY_ACCOUNT)).toBeNull();
-  });
-
-  it('removing a key that is not set is not an error', async () => {
-    const { raw } = await start();
-    expect((await raw('DELETE', '/judge/key')).status).toBe(200);
-  });
-
-  it.each([
-    ['empty', ''],
-    ['blank', '   '],
-    ['with a space inside', 'sk or'],
-    ['with a quote', 'sk"or'],
-  ])('answers 400 for a key that is %s', async (_name, key) => {
-    const { raw, keychain } = await start();
-    expect((await raw('PUT', '/judge/key', { key })).status).toBe(400);
+describe('an OpenRouter account', () => {
+  it('takes its key into its own Keychain item, never the old one', async () => {
+    const { api, keychain } = await start();
+    const account = await openRouterAccount(api);
+    expect(keychain.read(`account:${account.id}`)).toBe(KEY);
     expect(keychain.read(OPENROUTER_KEY_ACCOUNT)).toBeNull();
   });
 
   it('answers 409 when the Keychain refuses, naming no key', async () => {
     const memory = createMemoryKeychain();
-    const { raw } = await start({
+    const { api, raw } = await start({
       keychain: {
         ...memory,
         write: (account) => {
@@ -196,26 +285,29 @@ describe('the OpenRouter key', () => {
         },
       },
     });
-    const res = await raw('PUT', '/judge/key', { key: KEY });
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    });
+    const res = await raw('PUT', `/accounts/${account.id}/secret`, { secret: KEY });
     expect(res.status).toBe(409);
     expect(await res.text()).not.toContain('NEVER-SHOWN');
   });
 
-  it('is never in a response, the event stream, the database or the log', async () => {
-    const { api, raw, daemon: d } = await start();
+  it('never has a key in a response, the event stream, the database or the log', async () => {
+    const { api, daemon: d } = await start();
     const seen: string[] = [];
-    seen.push(JSON.stringify(await api.put('/judge/key', z.unknown(), { key: KEY })));
+    const account = await openRouterAccount(api);
     seen.push(JSON.stringify(await api.get('/judge', z.unknown())));
+    seen.push(JSON.stringify(await api.get('/accounts', z.unknown())));
     seen.push(JSON.stringify(await api.patch('/judge', z.unknown(), { enabled: true })));
-    seen.push(JSON.stringify(await api.post('/judge/test', z.unknown())));
+    seen.push(JSON.stringify(await api.post(`/accounts/${account.id}/test`, z.unknown())));
     seen.push(JSON.stringify(await api.get('/judge/calls', z.unknown())));
     seen.push(JSON.stringify(await api.get('/events?after=0&limit=1000', z.unknown())));
-    seen.push(await (await raw('DELETE', '/judge/key')).text());
     // A rejected key echoed back by the server must not reach the response either.
     openRouterAnswer = () =>
       Response.json({ error: { message: `Invalid key ${KEY}` } }, { status: 401 });
-    await api.put('/judge/key', z.unknown(), { key: KEY });
-    seen.push(JSON.stringify(await api.post('/judge/test', z.unknown())));
+    seen.push(JSON.stringify(await api.post(`/accounts/${account.id}/test`, z.unknown())));
     for (const text of seen) expect(text).not.toContain('NEVER-SHOWN');
     await d.stop();
     const files = ['logs/daemon.log', '10db.sqlite', '10db.sqlite-wal'].map((name) =>
@@ -226,11 +318,13 @@ describe('the OpenRouter key', () => {
   });
 });
 
-describe('POST /judge/test', () => {
-  it('calls the review model with the stored key and answers model, latency and cost', async () => {
+describe('POST /accounts/:id/test', () => {
+  it('calls the review model with that account key and answers model, latency and cost', async () => {
     const { api } = await start();
-    await api.put('/judge/key', JudgeStatusDto, { key: KEY });
-    const result = JudgeTestResultDto.parse(await api.post('/judge/test', z.unknown()));
+    const account = await openRouterAccount(api);
+    const result = JudgeTestResultDto.parse(
+      await api.post(`/accounts/${account.id}/test`, z.unknown()),
+    );
     expect(result).toMatchObject({
       ok: true,
       model: 'typesafe/jev-1.13-20260917',
@@ -241,9 +335,40 @@ describe('POST /judge/test', () => {
     ]);
   });
 
+  it('sends the key of the account tested, not the one decisions run on', async () => {
+    const { api } = await start();
+    await openRouterAccount(api, { label: 'First', key: 'sk-or-v1-first-account-key' });
+    const second = await openRouterAccount(api, {
+      label: 'Second',
+      key: 'sk-or-v1-second-account-key',
+      pick: false,
+    });
+    await api.post(`/accounts/${second.id}/test`, z.unknown());
+    expect(openRouterRequests.map((r) => r.authorization)).toEqual([
+      'Bearer sk-or-v1-second-account-key',
+    ]);
+  });
+
   it('says there is no key, and makes no request', async () => {
     const { api } = await start();
-    const result = JudgeTestResultDto.parse(await api.post('/judge/test', z.unknown()));
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    });
+    const result = JudgeTestResultDto.parse(
+      await api.post(`/accounts/${account.id}/test`, z.unknown()),
+    );
+    expect(result).toEqual({ ok: false, error: 'No OpenRouter key is set' });
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it('sends nothing with the key of an archived account', async () => {
+    const { api } = await start();
+    const account = await openRouterAccount(api, { pick: false });
+    await api.post(`/accounts/${account.id}/archive`, z.unknown());
+    const result = JudgeTestResultDto.parse(
+      await api.post(`/accounts/${account.id}/test`, z.unknown()),
+    );
     expect(result).toEqual({ ok: false, error: 'No OpenRouter key is set' });
     expect(openRouterRequests).toEqual([]);
   });
@@ -252,19 +377,29 @@ describe('POST /judge/test', () => {
     openRouterAnswer = () =>
       Response.json({ error: { message: 'No auth credentials found' } }, { status: 401 });
     const { api } = await start();
-    await api.put('/judge/key', JudgeStatusDto, { key: KEY });
-    const result = JudgeTestResultDto.parse(await api.post('/judge/test', z.unknown()));
+    const account = await openRouterAccount(api);
+    const result = JudgeTestResultDto.parse(
+      await api.post(`/accounts/${account.id}/test`, z.unknown()),
+    );
     expect(result).toMatchObject({ ok: false });
     expect(!result.ok && result.error).toContain('401');
   });
 
-  it('with the judge off, says so and makes no request', async () => {
-    const { api } = await start({
-      judgeOff: true,
-      keychain: createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY }),
-    });
-    const result = JudgeTestResultDto.parse(await api.post('/judge/test', z.unknown()));
-    expect(!result.ok && result.error).toContain('TENDB_JUDGE=off');
+  it.each([
+    ['an unknown account', () => mintId('Account'), 404],
+    ['an account that is not OpenRouter', 'claude', 400],
+  ] as const)('answers %s with %i', async (_name, which, status) => {
+    const { api, raw } = await start();
+    const id =
+      which === 'claude'
+        ? (
+            await api.post('/accounts', AccountCreatedDto, {
+              kind: 'claude_subscription',
+              label: 'Company A',
+            })
+          ).account.id
+        : which();
+    expect((await raw('POST', `/accounts/${id}/test`)).status).toBe(status);
     expect(openRouterRequests).toEqual([]);
   });
 });
@@ -309,7 +444,7 @@ describe('GET /judge/calls', () => {
 
   it('logs a call the daemon made through the judge', async () => {
     const { api, daemon: d } = await start();
-    await api.put('/judge/key', JudgeStatusDto, { key: KEY });
+    await openRouterAccount(api);
     const answer = await d.judge.choose({
       decision: 'review_size',
       state: 's',

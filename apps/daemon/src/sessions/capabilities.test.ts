@@ -1,4 +1,4 @@
-import { AgentCapabilitiesDto, SUPPORTED_ACCOUNT_KINDS } from '@10db/contracts';
+import { AGENT_ACCOUNT_KINDS, AgentCapabilitiesDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 import { FakeAdapter } from './fake-adapter';
@@ -55,7 +55,7 @@ describe('capabilities', () => {
 
   // Delivery rule 3 (spec §6.2): a message injected mid-turn counts as delivered only by a receipt.
   it.each(
-    SUPPORTED_ACCOUNT_KINDS.flatMap((kind) => [
+    AGENT_ACCOUNT_KINDS.flatMap((kind) => [
       [`claude on ${kind}`, claudeCapabilities(kind, null)] as const,
       [`codex on ${kind}`, codexCapabilities(kind)] as const,
     ]),
@@ -79,7 +79,7 @@ describe('capabilities', () => {
   ];
   it.each(
     ADAPTERS.flatMap(([name, adapter]) =>
-      SUPPORTED_ACCOUNT_KINDS.map((kind) => [`${name} on ${kind}`, adapter, kind] as const),
+      AGENT_ACCOUNT_KINDS.map((kind) => [`${name} on ${kind}`, adapter, kind] as const),
     ),
   )('%s: an adapter that injects reports receipts', (_name, adapter, kind) => {
     const caps = adapter.capabilities({ kind }, null);

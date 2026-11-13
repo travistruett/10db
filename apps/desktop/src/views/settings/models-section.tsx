@@ -24,6 +24,7 @@ import {
 } from '../../daemon/model-queries';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
+import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
 import { ModelDrawer } from './model-drawer';
 import { catalogueLine, costNote } from './model-format';
 import {
@@ -85,7 +86,7 @@ export function ModelsSection() {
   const header = (
     <Stack gap={4}>
       <Group justify="space-between" align="center" wrap="nowrap">
-        <Title order={3}>Models and benchmarks</Title>
+        <Title order={3}>Models and scores</Title>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
             <Text size="xs" c="red" role="alert">
@@ -139,6 +140,7 @@ export function ModelsSection() {
             : 'Reading the catalogue…'}{' '}
         <ArtificialAnalysisCredit />
       </Text>
+      <ArtificialAnalysisStatusLine />
     </Stack>
   );
 

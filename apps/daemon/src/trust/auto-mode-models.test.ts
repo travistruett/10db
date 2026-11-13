@@ -1,9 +1,9 @@
-import type { SupportedAccountKind } from '@10db/contracts';
+import type { AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { autoModeRuns } from './auto-mode-models';
 
 describe('autoModeRuns', () => {
-  it.each<[SupportedAccountKind, string | null, boolean]>([
+  it.each<[AgentAccountKind, string | null, boolean]>([
     ['claude_subscription', 'claude-opus-5-5', true],
     ['claude_subscription', 'claude-sonnet-4-6', true],
     ['claude_subscription', 'claude-sonnet-4-5', false],

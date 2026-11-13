@@ -6,6 +6,7 @@ import {
   AccountProblem,
   AccountSecretInput,
   EventType,
+  runsAgents,
   signsInWithLogin,
   ConflictError,
   InvalidError,
@@ -268,6 +269,9 @@ export function createAccountService(deps: {
     },
     async identity(id) {
       const row = getAccountRow(db, id);
+      // Nothing to probe: the account runs no agent, so it has no login or organization to report.
+      if (!runsAgents(row.kind))
+        throw new InvalidError('OpenRouter accounts have no identity to check');
       let launch;
       try {
         launch = deps.launcher.probe(row);
@@ -303,7 +307,7 @@ export function createAccountService(deps: {
         );
       }
       const refusal = checkAccount(launch.expect, seen);
-      if (refusal === null) deps.lists.record(row, seen);
+      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind }, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {

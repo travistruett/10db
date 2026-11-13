@@ -1,4 +1,6 @@
 import {
+  GithubSigninDto,
+  GithubStatusDto,
   AccountId,
   AccountInput,
   AccountPatch,
@@ -31,6 +33,8 @@ import {
   GoalAdoptInput,
   PlanExportInput,
   PlanImportInput,
+  PlanRecordList,
+  PlanRecordQuery,
   GoalId,
   DevUiConnectionDto,
   HealthResponse,
@@ -38,7 +42,7 @@ import {
   InboxItemId,
   InboxState,
   JudgeConfigPatch,
-  JudgeKeyInput,
+  BenchmarkKeyInput,
   ModelPicksQuery,
   ModelsQuery,
   KeepAwakeInput,
@@ -81,6 +85,7 @@ import {
   ScreenRefusalInput,
   ShapeConvertInput,
   ShapeDismissInput,
+  ShapeAttachmentId,
   ShapeEditInput,
   ShapeFindingId,
   ShapeId,
@@ -172,7 +177,7 @@ export interface ApiDeps {
   onUnexpectedError(error: unknown): void;
 }
 
-const STATUS = { not_found: 404, conflict: 409, invalid: 400 } as const;
+const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 const STREAM_PATH = '/events/stream';
 
@@ -783,6 +788,34 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    // The Record view's reads: the record whole, a revision's text, and each list a page at a time.
+    .get('/shapes/:shapeId/record', (c) =>
+      c.json(deps.services.getPlanRecord(ShapeId.parse(c.req.param('shapeId')))),
+    )
+    .get('/shapes/:shapeId/documents/:documentId/revisions/:number', (c) =>
+      c.json(
+        deps.services.getPlanRevision(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeAttachmentId.parse(c.req.param('documentId')),
+          z.coerce.number().int().min(1).parse(c.req.param('number')),
+        ),
+      ),
+    )
+    .get(
+      '/shapes/:shapeId/record/:list',
+      validator('query', (value): PlanRecordQuery => PlanRecordQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.getPlanRecordPage(
+            ShapeId.parse(c.req.param('shapeId')),
+            z.enum(PlanRecordList).parse(c.req.param('list')),
+            c.req.valid('query'),
+          ),
+        ),
+    )
+    .get('/tasks/:taskId/plan-context', (c) =>
+      c.json(deps.services.getTaskPlanContext(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1057,6 +1090,9 @@ export function createApp(deps: ApiDeps) {
     .get('/accounts/:accountId/identity', async (c) =>
       c.json(await deps.services.accountIdentity(AccountId.parse(c.req.param('accountId')))),
     )
+    .post('/accounts/:accountId/test', async (c) =>
+      c.json(await deps.services.testAccount(AccountId.parse(c.req.param('accountId')))),
+    )
     .get('/accounts/connecting', (c) => c.json(deps.services.connectingAccount()))
     .post('/accounts/:accountId/connect', async (c) =>
       c.json(await deps.services.connectAccount(AccountId.parse(c.req.param('accountId')))),
@@ -1153,6 +1189,23 @@ export function createApp(deps: ApiDeps) {
     .delete('/people/:personId', (c) => {
       deps.services.removePerson(PersonId.parse(c.req.param('personId')));
       return c.json({});
+    })
+    .get(
+      '/github',
+      validator('query', (query): { recheck?: '1' | undefined } => SystemQuery.parse(query)),
+      async (c) =>
+        c.json(
+          GithubStatusDto.parse(
+            await deps.services.githubStatus(c.req.valid('query').recheck === '1'),
+          ),
+        ),
+    )
+    .post('/github/signin', async (c) =>
+      c.json(GithubSigninDto.parse(await deps.services.startGithubSignin())),
+    )
+    .delete('/github/signin', (c) => {
+      deps.services.cancelGithubSignin();
+      return c.body(null, 204);
     })
     .get('/slack', (c) => c.json(deps.services.slackStatus()))
     .put(
@@ -1258,19 +1311,18 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
       async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
-    .put(
-      '/judge/key',
-      validator('json', (value): JudgeKeyInput => JudgeKeyInput.parse(value)),
-      async (c) => c.json(await deps.services.setJudgeKey(c.req.valid('json'))),
-    )
-    .delete('/judge/key', async (c) => c.json(await deps.services.removeJudgeKey()))
-    .post('/judge/test', async (c) => c.json(await deps.services.testJudge()))
     .get(
       '/judge/calls',
       validator('query', (query) => JudgeCallsQuery.parse(query)),
       (c) => c.json(deps.services.listJudgeCalls(c.req.valid('query').limit)),
     )
-    .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
+    .get('/benchmarks/status', async (c) => c.json(await deps.services.benchmarkStatus()))
+    .put(
+      '/benchmarks/key',
+      validator('json', (value): BenchmarkKeyInput => BenchmarkKeyInput.parse(value)),
+      async (c) => c.json(await deps.services.setBenchmarkKey(c.req.valid('json'))),
+    )
+    .delete('/benchmarks/key', async (c) => c.json(await deps.services.removeBenchmarkKey()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
     .get(

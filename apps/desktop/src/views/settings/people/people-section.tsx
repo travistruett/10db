@@ -1,5 +1,16 @@
 import type { PersonDto } from '@10db/contracts';
-import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Modal,
+  Stack,
+  Table,
+  Text,
+} from '@mantine/core';
 import { IconBrandSlack } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -83,6 +94,7 @@ export function PeopleSection() {
   const remove = useRemovePerson();
   // `undefined` is closed, `null` is a new person.
   const [editing, setEditing] = useState<PersonDto | null | undefined>(undefined);
+  const [removing, setRemoving] = useState<PersonDto | null>(null);
   const rows = [...(people.data ?? [])].sort((a, b) => Number(b.isBuilder) - Number(a.isBuilder));
 
   return (
@@ -153,7 +165,7 @@ export function PeopleSection() {
                         aria-label={`Remove ${person.name}`}
                         loading={remove.isPending && remove.variables === person.id}
                         onClick={() => {
-                          remove.mutate(person.id);
+                          setRemoving(person);
                         }}
                       >
                         Remove
@@ -171,6 +183,38 @@ export function PeopleSection() {
           {remove.error.message}
         </Alert>
       ) : null}
+      <Modal
+        opened={removing !== null}
+        onClose={() => {
+          setRemoving(null);
+        }}
+        title={`Remove ${removing?.name ?? ''}?`}
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Their Slack contact is deleted. Questions already sent to them stay in the Waiting tab.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setRemoving(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                if (removing) remove.mutate(removing.id);
+                setRemoving(null);
+              }}
+            >
+              Remove Person
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <StakeholderTimers />
       <PersonModal
         person={editing ?? null}

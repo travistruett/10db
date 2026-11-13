@@ -39,6 +39,8 @@ function secretLabel(kind: SupportedAccountKind): string {
       return 'Gateway token';
     case AccountKind.Bedrock:
       return 'Bedrock bearer token';
+    case AccountKind.OpenRouter:
+      return 'OpenRouter key';
     case AccountKind.ClaudeSubscription:
     case AccountKind.CodexSignin:
       return 'Secret';

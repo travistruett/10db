@@ -17,7 +17,9 @@ favors legibility and calm over decoration.
   green), so no stock Mantine color appears.
 - **Primary color:** blue. Status colors: blue = running, yellow = waiting on a human, orange =
   paused (limits), red = failed, green = done or ready, gray = queued or cancelled. Green is the only
-  "OK" color; don't use cyan or teal for success. Every card in the Inbox's Open tab waits on the
+  "OK" color for a task or goal; don't use cyan or teal for success there. A connection's status (Overview,
+  Integrations, an account's state) is the exception: teal = works, yellow = needs the builder, gray = off, never
+  green or red, and its dot always comes with words. Every card in the Inbox's Open tab waits on the
   builder, so its kind is yellow, a flag's too: red there would read as an error. The Waiting tab holds what the
   builder waits on someone else for; waiting on someone shows as a line on the card, not a color.
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
@@ -159,7 +161,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   is shaped belongs to a project: Board, Plan, Knowledge and the project's settings. The sidebar reads in
   that order: Inbox and Factory; then a "Project" label over the project switcher and that project's Board,
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
-  same order (Back to Board, the project's sections, then Global).
+  same order (Back to Board, the project's sections, then the app-wide ones), one scope at a time: a "This
+  project" / "All projects" switch under Back to Board picks which half the sections list shows, under subheads,
+  so the list fits 1280×720.
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
   right-aligned. A status is dimmed text after the
   name, never a pill, in a dense list. Violet marks a role's pick in Settings › Models; orange stays

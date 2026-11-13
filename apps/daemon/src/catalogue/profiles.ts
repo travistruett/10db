@@ -3,9 +3,9 @@ import {
   knownEfforts,
   ModelStatus,
   providerOf,
-  SUPPORTED_ACCOUNT_KINDS,
+  AGENT_ACCOUNT_KINDS,
   type Provider,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import {
   listAccountModels,
@@ -36,8 +36,8 @@ interface Offer {
   ranked: boolean;
 }
 
-const isSupported = (kind: string): kind is SupportedAccountKind =>
-  SUPPORTED_ACCOUNT_KINDS.some((supported) => supported === kind);
+const isSupported = (kind: string): kind is AgentAccountKind =>
+  AGENT_ACCOUNT_KINDS.some((supported) => supported === kind);
 
 /** The models an account with no list yet is assumed to run: its maker's own, retired ones left out. */
 function assumedOffers(provider: Provider, catalogue: Catalogue, ranked: boolean): Offer[] {

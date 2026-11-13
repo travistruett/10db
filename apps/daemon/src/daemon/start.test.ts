@@ -17,7 +17,10 @@ import { dirname, join } from 'node:path';
 import {
   BenchmarkStatusDto,
   BoardColumnDto,
+  DaemonEvent,
   EventsHead,
+  GithubSigninDto,
+  GithubStatusDto,
   FolderInspectResult,
   InboxItemDto,
   KeepAwakeStatus,
@@ -1348,6 +1351,72 @@ describe('startDaemon', () => {
       expect(probes()).toBe(2);
       expect(await login('/system')).toBeNull();
       expect(probes()).toBe(2);
+    });
+  });
+
+  describe('GitHub Sign In', () => {
+    it('reads gh through the daemon, runs the sign-in child, and announces its end after the login is cached', async () => {
+      const gh = new FakeGh();
+      gh.auth = 'signed_out';
+      let print: (text: string) => void = () => undefined;
+      let exit: (code: number | null) => void = () => undefined;
+      let started: () => void = () => undefined;
+      const spawnedChild = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        gh,
+        githubLoginSpawn: () => {
+          started();
+          return {
+            onOutput: (listener) => {
+              print = (text) => {
+                listener('stderr', text);
+              };
+            },
+            onExit: (listener) => {
+              exit = listener;
+            },
+            kill: () => undefined,
+          };
+        },
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        state: 'signed_out',
+        login: null,
+        signingIn: null,
+      });
+
+      const post = api.post('/github/signin', GithubSigninDto);
+      await spawnedChild;
+      print(
+        '! First copy your one-time code: ABCD-1234\nOpen this URL to continue in your web browser: https://github.com/login/device\n',
+      );
+      expect(await post).toEqual({ code: 'ABCD-1234', url: 'https://github.com/login/device' });
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        signingIn: { code: 'ABCD-1234' },
+      });
+
+      gh.auth = 'ok';
+      exit(0);
+      const ended = await waitForAsync(async () =>
+        (await api.get('/events?after=0', z.array(DaemonEvent))).find(
+          (e) => e.type === 'github.login_ended',
+        ),
+      );
+      expect(ended.data).toEqual({ ok: true, login: 'octocat', message: null, cancelled: false });
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        state: 'signed_in',
+        login: 'octocat',
+        signingIn: null,
+      });
     });
   });
 

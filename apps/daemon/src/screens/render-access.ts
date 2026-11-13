@@ -58,6 +58,14 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/tasks/:taskId/thread/pictures/:fileId':
     "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
+  '/shapes/:shapeId/record':
+    "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
+  '/shapes/:shapeId/record/:list':
+    "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
+  '/shapes/:shapeId/documents/:documentId/revisions/:number':
+    "A Plan's documents are read in the Record view, and no screen Plan draws shows them.",
+  '/tasks/:taskId/plan-context':
+    "What a lane's brief carried is for the task drawer, and no screen Plan draws shows it.",
   '/events/head': 'The event log is not a screen; the window draws once and does not follow it.',
   '/events/stream':
     'The live stream is not a screen; the window draws once and does not follow it.',
@@ -90,6 +98,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/accounts/:accountId/usage': 'No screen draws an account.',
   '/personas': 'No screen draws a setting.',
   '/people': 'No screen draws a setting.',
+  '/github': 'No screen draws a setting.',
   '/slack': 'No screen draws a setting.',
   '/slack/members': "The workspace's people are read from Slack, and no screen draws them.",
   '/stakeholders/timers': 'No screen draws a setting.',

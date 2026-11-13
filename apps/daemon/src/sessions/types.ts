@@ -5,7 +5,7 @@ import type {
   ModelMarkBasis,
   SessionId,
   ShapeId,
-  SupportedAccountKind,
+  AgentAccountKind,
   ToolCallView,
   TrustPolicy,
   WorkstreamId,
@@ -392,7 +392,7 @@ export interface ShapeImage {
 
 export interface AccountProbeSpec {
   /** The account's kind, which picks the agent that reports who it is. */
-  readonly kind: SupportedAccountKind;
+  readonly kind: AgentAccountKind;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
 }

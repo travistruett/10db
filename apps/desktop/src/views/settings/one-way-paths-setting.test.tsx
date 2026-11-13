@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { ONE_WAY_PATHS_LABEL } from './one-way-paths-setting';
 
-// Shape spec §7: the globs that force a spec, edited one per line in Settings › General.
+// Shape spec §7: the globs that force a spec, edited one per line in Settings › Planning.
 
-describe('Settings › General › One-way paths', () => {
+describe('Settings › Planning › One-way paths', () => {
   it('shows the saved globs one per line and sends the edited list', async () => {
     const put: unknown[] = [];
     server.use(
@@ -22,12 +22,12 @@ describe('Settings › General › One-way paths', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: ONE_WAY_PATHS_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', 'packages/db/drizzle/**\npackages/contracts/src/**');
     });
-    const save = screen.getByRole('button', { name: 'Save one-way paths' });
+    const save = screen.getByRole('button', { name: 'Save One-Way Paths' });
     expect(save).toHaveProperty('disabled', true);
     fireEvent.change(box, { target: { value: 'packages/db/drizzle/**\n\n  infra/**  \n' } });
     fireEvent.click(save);

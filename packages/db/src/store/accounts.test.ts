@@ -3,6 +3,7 @@ import {
   EventType,
   InvalidError,
   NotFoundError,
+  OPENROUTER_CANT_RUN_AGENTS,
   mintId,
   type AccountId,
   type ProjectDto,
@@ -20,6 +21,7 @@ import {
   getAccountRow,
   getProject,
   getSession,
+  insertJudgeCall,
   insertSession,
   insertTask,
   insertWorkstream,
@@ -27,6 +29,7 @@ import {
   listEventsAfter,
   listMoveBacks,
   patchAccount,
+  patchJudgeConfig,
   patchProject,
   recordAccountSecret,
   seedAccount,
@@ -471,5 +474,94 @@ describe('fallback accounts', () => {
     expect(() => store.write((ctx) => archiveAccount(ctx, fallback.id))).toThrow(
       /fallback of "demo"/,
     );
+  });
+});
+
+describe('OpenRouter accounts', () => {
+  const openRouter = (label = 'OpenRouter') => seedAccount(store, { kind: 'openrouter', label });
+
+  it('keeps its key at account:<id>, with no directory, lanes or cap', () => {
+    const account = openRouter();
+    expect(account).toMatchObject({ kind: 'openrouter', settings: {}, monthlyCapUsd: null });
+    expect(getAccountRow(store.db, account.id)).toMatchObject({
+      configDir: null,
+      laneCap: 0,
+      monthlyCapUsd: null,
+      secretRef: accountSecretRef(account.id),
+    });
+  });
+
+  it('takes no lane cap, and no monthly cap', () => {
+    const account = openRouter();
+    for (const patch of [{ laneCap: 3 }, { monthlyCapUsd: 5 }]) {
+      expect(() => store.write((ctx) => patchAccount(ctx, account.id, patch))).toThrow(
+        InvalidError,
+      );
+    }
+  });
+
+  it.each<{ name: string; bind: (id: AccountId, project: ProjectDto) => void }>([
+    {
+      name: 'a project created on it',
+      bind: (id) => {
+        seedProject(store, { accountId: id });
+      },
+    },
+    {
+      name: 'a project moved to it',
+      bind: (id, project) => store.write((ctx) => patchProject(ctx, project.id, { accountId: id })),
+    },
+    {
+      name: 'a project created with it as the backup',
+      bind: (id) => {
+        seedProject(store, { fallbackAccountId: id });
+      },
+    },
+    {
+      name: 'a project given it as the backup',
+      bind: (id, project) =>
+        store.write((ctx) => patchProject(ctx, project.id, { fallbackAccountId: id })),
+    },
+  ])('refuses $name', ({ bind }) => {
+    const project = seedProject(store);
+    const account = openRouter();
+    expect(() => {
+      bind(account.id, project);
+    }).toThrow(OPENROUTER_CANT_RUN_AGENTS);
+    expect(() => {
+      bind(account.id, project);
+    }).toThrow(InvalidError);
+  });
+
+  describe('this month', () => {
+    const call = (costUsd: number | null) =>
+      store.write((ctx) =>
+        insertJudgeCall(ctx, {
+          decision: 'review_size',
+          model: 'm',
+          state: '',
+          question: 'q',
+          answer: null,
+          confidence: null,
+          outcome: 'acted',
+          latencyMs: 1,
+          costUsd,
+          workstreamId: null,
+          taskId: null,
+        }),
+      );
+
+    it("is the month's decision dollars on the account decisions run on, and nothing on another", () => {
+      const runsDecisions = openRouter();
+      const other = openRouter('Spare');
+      store.write((ctx) => patchJudgeConfig(ctx, { accountId: runsDecisions.id }));
+      call(0.25);
+      call(null);
+      call(0.5);
+      now = new Date(2026, 8, 20);
+      call(9);
+      expect(accountUsage(store.db, runsDecisions.id, OCTOBER).total.costUsd).toBeCloseTo(0.75);
+      expect(accountUsage(store.db, other.id, OCTOBER).total.costUsd).toBeNull();
+    });
   });
 });

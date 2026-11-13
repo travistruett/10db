@@ -56,7 +56,7 @@ export function SmallProposalLimitSetting({ project }: { readonly project: Proje
               });
             }}
           >
-            Save proposal limit
+            Save Proposal Limit
           </Button>
         </Stack>
       </SettingRow>

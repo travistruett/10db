@@ -1,5 +1,6 @@
 import {
   mintId,
+  type AccountId,
   type JudgeDecision,
   type JudgeCallId,
   type JudgeOutcome,
@@ -66,16 +67,19 @@ export interface Judge {
 }
 
 export interface JudgeService extends Judge {
-  /** One tiny call on the review decision's model, to check the key and the connection. Logs nothing. */
-  test(): Promise<JudgeTestResultDto>;
+  /** One tiny call on the review decision's model with `account`'s key, to check the key and the connection. Logs nothing. */
+  test(account: AccountId): Promise<JudgeTestResultDto>;
 }
 
 export interface JudgeDeps {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly fetch: typeof fetch;
-  /** The builder's OpenRouter key, read fresh for every call; null when there is none. */
-  readonly readKey: () => Promise<string | null>;
+  /**
+   * The OpenRouter key of `accountId`, read fresh for every call; null when there is none: no account,
+   * an archived or other kind of account, or a secret that is missing or changed.
+   */
+  readonly readKey: (accountId: AccountId | null) => Promise<string | null>;
   /** The daemon was started with `TENDB_JUDGE=off`: no key is read and nothing is sent. */
   readonly off: boolean;
   readonly logger: Logger;
@@ -134,6 +138,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
   /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
   async function attempt(
     model: string,
+    accountId: AccountId | null,
     q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'criteria' | 'signal'>,
     timeoutMs: number,
   ): Promise<Attempt> {
@@ -153,7 +158,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     let key: string | null = null;
     try {
       // The key read is part of the call: a slow Keychain counts against the same timeout.
-      key = await untilAborted(deps.readKey(), controller.signal);
+      key = await untilAborted(deps.readKey(accountId), controller.signal);
       // A call cut short while the key was read sends nothing.
       controller.signal.throwIfAborted();
       if (key === null)
@@ -255,7 +260,12 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
 
-      const result = await attempt(model, req, deps.timeoutMs ?? JUDGE_TIMEOUT_MS);
+      const result = await attempt(
+        model,
+        config.accountId,
+        req,
+        deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
+      );
       if (result.kind === 'fallback')
         return fallback(result.reason, result.detail, result.latencyMs);
       const { answer } = result;
@@ -289,11 +299,12 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     }
   }
 
-  async function test(): Promise<JudgeTestResultDto> {
+  async function test(account: AccountId): Promise<JudgeTestResultDto> {
     if (deps.off) return { ok: false, error: 'This daemon was started with TENDB_JUDGE=off' };
     const model = getJudgeConfig(deps.state.db).decisions.review_size.model;
     const result = await attempt(
       model,
+      account,
       { state: TEST_STATE, question: TEST_QUESTION, options: TEST_OPTIONS },
       TEST_TIMEOUT_MS,
     );

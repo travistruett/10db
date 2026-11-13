@@ -13,7 +13,8 @@
         "anthropic_api_key",
         "bedrock",
         "gateway",
-        "codex_signin"
+        "codex_signin",
+        "openrouter"
       ]
     },
     "label": {
@@ -129,6 +130,11 @@
               }
             }
           },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {},
           "additionalProperties": false
         }
       ]

@@ -1,4 +1,4 @@
-import type { NextAction, TaskId, WorkstreamId } from '@10db/contracts';
+import { agentKind, type NextAction, type TaskId, type WorkstreamId } from '@10db/contracts';
 import {
   insertSystemNotice,
   listUndeliveredTaskMessages,
@@ -60,7 +60,11 @@ export async function readBackThread(
   const { action } = input;
   const thread = resumedSessionOf(action);
   const unchanged: ReadBack = { kind: 'read', action };
-  if (thread === null || !deps.adapter.capabilities(input.account, null).readBack) return unchanged;
+  if (
+    thread === null ||
+    !deps.adapter.capabilities({ kind: agentKind(input.account.kind) }, null).readBack
+  )
+    return unchanged;
   // Oldest first, so the first was written earliest.
   const inDoubt = listUndeliveredTaskMessages(deps.state.db, input.taskId).filter(
     (m) => m.pushUuids.length > 0,

@@ -12,20 +12,23 @@ function byline(account: AccountDto): string {
 export interface AccountSelectProps extends Omit<SelectProps, 'data' | 'renderOption'> {
   /** The accounts to offer; archived ones are left out. */
   readonly accounts: readonly AccountDto[];
+  /** Why an account can't be picked here, or null when it can; a refused account is listed, disabled, with the reason. */
+  readonly isDisabled?: (account: AccountDto) => string | null;
 }
 
 /**
  * An account picker: the field shows the account's name, and each option adds a byline with its
  * identity and kind, so a long email never crowds the name.
  */
-export function AccountSelect({ accounts, ...props }: AccountSelectProps) {
+export function AccountSelect({ accounts, isDisabled, ...props }: AccountSelectProps) {
   const offered = accounts.filter((a) => !a.archived);
   // Keyed by plain string: the option value Mantine hands back is unbranded.
   const byId = new Map<string, AccountDto>(offered.map((a) => [a.id, a]));
+  const refusal = (account: AccountDto): string | null => isDisabled?.(account) ?? null;
   return (
     <Select
       {...props}
-      data={offered.map((a) => ({ value: a.id, label: a.label }))}
+      data={offered.map((a) => ({ value: a.id, label: a.label, disabled: refusal(a) !== null }))}
       renderOption={({ option, checked }) => {
         const account = byId.get(option.value);
         return (
@@ -34,7 +37,7 @@ export function AccountSelect({ accounts, ...props }: AccountSelectProps) {
               <Text size="sm">{option.label}</Text>
               {account ? (
                 <Text size="xs" c="dimmed" truncate>
-                  {byline(account)}
+                  {refusal(account) ?? byline(account)}
                 </Text>
               ) : null}
             </Stack>

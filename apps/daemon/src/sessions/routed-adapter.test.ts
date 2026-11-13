@@ -2,8 +2,8 @@ import {
   AccountKind,
   mintId,
   providerOf,
-  SUPPORTED_ACCOUNT_KINDS,
-  type SupportedAccountKind,
+  AGENT_ACCOUNT_KINDS,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { codexCapabilities } from './capabilities';
@@ -71,7 +71,7 @@ function recording(name: string): AgentAdapter & { readonly calls: string[] } {
   };
 }
 
-const account = (kind: SupportedAccountKind) => ({
+const account = (kind: AgentAccountKind) => ({
   accountId: mintId('Account'),
   label: 'A',
   kind,
@@ -79,8 +79,8 @@ const account = (kind: SupportedAccountKind) => ({
 });
 
 /** Only the account matters to routing; the rest of a spec is the adapter's. */
-const asSession = (kind: SupportedAccountKind) => ({ account: account(kind) }) as LaneSessionSpec; // routing reads only `account`
-const asShape = (kind: SupportedAccountKind) => ({ account: account(kind) }) as ExploreSessionSpec; // routing reads only `account`
+const asSession = (kind: AgentAccountKind) => ({ account: account(kind) }) as LaneSessionSpec; // routing reads only `account`
+const asShape = (kind: AgentAccountKind) => ({ account: account(kind) }) as ExploreSessionSpec; // routing reads only `account`
 
 const CLAUDE_KINDS = [
   AccountKind.ClaudeSubscription,
@@ -99,7 +99,7 @@ const METHODS = [
   'readClientUuids',
 ] as const;
 
-async function callAll(adapter: AgentAdapter, kind: SupportedAccountKind): Promise<void> {
+async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<void> {
   adapter.open(asSession(kind));
   adapter.open(asShape(kind));
   adapter.capabilities({ kind }, null);
@@ -140,7 +140,7 @@ describe('createRoutedAdapter', () => {
     expect(probed.email).toBe('codex');
   });
 
-  it.each(SUPPORTED_ACCOUNT_KINDS)('asks the agent of %s what it can do', (kind) => {
+  it.each(AGENT_ACCOUNT_KINDS)('asks the agent of %s what it can do', (kind) => {
     const routed = createRoutedAdapter({ claude: recording('claude'), codex: recording('codex') });
     expect(routed.capabilities({ kind }, null).label).toBe(providerOf(kind));
   });

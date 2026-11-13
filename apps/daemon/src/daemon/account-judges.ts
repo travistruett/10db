@@ -2,6 +2,7 @@ import {
   isModelTier,
   JudgeKind,
   providerOf,
+  runsAgents,
   StepRole,
   type AccountJudgeDto,
 } from '@10db/contracts';
@@ -20,9 +21,12 @@ export function accountJudges(
   db: DbReader,
   adapter: Pick<AgentAdapter, 'capabilities'>,
 ): AccountJudgeDto[] {
-  return listAccounts(db).map((account) => {
+  // An OpenRouter account answers decisions only and never runs a session, so it has no judge.
+  return listAccounts(db).flatMap((account) => {
+    const kind = account.kind;
+    if (!runsAgents(kind)) return [];
     const choice = chooseModel({
-      ...routingInputs(db, { accountId: account.id, provider: providerOf(account.kind) }),
+      ...routingInputs(db, { accountId: account.id, provider: providerOf(kind) }),
       def: { role: StepRole.Implement, need: IMPLEMENT_NEED },
       persona: undefined,
       task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
@@ -32,9 +36,8 @@ export function accountJudges(
     });
     // A tier's name is what a choice says when the account offers no model for it.
     const model = isModelTier(choice.model) ? null : choice.model;
-    const judge = adapter.capabilities({ kind: account.kind }, model).judge;
-    const reason =
-      judge === JudgeKind.Rules ? floorReason({ kind: account.kind, model, autoMode: true }) : null;
+    const judge = adapter.capabilities({ kind }, model).judge;
+    const reason = judge === JudgeKind.Rules ? floorReason({ kind, model, autoMode: true }) : null;
     return {
       accountId: account.id,
       label: account.label,

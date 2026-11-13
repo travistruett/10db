@@ -90,6 +90,31 @@ describe('Shape: the implementer rehearsal and Convert', () => {
     expect(posted).toHaveLength(1);
   });
 
+  it('an imported Plan offers no rehearsal and names its tasks once', async () => {
+    const goal = goalProposal('brainstorm', ['one', 'two']);
+    const loose = looseTaskProposal('three');
+    const base = proposed([goal, loose], {
+      rehearsals: [...marks(goal, false), ...marks(loose, false)],
+    });
+    const view = { ...base, shape: { ...base.shape, importedAt: '2026-11-12T08:00:00.000Z' } };
+    const posted: unknown[] = [];
+    serve(
+      view,
+      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ status: 'started', tasks: 3 });
+      }),
+    );
+    open(view);
+    const dialog = await openConvert();
+    expect(
+      await within(dialog).findByText(/Imported tasks aren't rehearsed: 3 tasks/),
+    ).toBeTruthy();
+    expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
+    expect(posted).toHaveLength(0);
+  });
+
   it('does not rehearse a task that already has its mark', async () => {
     const goal = goalProposal('brainstorm', ['one']);
     const view = proposed([goal], { rehearsals: marks(goal, true) });

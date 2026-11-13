@@ -85,7 +85,7 @@ export function ScreensMatrixField({
               onChange({ ...value, viewports: [...value.viewports, { width: '', height: '' }] });
             }}
           >
-            Add viewport
+            Add Viewport
           </Button>
         </Group>
       ) : null}

@@ -37,6 +37,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { OpenConversation } from '../shape/open-conversation';
+import { PlanContextDisclosure } from './plan-context-disclosure';
 import { TaskSizeLine } from '../shape/task-size-line';
 import {
   useCloseTask,
@@ -291,6 +292,7 @@ export function TaskDrawer({
       size="min(640px, 50vw)"
       title="Task"
       padding="lg"
+      closeButtonProps={{ 'aria-label': 'Close' }}
     >
       <Stack gap="md">
         <Stack gap={4}>
@@ -433,6 +435,7 @@ export function TaskDrawer({
               ) : null}
               <TaskPictures taskId={task.id} />
               <TaskSizeLine taskId={task.id} />
+              <PlanContextDisclosure taskId={task.id} />
               {onOpenConversation ? (
                 <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
               ) : null}

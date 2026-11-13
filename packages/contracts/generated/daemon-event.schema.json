@@ -15,6 +15,7 @@
         "account.paused",
         "account.resumed",
         "account.login_ended",
+        "github.login_ended",
         "project.created",
         "task.created",
         "task.changed",

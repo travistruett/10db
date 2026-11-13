@@ -51,7 +51,7 @@ const DaemonEnv = z.object({
   // The file the model catalogue is read from when none is stored, instead of the one the release bundles.
   // A throwaway daemon that fetches nothing points it at a catalogue file so it still has model profiles.
   TENDB_CATALOGUE_SNAPSHOT: z.string().startsWith('/').optional(),
-  // `off` keeps the daemon from reading the OpenRouter key and from calling OpenRouter: every decision
+  // `off` keeps the daemon from reading an OpenRouter account's key and from calling OpenRouter: every decision
   // keeps today's rule. Set for every daemon that is not the installed app, as TENDB_BENCHMARKS is.
   TENDB_JUDGE: z.enum(['on', 'off']).optional(),
   // `off` keeps the daemon from reading the Slack bot token and from calling Slack: no question is sent

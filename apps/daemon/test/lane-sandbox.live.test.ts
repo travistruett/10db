@@ -26,6 +26,7 @@ import {
   type AreaDef,
   type InboxItemDto,
   type ProjectDto,
+  agentKind,
 } from '@10db/contracts';
 import { createTestStore, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
@@ -309,7 +310,7 @@ async function runLane(opts: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: defaultAccount.kind,
+    kind: agentKind(defaultAccount.kind),
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });

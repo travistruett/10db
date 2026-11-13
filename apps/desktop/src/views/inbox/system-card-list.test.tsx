@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { slackConnection } from '../../test/people-fixtures';
 
 const codex = (over: Partial<AgentCopy>): AgentCopy => ({
   tool: ToolName.Codex,
@@ -98,7 +99,7 @@ describe('10db cards in the Inbox', () => {
         },
       },
       title: 'Artificial Analysis refused the key',
-      body: /Replace the key in the Keychain; the next sync reads it/,
+      body: /Replace the key in Settings › Integrations\./,
     },
   ])('says what to do about $name', async ({ check, title, body }) => {
     serveCheck(() => check);
@@ -106,6 +107,38 @@ describe('10db cards in the Inbox', () => {
     expect(await screen.findByText(title)).toBeTruthy();
     expect(screen.getByText(body)).toBeTruthy();
     expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+  });
+
+  it.each([
+    {
+      name: 'a refused Artificial Analysis key',
+      serve: () => {
+        serveCheck(() => ({
+          benchmarkSync: { outcome: 'unauthorized' as const, message: 'AA refused the key' },
+        }));
+      },
+      focus: 'artificial-analysis',
+    },
+    {
+      name: 'a refused Slack token',
+      serve: () => {
+        serveCheck(() => ({}));
+        server.use(
+          http.get(daemonUrl('/slack'), () =>
+            HttpResponse.json(slackConnection({ state: 'refused' })),
+          ),
+        );
+      },
+      focus: 'slack',
+    },
+  ])('opens the card in Integrations from $name', async ({ serve, focus }) => {
+    serve();
+    const { router } = renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('link', { name: 'Open Integrations' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/settings/integrations');
+    });
+    expect(router.state.location.search).toEqual({ focus });
   });
 
   it('puts nothing above a view for a newer release or a version warning', async () => {

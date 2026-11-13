@@ -39,6 +39,13 @@ import {
 } from './plan-bundle';
 import { AnchorCheckDto, PlanAnchor, PlanContext, PlanRef, SectionIndexEntry } from './plan-record';
 import {
+  PlanDocumentRevisionDto,
+  PlanRecordDto,
+  PlanRecordPage,
+  PlanRecordQuery,
+  TaskPlanContextDto,
+} from './plan-record-view';
+import {
   PassCloseAnswerDto,
   PassCloseContinueDto,
   PassClosePreviewDto,
@@ -78,14 +85,9 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
-import {
-  JudgeCallDto,
-  JudgeConfigPatch,
-  JudgeKeyInput,
-  JudgeStatusDto,
-  JudgeTestResultDto,
-} from './judge';
+import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import { GithubSigninDto, GithubStatusDto } from './github';
+import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
@@ -312,10 +314,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
+  'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'github-signin-dto': GithubSigninDto,
+  'github-status-dto': GithubStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
-  'judge-key-input': JudgeKeyInput,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,
   'board-column-delete': BoardColumnDelete,
@@ -434,6 +438,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'section-index-entry': SectionIndexEntry,
   'anchor-check-dto': AnchorCheckDto,
   'plan-context': PlanContext,
+  'plan-record-dto': PlanRecordDto,
+  'plan-document-revision-dto': PlanDocumentRevisionDto,
+  'plan-record-query': PlanRecordQuery,
+  'plan-record-page': PlanRecordPage,
+  'task-plan-context-dto': TaskPlanContextDto,
   'task-file-dto': TaskFileDto,
   'task-message-dto': TaskMessageDto,
   'task-message-input': TaskMessageInput,

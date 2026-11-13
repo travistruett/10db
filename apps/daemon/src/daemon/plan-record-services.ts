@@ -9,6 +9,10 @@ import {
   loadStoredRecord,
   planImportChanges,
   readBundleFile,
+  readPlanRecord,
+  readPlanRecordPage,
+  readPlanRevision,
+  readTaskPlanContext,
   validateBundle,
 } from '../plan-record';
 
@@ -23,6 +27,12 @@ export function createPlanRecordServices(deps: {
   readonly sandboxRoots: readonly string[];
 }): PlanRecordServices {
   return {
+    getPlanRecord: (shapeId) => readPlanRecord(deps.state.db, shapeId),
+    getPlanRevision: (shapeId, documentId, number) =>
+      readPlanRevision(deps.state.db, shapeId, documentId, number),
+    getPlanRecordPage: (shapeId, list, query) =>
+      readPlanRecordPage(deps.state.db, shapeId, list, query),
+    getTaskPlanContext: (taskId) => readTaskPlanContext(deps.state.db, taskId),
     async exportPlan(shapeId: ShapeId, input: PlanExportInput) {
       getShape(deps.state.db, shapeId);
       return await exportPlan(

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
+import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
 import { createTestStore, insertShape, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
@@ -89,7 +89,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: account.kind,
+      kind: agentKind(account.kind),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -141,7 +141,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       projectId: project.id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
-      accountKind: account.kind,
+      accountKind: agentKind(account.kind),
       env: launch.env,
       resumeProviderSessionId: null,
       signal: new AbortController().signal,

@@ -33,7 +33,7 @@ import {
   type ShapeViewDto,
   type SessionId,
   type StartShapeInput,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { buildTrustPolicy, projectLiveSystems } from '../trust';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -193,7 +193,7 @@ export interface ShapePrepareInput {
   readonly shapeId: ShapeId;
   readonly sessionId: SessionId;
   /** The kind of the account the session runs on, which names where its login is kept. */
-  readonly accountKind: SupportedAccountKind;
+  readonly accountKind: AgentAccountKind;
   /** The session's launch env, which the sandbox and the project's servers are built from. */
   readonly env: Readonly<Record<string, string>>;
   readonly resumeProviderSessionId: string | null;

@@ -3,6 +3,7 @@ import {
   KeepAwakeStatus,
   LanePermissionsDto,
   PicturesStatusDto,
+  PlanRecordDto,
   PROTOCOL_VERSION,
   SelfUpdateStatusDto,
   SystemCheckDto,
@@ -26,6 +27,7 @@ import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
+import { githubStatusDto } from './github-fixtures';
 import { projectViewDto } from './fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
 
@@ -70,6 +72,8 @@ export function baseHandlers(
     }),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
+    // Settings › Integrations reads gh's login; signed in, no Sign In running.
+    http.get(daemonUrl('/github', base), () => HttpResponse.json(githubStatusDto())),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),
@@ -112,6 +116,24 @@ export function baseHandlers(
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    // A task's drawer asks what its lane got of a Plan; a task filed by hand has none.
+    http.get(daemonUrl('/tasks/:taskId/plan-context', base), () =>
+      HttpResponse.json({ context: null, packed: null, checks: [] }),
+    ),
+    // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
+    http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>
+      HttpResponse.json(
+        PlanRecordDto.parse({
+          shapeId: params['shapeId'],
+          projectId: BASE_PROJECT.id,
+          title: 'Board polish',
+          importedAt: null,
+          origin: null,
+          documents: [],
+          counts: { decisions: 0, evidence: 0, reviews: 0, questions: 0, tasks: 0 },
+        }),
+      ),
+    ),
     // A task's thread and drawer show its pictures of the app; none taken.
     http.get(daemonUrl('/tasks/:taskId/screens', base), ({ params }) =>
       HttpResponse.json(

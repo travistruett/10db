@@ -1,4 +1,4 @@
-import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type AgentAccountKind } from '@10db/contracts';
 
 /** A model Claude Code can be launched on by alias; each resolves to a current model on the plan and the API. */
 const ALIASES = new Set(['opus', 'sonnet', 'haiku', 'fable', 'default', 'best']);
@@ -44,7 +44,7 @@ function meetsFloor(model: string, floors: Floors): boolean {
  * Whether Claude Code's auto mode runs on the kind and model (research §4, "Availability"). An id it
  * can't read, and every kind auto mode doesn't run on, is false: the session falls back to the rules.
  */
-export function autoModeRuns(kind: SupportedAccountKind, model: string | null): boolean {
+export function autoModeRuns(kind: AgentAccountKind, model: string | null): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey: {

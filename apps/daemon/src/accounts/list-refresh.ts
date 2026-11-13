@@ -1,4 +1,4 @@
-import { SUPPORTED_ACCOUNT_KINDS, type AccountId } from '@10db/contracts';
+import { runsAgents, type AccountId } from '@10db/contracts';
 import { getAccountRow, listAccountModels, listAccounts } from '@10db/db';
 import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
@@ -59,6 +59,8 @@ export function createListRefresh(deps: {
 
   async function probeAndRecord(id: AccountId): Promise<void> {
     const row = getAccountRow(db, id);
+    // An OpenRouter account lists no models and runs no agent: there is nothing to probe.
+    if (!runsAgents(row.kind)) return;
     const launch = deps.launcher.probe(row);
     const release = await deps.startGate.acquire(id);
     let seen: SeenAccount;
@@ -71,7 +73,8 @@ export function createListRefresh(deps: {
     } finally {
       release();
     }
-    if (checkAccount(launch.expect, seen) === null) deps.lists.record(row, seen);
+    if (checkAccount(launch.expect, seen) === null)
+      deps.lists.record({ id: row.id, kind: row.kind }, seen);
   }
 
   function readOne(id: AccountId): Promise<void> {
@@ -95,7 +98,7 @@ export function createListRefresh(deps: {
     async readAll({ staleOnly = false } = {}) {
       for (const account of listAccounts(db)) {
         if (stopped) return;
-        if (!SUPPORTED_ACCOUNT_KINDS.some((kind) => kind === account.kind)) continue;
+        if (!runsAgents(account.kind)) continue;
         if (staleOnly && !stale(account.id)) continue;
         await readOne(account.id);
       }
