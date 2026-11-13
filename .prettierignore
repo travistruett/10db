@@ -1,5 +1,7 @@
 pnpm-lock.yaml
 **/generated/
+# Written by `pnpm --filter @10db/daemon generate:codex`, byte for byte as the pinned Codex prints it.
+apps/daemon/src/sessions/codex-generated/
 packages/db/drizzle/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/

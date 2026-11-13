@@ -115,7 +115,7 @@ export function PassHeader(props: PassHeaderProps) {
           {signedOff ? pullRequest : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
-              <ActionIcon variant="subtle" color="gray" aria-label="More pass actions">
+              <ActionIcon variant="subtle" color="gray" aria-label="More actions">
                 <IconDots size={16} stroke={1.5} />
               </ActionIcon>
             </Menu.Target>
@@ -123,20 +123,20 @@ export function PassHeader(props: PassHeaderProps) {
               {onClose ? (
                 <MenuAction
                   label="Finish"
-                  byline="Ship the signed-off pages and end the pass."
+                  byline="Ship the signed-off pages as one pull request."
                   disabled={!open}
                   onClick={onClose}
                 />
               ) : null}
               <MenuAction
                 label="Rename"
-                byline="Change the pass's name."
+                byline="Change the name at the top."
                 disabled={!open}
                 onClick={onRename}
               />
               <MenuAction
                 label="Abandon"
-                byline="Put unfinished pages back. Their work is saved."
+                byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
                 color="red"
                 disabled={!abandonable}
                 onClick={onAbandon}

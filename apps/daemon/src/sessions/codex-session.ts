@@ -29,6 +29,7 @@ import {
   HooksListResponse,
   InitializeResponse,
   RateLimitsReadResponse,
+  SkillsExtraRootsResponse,
   ThreadResponse,
   TurnCompleted,
   TurnStarted,
@@ -458,12 +459,30 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     error.code !== CLIENT_ERROR_CODE &&
     refusesModel(error.message);
 
+  /**
+   * The setup's skill folders, listed by this session's own app-server before its thread starts (live
+   * check L4: `skills.config` adds no folders). A root Codex refuses ends the start with no prompt.
+   */
+  const setSkillRoots = async (): Promise<void> => {
+    const roots = spec.setup?.skillRoots ?? [];
+    if (roots.length === 0) return;
+    try {
+      await ask('skills/extraRoots/set', { extraRoots: [...roots] }, SkillsExtraRootsResponse);
+    } catch (error) {
+      if (error instanceof CodexRpcError || error instanceof CallTimeout)
+        throw sandboxRefused("Codex refused the session's skill folders.");
+      throw error;
+    }
+  };
+
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const params = {
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
       config: codexThreadConfig(spec),
+      // Codex loads no AGENTS.md under `untrusted` (L4): the instructions travel with the thread.
+      ...(spec.instructions ? { developerInstructions: spec.instructions } : {}),
     };
     const resumeId = spec.resumeProviderSessionId;
     let thread;
@@ -844,6 +863,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     await verifyAccount();
     await checkProjectLayer();
     await checkGuardHook(home);
+    await setSkillRoots();
     const thread = await startThread();
 
     threadId = thread.thread.id;

@@ -189,6 +189,19 @@ export interface LaneProfileInput {
   sandboxRoots: readonly string[];
   /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
   ownFiles: readonly string[];
+  /**
+   * The builder's skill and plugin folders a session's setup opens read-only, each judged by
+   * `setupReadRefusal` and collapsed. They open past the protected reads, never past a secret file, a
+   * toolchain secret or a sandbox root, and never for writing; a deny inside one still wins in srt.
+   */
+  setupReads: readonly string[];
+  /**
+   * The `.env*` files and folders, `.git` folders and link targets found inside the setup reads.
+   * Denied as `secretFiles` are, but a folder among them is never refused for lying inside a system or
+   * toolchain location: it sits inside a setup folder that only this setup opens, and holds nothing a
+   * lane command needs.
+   */
+  setupSecrets: readonly string[];
   loopback: boolean;
   /**
    * Docker engine sockets the profile lets commands connect to, from `dockerAccess`; none unless the
@@ -216,6 +229,22 @@ function isDirectory(path: string): boolean {
     return lstatSync(path).isDirectory();
   } catch {
     return false;
+  }
+}
+
+/**
+ * A setup secret that holds what every lane command needs would leave a lane whose commands fail with
+ * no reason given, so the session is refused, naming it.
+ */
+function refuseSetupSecretsOverNeeds(secrets: readonly string[], needed: readonly string[]): void {
+  const neededSpellings = [...SYSTEM_READS, ...needed.flatMap(spellings)];
+  for (const secret of secrets) {
+    const held = neededSpellings.find((path) => isEqualOrUnder(path, secret));
+    if (held !== undefined)
+      throw new SandboxProfileError(
+        'setupSecrets',
+        `a .env* or .git entry in an opened setup folder leads to ${secret}, which holds ${held} that every lane command needs; remove the link or point it at a file`,
+      );
   }
 }
 
@@ -315,10 +344,16 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   }
   const laneReads = [input.tmpDir, checkout, ...input.toolchainReads, ...input.extraReads];
   refuseSecretsOverNeeds(input.secretFiles, laneReads, input.toolchainReads);
+  refuseSetupSecretsOverNeeds(input.setupSecrets, laneReads);
   refuseToolchainSecretsOverNeeds(input.toolchainSecrets, laneReads);
   refuseWritesOverSandboxRoots([checkout, ...input.extraWrites], input.sandboxRoots);
   const needed = [...SYSTEM_READS, ...laneReads];
-  const denied = [...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets];
+  const denied = [
+    ...input.protectedReads,
+    ...input.secretFiles,
+    ...input.setupSecrets,
+    ...input.toolchainSecrets,
+  ];
   const own = [input.tmpDir, ...input.ownFiles];
   const inSandboxRoot = (path: string): boolean =>
     input.sandboxRoots.some((root) => isEqualOrUnder(path, root)) &&
@@ -329,6 +364,13 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const readable = [...needed, ...input.readList]
     .filter(isAllowed)
     .filter((path) => !holdsSandboxRoot(path, input.sandboxRoots));
+  const secrets = [...input.secretFiles, ...input.setupSecrets, ...input.toolchainSecrets];
+  const setupReads = input.setupReads.filter(
+    (path) =>
+      !secrets.some((secret) => isEqualOrUnder(path, secret)) &&
+      !inSandboxRoot(path) &&
+      !holdsSandboxRoot(path, input.sandboxRoots),
+  );
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
   // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
@@ -348,9 +390,10 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
         ...input.protectedReads,
         ...input.sandboxRoots,
         ...input.secretFiles,
+        ...input.setupSecrets,
         ...input.toolchainSecrets,
       ],
-      allowRead: [...readable, ...listings],
+      allowRead: [...readable, ...listings, ...setupReads],
       allowWrite: writable,
       denyWrite: [...input.denyWrites],
     },

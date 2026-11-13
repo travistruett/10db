@@ -217,6 +217,14 @@ import {
   McpServerStatusDto,
   SystemCheckDto,
 } from './system';
+import {
+  InstalledPluginDto,
+  ProjectTrustDto,
+  SetupPreviewDto,
+  TrustOverrides,
+  TrustSettingsDto,
+  TrustSwitches,
+} from './trust';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
@@ -274,6 +282,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'self-update-status-dto': SelfUpdateStatusDto,
   'self-update-wait-input': SelfUpdateWaitInput,
   'lane-permissions-dto': LanePermissionsDto,
+  'trust-switches': TrustSwitches,
+  'trust-overrides': TrustOverrides,
+  'trust-settings-dto': TrustSettingsDto,
+  'project-trust-dto': ProjectTrustDto,
+  'setup-preview-dto': SetupPreviewDto,
+  'installed-plugin-dto': InstalledPluginDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,

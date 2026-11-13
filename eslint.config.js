@@ -13,6 +13,7 @@ export default defineConfig(
     '**/node_modules/**',
     '**/dist/**',
     '**/generated/**',
+    'apps/daemon/src/sessions/codex-generated/**',
     'packages/db/drizzle/**',
     'apps/desktop/src-tauri/target/**',
     'apps/desktop/src-tauri/resources/**',

@@ -196,7 +196,19 @@ import {
   reopenSignedOffPage,
   type PassWorkDeps,
 } from '../pass';
-import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
+import {
+  allowedToolsFor,
+  laneAutoMode,
+  storableRule,
+  trustSwitchesFor,
+  warnInvalidTrust,
+} from '../permissions';
+import {
+  leftOutNote,
+  loadedLine,
+  planSessionSetup,
+  projectInstructionsLoaded,
+} from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
 import { resolveStep } from './resolve-step';
@@ -208,9 +220,11 @@ import {
   type LaneSession,
 } from '../sandbox';
 import {
+  nativeJudge,
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
+  type LanePermissionMode,
   type SessionAdapter,
   type SessionHandle,
   type TurnResult,
@@ -368,6 +382,10 @@ export interface RunnerOptions {
   readonly codexLaneTempRoot: string;
   /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
   readonly worktreeRoot: string;
+  /** The builder's home, whose instructions, skills and plugins come along into each session (Settings › Trust). */
+  readonly builderHome: string;
+  /** The roots lanes write outside their checkouts (their temp roots): no setup comes along from them. */
+  readonly laneWritableRoots: readonly string[];
   /**
    * While this holds (the Mac is overloaded, or an update drains the factory) no session or task gate
    * starts: each waits here, before anything is built or launched and before a gate takes its batch's
@@ -2049,6 +2067,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? (resumed?.briefed ?? false)
       : briefedFromHandoff(action, contextPack.handoff, evidence);
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
+    // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
+    // Read before the start slot is taken, so nothing it throws can hold the slot.
+    const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
+    const setupPlan = planSessionSetup({
+      home: opts.builderHome,
+      checkout,
+      switches,
+      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+    });
     // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
     const releaseStart =
       account.kind === AccountKind.ClaudeSubscription
@@ -2060,6 +2087,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
+          setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
           rules: listPermissionRules(db, project.id, id),
@@ -2092,6 +2120,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    const setupLeftOut = [...setupPlan.leftOut, ...(laneSession?.setup.leftOut ?? [])];
+    if (setupLeftOut.length > 0)
+      opts.logger.info({ workstreamId: id, leftOut: setupLeftOut }, 'session setup left out');
+    const setupNote = leftOutNote(setupLeftOut);
+    // Only a sandboxed lane runs in auto mode, read from the app-wide setting as each session starts.
+    const lanePermissionMode: LanePermissionMode | null =
+      laneSession === null
+        ? null
+        : laneAutoMode(db, (stored) => {
+              opts.logger.warn(
+                { stored },
+                'the lane auto mode setting is not a boolean; using default mode',
+              );
+            })
+          ? 'auto'
+          : 'default';
+    // Where auto mode judges the web, WebSearch and WebFetch go to its classifier instead of a card.
+    const webJudged = switches.web && nativeJudge(account.kind, lanePermissionMode);
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -2163,6 +2209,18 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
+      instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
+      webJudged,
+      setupLine:
+        laneSession === null
+          ? null
+          : loadedLine({
+              provider,
+              skills: laneSession.setup.loaded.skills,
+              plugins: laneSession.setup.loaded.plugins,
+              projectFiles: setupPlan.input.projectFiles,
+              leftOut: setupLeftOut,
+            }),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
       renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
@@ -2390,7 +2448,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         workstreamId: id,
         sequence: session.sequence,
         cwd: checkout,
-        prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
         ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
         model: launch.model,
         effort: launchStep.effort,
@@ -2399,18 +2457,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        instructions: setupPlan.instructions.text,
         ...(laneSession
           ? {
-              lanePermissionMode: laneAutoMode(db, (stored) => {
-                opts.logger.warn(
-                  { stored },
-                  'the lane auto mode setting is not a boolean; using default mode',
-                );
-              })
-                ? 'auto'
-                : 'default',
+              setup: {
+                plugins: laneSession.setup.pluginDirs,
+                skillRoots: laneSession.setup.skillRoots,
+              },
             }
           : {}),
+        ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
         allowedTools: allowedToolsFor(
           project,
           step.tools,
@@ -2437,6 +2493,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
+            webJudged,
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },

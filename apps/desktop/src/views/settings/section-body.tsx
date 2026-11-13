@@ -18,10 +18,12 @@ import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
+import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsSectionKey } from './sections';
 import { RoleSettings } from './role-settings';
 import { SelfUpdateSection } from './self-update-section';
 import { ShapeJevSetting } from './shape-jev-setting';
+import { TrustSection } from './trust-section';
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -93,6 +95,20 @@ export function SectionBody({
         <>
           {heading}
           <PeopleSection />
+        </>
+      );
+    case SettingsSectionKey.ProjectTrust:
+      return (
+        <>
+          {heading}
+          {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Trust:
+      return (
+        <>
+          {heading}
+          <TrustSection />
         </>
       );
     case SettingsSectionKey.KeepAwake:

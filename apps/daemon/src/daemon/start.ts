@@ -91,6 +91,7 @@ import {
   sweepDrafts,
 } from '../stakeholders';
 import { createSlackClient, type SlackClient } from '../slack';
+import { createTrustServices } from './trust-services';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -326,6 +327,11 @@ export interface DaemonOptions {
    * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
    */
   readonly worktreeRoot?: string;
+  /**
+   * The builder's home, whose instructions, skills and installed plugins come along into each session
+   * (Settings › Trust). Defaults to the user's home; tests give a temp one.
+   */
+  readonly builderHome?: string;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -537,6 +543,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // policy opens to every ChatGPT lane. With no sandbox no lane runs, so none is.
   const laneWrittenRoots = sandboxRoots === null ? [] : laneWrittenRootsOf(sandboxRoots);
   const allSandboxRoots = sandboxRoots === null ? [] : allSandboxRootsOf(sandboxRoots);
+  const builderHome = opts.builderHome ?? homedir();
   // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
   // the daemon's own is refused before anything else starts.
   let worktreeRoot: string;
@@ -848,7 +855,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // is neither swept nor claimed.
   const claimedRoots =
     sandboxRoots?.refusal === null
-      ? claimSandboxRoots([sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files])
+      ? claimSandboxRoots({
+          temps: [sandboxRoots.temp, sandboxRoots.codexLanes],
+          files: sandboxRoots.files,
+        })
       : null;
   // Off the event loop and never waited on by a start: `tmutil` can be slow, and a root it could
   // not exclude costs backup space, not a lane. `stop()` ends what still runs.
@@ -933,7 +943,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? sandboxesFor(sandboxRoots, {
           lane: () =>
             createLaneSandbox({
-              home: homedir(),
+              // The home the setup is found in is the one its paths are judged and named by.
+              home: builderHome,
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
               loginCodexHome: launcher.loginCodexHome(),
@@ -1356,6 +1367,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             protectedPaths: guarded,
             projectEnv: () => launcher.projectEnv(),
             exportAwsCredentials,
+            builderHome,
+            laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
           }),
         }),
     models(projectId) {
@@ -1406,6 +1419,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     laneSandbox,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
+    builderHome,
+    laneWritableRoots: allSandboxRoots,
     hold: startHold,
     laneTempDirs,
     state,
@@ -1792,6 +1807,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
+    trust: createTrustServices({
+      state,
+      builderHome,
+      laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+      laneSandbox,
+      log: logger.child({ component: 'trust' }),
+    }),
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,

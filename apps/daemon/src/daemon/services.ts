@@ -156,6 +156,7 @@ import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
+import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
 import { gateCallsDocker } from './docker-need';
@@ -235,6 +236,8 @@ export function createServices(deps: {
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
+  /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
+  readonly trust: TrustServices;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
@@ -660,6 +663,7 @@ export function createServices(deps: {
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
     ...deps.stakeholders,
+    ...deps.trust,
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
     ...deps.knowledge,

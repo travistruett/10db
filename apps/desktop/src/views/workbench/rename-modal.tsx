@@ -22,7 +22,7 @@ export function RenameModal({ pass, onClose, rename }: RenameModalProps) {
   const submit = () => {
     const body = PassRename.safeParse({ name: name.trim() });
     if (!body.success) {
-      setFieldError(name.trim() === '' ? 'Name the pass' : 'A name is one line of text');
+      setFieldError(name.trim() === '' ? 'Enter a name' : 'A name is one line of text');
       return;
     }
     setFieldError(null);
@@ -32,7 +32,7 @@ export function RenameModal({ pass, onClose, rename }: RenameModalProps) {
     <FormModal
       opened
       onClose={onClose}
-      title="Rename Pass"
+      title="Rename"
       size="md"
       error={saving.error?.message ?? null}
       actions={

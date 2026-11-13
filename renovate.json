@@ -52,7 +52,8 @@
       "matchPackageNames": ["@openai/codex"],
       "groupName": "Codex CLI",
       "prBodyNotes": [
-        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
+        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it.",
+        "Then, on a Mac, run `pnpm --filter @10db/daemon generate:codex` and commit `apps/daemon/src/sessions/codex-generated/`: the drift check fails until its STAMP names this release."
       ]
     },
     {

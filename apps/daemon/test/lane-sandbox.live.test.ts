@@ -55,6 +55,7 @@ import {
   laneTempRoot,
   removeLaneTempDir,
   type LaneSession,
+  type SetupInput,
   type StdioMcpServer,
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
@@ -73,7 +74,7 @@ function claimRootsWhileRunning(): void {
   let claim: ReturnType<typeof claimSandboxRoots> | null = null;
   beforeAll(() => {
     const roots = sandboxRoots();
-    claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+    claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
   });
   afterAll(() => {
     claim?.release();
@@ -271,6 +272,8 @@ async function runLane(opts: {
   readonly areas?: readonly AreaDef[];
   /** The claims the lane holds; none unless given. */
   readonly claims?: readonly { readonly kind: ClaimKind; readonly name: string }[];
+  /** What comes along into the session, as the runner plans it. */
+  readonly setup?: SetupInput;
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
   const claudePath = await ensureAgent(AgentTool.Claude);
@@ -356,6 +359,7 @@ async function runLane(opts: {
       configDir,
       checkouts: [opts.checkout],
       mcpServers: opts.mcpServers ?? {},
+      ...(opts.setup === undefined ? {} : { setup: opts.setup }),
     });
     const lane = laneSession;
     const envFile = lane.spec.env['CLAUDE_ENV_FILE'];
@@ -419,6 +423,7 @@ async function runLane(opts: {
       account: launch.expect,
       projectMcpServers: lane.mcpServers,
       sandbox: lane.spec,
+      setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
       allowedTools: [
         ...allowedToolsFor(run.project, ToolAccess.Edit, {
           sandboxed: { checkout: opts.checkout },
@@ -911,6 +916,83 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       expect(existsSync(join(checkout, 'mcp-wrote'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
+
+describe.skipIf(!live)('lane sandbox with the setup, live', () => {
+  claimRootsWhileRunning();
+  it("reads an opened skill and none of ~/.claude beside it, with Claude Code's own sandbox", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    // Two levels into the home, as a builder's own skills folder is: a skill directly in it is refused.
+    const skills = realpathSync(mkdtempSync(join(homedir(), '10db-live-skills-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      const mark = `SKILL-MARK-${randomUUID()}`;
+      const skill = join(skills, 'live-skill');
+      mkdirSync(skill);
+      writeFileSync(
+        join(skill, 'SKILL.md'),
+        `---\nname: live-skill\ndescription: the live check\n---\n\n${mark}\n`,
+      );
+      writeFileSync(join(skill, 'run.sh'), `#!/bin/sh\necho ran-${mark}\n`);
+      const secret = plant('skill-env', join(skill, '.env'));
+      const run = await runLane({
+        checkout,
+        dataDir,
+        extraEnv: {},
+        setup: {
+          skills: [{ name: 'live-skill', path: skill, skillFile: join(skill, 'SKILL.md') }],
+          plugins: [],
+          projectFiles: [],
+        },
+        probe: ({ tmpDir }) =>
+          [
+            `exec > '${tmpDir}/probe-out' 2>&1`,
+            `cat '${join(skill, 'SKILL.md')}' > /dev/null 2>&1 && echo read-skill=ok || echo read-skill=denied`,
+            `sh '${join(skill, 'run.sh')}' > /dev/null 2>&1 && echo run-skill=ok || echo run-skill=denied`,
+            `cat '${secret.path}' > /dev/null 2>&1 && echo read-skill-env=ok || echo read-skill-env=denied`,
+            `ls "$HOME/.claude" > /dev/null 2>&1 && echo list-claude=ok || echo list-claude=denied`,
+            `cat "$HOME/.claude.json" > /dev/null 2>&1 && echo read-claude-json=ok || echo read-claude-json=denied`,
+            `touch '${join(skill, 'x')}' 2>/dev/null && echo write-skill=ok || echo write-skill=denied`,
+            '',
+          ].join('\n'),
+        prompt: [
+          'This is a sandbox check. Do exactly these steps in order and nothing else:',
+          '1. Run this Bash command: bash probe.sh',
+          `2. Use the Read tool on ${join(skill, 'SKILL.md')}`,
+          `3. Use the Read tool on ${join(homedir(), '.claude', 'settings.json')}`,
+          'Some steps will be refused; that is expected. Never retry a step or try another way.',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('setup', run, [secret]);
+      for (const probe of [
+        'read-skill=ok',
+        'run-skill=ok',
+        'read-skill-env=denied',
+        'list-claude=denied',
+        'read-claude-json=denied',
+        'write-skill=denied',
+      ])
+        expect.soft(run.probeOutput, probe).toContain(probe);
+      // The file tools read the opened skill and refuse ~/.claude beside it.
+      const reads = run.calls.filter((call) => call.name === 'Read');
+      expect(
+        reads.find((call) => pathOf(call.input) === join(skill, 'SKILL.md'))?.output,
+      ).toContain(mark);
+      const settings = reads.find(
+        (call) => pathOf(call.input) === join(homedir(), '.claude', 'settings.json'),
+      );
+      expect(settings?.isError).toBe(true);
+      expect(run.transcript).not.toContain(secret.token);
+      expect(existsSync(join(skill, 'x'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(skills, { recursive: true, force: true });
     }
   }, 300_000);
 });

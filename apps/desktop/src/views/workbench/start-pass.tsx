@@ -97,7 +97,7 @@ export function StartPass(props: StartPassProps) {
             onStart(openRequest(ticks, bothering, goalId));
           }}
         >
-          Start Pass
+          Start
         </Button>
       </Group>
     </Stack>

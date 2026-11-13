@@ -95,8 +95,103 @@ describe('readAccess', () => {
     setup?: () => void;
     path: () => string;
     context?: () => Partial<FileAccessContext>;
+    /** A search or listing of the path as a directory. */
+    tree?: boolean;
     expected: ReadAccess;
   }[] = [
+    {
+      name: 'a file in a setup read under ~/.claude is allowed',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's'), { recursive: true });
+        writeFileSync(join(configDir, 'skills', 's', 'SKILL.md'), '');
+      },
+      path: () => join(configDir, 'skills', 's', 'SKILL.md'),
+      context: () => ({ setupReads: [join(configDir, 'skills')] }),
+      expected: 'allowed',
+    },
+    {
+      name: 'a search of a setup read under ~/.claude is allowed',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's'), { recursive: true });
+      },
+      path: () => join(configDir, 'skills'),
+      context: () => ({ setupReads: [join(configDir, 'skills')] }),
+      tree: true,
+      expected: 'allowed',
+    },
+    {
+      name: 'a secret file inside a setup read is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's'), { recursive: true });
+        writeFileSync(join(configDir, 'skills', 's', '.env'), 'TOKEN=x');
+      },
+      path: () => join(configDir, 'skills', 's', '.env'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      expected: 'protected',
+    },
+    {
+      name: 'a search of a setup read holding a secret file is refused',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's'), { recursive: true });
+        writeFileSync(join(configDir, 'skills', 's', '.env'), 'TOKEN=x');
+      },
+      path: () => join(configDir, 'skills'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      tree: true,
+      expected: 'contains-protected',
+    },
+    {
+      name: 'a file inside a secret directory in a setup read is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's', '.env'), { recursive: true });
+        writeFileSync(join(configDir, 'skills', 's', '.env', 'prod'), 'TOKEN=x');
+      },
+      path: () => join(configDir, 'skills', 's', '.env', 'prod'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      expected: 'protected',
+    },
+    {
+      name: 'a search of a folder inside a secret directory in a setup read is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's', '.env', 'keys'), { recursive: true });
+      },
+      path: () => join(configDir, 'skills', 's', '.env', 'keys'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      tree: true,
+      expected: 'protected',
+    },
+    {
+      name: 'a file beside a setup read in ~/.claude is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills'), { recursive: true });
+        writeFileSync(join(configDir, 'settings.json'), '{}');
+      },
+      path: () => join(configDir, 'settings.json'),
+      context: () => ({ setupReads: [join(configDir, 'skills')] }),
+      expected: 'protected',
+    },
+    {
+      name: 'a link from a setup read to ~/.claude.json is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's'), { recursive: true });
+        symlinkSync(join(home, '.claude.json'), join(configDir, 'skills', 's', 'x'));
+      },
+      path: () => join(configDir, 'skills', 's', 'x'),
+      context: () => ({ setupReads: [join(configDir, 'skills')] }),
+      expected: 'protected',
+    },
     {
       name: 'a file in the checkout',
       path: () => join(checkout, 'src', 'a.ts'),
@@ -453,7 +548,7 @@ describe('readAccess', () => {
   for (const row of rows) {
     it.skipIf(row.darwinOnly === true && process.platform !== 'darwin')(row.name, () => {
       row.setup?.();
-      const result = readAccess(row.path(), context(row.context?.()));
+      const result = readAccess(row.path(), context(row.context?.()), row.tree ?? false);
       expect(result.access).toBe(row.expected);
     });
   }

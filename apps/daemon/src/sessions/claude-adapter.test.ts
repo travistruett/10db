@@ -37,6 +37,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
+import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { CompletionError, type SessionEvent, type SessionSpec } from './types';
@@ -521,6 +522,55 @@ describe('buildQueryOptions', () => {
       strictMcpConfig: true,
       plugins: [{ type: 'local', path: '/harness' }],
     });
+  });
+
+  it("passes the setup's plugin dirs after the harness", () => {
+    const options = buildQueryOptions(
+      spec({
+        sandbox: laneSandbox,
+        setup: { plugins: ['/s/yours', '/s/plugins/p'], skillRoots: [] },
+      }),
+      deps,
+    );
+    expect(options.plugins).toEqual([
+      { type: 'local', path: '/harness' },
+      { type: 'local', path: '/s/yours' },
+      { type: 'local', path: '/s/plugins/p' },
+    ]);
+  });
+
+  it("puts a lane's instructions in its custom prompt, never the preset", () => {
+    const options = buildQueryOptions(
+      spec({ sandbox: laneSandbox, instructions: '# AGENTS.md\nUse pnpm.' }),
+      deps,
+    );
+    expect(options.systemPrompt).toEqual({ type: 'custom', prompt: '# AGENTS.md\nUse pnpm.' });
+  });
+
+  it('sends no system prompt when there are no instructions', () => {
+    for (const instructions of [undefined, null, '']) {
+      const options = buildQueryOptions(
+        spec({ sandbox: laneSandbox, ...(instructions === undefined ? {} : { instructions }) }),
+        deps,
+      );
+      expect(options).not.toHaveProperty('systemPrompt');
+    }
+  });
+
+  it('adds the skill-name line only when there are plugin dirs', () => {
+    const withPlugins = buildQueryOptions(
+      spec({ instructions: 'Use pnpm.', setup: { plugins: ['/s/yours'], skillRoots: [] } }),
+      deps,
+    );
+    expect(withPlugins.systemPrompt).toEqual({
+      type: 'custom',
+      prompt: `Use pnpm.\n\n${SKILL_NAMES_LINE}`,
+    });
+    const without = buildQueryOptions(
+      spec({ instructions: 'Use pnpm.', setup: { plugins: [], skillRoots: ['/s/yours/skills'] } }),
+      deps,
+    );
+    expect(without.systemPrompt).toEqual({ type: 'custom', prompt: 'Use pnpm.' });
   });
 
   it('wires no settings re-check into a sandboxed session, which loads no settings file', () => {

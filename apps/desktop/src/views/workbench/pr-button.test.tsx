@@ -77,7 +77,7 @@ describe('PrButton', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Open Pull Request' });
     expect(
       within(dialog).getByText(
-        'build has 4 commits origin/main lacks from before the pass; the pull request lists them too.',
+        'build has 4 commits origin/main lacks from before you started; the pull request lists them too.',
       ),
     ).toBeTruthy();
     expect(

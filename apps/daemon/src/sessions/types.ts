@@ -46,6 +46,12 @@ export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 /** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
 export type LanePermissionMode = 'default' | 'auto';
 
+/** A session's setup as the adapters take it: the plugin dirs Claude loads, the skill roots Codex lists. */
+export interface SessionSetupDirs {
+  readonly plugins: readonly string[];
+  readonly skillRoots: readonly string[];
+}
+
 export interface SessionSpec {
   readonly sessionId: SessionId;
   readonly workstreamId: WorkstreamId;
@@ -68,6 +74,16 @@ export interface SessionSpec {
   readonly account: AccountExpectation;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
+  /**
+   * The project's and the builder's instructions, read when the session started (`session-setup`). A
+   * lane takes them as its custom system prompt, Plan after its own; Codex as developer instructions.
+   */
+  readonly instructions?: string | null;
+  /**
+   * What the lane sandbox kept of the session's setup: Claude's plugin dirs and Codex's skill roots.
+   * Absent without a sandbox.
+   */
+  readonly setup?: SessionSetupDirs;
   readonly allowedTools: readonly string[];
   /**
    * The permission mode a sandboxed session runs in, read from the app-wide setting when the session
@@ -140,6 +156,16 @@ export interface ShapeSessionSpec {
   readonly cwd: string;
   /** Appended to Claude Code's own system prompt. */
   readonly systemPrompt: string;
+  /**
+   * The project's and the builder's instructions, read when the session started (`session-setup`). A
+   * lane takes them as its custom system prompt, Plan after its own; Codex as developer instructions.
+   */
+  readonly instructions?: string | null;
+  /**
+   * What the lane sandbox kept of the session's setup: Claude's plugin dirs and Codex's skill roots.
+   * Absent without a sandbox.
+   */
+  readonly setup?: SessionSetupDirs;
   /** The first message; later ones come from `send`. */
   readonly prompt: string;
   /** Images that go with the first message. */

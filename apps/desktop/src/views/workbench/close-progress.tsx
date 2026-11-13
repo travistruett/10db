@@ -39,12 +39,12 @@ const STEPS: readonly {
     runs: (facts) => facts.delivery === Delivery.PullRequest,
   },
   { after: CloseStep.Pushed, line: "Moving your folder's branch…", runs: () => true },
-  { after: CloseStep.FastForwarded, line: 'Finishing the pass…', runs: () => true },
+  { after: CloseStep.FastForwarded, line: 'Finishing…', runs: () => true },
 ];
 
 /** What a closing pass does next: the first step after the last finished that does anything. */
 function closingLine(step: CloseStep | null, facts: CloseFacts): string {
-  if (step === null) return 'Finishing the pass…';
+  if (step === null) return 'Finishing…';
   const next = STEPS.find((candidate) => candidate.after >= step && candidate.runs(facts));
   // A local project after its folder gate: a push if it has an origin, then the folder's branch.
   if (
@@ -53,7 +53,7 @@ function closingLine(step: CloseStep | null, facts: CloseFacts): string {
     next?.after === CloseStep.Pushed
   )
     return 'Finishing the close…';
-  return next?.line ?? 'Finishing the pass…';
+  return next?.line ?? 'Finishing…';
 }
 
 /** What a pass that is ending is doing, in words; null while it is open or once it has ended. */
@@ -66,7 +66,7 @@ export function closeProgressLine(
     case PassState.Closing:
       return facts.stopped ? null : closingLine(step, facts);
     case PassState.Abandoning:
-      return 'Abandoning the pass…';
+      return 'Abandoning…';
     case PassState.Open:
     case PassState.Closed:
     case PassState.Settled:

@@ -4,7 +4,11 @@ import { z } from 'zod';
 export const COMMENT_MARKER = '<!-- 10db:test-report -->';
 
 const MAX_ROWS = 10;
-const GENERATED_PREFIXES = ['packages/contracts/generated/', 'packages/db/drizzle/'];
+const GENERATED_PREFIXES = [
+  'packages/contracts/generated/',
+  'packages/db/drizzle/',
+  'apps/daemon/src/sessions/codex-generated/',
+];
 const TEST_PATH = /\.(test|spec)\.[cm]?tsx?$|(^|\/)(test|tests|e2e)\//;
 const CODE_PATH = /\.([cm]?[jt]sx?|rs|sh|css)$/;
 

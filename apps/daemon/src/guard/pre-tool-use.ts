@@ -46,6 +46,8 @@ const OUT_OF_PROXY_TOOLS: ReadonlySet<string> = new Set([
   'ListMcpResourcesTool',
   'ReadMcpResourceTool',
 ]);
+/** The web tools a lane's agent judges itself where it can (`GuardInput.webJudged`). */
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -115,6 +117,8 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
  * permission mode may decide it.
  */
 function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
+  // No allow rule names them, so the call reaches auto mode's classifier before it could settle.
+  if (input.webJudged === true && WEB_TOOLS.has(input.toolName)) return null;
   const judged = BROKER_JUDGES[input.toolName];
   if (judged !== undefined) return judged;
   if (actsOutsideSandboxProxy(input.toolName)) {

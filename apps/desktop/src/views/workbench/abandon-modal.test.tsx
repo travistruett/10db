@@ -77,7 +77,7 @@ describe('AbandonModal', () => {
         within(d).queryByText(
           offered
             ? 'Finishing stops where it is; what has landed stays.'
-            : 'The pass is landing: it can no longer be abandoned.',
+            : 'It is landing now, so it can no longer be abandoned.',
         ),
       ).toBeTruthy();
       fireEvent.click(button);

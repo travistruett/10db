@@ -68,6 +68,11 @@ export interface GuardInput {
   };
   /** Present for a sandboxed lane: refuses reads and writes by the real path they name. */
   readonly fileAccess?: FileAccessJudge;
+  /**
+   * The agent judges this lane's web calls itself (Claude Code's auto mode), so WebSearch and WebFetch go
+   * to its judge instead of a card.
+   */
+  readonly webJudged?: boolean;
 }
 
 /**
