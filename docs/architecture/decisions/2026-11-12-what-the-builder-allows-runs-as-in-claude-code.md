@@ -37,9 +37,11 @@
    (lefthook, husky, pre-commit) read files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`,
    lint configs, package scripts), so they run contained. The checkout and its `.git` folder are writable there,
    but not `.git/hooks`, `.git/config`, `config.worktree`, `.git/info`, `modules`, `worktrees`, the files that point
-   git at another git dir, the remote-tracking refs, tags and packed refs, or the refs of `main` and the base branch
-   unless one is the current branch, and the builder's global git config is readable for their identity. A push
-   and a `gh pr merge` need the builder's credentials, so they run outside the sandbox with `core.hooksPath` at
+   git at another git dir, `HEAD`, `rebase-merge`, `rebase-apply`, `sequencer`, the remote-tracking refs, tags and
+   packed refs, or any branch's ref but the current one's (`main`, the base branch and other lanes' branches stay
+   as they are). A commit or merge runs only on a branch, and 10db reads HEAD before and after each call: one that
+   moved it holds every later call in the pass, with a plain reason, until HEAD is back. The builder's global git
+   config is readable for their identity. A push and a `gh pr merge` need the builder's credentials, so they run outside the sandbox with `core.hooksPath` at
    `/dev/null` and `push.recurseSubmodules=no`: the repository's push hooks don't run for an approved push, and no
    submodule is pushed along. Every call runs in a process group of its own, killed when its session ends or after
    10 minutes (`BUILDER_RUN_TIMEOUT_MS`), and the card shows the words 10db runs, not the line as written. The card says which. The agent's Bash

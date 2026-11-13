@@ -192,7 +192,7 @@ import {
   type Launcher,
   type SessionLaunch,
 } from '../environment';
-import { runPassGit, type Git } from '../git';
+import { createPassGitSession, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
@@ -2622,11 +2622,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               ? {
                   passGit: {
                     baseBranch: project.baseBranch,
-                    run: (call) => {
+                    // One per session: a call that moved HEAD holds the next until it is back.
+                    run: createPassGitSession(() => {
                       // The project env: the login shell's, never the account's credentials.
                       const env = opts.launcher.projectEnv();
                       const gate = opts.gateSandbox ?? null;
-                      return runPassGit(call, {
+                      return {
                         checkout,
                         baseBranch: project.baseBranch,
                         env,
@@ -2645,8 +2646,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                                 },
                                 home: opts.builderHome,
                               },
-                      });
-                    },
+                      };
+                    }),
                   },
                 }
               : {}),

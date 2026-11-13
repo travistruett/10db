@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { systemClock, type Clock } from '../clock';
 import { SECRET_VARIABLES } from '../environment';
@@ -127,6 +127,50 @@ function ownGitDir(checkout: string): { readonly root: string; readonly gitDir: 
   } catch {
     return null;
   }
+}
+
+/** What the git dir's HEAD file says, or null when it can't be read. */
+function readHead(gitDir: string): string | null {
+  try {
+    return readFileSync(join(gitDir, 'HEAD'), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** The branch a HEAD file names, or null for a detached or unreadable HEAD. */
+function branchOfHead(head: string | null): string | null {
+  return /^ref: refs\/heads\/(\S+)\n?$/.exec(head ?? '')?.[1] ?? null;
+}
+
+/** HEAD as a card line names it. */
+const shownHead = (head: string | null): string =>
+  head === null ? 'unreadable' : (branchOfHead(head) ?? head.trim());
+
+/**
+ * One pass's approved calls. HEAD is read before and after each: one that moved it (a hook that
+ * switched the branch) leaves every later call refused until HEAD is back where it was, since the
+ * branch HEAD names is the one the next call may write.
+ */
+export function createPassGitSession(
+  /** Read for each call, so it runs with the project's env and rules as they are then. */
+  optsOf: () => Parameters<typeof runPassGit>[1],
+): (call: Extract<PassGitCall, { kind: 'run' }>) => Promise<BuilderRun | BuilderRefusal> {
+  let expected: string | null = null;
+  return async (call) => {
+    const opts = optsOf();
+    const gitDir = join(opts.checkout, '.git');
+    const before = readHead(gitDir);
+    if (expected !== null && before !== expected)
+      return refused(
+        `HEAD moved while 10db ran an earlier call for you in this pass (it named ${shownHead(expected)} and now names ${shownHead(before)}), so 10db runs no other commit, push or merge until it is back. Switch back to ${shownHead(expected)} yourself, then ask again.`,
+      );
+    expected = null;
+    const ran = await runPassGit(call, opts);
+    const after = readHead(gitDir);
+    if (after !== before) expected = before;
+    return ran;
+  };
 }
 
 /** Where a pass's commit or merge runs: the gate's sandbox, built from the lane profile. */
@@ -268,18 +312,30 @@ export async function runPassGit(
     }
   }
   if (contained && opts.sandbox !== null) {
-    // The commit moves the current branch; `main` and the base branch stay closed but for that one.
-    const head = await git('symbolic-ref', '--short', '-q', 'HEAD');
-    const current = head.exitCode === 0 ? head.output.trim().toLowerCase() : '';
-    const kept = [...new Set(['main', opts.baseBranch])].filter(
-      (branch) => branch.toLowerCase() !== current,
-    );
+    // The call moves the current branch alone: HEAD and every other ref, `main`, the base branch
+    // and other lanes' branches among them, stay closed to it and to the hooks it starts.
+    const current = branchOfHead(readHead(place.gitDir));
+    if (current === null)
+      return refused(
+        "This checkout's HEAD names no branch, and 10db runs a pass's commit or merge only on one. Switch to a branch first.",
+      );
+    const refs = await git('for-each-ref', '--format=%(refname)', 'refs/heads');
+    if (refs.exitCode !== 0)
+      return refused("10db couldn't list this checkout's branches, so it won't run the call.");
+    const own = `refs/heads/${current}`.toLowerCase();
+    const closed = [
+      ...new Set([
+        ...refs.output.split('\n').filter((ref) => ref !== ''),
+        'refs/heads/main',
+        `refs/heads/${opts.baseBranch}`,
+      ]),
+    ].filter((ref) => ref.toLowerCase() !== own);
     return runContained(
       opts.bins.git,
       args,
       opts.sandbox,
       place,
-      kept,
+      closed,
       {
         ...gitEnv,
         GIT_ATTR_SOURCE: attrSource,
@@ -317,7 +373,7 @@ async function runContained(
   args: readonly string[],
   sandbox: PassGitSandbox,
   place: { readonly root: string; readonly gitDir: string },
-  keptBranches: readonly string[],
+  closedRefs: readonly string[],
   gitEnv: Readonly<Record<string, string>>,
   signal: AbortSignal,
   clock: Clock,
@@ -341,7 +397,7 @@ async function runContained(
         gitDir: place.gitDir,
         // A dotfiles link opens the file it leads to as well; the builder's home is no lane's to write.
         globalConfig: identity === null ? [] : [...new Set([identity, realOr(identity)])],
-        keptBranches,
+        closedRefs,
       },
     });
   } catch (error) {

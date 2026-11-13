@@ -24,7 +24,7 @@ import { silentLogger } from '../log';
 import { createGateSandbox } from '../sandbox';
 import { createGit } from './git';
 import { ManualClock } from '../clock';
-import { runPassGit, type PassGitSandbox } from './run-as-builder';
+import { createPassGitSession, runPassGit, type PassGitSandbox } from './run-as-builder';
 import { resolveGit } from './version';
 
 // A pass's commit, push or merge runs once the builder allows it, so nothing a lane could plant in
@@ -349,4 +349,38 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
       }
     },
   );
+  // Here srt is a stand-in, so a hook can move HEAD; under Seatbelt HEAD is closed to it. Either way
+  // a call that moved HEAD stops the next one until HEAD is back.
+  it('refuses the next call after one moved HEAD, until HEAD is back', async () => {
+    const repo = createTempRepo();
+    try {
+      git(repo.path, 'switch', '-q', '-c', 'feat/page');
+      writeFileSync(
+        join(repo.path, '.git', 'hooks', 'post-commit'),
+        "#!/bin/sh\nprintf 'ref: refs/heads/main\\n' > .git/HEAD\n",
+        { mode: 0o755 },
+      );
+      const session = createPassGitSession(() => ({
+        checkout: repo.path,
+        baseBranch: 'main',
+        env,
+        signal,
+        bins,
+        sandbox: sandboxFor(repo.path),
+      }));
+      expect(await session(callOf('git commit --allow-empty -m x'))).toMatchObject({ exitCode: 0 });
+      const next = await session(callOf('git commit --allow-empty -m y'));
+      expect(next).toEqual({
+        refused: expect.stringContaining('HEAD moved while 10db ran an earlier call') as string,
+      });
+      expect(git(repo.path, 'log', '-1', '--format=%s', 'main')).not.toBe('y');
+      // Put back by the builder, the pass goes on.
+      execFileSync('rm', [join(repo.path, '.git', 'hooks', 'post-commit')]);
+      git(repo.path, 'symbolic-ref', 'HEAD', 'refs/heads/feat/page');
+      expect(await session(callOf('git commit --allow-empty -m z'))).toMatchObject({ exitCode: 0 });
+      expect(git(repo.path, 'log', '-1', '--format=%s', 'feat/page')).toBe('z');
+    } finally {
+      repo.cleanup();
+    }
+  });
 });

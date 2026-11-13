@@ -74,8 +74,11 @@ export interface GateRunInput {
   readonly approvedGit?: {
     readonly gitDir: string;
     readonly globalConfig: readonly string[];
-    /** Branches whose refs stay closed: `main` and the base branch, where 10db lands the work. */
-    readonly keptBranches: readonly string[];
+    /**
+     * Refs that stay closed, by full name (`refs/heads/main`): every branch but the one the call
+     * moves, `main` and the base branch, where 10db lands the work, and other lanes' among them.
+     */
+    readonly closedRefs: readonly string[];
   };
 }
 
@@ -93,6 +96,12 @@ const CLOSED_GIT_ENTRIES = [
   'worktrees',
   'commondir',
   'gitdir',
+  // HEAD names the branch the next approved call moves: a hook that pointed it at `main` would
+  // open main's ref to that call. A rebase or a cherry-pick left half done resumes as the builder.
+  'HEAD',
+  'rebase-merge',
+  'rebase-apply',
+  'sequencer',
   // A commit or a merge moves only the current branch: the remote-tracking refs, the tags and the
   // packed refs (where `main` may live) stay as they are.
   'refs/remotes',
@@ -266,9 +275,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
                     (path) => !pathsEqual(realOr(path), realOr(approved.gitDir)),
                   ),
                   ...CLOSED_GIT_ENTRIES.map((name) => join(approved.gitDir, name)),
-                  ...approved.keptBranches.flatMap((branch) => [
-                    join(approved.gitDir, 'refs', 'heads', branch),
-                    join(approved.gitDir, 'logs', 'refs', 'heads', branch),
+                  ...approved.closedRefs.flatMap((ref) => [
+                    join(approved.gitDir, ref),
+                    join(approved.gitDir, 'logs', ref),
                   ]),
                 ]),
             ...access.otherCheckouts,

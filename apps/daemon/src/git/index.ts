@@ -48,6 +48,7 @@ export {
 } from './worktree-list';
 export {
   builderCommandLine,
+  createPassGitSession,
   runPassGit,
   type BuilderRefusal,
   type BuilderRun,

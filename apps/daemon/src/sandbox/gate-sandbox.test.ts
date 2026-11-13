@@ -237,7 +237,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
           approvedGit: {
             gitDir,
             globalConfig: [identity, join(home, '.config', 'git', 'config')],
-            keptBranches: ['main', 'develop'],
+            closedRefs: ['refs/heads/main', 'refs/heads/develop'],
           },
         }),
         (run) => {
@@ -250,7 +250,10 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
               ...['hooks', 'config', 'config.worktree', 'info', 'modules', 'worktrees'].map(
                 (name) => join(gitDir, name),
               ),
-              ...['commondir', 'gitdir'].map((name) => join(gitDir, name)),
+              ...['commondir', 'gitdir', 'HEAD', 'rebase-merge', 'rebase-apply', 'sequencer'].map(
+                (name) => join(gitDir, name),
+              ),
+              join(gitDir, 'logs', 'refs', 'heads', 'main'),
               // The branches 10db lands work on, and every ref but the session's own branches.
               ...['refs/heads/main', 'refs/heads/develop', 'refs/remotes', 'refs/tags'].map(
                 (name) => join(gitDir, name),

@@ -171,8 +171,9 @@ without it):
   `GIT_DIR` and `GIT_WORK_TREE` set to its own `.git` folder, `core.fsmonitor` off and the project env with no
   account credential. A commit or a merge runs inside the gate's sandbox, because the hook runners it starts read
   files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`): the checkout and its `.git` are
-  writable there but not `.git/hooks`, `.git/config`, `.git/info`, the files that point at another git dir or
-  the refs of `main` and the base branch (but the current one),
+  writable there but not `.git/hooks`, `.git/config`, `.git/info`, `HEAD`, a half-done rebase or sequencer, the
+  files that point at another git dir or any branch's ref but the current one's (a call that moved HEAD anyway
+  holds the pass's next call until HEAD is back),
   and the builder's global git config is readable for their identity. A push or a `gh pr merge` needs the
   builder's credentials, so it runs outside the sandbox with `core.hooksPath` at `/dev/null`, and the card says
   the repository's push hooks don't run. The agent's Bash call then prints what it printed and ends with its exit
