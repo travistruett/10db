@@ -182,27 +182,53 @@ export const BundleOrigin = z.strictObject({
 });
 export type BundleOrigin = z.infer<typeof BundleOrigin>;
 
+/**
+ * The path of every string in a parsed value that holds a lone surrogate, which storage would turn into
+ * U+FFFD. Walks with a stack, not recursion, though a parsed bundle's depth is the schema's.
+ */
+function illFormedStrings(value: unknown): (string | number)[][] {
+  const found: (string | number)[][] = [];
+  const stack: { value: unknown; path: (string | number)[] }[] = [{ value, path: [] }];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const at = next.value;
+    if (typeof at === 'string') {
+      if (!at.isWellFormed()) found.push(next.path);
+    } else if (Array.isArray(at)) {
+      at.forEach((item: unknown, i) => stack.push({ value: item, path: [...next.path, i] }));
+    } else if (typeof at === 'object' && at !== null) {
+      for (const [key, item] of Object.entries(at))
+        stack.push({ value: item, path: [...next.path, key] });
+    }
+  }
+  return found.reverse();
+}
+
 /** A planning effort; importing the same `id` into the same project again updates its Plan. */
-export const PlanBundle = z.strictObject({
-  id: z
-    .string()
-    .regex(
-      /^[a-z0-9][a-z0-9._-]{2,99}$/,
-      'lowercase letters, digits, dots, underscores and hyphens, 3 to 100 of them',
-    ),
-  projectId: ProjectId,
-  title: Text,
-  origin: BundleOrigin,
-  intent: z.array(BundleIntent).default([]),
-  documents: z.array(BundleDocument),
-  entries: z.array(BundleEntry).default([]),
-  decisions: z.array(BundleDecision).default([]),
-  findings: z.array(BundleFinding).default([]),
-  questions: z.array(BundleQuestion).default([]),
-  goals: z.array(BundleGoal).default([]),
-  tasks: z.array(BundleTask).default([]),
-  landings: z.array(BundleLanding).default([]),
-});
+export const PlanBundle = z
+  .strictObject({
+    id: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9._-]{2,99}$/,
+        'lowercase letters, digits, dots, underscores and hyphens, 3 to 100 of them',
+      ),
+    projectId: ProjectId,
+    title: Text,
+    origin: BundleOrigin,
+    intent: z.array(BundleIntent).default([]),
+    documents: z.array(BundleDocument),
+    entries: z.array(BundleEntry).default([]),
+    decisions: z.array(BundleDecision).default([]),
+    findings: z.array(BundleFinding).default([]),
+    questions: z.array(BundleQuestion).default([]),
+    goals: z.array(BundleGoal).default([]),
+    tasks: z.array(BundleTask).default([]),
+    landings: z.array(BundleLanding).default([]),
+  })
+  .superRefine((bundle, ctx) => {
+    for (const path of illFormedStrings(bundle))
+      ctx.addIssue({ code: 'custom', path, message: 'holds a lone surrogate, which is not text' });
+  });
 export type PlanBundle = z.infer<typeof PlanBundle>;
 
 // --- Import and export ----------------------------------------------------------------------------

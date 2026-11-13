@@ -30,6 +30,7 @@ describe('CodeAnchor', () => {
   it.each([
     ['a 6-line excerpt', { excerpt: 'a\nb\nc\nd\ne\nf' }],
     ['a blank excerpt', { excerpt: '  \n ' }],
+    ['an excerpt of punctuation only', { excerpt: '}\n);' }],
     ['../x.ts', { path: '../x.ts' }],
     ['/abs.ts', { path: '/abs.ts' }],
     ['a\u0000b', { path: 'a\u0000b' }],
@@ -117,6 +118,21 @@ describe('PlanBundle', () => {
 
   it('an id with a capital is refused', () => {
     expect(PlanBundle.safeParse({ ...minimal, id: 'Remote-host' }).success).toBe(false);
+  });
+
+  it('a lone surrogate anywhere in its text is refused, naming where', () => {
+    const lone = JSON.parse('"P1 \\ud800"') as string;
+    const titled = PlanBundle.safeParse({ ...minimal, title: lone });
+    const bodied = PlanBundle.safeParse({
+      ...minimal,
+      documents: [
+        { key: 'p1', kind: 'plan', title: 'P1', revisions: [{ number: 1, body: lone, at: AT }] },
+      ],
+    });
+    expect(titled.error?.issues.map((i) => i.path.join('.'))).toEqual(['title']);
+    expect(bodied.error?.issues.map((i) => i.path.join('.'))).toEqual([
+      'documents.0.revisions.0.body',
+    ]);
   });
 });
 

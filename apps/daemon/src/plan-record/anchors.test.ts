@@ -42,6 +42,13 @@ describe('locateAnchor', () => {
     expect(locateAnchor(file, { line, excerpt: EXCERPT })).toEqual(expected);
   });
 
+  it('an excerpt ending in a newline is current at its line', () => {
+    expect(locateAnchor(fileWith(18, 40), { line: 18, excerpt: `${EXCERPT}\n` })).toEqual({
+      result: 'current',
+      line: 18,
+    });
+  });
+
   it('two matches pick the nearest', () => {
     const out = filler(100);
     out.splice(9, 2, 'const pack = build();', 'emit(pack);');

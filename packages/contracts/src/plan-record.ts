@@ -118,6 +118,8 @@ export const CodeAnchor = z.strictObject({
   excerpt: z
     .string()
     .refine((e) => e.trim().length > 0, 'an excerpt is not blank')
+    // A line of punctuation alone (`}`) is found almost anywhere, so it proves nothing.
+    .refine((e) => /[\p{L}\p{N}]/u.test(e), 'an excerpt holds a letter or a digit')
     .refine(
       (e) => e.split('\n').length <= EXCERPT_MAX_LINES,
       `an excerpt is at most ${String(EXCERPT_MAX_LINES)} lines`,

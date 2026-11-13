@@ -132,12 +132,14 @@ describe('indexSections', () => {
     expect(one && sectionText(body, one)).toBe('# One\r\nfirst\r\n');
   });
 
-  it('every section is a substring at its offsets', () => {
+  it('every section starts at its heading line and ends at a line start', () => {
     for (const [, body] of ROWS) {
       for (const entry of indexSections(body)) {
-        const text = sectionText(body, entry);
-        expect(body.slice(entry.start, entry.end)).toBe(text);
-        expect(text.length).toBeGreaterThan(0);
+        expect(entry.start === 0 || body[entry.start - 1] === '\n').toBe(true);
+        const line = body.slice(entry.start).replace(/^\uFEFF/, '');
+        expect(line).toMatch(new RegExp(`^ {0,3}#{${String(entry.level)}}(?!#)`));
+        expect(entry.end === body.length || body[entry.end - 1] === '\n').toBe(true);
+        expect(entry.end).toBeGreaterThan(entry.start);
         expect(entry.end).toBeLessThanOrEqual(body.length);
       }
     }

@@ -11,7 +11,7 @@ const linesOf = (text: string): string[] => text.split('\n').map((line) => line.
 
 /**
  * Finds an anchor's excerpt in a file: `current` when every excerpt line equals the file's line from
- * `anchor.line` on (trailing whitespace aside); else `moved` to the nearest match within
+ * `anchor.line` on (trailing whitespace and one final newline aside); else `moved` to the nearest match within
  * ANCHOR_MOVE_WINDOW lines, the earlier on a tie; else `changed`.
  */
 export function locateAnchor(
@@ -19,7 +19,10 @@ export function locateAnchor(
   anchor: { line: number; excerpt: string },
 ): AnchorLocation {
   const file = linesOf(fileText);
-  const excerpt = linesOf(anchor.excerpt);
+  // An excerpt copied with its line's newline ends in one empty line, which is no line of its own.
+  const excerpt = linesOf(
+    anchor.excerpt.endsWith('\n') ? anchor.excerpt.slice(0, -1) : anchor.excerpt,
+  );
   const matchesAt = (line: number): boolean =>
     excerpt.every((text, i) => file[line - 1 + i] === text);
   if (matchesAt(anchor.line)) return { result: 'current', line: anchor.line };
