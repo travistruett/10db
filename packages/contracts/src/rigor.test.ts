@@ -254,7 +254,9 @@ describe('the query, order and refusal the routes add', () => {
     expect(error.code).toBe('invalid');
     expect(error.kindKey).toBe('security');
     expect(error.message).toContain('Security');
-    expect(error.message).toContain('careful');
+    expect(error.message).toBe(
+      "Security work is at least Careful, so a task of that kind can't be Light; choose Careful or stronger, or take off the security kind",
+    );
   });
 });
 

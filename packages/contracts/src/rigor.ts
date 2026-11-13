@@ -16,6 +16,9 @@ export const Rigor = {
 } as const;
 export type Rigor = ValueOf<typeof Rigor>;
 
+/** A rigor as the builder reads it. */
+const rigorTitle = (rigor: Rigor): string => rigor.charAt(0).toUpperCase() + rigor.slice(1);
+
 /** Every rigor, weakest first. */
 export const RIGORS: readonly Rigor[] = [
   Rigor.Light,
@@ -214,7 +217,7 @@ export class RigorBelowKindError extends DomainError {
   ) {
     super(
       'invalid',
-      `${kind.label} work is at least ${minimum}, so a task of that kind can't be ${rigor}; choose ${minimum} or stronger, or take off the ${kind.key} kind`,
+      `${kind.label} work is at least ${rigorTitle(minimum)}, so a task of that kind can't be ${rigorTitle(rigor)}; choose ${rigorTitle(minimum)} or stronger, or take off the ${kind.key} kind`,
     );
     this.kindKey = kind.key;
     this.minimum = minimum;
