@@ -1,15 +1,35 @@
 import {
+  LIVE_SYSTEM_MAX_CHARS,
+  LIVE_SYSTEMS_MAX,
   TrustOverrides,
   type ProjectDto,
   type SetupPreviewDto,
   type TrustSwitchKey,
 } from '@10db/contracts';
-import { Alert, Button, Group, List, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Group,
+  List,
+  SegmentedControl,
+  Stack,
+  TagsInput,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useId, useState, type ReactNode } from 'react';
-import { useProjectTrust, useSetProjectTrust, useTrust } from '../../daemon/trust-queries';
+import { z } from 'zod';
+import { DaemonRequestError } from '../../daemon/client';
+import {
+  useLiveSystems,
+  useProjectTrust,
+  useSetLiveSystems,
+  useSetProjectTrust,
+  useTrust,
+} from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TrustRowText } from './trust-section';
-import { TRUST_ROWS } from './trust-rows';
+import { LIVE_SYSTEMS_DESCRIPTION, TRUST_ROWS } from './trust-rows';
 
 const Choice = { App: 'app', On: 'on', Off: 'off' } as const;
 type Choice = (typeof Choice)[keyof typeof Choice];
@@ -153,6 +173,45 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
   );
 }
 
+const RefusedList = z.object({ issues: z.array(z.object({ message: z.string() })).min(1) });
+
+/** Why the daemon refused a list, without the field paths the builder never sees. */
+function refusal(error: Error | null): string | undefined {
+  if (error === null) return undefined;
+  const refused = error instanceof DaemonRequestError ? RefusedList.safeParse(error.body) : null;
+  return refused?.success === true
+    ? [...new Set(refused.data.issues.map((issue) => issue.message))].join('; ')
+    : error.message;
+}
+
+/**
+ * The project's live systems. A change is sent at once and shows while it is on its way; one the daemon
+ * refuses shows why under the input and leaves the saved list.
+ */
+function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
+  const live = useLiveSystems(projectId);
+  const set = useSetLiveSystems(projectId);
+  const saved = live.data?.liveSystems;
+  const shown = set.isPending ? set.variables : (saved ?? []);
+  return (
+    <SettingsCard>
+      <SettingRow label="Live systems" description={LIVE_SYSTEMS_DESCRIPTION} stacked>
+        <TagsInput
+          aria-label="Live systems"
+          value={[...shown]}
+          maxTags={LIVE_SYSTEMS_MAX}
+          maxLength={LIVE_SYSTEM_MAX_CHARS}
+          disabled={saved === undefined}
+          error={live.error?.message ?? refusal(set.error)}
+          onChange={(next) => {
+            set.mutate(next);
+          }}
+        />
+      </SettingRow>
+    </SettingsCard>
+  );
+}
+
 /** A project's Trust: each switch as the app has it, or on or off for this project alone. */
 export function ProjectTrustSection({ project }: { readonly project: ProjectDto }) {
   const trust = useProjectTrust(project.id);
@@ -203,6 +262,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
           ))}
         </SettingsCard>
       )}
+      <LiveSystems projectId={project.id} />
       <ComesAlong preview={trust.data?.preview} />
     </Stack>
   );

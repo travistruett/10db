@@ -2,7 +2,7 @@ import { chmod, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import type { SessionSpec } from './types';
+import type { LaneSessionSpec } from './types';
 
 /** What Codex's `PreToolUse` hook sends: the keys 10db reads, with the rest passed over. */
 export const HookInput = z.looseObject({
@@ -125,6 +125,13 @@ const refuse = (reason: string, interrupt = false): GuardAnswer => ({
   interrupt,
 });
 
+function ranForBuilder(ran: { command: string; exitCode: number; output: string }): string {
+  const ended = `10db ran this for the builder: ${ran.command}\nIt ended with exit code ${String(ran.exitCode)}`;
+  return ran.output === ''
+    ? `${ended} and printed nothing.`
+    : `${ended} and printed:\n${ran.output}`;
+}
+
 function unreadable(toolName: string): string {
   if (toolName === 'apply_patch') return '10db could not read this patch, so it was refused.';
   if (toolName === 'Bash' || toolName.startsWith('mcp__'))
@@ -137,7 +144,7 @@ function unreadable(toolName: string): string {
  * 10db doesn't know, and a patch that names no path, are refused rather than read as nothing to judge.
  */
 export async function judgeHookCall(
-  spec: Pick<SessionSpec, 'preToolUse' | 'canUseTool'>,
+  spec: Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>,
   hook: HookInput,
   signal: AbortSignal,
 ): Promise<GuardAnswer> {
@@ -164,6 +171,9 @@ export async function judgeHookCall(
       ...(hook.cwd === undefined ? {} : { cwd: hook.cwd }),
     });
     if (decision.behavior === 'deny') return refuse(decision.message, decision.interrupt === true);
+    // Codex would run its own copy of a call 10db already ran, which fails, and the agent retries:
+    // the refusal carries the result instead.
+    if (decision.ranForBuilder !== undefined) return refuse(ranForBuilder(decision.ranForBuilder));
   }
   return signal.aborted
     ? refuse('The session ended before this call was checked.')

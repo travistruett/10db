@@ -1,10 +1,10 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentKind, idUuid, mintId } from '@10db/contracts';
+import { agentKind, idUuid, mintId, type ToolCallView } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
-import { createTempRepo, type TempDir } from '../../test/fixtures';
+import { createTempRepo, type TempDir, testPolicy } from '../../test/fixtures';
 import { loadEnv } from '../env';
 import {
   AgentTool,
@@ -13,7 +13,7 @@ import {
   ensureAgent,
   systemKeychain,
 } from '../environment';
-import { createLogger } from '../log';
+import { createLogger, silentLogger } from '../log';
 import { createClaudeAdapter } from './index';
 import type { SessionEvent } from './types';
 
@@ -25,7 +25,7 @@ async function liveSession(spec: {
   readonly promptUuid?: string;
   readonly repo?: TempDir;
   readonly resume?: string;
-  readonly allowRead?: boolean;
+  readonly allowedTools?: readonly string[];
 }) {
   const login = await captureLoginEnv({ inherited: process.env });
   // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
@@ -81,10 +81,15 @@ async function liveSession(spec: {
     'claude-haiku-5-5',
     [],
   );
-  const handle = adapter.start({
+  const handle = adapter.open({
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    policy: testPolicy(),
+    profile: {
+      kind: 'lane',
+      workstreamId: mintId('Workstream'),
+      sequence: 1,
+      allowedTools: spec.allowedTools ?? [],
+    },
     cwd: repo.path,
     prompt: spec.prompt,
     ...(spec.promptUuid === undefined ? {} : { promptUuid: spec.promptUuid }),
@@ -94,16 +99,93 @@ async function liveSession(spec: {
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: spec.allowRead === true ? ['Read'] : [],
+    sandbox: null,
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     preToolUse: () => ({ decision: 'allow' }),
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.', by: '10db' }),
   });
   return {
     handle,
     lines,
     repo,
+    cleanup: () => {
+      repo.cleanup();
+    },
+  };
+}
+
+/** A live Plan session on the default account's login: no settings file, plugin or project server. */
+async function livePlanSession(spec: { readonly prompt: string; readonly model?: string }) {
+  const login = await captureLoginEnv({ inherited: process.env });
+  const claudePath = await ensureAgent(AgentTool.Claude);
+  const repo = createTempRepo();
+  const adapter = createClaudeAdapter({
+    claudePath,
+    pluginDir: HARNESS_PLUGIN_DIR,
+    logger: silentLogger,
+  });
+  const launcher = createLauncher({
+    base: login.vars,
+    clientApp: '10db/live-test',
+    keychain: systemKeychain,
+  });
+  const defaultAccount: AccountRow = {
+    id: mintId('Account'),
+    kind: 'claude_subscription',
+    label: 'Claude plan',
+    payer: '',
+    expectedIdentity: null,
+    configDir: launcher.loginConfigDir(),
+    secretRef: null,
+    secretFingerprint: null,
+    settings: {},
+    laneCap: 4,
+    monthlyCapUsd: null,
+    archived: false,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const seen = await adapter.probeAccount({
+    kind: agentKind(defaultAccount.kind),
+    cwd: repo.path,
+    env: launcher.probe(defaultAccount).env,
+  });
+  const launch = launcher.session(
+    { ...defaultAccount, expectedIdentity: seen.email ?? null },
+    spec.model ?? 'claude-haiku-5-5',
+    [],
+  );
+  const handle = adapter.open({
+    sessionId: mintId('Session'),
+    policy: testPolicy('plan'),
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are helping plan work. Answer briefly.',
+      tools: ['Read'],
+      allowedTools: [],
+      disallowedTools: [],
+      agents: {},
+    },
+    cwd: repo.path,
+    prompt: spec.prompt,
+    model: launch.model,
+    effort: 'low',
+    resumeProviderSessionId: null,
+    env: launch.env,
+    account: launch.expect,
+    // Nothing listens here; the session runs without 10db's tools.
+    mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+    sandbox: null,
+    projectMcpServers: {},
+    preToolUse: () => ({ decision: 'allow' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.', by: '10db' }),
+  });
+  return {
+    handle,
     cleanup: () => {
       repo.cleanup();
     },
@@ -125,8 +207,10 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     }
     cleanup();
 
+    // A subscription run can report its rate limit before init, so `started` is the first event
+    // besides those limit readings.
     const types = events.map((e) => e.type);
-    expect(types[0]).toBe('started');
+    expect(types.find((t) => t !== 'rate_limit')).toBe('started');
     expect(types).toContain('context');
     expect(types).toContain('turn_complete');
     expect(types.filter((t) => t === 'ended')).toEqual(['ended']);
@@ -134,6 +218,18 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     const billing = lines.find((l) => l['msg'] === 'claude session billing');
     expect(billing).toMatchObject({ apiKeySource: 'none', apiProvider: 'firstParty' });
     expect(billing?.['subscriptionType']).toBeTruthy();
+    // It streams: the first message's deltas are its text, and the session lists its commands.
+    const message = events.find((e) => e.type === 'message');
+    if (message?.type !== 'message') throw new Error('no message streamed');
+    const deltas = events.flatMap((e) =>
+      e.type === 'text_delta' && e.itemId === message.itemId ? [e.text] : [],
+    );
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(deltas.join('')).toBe(message.text);
+    const commands = events.find((e) => e.type === 'commands');
+    expect(commands?.type === 'commands' ? commands.commands.map((c) => c.name) : []).toContain(
+      'compact',
+    );
   }, 120_000);
 
   // Workbench spec §6.3: a builder message is delivered on the evidence a turn took it, the uuid an
@@ -194,13 +290,13 @@ describe.skipIf(!live)('Claude adapter, live', () => {
         'Read one.txt, then two.txt, then three.txt with the Read tool, one call at a time, waiting for each result before the next call. Then reply with the three words they hold, in order.',
       promptUuid: prompt,
       repo,
-      allowRead: true,
+      allowedTools: ['Read'],
     });
     const consumed: string[] = [];
     let sent = false;
     for await (const event of handle.events) {
       if (event.type === 'consumed') consumed.push(...event.uuids);
-      if (event.type === 'activity' && event.kind === 'tool' && !sent) {
+      if (event.type === 'tool_call' && !sent) {
         sent = true;
         handle.send(
           'When you are done with the files, also reply with the single word: blue',
@@ -251,4 +347,45 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(providerSessionId).not.toBe('');
     expect(consumed).toContain(again);
   }, 180_000);
+  // Claude Code may write the assistant frame before the PreToolUse hook's control request. The card
+  // must still diff against the file as it was: a whole file shown as added means the capture lost.
+  it('shows a Write over an existing file as a diff of the changed line, not the whole file added', async () => {
+    const repo = createTempRepo();
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${String(i + 1)}`);
+    writeFileSync(join(repo.path, 'notes.txt'), `${lines.join('\n')}\n`);
+    const { handle, cleanup } = await liveSession({
+      prompt:
+        'Read notes.txt with the Read tool, then use the Write tool to write notes.txt again with every line the same except line 10, which becomes: ten. Do nothing else.',
+      repo,
+      allowedTools: ['Read', 'Write', 'Edit'],
+    });
+    const edits: ToolCallView[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'tool_call' && event.call.kind === 'edit') edits.push(event.call);
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+    cleanup();
+
+    // The call as first shown, the running view built when the frame was mapped.
+    expect(edits[0]).toMatchObject({ change: 'update', addedLines: 1, removedLines: 1 });
+  }, 180_000);
+
+  // The one Claude core runs Plan's preflight too: the account check, the MCP registration and the
+  // first message, against the real SDK.
+  it('runs one Plan turn on the real claude, with no settings, plugin or project server', async () => {
+    const { handle, cleanup } = await livePlanSession({
+      prompt: 'Reply with the single word: ready',
+    });
+    const events: SessionEvent[] = [];
+    for await (const event of handle.events) {
+      events.push(event);
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+    cleanup();
+
+    const types = events.map((e) => e.type);
+    expect(types[0]).toBe('started');
+    expect(types.indexOf('turn_complete')).toBeGreaterThan(0);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+  }, 120_000);
 });

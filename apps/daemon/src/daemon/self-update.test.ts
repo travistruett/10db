@@ -515,7 +515,7 @@ describe('self-update in the daemon', () => {
           ],
         ],
       });
-      const started = vi.spyOn(adapter, 'start');
+      const started = vi.spyOn(adapter, 'open');
       const api = await start({ caps: { global: 2 }, adapter });
       await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
       const project = await api.post('/projects', ProjectDto, {
@@ -594,7 +594,7 @@ describe('self-update in the daemon', () => {
           ],
         ],
       });
-      const started = vi.spyOn(adapter, 'start');
+      const started = vi.spyOn(adapter, 'open');
       const api = await start({ caps: { global: 2 }, adapter });
       await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
       const project = await api.post('/projects', ProjectDto, {
@@ -641,7 +641,7 @@ describe('self-update in the daemon', () => {
           { do: 'turn_complete' },
         ] as const;
         const adapter = new FakeAdapter({ Alpha: [[...sessionEnd]], Beta: [[...sessionEnd]] });
-        const started = vi.spyOn(adapter, 'start');
+        const started = vi.spyOn(adapter, 'open');
         const api = await start({
           caps: { global: 2 },
           adapter,

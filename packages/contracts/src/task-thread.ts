@@ -60,6 +60,11 @@ export const TaskMessageDto = z.object({
    * builder may send as a message of their own. Never sent by itself.
    */
   sendable: z.boolean(),
+  /**
+   * The offer is the builder's go-ahead for a call auto mode denied in a pass: the button reads
+   * Allow this. True only while the offer stands.
+   */
+  allowThis: z.boolean(),
 });
 export type TaskMessageDto = z.infer<typeof TaskMessageDto>;
 

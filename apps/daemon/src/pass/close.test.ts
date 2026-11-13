@@ -22,6 +22,10 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  insertSystemNotice,
+  listTaskThread,
+  offerAllowThis,
+  offerToAgent,
   openHolds,
   openPassTurn,
   patchProject,
@@ -448,6 +452,31 @@ describe('Finish', () => {
     const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
     expect(said.map((n) => [n.id, n.kind])).toEqual([['close-pr-ready', 'pr_not_opened']]);
     expect(said[0]?.text).toMatch(/could not be made ready for review: GitHub is down/);
+  });
+
+  it("drops the pass's Allow this offers as it closes, and leaves a Send to Agent offer", async () => {
+    await world({ gateCommand: null });
+    await twoTurns();
+    w.h.git$('remote', 'remove', 'origin');
+    const { denied, finding } = w.h.store.write((ctx) => {
+      const stopped = insertSystemNotice(ctx, w.settings.id, 'Auto mode stopped this Bash call');
+      offerAllowThis(ctx, stopped.id, 'I approve this exact Bash call.');
+      const review = insertSystemNotice(ctx, w.settings.id, 'Review: the label is cut off');
+      offerToAgent(ctx, review.id, 'Fix the label');
+      return { denied: stopped, finding: review };
+    }).value;
+
+    await confirm(closeDeps());
+
+    expect(passState()).toBe('SETTLED');
+    expect(
+      listTaskThread(w.h.store.db, w.settings.id)
+        .filter((m) => m.id === denied.id || m.id === finding.id)
+        .map((m) => [m.id, m.sendable, m.allowThis]),
+    ).toEqual([
+      [denied.id, false, false],
+      [finding.id, true, false],
+    ]);
   });
 
   it('closes by the fast-forward alone with no origin, and settles at once', async () => {

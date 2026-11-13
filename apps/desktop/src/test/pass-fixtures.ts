@@ -408,6 +408,7 @@ export function taskMessageDto(
     deliveredAt: minutesBeforeNow(12),
     files: [],
     sendable: false,
+    allowThis: false,
     ...overrides,
   });
 }

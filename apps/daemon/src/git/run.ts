@@ -35,6 +35,12 @@ export const NO_PROMPTS = {
 } as const;
 
 /**
+ * No replace refs: a `refs/replace/*` a hook or a lane wrote would make git show other objects for
+ * the ones it names, in every call the daemon makes and every call the builder allows.
+ */
+export const NO_REPLACE_OBJECTS = { GIT_NO_REPLACE_OBJECTS: '1' } as const;
+
+/**
  * Variables that make Xcode's `/usr/bin/git` shim pick another git on each spawn: dropped, so the git
  * that passed the probe is the git that runs.
  */
@@ -65,6 +71,7 @@ export function localGitEnv(extra: Readonly<Record<string, string>> = {}): Recor
     // running at that moment fails with "index.lock: File exists".
     GIT_OPTIONAL_LOCKS: '0',
     ...NO_PROMPTS,
+    ...NO_REPLACE_OBJECTS,
     ...extra,
   };
 }
@@ -82,6 +89,7 @@ function loginConfigEnv(
     ...keep(login, KEPT_NETWORK, COMMAND_CONFIG),
     GIT_OPTIONAL_LOCKS: '0',
     ...NO_PROMPTS,
+    ...NO_REPLACE_OBJECTS,
     ...extra,
   };
 }
@@ -94,7 +102,7 @@ export function networkGitEnv(
   login: Readonly<Record<string, string>>,
   extra: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
-  return { ...keep(login, KEPT_NETWORK), ...NO_PROMPTS, ...extra };
+  return { ...keep(login, KEPT_NETWORK), ...NO_PROMPTS, ...NO_REPLACE_OBJECTS, ...extra };
 }
 
 export class GitError extends Error {

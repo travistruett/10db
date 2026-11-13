@@ -4,33 +4,47 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import type { InitializeResponse as GeneratedInitializeResponse } from './codex-generated/ts/InitializeResponse';
 import type { AccountRateLimitsUpdatedNotification } from './codex-generated/ts/v2/AccountRateLimitsUpdatedNotification';
+import type { AgentMessageDeltaNotification } from './codex-generated/ts/v2/AgentMessageDeltaNotification';
+import type { CommandExecutionOutputDeltaNotification } from './codex-generated/ts/v2/CommandExecutionOutputDeltaNotification';
 import type { ConfigReadResponse as GeneratedConfigReadResponse } from './codex-generated/ts/v2/ConfigReadResponse';
 import type { GetAccountRateLimitsResponse } from './codex-generated/ts/v2/GetAccountRateLimitsResponse';
 import type { GetAccountResponse } from './codex-generated/ts/v2/GetAccountResponse';
 import type { HooksListResponse as GeneratedHooksListResponse } from './codex-generated/ts/v2/HooksListResponse';
 import type { ItemCompletedNotification } from './codex-generated/ts/v2/ItemCompletedNotification';
+import type { ItemStartedNotification } from './codex-generated/ts/v2/ItemStartedNotification';
 import type { ModelListResponse as GeneratedModelListResponse } from './codex-generated/ts/v2/ModelListResponse';
+import type { ReasoningSummaryTextDeltaNotification } from './codex-generated/ts/v2/ReasoningSummaryTextDeltaNotification';
+import type { ReviewStartResponse } from './codex-generated/ts/v2/ReviewStartResponse';
+import type { ThreadCompactStartResponse } from './codex-generated/ts/v2/ThreadCompactStartResponse';
 import type { ThreadResumeResponse } from './codex-generated/ts/v2/ThreadResumeResponse';
 import type { ThreadStartResponse } from './codex-generated/ts/v2/ThreadStartResponse';
 import type { ThreadTokenUsageUpdatedNotification } from './codex-generated/ts/v2/ThreadTokenUsageUpdatedNotification';
 import type { ThreadTurnsListResponse } from './codex-generated/ts/v2/ThreadTurnsListResponse';
 import type { TurnCompletedNotification } from './codex-generated/ts/v2/TurnCompletedNotification';
+import type { TurnPlanUpdatedNotification } from './codex-generated/ts/v2/TurnPlanUpdatedNotification';
 import type { TurnStartedNotification } from './codex-generated/ts/v2/TurnStartedNotification';
 import type { TurnStartResponse as GeneratedTurnStartResponse } from './codex-generated/ts/v2/TurnStartResponse';
 import {
   AccountReadResponse,
+  AgentMessageDelta,
+  CommandOutputDelta,
+  CompactStarted,
   ConfigReadResponse,
   HooksListResponse,
   InitializeResponse,
   ItemCompleted,
+  ItemStarted,
   MODEL_ITEMS,
   ModelListResponse,
   RateLimitsReadResponse,
   RateLimitsUpdated,
+  ReasoningSummaryDelta,
+  ReviewStarted,
   ThreadResponse,
   ThreadTurnsPage,
   TokenUsageUpdated,
   TurnCompleted,
+  TurnPlanUpdated,
   TurnStarted,
   TurnStartResponse,
 } from './codex-protocol';
@@ -67,6 +81,17 @@ expectTypeOf<Wire<ThreadTokenUsageUpdatedNotification>>().toExtend<
 >();
 expectTypeOf<Wire<ItemCompletedNotification>>().toExtend<z.input<typeof ItemCompleted>>();
 expectTypeOf<Wire<ThreadTurnsListResponse>>().toExtend<z.input<typeof ThreadTurnsPage>>();
+expectTypeOf<Wire<ItemStartedNotification>>().toExtend<z.input<typeof ItemStarted>>();
+expectTypeOf<Wire<AgentMessageDeltaNotification>>().toExtend<z.input<typeof AgentMessageDelta>>();
+expectTypeOf<Wire<ReasoningSummaryTextDeltaNotification>>().toExtend<
+  z.input<typeof ReasoningSummaryDelta>
+>();
+expectTypeOf<Wire<CommandExecutionOutputDeltaNotification>>().toExtend<
+  z.input<typeof CommandOutputDelta>
+>();
+expectTypeOf<Wire<TurnPlanUpdatedNotification>>().toExtend<z.input<typeof TurnPlanUpdated>>();
+expectTypeOf<Wire<ReviewStartResponse>>().toExtend<z.input<typeof ReviewStarted>>();
+expectTypeOf<Wire<ThreadCompactStartResponse>>().toExtend<z.input<typeof CompactStarted>>();
 
 const GENERATED = join(import.meta.dirname, 'codex-generated');
 
@@ -87,6 +112,13 @@ const ROWS: readonly { readonly type: string; readonly runtime: z.ZodType }[] = 
   { type: 'ThreadTokenUsageUpdatedNotification', runtime: TokenUsageUpdated },
   { type: 'ItemCompletedNotification', runtime: ItemCompleted },
   { type: 'ThreadTurnsListResponse', runtime: ThreadTurnsPage },
+  { type: 'ItemStartedNotification', runtime: ItemStarted },
+  { type: 'AgentMessageDeltaNotification', runtime: AgentMessageDelta },
+  { type: 'ReasoningSummaryTextDeltaNotification', runtime: ReasoningSummaryDelta },
+  { type: 'CommandExecutionOutputDeltaNotification', runtime: CommandOutputDelta },
+  { type: 'TurnPlanUpdatedNotification', runtime: TurnPlanUpdated },
+  { type: 'ReviewStartResponse', runtime: ReviewStarted },
+  { type: 'ThreadCompactStartResponse', runtime: CompactStarted },
 ];
 
 /**

@@ -67,6 +67,7 @@ import type {
   KeepAwakeMode,
   KeepAwakeStatus,
   LanePermissionsDto,
+  LiveSystemsDto,
   ProjectTrustDto,
   TrustOverrides,
   TrustSettingsDto,
@@ -580,6 +581,10 @@ export interface ApiServices extends PlanRecordServices {
   /** A project's Trust: its overrides, the switches its sessions use, and what would come along; throws NotFoundError. */
   projectTrust(projectId: ProjectId): Promise<ProjectTrustDto>;
   setProjectTrust(projectId: ProjectId, overrides: TrustOverrides): Promise<ProjectTrustDto>;
+  /** The hosts, cloud profiles and namespaces the judge treats as live in a project; throws NotFoundError. */
+  liveSystems(projectId: ProjectId): LiveSystemsDto;
+  /** Replaces them, trimmed and without duplicates; read when each session starts. */
+  setLiveSystems(projectId: ProjectId, input: LiveSystemsDto): LiveSystemsDto;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */

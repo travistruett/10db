@@ -5,14 +5,14 @@ import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } fro
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
 import { chooseModel } from '../routing';
-import { CompletionError, type SessionAdapter } from '../sessions';
+import { CompletionError, type AgentAdapter } from '../sessions';
 import { routingInputs } from '../team';
 
 /** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
 const NAMING_MODEL = ModelTier.Efficient;
 
 export interface AreaNamerDeps {
-  readonly adapter: Pick<SessionAdapter, 'complete'>;
+  readonly adapter: Pick<AgentAdapter, 'complete'>;
   readonly launcher: Pick<Launcher, 'session'>;
   readonly db: DbReader;
   /** Where each question gets its own empty folder to start in. */

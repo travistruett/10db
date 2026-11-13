@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs } from '../../test/fixtures';
 import { seedProfiles } from '../../test/seed-profiles';
-import type { SessionSpec } from '../sessions';
+import type { LaneSessionSpec } from '../sessions';
 
 // What a session starts on: the account's own ID for the planned model, a model chosen again after a
 // move, and what happens when the account refuses the model it was given.
@@ -86,8 +86,8 @@ function secondPlan() {
 }
 
 /** Every spec the fake adapter is started with, in order. */
-function recordSpecs(): SessionSpec[] {
-  const specs: SessionSpec[] = [];
+function recordSpecs(): LaneSessionSpec[] {
+  const specs: LaneSessionSpec[] = [];
   engine.adapter.seen = (spec) => {
     specs.push(spec);
     return {};
@@ -217,7 +217,7 @@ describe('a step the gate sends back for another try', () => {
       { Alpha: [[turn], finish('op-escalate-01')] },
       { gateCommand: 'test -f src/api/a.txt' },
     );
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     // The project moves to an account that lists only the planned model while the first session runs.
     engine.adapter.seen = (spec) => {
       specs.push(spec);
@@ -358,7 +358,7 @@ describe('a model the account refuses at the first reply', () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'model_refused' }], finish('op-again-01')] });
     list(engine.project.accountId, claudeModels());
     const accountId = engine.project.accountId;
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     // Another lane's refusal of the same model lands after this lane chose it and before its own arrives.
     engine.adapter.seen = (spec) => {
       specs.push(spec);
@@ -383,7 +383,7 @@ describe('a model the account refuses at the first reply', () => {
     });
     const accountId = engine.project.accountId;
     list(accountId, claudeModels());
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     // The account's list changes while the session runs and no longer holds the model it was given.
     engine.adapter.seen = (spec) => {
       specs.push(spec);
@@ -427,7 +427,7 @@ describe('a model the account refuses by an error’s wording alone', () => {
     listAccountModels(engine.store.db, engine.project.accountId).find((m) => m.model === model);
 
   /** Runs the task to the end and answers the models its sessions started on. */
-  async function runTask(title: string, specs: SessionSpec[]): Promise<string[]> {
+  async function runTask(title: string, specs: LaneSessionSpec[]): Promise<string[]> {
     const before = specs.length;
     const { workstream } = engine.addTask(title, ['api'], [], quick);
     engine.launch(workstream.id);

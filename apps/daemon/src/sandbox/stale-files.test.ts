@@ -175,11 +175,13 @@ describe('claimSandboxTempRoot', () => {
   });
 
   it.each([
-    ['a dead daemon’s is swept from the files root', 'dead', 'files', false],
-    ['a live daemon’s is kept', 'live', 'files', true],
-    ['one in a temp root, which lanes write, is never touched', 'dead', 'temp', true],
-  ] as const)('a 10db-setup dir: %s', async (_name, daemon, kind, kept) => {
-    const setup = join(root, '10db-setup-0123456789ab');
+    ['a dead daemon’s is swept from the files root', 'setup', 'dead', 'files', false],
+    ['a live daemon’s is kept', 'setup', 'live', 'files', true],
+    ['one in a temp root, which lanes write, is never touched', 'setup', 'dead', 'temp', true],
+    ['a dead daemon’s secret reads are swept from the files root', 'read', 'dead', 'files', false],
+    ['secret reads in a temp root are never touched', 'read', 'dead', 'temp', true],
+  ] as const)('a 10db session dir: %s', async (_name, prefix, daemon, kind, kept) => {
+    const setup = join(root, `10db-${prefix}-0123456789ab`);
     mkdirSync(join(setup, 'yours/skills'), { recursive: true });
     symlinkSync(outside, join(setup, 'yours/skills/s'));
     const owner = daemon === 'dead' ? await deadPid() : liveProcess();

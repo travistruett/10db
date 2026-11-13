@@ -60,6 +60,7 @@ import {
   listTasks,
   listInbox,
   listSessions,
+  listTaskThread,
   listWorkstreams,
   patchAccount,
   patchProject,
@@ -86,6 +87,7 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
+import { setProjectLiveSystems } from '../trust';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
@@ -126,7 +128,7 @@ import {
   type LaneSession,
   type LaneSessionInput,
 } from '../sandbox';
-import type { FakeScriptBook, SessionEvent, SessionHandle, SessionSpec } from '../sessions';
+import type { FakeScriptBook, SessionEvent, SessionHandle, LaneSessionSpec } from '../sessions';
 import {
   createMemoryKeychain,
   FAKE_SRT,
@@ -379,7 +381,7 @@ describe('runner', () => {
           ],
         ],
       });
-      const start = vi.spyOn(engine.adapter, 'start');
+      const start = vi.spyOn(engine.adapter, 'open');
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
@@ -1539,7 +1541,7 @@ describe('runner', () => {
     };
     /** Runs one session of a new task and returns the spec the adapter was started with. */
     async function runTask(title: keyof typeof BOOK) {
-      const start = vi.spyOn(engine.adapter, 'start');
+      const start = vi.spyOn(engine.adapter, 'open');
       const { workstream } = engine.addTask(title);
       engine.launch(workstream.id);
       await engine.runner.idle();
@@ -1736,7 +1738,7 @@ describe('runner', () => {
 
   it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
-    const start = vi.spyOn(engine.adapter, 'start');
+    const start = vi.spyOn(engine.adapter, 'open');
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     await waitFor(() => ws(workstream.id).state === 'RUNNING');
@@ -1795,8 +1797,8 @@ describe('runner', () => {
   describe('lifecycle edges', () => {
     /** Wraps every handle the fake adapter returns; the wrapper sees each call the runner makes. */
     const interceptStart = (wrap: (handle: SessionHandle) => SessionHandle) => {
-      const real = engine.adapter.start.bind(engine.adapter);
-      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => wrap(real(spec)));
+      const real = engine.adapter.open.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'open').mockImplementation((spec) => wrap(real(spec)));
     };
     const doneScript = [write('src/api/a.txt'), commit('op-edge-0001', ['src/api/a.txt']), turn];
 
@@ -2755,7 +2757,7 @@ describe('accounts', () => {
 
   it('releases the start gate when the adapter throws on a subscription account', async () => {
     engine = await createTestEngine({ Alpha: [[turn]] });
-    engine.adapter.start = () => {
+    engine.adapter.open = () => {
       throw new Error('spawn failed');
     };
     const { workstream } = engine.addTask('Alpha');
@@ -2784,8 +2786,8 @@ const moveTo = (accountId: AccountId) =>
 const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
   engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
 /** Every spec the fake adapter is started with, in order. */
-const recordSpecs = (): SessionSpec[] => {
-  const specs: SessionSpec[] = [];
+const recordSpecs = (): LaneSessionSpec[] => {
+  const specs: LaneSessionSpec[] = [];
   engine.adapter.seen = (spec) => {
     specs.push(spec);
     return {};
@@ -4607,7 +4609,7 @@ describe('the session guard', () => {
 
   it('asks the broker about a call it must see, whatever the permission mode', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     engine.adapter.seen = (spec) => {
       specs.push(spec);
       return {};
@@ -4654,6 +4656,7 @@ describe("a lane's settled read-only line", () => {
         mcpServers: {},
         mcpFailures: [],
         setup: EMPTY_SETUP,
+        secretReadsDir: null,
         setProviderSession: () => undefined,
         trackProcesses: () => Promise.resolve(true),
         endProcesses: () => Promise.resolve(),
@@ -4667,7 +4670,7 @@ describe("a lane's settled read-only line", () => {
       {},
       { laneSandbox: standInSandbox() },
     );
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     engine.adapter.seen = (spec) => {
       specs.push(spec);
       return {};
@@ -4770,8 +4773,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const [spec] = specs;
     const [session] = listSessions(engine.store.db, workstream.id);
     expect(spec?.sandbox).toBe(laneSession?.spec);
-    expect(spec?.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
-    expect(spec?.allowedTools).not.toContain('Read');
+    expect(spec?.profile.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
+    expect(spec?.profile.allowedTools).not.toContain('Read');
     expect(spec?.prompt).toContain('a bare `mktemp` fails in the sandbox');
     expect(probe.inputs[0]).toMatchObject({
       project: { id: engine.project.id, repoPath: engine.repoPath, sandboxLoopback: false },
@@ -4831,8 +4834,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       repoGit('commit', '-q', '-m', 'setup');
     };
     /** Each spec as it started, with where its `yours` plugin's skill links led while it ran. */
-    const recordSetups = (): { spec: SessionSpec; links: Record<string, string> }[] => {
-      const seen: { spec: SessionSpec; links: Record<string, string> }[] = [];
+    const recordSetups = (): { spec: LaneSessionSpec; links: Record<string, string> }[] => {
+      const seen: { spec: LaneSessionSpec; links: Record<string, string> }[] = [];
       engine.adapter.seen = (spec) => {
         const yours = spec.setup?.plugins.find((dir) => dir.endsWith('/yours'));
         const skills = yours === undefined ? [] : readdirSync(join(yours, 'skills'));
@@ -4990,7 +4993,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
   });
 
   describe('the web in a lane', () => {
-    const fetchCall = { toolName: 'WebFetch', input: { url: 'https://example.net/', prompt: 'x' } };
+    const fetchCall = {
+      toolName: 'WebFetch',
+      input: { url: 'https://example.net/', prompt: 'x' },
+      reportedMode: 'auto' as const,
+    };
 
     it('a gateway lane with web on still cards WebFetch', async () => {
       const probe = sandboxProbe();
@@ -5011,7 +5018,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
-      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.profile.lanePermissionMode).toBe('auto');
       expect(spec.preToolUse(fetchCall).decision).toBe('ask');
       expect(spec.prompt).toContain('WebFetch, WebSearch and repo MCP tools wait on a card');
       await engine.runner.idle();
@@ -5032,9 +5039,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
-      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.profile.lanePermissionMode).toBe('auto');
       expect(spec.preToolUse(fetchCall).decision).toBe('allow');
-      expect(spec.allowedTools).not.toContain('WebFetch');
+      expect(spec.profile.allowedTools).not.toContain('WebFetch');
       expect(spec.prompt).toContain("WebSearch and WebFetch go to auto mode's judge");
       await engine.runner.idle();
     });
@@ -5056,6 +5063,195 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
       expect(spec.preToolUse(fetchCall).decision).toBe('ask');
+      await engine.runner.idle();
+    });
+  });
+
+  describe('a lane judged by auto mode', () => {
+    const deploy = {
+      toolName: 'Bash',
+      input: { command: 'npx vercel deploy --prod --yes' },
+      reportedMode: 'auto' as const,
+    };
+    const GATEWAY: Parameters<typeof createTestEngine>[3] = {
+      account: {
+        kind: 'gateway',
+        label: 'Gateway',
+        settings: { baseUrl: 'https://gateway.example.com' },
+      },
+      secret: 'sk-gateway-test-key',
+    };
+    const PLAN: Parameters<typeof createTestEngine>[3] = {
+      account: { kind: 'claude_subscription', label: 'Plan' },
+    };
+    const start = async (
+      setup: Parameters<typeof createTestEngine>[3],
+      project: Parameters<typeof createTestEngine>[1] = {},
+      book: FakeScriptBook = { Alpha: [[turn]] },
+      flow?: string,
+    ) => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        book,
+        project,
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        setup,
+      );
+      if (setup?.account?.kind === 'claude_subscription') {
+        engine.state.write((ctx) =>
+          patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+        );
+      }
+      const specs = recordSpecs();
+      const { task, workstream } = engine.addTask(
+        'Alpha',
+        ['api'],
+        [],
+        flow === undefined ? undefined : { flow },
+      );
+      return { specs, task, workstream };
+    };
+    const FLOOR_PREFIXES = ["10db's rules judge", 'Claude Code stopped running in auto mode'];
+    /** The floor notices a task's thread holds. */
+    const floorNotices = (taskId: Parameters<typeof listTaskThread>[1]): string[] =>
+      listTaskThread(engine.store.db, taskId)
+        .map((message) => message.body)
+        .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
+    const GATEWAY_NOTICE =
+      "10db's rules judge this session, not auto mode: auto mode doesn't run through a gateway account yet. A call those rules can't settle waits on a card.";
+
+    it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge', async () => {
+      const { specs, task, workstream } = await start(PLAN);
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.model).toBe('claude-sonnet-5-5');
+      expect(spec.preToolUse(deploy).decision).toBe('allow');
+      await engine.runner.idle();
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      expect(floorNotices(task.id)).toEqual([]);
+    });
+
+    it("a lane's denial makes no notice", async () => {
+      const { task, workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [
+              {
+                do: 'judge_denied' as const,
+                toolName: 'Bash',
+                summary: 'npx vercel deploy --prod --yes',
+                reason: 'The classifier judged this action dangerous',
+                by: 'classifier' as const,
+              },
+              turn,
+            ],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(
+        listTaskThread(engine.store.db, task.id).filter((m) =>
+          m.body.startsWith('Auto mode stopped'),
+        ),
+      ).toEqual([]);
+      expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+    });
+
+    it('a gateway lane refuses the same deploy and says why once', async () => {
+      const { specs, task, workstream } = await start(
+        GATEWAY,
+        {},
+        {
+          Alpha: [
+            [write('src/api/a.txt', 'one'), commit('op-floor-0001', ['src/api/a.txt']), turn],
+            [
+              {
+                do: 'mcp' as const,
+                tool: 'complete_step',
+                args: { opId: 'op-floor-0002', summary: 'Looks right.', verdict: 'approve' },
+              },
+              turn,
+            ],
+          ],
+        },
+        'standard',
+      );
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.preToolUse(deploy).decision).toBe('deny');
+      for (let i = 0; i < 10 && ws(workstream.id).state !== 'DONE'; i += 1) {
+        await engine.runner.idle();
+        if (ws(workstream.id).state !== 'DONE') engine.launch(workstream.id);
+      }
+      expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(1);
+      expect(floorNotices(task.id)).toEqual([GATEWAY_NOTICE]);
+    });
+
+    it('with lane auto mode off, a subscription lane refuses it', async () => {
+      const { specs, task, workstream } = await start(PLAN);
+      engine.state.write((ctx) => {
+        setLaneAutoMode(ctx, false);
+      });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.preToolUse(deploy).decision).toBe('deny');
+      await engine.runner.idle();
+      expect(floorNotices(task.id)).toEqual([
+        '10db\'s rules judge this session, not auto mode: "Lanes decide routine permissions" is off in Settings. A call those rules can\'t settle waits on a card.',
+      ]);
+    });
+
+    it('a call reported outside auto mode is refused, and the thread says Claude Code left auto mode', async () => {
+      const { task, workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [{ ...shell('npx vercel deploy --prod --yes'), reportedMode: 'other' as const }, turn],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(engine.adapter.observations.map((o) => o.kind)).toContain('denied_by_guard');
+      expect(floorNotices(task.id)).toEqual([
+        "Claude Code stopped running in auto mode during this session, so 10db's rules judge its calls from here. A call those rules can't settle waits on a card.",
+      ]);
+    });
+
+    it("a project allowing kubectl runs kubectl apply in a judged lane: the builder's allow rule wins", async () => {
+      const { specs, workstream } = await start(PLAN, { allowedCommands: ['kubectl'] });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      const apply = { ...deploy, input: { command: 'kubectl apply -f deploy.yaml' } };
+      const verdict = spec.preToolUse(apply);
+      expect(
+        verdict.decision === 'allow' && 'settled' in verdict ? verdict.settled : null,
+      ).toContain('allow rule');
+      const unlisted = { ...deploy, input: { command: 'vercel deploy --prod' } };
+      expect(spec.preToolUse(unlisted)).toEqual({ decision: 'allow' });
+      await engine.runner.idle();
+    });
+
+    it('the project’s live systems reach the spec', async () => {
+      const { specs, workstream } = await start(PLAN);
+      engine.state.write((ctx) => {
+        setProjectLiveSystems(ctx, engine.project.id, [
+          'the production database on db.example.com',
+        ]);
+      });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.policy.surface).toBe('lane');
+      expect(spec.policy.attended).toBe(false);
+      expect(
+        spec.policy.environment.some((line) =>
+          line.includes('"the production database on db.example.com"'),
+        ),
+      ).toBe(true);
       await engine.runner.idle();
     });
   });
@@ -5161,8 +5357,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     });
     /** Reports claude's pid at `started`, as the real adapter does. */
     const reportPid = () => {
-      const real = engine.adapter.start.bind(engine.adapter);
-      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => {
+      const real = engine.adapter.open.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'open').mockImplementation((spec) => {
         const handle = real(spec);
         return {
           ...handle,
@@ -5424,7 +5620,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       await engine.runner.idle();
       expect(specs[0]?.sandbox).toBeNull();
-      expect(specs[0]?.allowedTools).toEqual(allowedToolsFor(engine.project, ToolAccess.Edit));
+      expect(specs[0]?.profile.allowedTools).toEqual(
+        allowedToolsFor(engine.project, ToolAccess.Edit),
+      );
       expect(specs[0]?.prompt).not.toContain('mktemp');
     },
   );
@@ -5446,7 +5644,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const second = engine.addTask('Beta');
     engine.launch(second.workstream.id);
     await engine.runner.idle();
-    expect(specs.map((spec) => spec.lanePermissionMode)).toEqual(['auto', 'default']);
+    expect(specs.map((spec) => spec.profile.lanePermissionMode)).toEqual(['auto', 'default']);
   });
 
   it("reads the project's localhost switch when each session starts, so a change applies at the next one", async () => {
@@ -5537,7 +5735,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
   it('leaves no temp dir behind when the adapter throws on start', async () => {
     const probe = sandboxProbe();
     engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
-    engine.adapter.start = () => {
+    engine.adapter.open = () => {
       throw new Error('spawn failed');
     };
     const { workstream } = engine.addTask('Alpha');
@@ -5555,7 +5753,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     async function* refused(): AsyncGenerator<SessionEvent> {
       yield await Promise.resolve({ type: 'ended', reason: 'sandbox_refused', message: refusal });
     }
-    vi.spyOn(engine.adapter, 'start').mockImplementation(() => ({
+    vi.spyOn(engine.adapter, 'open').mockImplementation(() => ({
       events: refused(),
       send: () => undefined,
       interrupt: () => Promise.resolve(null),
@@ -5721,7 +5919,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { probe, specs, path } = await run(() => [[turn]]);
       expect(probe.inputs[0]?.project.repoPath).toBe(path);
       expect(probe.inputs[0]?.checkouts).toEqual([engine.repoPath, path]);
-      expect(specs[0]?.allowedTools).toContain(`Read(/${realpathSync(path)}/**)`);
+      expect(specs[0]?.profile.allowedTools).toContain(`Read(/${realpathSync(path)}/**)`);
     });
 
     it('the gate runs in the worktree', async () => {
@@ -6294,7 +6492,7 @@ describe("a batch's gate while new work is held", () => {
       {},
       { baseUpdates, hold, gate: recordingGate(order) },
     );
-    const start = vi.spyOn(engine.adapter, 'start');
+    const start = vi.spyOn(engine.adapter, 'open');
     const batch = engine.state.write((ctx) =>
       insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
     );

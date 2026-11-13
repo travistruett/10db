@@ -34,6 +34,8 @@ const CODEX_SEED_TYPES = [
   'v2/TurnStartResponse',
   'v2/TurnSteerResponse',
   'v2/TurnInterruptResponse',
+  'v2/ReviewStartResponse',
+  'v2/ThreadCompactStartResponse',
 ] as const;
 
 /**
@@ -57,6 +59,13 @@ const RUNTIME_SCHEMAS = [
   'v2/ThreadTokenUsageUpdatedNotification',
   'v2/ItemCompletedNotification',
   'v2/ThreadTurnsListResponse',
+  'v2/ItemStartedNotification',
+  'v2/AgentMessageDeltaNotification',
+  'v2/ReasoningSummaryTextDeltaNotification',
+  'v2/CommandExecutionOutputDeltaNotification',
+  'v2/TurnPlanUpdatedNotification',
+  'v2/ReviewStartResponse',
+  'v2/ThreadCompactStartResponse',
 ] as const;
 
 /** The pre-commit hygiene check refuses a file over 1 MB. */

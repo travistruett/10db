@@ -227,12 +227,12 @@ their calls are judged like any other call. Many need the network, OAuth or the 
 break, and the builder installed them. Servers a repository declares (`.mcp.json`) stay as built: approved by
 hash and run under `srt`, since an agent can write that file.
 
-**Approved project hooks run; plugin hooks don't yet.** Approved project hooks run in the agent's own process,
-outside the kernel sandbox, as they do in Claude Code. The builder approved them; that is the trust the decision
-extends. A hook an agent wrote never runs without approval (§2). Plugin hooks stay out of 10db sessions (live
-check L3b): a plugin's `PreToolUse` answer can rewrite a call after 10db's guard judged it, and its allow skips
-10db's broker, so a call 10db never judged or carded could run. They come along once 10db can order or judge
-them, a follow-up.
+**Hooks run.** Plugin hooks, the hooks and `allowed-tools` in the builder's and plugins' skills, commands and
+agents, and approved project hooks run as they do in Claude Code. The builder installed or approved them; that is
+the trust the decision extends. A plugin hook starts in its wrapper's folder, not the checkout. The live checks
+(research, L3b and L3c) showed a hook's rewrite of a call is not judged again by 10db's guard and a skill's
+`allowed-tools` skips the card for a call the guard passes on; the builder accepted both for what they installed.
+A hook an agent wrote never runs without approval (§2).
 
 **Not loaded:** the builder's `~/.claude/settings.json` (it can change billing, permissions and the sandbox),
 their permission allowlists and output styles.
@@ -246,7 +246,7 @@ These exist because 10db runs several writers at once. They apply only where ano
 | Claims and hazards (lockfiles, migrations) | Lanes in parallel copies of one project; pages in a pass | A chat or a lone task with nothing else in its folder |
 | Page areas | A pass | Everywhere else |
 | The folder hold | Any writer in Your folder: a pass, a chat that writes there | Separate copies |
-| Only 10db commits and pushes; the gate is 10db's | Lanes and passes, which 10db lands | A chat in Your folder (§8) |
+| Only 10db commits and pushes; the gate is 10db's | Lanes and passes, which 10db lands. In a pass the builder may allow a plain commit, push or merge on a card, which 10db then runs as the builder; a force push and a push to `main` or the base branch stay refused | A chat in Your folder (§8) |
 | Installs through the daemon | Lanes in parallel copies | A chat in Your folder |
 
 ## 8. Surfaces
@@ -256,7 +256,7 @@ These exist because 10db runs several writers at once. They apply only where ano
 | **Lane** | Setup comes along (§6). Web and MCP are judged, not carded. Deploys go to limit 4. Unreadable shell goes to the judge. "Allow Bash?" goes away. Unattended rules (§5). Commits, pushes, claims and the gate stay 10db's. |
 | **Gate** | Unchanged: it runs under the sandbox and runs tests, which are agent-written code. |
 | **Plan** | Its own session searches and fetches the web. Commands are judged, not carded, and background jobs run under the lanes' process tracking. Setup comes along. The researcher question limit and URL rules go. Plan still writes no code: that is its job, not a security line **(call)**. |
-| **Pass** | As a lane, attended. |
+| **Pass** | As a lane, attended. A plain `git commit`, `git push`, `git merge` or `gh pr merge` asks the builder on a card and, allowed, runs once as the builder would run it, outside the sandbox (a force push and a push to `main` or the base branch stay refused). A Read of the checkout's `.env*` asks on a card too. |
 | **Chat** (designed, §13) | A chat can write in Your folder, holding the folder while it does, and can commit, branch and open a pull request. Pushes and merges are judged (merging is limit 4). Bigger work still goes to a separate copy as a task. Builder tools are all present; destructive ones get Undo or are judged. |
 
 ## 9. Settings

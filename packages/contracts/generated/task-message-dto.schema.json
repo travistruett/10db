@@ -119,6 +119,9 @@
     },
     "sendable": {
       "type": "boolean"
+    },
+    "allowThis": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -131,6 +134,7 @@
     "pushedAt",
     "deliveredAt",
     "files",
-    "sendable"
+    "sendable",
+    "allowThis"
   ]
 }

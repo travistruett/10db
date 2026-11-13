@@ -111,7 +111,7 @@ const isDeveloperMessage = (item: InputItem): boolean =>
 
 const isCallOutput = (item: InputItem): boolean => item.type?.endsWith('_call_output') === true;
 
-/** The SSE stream of one response: the step's item, then a completion with token usage. */
+/** The SSE stream of one response: the step's item (a message in pieces), then a completion with token usage. */
 function answer(res: ServerResponse, step: FakeStep, n: number): void {
   const send = (event: Record<string, unknown> & { readonly type: string }): void => {
     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
@@ -134,6 +134,20 @@ function answer(res: ServerResponse, step: FakeStep, n: number): void {
           id: `msg_${String(n)}`,
           content: [{ type: 'output_text', text: step.say }],
         };
+  if (!('js' in step)) {
+    // A message streams as the Responses API sends it: the item, its text in two pieces, then the item done.
+    send({ type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } });
+    const half = Math.floor(step.say.length / 2);
+    for (const delta of [step.say.slice(0, half), step.say.slice(half)])
+      if (delta !== '')
+        send({
+          type: 'response.output_text.delta',
+          item_id: item.id,
+          output_index: 0,
+          content_index: 0,
+          delta,
+        });
+  }
   send({ type: 'response.output_item.done', item });
   send({
     type: 'response.completed',

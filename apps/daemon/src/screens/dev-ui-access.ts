@@ -20,6 +20,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/events/stream',
   '/projects/:projectId/shape-jev',
   '/projects/:projectId/one-way-paths',
+  '/projects/:projectId/live-systems',
   '/projects/:projectId/network-hosts',
   '/projects/:projectId/hazard-assessment',
   '/projects/:projectId/small-proposal-limit',

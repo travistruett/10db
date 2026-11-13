@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
+import { ClaimKind, DEFAULT_HAZARDS, JudgeKind } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { judgePreToolUse, protectedPaths } from './index';
@@ -29,6 +29,8 @@ function judge(
   extra: Partial<Parameters<typeof judgePreToolUse>[0]> = {},
 ) {
   return judgePreToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     ...extra,
     toolName,
     toolInput,
@@ -181,7 +183,9 @@ describe('judgePreToolUse', () => {
     ],
     ['mcp__repo__x, judged', 'mcp__repo__x', {}, 'ask'],
   ])('%s', (_name, toolName, input, decision) => {
-    expect(judge(toolName, input, AREA, { webJudged: true }).decision).toBe(decision);
+    expect(judge(toolName, input, AREA, { judge: JudgeKind.Native, webOn: true }).decision).toBe(
+      decision,
+    );
   });
 
   it('names what it could not read when it asks about a command', () => {
@@ -206,6 +210,8 @@ describe('judgePreToolUse', () => {
     }
     const read = (task: string) =>
       judgePreToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
         toolName: 'Read',
         toolInput: { file_path: join(files(task), 'shot.png') },
         repoPath: repo.path,
@@ -232,6 +238,8 @@ describe('judgePreToolUse', () => {
 describe('judgePreToolUse in a pass', () => {
   it("denies a write to a page's file under a held shared area, naming the page", () => {
     const verdict = judgePreToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Write',
       toolInput: { file_path: 'src/settings/page.tsx', content: 'x' },
       repoPath: repo.path,
@@ -242,7 +250,7 @@ describe('judgePreToolUse in a pass', () => {
       hazards: DEFAULT_HAZARDS,
       claims: [{ kind: ClaimKind.Area, name: 'src' }],
       readOnly: false,
-      inPass: { pages: ['settings'] },
+      inPass: { pages: ['settings'], baseBranch: 'main' },
       protectedPaths: protectedPaths({
         dataDir: data.path,
         home: homedir(),

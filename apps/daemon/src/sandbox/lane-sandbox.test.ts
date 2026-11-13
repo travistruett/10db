@@ -161,6 +161,28 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  // Claude Code's deny rule is what its Grep honours, so a person in the session changes nothing in
+  // the rules: an allowed Read is served from a copy in the session's own reads folder instead.
+  it('.env files in a session a person is in stay denied to every file tool and the kernel', async () => {
+    const env = writeIn(checkout, '.env');
+    const session = await sandbox().forSession(input({ attended: true }));
+    const reads = session.secretReadsDir;
+    try {
+      expect(session.spec.settings.filesystem.denyRead).toContain(env);
+      expect(session.spec.disallowedTools).toContain(`Read(/${env})`);
+      expect(session.spec.askRules.filter((rule) => rule.includes('.env'))).toEqual([]);
+      expect(session.fileAccess.secretsOnCard).toEqual([env]);
+      expect(session.fileAccess.secretFiles).toContain(env);
+      // Its own folder in the files root, which the kernel and the file-access judge close.
+      expect(reads).not.toBeNull();
+      expect(dirname(reads ?? '')).toBe(filesRoot);
+      expect(existsSync(reads ?? '')).toBe(true);
+    } finally {
+      session.dispose();
+    }
+    expect(existsSync(reads ?? '')).toBe(false);
+  });
+
   it("writes only the lane's own temp dir, never a shared cache or pnpm's shared lock directory", async () => {
     const session = await sandbox().forSession(input());
     try {
@@ -850,24 +872,6 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           `Write(/${hooks}/**)`,
         ]),
       );
-    } finally {
-      session.dispose();
-    }
-  });
-
-  it("hands the classifier a rule naming the project's gate command", async () => {
-    const session = await sandbox().forSession(
-      input({
-        project: {
-          id: projectId,
-          repoPath: repo.path,
-          sandboxLoopback: false,
-          gateCommand: 'make gate',
-        },
-      }),
-    );
-    try {
-      expect(session.spec.autoMode.hard_deny[1]).toContain(JSON.stringify('make gate'));
     } finally {
       session.dispose();
     }

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "harness": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex"
+      ]
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "steer": {
+      "type": "string",
+      "enum": [
+        "inject",
+        "queue"
+      ]
+    },
+    "receipts": {
+      "type": "boolean"
+    },
+    "readBack": {
+      "type": "boolean"
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "png",
+          "jpeg",
+          "webp"
+        ]
+      }
+    },
+    "slashCommands": {
+      "type": "boolean"
+    },
+    "plan": {
+      "type": "boolean"
+    },
+    "reasoning": {
+      "type": "boolean"
+    },
+    "subagents": {
+      "type": "boolean"
+    },
+    "modelSwitch": {
+      "type": "string",
+      "enum": [
+        "next_turn",
+        "none"
+      ]
+    },
+    "takeover": {
+      "type": "boolean"
+    },
+    "costUsd": {
+      "type": "boolean"
+    },
+    "judge": {
+      "type": "string",
+      "enum": [
+        "native",
+        "tendb",
+        "rules"
+      ]
+    }
+  },
+  "required": [
+    "harness",
+    "label",
+    "steer",
+    "receipts",
+    "readBack",
+    "images",
+    "slashCommands",
+    "plan",
+    "reasoning",
+    "subagents",
+    "modelSwitch",
+    "takeover",
+    "costUsd",
+    "judge"
+  ],
+  "additionalProperties": false
+}

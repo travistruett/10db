@@ -71,8 +71,30 @@ export default defineConfig(
     files: ['apps/desktop/src/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat['recommended-latest']],
     plugins: { 'jsx-a11y': fixupPluginRules(jsxA11y) },
-    rules: jsxA11y.flatConfigs.strict.rules,
     languageOptions: { globals: globals.browser },
+    rules: {
+      ...jsxA11y.flatConfigs.strict.rules,
+      // Repeated from the block above: a later block replaces a rule's options rather than merging them.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^@10db/[^/]+/.+',
+              message: 'Import a workspace package through its entry point only.',
+            },
+          ],
+          paths: [
+            {
+              name: '@10db/contracts',
+              importNames: ['providerOf', 'Provider'],
+              message:
+                "The UI reads an agent's capabilities, never its provider (docs/architecture/decisions/2026-11-12-one-adapter-seam-with-capabilities.md).",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
     files: ['apps/desktop/e2e/**/*.ts'],

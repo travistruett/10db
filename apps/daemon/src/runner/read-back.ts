@@ -1,11 +1,4 @@
-import {
-  Provider,
-  agentKind,
-  providerOf,
-  type NextAction,
-  type TaskId,
-  type WorkstreamId,
-} from '@10db/contracts';
+import { agentKind, type NextAction, type TaskId, type WorkstreamId } from '@10db/contracts';
 import {
   insertSystemNotice,
   listUndeliveredTaskMessages,
@@ -15,7 +8,7 @@ import {
 } from '@10db/db';
 import { AccountLaunchError, KeychainError, type Launcher } from '../environment';
 import type { StateStore } from '../events';
-import { ConversationUnreadError, type SessionAdapter } from '../sessions';
+import { ConversationUnreadError, type AgentAdapter } from '../sessions';
 import { resumedSessionOf } from './next-action';
 
 // Workbench spec §12. A lane that resumes a Codex thread while a builder message pushed to it was never
@@ -42,7 +35,7 @@ export type ReadBack =
 
 export interface ReadBackDeps {
   readonly state: StateStore;
-  readonly adapter: Pick<SessionAdapter, 'readClientUuids'>;
+  readonly adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'>;
   readonly launcher: Pick<Launcher, 'probe'>;
 }
 
@@ -67,7 +60,10 @@ export async function readBackThread(
   const { action } = input;
   const thread = resumedSessionOf(action);
   const unchanged: ReadBack = { kind: 'read', action };
-  if (thread === null || providerOf(agentKind(input.account.kind)) !== Provider.Codex)
+  if (
+    thread === null ||
+    !deps.adapter.capabilities({ kind: agentKind(input.account.kind) }, null).readBack
+  )
     return unchanged;
   // Oldest first, so the first was written earliest.
   const inDoubt = listUndeliveredTaskMessages(deps.state.db, input.taskId).filter(

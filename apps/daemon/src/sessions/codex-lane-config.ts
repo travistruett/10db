@@ -1,6 +1,6 @@
 import { SandboxedMcpServer } from '../sandbox';
 import { lanePermissions } from './codex-lane-permissions';
-import type { SessionMcpServer, SessionSpec } from './types';
+import type { LaneSessionSpec, SessionMcpServer } from './types';
 
 /** The name of the permission profile 10db's template defines and every lane thread must run under. */
 export const LANE_PROFILE = 'lane';
@@ -36,12 +36,12 @@ function projectServer(server: SessionMcpServer): Record<string, unknown> {
  * The per-lane `config` for `thread/start` and `thread/resume`. It travels over stdin, never on a
  * command line, and holds the name of the token variable, never the token.
  */
-export function codexThreadConfig(spec: SessionSpec): Record<string, unknown> {
+export function codexThreadConfig(spec: LaneSessionSpec): Record<string, unknown> {
   const projects = Object.fromEntries(
     Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
   );
   const { sandbox } = spec;
-  if (sandbox === undefined || sandbox === null) {
+  if (sandbox === null) {
     throw new CodexLaneConfigError('a Codex session needs the lane sandbox');
   }
   // With the setup's skill roots listed, Codex tells the model of its skills; every other thread keeps
