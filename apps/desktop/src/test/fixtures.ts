@@ -235,7 +235,7 @@ export function candidate(
     claims: task.areas.map((name) => ({ kind: 'area', name })),
     conflict: null,
     plan: {
-      flowName: 'standard',
+      rigor: 'standard',
       steps: [
         stepDto(),
         stepDto({

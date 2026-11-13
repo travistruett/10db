@@ -13,7 +13,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiClient, quickFlowId } from '../../test/api-client';
+import { apiClient } from '../../test/api-client';
 import { FakeGh } from '../../test/fake-gh';
 import { seedProfiles } from '../../test/seed-profiles';
 import {
@@ -165,7 +165,7 @@ async function addProject(api: ReturnType<typeof apiClient>) {
     name: '10db',
     repoPath: repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     areas: [{ name: 'src', globs: ['src/**'] }],
   });
 }
@@ -370,7 +370,7 @@ describe('self-update in the daemon', () => {
         name: '10db',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [
           { name: 'src', globs: ['src/**'] },
           { name: 'docs', globs: ['docs/**'] },
@@ -522,7 +522,7 @@ describe('self-update in the daemon', () => {
         name: '10db',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [
           { name: 'src', globs: ['src/**'] },
           { name: 'docs', globs: ['docs/**'] },
@@ -601,7 +601,7 @@ describe('self-update in the daemon', () => {
         name: '10db',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [
           { name: 'src', globs: ['src/**'] },
           { name: 'docs', globs: ['docs/**'] },
@@ -655,7 +655,7 @@ describe('self-update in the daemon', () => {
           name: 'shop',
           repoPath: remote.repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [
             { name: 'api', globs: ['src/api/**'] },
             { name: 'ui', globs: ['src/ui/**'] },

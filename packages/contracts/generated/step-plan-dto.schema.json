@@ -2,8 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "flowName": {
-      "type": "string"
+    "rigor": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "light",
+            "standard",
+            "careful",
+            "critical"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "steps": {
       "type": "array",
@@ -348,7 +361,7 @@
     }
   },
   "required": [
-    "flowName",
+    "rigor",
     "steps",
     "overBudget"
   ]

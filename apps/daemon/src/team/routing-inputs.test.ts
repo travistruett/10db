@@ -1,4 +1,4 @@
-import { mintId, ModelTier, type ModelSetting } from '@10db/contracts';
+import { ModelTier, Rigor, type ModelSetting } from '@10db/contracts';
 import {
   createTestStore,
   defaultAccountId,
@@ -45,10 +45,12 @@ function efficientModel(): string {
   return chooseModel({
     ...inputs,
     def: { role: 'implement', need: 0 },
-    persona: undefined,
-    task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: setting },
-    project: { id: null, budgetCeiling: null },
-    stakes: { retry: false },
+    requirements: [{ kind: 'automatic' }],
+    effort: null,
+    fallback: null,
+    pinned: false,
+    task: { modelSetting: setting, effortPin: null },
+    project: { budgetCeiling: null },
     byScore: false,
   }).model;
 }
@@ -113,22 +115,13 @@ describe('planning a step with the account’s overrides', () => {
       });
     });
     const plan = planSteps({
-      flow: {
-        id: mintId('Flow'),
-        name: 'one-step',
-        steps: [{ role: 'implement', need: 0, skip: [], persona: null }],
-        createdAt: '2026-11-07T00:00:00.000Z',
-        updatedAt: '2026-11-07T00:00:00.000Z',
-      },
-      task: {
-        riskTags: [],
-        acceptanceCriteria: [],
-        areas: [],
-        modelSetting: { kind: 'tier', tier: ModelTier.Efficient },
-      },
-      project: { id: mintId('Project'), budgetCeiling: null },
+      rigor: Rigor.Light,
+      taskKinds: [],
+      kinds: [],
+      playbook: { project: null, global: { rows: [], cells: [] } },
+      task: { modelSetting: { kind: 'tier', tier: ModelTier.Efficient }, effortPin: null },
+      project: { budgetCeiling: null },
       personas: [],
-      bindings: [],
       ...routingInputs(store.db, { accountId, provider: 'claude' }),
     });
     expect(plan.steps.length).toBeGreaterThan(0);

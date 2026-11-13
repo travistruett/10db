@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -50,7 +50,7 @@ async function project(extra: Record<string, unknown> = {}) {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(a),
+    defaultRigor: 'light',
     areas: [
       { name: 'app', globs: ['app/**'] },
       { name: 'contracts', globs: ['contracts/**'] },

@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import {
   createMemoryKeychain,
   createTempRepo,
@@ -65,7 +65,7 @@ async function runOnFallback(book: FakeScriptBook) {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     areas: [{ name: 'src', globs: ['src/**'] }],
     fallbackAccountId: fallback.id,
   });

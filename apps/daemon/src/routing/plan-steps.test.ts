@@ -1,27 +1,11 @@
-import { mintId, type FlowDto, type PersonaDto } from '@10db/contracts';
+import { mintId, Rigor, type KindDto, type PersonaDto, type TaskKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FLOWS } from './catalogue';
 import { planSteps, type PlanInput } from './plan-steps';
+import type { PlaybookScopes } from './playbook';
 import { testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 const NOW = '2026-10-17T12:00:00.000Z';
-const flow = (name: string, steps?: FlowDto['steps']): FlowDto => {
-  const def = DEFAULT_FLOWS.find((f) => f.name === name);
-  return {
-    id: mintId('Flow'),
-    name,
-    steps:
-      steps ??
-      (def?.steps ?? []).map((s) => ({ ...s, skip: s.skip ?? [], persona: s.persona ?? null })),
-    createdAt: NOW,
-    updatedAt: NOW,
-  };
-};
-const persona = (
-  key: string,
-  role: PersonaDto['role'],
-  extra: Partial<PersonaDto> = {},
-): PersonaDto => ({
+const persona = (key: string, role: PersonaDto['role']): PersonaDto => ({
   id: mintId('Persona'),
   key,
   name: key,
@@ -34,7 +18,6 @@ const persona = (
   archived: false,
   createdAt: NOW,
   updatedAt: NOW,
-  ...extra,
 });
 const defaults = [
   persona('planner', 'plan'),
@@ -43,238 +26,181 @@ const defaults = [
   persona('reviewer', 'review'),
   persona('qa', 'qa'),
 ];
-const project = { id: mintId('Project'), budgetCeiling: null } as const;
-const task = (riskTags: ('security' | 'migration')[] = [], criteria = 1) => ({
-  riskTags,
-  acceptanceCriteria: Array.from({ length: criteria }, (_, i) => `c${String(i)}`),
-  areas: [],
-  modelSetting: null,
+const empty: PlaybookScopes = { project: null, global: { rows: [], cells: [] } };
+const kind = (key: string, fields: Partial<KindDto> = {}): KindDto => ({
+  id: mintId('Kind'),
+  key,
+  label: key,
+  description: '',
+  minimumRigor: null,
+  alwaysReviewed: false,
+  failsAtLimit: false,
+  ownCopy: false,
+  toInbox: false,
+  addsSteps: [],
+  overrides: {},
+  position: 0,
+  ...fields,
 });
+const taskKinds = (...keys: string[]): TaskKind[] => keys.map((key) => ({ key, source: 'agent' }));
 const input = (over: Partial<PlanInput> = {}): PlanInput => ({
-  flow: flow('standard'),
-  task: task(),
-  project,
+  rigor: Rigor.Standard,
+  task: { modelSetting: null, effortPin: null },
+  taskKinds: [],
+  kinds: [],
+  playbook: empty,
+  project: { budgetCeiling: null },
   personas: defaults,
-  bindings: [],
   profiles: testCatalogue(),
-  roleSettings: [],
-  patterns: [],
   tierOverrides: {},
   ...over,
 });
 const summary = (plan: ReturnType<typeof planSteps>) =>
   plan.steps.map((s) => `${s.role}:${s.personaName}:${s.model}@${s.effort}`);
 
-describe('planSteps', () => {
+describe('planSteps: a plan per rigor on a scored account', () => {
   it.each([
+    { rigor: Rigor.Light, want: ['implement:implementer:mid@low'] },
     {
-      name: 'standard: implement then review',
-      over: {},
-      want: ['implement:implementer:mid@high', 'review:reviewer:big@high'],
+      rigor: Rigor.Standard,
+      want: ['implement:implementer:mid@high', 'review:reviewer:mid@high'],
     },
     {
-      name: 'full on a small, safe task skips the plan, the plan review and QA',
-      over: { flow: flow('full') },
-      want: ['implement:implementer:mid@high', 'review:reviewer:big@high'],
+      rigor: Rigor.Careful,
+      want: ['plan:planner:mid@high', 'implement:implementer:mid@high', 'review:reviewer:big@high'],
     },
     {
-      name: 'full on a large security task keeps every step and raises the reviews',
-      over: { flow: flow('full'), task: task(['security'], 4) },
+      rigor: Rigor.Critical,
       want: [
-        'plan:planner:mid@high',
+        'plan:planner:big@high',
         'plan_review:plan-reviewer:big@max',
-        'implement:implementer:mid@high',
+        'implement:implementer:big@high',
         'review:reviewer:big@max',
         'qa:qa:mid@low',
       ],
     },
-    {
-      name: 'full drops a plan review when the plan step was skipped',
-      over: { flow: flow('full'), task: task(['security']) },
-      want: ['implement:implementer:mid@high', 'review:reviewer:big@max'],
-    },
-    {
-      name: 'a migration floors the implement step, which mid already clears on intelligence',
-      over: { flow: flow('quick'), task: task(['migration']) },
-      want: ['implement:implementer:mid@high'],
-    },
-  ])('$name', ({ over, want }) => {
-    expect(summary(planSteps(input(over)))).toEqual(want);
+  ])('$rigor', ({ rigor, want }) => {
+    const plan = planSteps(input({ rigor }));
+    expect(summary(plan)).toEqual(want);
+    expect(plan.rigor).toBe(rigor);
   });
 
-  const measured = (scores: { intelligence: number | null }, costPerTaskUsd: number | null) => ({
-    scores,
-    costPerTaskUsd,
+  it('puts a migration’s plan review and Frontier review on a Careful task', () => {
+    const migration = kind('migration', {
+      minimumRigor: Rigor.Careful,
+      addsSteps: ['plan_review'],
+      overrides: {
+        plan_review: { personaId: null, model: { kind: 'tier', tier: 'capable' }, effort: 'high' },
+        review: { personaId: null, model: { kind: 'tier', tier: 'capable' }, effort: 'high' },
+      },
+    });
+    const plan = planSteps(
+      input({ rigor: Rigor.Careful, kinds: [migration], taskKinds: taskKinds('migration') }),
+    );
+    expect(summary(plan)).toEqual([
+      'plan:planner:mid@high',
+      // The kind fixes the effort at high, so the review step routes among the high profiles.
+      'plan_review:plan-reviewer:big@high',
+      'implement:implementer:mid@high',
+      'review:reviewer:big@high',
+    ]);
   });
-  const chosenBy = (reason: string) =>
-    reason.startsWith('by role default:')
-      ? 'default'
-      : reason.startsWith('by score:')
-        ? 'score'
-        : reason;
+
+  it('starts each step pending, with the need its cell gave it', () => {
+    const plan = planSteps(input());
+    expect(plan.steps.map((s) => [s.status, s.attempts, s.startedAt, s.result, s.need])).toEqual([
+      ['pending', 0, null, null, 40],
+      ['pending', 0, null, null, 40],
+    ]);
+  });
+});
+
+describe('planSteps: without scores each cell runs its fallback rung', () => {
+  const chosenBy = (reason: string) => (reason.startsWith('by role default:') ? 'default' : reason);
   it.each([
     {
-      name: 'no scores: every step on its role default',
-      profiles: unscoredCatalogue(),
-      want: [
-        'plan:big@high:default',
-        'implement:mid@high:default',
-        'review:big@high:default',
-        'qa:small@medium:default',
-      ],
+      rigor: Rigor.Standard,
+      want: ['implement:mid@high:default', 'review:big@high:default'],
     },
     {
-      name: 'scores but no costs: every step on its role default',
-      profiles: unscoredCatalogue({
-        'mid@high': measured({ intelligence: 46 }, null),
-        'big@high': measured({ intelligence: 51 }, null),
-      }),
-      want: [
-        'plan:big@high:default',
-        'implement:mid@high:default',
-        'review:big@high:default',
-        'qa:small@medium:default',
-      ],
+      rigor: Rigor.Careful,
+      want: ['plan:big@xhigh:default', 'implement:mid@xhigh:default', 'review:big@xhigh:default'],
     },
     {
-      name: 'partial: two profiles measured, every step routed among them by score',
-      profiles: unscoredCatalogue({
-        'mid@high': measured({ intelligence: 46 }, 0.75),
-        'big@high': measured({ intelligence: 51 }, 2.5),
-      }),
+      rigor: Rigor.Critical,
       want: [
-        'plan:mid@high:score',
-        'implement:mid@high:score',
-        'review:big@high:score',
-        'qa:mid@high:score',
+        'plan:big@xhigh:default',
+        'plan_review:big@xhigh:default',
+        'implement:big@xhigh:default',
+        'review:big@xhigh:default',
+        'qa:big@high:default',
       ],
     },
-    {
-      name: 'full scores: by need, cost and budget',
-      profiles: testCatalogue(),
-      want: [
-        'plan:mid@high:score',
-        'implement:mid@high:score',
-        'review:big@high:score',
-        'qa:mid@low:score',
-      ],
-    },
-  ])('routes with $name', ({ profiles, want }) => {
-    const plan = planSteps(input({ flow: flow('full'), task: task([], 4), profiles }));
+  ])('$rigor', ({ rigor, want }) => {
+    const plan = planSteps(input({ rigor, profiles: unscoredCatalogue() }));
     expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}:${chosenBy(s.reason)}`)).toEqual(
       want,
     );
   });
+});
 
-  it('starts each step pending', () => {
-    const plan = planSteps(input());
-    expect(plan.steps.map((s) => [s.status, s.attempts, s.startedAt, s.result])).toEqual([
-      ['pending', 0, null, null],
-      ['pending', 0, null, null],
-    ]);
-  });
-
-  it('uses a step’s own persona over the team’s binding', () => {
-    const sec = persona('security-reviewer', 'review');
+describe('planSteps: who plays a step', () => {
+  it('uses the persona a cell names', () => {
+    const strict = persona('strict-reviewer', 'review');
     const plan = planSteps(
       input({
-        flow: flow('two-reviews', [
-          { role: 'implement', need: 40, skip: [], persona: null },
-          { role: 'review', need: 48, skip: [], persona: null },
-          { role: 'review', need: 48, skip: [], persona: 'security-reviewer' },
-        ]),
-        personas: [...defaults, sec],
+        personas: [...defaults, strict],
+        playbook: {
+          project: null,
+          global: {
+            rows: [],
+            cells: [
+              {
+                rigor: Rigor.Standard,
+                role: 'review',
+                personaId: strict.id,
+                model: null,
+                effort: null,
+              },
+            ],
+          },
+        },
       }),
     );
-    expect(plan.steps.map((s) => s.personaName)).toEqual([
-      'implementer',
-      'reviewer',
-      'security-reviewer',
-    ]);
+    expect(plan.steps.map((s) => s.personaName)).toEqual(['implementer', 'strict-reviewer']);
   });
 
-  it('uses the persona the team binds to a role, and its pin over the router', () => {
-    const pinned = persona('opus-reviewer', 'review', {
-      modelPin: { model: 'big', effort: 'max' },
-    });
+  it.each([
+    { name: 'gone', personaId: mintId('Persona') },
+    { name: 'of another role', personaId: defaults[0]?.id ?? mintId('Persona') },
+  ])('runs the role’s own persona when a cell’s is $name', ({ personaId }) => {
     const plan = planSteps(
       input({
-        personas: [...defaults, pinned],
-        bindings: [{ role: 'review', personaId: pinned.id }],
-      }),
-    );
-    expect(plan.steps[1]).toMatchObject({
-      personaId: pinned.id,
-      model: 'big',
-      effort: 'max',
-      pinned: true,
-      reason: 'pinned by opus-reviewer',
-    });
-  });
-
-  it('raises a step to the persona’s minimum score', () => {
-    const strict = persona('reviewer', 'review', { minimumScore: 52 });
-    const plan = planSteps(
-      input({ personas: [...defaults.filter((p) => p.key !== 'reviewer'), strict] }),
-    );
-    expect(plan.steps[1]).toMatchObject({ model: 'big', effort: 'max' });
-    expect(plan.steps[1]?.reason).toContain('floor: reviewer minimum');
-  });
-
-  it('runs the role’s default when a step names a persona that is gone or archived', () => {
-    const plan = planSteps(
-      input({
-        flow: flow('ghost', [
-          { role: 'implement', need: 40, skip: [], persona: null },
-          { role: 'review', need: 48, skip: [], persona: 'old-reviewer' },
-        ]),
+        playbook: {
+          project: null,
+          global: {
+            rows: [],
+            cells: [
+              { rigor: Rigor.Standard, role: 'review', personaId, model: null, effort: null },
+            ],
+          },
+        },
       }),
     );
     expect(plan.steps[1]?.personaName).toBe('reviewer');
   });
 
   it('runs a role with no persona as a bare step', () => {
-    const plan = planSteps(input({ flow: flow('quick'), personas: [] }));
+    const plan = planSteps(input({ rigor: Rigor.Light, personas: [] }));
     expect(plan.steps[0]).toMatchObject({
       personaId: null,
       personaName: 'Implementer',
       tools: 'edit',
     });
   });
+});
 
-  it('says which source chose a model without scores, and runs a role default unpinned', () => {
-    const plan = planSteps(input({ profiles: unscoredCatalogue() }));
-    expect(plan.steps.map((s) => [s.model, s.effort, s.pinned, s.profileId === null])).toEqual([
-      ['mid', 'high', false, false],
-      ['big', 'high', false, false],
-    ]);
-    expect(plan.steps[0]?.reason).toBe(
-      'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
-    );
-    expect(plan.steps[1]?.reason).toBe(
-      'by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
-    );
-    expect(plan.overBudget).toEqual([]);
-  });
-
-  it('raises a role default under a floor', () => {
-    const plan = planSteps(
-      input({
-        flow: flow('full'),
-        task: task(['security', 'migration'], 4),
-        profiles: unscoredCatalogue(),
-      }),
-    );
-    expect(summary(plan)).toEqual([
-      'plan:planner:big@high',
-      'plan_review:plan-reviewer:big@xhigh',
-      'implement:implementer:big@xhigh',
-      'review:reviewer:big@xhigh',
-      'qa:qa:small@medium',
-    ]);
-    expect(plan.steps[3]?.reason).toContain('(floor: security-sensitive review)');
-  });
-
+describe('planSteps: what a step records', () => {
   it('names the tier on each step when the account offers nothing, and does not throw', () => {
     const plan = planSteps(input({ profiles: [] }));
     expect(
@@ -284,7 +210,7 @@ describe('planSteps', () => {
         'implement',
         'balanced',
         null,
-        { kind: 'automatic' },
+        { kind: 'automatic', minimum: 40 },
         'no model offered for the balanced tier',
         false,
       ],
@@ -292,31 +218,43 @@ describe('planSteps', () => {
         'review',
         'capable',
         null,
-        { kind: 'automatic' },
+        { kind: 'automatic', minimum: 40 },
         'no model offered for the capable tier',
         false,
       ],
     ]);
   });
 
-  it('records the setting that chose each step, so a later list can choose again', () => {
+  it('records the setting that chose each step, and pins a cell that names one model', () => {
     const plan = planSteps(
       input({
-        roleSettings: [
-          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'efficient' } },
-        ],
+        playbook: {
+          project: null,
+          global: {
+            rows: [],
+            cells: [
+              {
+                rigor: Rigor.Standard,
+                role: 'review',
+                personaId: null,
+                model: { kind: 'model', model: 'small' },
+                effort: null,
+              },
+            ],
+          },
+        },
       }),
     );
-    expect(plan.steps.map((s) => s.setting)).toEqual([
-      { kind: 'automatic' },
-      { kind: 'tier', tier: 'efficient' },
+    expect(plan.steps.map((s) => [s.setting, s.pinned])).toEqual([
+      [{ kind: 'automatic', minimum: 40 }, false],
+      [{ kind: 'model', model: 'small' }, true],
     ]);
     expect(plan.steps[1]?.model).toBe('small');
   });
 
   it('lists the steps no profile within the ceiling can run', () => {
-    const plan = planSteps(input({ project: { ...project, budgetCeiling: 1.5 } }));
-    expect(plan.overBudget).toEqual([1]);
-    expect(plan.steps.map((s) => s.overBudget)).toEqual([false, true]);
+    const plan = planSteps(input({ project: { budgetCeiling: 0.5 } }));
+    expect(plan.overBudget).toEqual([0, 1]);
+    expect(plan.steps.map((s) => s.overBudget)).toEqual([true, true]);
   });
 });

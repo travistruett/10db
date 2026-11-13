@@ -33,15 +33,12 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
     const choice = chooseModel({
       ...routingInputs(deps.db, { accountId: id, provider: providerOf(agentKind(account.kind)) }),
       def: { role: StepRole.Plan, need: 0 },
-      persona: undefined,
-      task: {
-        riskTags: [],
-        acceptanceCriteria: [],
-        areas: [],
-        modelSetting: { kind: 'tier', tier: NAMING_MODEL },
-      },
-      project: { id: null, budgetCeiling: null },
-      stakes: { retry: false },
+      requirements: [{ kind: 'automatic' }],
+      effort: null,
+      fallback: null,
+      pinned: false,
+      task: { modelSetting: { kind: 'tier', tier: NAMING_MODEL }, effortPin: null },
+      project: { budgetCeiling: null },
       byScore: false,
     });
     if (isModelTier(choice.model))

@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 import { bundleJson, P1_BODY } from './plan-bundle-fixture';
@@ -58,7 +58,7 @@ async function seed(): Promise<ProjectId> {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api()),
+    defaultRigor: 'light',
     areas: [
       { name: 'api', globs: ['src/api/**'] },
       { name: 'ui', globs: ['src/ui/**'] },

@@ -1,27 +1,20 @@
+import type { Effort } from '@10db/contracts';
 import {
   mintId,
   ModelStatus,
   ModelTier,
   type ModelProfileDto,
   type ModelSetting,
-  type PatternDto,
-  type PersonaDto,
-  type ProjectId,
-  type RiskTag,
-  type RoleSettingDto,
-  type StepRole,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { chooseModel, type ChooseInput } from './choose-model';
-import { NoProfileError } from './router';
+import { ROLE_DEFAULT } from './role-defaults';
 import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 /** What a reason says when no profile has a score to route on. */
 const UNSCORED =
   '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
 const NOW = '2026-10-17T12:00:00.000Z';
-const PROJECT = mintId('Project');
-const OTHER_PROJECT = mintId('Project');
 
 /** Two Capable models, the dearer one only in the pool when a test asks for it. */
 const peakRows = (): ModelProfileDto[] => unscoredCatalogue({}, ['peak']);
@@ -33,264 +26,36 @@ const scoredPeak = (): ModelProfileDto[] =>
     costPerTaskUsd: 8 + i,
   }));
 
-const persona = (extra: Partial<PersonaDto> = {}): PersonaDto => ({
-  id: mintId('Persona'),
-  key: 'reviewer',
-  name: 'Reviewer',
-  role: 'review',
-  tools: 'read_only',
-  instructions: 'x',
-  skills: [],
-  minimumScore: null,
-  modelPin: null,
-  archived: false,
-  createdAt: NOW,
-  updatedAt: NOW,
-  ...extra,
+/** The rung a cell would fall back to for the role: its default tier and effort. */
+const rungOf = (role: ChooseInput['def']['role']): NonNullable<ChooseInput['fallback']> => ({
+  tier: ROLE_DEFAULT[role].tier,
+  top: false,
+  effort: ROLE_DEFAULT[role].effort,
 });
 
-const pattern = (
-  setting: ModelSetting,
-  extra: Partial<Omit<PatternDto, 'id' | 'setting'>> = {},
-): PatternDto => ({
-  id: mintId('Pattern'),
-  projectId: null,
-  name: 'a pattern',
-  match: { roles: [], riskTags: [], areas: [], retryOnly: false },
-  setting,
-  position: 0,
-  ...extra,
-});
-const roleSetting = (
-  role: StepRole,
-  setting: ModelSetting,
-  projectId: ProjectId | null,
-): RoleSettingDto => ({ role, projectId, setting });
-
-const input = (over: Partial<ChooseInput> = {}): ChooseInput => ({
-  def: { role: 'implement', need: 40 },
-  persona: undefined,
-  task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-  project: { id: PROJECT, budgetCeiling: null },
-  profiles: testCatalogue(),
-  roleSettings: [],
-  patterns: [],
-  tierOverrides: {},
-  stakes: { retry: false },
-  ...over,
-});
-const task = (
-  over: { riskTags?: RiskTag[]; areas?: string[]; modelSetting?: ModelSetting } = {},
-) => ({
-  riskTags: over.riskTags ?? [],
-  acceptanceCriteria: [],
-  areas: over.areas ?? [],
+const input = (over: Partial<ChooseInput> = {}): ChooseInput => {
+  const def = over.def ?? { role: 'implement', need: 40 };
+  return {
+    def,
+    requirements: [{ kind: 'automatic' }],
+    effort: null,
+    fallback: rungOf(def.role),
+    pinned: false,
+    task: { modelSetting: null, effortPin: null },
+    project: { budgetCeiling: null },
+    profiles: testCatalogue(),
+    tierOverrides: {},
+    ...over,
+  };
+};
+const task = (over: { modelSetting?: ModelSetting; effortPin?: Effort } = {}) => ({
   modelSetting: over.modelSetting ?? null,
+  effortPin: over.effortPin ?? null,
 });
 const pick = (over: Partial<ChooseInput> = {}): string | null => {
   const choice = chooseModel(input(over));
   return choice.profile ? label(choice.profile) : null;
 };
-
-describe('chooseModel: which setting decides', () => {
-  const pinned = persona({ modelPin: { model: 'big', effort: 'max' } });
-  const levels = [
-    {
-      name: "a persona's pin",
-      setting: { kind: 'model', model: 'big' } satisfies ModelSetting,
-      pinned: true,
-    },
-    {
-      name: "the task's own setting",
-      setting: { kind: 'tier', tier: ModelTier.Efficient } satisfies ModelSetting,
-    },
-    {
-      name: "the project's pattern",
-      setting: { kind: 'model', model: 'mid' } satisfies ModelSetting,
-    },
-    { name: 'a global pattern', setting: { kind: 'top_of_tier' } satisfies ModelSetting },
-    {
-      name: "the project's role setting",
-      setting: { kind: 'tier', tier: ModelTier.Capable } satisfies ModelSetting,
-    },
-    {
-      name: 'the global role setting',
-      setting: { kind: 'model', model: 'peak' } satisfies ModelSetting,
-    },
-    { name: 'the default', setting: { kind: 'automatic' } satisfies ModelSetting },
-  ];
-  const everyLevel = (from: number): Partial<ChooseInput> => ({
-    profiles: [...testCatalogue(), ...scoredPeak()],
-    persona: from <= 0 ? pinned : undefined,
-    task: task(from <= 1 ? { modelSetting: { kind: 'tier', tier: ModelTier.Efficient } } : {}),
-    patterns: [
-      ...(from <= 2
-        ? [pattern({ kind: 'model', model: 'mid' }, { projectId: PROJECT, position: 3 })]
-        : []),
-      ...(from <= 3 ? [pattern({ kind: 'top_of_tier' }, { position: 0 })] : []),
-    ],
-    roleSettings: [
-      ...(from <= 4
-        ? [roleSetting('implement', { kind: 'tier', tier: ModelTier.Capable }, PROJECT)]
-        : []),
-      ...(from <= 5 ? [roleSetting('implement', { kind: 'model', model: 'peak' }, null)] : []),
-    ],
-    def: { role: 'implement', need: 25 },
-  });
-
-  it.each(levels.map((level, from) => ({ ...level, from })))(
-    '$name wins over every level below it',
-    ({ from, setting, pinned: isPinned }) => {
-      const choice = chooseModel(input(everyLevel(from)));
-      expect(choice.setting).toEqual(setting);
-      expect(choice.pinned).toBe(isPinned === true);
-    },
-  );
-
-  it('chooses inside the pool the winning setting names', () => {
-    const results = levels.map((_, from) => pick(everyLevel(from)));
-    expect(results).toEqual([
-      'big@max',
-      'small@high',
-      'mid@low',
-      'small@high',
-      'big@high',
-      'peak@low',
-      'small@high',
-    ]);
-  });
-
-  it("puts the project's patterns before the global ones, each by position", () => {
-    const choice = chooseModel(
-      input({
-        def: { role: 'implement', need: 20 },
-        patterns: [
-          pattern({ kind: 'model', model: 'small' }, { name: 'global first', position: 0 }),
-          pattern(
-            { kind: 'model', model: 'big' },
-            { name: 'project second', projectId: PROJECT, position: 2 },
-          ),
-          pattern(
-            { kind: 'model', model: 'mid' },
-            { name: 'project first', projectId: PROJECT, position: 1 },
-          ),
-        ],
-      }),
-    );
-    expect(choice.setting).toEqual({ kind: 'model', model: 'mid' });
-    expect(choice.reason).toContain('the pattern "project first"');
-  });
-
-  it('puts the project role before the global role, and ignores another project’s rows', () => {
-    const settings = [
-      roleSetting('implement', { kind: 'tier', tier: ModelTier.Efficient }, null),
-      roleSetting('implement', { kind: 'tier', tier: ModelTier.Capable }, OTHER_PROJECT),
-    ];
-    expect(chooseModel(input({ roleSettings: settings })).setting).toEqual({
-      kind: 'tier',
-      tier: ModelTier.Efficient,
-    });
-    const own = [...settings, roleSetting('implement', { kind: 'model', model: 'mid' }, PROJECT)];
-    expect(chooseModel(input({ roleSettings: own })).setting).toEqual({
-      kind: 'model',
-      model: 'mid',
-    });
-    const elsewhere = [pattern({ kind: 'model', model: 'big' }, { projectId: OTHER_PROJECT })];
-    expect(chooseModel(input({ patterns: elsewhere })).setting).toEqual({ kind: 'automatic' });
-  });
-
-  it('names the setting that chose the model in its reason', () => {
-    expect(
-      chooseModel(input({ task: task({ modelSetting: { kind: 'model', model: 'mid' } }) })).reason,
-    ).toMatch(/^the task's own setting: /);
-    expect(
-      chooseModel(
-        input({ roleSettings: [roleSetting('implement', { kind: 'model', model: 'mid' }, null)] }),
-      ).reason,
-    ).toMatch(/^the role's setting: /);
-    expect(chooseModel(input()).reason).toMatch(/^by score: /);
-  });
-});
-
-describe('chooseModel: patterns match on role, risk, area and retry', () => {
-  const high = pattern(
-    { kind: 'tier', tier: ModelTier.Capable },
-    {
-      match: {
-        roles: ['review'],
-        riskTags: ['security', 'auth'],
-        areas: ['billing'],
-        retryOnly: false,
-      },
-    },
-  );
-  const retryOnly = pattern(
-    { kind: 'tier', tier: ModelTier.Capable },
-    { match: { roles: [], riskTags: [], areas: [], retryOnly: true } },
-  );
-  it.each([
-    {
-      name: 'every dimension matches',
-      p: high,
-      role: 'review',
-      t: task({ riskTags: ['auth'], areas: ['billing', 'ui'] }),
-      applies: true,
-    },
-    {
-      name: 'the role differs',
-      p: high,
-      role: 'qa',
-      t: task({ riskTags: ['auth'], areas: ['billing'] }),
-      applies: false,
-    },
-    {
-      name: 'no risk tag matches',
-      p: high,
-      role: 'review',
-      t: task({ riskTags: ['migration'], areas: ['billing'] }),
-      applies: false,
-    },
-    {
-      name: 'the task is in no named area',
-      p: high,
-      role: 'review',
-      t: task({ riskTags: ['auth'], areas: ['ui'] }),
-      applies: false,
-    },
-    {
-      name: 'a retry-only pattern, first run',
-      p: retryOnly,
-      role: 'review',
-      t: task(),
-      applies: false,
-    },
-    {
-      name: 'a retry-only pattern, on a retry',
-      p: retryOnly,
-      role: 'review',
-      t: task(),
-      applies: true,
-      retry: true,
-    },
-    {
-      name: 'an empty match is any step',
-      p: pattern({ kind: 'tier', tier: ModelTier.Capable }),
-      role: 'qa',
-      t: task(),
-      applies: true,
-    },
-  ] as const)('$name', ({ p, role, t, applies, ...rest }) => {
-    const choice = chooseModel(
-      input({
-        def: { role, need: 20 },
-        task: t,
-        patterns: [p],
-        stakes: { retry: 'retry' in rest },
-      }),
-    );
-    expect(choice.setting.kind).toBe(applies ? 'tier' : 'automatic');
-  });
-});
 
 describe('chooseModel: a setting the account cannot honour', () => {
   const ghost: ModelSetting = { kind: 'model', model: 'ghost' };
@@ -302,12 +67,7 @@ describe('chooseModel: a setting the account cannot honour', () => {
 
   it.each([
     { name: 'the task', over: { task: task({ modelSetting: ghost }) } },
-    { name: 'a pattern', over: { patterns: [pattern(ghost)] } },
-    {
-      name: 'the project role',
-      over: { roleSettings: [roleSetting('implement', ghost, PROJECT)] },
-    },
-    { name: 'the global role', over: { roleSettings: [roleSetting('implement', ghost, null)] } },
+    { name: 'a requirement', over: { requirements: [ghost] } },
   ])('takes the role’s tier choice when $name names a model the account lacks', ({ over }) => {
     const choice = take(over);
     expect(label(choice.profile ?? failed())).toBe('mid@high');
@@ -315,20 +75,20 @@ describe('chooseModel: a setting the account cannot honour', () => {
     expect(choice.reason).toContain('ghost is not offered by this account, so the balanced tier');
   });
 
-  it('takes the tier’s choice for a persona pin the account lacks, and says so', () => {
+  it('keeps a cell’s one model at the nearest effort it offers, and holds it against a retry', () => {
     const choice = take({
-      persona: persona({ modelPin: { model: 'ghost', effort: 'high' } }),
-      def: { role: 'review', need: 48 },
+      requirements: [{ kind: 'model', model: 'mid' }],
+      effort: 'max',
+      pinned: true,
     });
-    expect(label(choice.profile ?? failed())).toBe('big@high');
-    expect(choice.pinned).toBe(false);
-    expect(choice.reason).toContain('reviewer pins ghost, which this account does not offer');
-  });
-
-  it('keeps a pin whose model is offered at another effort, at the nearest one', () => {
-    const choice = take({ persona: persona({ modelPin: { model: 'mid', effort: 'max' } }) });
     expect(choice.pinned).toBe(true);
     expect(label(choice.profile ?? failed())).toBe('mid@max');
+  });
+
+  it('does not hold a retry on a cell’s model the account lacks', () => {
+    const choice = take({ requirements: [ghost], pinned: true });
+    expect(choice.pinned).toBe(false);
+    expect(label(choice.profile ?? failed())).toBe('mid@high');
   });
 
   it('takes the tier’s choice for a model its maker has retired', () => {
@@ -409,7 +169,7 @@ describe('chooseModel: a tier and the top of it', () => {
       pick({
         profiles: both,
         def: { role, need: 40 },
-        roleSettings: [roleSetting(role, setting, null)],
+        requirements: [setting],
       }),
     ).toBe(want);
   });
@@ -420,7 +180,7 @@ describe('chooseModel: a tier and the top of it', () => {
       pick({
         profiles,
         def: { role: 'review', need: 54 },
-        roleSettings: [roleSetting('review', { kind: 'top_of_tier' }, null)],
+        requirements: [{ kind: 'top_of_tier' }],
       }),
     ).toBe('peak@medium');
   });
@@ -439,7 +199,7 @@ describe('chooseModel: a tier and the top of it', () => {
       pick({
         profiles,
         def: { role: 'implement', need },
-        roleSettings: [roleSetting('implement', { kind: 'top_of_tier' }, null)],
+        requirements: [{ kind: 'top_of_tier' }],
       }),
     ).toBe(want);
   });
@@ -448,7 +208,7 @@ describe('chooseModel: a tier and the top of it', () => {
     expect(
       pick({
         def: { role: 'implement', need: 40 },
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'capable' }, null)],
+        requirements: [{ kind: 'tier', tier: 'capable' }],
       }),
     ).toBe('big@high');
   });
@@ -457,7 +217,7 @@ describe('chooseModel: a tier and the top of it', () => {
     const choice = chooseModel(
       input({
         def: { role: 'implement', need: 90 },
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'efficient' }, null)],
+        requirements: [{ kind: 'tier', tier: 'efficient' }],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('small@high');
@@ -470,7 +230,7 @@ describe('chooseModel: a tier and the top of it', () => {
       input({
         profiles: noFast,
         def: { role: 'qa', need: 20 },
-        roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'efficient' }, null)],
+        requirements: [{ kind: 'tier', tier: 'efficient' }],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('mid@medium');
@@ -542,27 +302,34 @@ describe('chooseModel: a role with no setting and no score', () => {
 
   it.each([
     {
-      name: 'a migration implement',
+      name: 'Careful’s cells, a tier at the role default one effort up',
+      fallback: { tier: 'balanced', top: false, effort: 'xhigh' },
       role: 'implement',
-      riskTags: ['migration'],
+      want: 'mid@xhigh',
+    },
+    {
+      name: 'Critical’s cells, the top of Capable and Frontier one effort up',
+      fallback: { tier: 'capable', top: true, effort: 'xhigh' },
+      role: 'review',
       want: 'peak@xhigh',
     },
-    { name: 'a security review', role: 'review', riskTags: ['security'], want: 'peak@xhigh' },
-    { name: 'a QA step', role: 'qa', riskTags: ['migration'], want: 'small@medium' },
-  ] as const)(
-    'sends $name to the top of the capable tier, one effort up, under a floor',
-    ({ role, riskTags, want }) => {
-      expect(
-        pick({
-          profiles: [...unscoredCatalogue(), ...peakRows()],
-          def: { role, need: 40 },
-          task: task({ riskTags: [...riskTags] }),
-        }),
-      ).toBe(want);
+    {
+      name: 'a cell with a fallback rung on a tier no model of is offered',
+      fallback: { tier: 'efficient', top: false, effort: 'medium' },
+      role: 'qa',
+      want: 'small@medium',
     },
-  );
+  ] as const)('runs the cell’s fallback rung for $name', ({ fallback, role, want }) => {
+    expect(
+      pick({
+        profiles: [...unscoredCatalogue(), ...peakRows()],
+        def: { role, need: 40 },
+        fallback,
+      }),
+    ).toBe(want);
+  });
 
-  it('says which default chose the model, and names a floor', () => {
+  it('says which rung chose the model', () => {
     expect(chooseModel(input({ profiles: unscoredCatalogue() })).reason).toBe(
       `by role default: the cheapest model of the balanced tier${UNSCORED}`,
     );
@@ -571,12 +338,10 @@ describe('chooseModel: a role with no setting and no score', () => {
         input({
           profiles: [...unscoredCatalogue(), ...peakRows()],
           def: { role: 'review', need: 48 },
-          task: task({ riskTags: ['security'] }),
+          fallback: { tier: 'capable', top: true, effort: 'xhigh' },
         }),
       ).reason,
-    ).toBe(
-      `by role default: the top model of the capable tier, one effort up (floor: security-sensitive review)${UNSCORED}`,
-    );
+    ).toBe(`by role default: the top model of the capable tier${UNSCORED}`);
   });
 });
 
@@ -596,7 +361,7 @@ describe('chooseModel: the account’s tier override', () => {
       pick({
         profiles,
         tierOverrides: overrides,
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'balanced' }, null)],
+        requirements: [{ kind: 'tier', tier: 'balanced' }],
       }),
     ).toBe('big@high');
     expect(
@@ -604,14 +369,14 @@ describe('chooseModel: the account’s tier override', () => {
         profiles,
         def: { role: 'plan', need: 45 },
         tierOverrides: { capable: 'big' },
-        roleSettings: [roleSetting('plan', { kind: 'top_of_tier' }, null)],
+        requirements: [{ kind: 'top_of_tier' }],
       }),
     ).toBe('peak@high');
     expect(
       pick({
         profiles,
         tierOverrides: overrides,
-        roleSettings: [roleSetting('implement', { kind: 'model', model: 'small' }, null)],
+        requirements: [{ kind: 'model', model: 'small' }],
       }),
     ).toBe('small@high');
   });
@@ -664,20 +429,14 @@ describe('chooseModel: nothing to choose from', () => {
   });
 });
 
-describe('chooseModel: score, floor and budget', () => {
+describe('chooseModel: score and budget', () => {
   it('routes by score across everything on offer when nothing sets a model', () => {
     expect(pick()).toBe('mid@high');
   });
 
-  it('raises a scored step to a persona’s minimum score', () => {
-    expect(
-      pick({ def: { role: 'review', need: 48 }, persona: persona({ minimumScore: 52 }) }),
-    ).toBe('big@max');
-  });
-
   it('flags a choice over the budget ceiling as the router does', () => {
     const choice = chooseModel(
-      input({ def: { role: 'review', need: 48 }, project: { id: PROJECT, budgetCeiling: 1.5 } }),
+      input({ def: { role: 'review', need: 48 }, project: { budgetCeiling: 1.5 } }),
     );
     expect(label(choice.profile ?? failed())).toBe('big@high');
     expect(choice.overBudget).toBe(true);
@@ -687,8 +446,8 @@ describe('chooseModel: score, floor and budget', () => {
     const choice = chooseModel(
       input({
         def: { role: 'implement', need: 20 },
-        project: { id: PROJECT, budgetCeiling: 0.5 },
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'balanced' }, null)],
+        project: { budgetCeiling: 0.5 },
+        requirements: [{ kind: 'tier', tier: 'balanced' }],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('mid@low');
@@ -702,7 +461,7 @@ describe('chooseModel: score, floor and budget', () => {
   ])('counts what the account pays against the ceiling for $name', ({ price, over }) => {
     const choice = chooseModel(
       input({
-        project: { id: PROJECT, budgetCeiling: 1.05 },
+        project: { budgetCeiling: 1.05 },
         accountModels: [
           {
             accountId: mintId('Account'),
@@ -731,10 +490,10 @@ function failed(): never {
 
 describe('chooseModel: a conversation that must not refuse', () => {
   const lowScores = testCatalogue().filter((p) => p.model !== 'big');
-  it('routes by score for a step, which refuses a need nothing reaches', () => {
-    expect(() =>
-      chooseModel(input({ profiles: lowScores, def: { role: 'plan', need: 99 } })),
-    ).toThrow(NoProfileError);
+  it('takes the strongest offered for a step, when no model reaches its need, and says so', () => {
+    const choice = chooseModel(input({ profiles: lowScores, def: { role: 'plan', need: 99 } }));
+    expect(label(choice.profile ?? failed())).toBe('mid@high');
+    expect(choice.reason).toContain('none reaches 99 intelligence, so the highest scoring');
   });
 
   it.each([
@@ -759,29 +518,10 @@ describe('chooseModel: a conversation that must not refuse', () => {
       input({
         byScore: false,
         def: { role: 'plan', need: 99 },
-        roleSettings: [roleSetting('plan', { kind: 'model', model: 'small' }, null)],
+        requirements: [{ kind: 'model', model: 'small' }],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('small@high');
-  });
-});
-
-describe('chooseModel: a persona pin the account lacks', () => {
-  const profiles = [...testCatalogue(), ...scoredPeak()];
-  const securityReview = {
-    def: { role: 'review', need: 48 } as const,
-    task: task({ riskTags: ['security'] }),
-    persona: persona({ modelPin: { model: 'ghost', effort: 'high' } }),
-    profiles,
-  };
-  it('takes the role tier’s automatic choice, not the seeded pattern’s', () => {
-    const highRisk = pattern({ kind: 'top_of_tier' }, { name: 'High-risk work' });
-    const withPattern = chooseModel(input({ ...securityReview, patterns: [highRisk] }));
-    const without = chooseModel(input(securityReview));
-    expect(label(withPattern.profile ?? failed())).toBe('big@max');
-    expect(label(without.profile ?? failed())).toBe('big@max');
-    expect(withPattern.setting).toEqual({ kind: 'automatic' });
-    expect(withPattern.reason).toContain('reviewer pins ghost, which this account does not offer');
   });
 });
 
@@ -813,5 +553,198 @@ describe('chooseModel: the account’s override after a scored choice', () => {
     expect(choice.model).toBe('gateway-model');
     expect(choice.tier).toBe(ModelTier.Capable);
     expect(choice.reason).toContain("the account's capable model gateway-model");
+  });
+});
+
+describe('chooseModel: the strongest requirement decides', () => {
+  const profiles = [...testCatalogue(), ...scoredPeak()];
+  const settings = {
+    automatic: { kind: 'automatic' },
+    'tier efficient': { kind: 'tier', tier: 'efficient' },
+    'tier balanced': { kind: 'tier', tier: 'balanced' },
+    'tier capable': { kind: 'tier', tier: 'capable' },
+    'top of capable': { kind: 'top_of_tier', tier: 'capable' },
+    'top of any tier': { kind: 'top_of_tier' },
+    'one model': { kind: 'model', model: 'mid' },
+  } as const satisfies Record<string, ModelSetting>;
+  const names = Object.keys(settings) as (keyof typeof settings)[];
+  const scoreOf = (setting: ModelSetting): number => {
+    const choice = chooseModel(input({ profiles, requirements: [setting] }));
+    return choice.profile?.scores.intelligence ?? -1;
+  };
+  const pairs = names.flatMap((a) => names.map((b) => ({ a, b })));
+
+  it.each(pairs)(
+    'of $a and $b, the one that scores higher on its own wins, in either order',
+    ({ a, b }) => {
+      const [first, second] = [settings[a], settings[b]];
+      const stronger = Math.max(scoreOf(first), scoreOf(second));
+      for (const requirements of [
+        [first, second],
+        [second, first],
+      ])
+        expect(chooseModel(input({ profiles, requirements })).profile?.scores.intelligence).toBe(
+          stronger,
+        );
+    },
+  );
+
+  it('takes the first of two requirements that choose the same model', () => {
+    const choice = chooseModel(
+      input({ profiles, requirements: [{ kind: 'tier', tier: 'capable' }, { kind: 'automatic' }] }),
+    );
+    expect(choice.setting).toEqual({ kind: 'tier', tier: 'capable' });
+  });
+
+  it('names the setting that won, so a later list can resolve it again', () => {
+    const choice = chooseModel(
+      input({ profiles, requirements: [{ kind: 'automatic' }, { kind: 'tier', tier: 'capable' }] }),
+    );
+    expect(choice.setting).toEqual({ kind: 'tier', tier: 'capable' });
+    expect(label(choice.profile ?? failed())).toBe('big@high');
+  });
+
+  it.each([
+    {
+      name: 'unscored, the higher rung wins whatever it costs',
+      profiles: unscoredCatalogue(),
+      requirements: [
+        { kind: 'tier', tier: 'balanced' },
+        { kind: 'tier', tier: 'capable' },
+      ],
+      want: 'big@high',
+    },
+    {
+      name: 'unscored, at one rung the dearer model wins',
+      profiles: [...unscoredCatalogue(), ...peakRows()],
+      requirements: [
+        { kind: 'tier', tier: 'capable' },
+        { kind: 'top_of_tier', tier: 'capable' },
+      ],
+      want: 'peak@high',
+    },
+    {
+      name: 'unscored, one model against its tier by the higher rung',
+      profiles: [...unscoredCatalogue(), ...peakRows()],
+      requirements: [
+        { kind: 'model', model: 'small' },
+        { kind: 'tier', tier: 'balanced' },
+      ],
+      want: 'mid@high',
+    },
+  ] as const)('$name', ({ profiles: offered, requirements, want }) => {
+    expect(
+      pick({
+        profiles: offered,
+        requirements: [...requirements],
+        def: { role: 'review', need: 48 },
+        fallback: rungOf('review'),
+      }),
+    ).toBe(want);
+  });
+});
+
+describe('chooseModel: the task’s own pin beats every requirement', () => {
+  const profiles = [...testCatalogue(), ...scoredPeak()];
+  it('runs the task’s setting alone, however strong the requirements are', () => {
+    const choice = chooseModel(
+      input({
+        profiles,
+        requirements: [
+          { kind: 'tier', tier: 'capable' },
+          { kind: 'top_of_tier', tier: 'capable' },
+        ],
+        task: task({ modelSetting: { kind: 'tier', tier: 'efficient' } }),
+      }),
+    );
+    expect(label(choice.profile ?? failed())).toBe('small@high');
+    expect(choice.reason).toMatch(/^the task's own setting: /);
+  });
+
+  it('puts the account’s refusal of a model before the task’s setting', () => {
+    const choice = chooseModel(
+      input({
+        profiles,
+        requirements: [{ kind: 'tier', tier: 'capable' }],
+        task: task({ modelSetting: { kind: 'tier', tier: 'efficient' } }),
+        startOverTier: ModelTier.Balanced,
+      }),
+    );
+    expect(label(choice.profile ?? failed())).toBe('mid@high');
+    expect(choice.reason).toContain("the refused model's tier (balanced)");
+  });
+
+  it('runs the task’s effort pin over a cell’s effort', () => {
+    expect(
+      pick({
+        profiles,
+        requirements: [{ kind: 'model', model: 'mid' }],
+        effort: 'high',
+        task: task({ effortPin: 'low' }),
+      }),
+    ).toBe('mid@low');
+  });
+});
+
+describe('chooseModel: a fixed effort', () => {
+  /** An offer shaped like a Codex plan's: one model at three efforts, one at two, neither with Max. */
+  const codex = unscoredCatalogue({}, ['mid', 'big']).filter(
+    (p) => p.effort !== 'max' && p.effort !== 'xhigh' && !(p.model === 'big' && p.effort === 'low'),
+  );
+  it.each([
+    { name: 'an effort the model offers', effort: 'medium', want: 'mid@medium' },
+    {
+      name: 'an effort above what it offers snaps down to its highest',
+      effort: 'max',
+      want: 'mid@high',
+    },
+    { name: 'the lowest it offers', effort: 'low', want: 'mid@low' },
+  ] as const)('$name', ({ effort, want }) => {
+    expect(
+      pick({ profiles: codex, requirements: [{ kind: 'tier', tier: 'balanced' }], effort }),
+    ).toBe(want);
+  });
+
+  it('snaps a model that lacks the effort to its nearest, and routes among those profiles by score', () => {
+    expect(pick({ effort: 'low', def: { role: 'implement', need: 40 } })).toBe('big@high');
+    expect(pick({ effort: 'high', def: { role: 'implement', need: 40 } })).toBe('mid@high');
+  });
+
+  it('falls back to the effort of the rung when none is fixed', () => {
+    expect(pick({ profiles: unscoredCatalogue(), effort: null })).toBe('mid@high');
+    expect(pick({ profiles: unscoredCatalogue(), effort: 'low' })).toBe('mid@low');
+  });
+});
+
+describe('chooseModel: no model reaches the need', () => {
+  it('takes the strongest offered and says that none reached it', () => {
+    const choice = chooseModel(input({ def: { role: 'implement', need: 90 } }));
+    expect(label(choice.profile ?? failed())).toBe('big@max');
+    expect(choice.reason).toContain('none reaches 90 intelligence, so the highest scoring');
+  });
+});
+
+describe('chooseModel: the top of a named tier', () => {
+  const ladder = unscoredCatalogue({}, ['small', 'mid', 'big', 'peak', 'apex']);
+  it.each([
+    {
+      name: 'a named Capable stays in Capable',
+      setting: { kind: 'top_of_tier', tier: 'capable' },
+      want: 'peak@high',
+    },
+    {
+      name: 'a named Frontier is Frontier’s model',
+      setting: { kind: 'top_of_tier', tier: 'frontier' },
+      want: 'apex@high',
+    },
+    {
+      name: 'no tier takes the dearest of the capable span',
+      setting: { kind: 'top_of_tier' },
+      want: 'apex@high',
+    },
+  ] as const)('$name', ({ setting, want }) => {
+    expect(
+      pick({ profiles: ladder, def: { role: 'review', need: 40 }, requirements: [setting] }),
+    ).toBe(want);
   });
 });

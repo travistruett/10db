@@ -14,6 +14,7 @@ import {
   RoutedBy,
   agentKind,
   providerOf,
+  Rigor,
   StepRole,
   type Effort,
   type InboxAnswer,
@@ -217,7 +218,7 @@ import {
 } from '../pictures';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
+import { chooseModel, offeredModels, resolveSteps } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
@@ -274,7 +275,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { routingInputs, seedTeam } from '../team';
+import { playbookInputs, routingInputs, seedTeam } from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -1343,17 +1344,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
-  // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
-  // default and never by score, so a conversation is never refused for want of one. Undefined when the account
-  // offers nothing to run it on.
-  const planModel = (project: ProjectDto): { model: string; effort: Effort } | undefined => {
+  // The model a Plan conversation runs on: what the Careful Plan cell chooses (the project's, then the global
+  // one, then the default), by its fallback rung and never by score, so a conversation is never refused for
+  // want of one. The conversation's own effort, when the builder chose one, fixes the effort. Undefined when
+  // the account offers nothing to run it on.
+  const planModel = (
+    project: ProjectDto,
+    effort: Effort | null = null,
+  ): { model: string; effort: Effort } | undefined => {
+    const plan = resolveSteps({
+      rigor: Rigor.Careful,
+      taskKinds: [],
+      ...playbookInputs(db, project.id),
+    }).find((step) => step.role === StepRole.Plan);
     const choice = chooseModel({
       ...routingInputs(db, project),
-      def: { role: StepRole.Plan, need: PLAN_NEED },
-      persona: undefined,
-      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
+      def: { role: StepRole.Plan, need: plan?.need ?? 0 },
+      requirements: plan?.requirements ?? [{ kind: 'automatic' }],
+      effort: plan?.effort ?? null,
+      fallback: plan?.fallback ?? null,
+      pinned: false,
+      task: { modelSetting: null, effortPin: effort },
       project,
-      stakes: { retry: false },
       byScore: false,
     });
     return choice.profile === null && choice.model === choice.tier

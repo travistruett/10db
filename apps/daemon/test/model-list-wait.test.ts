@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { parseCatalogue } from '../src/catalogue';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
 import { readModelsDevFixture } from './models-dev-fixture';
 
@@ -70,7 +70,7 @@ describe('a daemon with no catalogue to build profiles from', () => {
       name: 'wait',
       repoPath: repo.path,
       gateCommand: 'test -d src',
-      flowId: await quickFlowId(api),
+      defaultRigor: 'light',
       areas: [{ name: 'a', globs: ['src/a/**'] }],
     });
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

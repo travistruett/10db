@@ -67,6 +67,7 @@ import {
   patchWorkstream,
   schema,
   seedAccount,
+  setPlaybook,
   setAppSetting,
   setBatchNotice,
   setWorkstreamNotice,
@@ -3460,8 +3461,9 @@ describe('flows', () => {
     expect(ws(workstream.id)).toMatchObject({
       state: 'QUEUED',
       stepIndex: 1,
-      model: 'claude-opus-5-5',
-      effort: 'medium',
+      // Standard's review needs at least 40, which Sonnet at high effort meets.
+      model: 'claude-sonnet-5-5',
+      effort: 'high',
     });
     engine.launch(workstream.id);
     await engine.runner.idle();
@@ -7063,6 +7065,12 @@ describe('without a gate command', () => {
           ],
         },
         { gateCommand: null },
+      );
+      // A stronger review than the build, so the two steps run on different models.
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, {
+          cells: [{ rigor: 'standard', role: 'review', model: { kind: 'automatic', minimum: 48 } }],
+        }),
       );
       const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
       await runToWait(workstream.id);

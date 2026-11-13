@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import {
   createTempRepo,
   handoffArgs,
@@ -127,7 +127,7 @@ describe('§1.3 with the fake adapter', () => {
       name: 'acceptance',
       repoPath: repo.path,
       gateCommand: 'test -d src',
-      flowId: await quickFlowId(api),
+      defaultRigor: 'light',
       maxLanes: 3,
       areas: [
         { name: 'a', globs: ['src/a/**'] },

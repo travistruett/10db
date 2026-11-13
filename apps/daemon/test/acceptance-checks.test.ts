@@ -19,7 +19,7 @@ import {
   runAcceptanceChecks,
   sessionBaselines,
 } from '../scripts/acceptance-checks';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, handoffArgs, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -100,7 +100,7 @@ beforeAll(async () => {
     name: 'checks',
     repoPath: repo.path,
     gateCommand: 'test -d src',
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     maxLanes: 2,
     areas: [
       { name: 'a', globs: ['src/a/**'] },

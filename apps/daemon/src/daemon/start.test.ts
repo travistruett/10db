@@ -48,7 +48,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CATALOGUE_URL } from '../catalogue';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
-import { apiClient, quickFlowId } from '../../test/api-client';
+import { apiClient } from '../../test/api-client';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
 import { seedProfiles } from '../../test/seed-profiles';
 import { FakeGh } from '../../test/fake-gh';
@@ -312,7 +312,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -358,7 +358,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -421,7 +421,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -554,7 +554,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -850,7 +850,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -901,7 +901,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(apiClient(running.url, running.token)),
+        defaultRigor: 'light',
         areas: [{ name: 'api', globs: ['src/**'] }],
       });
       const task = await call(`/projects/${project.id}/tasks`, {
@@ -1166,7 +1166,7 @@ describe('startDaemon', () => {
         name: 'wired',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'api', globs: ['src/api/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -1228,7 +1228,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const overloadCards = async () =>
@@ -1290,7 +1290,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(before),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       await waitForAsync(async () => (await overloadCards(before))[0]);
@@ -1716,7 +1716,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -1819,7 +1819,7 @@ describe('startDaemon', () => {
         areas: ['src'],
       });
       const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
-      expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
+      expect(plan).toMatchObject({ rigor: 'standard', overBudget: [] });
       expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
         'implement:claude-sonnet-5-5@high',
         'review:claude-sonnet-5-5@high',

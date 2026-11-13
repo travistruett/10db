@@ -160,7 +160,13 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { rolePicks } from '../routing';
-import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } from '../team';
+import {
+  playbookInputs,
+  proposeCandidates,
+  resolveStepPlan,
+  routingInputs,
+  startTaskWithPlan,
+} from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
@@ -726,7 +732,7 @@ export function createServices(deps: {
         accountId,
         picks: rolePicks({
           ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
-          personas: listPersonas(db),
+          playbook: playbookInputs(db, null).playbook,
         }),
       };
     },

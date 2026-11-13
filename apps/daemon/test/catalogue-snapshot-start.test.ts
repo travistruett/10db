@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunningDaemon } from '../src/daemon';
 import { startDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 const SNAPSHOT = new URL('fixtures/catalogue.json', import.meta.url).pathname;
@@ -66,7 +66,7 @@ describe('a daemon started with the catalogue fetch off and a snapshot', () => {
       name: 'snapshot',
       repoPath: repo.path,
       gateCommand: 'test -d src',
-      flowId: await quickFlowId(api),
+      defaultRigor: 'light',
       areas: [{ name: 'a', globs: ['src/a/**'] }],
     });
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

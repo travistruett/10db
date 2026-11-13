@@ -23,13 +23,10 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import {
-  findFlowByName,
   getBatch,
   getEvidence,
-  getFlow,
   getProject,
   getTask,
-  getTeam,
   getWorkstream,
   getWorkstreamRow,
   insertEvidence,
@@ -49,8 +46,8 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { DEFAULT_PROJECT_FLOW, NoProfileError, planSteps } from '../routing';
-import { routingInputs } from './routing-inputs';
+import { NoProfileError, planSteps } from '../routing';
+import { playbookInputs, routingInputs } from './routing-inputs';
 import {
   commitCoveredByRevert,
   commitAdaptsMerge,
@@ -63,21 +60,18 @@ import {
 } from './reverted-work';
 import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
 
-/** What starting this task would run: its flow resolved against the project's team and the catalogue. */
+/** What starting this task would run: its rigor and kinds resolved against the playbook and the catalogue. */
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
   const task = getTask(db, taskId);
   const project = getProject(db, task.projectId);
-  const flowId = task.flowId ?? project.flowId;
-  const flow = flowId ? getFlow(db, flowId) : findFlowByName(db, DEFAULT_PROJECT_FLOW);
-  if (!flow)
-    throw new InvalidError(`The ${DEFAULT_PROJECT_FLOW} flow is missing; restart 10db to seed it`);
   try {
     return planSteps({
-      flow,
+      rigor: task.effectiveRigor,
       task,
+      taskKinds: task.kinds,
       project,
       personas: listPersonas(db),
-      bindings: getTeam(db, project.id).bindings,
+      ...playbookInputs(db, project.id),
       ...routingInputs(db, project),
     });
   } catch (error) {
@@ -109,7 +103,7 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
       `${named.join('. ')}. Raise the ceiling, lower the need or pin a persona.`,
     );
   }
-  if (plan.steps.length === 0) throw new InvalidError('The flow resolved to no steps');
+  if (plan.steps.length === 0) throw new InvalidError('The plan resolved to no steps');
   return plan;
 }
 
@@ -121,7 +115,7 @@ export function insertPlannedWorkstream(
   batchId: BatchId | null,
 ): WorkstreamDto {
   const [first] = plan.steps;
-  if (!first) throw new InvalidError('The flow resolved to no steps');
+  if (!first) throw new InvalidError('The plan resolved to no steps');
   const ws = insertWorkstream(ctx, taskId, {
     batchId,
     first: { model: first.model, effort: first.effort },

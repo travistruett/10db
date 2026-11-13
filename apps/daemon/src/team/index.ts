@@ -1,5 +1,5 @@
 export { proposeCandidates } from './candidates';
-export { routingInputs } from './routing-inputs';
+export { playbookInputs, routingInputs } from './routing-inputs';
 export { seedTeam } from './seed';
 export {
   actionEntering,
