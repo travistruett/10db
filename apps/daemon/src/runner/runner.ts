@@ -1,6 +1,5 @@
 import { homedir } from 'node:os';
-import { realpathSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import {
   TrustSurface,
   ClaimKind,
@@ -189,7 +188,7 @@ import {
   type Launcher,
   type SessionLaunch,
 } from '../environment';
-import { equalOrUnder, runAsBuilder, type Git } from '../git';
+import { runPassGit, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
@@ -825,20 +824,6 @@ function stoppedWaiting(logPath: string): GateResult {
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
 const GATE_SUMMARY_CHARS = 2000;
-
-/**
- * Where a pass runs a call the builder allowed: the call's own directory (an earlier `cd`) when its
- * real path lies in the checkout's, else the checkout, so a link out of the checkout never moves it.
- */
-function builderCwd(cwd: string | undefined, checkout: string): string {
-  if (cwd === undefined || !isAbsolute(cwd)) return checkout;
-  try {
-    const real = realpathSync.native(cwd);
-    return equalOrUnder(real, realpathSync.native(checkout)) ? real : checkout;
-  } catch {
-    return checkout;
-  }
-}
 
 /**
  * A gate's evidence text: the note on why it ran without its base as origin has it, when there is
@@ -2557,10 +2542,10 @@ export function createRunner(opts: RunnerOptions): Runner {
               ? {
                   passGit: {
                     baseBranch: project.baseBranch,
-                    currentBranch: () => opts.git.currentBranch(checkout),
-                    run: (argv, cwd) =>
-                      runAsBuilder(argv, {
-                        cwd: builderCwd(cwd, checkout),
+                    run: (call) =>
+                      runPassGit(call, {
+                        checkout,
+                        baseBranch: project.baseBranch,
                         env: launch.env,
                         signal: abort.signal,
                       }),

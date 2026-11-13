@@ -18,11 +18,10 @@ import {
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import type { BuilderRun, Git } from '../git';
+import type { BuilderRefusal, BuilderRun, Git } from '../git';
 import {
   firstUnread,
   hazardHit,
-  isProtected,
   passGitCall,
   runsInBackground,
   startsEndlessBackgroundLoop,
@@ -105,9 +104,8 @@ type BrokerContext = BrokerOwner & {
    */
   readonly passGit?: {
     readonly baseBranch: string;
-    currentBranch(): Promise<string | null>;
-    /** Runs `argv` in `cwd`, the hook's directory for the call, when it lies in the checkout. */
-    run(argv: readonly string[], cwd: string | undefined): Promise<BuilderRun>;
+    /** Runs the allowed call as the builder (`runPassGit`), or says why 10db still won't. */
+    run(call: Extract<PassGitCall, { kind: 'run' }>): Promise<BuilderRun | BuilderRefusal>;
   };
 };
 
@@ -646,9 +644,9 @@ export function createPermissionBroker(
   }
 
   /**
-   * A pass's commit, push or merge: one card, allowed once or denied. A push of the current branch is
-   * checked when it runs, so a pass on the base branch never pushes it. The call runs as the builder
-   * would run it, and the agent's Bash call prints what it printed and ends as it ended.
+   * A pass's commit, push or merge: one card, allowed once or denied. The call then runs as the
+   * builder would run it (`runPassGit`, which checks the remote and the current branch first), and
+   * the agent's Bash call prints what it printed and ends as it ended.
    */
   async function runPassGit(
     req: ToolRequest,
@@ -679,17 +677,8 @@ export function createPermissionBroker(
         by: DeniedBy.Builder,
       };
     }
-    if (call.pushesCurrentBranch) {
-      const branch = await passGit.currentBranch();
-      if (branch === null || isProtected(branch, passGit.baseBranch)) {
-        return {
-          behavior: 'deny',
-          message: `This push sends the current branch, ${branch ?? 'a detached HEAD'}, and a push to ${branch ?? 'it'} stays refused in a pass: 10db lands the work there when it ships. Push a branch of your own by name.`,
-          by: DeniedBy.TenDb,
-        };
-      }
-    }
-    const ran = await passGit.run(call.argv, req.cwd);
+    const ran = await passGit.run(call);
+    if ('refused' in ran) return { behavior: 'deny', message: ran.refused, by: DeniedBy.TenDb };
     return {
       behavior: 'allow',
       updatedInput: {

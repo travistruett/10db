@@ -59,7 +59,7 @@ import {
   seedWorkstream,
 } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit, runAsBuilder, type Git } from '../git';
+import { createGit, runPassGit, type Git } from '../git';
 import { acceptProposal, proposePrinciple } from '../knowledge';
 import { silentLogger } from '../log';
 import {
@@ -3749,8 +3749,7 @@ describe('permission broker in a pass', () => {
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
         passGit: {
           baseBranch: 'main',
-          currentBranch: () => Promise.resolve(git('branch', '--show-current').trim() || null),
-          run: (argv) => runAsBuilder(argv, { cwd: repo, env, signal }),
+          run: (call) => runPassGit(call, { checkout: repo, baseBranch: 'main', env, signal }),
         },
       },
     );
@@ -3819,7 +3818,7 @@ describe('permission broker in a pass', () => {
       inbox.answer(card().id, { choice: 'allow_once' });
       const result = await decision;
       expect(result).toMatchObject({ behavior: 'deny', by: '10db' });
-      expect(replayed(result)).toContain('a push to main stays refused');
+      expect(replayed(result)).toContain('a push of main stays refused in a pass');
       expect(git('rev-parse', 'origin/main')).not.toBe(git('rev-parse', 'HEAD'));
     } finally {
       remote.cleanup();

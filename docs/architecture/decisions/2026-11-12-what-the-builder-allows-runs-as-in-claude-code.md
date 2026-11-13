@@ -24,17 +24,25 @@
    outside the checkout (`~/.ssh`, the Keychain, account config) stay unreadable in every session, as decision item
    1 of the trust decision keeps them.
 
-3. **In a pass, a plain commit, push or merge asks, then runs.** `git commit …`, `git push …`, `git merge …` or
-   `gh pr merge …`, alone on its line with literal words (`guard/pass-git.ts`), gets one card (Allow once or Deny)
-   instead of the guard's refusal. Once allowed, 10db runs that exact call in the checkout, outside the sandbox,
-   with the session's environment, as the builder would in a terminal (`git/run-as-builder.ts`): their git
-   config, credentials and the repository's hooks take part, and the card says so. The agent's Bash call then
-   prints what it printed and ends with its exit code. Still refused, with no card: a force push (`--force`,
-   `--force-with-lease`, `-f`, a `+` refspec), `--mirror`, `--all`, a delete, a push to `main` or the base
-   branch (a push of the current branch is checked when it runs), `--receive-pack` and `--repo`, `gh pr merge
---admin` or in another repository, git's own options (`-C`, `-c`), and every other spelling (a wrapper, a
-   variable, a substitution, a redirection, a second command), which the refusal names. Lanes are unchanged:
-   coordination still refuses git and gh writes there.
+3. **In a pass, a plain commit, push or merge asks, then runs.** `git commit …`, `git push <remote> <branch>`,
+   `git merge <branch>` or `gh pr merge [<number>]`, alone on its line with literal words (`guard/pass-git.ts`),
+   gets one card (Allow once or Deny) instead of the guard's refusal. Once allowed, 10db runs that exact call as the
+   builder would in a terminal (`git/run-as-builder.ts`): at the checkout's root, with `GIT_DIR` and `GIT_WORK_TREE`
+   set to the checkout's own `.git` folder (a `.git` file, a link, or a git dir naming another common dir is
+   refused), `core.fsmonitor` off, prompts off, and the session's environment, so the builder's credentials and
+   the checkout's own hooks take part (a pass can't write `.git`: its git state is kernel-denied and the file
+   tools never write it). The card says so. The agent's Bash call then prints what it printed and ends with its
+   exit code. Nothing the agent wrote rides along: each call carries only options that read nothing outside the
+   checkout (commit: `-m`/`--message`, `--no-edit`, `--allow-empty`, `-a`, `-q`, `--no-verify`, paths; merge:
+   those for a merge and a branch name; push: `-u`, `-q`, `-v`, `-n`, `--no-verify`, `--follow-tags`; gh: the
+   merge method, `--delete-branch`, `--auto`, `--subject`, `--body`), a push names a remote the checkout's own
+   `git remote` lists (checked when it runs, so a folder named like a remote is never the target), and every
+   push destination is a plain branch name, `refs/heads/<name>`, `HEAD` or `@`. Still refused, with no card and a
+   plain reason: a force push, `--mirror`, `--all`, a delete, a push to `main` or the base branch in any case (a
+   push of the current branch is checked when it runs), `--amend`, a message, template or paths read from a file,
+   a merge strategy, `gh pr merge --admin`, a pull request named by URL or in another repository, git's own
+   options (`-C`, `-c`), and every other spelling (a wrapper, a variable, a substitution, a redirection, a second
+   command). Lanes are unchanged: coordination still refuses git and gh writes there.
 
 ## Why
 

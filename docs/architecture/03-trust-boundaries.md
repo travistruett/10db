@@ -164,13 +164,16 @@ without it):
   four limits (destroying data the session didn't create, sending data out, reading secrets, writing to live
   systems) as `soft_deny` where a person is in the session (a pass) and `hard_deny` where none is (a lane), and the
   coordination lines (the full gate, git and gh commits, pushes and merges, CPU load) as `hard_deny` everywhere.
-  In a pass a plain `git commit`, `git push`, `git merge` or `gh pr merge` alone on its line (`guard/pass-git.ts`)
-  is the builder's instead: the hook asks, so the classifier never sees it, the broker raises one card (Allow once
-  or Deny), and once allowed 10db runs that exact call outside the sandbox with the session's environment, so the
-  builder's credentials and the repository's hooks take part, as in Claude Code (`git/run-as-builder.ts`); the
-  agent's Bash call then prints what it printed and ends with its exit code. A force push, a push of or to `main`
-  or the base branch (the current branch is read when it runs), another repository, git's own options and every
-  other spelling stay refused, and lanes are unchanged
+  In a pass a plain `git commit`, `git push <remote> <branch>`, `git merge <branch>` or `gh pr merge [<number>]`
+  alone on its line, with only options that read nothing outside the checkout (`guard/pass-git.ts`), is the
+  builder's instead: the hook asks, so the classifier never sees it, the broker raises one card (Allow once or
+  Deny), and once allowed 10db runs that exact call outside the sandbox (`git/run-as-builder.ts`) at the
+  checkout's root with `GIT_DIR` and `GIT_WORK_TREE` set to its own `.git` folder, `core.fsmonitor` off and the
+  session's environment, so the builder's credentials and the checkout's own hooks (which a pass can't write)
+  take part, as in Claude Code; the agent's Bash call then prints what it printed and ends with its exit code. A
+  push goes only to a remote the checkout lists. A force push, a push of or to `main` or the base branch, a call
+  that reads a file outside the checkout, another repository, git's own options and every other spelling stay
+  refused, and lanes are unchanged
   (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
   `classifyAllShell` is on, so an allow rule that matches a narrow Bash command no longer settles it before the
   classifier (live check G5). Every value 10db didn't write (the project name, the checkout, the gate command, a
