@@ -72,6 +72,13 @@ describe('an OpenRouter account in Accounts', () => {
     });
     const plan = screen.getByRole('button', { name: 'Open Claude plan' }).closest('tr');
     if (!plan) throw new Error('row not found');
+    // The status is a dot and words like Overview's, not a pill.
+    expect(within(plan).getByTestId('connection-dot').getAttribute('data-color')).toBe('teal');
+    expect(within(plan).getByText('Ready')).toBeTruthy();
+    expect(within(spareRow).getByTestId('connection-dot').getAttribute('data-color')).toBe(
+      'yellow',
+    );
+    expect(within(spareRow).getByText('Needs a secret')).toBeTruthy();
     expect(within(plan).getByText("Used by: Renewals' agents")).toBeTruthy();
   });
 

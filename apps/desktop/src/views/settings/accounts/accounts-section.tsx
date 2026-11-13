@@ -23,18 +23,19 @@ import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
 import { AccountPause } from './account-pause';
 import { AddAccountModal } from './add-account-modal';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { settingsSearch } from '../focus-target';
 import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
 
-/** Waiting on a human is yellow; green, the done colour, marks an account that can run. */
-const STATUS_COLOR: Readonly<Record<AccountStatus, string>> = {
-  [AccountStatus.Ready]: 'green',
-  [AccountStatus.NeedsSignIn]: 'yellow',
-  [AccountStatus.NeedsSecret]: 'yellow',
-  [AccountStatus.Archived]: 'gray',
+/** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
+const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
+  [AccountStatus.Ready]: ConnectionTone.Works,
+  [AccountStatus.NeedsSignIn]: ConnectionTone.NeedsYou,
+  [AccountStatus.NeedsSecret]: ConnectionTone.NeedsYou,
+  [AccountStatus.Archived]: ConnectionTone.Off,
 };
 
 function UsageCell({ account }: { readonly account: AccountDto }) {
@@ -120,9 +121,7 @@ function AccountRow({
         <Text size="sm">{ACCOUNT_KIND_LABEL[account.kind]}</Text>
       </Table.Td>
       <Table.Td>
-        <Badge size="sm" variant="light" color={STATUS_COLOR[status]}>
-          {ACCOUNT_STATUS_LABEL[status]}
-        </Badge>
+        <ConnectionStatus tone={STATUS_TONE[status]} label={ACCOUNT_STATUS_LABEL[status]} />
       </Table.Td>
       <Table.Td ta="right">
         <UsageCell account={account} />
