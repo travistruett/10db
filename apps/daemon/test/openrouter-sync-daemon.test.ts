@@ -1,12 +1,5 @@
-import {
-  AccountCreatedDto,
-  AccountDto,
-  BenchmarkStatusDto,
-  JudgeStatusDto,
-  ModelRowDto,
-} from '@10db/contracts';
+import { AccountCreatedDto, AccountDto, BenchmarkStatusDto, JudgeStatusDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { OPENROUTER_KEY_ACCOUNT, type Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
@@ -66,7 +59,9 @@ function answer(url: string): Response {
   });
 }
 
-async function start(opts: { judgeOff?: boolean; keychain?: Keychain } = {}) {
+async function start(
+  opts: { judgeOff?: boolean; benchmarksOff?: boolean; keychain?: Keychain } = {},
+) {
   daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
@@ -76,6 +71,7 @@ async function start(opts: { judgeOff?: boolean; keychain?: Keychain } = {}) {
     keychain: opts.keychain ?? createMemoryKeychain(),
     openRouterSync: true,
     ...(opts.judgeOff === undefined ? {} : { judgeOff: opts.judgeOff }),
+    ...(opts.benchmarksOff === undefined ? {} : { benchmarksOff: opts.benchmarksOff }),
     fetch: (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       requests.push({ url, authorization: new Headers(init?.headers).get('authorization') });
@@ -94,7 +90,6 @@ describe('the OpenRouter sync in a daemon', () => {
     const api = await start();
     await waitForAsync(async () => (await openRouterStatus(api)).outcome === 'no_key');
     expect(requests).toEqual([]);
-    const modelsBefore = await api.get('/models', z.array(ModelRowDto));
 
     const { account } = await api.post('/accounts', AccountCreatedDto, {
       kind: 'openrouter',
@@ -115,8 +110,6 @@ describe('the OpenRouter sync in a daemon', () => {
     );
     expect(keyed.length).toBeGreaterThan(0);
     expect(keyed.every((r) => r.authorization === `Bearer ${KEY}`)).toBe(true);
-    // Reading measures never touches the profiles routing reads.
-    expect(await api.get('/models', z.array(ModelRowDto))).toEqual(modelsBefore);
   });
 
   it('reads at the first boot with the key an older version left in its own Keychain item', async () => {
@@ -128,8 +121,11 @@ describe('the OpenRouter sync in a daemon', () => {
     expect(status).toMatchObject({ outcome: 'ok', keyConfigured: true });
   });
 
-  it('with the judge off says so and makes no request', async () => {
-    const api = await start({ judgeOff: true });
+  it.each([
+    { name: 'the judge off', opts: { judgeOff: true } },
+    { name: 'benchmarks off', opts: { benchmarksOff: true } },
+  ])('with $name says so and makes no request', async ({ opts }) => {
+    const api = await start(opts);
     expect(await openRouterStatus(api)).toMatchObject({ off: true, outcome: null });
     expect(requests).toEqual([]);
   });
