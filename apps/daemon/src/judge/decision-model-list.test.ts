@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { DECISION_MODELS_URL } from './decision-models';
-import { createDecisionModelList, DECISION_MODELS_TTL_MS } from './decision-model-list';
+import { createDecisionModelList } from './decision-model-list';
+
+const SIX_HOURS = 6 * 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
 
 const model = (id: string) => ({
   id,
@@ -13,7 +16,7 @@ const model = (id: string) => ({
 
 let clock: ManualClock;
 let asked: string[];
-let answer: () => Response;
+let answer: () => Response | Promise<Response>;
 
 const build = () =>
   createDecisionModelList({
@@ -24,6 +27,9 @@ const build = () =>
     },
   });
 
+/** Lets a read started behind a caller finish. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
 beforeEach(() => {
   clock = new ManualClock(new Date('2026-11-13T12:00:00.000Z'));
   asked = [];
@@ -31,33 +37,38 @@ beforeEach(() => {
 });
 
 describe('the decision model list', () => {
-  it('reads OpenRouter once and answers from its copy until it is a few hours old', async () => {
+  it('reads OpenRouter once, then answers its copy and reads again behind it once it is six hours old', async () => {
     const list = build();
-    const first = await list.list();
-    expect(first).toEqual({
+    expect(await list.list()).toEqual({
       models: [expect.objectContaining({ id: 'liquid/d1' })],
       fetchedAt: '2026-11-13T12:00:00.000Z',
     });
-    clock.advance(DECISION_MODELS_TTL_MS - 1);
+    clock.advance(SIX_HOURS - 1);
     await list.list();
     expect(asked).toEqual([DECISION_MODELS_URL]);
     clock.advance(1);
     answer = () => Response.json({ data: [model('liquid/d1'), model('morph/reflex')] });
+    // The old copy at once, without waiting on OpenRouter.
+    expect((await list.list()).models.map((m) => m.id)).toEqual(['liquid/d1']);
+    await settle();
     expect((await list.list()).models.map((m) => m.id)).toEqual(['liquid/d1', 'morph/reflex']);
     expect(asked).toHaveLength(2);
   });
 
   it('asks OpenRouter once for callers that ask together', async () => {
     const list = build();
-    await Promise.all([list.list(), list.list(), list.ids()]);
+    list.ids();
+    await Promise.all([list.list(), list.list()]);
     expect(asked).toHaveLength(1);
   });
 
   it('keeps answering its old copy when a later read fails', async () => {
     const list = build();
     await list.list();
-    clock.advance(DECISION_MODELS_TTL_MS);
+    clock.advance(SIX_HOURS);
     answer = () => new Response('down', { status: 503 });
+    await list.list();
+    await settle();
     expect((await list.list()).fetchedAt).toBe('2026-11-13T12:00:00.000Z');
   });
 
@@ -69,17 +80,37 @@ describe('the decision model list', () => {
     await expect(build().list()).rejects.toThrow(why);
   });
 
-  it('names the decision models for routing, and none when the list cannot be read', async () => {
-    expect(await build().ids()).toEqual(new Set(['liquid/d1']));
-    answer = () => new Response('down', { status: 503 });
-    expect(await build().ids()).toBeNull();
+  it('routes without waiting: none while the list is being read, the decision models once it is', async () => {
+    let release: () => void = () => undefined;
+    answer = () =>
+      new Promise<Response>((resolve) => {
+        release = () => {
+          resolve(Response.json({ data: [model('liquid/d1')] }));
+        };
+      });
+    const list = build();
+    expect(list.ids()).toBeNull();
+    release();
+    await settle();
+    expect(list.ids()).toEqual(new Set(['liquid/d1']));
+    clock.advance(SIX_HOURS * 10);
+    expect(list.ids()).toEqual(new Set(['liquid/d1']));
+    expect(asked).toHaveLength(1);
   });
 
-  it('routes on its copy however old, without asking OpenRouter again', async () => {
+  it('reads again at most once a minute while OpenRouter fails', async () => {
+    answer = () => new Response('down', { status: 503 });
     const list = build();
-    await list.ids();
-    clock.advance(DECISION_MODELS_TTL_MS * 10);
-    expect(await list.ids()).toEqual(new Set(['liquid/d1']));
+    list.ids();
+    await settle();
+    list.ids();
+    list.ids();
     expect(asked).toHaveLength(1);
+    clock.advance(MINUTE);
+    answer = () => Response.json({ data: [model('liquid/d1')] });
+    list.ids();
+    await settle();
+    expect(asked).toHaveLength(2);
+    expect(list.ids()).toEqual(new Set(['liquid/d1']));
   });
 });

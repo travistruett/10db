@@ -87,7 +87,7 @@ function build(options: { off?: boolean } = {}) {
       if (keyHangs) return new Promise<string | null>(() => undefined);
       return Promise.resolve(key);
     },
-    decisionModelIds: () => Promise.resolve(decisionModels),
+    decisionModelIds: () => decisionModels,
     off: options.off ?? false,
     logger: silentLogger,
   });

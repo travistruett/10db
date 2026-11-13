@@ -2,21 +2,25 @@ import type { DecisionModelListDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { DECISION_MODELS_URL, decisionModelsFrom } from './decision-models';
 import { OpenRouterError } from './openrouter';
-import { untilAborted } from './until-aborted';
 
-/** OpenRouter's decision models change rarely; Settings reads them again after this long. */
-export const DECISION_MODELS_TTL_MS = 6 * 60 * 60 * 1000;
+/** OpenRouter's decision models change rarely; the list is read again after this long. */
+const TTL_MS = 6 * 60 * 60 * 1000;
+/** After a failed read, no other read starts for this long, so an outage costs one request a minute, not one a call. */
+const RETRY_MS = 60 * 1000;
 /** A read of the list that takes longer is given up. */
 const LIST_TIMEOUT_MS = 10_000;
 
 export interface DecisionModelList {
-  /** The list, read again from OpenRouter once the copy held is older than the TTL; an old copy outlives a failed read. */
+  /**
+   * The list. With no copy held it waits for a read; with a copy older than 6 hours it answers that copy at once and
+   * reads again behind it.
+   */
   list(): Promise<DecisionModelListDto>;
   /**
-   * Every listed model's id, for routing a call: the copy held however old, read once when there is none, and null
-   * when it can't be read. Gives up waiting when `signal` aborts.
+   * Every listed model's id, for routing a call, without waiting: the copy held however old, or null while there is
+   * none, in which case a read starts behind the call.
    */
-  ids(signal?: AbortSignal): Promise<ReadonlySet<string> | null>;
+  ids(): ReadonlySet<string> | null;
 }
 
 export function createDecisionModelList(deps: {
@@ -25,6 +29,10 @@ export function createDecisionModelList(deps: {
 }): DecisionModelList {
   let held: { readonly dto: DecisionModelListDto; readonly ids: ReadonlySet<string> } | null = null;
   let reading: Promise<DecisionModelListDto> | null = null;
+  /** When the last read failed; none starts within `RETRY_MS` of it. */
+  let failedAt: number | null = null;
+
+  const now = (): number => deps.clock.now().getTime();
 
   async function read(): Promise<DecisionModelListDto> {
     const controller = new AbortController();
@@ -43,14 +51,12 @@ export function createDecisionModelList(deps: {
       } catch {
         throw new OpenRouterError("OpenRouter's model list was not JSON");
       }
-      const dto = {
-        models: decisionModelsFrom(body),
-        fetchedAt: deps.clock.now().toISOString(),
-      };
+      const dto = { models: decisionModelsFrom(body), fetchedAt: deps.clock.now().toISOString() };
       held = { dto, ids: new Set(dto.models.map((m) => m.id)) };
+      failedAt = null;
       return dto;
     } catch (error) {
-      if (held !== null) return held.dto;
+      failedAt = now();
       throw error;
     } finally {
       timer.cancel();
@@ -64,20 +70,21 @@ export function createDecisionModelList(deps: {
     return reading;
   }
 
-  const fresh = (): boolean =>
-    held !== null &&
-    deps.clock.now().getTime() - Date.parse(held.dto.fetchedAt) < DECISION_MODELS_TTL_MS;
+  /** Starts a read behind the caller unless one runs or one failed within the last minute. */
+  function refreshBehind(): void {
+    if (reading !== null || (failedAt !== null && now() - failedAt < RETRY_MS)) return;
+    load().catch(() => undefined);
+  }
 
   return {
-    list: () => (fresh() && held !== null ? Promise.resolve(held.dto) : load()),
-    async ids(signal) {
-      if (held !== null) return held.ids;
-      try {
-        const dto = await (signal === undefined ? load() : untilAborted(load(), signal));
-        return new Set(dto.models.map((m) => m.id));
-      } catch {
-        return null;
-      }
+    list() {
+      if (held === null) return load();
+      if (now() - Date.parse(held.dto.fetchedAt) >= TTL_MS) refreshBehind();
+      return Promise.resolve(held.dto);
+    },
+    ids() {
+      if (held === null) refreshBehind();
+      return held?.ids ?? null;
     },
   };
 }

@@ -84,8 +84,8 @@ export interface JudgeDeps {
    * an archived or other kind of account, or a secret that is missing or changed.
    */
   readonly readKey: (accountId: AccountId | null) => Promise<string | null>;
-  /** The ids of OpenRouter's decision models, which say which endpoint a model answers on; null when unknown. */
-  readonly decisionModelIds: (signal: AbortSignal) => Promise<ReadonlySet<string> | null>;
+  /** The ids of OpenRouter's decision models, which say which endpoint a model answers on; null when unknown. Never waits. */
+  readonly decisionModelIds: () => ReadonlySet<string> | null;
   /** The daemon was started with `TENDB_JUDGE=off`: no key is read and nothing is sent. */
   readonly off: boolean;
   readonly logger: Logger;
@@ -157,12 +157,9 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           detail: 'No OpenRouter key is set',
           latencyMs: null,
         };
-      const api = await modelApi(model, () =>
-        untilAborted(deps.decisionModelIds(controller.signal), controller.signal),
-      );
       const answer = await askModel({
         model,
-        api,
+        api: modelApi(model, deps.decisionModelIds),
         state: q.state,
         question: q.question,
         options: q.options,

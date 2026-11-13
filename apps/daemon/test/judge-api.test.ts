@@ -267,6 +267,18 @@ describe('PATCH /judge', () => {
     ]);
   });
 
+  it('answers 409 for a new model with the judge off, saving nothing and asking nothing', async () => {
+    const { api, raw } = await start({ judgeOff: true });
+    await openRouterAccount(api);
+    expect(
+      (await raw('PATCH', '/judge', { decisions: { review_size: { model: 'liquid/d1' } } })).status,
+    ).toBe(409);
+    expect((await api.get('/judge', JudgeStatusDto)).config.decisions.review_size.model).toBe(
+      'typesafe/jev-1.13',
+    );
+    expect(openRouterRequests).toEqual([]);
+  });
+
   it('asks nothing when the model stays the same', async () => {
     const { api } = await start();
     await openRouterAccount(api);

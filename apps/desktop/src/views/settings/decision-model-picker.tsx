@@ -1,5 +1,6 @@
 import type { DecisionModelDto, JudgeDecision, JudgeStatusDto } from '@10db/contracts';
 import {
+  Button,
   Group,
   Loader,
   Select,
@@ -70,15 +71,20 @@ export function DecisionModelPicker({
   const patch = usePatchJudge();
   const asking = patch.isPending ? patch.variables.decisions?.[decision]?.model : undefined;
 
+  const savedText = (
+    <Text size="sm" ff="monospace">
+      {saved}
+    </Text>
+  );
   if (!keyed)
     return (
       <Stack gap={2} align="flex-end">
-        <Text size="sm" ff="monospace">
-          {saved}
-        </Text>
+        {savedText}
         {status.off ? null : (
           <Text size="xs" c="dimmed">
-            Add an OpenRouter key to pick another model: choose an account under Runs on.
+            {status.account === null
+              ? 'Add an OpenRouter key to pick another model: choose an account under Runs on.'
+              : 'Add an OpenRouter key to pick another model: set the key of the account decisions run on.'}
           </Text>
         )}
       </Stack>
@@ -86,10 +92,23 @@ export function DecisionModelPicker({
   if (models.isPending) return <Loader size="sm" aria-label="Loading models" />;
   if (models.isError)
     return (
-      <Text size="sm" c="red" role="alert">
-        OpenRouter&apos;s decision models could not be read.{' '}
-        {models.error instanceof DaemonRequestError ? models.error.message : ''}
-      </Text>
+      <Stack gap={2} align="flex-end">
+        {savedText}
+        <Text size="xs" c="red" role="alert">
+          OpenRouter&apos;s decision models could not be read.{' '}
+          {models.error instanceof DaemonRequestError ? models.error.message : ''}
+        </Text>
+        <Button
+          size="xs"
+          variant="default"
+          loading={models.isFetching}
+          onClick={() => {
+            void models.refetch();
+          }}
+        >
+          Try Again
+        </Button>
+      </Stack>
     );
 
   const list = models.data.models;

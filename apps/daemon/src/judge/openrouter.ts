@@ -69,12 +69,12 @@ export interface ModelAnswer {
  * A model is a chat model only when OpenRouter's decision list is known and leaves it out: the picker offers decision
  * models alone, so with the list unreadable a model is taken to be one.
  */
-export async function modelApi(
+export function modelApi(
   model: string,
-  decisionModels: () => Promise<ReadonlySet<string> | null>,
-): Promise<ModelApi> {
+  decisionModels: () => ReadonlySet<string> | null,
+): ModelApi {
   if (/^~?typesafe\//.test(model)) return ModelApi.SystemOne;
-  const ids = await decisionModels();
+  const ids = decisionModels();
   if (ids === null || ids.has(model)) return ModelApi.Decisions;
   return ModelApi.Chat;
 }

@@ -658,7 +658,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    decisionModelIds: (signal) => decisionModels.ids(signal),
+    decisionModelIds: () => decisionModels.ids(),
     readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),

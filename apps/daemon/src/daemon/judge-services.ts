@@ -108,7 +108,12 @@ export function createJudgeServices(deps: {
       // is never left naming a model 10db can't use.
       const config = getJudgeConfig(deps.state.db);
       const accountId = patch.accountId === undefined ? config.accountId : patch.accountId;
-      for (const model of newModels(config, patch)) {
+      const models = newModels(config, patch);
+      if (deps.off && models.length > 0)
+        throw new ConflictError(
+          'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
+        );
+      for (const model of models) {
         const result =
           accountId === null
             ? { ok: false as const, error: 'No OpenRouter key is set' }

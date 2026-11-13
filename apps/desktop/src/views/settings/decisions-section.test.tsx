@@ -217,12 +217,30 @@ describe('Settings › Decisions', () => {
           body: { decisions: { review_size: { model: '~typesafe/jev-latest' } } },
         });
       });
+      // Saved, not only shown while it is tested: the field is enabled again and still shows the pick.
       await waitFor(() => {
-        expect(screen.getByRole('combobox', { name: 'Model' })).toHaveProperty(
-          'value',
-          'Jev Latest',
-        );
+        expect(screen.queryByText(/a test decision…/)).toBeNull();
+        const select = screen.getByRole('combobox', { name: 'Model' });
+        expect(select).toHaveProperty('disabled', false);
+        expect(select).toHaveProperty('value', 'Jev Latest');
       });
+    });
+
+    it('keeps the saved model in view and offers Try Again when the list cannot be read', async () => {
+      open({ status: keyed, accounts: [work], models });
+      let failing = true;
+      server.use(
+        http.get(daemonUrl('/judge/models'), () =>
+          failing
+            ? HttpResponse.json({ error: 'upstream', message: 'HTTP 503' }, { status: 502 })
+            : HttpResponse.json({ models, fetchedAt: '2026-11-13T12:00:00.000Z' }),
+        ),
+      );
+      expect(await screen.findByText(/could not be read/, {}, { timeout: 5000 })).toBeTruthy();
+      expect(screen.getByText('typesafe/jev-1.13')).toBeTruthy();
+      failing = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+      expect(await screen.findByRole('combobox', { name: 'Model' })).toBeTruthy();
     });
 
     it('says why a model was refused and keeps the one saved', async () => {
