@@ -69,13 +69,7 @@ import {
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
-import {
-  JudgeCallDto,
-  JudgeConfigPatch,
-  JudgeKeyInput,
-  JudgeStatusDto,
-  JudgeTestResultDto,
-} from './judge';
+import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
@@ -294,7 +288,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'benchmark-status-dto': BenchmarkStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
-  'judge-key-input': JudgeKeyInput,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,
   'board-column-delete': BoardColumnDelete,
