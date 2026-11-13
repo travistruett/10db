@@ -90,7 +90,7 @@ describe('the Waiting tab', () => {
     fireEvent.click(tabs().getByRole('radio', { name: /Waiting/ }));
     expect(await screen.findByText('How long should access last?')).toBeTruthy();
     expect(screen.getByText('Mark Ellis')).toBeTruthy();
-    expect(screen.getByText('sent 3h ago')).toBeTruthy();
+    expect(screen.getByText('· sent 3h ago')).toBeTruthy();
   });
 
   it('says nothing is out with anyone when empty', async () => {
@@ -115,7 +115,7 @@ describe('the Waiting tab', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
     expect(await screen.findByText('Mark Ellis + Ana Ortiz')).toBeTruthy();
     expect(screen.getByText('with Priya')).toBeTruthy();
-    expect(screen.getByText('reminded 1h ago')).toBeTruthy();
+    expect(screen.getByText('· reminded 1h ago')).toBeTruthy();
   });
 
   it('expanding a row shows the conversation and an open proposal', async () => {
@@ -144,12 +144,24 @@ describe('the Waiting tab', () => {
     expect(link.getAttribute('href')).toBe('https://acme.slack.com/archives/D1/p1');
   });
 
-  it('Take Back from the row menu returns the card', async () => {
+  it('Take Back from the row menu asks first, since it posts in Slack, then returns the card', async () => {
     const calls = serve([card({})]);
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'More for this question' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Back' }));
+    const ask = await screen.findByRole('dialog', { name: 'Take this back from Mark Ellis?' });
+    expect(within(ask).getByText(/tells them in the Slack thread/)).toBeTruthy();
+    fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(calls).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'More for this question' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Back', hidden: true }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Take Back' }),
+    );
     await waitFor(() => {
       expect(calls.map((c) => c.path.split(':')[0])).toEqual(['take-back']);
     });
@@ -185,6 +197,9 @@ describe('what leaves Waiting for Open', () => {
       expect(calls.map((c) => c.path.split(':')[0])).toEqual(['keep-waiting']);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Take Back' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Take Back' }),
+    );
     await waitFor(() => {
       expect(calls.map((c) => c.path.split(':')[0])).toEqual(['keep-waiting', 'take-back']);
     });

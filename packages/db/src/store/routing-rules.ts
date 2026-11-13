@@ -201,7 +201,7 @@ export function assigneesFor(db: DbReader, input: AssigneesInput): AssigneesResu
   if (!same) return toBuilder();
   if (first.handles.length > MAX_RECIPIENTS)
     return toBuilder(
-      `${String(first.handles.length)} people answer ${input.category} questions here, more than a Slack group DM holds. Use Ask Someone… to pick.`,
+      `${String(first.handles.length)} people answer ${input.category} questions here, more than a Slack group DM holds. Use Ask Someone to pick.`,
     );
   return { handles: first.handles, tier: first.tier, note: null };
 }

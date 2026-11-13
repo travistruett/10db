@@ -114,8 +114,10 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   `shell/confirm-modal.tsx`) in its menu. Settings › People (`views/settings/people/`) is only the people, with
   how 10db reaches each one, and the timers; Add Person never shows a handle (`person-handle.ts` makes one from
   the name and numbers a clash). Settings › Who Answers (`who-answers-section.tsx`) is the routing table. A question card shows what its
-  people will get (`slack-preview.tsx`: ⌘↵ sends, a bare Enter and the digits do nothing), Ask Someone… (`ask-someone.tsx`),
-  and, for someone not in Slack, Copy for them from `InboxItemDto.copyFor`. The Inbox has an Open, a Waiting and a
+  people will get (`slack-preview.tsx`: the route line under the title with Change, the card's one reroute
+  control; ⌘↵ sends, a bare Enter and the digits do nothing), Ask Someone (`ask-someone.tsx`), and, for someone
+  not in Slack, the message with Copy for them beside it, from `InboxItemDto.copyFor`. Take Back posts in Slack,
+  so it asks first (`take-back-modal.tsx`). The Inbox has an Open, a Waiting and a
   Resolved tab (`inbox-rows.ts` `splitInbox`: a sent, unreturned card is Waiting only while Slack is connected).
   `WorkstreamDto.waitingOn` draws "Waiting on Mark in Slack · 3h" on a card that keeps its plain border. A popover
   that holds a Select draws the Select's list inside itself (`comboboxProps={{ withinPortal: false }}`), or a click

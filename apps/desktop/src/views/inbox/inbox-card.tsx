@@ -44,7 +44,6 @@ import { SlackPreview } from './slack-preview';
 import {
   AskSomeoneFooter,
   ComposedMessage,
-  CopyForPeople,
   RouteLineRow,
   SendInsteadLink,
   SentNotice,
@@ -382,9 +381,6 @@ export function InboxCard({
         <Group justify="flex-end">
           {mode === StakeholderMode.Unrouted && hasOptions ? (
             <AskSomeoneFooter item={item} people={people} />
-          ) : null}
-          {mode === StakeholderMode.Copy ? (
-            <CopyForPeople item={item} recipients={copyPeople(item, people)} />
           ) : null}
           <Button
             size="sm"

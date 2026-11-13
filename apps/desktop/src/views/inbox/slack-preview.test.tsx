@@ -164,10 +164,11 @@ describe('a card with a draft', () => {
     expect(screen.getByRole('button', { name: 'Send to Mark and Ana' })).toBeTruthy();
   });
 
-  it("a failed send shows Slack's words and offers Send again as well as Ask Someone", async () => {
+  it("a failed send shows Slack's words, Send again, and Change as its one way to reroute", async () => {
     const posted = serve(card({ state: 'failed', error: 'Slack refused: channel_not_found.' }));
     expect(await screen.findByText(/Slack refused: channel_not_found/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Ask Someone/ })).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /Ask Someone/ })).toHaveLength(0);
+    expect(screen.getAllByRole('button', { name: 'Change' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /Send to Mark/ }));
     await waitFor(() => {
       expect(posted).toEqual([{ path: 'send', body: {} }]);

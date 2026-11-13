@@ -86,7 +86,7 @@ export const SendInput = z.object({
 });
 export type SendInput = z.infer<typeof SendInput>;
 
-/** `POST /inbox/:id/ask`: Ask Someone…, with an optional standing rule for the same kind of question. */
+/** `POST /inbox/:id/ask`: Ask Someone, with an optional standing rule for the same kind of question. */
 export const AskSomeoneInput = z.object({
   personIds: z.array(PersonId).min(1).max(8),
   always: z

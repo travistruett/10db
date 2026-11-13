@@ -90,7 +90,7 @@ export function draftContext(
 
 /**
  * The message a question would be for these people, with what the scan holds, without writing anything:
- * Ask Someone… previews it for a person who is not on Slack too (Copy for them, spec §5).
+ * Ask Someone previews it for a person who is not on Slack too (Copy for them, spec §5).
  */
 export function previewDraft(
   db: DbReader,

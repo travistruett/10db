@@ -12,6 +12,7 @@ export function ConfirmModal({
   confirmLabel,
   loading = false,
   error = null,
+  destructive = false,
   onConfirm,
   onCancel,
 }: {
@@ -22,6 +23,8 @@ export function ConfirmModal({
   readonly confirmLabel: string;
   readonly loading?: boolean;
   readonly error?: string | null;
+  /** The action stops or removes something, so its button is red. */
+  readonly destructive?: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
@@ -38,7 +41,7 @@ export function ConfirmModal({
           <Button variant="default" data-autofocus onClick={onCancel}>
             Cancel
           </Button>
-          <Button color="red" loading={loading} onClick={onConfirm}>
+          <Button {...(destructive ? { color: 'red' } : {})} loading={loading} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </Group>

@@ -113,7 +113,7 @@ The builder's request fixes S2, S3 and S5. The rest are this spec's **(call)**, 
   new judge decision, `question_route`, chooses who answers: one person per candidate, each described by their
   category and topic routes, plus "nobody fits". The lane's category and topic are evidence in its state. An
   answer at or above the floor routes the card, still under the person's send mode. One below it leaves the
-  card with the builder, with "Suggested: Sarah (64%)" filled into Ask Someone…. Off, no key, a timeout or an
+  card with the builder, with "Suggested: Sarah (64%)" filled into Ask Someone. Off, no key, a timeout or an
   error: the lane's tags decide, its topic first, then its category. It runs on the card, after the lane asked,
   so it behaves the same whatever account the lane runs on (§6.3).
 - **S13. Anyone in the conversation can answer; a recipient approves (call).** A bot DM holds only the
@@ -244,7 +244,7 @@ chose it:
    readers still work. Names are listed in that order everywhere ("Mark and Ana"). A tie never spans scopes: a
    goal route for Mark beats a project route for Ana outright. A tie of more than eight people (a group DM's
    limit) goes to the builder instead, with the note "9 people answer product questions here, more than a Slack
-   group DM holds. Use Ask Someone… to pick."
+   group DM holds. Use Ask Someone to pick."
 
 6. **Folding follows the rules' people.** Identical open asks fold into one card today. The recipients the rules
    give a new ask (`rule_assignees`, stored on the card, compared as a set) are part of the fold key. A question routed to Mark never
@@ -281,7 +281,7 @@ never runs inside a transaction.
 - **The answer.** A route at or above the floor routes the card to every person on it: `routedBy: 'judge'` and
   the confidence on the card, then the draft and the send mode, as for a rule. `nobody` at or above the floor
   keeps it with the builder. Anything below the floor keeps it with the builder and stores the top route's
-  people as a suggestion (`{ personIds, confidence }`), which Ask Someone… opens on.
+  people as a suggestion (`{ personIds, confidence }`), which Ask Someone opens on.
 - **The fallback** (the judge is off, has no key, times out or errs): the lane's topic, when it names one of the
   project's topic routes, routes to that route's people; else its category's project routes; else the builder.
   `routedBy: 'rule'`.
@@ -311,7 +311,7 @@ beside them. A topic is a short phrase the builder types ("billing, pricing, inv
 
 From most used to least:
 
-1. **On the card** (§10.2): **Ask Someone…** routes this one question to a person and offers "Always send
+1. **On the card** (§10.2): **Ask Someone** routes this one question to a person and offers "Always send
    product questions on this goal to Mark", which writes the route. The card then shows the message for the
    builder to send. The table fills itself from use.
 2. **On a goal**, in Factory's open goal under About this goal: "Questions go to: Mark (product, design)".
@@ -412,7 +412,7 @@ conversation, and asking the builder to approve each turn would bring the relay 
 are templates filled with the card's already-sent text, letters and Slack names, never agent text, so they skip
 review. Names from Slack are escaped like card text.
 
-**Ask Someone…** only reroutes. The card becomes a routed card with the preview, and Send is the review, so a
+**Ask Someone** only reroutes. The card becomes a routed card with the preview, and Send is the review, so a
 message never leaves without the builder having seen it or the person's mode allowing it. A session still waiting
 on the card parks at that moment, so a stakeholder's words only ever reach a lane through the resumed prompt.
 
@@ -752,7 +752,7 @@ Setting up Slack happens once, so it has its own section; People is only the peo
 │ Integrations                                                                                 │
 │ The services 10db uses to reach the people who answer your questions.                        │
 │ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ # Slack                                                                             [⋯] │ │
+│ │ # Slack                                                                             [⋯]  │ │
 │ │ Acme · posts as @10db · you're @travis                                                   │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -812,6 +812,7 @@ A routed card in review mode opens on what Mark will get. Today's answer control
 ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ [Question] Renewals · For Mark in Slack                                                      │
 │ How long should a customer keep access while a failed renewal retries?                       │
+│ Product question on the goal Renewals → Mark · Change                                        │
 │                                                                                              │
 │ Mark will get                                                                     [Edit]     │
 │ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
@@ -824,15 +825,14 @@ A routed card in review mode opens on what Mark will get. Today's answer control
 │ │ C. Keep access for the whole billing period                                              │ │
 │ │ ↳ Reply in this thread with a letter or your own words.                                  │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│ Product question on the goal Renewals → Mark · Change                                         │
-│ The task is parked until someone answers. Other work keeps running.                          │
-│                                                     [Answer Myself]   [Send to Mark  ⌘↵]    │
+│ The task is parked until someone answers…             [Answer Myself]   [Send to Mark  ⌘↵]   │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - The preview is drawn like a Slack message on the `bg_1` tone, not a screenshot: plain text, the letters
   bold. **Edit** turns it into an autosizing Textarea; Done returns to the preview.
-- The route line says why this person: "Product question on the goal Renewals → Mark". A triaged card says
+- The route line sits under the title, so who gets it and why reads before the message: "Product question on
+  the goal Renewals → Mark". The note that the task is parked sits left of the footer's buttons. A triaged card says
   "Billing topic → Sarah · chosen by Jev, 91%"; a tie says "Product question on Acme app → Mark and Ana", and
   the preview's heading and primary name both ("Mark and Ana will get", **Send to Mark and Ana**). **Change**
   opens the Ask Someone popover.
@@ -846,12 +846,13 @@ A routed card in review mode opens on what Mark will get. Today's answer control
   it before it goes to Mark." Send is disabled until the scan passes. A path-like warning is a dimmed line
   under the preview and doesn't disable Send.
 
-**Ask Someone…** sits in the footer of a question card that isn't routed, as a `default` button left of the
-primary. On a routed card the route line's **Change** opens the same popover, and there is no second button.
+**Ask Someone** sits in the footer of a question card that isn't routed, as a `default` button left of the
+primary. On a routed card, a failed one included, the route line's **Change** opens the same popover, and there
+is no second button. With nobody but the builder to ask, the popover says so and links to Settings › People.
 
 ```
                          ┌ Ask someone ──────────────────────────────────────┐
-                         │ [ Mark Ellis · @mark                          ▾ ] │
+                         │ [ Mark Ellis · Slack                          ▾ ] │
                          │ ☑ Always send [Product ✓] [Design] questions      │
                          │   on [ the goal Renewals ▾ ] to Mark              │
                          │      (this task · the goal Renewals · Acme app)   │
@@ -863,11 +864,12 @@ primary. On a routed card the route line's **Change** opens the same popover, an
 - The card's own category is ticked; the other stakeholder kinds (Product, Business, Design) are one click
   away, each with its hint as a tooltip, and each ticked one writes a route.
 - **A suggestion opens the popover on it.** A card triage left with the builder (§6.3) shows "Suggested: Sarah
-  (64%)" in the footer beside Ask Someone…, and the popover opens with Sarah picked and Always unticked.
+  (64%)" in the footer beside Ask Someone, and the popover opens with Sarah picked and Always unticked.
 - **Ask Mark** routes the card to Mark and closes the popover; the card then shows "Mark will get" and Send to
   Mark (or sends at once when Mark's mode allows it). Nothing leaves from the popover itself.
-- Choosing someone not in Slack makes the card's primary **Copy for Priya**, which copies the message and leaves
-  the card open for the builder to paste her answer.
+- Choosing someone not in Slack puts the message on the card under "Priya Shah isn't on Slack. Copy this to
+  them, then pick their answer below.", with **Copy for Priya Shah** beside that line; the footer keeps Send
+  answer as its one primary, and the card stays open for the builder to give her answer.
 
 ### 10.3 The Inbox's Waiting tab
 
@@ -877,15 +879,18 @@ leaves Open for a third tab between Open and Resolved.
 ```
  Inbox                                          [ Open  2 ] [ Waiting  3 ] [ Resolved ]
  ───────────────────────────────────────────────────────────────────────────────────────────────
- ● Mark Ellis   How long should a customer keep access while a…   Renewals   sent 3h ago   ↗  ⋯
- ● Mark Ellis   Should the receipt email show the card's last 4…  Renewals   sent 3h ago   ↗  ⋯
- ● Dana Ruiz    Which empty state reads best for the Waiting tab? 10db       sent 12m ago  ↗  ⋯
+ ● How long should a customer keep access while a failed renewal…    Renewals   Open in Slack  ⋯
+   With Mark Ellis · sent 3h ago
+ ● Which empty state reads best for the Waiting tab?                  10db       Open in Slack  ⋯
+   With Dana Ruiz with Priya · sent 12m ago · reminded 1h ago
 ```
 
-- One dense row per send: a yellow dot, the recipients ("Mark Ellis", or "Mark Ellis + Ana Ortiz"), "with
-  Priya" when someone was brought in, the question, the project, when it was sent ("reminded 1h ago" once the
-  reminder went), ↗ opens the conversation in Slack, ⋯ holds Answer Myself, Nudge (slice 2) and Take Back (the
-  card returns to Open, and the thread gets the closing line).
+- One row per send, with the question as its headline and one dimmed line under it: the recipients ("With
+  Mark Ellis", or "With Mark Ellis + Ana Ortiz"), "with Priya" when someone was brought in, when it was sent
+  and "reminded 1h ago" once the reminder went. Beside it are the project, **Open in Slack** and ⋯, which
+  holds Answer Myself, Nudge (slice 2) and Take Back. Take Back posts in the thread, so it asks first ("10db
+  tells them in the Slack thread that you have it"); the card then returns to Open. The returned card's Take
+  Back asks the same.
 - Selecting a row expands the card read-only: the message as sent, the conversation so far with each author, and
   an open proposal ("Proposed B, waiting for Mark's ✅").
 - The tab's count is a `CountBadge` in the neutral (gray) tone, since nothing in it needs the builder; Open's
@@ -934,7 +939,7 @@ leaves Open for a third tab between Open and Resolved.
 | People             | `Loader size="sm"`      | only You, and the Slack guide                                 | red `Alert` "Couldn't load people" with the message             |
 | Member picker      | the Select's loader     | "No members found. Is the app installed in Mark's workspace?" | Slack's error in words, beside the field                        |
 | Waiting tab        | with the Inbox          | "Nothing is out with anyone."                                 | with the Inbox                                                  |
-| Who Answers        | `Loader size="sm"`      | "Every question comes to you. Add a route, or use Ask Someone… on a card." | red `Alert` with the message                        |
+| Who Answers        | `Loader size="sm"`      | "Every question comes to you. Add a route, or use Ask Someone on a card." | red `Alert` with the message                        |
 | A send that failed | —                       | —                                                             | the card is back in Open with "Slack refused: channel_not_found. Mark may have left the workspace." |
 
 ## 11. Security
@@ -959,7 +964,7 @@ leaves Open for a third tab between Open and Resolved.
 ## 12. Slices
 
 1. **The Mark case** (the plan): the Slack connection, People with a Slack contact, the six categories, routes at
-   three scopes and topic routes, triage, ties asked together, Who Answers, Ask Someone…, the lane's briefing
+   three scopes and topic routes, triage, ties asked together, Who Answers, Ask Someone, the lane's briefing
    line, park at once, compose, scan, review and send, follow-ups in the thread, the reply watch, bringing
    someone in, agreeing an answer, answer as the person, the decision by the person, the closing lines, the 4 h
    reminder and the 8 h return, the Waiting tab, the one-line surfaces, Copy for someone without Slack, the

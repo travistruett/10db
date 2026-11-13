@@ -11,7 +11,7 @@ import {
 export const StakeholderMode = {
   /** Not a stakeholder card as far as the screen goes: today's card. */
   None: 'none',
-  /** A question nobody was asked about; it offers Ask Someone…. */
+  /** A question nobody was asked about; it offers Ask Someone. */
   Unrouted: 'unrouted',
   /** Triage is still choosing who answers. */
   Pending: 'pending',

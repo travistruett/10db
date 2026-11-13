@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import {
   Alert,
+  Anchor,
   Button,
   Checkbox,
   Chip,
@@ -18,10 +19,12 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAskSomeone } from '../../daemon/people';
 import { useTasks, useWorkstreams } from '../../daemon/queries';
 import { QUESTION_CATEGORY_HINTS } from '@10db/contracts';
+import { SettingsSectionKey } from '../settings/sections';
 import { categoryWord, recipientsOf } from './route-line';
 
 /** The kinds of question a stakeholder can answer; the others stay with the builder or the lane's own rules. */
@@ -35,7 +38,7 @@ const Scope = { Task: 'task', Goal: 'goal', Project: 'project' } as const;
 type Scope = (typeof Scope)[keyof typeof Scope];
 
 function personLabel(person: PersonDto): string {
-  return `${person.name} · ${person.slack === null ? 'not in Slack' : `@${person.handle}`}`;
+  return `${person.name} · ${person.slack === null ? 'not on Slack' : 'Slack'}`;
 }
 
 /** The task and goal a card belongs to, read from the run it came from. */
@@ -89,7 +92,14 @@ export function AskSomeone({
       </Popover.Target>
       <Popover.Dropdown>
         {/* Mounted only while open, so each opening starts from the suggestion or the current route. */}
-        {opened ? (
+        {opened && people.every((p) => p.isBuilder) ? (
+          <NobodyToAsk
+            onDone={() => {
+              setOpened(false);
+            }}
+          />
+        ) : null}
+        {opened && people.some((p) => !p.isBuilder) ? (
           <AskForm
             item={item}
             people={people}
@@ -101,6 +111,32 @@ export function AskSomeone({
         ) : null}
       </Popover.Dropdown>
     </Popover>
+  );
+}
+
+/** With nobody but the builder, the popover says where people are added instead of an empty list. */
+function NobodyToAsk({ onDone }: { readonly onDone: () => void }) {
+  return (
+    <Stack gap="sm">
+      <Text size="sm">There is nobody to ask yet.</Text>
+      <Anchor
+        size="sm"
+        renderRoot={(props) => (
+          <Link
+            {...props}
+            to="/settings/$section"
+            params={{ section: SettingsSectionKey.People }}
+          />
+        )}
+      >
+        Add someone in Settings › People
+      </Anchor>
+      <Group justify="flex-end">
+        <Button variant="default" onClick={onDone}>
+          Cancel
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 

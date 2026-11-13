@@ -14,12 +14,17 @@ const goalId = mintId('Goal');
 const task = taskDto({ goalId });
 const workstream = workstreamDto({ taskId: task.id });
 
-function serve(item: InboxItemDto, options: { copyForAfterAsk?: string[] } = {}) {
+function serve(
+  item: InboxItemDto,
+  options: { copyForAfterAsk?: string[]; people?: unknown[] } = {},
+) {
   let current = item;
   const asked: unknown[] = [];
   server.use(
     http.get(daemonUrl('/inbox'), () => HttpResponse.json([current])),
-    http.get(daemonUrl('/people'), () => HttpResponse.json([BUILDER_PERSON, mark, sarah, priya])),
+    http.get(daemonUrl('/people'), () =>
+      HttpResponse.json(options.people ?? [BUILDER_PERSON, mark, sarah, priya]),
+    ),
     http.get(daemonUrl('/workstreams'), () => HttpResponse.json([workstream])),
     http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
     http.post(daemonUrl('/inbox/:id/ask'), async ({ request }) => {
@@ -53,10 +58,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Ask Someone…', () => {
+describe('Ask Someone', () => {
+  it('with nobody but the builder, says where to add someone instead of an empty list', async () => {
+    serve(unrouted(), { people: [BUILDER_PERSON] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
+    const popover = await screen.findByRole('dialog');
+    expect(within(popover).getByText('There is nobody to ask yet.')).toBeTruthy();
+    expect(
+      within(popover)
+        .getByRole('link', { name: 'Add someone in Settings › People' })
+        .getAttribute('href'),
+    ).toBe('/settings/people');
+    expect(within(popover).queryByLabelText('Person')).toBeNull();
+  });
+
   it('offers Product, Design and Business; ticking Design too writes both at the goal scope', async () => {
     const asked = serve(unrouted());
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await within(popover).findByLabelText('Person', { selector: 'input' });
     await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
@@ -82,7 +100,7 @@ describe('Ask Someone…', () => {
 
   it('unticking Always asks just this once', async () => {
     const asked = serve(unrouted());
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await within(popover).findByLabelText('Person', { selector: 'input' });
     await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
@@ -95,7 +113,7 @@ describe('Ask Someone…', () => {
 
   it('can scope Always to this task or to the whole project', async () => {
     const asked = serve(unrouted());
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await within(popover).findByLabelText('Person', { selector: 'input' });
     await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
@@ -117,12 +135,12 @@ describe('Ask Someone…', () => {
       routeSuggestion: { personIds: [sarah.id], confidence: 0.64 },
     });
     expect(await screen.findByText('Suggested: Sarah (64%)')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Ask Someone…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await within(popover).findByLabelText('Person', { selector: 'input' });
     expect(within(popover).getByLabelText('Person', { selector: 'input' })).toHaveProperty(
       'value',
-      'Sarah · @sarah',
+      'Sarah · Slack',
     );
     expect(await within(popover).findByRole('checkbox', { name: /Always send/ })).toHaveProperty(
       'checked',
@@ -141,7 +159,7 @@ describe('a card asked of someone not in Slack', () => {
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     // The daemon keeps such a card with the builder and names her in copyFor.
     serve(unrouted(), { copyForAfterAsk: ['priya'] });
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await pickOption(
       await within(popover).findByLabelText('Person', { selector: 'input' }),

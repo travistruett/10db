@@ -200,6 +200,7 @@ export function SlackCard() {
         opened={disconnecting}
         title="Disconnect Slack?"
         confirmLabel="Disconnect"
+        destructive
         loading={remove.isPending}
         error={remove.isError ? remove.error.message : null}
         onCancel={() => {

@@ -112,6 +112,13 @@ export function SlackPreview({
     <Paper withBorder p="md" shadow="xs" data-inbox-selected>
       <Stack gap="sm">
         {header}
+        {/* Who gets it and why, with the card's one way to send it to someone else. */}
+        <Group gap="xs">
+          <Text size="sm" c="dimmed">
+            {line.text}
+          </Text>
+          <AskSomeone item={item} people={people} label="Change" variant="subtle" />
+        </Group>
         <Group justify="space-between">
           <Text fw={600} size="sm">
             {`${names} will get`}
@@ -174,50 +181,43 @@ export function SlackPreview({
             {`First message to ${names}: check it before it goes`}
           </Text>
         ) : null}
-        <Group gap="xs">
-          <Text size="sm" c="dimmed">
-            {line.text}
-          </Text>
-          <AskSomeone item={item} people={people} label="Change" variant="subtle" />
-        </Group>
-        <Text size="xs" c="dimmed">
-          The task is parked until someone answers. Other work keeps running.
-        </Text>
         {sendInbox.isError ? (
           <Alert color="red" variant="light">
             {sendInbox.error.message}
           </Alert>
         ) : null}
-        <Group justify="flex-end">
-          {send.state === 'failed' ? (
-            <AskSomeone item={item} people={people} label="Ask Someone…" />
-          ) : null}
-          <Button variant="default" onClick={onAnswerMyself}>
-            Answer Myself
-          </Button>
-          {limitHeld ? (
-            <Button
-              loading={sendInbox.isPending}
-              onClick={() => {
-                submit(true);
-              }}
-            >
-              Send Anyway
+        <Group justify="space-between" wrap="nowrap" gap="md">
+          <Text size="xs" c="dimmed">
+            The task is parked until someone answers. Other work keeps running.
+          </Text>
+          <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
+            <Button variant="default" onClick={onAnswerMyself}>
+              Answer Myself
             </Button>
-          ) : (
-            <Button
-              disabled={blocked}
-              loading={sendInbox.isPending}
-              onClick={sendNow}
-              rightSection={
-                <Kbd size="xs" aria-hidden>
-                  ⌘↵
-                </Kbd>
-              }
-            >
-              {`Send to ${names}`}
-            </Button>
-          )}
+            {limitHeld ? (
+              <Button
+                loading={sendInbox.isPending}
+                onClick={() => {
+                  submit(true);
+                }}
+              >
+                Send Anyway
+              </Button>
+            ) : (
+              <Button
+                disabled={blocked}
+                loading={sendInbox.isPending}
+                onClick={sendNow}
+                rightSection={
+                  <Kbd size="xs" aria-hidden>
+                    ⌘↵
+                  </Kbd>
+                }
+              >
+                {`Send to ${names}`}
+              </Button>
+            )}
+          </Group>
         </Group>
       </Stack>
     </Paper>

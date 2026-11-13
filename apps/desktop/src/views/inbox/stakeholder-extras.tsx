@@ -6,10 +6,10 @@ import {
   useKeepWaiting,
   useSlackConnection,
   useStakeholderTimers,
-  useTakeBack,
 } from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
 import { copyPeople, joinNames, routeLine, StakeholderMode } from './route-line';
+import { TakeBackModal } from './take-back-modal';
 
 /** The route line of a card that is not showing a draft: why this person, and Change. */
 export function RouteLineRow({
@@ -40,7 +40,10 @@ export function RouteLineRow({
   );
 }
 
-/** The message a person not in Slack would get, to paste to them. */
+/**
+ * The message for people not in Slack, under a line that says what the builder does with it, and the
+ * Copy button beside that line; the card's footer keeps Send answer as its one primary.
+ */
 export function ComposedMessage({
   item,
   recipients,
@@ -53,18 +56,28 @@ export function ComposedMessage({
     recipients.map((p) => p.id),
     recipients.length > 0,
   );
-  if (!compose.isSuccess) return null;
+  const names = joinNames(recipients.map((p) => p.name));
   return (
-    <Paper bg="var(--mantine-color-default-hover)" p="sm" radius="md">
-      <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-        {compose.data.text}
-      </Text>
-    </Paper>
+    <Stack gap="xs">
+      <Group justify="space-between" wrap="nowrap" gap="md">
+        <Text size="sm">
+          {`${names} ${recipients.length > 1 ? "aren't" : "isn't"} on Slack. Copy this to them, then pick their answer below.`}
+        </Text>
+        <CopyForPeople item={item} recipients={recipients} />
+      </Group>
+      {compose.isSuccess ? (
+        <Paper bg="var(--mantine-color-default-hover)" p="sm" radius="md">
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+            {compose.data.text}
+          </Text>
+        </Paper>
+      ) : null}
+    </Stack>
   );
 }
 
 /** Copies the composed message for someone who is not in Slack; the card stays open for their answer. */
-export function CopyForPeople({
+function CopyForPeople({
   item,
   recipients,
 }: {
@@ -79,7 +92,9 @@ export function CopyForPeople({
   const [copied, setCopied] = useState(false);
   return (
     <Button
+      size="xs"
       variant="default"
+      style={{ flex: 'none' }}
       disabled={!compose.isSuccess}
       onClick={() => {
         if (compose.isSuccess)
@@ -93,7 +108,7 @@ export function CopyForPeople({
   );
 }
 
-/** Ask Someone… in the footer of an unrouted question, with triage's suggestion beside it. */
+/** Ask Someone in the footer of an unrouted question, with triage's suggestion beside it. */
 export function AskSomeoneFooter({
   item,
   people,
@@ -114,7 +129,7 @@ export function AskSomeoneFooter({
       <AskSomeone
         item={item}
         people={people}
-        label="Ask Someone…"
+        label="Ask Someone"
 
         {...(suggested === undefined ? {} : { suggestedPersonId: suggested.id })}
       />
@@ -153,7 +168,7 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
   const connection = useSlackConnection();
   const timers = useStakeholderTimers();
   const keepWaiting = useKeepWaiting();
-  const takeBack = useTakeBack();
+  const [takingBack, setTakingBack] = useState(false);
   const send = item.send;
   if (send?.state !== SendState.Sent) return null;
   const names = send.people.filter((p) => p.recipient).map((p) => p.name);
@@ -189,20 +204,26 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
             <Button
               size="xs"
               variant="default"
-              loading={takeBack.isPending}
               onClick={() => {
-                takeBack.mutate(item.id);
+                setTakingBack(true);
               }}
             >
               Take Back
             </Button>
           </Group>
-          {keepWaiting.isError || takeBack.isError ? (
+          {keepWaiting.isError ? (
             <Text size="xs" c="red">
-              {keepWaiting.error?.message ?? takeBack.error?.message}
+              {keepWaiting.error.message}
             </Text>
           ) : null}
         </Stack>
+        <TakeBackModal
+          item={item}
+          opened={takingBack}
+          onClose={() => {
+            setTakingBack(false);
+          }}
+        />
       </Alert>
     );
   }

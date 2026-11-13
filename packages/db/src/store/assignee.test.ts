@@ -210,7 +210,7 @@ describe('assigneesFor', () => {
     expect(w.ask([w.loose])).toEqual({
       handles: ['me'],
       tier: 'builder',
-      note: '9 people answer product questions here, more than a Slack group DM holds. Use Ask Someone… to pick.',
+      note: '9 people answer product questions here, more than a Slack group DM holds. Use Ask Someone to pick.',
     });
   });
 

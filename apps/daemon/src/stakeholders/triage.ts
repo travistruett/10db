@@ -134,7 +134,7 @@ export function createTriage(deps: TriageDeps): Triage {
   function settle(cardId: InboxItemId, verdict: Verdict): boolean {
     return state.write((ctx) => {
       const card = getInboxItem(ctx.tx, cardId);
-      // Someone else routed the card while the judge thought (Ask Someone…): that stands, and only the
+      // Someone else routed the card while the judge thought (Ask Someone): that stands, and only the
       // judge's own call is recorded.
       if (card.routedBy !== RoutedBy.TriagePending) {
         if (verdict.kind !== 'fallback')
