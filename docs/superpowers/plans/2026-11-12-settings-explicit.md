@@ -276,3 +276,105 @@ rows in the existing `delivery/cards.test.ts` and self-update tests.
 - [ ] e2e (`apps/desktop/e2e/settings.spec.ts`, against the real daemon): the scope switch and subheads; Overview
   shows a row per account and service; Integrations shows three cards; Decisions shows Runs on's empty state; an
   axe check on Overview and Integrations (`expect-accessible.ts`).
+
+---
+
+## Amendments after plan review (round 1). These override the tasks above where they differ.
+
+### Per provider (root AGENTS.md, provider parity)
+
+Settings layout, Integrations and Overview behave the same on every account kind. Decisions run on the judge's
+own account (OpenRouter) whatever kind a project's agents use (spec §6.3). Two gaps are stated in the UI and filed
+as follow-up tasks in Task 6: "OpenRouter can't run agents yet", and "Decisions run on OpenRouter for now" (no
+decisions on a Claude plan, an API key, Bedrock or a ChatGPT plan).
+
+### Task 2 (pinned)
+
+- **judge config merge.** `store/judge-config.ts` merges `accountId: patch.accountId === undefined ?
+  current.accountId : patch.accountId`; real-SQLite rows "a patch without accountId keeps it", "null clears it";
+  the store refuses (InvalidError, 400) an id that is unknown, archived or not `openrouter`. `GET /judge` with an id
+  that no longer resolves gives `account: null`.
+- **`moveOpenRouterKey(deps: { state: StateStore; keychain: Keychain })` never throws.** It catches everything,
+  logs by error name only, and start continues. Order, pinned:
+  1. read the old item (throws → log, stop; nothing created, old item kept);
+  2. absent → stop;
+  3. if any OpenRouter account (archived or not) has a fingerprint equal to the old item's → remove the old item
+     (remove throws → log; next start retries), stop;
+  4. else if any unarchived OpenRouter account exists → leave everything, stop;
+  5. else create the account with the first free label of "OpenRouter", "OpenRouter key", "OpenRouter 2", "OpenRouter
+     3"…, write `account:<id>`, read back, record the fingerprint, set `judge.accountId` if it is null — the row
+     and the judge setting in one `state.write`, rolled back if the Keychain write or read-back fails; then remove
+     the old item (throws → log; step 3 finishes it next start).
+  Rows for each step, plus "label taken". The judge-off row goes **through `startDaemon`** with a recording
+  keychain (pattern: `apps/daemon/test/judge-api.test.ts:111`) and also exercises a list refresh and the identity
+  route on an OpenRouter account, asserting zero Keychain calls.
+- **Every kind check, with what `openrouter` does** (replaces the "researcher list"; the implementer greps for
+  `SUPPORTED_ACCOUNT_KINDS`, `providerOf`, `AccountKind.` comparisons and fixes each):
+  - `environment/launch.ts` `build`: throws a typed `AccountLaunchError` for openrouter **before any Keychain read**;
+    its Claude/Codex ternaries (l.141, 169, 209) narrow with `runsAgents` first.
+  - `accounts/list-refresh.ts:98`, `catalogue/profiles.ts:62`, `team/routing-inputs.ts:17`, `accounts/moves.ts:89`
+    (`moveTargets`), `sessions/routed-adapter.ts`, `daemon/area-namer.ts`, `accounts/cards.ts:52`,
+    `AccountExpectation.kind`: filter or narrow with `runsAgents`; openrouter is never a move target, a probe, a
+    profile or a routing input.
+  - `GET /accounts/:id/identity` for openrouter: 400 "OpenRouter accounts have no identity to check", no probe.
+  - `insertAccount`: openrouter gets `configDir: null`, `laneCap: 0` (column is NOT NULL), `monthlyCapUsd: null`;
+    `AccountService.create` makes no config directory for it.
+  - `parseAccountSettings`/`AccountSettings` include `OpenRouterSettings`; `AccountInput`'s error text lists it.
+- **Test reads that account's key.** `JudgeService.test(account)` reads the given account's own secret through the
+  shared check; a two-account HTTP row fails if the wrong `authorization` header is sent.
+- **Shared secret read.** Extract the fingerprint check from `launch.ts`'s `secretOf` into one function used by
+  launch (sync `read`) and the judge (async `readAsync`). `JudgeStatusDto.account` gains `secretState: 'set' |
+  'missing' | 'changed'` (from `readAsync` + fingerprint when the judge is on; from the fingerprint only when off).
+- **Desktop.** `AccountSelect` takes `isDisabled(account): string | null` (the reason); Billing and project setup
+  (`views/project-setup/project-setup.tsx:229`, and its `accounts[0]` fallback skips OpenRouter) pass the
+  can't-run-agents rule, Runs on passes the opposite. The drawer hides `IdentityCheck`, `UsageByProject`, lane cap
+  and `TierOverrides` for openrouter; `account-form-values.ts` sends only `{kind,label,payer}` for it. Add Account's
+  order: `POST /accounts`, then `PUT /accounts/:id/secret` through `daemon/account-secret.ts` (field cleared before
+  the await, as `decisions-section.tsx:245`), then `PATCH /judge` if the checkbox is on; a failed secret step shows
+  its error beside the submit and leaves the account (drawer opens on it to retry). Accounts reads `?focus=<account
+  id>` and opens that drawer (render row through the real route). `who-answers-section.tsx:24` uses
+  `account?.secretState === 'set'` for "judge on". Account rows show brand marks: `IconBrandOpenai` (Codex plan),
+  `IconBrandAws` (Bedrock), `IconKey` (API key, gateway, OpenRouter), the existing icon for a Claude plan.
+- **This month** for OpenRouter (no migration): the account decisions run on shows this month's decision dollars from
+  `judge_calls` (30-day retention noted in a comment); other OpenRouter accounts show "—".
+
+### Task 3 (pinned)
+
+- `BenchmarkStatusDto` gains `off: boolean`. Off: the card says "Off: 10db was started with TENDB_BENCHMARKS=off",
+  gray, no actions; Overview's row is gray. Render row for it.
+- Task 3 lands `integration-card.tsx` in its own first commit; Tasks 4 and 5 cherry-pick that commit if they need it
+  before the merge (identical changes merge cleanly).
+
+### Task 4 (pinned)
+
+- `GithubState` has no `Off` (no switch exists): `'not_installed' | 'signed_out' | 'signed_in' | 'unreachable'`.
+- `GithubStatusDto` gains `signingIn: { code: string; url: string; startedAt: Timestamp } | null`; the card and the
+  first-run row restore the waiting state from it (render row "mounted while a sign-in runs shows the code and
+  Cancel").
+- Add a `starting` state (spawned, no code yet; the slot is taken at spawn):
+  | starting | POST → 409 | → waiting; POST answers 200 | re-read `authLogin`; POST answers 409 "Already signed in" | POST answers 502 with gh's message, mapped and bounded | kill; POST answers 409 "Cancelled" | (5 s) kill; 502 "gh didn't print a code" | kill |
+- On gh's exit the daemon re-reads `authLogin` and updates its cached status **before** emitting
+  `github.login_ended`. `GET /github` without `recheck` returns the cached status, probing if it is older than 60 s.
+- `?recheck=1` and `POST /github/signin` call `resolveGh()` again; the gh exec reads the current path through a
+  getter (row: not installed → installed → recheck reads signed_out/signed_in).
+- gh's messages reaching an event or a response are mapped to known ones where gh's text is known, otherwise the
+  last stderr line stripped of ANSI codes and cut to 200 characters (`GithubLoginEndedData.message` never holds
+  more).
+- The 5 s and 10 min timers use the injected `Clock`; no sleeps in tests.
+- `isSignInUrl` accepts github.com only with path `/login/device`.
+
+### Task 5 (added)
+
+- The summary line's names link to and focus their rows; a "Couldn't read this" row counts as needing the builder.
+
+### Task 6 (added)
+
+- `docs/architecture/03-trust-boundaries.md`: replace `openrouter-api-key` / `PUT /judge/key` (l.62, 797) with the
+  account secret; add the AA key route and the gh login spawn.
+- File the two provider-parity follow-up tasks in 10db (skill `10db-task`) and name them in the PR.
+- `/design-review` on the running app checks dark and light.
+
+### Review focus #2, reworded
+
+A project PATCH or project create naming an OpenRouter account (as account or backup) is refused with "OpenRouter
+can't run agents yet" (no route sets the default account; `seedDefaultAccount` makes a Claude plan).
