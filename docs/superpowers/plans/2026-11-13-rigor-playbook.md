@@ -34,6 +34,9 @@
   and security, auth and migration plans to Capable at high effort (spec §6.1).
 - Without scores (no Artificial Analysis key), every Careful step runs one effort up.
 - A cell naming one model is never stepped up on a retry; today only a persona pin held a step.
+- A task's own model choice beats a playbook cell that names one model (today a persona pin beat the task's
+  choice). A step whose minimum no model on the account reaches runs on the strongest one instead of refusing
+  to start.
 - Plan conversations follow the Careful Plan cell, so a moved persona pin on the planner now applies to them.
 
 **What could go wrong, and how we'd know**
