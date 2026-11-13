@@ -21,6 +21,7 @@ import {
   getAccountRow,
   getProject,
   getSession,
+  insertJudgeCall,
   insertSession,
   insertTask,
   insertWorkstream,
@@ -28,6 +29,7 @@ import {
   listEventsAfter,
   listMoveBacks,
   patchAccount,
+  patchJudgeConfig,
   patchProject,
   recordAccountSecret,
   seedAccount,
@@ -529,5 +531,37 @@ describe('OpenRouter accounts', () => {
     expect(() => {
       bind(account.id, project);
     }).toThrow(InvalidError);
+  });
+
+  describe('this month', () => {
+    const call = (costUsd: number | null) =>
+      store.write((ctx) =>
+        insertJudgeCall(ctx, {
+          decision: 'review_size',
+          model: 'm',
+          state: '',
+          question: 'q',
+          answer: null,
+          confidence: null,
+          outcome: 'acted',
+          latencyMs: 1,
+          costUsd,
+          workstreamId: null,
+          taskId: null,
+        }),
+      );
+
+    it("is the month's decision dollars on the account decisions run on, and nothing on another", () => {
+      const runsDecisions = openRouter();
+      const other = openRouter('Spare');
+      store.write((ctx) => patchJudgeConfig(ctx, { accountId: runsDecisions.id }));
+      call(0.25);
+      call(null);
+      call(0.5);
+      now = new Date(2026, 8, 20);
+      call(9);
+      expect(accountUsage(store.db, runsDecisions.id, OCTOBER).total.costUsd).toBeCloseTo(0.75);
+      expect(accountUsage(store.db, other.id, OCTOBER).total.costUsd).toBeNull();
+    });
   });
 });
