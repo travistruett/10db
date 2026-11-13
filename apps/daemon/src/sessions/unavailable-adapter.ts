@@ -34,6 +34,7 @@ export function createUnavailableAdapter(
         send: () => undefined,
         interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
+        setModel: () => Promise.resolve(),
       };
     },
   };

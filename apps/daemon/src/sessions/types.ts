@@ -379,6 +379,11 @@ export interface SessionHandle {
   interrupt(): Promise<InterruptReceipt>;
   /** Ends the session cleanly; resolves once `ended` has been emitted. */
   stop(): Promise<void>;
+  /**
+   * Runs the session's next turn on `model`, the account's launch id for it. Between turns only: a
+   * caller never sends it while a turn runs.
+   */
+  setModel(model: string): Promise<void>;
 }
 
 /** A picture as Claude sees it: an image content block, base64 (Shape spec §5.4). */

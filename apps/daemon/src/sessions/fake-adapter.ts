@@ -244,6 +244,8 @@ export class FakeAdapter implements AgentAdapter {
   readonly shapeSessions: {
     readonly spec: ExploreSessionSpec;
     readonly sent: string[];
+    /** Every model the session was switched to, in order. */
+    readonly models: string[];
     readonly handle: SessionHandle;
   }[] = [];
   /** How a Shape session answers a message; the default writes a short reply. */
@@ -259,6 +261,7 @@ export class FakeAdapter implements AgentAdapter {
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
     const sent: string[] = [];
+    const models: string[] = [];
     const inner = refusal
       ? fakeEndedSession({
           type: 'ended',
@@ -282,8 +285,12 @@ export class FakeAdapter implements AgentAdapter {
         if (this.shapeStopGate !== null) await this.shapeStopGate;
         await inner.stop();
       },
+      setModel: (model) => {
+        models.push(model);
+        return inner.setModel(model);
+      },
     };
-    this.shapeSessions.push({ spec, sent, handle });
+    this.shapeSessions.push({ spec, sent, models, handle });
     return handle;
   }
 

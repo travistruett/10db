@@ -396,6 +396,14 @@ describe('one open handle per agent session', () => {
     expect(events).toContainEqual({ type: 'message', itemId: 'fake-msg-1', text: 'Understood.' });
   });
 
+  it('records the model an explore session is switched to', async () => {
+    const adapter = new FakeAdapter({});
+    const handle = adapter.open(exploreSpec(null));
+    await handle.setModel('claude-opus-5-5');
+    expect(adapter.shapeSessions[0]?.models).toEqual(['claude-opus-5-5']);
+    await handle.stop();
+  });
+
   it('refuses an explore session on the agent session a lane holds: the key is the agent session', () => {
     const adapter = hanging();
     adapter.open(spec({ resumeProviderSessionId: 'p1' }));

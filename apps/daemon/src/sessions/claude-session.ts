@@ -118,6 +118,7 @@ export function refusedSession(message: string): SessionHandle {
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -521,6 +522,7 @@ function endedSession(ended: Extract<SessionEvent, { type: 'ended' }>): SessionH
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -1106,6 +1108,10 @@ function startSession(
       abortTimer.cancel();
       forceTimer.cancel();
     },
+    async setModel(model) {
+      if (halted()) return;
+      await q.setModel(model);
+    },
   };
 }
 
@@ -1214,6 +1220,8 @@ export function startClaudeSession(
       await current?.stop();
       await settled;
     },
+    // Between two starts the next start is made from the session, so the pick waits for it.
+    setModel: (model) => (closedStart() || !current ? Promise.resolve() : current.setModel(model)),
   };
 }
 

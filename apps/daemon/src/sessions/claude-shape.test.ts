@@ -176,6 +176,10 @@ function fakeQuery(
         return Promise.resolve({ added: [], removed: [], errors: opts.mcpErrors ?? {} });
       },
       mcpServerStatus: () => Promise.resolve([]),
+      setModel: (model?: string) => {
+        run.order.push(`setModel ${model ?? ''}`);
+        return Promise.resolve();
+      },
       getContextUsage: () =>
         Promise.resolve({ totalTokens: 90_000, maxTokens: 200_000, percentage: 45 }),
     }) as unknown as ReturnType<QueryFn>;
@@ -660,6 +664,24 @@ describe('the session’s run', () => {
     }
     expect(interruptsBeforeStop).toBe(1);
     expect(run.inputs.map((m) => m.message.content)).toEqual(['First message', 'and another']);
+  });
+
+  it('runs the next turn on the model it is given between turns', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(spec(), deps(query));
+    let switched = false;
+    for await (const event of handle.events) {
+      if (event.type === 'turn_complete' && !switched) {
+        switched = true;
+        await handle.setModel('claude-opus-5-5');
+        handle.send('on the new model');
+      } else if (event.type === 'turn_complete') await handle.stop();
+    }
+    expect(run.order.filter((o) => o !== 'accountInfo' && o !== 'setMcpServers')).toEqual([
+      'input',
+      'setModel claude-opus-5-5',
+      'input',
+    ]);
   });
 
   it('refuses a session that is not the expected account, before any prompt', async () => {

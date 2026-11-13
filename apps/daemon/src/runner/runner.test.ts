@@ -5758,6 +5758,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       send: () => undefined,
       interrupt: () => Promise.resolve(null),
       stop: () => Promise.resolve(),
+      setModel: () => Promise.resolve(),
     }));
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);

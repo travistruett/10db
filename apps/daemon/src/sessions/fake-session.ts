@@ -110,6 +110,7 @@ export function fakeEndedSession(ended: Extract<SessionEvent, { type: 'ended' }>
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -570,6 +571,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
       end('stopped', null);
       await core.done;
     },
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -709,5 +711,6 @@ export function runFakeExploreSession(
       core.end('stopped', null);
       return Promise.resolve();
     },
+    setModel: () => Promise.resolve(),
   };
 }
