@@ -207,8 +207,10 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     }
     cleanup();
 
+    // A subscription run can report its rate limit before init, so `started` is the first event
+    // besides those limit readings.
     const types = events.map((e) => e.type);
-    expect(types[0]).toBe('started');
+    expect(types.find((t) => t !== 'rate_limit')).toBe('started');
     expect(types).toContain('context');
     expect(types).toContain('turn_complete');
     expect(types.filter((t) => t === 'ended')).toEqual(['ended']);
