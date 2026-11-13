@@ -13,8 +13,12 @@ export const MARKDOWN_MAX_DEPTH = 32;
 const CONTAINER = /^[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))/;
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const EMPHASIS = new Set(['*', '_', '~']);
-/** A table row or an ATX heading: a block of its own, which emphasis can't run into. */
-const OWN_BLOCK = /^[ \t]*(?:\||#{1,6}(?:[ \t]|$))/;
+/** A list item's marker: it always starts a new item, which emphasis can't run into. */
+const LIST_MARKER = /^[ \t]*(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/;
+/** An ATX heading: one line, a block of its own. */
+const HEADING = /^[ \t]*#{1,6}(?:[ \t]|$)/;
+/** A table's delimiter row; the rows after it, to a blank line, are each a block of their own. */
+const TABLE_DELIMITER = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 const isSpace = (c: string | undefined): boolean => c === undefined || /\s/.test(c);
 
 /** Columns of leading white space, a tab to the next multiple of four. */
@@ -62,6 +66,8 @@ export function markdownFits(text: string): boolean {
   if (text.length > MARKDOWN_MAX_LENGTH) return false;
   let fence: string | null = null;
   let open = 0;
+  let inTable = false;
+  let afterPipeLine = false;
   for (const line of text.split(/\r\n|\r|\n/)) {
     if (fence !== null) {
       const close = FENCE.exec(line.replace(/^[ \t>]*/, ''));
@@ -70,23 +76,36 @@ export function markdownFits(text: string): boolean {
     }
     let rest = line;
     let markers = 0;
+    let listItem = false;
     for (let m = CONTAINER.exec(rest); m !== null; m = CONTAINER.exec(rest)) {
       markers += 1;
+      if (LIST_MARKER.test(m[0])) listItem = true;
       if (markers > MARKDOWN_MAX_DEPTH) return false;
       rest = rest.slice(m[0].length);
     }
     const opened = FENCE.exec(rest)?.[1];
     if (opened !== undefined) {
       fence = opened;
+      afterPipeLine = false;
       continue;
     }
     if (rest.trim() === '') {
       open = 0;
+      inTable = false;
+      afterPipeLine = false;
       continue;
     }
-    // A list item, a quote, a table row or a heading starts a new block, and emphasis never crosses
-    // from one block into the next.
-    if (markers > 0 || OWN_BLOCK.test(rest)) open = 0;
+    // A new list item, a heading, or a row of a table whose delimiter row was seen starts a block
+    // of its own, and emphasis never crosses into it. A quote line or a pipe line outside a table
+    // may continue the paragraph before it, so it keeps what was left open: counting too much only
+    // shows the text plain, counting too little lets the parser recurse past the bound.
+    if (afterPipeLine && rest.includes('|') && TABLE_DELIMITER.test(rest)) {
+      inTable = true;
+      open = 0;
+      continue;
+    }
+    if (listItem || HEADING.test(rest) || (inTable && rest.trimStart().startsWith('|'))) open = 0;
+    afterPipeLine = rest.includes('|');
     // An indented list marker nests one level for every two columns before it.
     const containers = markers === 0 ? 0 : markers + Math.floor(indentOf(line) / 2);
     const emphasis = emphasisAfter(rest, open);

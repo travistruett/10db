@@ -30,6 +30,21 @@ describe('markdownFits', () => {
       true,
     ],
     [
+      'emphasis opened across quote lines past the limit',
+      Array.from({ length: 40 }, () => '> *a').join('\n'),
+      false,
+    ],
+    [
+      'emphasis opened across pipe lines that are no table',
+      Array.from({ length: 40 }, () => '| *a').join('\n'),
+      false,
+    ],
+    [
+      'a thematic break is no table delimiter',
+      ['x', '---', ...Array.from({ length: 40 }, () => '| *a')].join('\n'),
+      false,
+    ],
+    [
       'a table of lone stars',
       [
         '| glob | holds |',
