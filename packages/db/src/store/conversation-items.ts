@@ -89,14 +89,13 @@ export function insertItem(
 export function listItems(
   db: DbReader,
   conversationId: ConversationId,
-  opts: { readonly afterSeq?: number; readonly limit?: number } = {},
+  opts: { readonly afterSeq?: number } = {},
 ): ConversationItemRow[] {
   const where =
     opts.afterSeq === undefined
       ? ofConversation(conversationId)
       : and(ofConversation(conversationId), gt(schema.conversationItems.seq, opts.afterSeq));
-  const query = db.select().from(schema.conversationItems).where(where).orderBy(bySeq);
-  return opts.limit === undefined ? query.all() : query.limit(opts.limit).all();
+  return db.select().from(schema.conversationItems).where(where).orderBy(bySeq).all();
 }
 
 /** The newest `count` items, oldest first. */
@@ -156,27 +155,6 @@ export function getMessageRow(db: DbReader, id: ConversationItemId): Conversatio
   const [row] = withFiles(db, [getItem(db, id)]);
   if (row === undefined) throw new NotFoundError('conversation item', id);
   return row;
-}
-
-/** The conversation's message-like items in `seq` order, each with its files. */
-export function listMessageRows(
-  db: DbReader,
-  conversationId: ConversationId,
-): ConversationMessageRow[] {
-  return withFiles(
-    db,
-    db
-      .select()
-      .from(schema.conversationItems)
-      .where(
-        and(
-          ofConversation(conversationId),
-          inArray(schema.conversationItems.kind, [...MESSAGE_KINDS]),
-        ),
-      )
-      .orderBy(bySeq)
-      .all(),
-  );
 }
 
 const builderMessage = and(

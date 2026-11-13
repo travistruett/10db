@@ -82,11 +82,10 @@ describe('conversation items', () => {
     expect(listItems(store.db, conversation).map((i) => i.id)).toEqual([old, fresh.id]);
   });
 
-  it('pages by seq', () => {
+  it('lists the items after a seq', () => {
     add(conversation, 'a');
     const second = add(conversation, 'b');
-    add(conversation, 'c');
-    expect(listItems(store.db, conversation, { afterSeq: 1, limit: 1 }).map((i) => i.id)).toEqual([
+    expect(listItems(store.db, conversation, { afterSeq: 1 }).map((i) => i.id)).toEqual([
       second.id,
     ]);
   });
