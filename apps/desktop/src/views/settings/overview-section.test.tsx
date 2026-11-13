@@ -14,6 +14,7 @@ import { accountDto } from '../../test/account-fixtures';
 import { benchmarkStatusDto } from '../../test/benchmark-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { githubStatusDto } from '../../test/github-fixtures';
+import { judgeStatusDto, serveJudge } from '../../test/judge-fixtures';
 import { slackConnection } from '../../test/people-fixtures';
 
 const CLAUDE_PLAN = accountDto({
@@ -129,6 +130,23 @@ async function rowLink(name: RegExp): Promise<HTMLElement> {
 }
 
 describe('Settings › Overview', () => {
+  it("says what each account is used by, an OpenRouter account's decisions included", async () => {
+    const router = accountDto({ kind: 'openrouter', label: 'OpenRouter', secretSet: true });
+    serveJudge({
+      status: judgeStatusDto({
+        config: { ...judgeStatusDto().config, accountId: router.id },
+        account: { id: router.id, label: 'OpenRouter', secretSet: true, secretState: 'set' },
+      }),
+    });
+    serve({ accounts: [CLAUDE_PLAN, router] });
+    const plan = await rowLink(/^Claude plan/);
+    expect(within(plan).getByText('Used by nothing')).toBeTruthy();
+    const openRouter = await rowLink(/^OpenRouter/);
+    await waitFor(() => {
+      expect(within(openRouter).getByText('Used by: decisions')).toBeTruthy();
+    });
+  });
+
   it('says all connections work, counting nothing that is off, and lists a row in each group', async () => {
     serve({ slack: { state: 'off' } });
     // Claude plan, GitHub, AA, models.dev, Claude Code, Codex and self-update work; Slack is off.

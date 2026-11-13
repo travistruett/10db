@@ -76,7 +76,18 @@ test.describe('Settings', () => {
     await expectAccessible(page, 'settings integrations');
   });
 
-  test.fixme("Decisions shows Runs on's empty state: needs Task 2's OpenRouter accounts", () => {
-    // With no OpenRouter account: "No account can run decisions yet." and Add OpenRouter Account.
+  test("Decisions shows Runs on's empty state with Add OpenRouter Account, which opens Add Account on that kind", async ({
+    page,
+  }) => {
+    await page.goto('/settings/decisions');
+    const main = page.getByRole('main');
+    await expect(main.getByText('No account can run decisions yet.')).toBeVisible();
+    await main.getByRole('button', { name: 'Add OpenRouter Account' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add Account' });
+    await expect(dialog.getByRole('textbox', { name: 'OpenRouter key' })).toBeVisible();
+    await expect(
+      dialog.getByRole('checkbox', { name: 'Run decisions on this account' }),
+    ).toBeChecked();
+    await expectAccessible(page, 'settings decisions');
   });
 });

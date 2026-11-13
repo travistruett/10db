@@ -37,22 +37,37 @@ const ready = (tone: ConnectionTone, label: string, detail: string | null = null
 describe('an account row', () => {
   it.each([
     {
-      name: 'a ready account',
+      name: 'a ready account used by nothing',
       account: accountDto({ expectedIdentity: 'a@example.com' }),
-      want: ready(ConnectionTone.Works, 'Ready', 'Claude subscription'),
+      used: [],
+      want: ready(ConnectionTone.Works, 'Ready', 'Used by nothing'),
+    },
+    {
+      name: 'a ready account used by a project and decisions',
+      account: accountDto({ expectedIdentity: 'a@example.com' }),
+      used: ["Renewals' agents", 'decisions'],
+      want: ready(ConnectionTone.Works, 'Ready', "Used by: Renewals' agents, decisions"),
     },
     {
       name: 'a plan never signed in',
       account: accountDto({ expectedIdentity: null }),
-      want: ready(ConnectionTone.NeedsYou, 'Needs sign-in', 'Claude subscription'),
+      used: [],
+      want: ready(ConnectionTone.NeedsYou, 'Needs sign-in', 'Used by nothing'),
     },
     {
       name: 'an API key with no secret',
       account: accountDto({ kind: 'anthropic_api_key', settings: {}, secretSet: false }),
-      want: ready(ConnectionTone.NeedsYou, 'Needs a secret', 'Anthropic API key'),
+      used: [],
+      want: ready(ConnectionTone.NeedsYou, 'Needs a secret', 'Used by nothing'),
     },
-  ])('$name', ({ account, want }) => {
-    expect(accountState(account)).toEqual(want);
+    {
+      name: 'an OpenRouter key with no secret that decisions run on',
+      account: accountDto({ kind: 'openrouter', settings: {}, secretSet: false }),
+      used: ['decisions'],
+      want: ready(ConnectionTone.NeedsYou, 'Needs a secret', 'Used by: decisions'),
+    },
+  ])('$name', ({ account, used, want }) => {
+    expect(accountState(account, used)).toEqual(want);
   });
 });
 

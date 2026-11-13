@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { accountDto, accountUsageDto, DEFAULT_ACCOUNT } from '../../../test/account-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
+import { judgeStatusDto } from '../../../test/judge-fixtures';
 
 const PASTED = 'pasted-value-never-echoed';
 const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const;
@@ -11,6 +12,8 @@ const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const;
 let spies: MockInstance[] = [];
 
 beforeEach(() => {
+  // The drawer says what decisions use an account, so it reads the judge too.
+  server.use(http.get(daemonUrl('/judge'), () => HttpResponse.json(judgeStatusDto())));
   spies = CONSOLE_METHODS.map((method) =>
     vi.spyOn(console, method).mockImplementation(() => undefined),
   );

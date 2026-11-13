@@ -1,5 +1,6 @@
 import {
   DEFAULT_JUDGE_CONFIG,
+  type AccountDto,
   JudgeCallDto,
   JudgeConfigPatch,
   JudgeDecision,
@@ -14,7 +15,7 @@ import { baseHandlers, daemonUrl, server } from './daemon';
 export function judgeStatusDto(overrides: Partial<JudgeStatusDto> = {}): JudgeStatusDto {
   return JudgeStatusDto.parse({
     config: DEFAULT_JUDGE_CONFIG,
-    keySet: false,
+    account: null,
     off: false,
     ...overrides,
   });
@@ -67,6 +68,8 @@ export function serveJudge(initial: {
   readonly calls?: readonly JudgeCallDto[];
   readonly test?: JsonBodyType;
   readonly measures?: ShapeMeasuresDto;
+  /** The accounts a patch naming `accountId` can resolve to the status's account. */
+  readonly accounts?: readonly AccountDto[];
 }) {
   let status = initial.status ?? judgeStatusDto();
   const sent: JudgeRequest[] = [];
@@ -95,10 +98,21 @@ export function serveJudge(initial: {
           floor: change?.floor ?? current.floor,
         };
       };
+      const accountId = body.accountId === undefined ? status.config.accountId : body.accountId;
+      const named = initial.accounts?.find((a) => a.id === accountId);
       status = {
         ...status,
+        account: named
+          ? {
+              id: named.id,
+              label: named.label,
+              secretSet: named.secretSet,
+              secretState: named.secretSet ? 'set' : 'missing',
+            }
+          : null,
         config: {
           enabled: body.enabled ?? status.config.enabled,
+          accountId,
           decisions: {
             review_size: merged(JudgeDecision.ReviewSize),
             shape_ready: merged(JudgeDecision.ShapeReady),
@@ -113,17 +127,7 @@ export function serveJudge(initial: {
       };
       return HttpResponse.json(status);
     }),
-    http.put(daemonUrl('/judge/key'), async ({ request }) => {
-      await note(request);
-      status = { ...status, keySet: true };
-      return HttpResponse.json(status);
-    }),
-    http.delete(daemonUrl('/judge/key'), async ({ request }) => {
-      await note(request);
-      status = { ...status, keySet: false };
-      return HttpResponse.json(status);
-    }),
-    http.post(daemonUrl('/judge/test'), async ({ request }) => {
+    http.post(daemonUrl('/accounts/:accountId/test'), async ({ request }) => {
       await note(request);
       return HttpResponse.json(initial.test);
     }),

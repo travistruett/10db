@@ -1,6 +1,7 @@
 import {
   accountDisplayName,
   needsSecret,
+  runsAgents,
   signsInWithLogin,
   type AccountDto,
   type AccountId,
@@ -8,12 +9,16 @@ import {
 import { Drawer, Stack, Text, Title } from '@mantine/core';
 import { useCallback, useState } from 'react';
 import { useAccounts } from '../../../daemon/account-queries';
+import { useJudgeStatus } from '../../../daemon/judge-queries';
+import { useProjects } from '../../../daemon/queries';
 import { AccountPause } from './account-pause';
 import { ArchiveAccount } from './archive-account';
 import { EditAccountForm } from './edit-account-form';
 import { IdentityCheck } from './identity-check';
 import { SecretForm } from './secret-form';
 import { SignInSteps } from './sign-in-steps';
+import { TestAccount } from './test-account';
+import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
 import { UsageByProject } from './usage-by-project';
 
 function noop() {
@@ -38,20 +43,35 @@ function AccountDrawerBody({
   const onConnected = useCallback(() => {
     setCheckRequests((n) => n + 1);
   }, []);
+  const projects = useProjects();
+  const judge = useJudgeStatus();
+  const agents = runsAgents(account.kind);
   return (
     <Stack gap="lg">
-      {account.archived ? null : <AccountPause account={account} />}
+      <Stack gap={2}>
+        <Text size="sm">{usedByText(accountUsedBy(account, projects.data ?? [], judge.data))}</Text>
+        {agents ? null : (
+          <Text size="sm" c="dimmed">
+            {CANT_RUN_AGENTS}
+          </Text>
+        )}
+      </Stack>
+      {account.archived || !agents ? null : <AccountPause account={account} />}
       <Stack gap="xs">
-        <Title order={4}>Identity</Title>
+        <Title order={4}>{agents ? 'Identity' : 'Key'}</Title>
         {signsInWithLogin(account.kind) && !account.archived ? (
           <SignInSteps account={account} onConnected={onConnected} />
         ) : null}
         {needsSecret(account.kind, account.settings) ? <SecretForm account={account} /> : null}
-        <IdentityCheck account={account} checkRequests={checkRequests} />
+        {agents ? (
+          <IdentityCheck account={account} checkRequests={checkRequests} />
+        ) : account.archived ? null : (
+          <TestAccount account={account} />
+        )}
       </Stack>
       <Stack gap="xs">
         <Title order={4}>Usage this month</Title>
-        <UsageByProject accountId={account.id} />
+        <UsageByProject account={account} />
       </Stack>
       {account.archived ? null : (
         <>
