@@ -160,6 +160,7 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import type { OpenRouterMeasureKind } from './openrouter-measure-kind';
 import type { Json } from './json';
 
 const createdAt = () => text('created_at').notNull();
@@ -1268,7 +1269,7 @@ export const openrouterMeasures = sqliteTable(
   'openrouter_measures',
   {
     id: text('id').notNull(),
-    kind: text('kind').$type<'score_aa' | 'score_openrouter' | 'speed'>().notNull(),
+    kind: text('kind').$type<OpenRouterMeasureKind>().notNull(),
     key: text('key').notNull(),
     intelligence: real('intelligence'),
     coding: real('coding'),

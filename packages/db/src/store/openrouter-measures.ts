@@ -1,14 +1,9 @@
 import { asc, eq, inArray, and } from 'drizzle-orm';
+import { OpenRouterMeasureKind } from '../openrouter-measure-kind';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
-export const OpenRouterMeasureKind = {
-  ScoreAa: 'score_aa',
-  ScoreOpenRouter: 'score_openrouter',
-  Speed: 'speed',
-} as const;
-export type OpenRouterMeasureKind =
-  (typeof OpenRouterMeasureKind)[keyof typeof OpenRouterMeasureKind];
+export { OpenRouterMeasureKind };
 
 /** One score row as the sync reads it: an index set from Artificial Analysis, or one OpenRouter benchmark. */
 export interface OpenRouterScoreInput {
