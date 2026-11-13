@@ -208,7 +208,9 @@ export function AaCard() {
           {note}
         </Text>
       ) : null}
-      <ArtificialAnalysisCredit />
+      <Text size="xs" c="dimmed">
+        <ArtificialAnalysisCredit />
+      </Text>
     </IntegrationCard>
   );
 }
