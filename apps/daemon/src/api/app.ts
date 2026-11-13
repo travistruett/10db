@@ -46,6 +46,11 @@ import {
   ModelPicksQuery,
   ModelsQuery,
   KeepAwakeInput,
+  KindId,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  PlaybookInput,
   LanePermissionsDto,
   LiveSystemsDto,
   TrustOverrides,
@@ -604,6 +609,7 @@ export function createApp(deps: ApiDeps) {
           deps.services.chooseShapeModel(
             ShapeId.parse(c.req.param('shapeId')),
             c.req.valid('json').model,
+            c.req.valid('json').effort,
           ),
         ),
     )
@@ -1293,6 +1299,49 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/playbook', (c) => c.json(deps.services.getPlaybook(null)))
+    .put(
+      '/playbook',
+      validator('json', (value): PlaybookInput => PlaybookInput.parse(value)),
+      (c) => c.json(deps.services.setPlaybook(null, c.req.valid('json'))),
+    )
+    .get('/projects/:projectId/playbook', (c) =>
+      c.json(deps.services.getPlaybook(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/playbook',
+      validator('json', (value): PlaybookInput => PlaybookInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setPlaybook(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/playbook/move-report', (c) => c.json(deps.services.playbookMoveReport()))
+    .delete('/playbook/move-report', (c) => {
+      deps.services.dismissPlaybookMoveReport();
+      return c.body(null, 204);
+    })
+    .get('/kinds', (c) => c.json(deps.services.listKinds()))
+    .post(
+      '/kinds',
+      validator('json', (value): KindInput => KindInput.parse(value)),
+      (c) => c.json(deps.services.createKind(c.req.valid('json')), 201),
+    )
+    .put(
+      '/kinds/order',
+      validator('json', (value): KindOrderInput => KindOrderInput.parse(value)),
+      (c) => c.json(deps.services.moveKind(c.req.valid('json'))),
+    )
+    .patch(
+      '/kinds/:kindId',
+      validator('json', (value): KindPatch => KindPatch.parse(value)),
+      (c) =>
+        c.json(deps.services.patchKind(KindId.parse(c.req.param('kindId')), c.req.valid('json'))),
+    )
+    .delete('/kinds/:kindId', (c) => {
+      deps.services.deleteKind(KindId.parse(c.req.param('kindId')));
+      return c.body(null, 204);
+    })
     .get('/model-profiles', (c) => c.json(deps.services.listModelProfiles()))
     .patch(
       '/model-profiles/:profileId',
@@ -1333,7 +1382,10 @@ export function createApp(deps: ApiDeps) {
     .get(
       '/models/picks',
       validator('query', (query) => ModelPicksQuery.parse(query)),
-      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
+      (c) => {
+        const { account, rigor } = c.req.valid('query');
+        return c.json(deps.services.modelPicks(account, rigor));
+      },
     )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))

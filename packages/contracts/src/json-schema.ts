@@ -94,7 +94,6 @@ import {
   ModelSettingsInput,
   ModelEffortDto,
   ModelRowDto,
-  ModelPicksQuery,
   ModelsQuery,
   RolePickDto,
   RolePicksDto,
@@ -123,7 +122,15 @@ import {
 } from './entities';
 import { DaemonEvent } from './events';
 import { FlowDto, FlowInput, FlowPatch } from './flows';
-import { KindDto, KindInput, KindPatch, PlaybookDto, PlaybookInput } from './rigor';
+import {
+  KindDto,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  ModelPicksQuery,
+  PlaybookDto,
+  PlaybookInput,
+} from './rigor';
 import {
   AreaProposalInput,
   AreaProposalResult,
@@ -335,6 +342,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'kind-dto': KindDto,
   'kind-input': KindInput,
   'kind-patch': KindPatch,
+  'kind-order-input': KindOrderInput,
   'playbook-dto': PlaybookDto,
   'playbook-input': PlaybookInput,
   'folder-inspect-input': FolderInspectInput,

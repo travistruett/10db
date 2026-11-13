@@ -72,7 +72,7 @@ export function createShapeServices(deps: {
     sendShapeMessage: (id, text) => shape.send(id, text),
     proposeShape: (id) => shape.propose(id),
     stopShape: (id) => shape.stop(id),
-    chooseShapeModel: (id, model) => shape.chooseModel(id, model),
+    chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
       const outcome = await shape.convert(
         id,

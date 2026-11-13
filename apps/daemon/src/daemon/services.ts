@@ -16,6 +16,7 @@ import {
   NotFoundError,
   providerOf,
   isDaemonAddress,
+  refuseRigorBelowKinds,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
@@ -62,6 +63,7 @@ import {
   insertProject,
   insertTask,
   latestEventSeq,
+  listKinds,
   humanTouchDays,
   latestWorkstreamOf,
   openGoalDigest,
@@ -176,6 +178,7 @@ import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
+import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
@@ -358,8 +361,13 @@ export function createServices(deps: {
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) =>
-        insertTask(
+      const task = deps.state.write((ctx) => {
+        refuseRigorBelowKinds({
+          rigor: input.rigor ?? null,
+          taskKinds: input.kinds ?? [],
+          kinds: listKinds(ctx.tx),
+        });
+        return insertTask(
           ctx,
           projectId,
           input,
@@ -368,8 +376,8 @@ export function createServices(deps: {
             riskTags: input.riskTags ?? [],
             workspaceMode: input.workspaceMode,
           }),
-        ),
-      );
+        );
+      });
       deps.scheduler.requestTick();
       return task;
     },
@@ -705,6 +713,7 @@ export function createServices(deps: {
     ...deps.stakeholders,
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
+    ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.planRecord,
     ...deps.knowledge,
@@ -726,14 +735,17 @@ export function createServices(deps: {
         catalogue: deps.catalogue.catalogue(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
-    modelPicks: (accountId) => {
+    modelPicks: (accountId, rigor) => {
       const account = liveAccount(db, accountId);
       return {
         accountId,
-        picks: rolePicks({
-          ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
-          playbook: playbookInputs(db, null).playbook,
-        }),
+        picks: rolePicks(
+          {
+            ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
+            playbook: playbookInputs(db, null).playbook,
+          },
+          rigor,
+        ),
       };
     },
     listAccountOffers: () => listAccountModels(db),
@@ -803,8 +815,15 @@ export function createServices(deps: {
       // copy only if it hasn't started and the builder hasn't placed it.
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
+        // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
+        if (patch.rigor !== undefined || patch.kinds !== undefined)
+          refuseRigorBelowKinds({
+            rigor: patch.rigor === undefined ? task.rigor : patch.rigor,
+            taskKinds: patch.kinds ?? task.kinds,
+            kinds: listKinds(ctx.tx),
+          });
         const proposed =
-          patch.areas === undefined && patch.riskTags === undefined
+          patch.areas === undefined && patch.riskTags === undefined && patch.kinds === undefined
             ? undefined
             : proposePlacement(getProject(ctx.tx, task.projectId), {
                 areas: patch.areas ?? task.areas,

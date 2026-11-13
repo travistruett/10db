@@ -329,8 +329,14 @@ export type ShapeDto = z.infer<typeof ShapeDto>;
 /** A model the builder may choose for a conversation (Shape spec §5.1): any model ID the project's account lists. */
 export const ShapeModel = z.string().trim().min(1).max(200);
 
-/** `PUT /shapes/:id/model`: the model ID to run the conversation on, or null for the `plan` role's. */
-export const ShapeModelInput = z.strictObject({ model: ShapeModel.nullable() });
+/**
+ * `PUT /shapes/:id/model`: the model ID to run the conversation on, or null for the `plan` role's, and the
+ * effort to run it at, or null for the model's own default.
+ */
+export const ShapeModelInput = z.strictObject({
+  model: ShapeModel.nullable(),
+  effort: z.enum(Effort).nullable().default(null),
+});
 export type ShapeModelInput = z.infer<typeof ShapeModelInput>;
 
 export const ShapeMessageDto = z.object({

@@ -1,4 +1,14 @@
 import type {
+  Effort,
+  KindDto,
+  KindId,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  PlaybookDto,
+  PlaybookInput,
+  PlaybookMoveEntry,
+  Rigor,
   PlanDocumentRevisionDto,
   PlanRecordDto,
   PlanRecordList,
@@ -443,10 +453,11 @@ export interface ApiServices extends PlanRecordServices {
   /** Interrupts the turn that is running; answering when nothing runs is a no-op. */
   stopShape(id: ShapeId): Promise<void>;
   /**
-   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null. Throws
+   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null, at `effort`
+   * or, with null, the model's own default. Throws
    * InvalidError for a model the account doesn't offer and ConflictError while a turn runs.
    */
-  chooseShapeModel(id: ShapeId, model: string | null): ShapeDto;
+  chooseShapeModel(id: ShapeId, model: string | null, effort: Effort | null): ShapeDto;
   /**
    * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
    * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
@@ -685,9 +696,27 @@ export interface ApiServices extends PlanRecordServices {
   listModels(accountId?: AccountId): ModelRowDto[];
   /**
    * What routing chooses for each role on an account at the role's starting need, for a task and a project with
-   * no settings of their own. Throws NotFoundError for an unknown or archived account.
+   * no settings of their own, from the cells of `rigor` (Standard when left out). Throws NotFoundError for an
+   * unknown or archived account.
    */
-  modelPicks(accountId: AccountId): RolePicksDto;
+  modelPicks(accountId: AccountId, rigor?: Rigor): RolePicksDto;
+  /**
+   * The playbook a project sees (its own overrides over the global ones over 10db's defaults), or, with null,
+   * the global one. Throws NotFoundError for a missing project.
+   */
+  getPlaybook(projectId: ProjectId | null): PlaybookDto;
+  /** Applies a form to one scope's playbook and answers what that scope now sees. */
+  setPlaybook(projectId: ProjectId | null, input: PlaybookInput): PlaybookDto;
+  /** The settings the move to the playbook could not carry over; empty once dismissed. */
+  playbookMoveReport(): PlaybookMoveEntry[];
+  dismissPlaybookMoveReport(): void;
+  listKinds(): KindDto[];
+  /** Throws ConflictError for a key another kind has. */
+  createKind(input: KindInput): KindDto;
+  patchKind(id: KindId, patch: KindPatch): KindDto;
+  deleteKind(id: KindId): void;
+  /** Puts a kind at a place in the list and answers the list. */
+  moveKind(input: KindOrderInput): KindDto[];
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */

@@ -14,3 +14,4 @@ export { offeredModels, offeredProfiles } from './offered';
 export { costOnAccount } from './cost-on-account';
 export { DEFAULT_CELLS, DEFAULT_ROWS, FALLBACK_RUNG, type FallbackRung } from './playbook-defaults';
 export { resolveSteps, type PlaybookScopes, type ResolvedStep } from './playbook';
+export { playbookView } from './playbook-view';

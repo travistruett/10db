@@ -13,6 +13,7 @@ import {
   type GoalId,
   type ProjectId,
   type ShapeFindingId,
+  type Effort,
   type ShapeId,
   type ShapeProposalId,
   type TaskId,
@@ -163,16 +164,23 @@ export function useStopShape() {
   });
 }
 
-/** Sets the model the conversation's next turn runs on; null runs it on the `plan` role's. */
+/**
+ * Sets the model the conversation's next turn runs on, null for the `plan` role's, and the effort it runs
+ * at, null (or none given) for the model's own default.
+ */
 export function useChooseShapeModel() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { readonly shapeId: ShapeId; readonly model: string | null }) =>
+    mutationFn: async (input: {
+      readonly shapeId: ShapeId;
+      readonly model: string | null;
+      readonly effort?: Effort | null;
+    }) =>
       readJson(
         await client.shapes[':shapeId'].model.$put({
           param: { shapeId: input.shapeId },
-          json: { model: input.model },
+          json: { model: input.model, effort: input.effort ?? null },
         }),
         ShapeDto,
       ),

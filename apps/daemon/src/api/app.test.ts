@@ -634,6 +634,119 @@ describe('team, routing and benchmark routes', () => {
       service: 'setProjectModelSettings',
     },
     {
+      name: 'GET /playbook',
+      method: 'GET',
+      path: '/playbook',
+      body: undefined,
+      service: 'getPlaybook',
+    },
+    {
+      name: 'PUT /playbook',
+      method: 'PUT',
+      path: '/playbook',
+      body: { rows: [{ rigor: 'light', steps: null }], cells: [] },
+      service: 'setPlaybook',
+    },
+    {
+      name: 'GET /projects/:id/playbook',
+      method: 'GET',
+      path: `/projects/${projectId}/playbook`,
+      body: undefined,
+      service: 'getPlaybook',
+    },
+    {
+      name: 'PUT /projects/:id/playbook',
+      method: 'PUT',
+      path: `/projects/${projectId}/playbook`,
+      body: { cells: [{ rigor: 'standard', role: 'review', effort: 'high' }] },
+      service: 'setPlaybook',
+    },
+    {
+      name: 'GET /playbook/move-report',
+      method: 'GET',
+      path: '/playbook/move-report',
+      body: undefined,
+      service: 'playbookMoveReport',
+    },
+    {
+      name: 'DELETE /playbook/move-report',
+      method: 'DELETE',
+      path: '/playbook/move-report',
+      body: undefined,
+      service: 'dismissPlaybookMoveReport',
+    },
+    { name: 'GET /kinds', method: 'GET', path: '/kinds', body: undefined, service: 'listKinds' },
+    {
+      name: 'POST /kinds',
+      method: 'POST',
+      path: '/kinds',
+      body: { key: 'payments', label: 'Payments', minimumRigor: 'careful' },
+      service: 'createKind',
+    },
+    {
+      name: 'PATCH /kinds/:id',
+      method: 'PATCH',
+      path: `/kinds/${mintId('Kind')}`,
+      body: { alwaysReviewed: true },
+      service: 'patchKind',
+    },
+    {
+      name: 'DELETE /kinds/:id',
+      method: 'DELETE',
+      path: `/kinds/${mintId('Kind')}`,
+      body: undefined,
+      service: 'deleteKind',
+    },
+    {
+      name: 'PUT /kinds/order',
+      method: 'PUT',
+      path: '/kinds/order',
+      body: { kindId: mintId('Kind'), position: 0 },
+      service: 'moveKind',
+    },
+    {
+      name: 'GET /models/picks at a rigor',
+      method: 'GET',
+      path: `/models/picks?account=${mintId('Account')}&rigor=careful`,
+      body: undefined,
+      service: 'modelPicks',
+    },
+    {
+      name: 'PUT /shapes/:id/model with an effort',
+      method: 'PUT',
+      path: `/shapes/${mintId('Shape')}/model`,
+      body: { model: 'm-1', effort: 'high' },
+      service: 'chooseShapeModel',
+    },
+    {
+      name: 'POST /projects/:id/tasks with a rigor, kinds and an effort pin',
+      method: 'POST',
+      path: `/projects/${projectId}/tasks`,
+      body: {
+        title: 'Add a thing',
+        acceptanceCriteria: ['It works'],
+        areas: ['api'],
+        rigor: 'careful',
+        kinds: [{ key: 'security', source: 'builder' }],
+        effortPin: 'high',
+      },
+      service: 'createTask',
+    },
+    {
+      name: 'PATCH /tasks/:id with a rigor, kinds and an effort pin',
+      method: 'PATCH',
+      path: `/tasks/${taskId}`,
+      body: { rigor: 'standard', kinds: [], effortPin: null },
+      service: 'patchTask',
+    },
+    {
+      name: 'PATCH /projects/:id with a default rigor',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { defaultRigor: 'careful' },
+      service: 'patchProject',
+    },
+    {
       name: 'GET /benchmarks/status',
       method: 'GET',
       path: '/benchmarks/status',
@@ -980,6 +1093,54 @@ describe('team, routing and benchmark routes', () => {
       body: { name: 'talk', steps: [{ role: 'review', need: 48 }] },
     },
     {
+      name: 'a playbook with no build step',
+      method: 'PUT',
+      path: '/playbook',
+      body: { rows: [{ rigor: 'light', steps: ['review'] }] },
+    },
+    {
+      name: 'a project playbook that sets a cell twice',
+      method: 'PUT',
+      path: `/projects/${projectId}/playbook`,
+      body: {
+        cells: [
+          { rigor: 'light', role: 'implement', effort: 'low' },
+          { rigor: 'light', role: 'implement', effort: 'high' },
+        ],
+      },
+    },
+    {
+      name: 'a kind patch that names the key',
+      method: 'PATCH',
+      path: `/kinds/${mintId('Kind')}`,
+      body: { key: 'other' },
+    },
+    { name: 'a kind with no label', method: 'POST', path: '/kinds', body: { key: 'ui' } },
+    {
+      name: 'a kind order below the first place',
+      method: 'PUT',
+      path: '/kinds/order',
+      body: { kindId: mintId('Kind'), position: -1 },
+    },
+    {
+      name: 'picks at a rigor that does not exist',
+      method: 'GET',
+      path: `/models/picks?account=${mintId('Account')}&rigor=extreme`,
+      body: undefined,
+    },
+    {
+      name: 'a task patch with a rigor that does not exist',
+      method: 'PATCH',
+      path: `/tasks/${taskId}`,
+      body: { rigor: 'extreme' },
+    },
+    {
+      name: 'a project patch with a default rigor that does not exist',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { defaultRigor: 'extreme' },
+    },
+    {
       name: 'a malformed persona id',
       method: 'PATCH',
       path: '/personas/nope',
@@ -989,6 +1150,41 @@ describe('team, routing and benchmark routes', () => {
     const res = await app().request(path, { method, ...json, body: JSON.stringify(body) });
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
+  });
+});
+
+describe('picks and a conversation’s model carry their new fields to the service', () => {
+  it('passes the rigor the picks ask for, and none when the query leaves it out', async () => {
+    const asked: (string | undefined)[] = [];
+    const services = stubServices({
+      modelPicks: (accountId, rigor) => {
+        asked.push(rigor);
+        return { accountId, picks: [] };
+      },
+    });
+    const account = mintId('Account');
+    await app(services).request(`/models/picks?account=${account}&rigor=critical`, auth);
+    await app(services).request(`/models/picks?account=${account}`, auth);
+    expect(asked).toEqual(['critical', undefined]);
+  });
+
+  it('passes the effort with the model, null when the body gives none', async () => {
+    const asked: unknown[] = [];
+    const services = stubServices({
+      chooseShapeModel: (_id, model, effort) => {
+        asked.push([model, effort]);
+        throw new InvalidError('stop here');
+      },
+    });
+    const path = `/shapes/${mintId('Shape')}/model`;
+    const put = (body: unknown) =>
+      app(services).request(path, { method: 'PUT', ...json, body: JSON.stringify(body) });
+    await put({ model: 'm-1', effort: 'high' });
+    await put({ model: 'm-1' });
+    expect(asked).toEqual([
+      ['m-1', 'high'],
+      ['m-1', null],
+    ]);
   });
 });
 

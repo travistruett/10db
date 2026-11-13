@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { ModelSetting } from './catalogue';
+import { mintId } from './ids';
 import {
   effectiveRigor,
   KindInput,
+  KindOrderInput,
   KindPatch,
+  ModelPicksQuery,
   PlaybookInput,
   Rigor,
   RIGORS,
+  RigorBelowKindError,
+  refuseRigorBelowKinds,
   rigorAtLeast,
   type TaskKind,
 } from './rigor';
@@ -194,5 +199,96 @@ describe('effectiveRigor', () => {
     expect(
       effectiveRigor({ rigor: own, projectDefault: def, taskKinds: task(...keys), kinds }),
     ).toBe(want);
+  });
+});
+
+describe('the query, order and refusal the routes add', () => {
+  const account = mintId('Account');
+  const kindId = mintId('Kind');
+
+  it.each([
+    { name: 'an account alone', query: { account }, ok: true },
+    { name: 'an account and a rigor', query: { account, rigor: 'careful' }, ok: true },
+    { name: 'a rigor that does not exist', query: { account, rigor: 'extreme' }, ok: false },
+    { name: 'no account', query: { rigor: 'light' }, ok: false },
+  ])('ModelPicksQuery reads $name', ({ query, ok }) => {
+    expect(ModelPicksQuery.safeParse(query).success).toBe(ok);
+  });
+
+  it.each([
+    {
+      name: 'the first place',
+      value: { kindId: kindId, position: 0 },
+      ok: true,
+    },
+    {
+      name: 'a negative place',
+      value: { kindId: kindId, position: -1 },
+      ok: false,
+    },
+    {
+      name: 'a task id',
+      value: { kindId: mintId('Task'), position: 1 },
+      ok: false,
+    },
+  ])('KindOrderInput reads $name', ({ value, ok }) => {
+    expect(KindOrderInput.safeParse(value).success).toBe(ok);
+  });
+
+  it('names the kind and its minimum when a rigor is too low', () => {
+    const error = new RigorBelowKindError(
+      { key: 'security', label: 'Security' },
+      'careful',
+      'light',
+    );
+    expect(error.code).toBe('invalid');
+    expect(error.kindKey).toBe('security');
+    expect(error.message).toContain('Security');
+    expect(error.message).toContain('careful');
+  });
+});
+
+describe('refuseRigorBelowKinds', () => {
+  const kinds = [
+    { key: 'security', label: 'Security', minimumRigor: Rigor.Careful },
+    { key: 'migration', label: 'Migration', minimumRigor: Rigor.Critical },
+    { key: 'docs', label: 'Docs', minimumRigor: null },
+  ];
+  const own = (...keys: string[]) => keys.map((key) => ({ key }));
+
+  it.each([
+    {
+      name: 'no rigor of its own follows the floor',
+      rigor: null,
+      has: ['security'],
+      refused: null,
+    },
+    { name: 'a rigor at the floor', rigor: Rigor.Careful, has: ['security'], refused: null },
+    { name: 'a rigor above the floor', rigor: Rigor.Critical, has: ['security'], refused: null },
+    { name: 'a rigor below the floor', rigor: Rigor.Light, has: ['security'], refused: 'security' },
+    { name: 'a kind with no minimum', rigor: Rigor.Light, has: ['docs'], refused: null },
+    { name: 'a key no kind has', rigor: Rigor.Light, has: ['gone'], refused: null },
+    { name: 'no kinds', rigor: Rigor.Light, has: [], refused: null },
+    {
+      name: 'two floors name the strongest',
+      rigor: Rigor.Standard,
+      has: ['security', 'migration'],
+      refused: 'migration',
+    },
+    {
+      name: 'a rigor that meets one floor and misses the other',
+      rigor: Rigor.Careful,
+      has: ['security', 'migration'],
+      refused: 'migration',
+    },
+  ])('$name', ({ rigor, has, refused }) => {
+    const call = () => {
+      refuseRigorBelowKinds({ rigor, taskKinds: own(...has), kinds });
+    };
+    if (refused === null) call();
+    else
+      expect(call).toThrow(
+        expect.objectContaining({ name: 'RigorBelowKindError', kindKey: refused }),
+      );
   });
 });

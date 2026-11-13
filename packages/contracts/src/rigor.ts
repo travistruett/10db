@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
-import { KindId, PersonaId } from './ids';
+import { DomainError } from './errors';
+import { AccountId, KindId, PersonaId } from './ids';
 import { HyphenatedKey } from './keys';
 import { Effort, StepRole } from './states';
 
@@ -184,3 +185,62 @@ export const PlaybookMoveEntry = z.object({
   why: z.string().min(1),
 });
 export type PlaybookMoveEntry = z.infer<typeof PlaybookMoveEntry>;
+
+/** Where a kind goes in the builder's order: 0 is first, and past the end is last. */
+export const KindOrderInput = z.strictObject({ kindId: KindId, position: z.int().min(0) });
+export type KindOrderInput = z.infer<typeof KindOrderInput>;
+
+/**
+ * Which account's offer the router's picks are made on, and at which rigor's cells (Standard when
+ * left out). The query string carries the rigor as its word.
+ */
+export const ModelPicksQuery = z.strictObject({
+  account: AccountId,
+  rigor: z.enum(Rigor).optional(),
+});
+export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
+
+/** A task's own rigor is below what a kind it has asks for; the message names the kind and its minimum. */
+export class RigorBelowKindError extends DomainError {
+  override readonly name = 'RigorBelowKindError';
+  readonly kindKey: string;
+  readonly minimum: Rigor;
+  constructor(
+    kind: { readonly key: string; readonly label: string },
+    minimum: Rigor,
+    rigor: Rigor,
+  ) {
+    super(
+      'invalid',
+      `${kind.label} work is at least ${minimum}, so a task of that kind can't be ${rigor}; choose ${minimum} or stronger, or take off the ${kind.key} kind`,
+    );
+    this.kindKey = kind.key;
+    this.minimum = minimum;
+  }
+}
+
+/**
+ * Refuses a rigor the builder set that is below the minimum of a kind the task has, naming the kind that
+ * holds the floor (the strongest one when several do). A task with no rigor of its own follows the floor,
+ * and a key no kind has holds none.
+ */
+export function refuseRigorBelowKinds(input: {
+  readonly rigor: Rigor | null;
+  readonly taskKinds: readonly { readonly key: string }[];
+  readonly kinds: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly minimumRigor: Rigor | null;
+  }[];
+}): void {
+  if (input.rigor === null) return;
+  const keys = new Set(input.taskKinds.map((k) => k.key));
+  let holder: { key: string; label: string; minimum: Rigor } | null = null;
+  for (const kind of input.kinds) {
+    const minimum = kind.minimumRigor;
+    if (minimum === null || !keys.has(kind.key) || rigorAtLeast(input.rigor, minimum)) continue;
+    if (holder === null || rigorAtLeast(minimum, holder.minimum))
+      holder = { key: kind.key, label: kind.label, minimum };
+  }
+  if (holder !== null) throw new RigorBelowKindError(holder, holder.minimum, input.rigor);
+}

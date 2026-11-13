@@ -214,10 +214,6 @@ export const ModelRowDto = z.object({
 });
 export type ModelRowDto = z.infer<typeof ModelRowDto>;
 
-/** Which account's offer the router's picks are made on. */
-export const ModelPicksQuery = z.strictObject({ account: AccountId });
-export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
-
 /** What routing chooses for one role at its starting need. */
 export const RolePickDto = z.object({
   role: z.enum(StepRole),

@@ -5,6 +5,7 @@ import {
   PlanDraft,
   ShapeDto,
   ShapeMessageDto,
+  ShapeModelInput,
   ShapeProposalBody,
   ShapeProposalKind,
   ShapeToolInputs,
@@ -358,5 +359,19 @@ describe('the Shape MCP tool inputs', () => {
         ...Object.values(ShapeToolName).map((t) => `shape-mcp-${t.replaceAll('_', '-')}-input`),
       ]),
     );
+  });
+});
+
+describe('ShapeModelInput', () => {
+  it.each([
+    { name: 'a model and an effort', value: { model: 'm-1', effort: 'high' }, effort: 'high' },
+    { name: 'a model alone leaves the effort to the model', value: { model: 'm-1' }, effort: null },
+    { name: 'neither', value: { model: null, effort: null }, effort: null },
+  ])('reads $name', ({ value, effort }) => {
+    expect(ShapeModelInput.parse(value).effort).toBe(effort);
+  });
+
+  it('refuses an effort that does not exist', () => {
+    expect(ShapeModelInput.safeParse({ model: 'm-1', effort: 'extreme' }).success).toBe(false);
   });
 });
