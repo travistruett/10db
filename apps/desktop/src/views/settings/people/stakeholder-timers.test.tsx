@@ -38,6 +38,27 @@ describe('StakeholderTimers', () => {
     });
   });
 
+  it('takes whole hours only', async () => {
+    const saved = serve();
+    const back = await screen.findByLabelText('Back to you after (hours)');
+    fireEvent.change(back, { target: { value: '12.5' } });
+    fireEvent.blur(back);
+    await waitFor(() => {
+      expect(
+        saved.every((s) => Number.isInteger((s as { returnAfterHours: number }).returnAfterHours)),
+      ).toBe(true);
+    });
+    expect(screen.getByLabelText('Back to you after (hours)')).toHaveProperty('value', '12');
+  });
+
+  it('turning the reminder on picks a value below the return', async () => {
+    const saved = serve({ remindAfterHours: null, returnAfterHours: 3 });
+    fireEvent.click(await screen.findByRole('switch', { name: 'Send a reminder' }));
+    await waitFor(() => {
+      expect(saved).toEqual([{ remindAfterHours: 2, returnAfterHours: 3 }]);
+    });
+  });
+
   it('the reminder can be turned off', async () => {
     const saved = serve();
     fireEvent.click(await screen.findByRole('switch', { name: 'Send a reminder' }));

@@ -186,7 +186,7 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
     const title =
       send.returnedReason === 'disagreed'
         ? `${joinNames(names)} disagree`
-        : `${joinNames(names)} hasn't answered in ${String(timers.data?.returnAfterHours ?? 8)} hours`;
+        : `${joinNames(names)} ${names.length > 1 ? "haven't" : "hasn't"} answered in ${String(timers.data?.returnAfterHours ?? 8)} hours`;
     return (
       <Alert color="yellow" variant="light" title={title}>
         <Stack gap="sm">
@@ -232,7 +232,27 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
   const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
   return notice === undefined ? null : (
     <Alert color="yellow" variant="light">
-      {notice}
+      <Stack gap="xs">
+        {notice}
+        <Group>
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => {
+              setTakingBack(true);
+            }}
+          >
+            Take Back
+          </Button>
+        </Group>
+      </Stack>
+      <TakeBackModal
+        item={item}
+        opened={takingBack}
+        onClose={() => {
+          setTakingBack(false);
+        }}
+      />
     </Alert>
   );
 }

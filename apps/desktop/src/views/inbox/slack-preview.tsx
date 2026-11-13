@@ -87,6 +87,7 @@ export function SlackPreview({
   const [edited, setEdited] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const names = joinNames(recipientNames(send));
+  const recipientCount = recipientNames(send).length;
   const text = edited ?? send.text;
   const hold = send.hits.find((h) => h.severity === 'hold');
   const warnings = send.hits.filter((h) => h.severity === 'warn');
@@ -220,7 +221,7 @@ export function SlackPreview({
         ) : null}
         {limitHeld ? (
           <Alert color="yellow" variant="light">
-            {`${names} has had ${limit === null ? 'their limit of' : String(limit)} new questions today.`}
+            {`${names} ${recipientCount > 1 ? 'have' : 'has'} had ${limit === null ? 'their limit of' : String(limit)} new questions today.`}
           </Alert>
         ) : null}
         {send.heldBy === 'first_send' ? (

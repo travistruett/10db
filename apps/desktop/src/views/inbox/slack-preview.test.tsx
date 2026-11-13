@@ -156,6 +156,22 @@ describe('a card with a draft', () => {
     });
   });
 
+  it('a limit hold on two people reads "have had"', async () => {
+    serve(
+      card(
+        {
+          heldBy: 'limit',
+          people: [
+            { personId: mark.id, userId: 'U1', name: 'Mark', recipient: true },
+            { personId: ana.id, userId: 'U2', name: 'Ana', recipient: true },
+          ],
+        },
+        { assignees: ['mark', 'ana'] },
+      ),
+    );
+    expect(await screen.findByText(/Mark and Ana have had 10 new questions today/)).toBeTruthy();
+  });
+
   it('a first send says to check it before it goes', async () => {
     serve(card({ heldBy: 'first_send' }));
     expect(await screen.findByText('First message to Mark: check it before it goes')).toBeTruthy();
@@ -240,6 +256,18 @@ describe('a draft while the builder is not yet bound to Slack', () => {
   });
 });
 
+describe('a question nobody was asked about', () => {
+  it("is today's card: its options, Send answer, Ask Someone, and nothing about a message", async () => {
+    serve(inboxItemDto({ title: 'Which?', options: OPTIONS, category: 'product' }));
+    expect(await screen.findByRole('radio', { name: /Keep access for 7 days/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ask Someone' })).toBeTruthy();
+    expect(screen.queryByText(/will get/)).toBeNull();
+    expect(screen.queryByText(/question →/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Answer Myself' })).toBeNull();
+  });
+});
+
 describe('a card still being triaged', () => {
   it("says it is finding who answers and keeps today's options", async () => {
     serve(
@@ -251,6 +279,8 @@ describe('a card still being triaged', () => {
       }),
     );
     expect(await screen.findByText('Finding who answers…')).toBeTruthy();
+    // The builder need not wait for the judge to ask someone.
+    expect(screen.getByRole('button', { name: 'Ask Someone' })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Keep access for 7 days/ })).toBeTruthy();
   });
 });

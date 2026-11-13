@@ -75,7 +75,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   account: [accountKeys.all],
   inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
   app_setting: [queryKeys.keepAwake],
-  // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
+  // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
+  // name them. Step plans, which only the batch sheet shows, are not read from people.
   persona: [CANDIDATES],
   person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   slack: [SLACK_KEY],

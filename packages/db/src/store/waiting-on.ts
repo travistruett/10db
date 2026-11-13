@@ -20,7 +20,6 @@ export interface SentCard {
   readonly names: readonly string[];
   /** When the wait started: the send, or the builder's last Keep Waiting. */
   readonly since: string;
-  readonly assigneeIds: readonly string[];
 }
 
 /**
@@ -62,7 +61,29 @@ export function sentCards(db: DbReader, projectId?: ProjectId): SentCard[] {
       workstreamIds: card.targets.map((t) => t.workstreamId),
       names: people.map((p) => p.name),
       since: send.waitStartedAt ?? send.sentAt ?? send.createdAt,
-      assigneeIds: people.flatMap((p) => (p.personId === null ? [] : [p.personId])),
     };
   });
+}
+
+/**
+ * Who a run's question is out with, or null. A run with a card of the builder's open as well is still
+ * waiting on the builder, so it says nothing of Slack.
+ */
+export function waitingOnWorkstream(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+): { names: string[]; since: string } | null {
+  const sent = sentCards(db).filter((c) => c.workstreamIds.includes(workstreamId));
+  const first = sent[0];
+  if (first === undefined) return null;
+  const sentIds = new Set(sent.map((c) => c.inboxItemId));
+  const open = db
+    .select({ id: schema.inboxItems.id, targets: schema.inboxItems.targets })
+    .from(schema.inboxItems)
+    .where(eq(schema.inboxItems.state, InboxState.Open))
+    .all();
+  const builderCard = open.some(
+    (card) => !sentIds.has(card.id) && card.targets.some((t) => t.workstreamId === workstreamId),
+  );
+  return builderCard ? null : { names: [...first.names], since: first.since };
 }

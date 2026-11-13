@@ -93,6 +93,18 @@ describe('the Waiting tab', () => {
     expect(screen.getByText('· sent 3h ago')).toBeTruthy();
   });
 
+  it('keeps the Waiting count in the neutral badge, not the filled one', async () => {
+    serve([card({})]);
+    renderApp('/inbox');
+    await screen.findByRole('radio', { name: /Waiting/ });
+    const badge = await waitFor(() => {
+      const found = tabs().getByText('Waiting').parentElement?.querySelector('.mantine-Badge-root');
+      if (!found) throw new Error('no Waiting count yet');
+      return found;
+    });
+    expect(badge.getAttribute('data-variant')).toBe('default');
+  });
+
   it('says nothing is out with anyone when empty', async () => {
     serve([]);
     renderApp('/inbox');
@@ -239,6 +251,38 @@ describe('what leaves Waiting for Open', () => {
     renderApp('/inbox');
     expect(await screen.findByText('How long should access last?')).toBeTruthy();
     expect((await screen.findAllByText(notice)).length).toBeGreaterThan(0);
+  });
+
+  it('a sent card in an outage can be taken back, after asking', async () => {
+    const calls = serve([card({})], { state: 'refused' });
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('button', { name: 'Take Back' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Take Back' }),
+    );
+    await waitFor(() => {
+      expect(calls.map((c) => c.path.split(':')[0])).toEqual(['take-back']);
+    });
+  });
+
+  it('two people who have not answered read "haven\'t"', async () => {
+    serve([
+      card(
+        {
+          people: [
+            { personId: mark.id, userId: 'U1', name: 'Mark Ellis', recipient: true },
+            { personId: ana.id, userId: 'U2', name: 'Ana Ortiz', recipient: true },
+          ],
+          returnedAt: ago(0),
+          returnedReason: 'timer',
+        },
+        { assignees: ['mark', 'ana'] },
+      ),
+    ]);
+    renderApp('/inbox');
+    expect(
+      await screen.findByText("Mark Ellis and Ana Ortiz haven't answered in 8 hours"),
+    ).toBeTruthy();
   });
 
   it('a sent card leaves Open for Waiting once Slack is connected', async () => {

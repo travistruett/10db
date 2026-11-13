@@ -50,7 +50,7 @@ import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
 import { passHoldingTask } from './passes';
 import { getProject } from './projects';
-import { sentCards } from './waiting-on';
+import { waitingOnWorkstream } from './waiting-on';
 import type { DbReader, WriteContext } from './store';
 import { getTask, mergedDespiteFailure } from './tasks';
 
@@ -95,8 +95,7 @@ export function getWorkstreamRow(db: DbReader, id: WorkstreamId): WorkstreamRow 
 
 /** Who the run's question is out with, when it is. */
 function waitingOnFor(db: DbReader, id: WorkstreamId): WorkstreamDto['waitingOn'] {
-  const card = sentCards(db).find((c) => c.workstreamIds.includes(id));
-  return card === undefined ? null : { names: [...card.names], since: card.since };
+  return waitingOnWorkstream(db, id);
 }
 
 function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {

@@ -50,12 +50,15 @@ export function StakeholderTimers() {
               checked={current.remindAfterHours !== null}
               onChange={(event) => {
                 change({
-                  remindAfterHours: event.currentTarget.checked ? DEFAULT_REMIND_HOURS : null,
+                  remindAfterHours: event.currentTarget.checked
+                    ? Math.max(1, Math.min(DEFAULT_REMIND_HOURS, current.returnAfterHours - 1))
+                    : null,
                   returnAfterHours: current.returnAfterHours,
                 });
               }}
             />
             <NumberInput
+              allowDecimal={false}
               aria-label="Remind after (hours)"
               w={90}
               min={1}
@@ -82,6 +85,7 @@ export function StakeholderTimers() {
         >
           <Group gap="sm" justify="flex-end" wrap="nowrap">
             <NumberInput
+              allowDecimal={false}
               aria-label="Back to you after (hours)"
               w={90}
               min={1}

@@ -132,7 +132,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expectAccessible(page, 'inbox, routed to a person not in Slack, dark');
   await page.getByRole('radio', { name: /Seven days/ }).check();
   await page.getByRole('button', { name: 'Send answer' }).click();
-  // Other cards may be open; this one is gone, with the message copied for Priya.
+  // Other cards may be open; this one is gone.
   await expect(page.getByText(QUESTION, { exact: true })).toHaveCount(0);
 
   // Who Answers shows the route the card wrote.

@@ -42,7 +42,16 @@ export function splitInbox(
   connection: SlackConnectionDto['state'] | undefined,
 ): { readonly open: InboxItemDto[]; readonly waiting: InboxItemDto[] } {
   const waiting = items.filter((item) => isWaiting(item, connection));
-  return { open: items.filter((item) => !waiting.includes(item)), waiting };
+  // While the connection is still loading nobody knows where a sent card belongs: it is in neither tab
+  // and in no count, rather than counted in Open and moved a moment later.
+  const unplaced = (item: InboxItemDto): boolean =>
+    connection === undefined &&
+    item.send?.state === SendState.Sent &&
+    item.send.returnedAt === null;
+  return {
+    open: items.filter((item) => !waiting.includes(item) && !unplaced(item)),
+    waiting,
+  };
 }
 
 /** Open's count: its rows, leaving out a card triage has not placed yet, which may still go to someone else. */

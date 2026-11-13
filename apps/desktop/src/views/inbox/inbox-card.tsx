@@ -379,7 +379,7 @@ export function InboxCard({
           </Alert>
         ) : null}
         <Group justify="flex-end">
-          {mode === StakeholderMode.Unrouted && hasOptions ? (
+          {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
             <AskSomeoneFooter item={item} people={people} />
           ) : null}
           <Button

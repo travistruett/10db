@@ -320,6 +320,15 @@ describe('a goal’s status', () => {
       expect(digest.waitingOnSomeone).toEqual([]);
     });
 
+    it('leaves the run waiting on you while the builder also has a card open on it', () => {
+      const { b } = adopt();
+      const ws = run(b, WorkstreamState.WaitingHuman);
+      sentTo(ws);
+      expect(getWorkstream(store.db, ws).waitingOn).not.toBeNull();
+      card(ws, 'Something only you can answer');
+      expect(getWorkstream(store.db, ws).waitingOn).toBeNull();
+    });
+
     it('puts waitingOn on the run whose question is out, and on no other', () => {
       const { b, c } = adopt();
       const waiting = run(b, WorkstreamState.WaitingHuman);

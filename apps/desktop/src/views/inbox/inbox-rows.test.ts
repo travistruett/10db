@@ -168,10 +168,18 @@ describe('splitInbox: what needs the builder and what waits on someone', () => {
     ['a sent card while the token is gone', sent(), 'none', 'open'],
     ['a sent card while Slack is off', sent(), 'off', 'open'],
     ['a sent card while Slack is unreachable', sent(), 'unreachable', 'open'],
-    ['a sent card before the connection is known', sent(), undefined, 'open'],
+    ['a sent card before the connection is known', sent(), undefined, 'neither'],
+    [
+      'a draft before the connection is known',
+      inboxItemDto({ send: sendDto({ state: 'draft' }) }),
+      undefined,
+      'open',
+    ],
   ] as const)('%s is in %s', (_name, item, connection, where) => {
     const split = splitInbox([item], connection);
-    expect(split.waiting.length === 1 ? 'waiting' : 'open').toBe(where);
+    const found =
+      split.waiting.length === 1 ? 'waiting' : split.open.length === 1 ? 'open' : 'neither';
+    expect(found).toBe(where);
   });
 
   it('counts Open without a card still being triaged, and shows it in the list', () => {

@@ -74,6 +74,8 @@ describe('answeredCardsForTask', () => {
         question: 'First?',
         choice: 'Ship unmeasured',
         note: 'Follow-up runs it.',
+        answeredBy: null,
+        via: 'inbox',
       },
       {
         id: second.id,
@@ -81,6 +83,8 @@ describe('answeredCardsForTask', () => {
         question: 'Second?',
         choice: 'Ship unmeasured',
         note: 'Follow-up runs it.',
+        answeredBy: null,
+        via: 'inbox',
       },
     ]);
   });

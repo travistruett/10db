@@ -18,7 +18,21 @@ describe('shouldNotifyOpened', () => {
       false,
     ],
     ['a card sending right now', inboxItemDto({ send: sendDto({ state: 'sending' }) }), false],
-    ['a draft that waits for review', inboxItemDto({ send: sendDto({ state: 'draft' }) }), true],
+    [
+      'a draft that waits for review',
+      inboxItemDto({ send: sendDto({ state: 'draft', heldBy: 'review' }) }),
+      true,
+    ],
+    [
+      'a draft held at the limit',
+      inboxItemDto({ send: sendDto({ state: 'draft', heldBy: 'limit' }) }),
+      true,
+    ],
+    [
+      'a draft nothing holds, which sends by itself',
+      inboxItemDto({ send: sendDto({ state: 'draft', heldBy: null }) }),
+      false,
+    ],
   ])('%s: %s', (_name, item, expected) => {
     expect(shouldNotifyOpened(item)).toBe(expected);
   });

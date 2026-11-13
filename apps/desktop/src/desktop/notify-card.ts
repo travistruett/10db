@@ -7,7 +7,10 @@ import { z } from 'zod';
  */
 export function shouldNotifyOpened(item: InboxItemDto): boolean {
   if (item.routedBy === RoutedBy.TriagePending) return false;
-  return item.send?.state !== SendState.Sent && item.send?.state !== SendState.Sending;
+  const send = item.send;
+  if (send?.state === SendState.Sent || send?.state === SendState.Sending) return false;
+  // A draft nothing holds goes out by itself (Send Without Asking): it needs nothing from the builder.
+  return !(send?.state === SendState.Draft && send.heldBy === null);
 }
 
 const TriagedData = z.object({ toBuilder: z.boolean() });
