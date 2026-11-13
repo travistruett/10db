@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   Provider,
   RoutedBy,
+  agentKind,
   providerOf,
   StepRole,
   type Effort,
@@ -63,6 +64,7 @@ import {
   createListRefresh,
   createMoveBack,
   MoveCause,
+  moveOpenRouterKey,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -78,7 +80,7 @@ import {
   type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
-import { createJudgeServices } from './judge-services';
+import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
   createReplyWatch,
@@ -146,7 +148,6 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
-  OPENROUTER_KEY_ACCOUNT,
   SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
@@ -626,13 +627,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    readKey: () =>
-      opts.judgeOff === true
-        ? Promise.resolve(null)
-        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
+    readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  // With the judge off no Keychain item is read, the old key's included.
+  if (opts.judgeOff !== true)
+    await moveOpenRouterKey({
+      state,
+      keychain: judgeKeychain,
+      logger: logger.child({ component: 'judge' }),
+    });
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,
@@ -803,7 +808,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconcileProfiles(ctx, from);
     });
     modelWait.release((id) => {
-      const provider = providerOf(getAccountRow(db, id).kind);
+      const provider = providerOf(agentKind(getAccountRow(db, id).kind));
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
@@ -1309,7 +1314,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Judged on the account the conversation runs on, which can differ from the project's provider.
   const brainstormRefusal = (projectId: ProjectId): string | null =>
-    providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
+    providerOf(agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind)) ===
+    Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
   // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
@@ -1399,7 +1405,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         model: session.model,
         modelId,
         effort: profile.effort,
-        agentModels: shapeAgentModels(row.kind),
+        agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,
         access: {

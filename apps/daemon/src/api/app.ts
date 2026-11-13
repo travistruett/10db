@@ -36,7 +36,6 @@ import {
   InboxItemId,
   InboxState,
   JudgeConfigPatch,
-  JudgeKeyInput,
   KeepAwakeInput,
   LanePermissionsDto,
   TrustOverrides,
@@ -1010,6 +1009,9 @@ export function createApp(deps: ApiDeps) {
     .get('/accounts/:accountId/identity', async (c) =>
       c.json(await deps.services.accountIdentity(AccountId.parse(c.req.param('accountId')))),
     )
+    .post('/accounts/:accountId/test', async (c) =>
+      c.json(await deps.services.testAccount(AccountId.parse(c.req.param('accountId')))),
+    )
     .get('/accounts/connecting', (c) => c.json(deps.services.connectingAccount()))
     .post('/accounts/:accountId/connect', async (c) =>
       c.json(await deps.services.connectAccount(AccountId.parse(c.req.param('accountId')))),
@@ -1211,13 +1213,6 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
       async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
-    .put(
-      '/judge/key',
-      validator('json', (value): JudgeKeyInput => JudgeKeyInput.parse(value)),
-      async (c) => c.json(await deps.services.setJudgeKey(c.req.valid('json'))),
-    )
-    .delete('/judge/key', async (c) => c.json(await deps.services.removeJudgeKey()))
-    .post('/judge/test', async (c) => c.json(await deps.services.testJudge()))
     .get(
       '/judge/calls',
       validator('query', (query) => JudgeCallsQuery.parse(query)),
