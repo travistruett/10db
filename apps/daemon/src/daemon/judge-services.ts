@@ -79,6 +79,8 @@ export function createJudgeServices(deps: {
   readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
   readonly off: boolean;
+  /** Called after a patch changed the account decisions run on, so a sync can read with the new key. */
+  readonly onAccountChanged?: () => void;
 }): JudgeApiServices {
   const status = async (): Promise<JudgeStatusDto> => {
     const config = getJudgeConfig(deps.state.db);
@@ -124,6 +126,7 @@ export function createJudgeServices(deps: {
           );
       }
       deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
+      if (accountId !== config.accountId) deps.onAccountChanged?.();
       return status();
     },
     testAccount(id) {
