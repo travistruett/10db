@@ -70,6 +70,7 @@ function shapeOf(title: string): ShapeDto {
     proposeUnlocked: false,
     round: 0,
     model: null,
+    importedAt: null,
     createdAt: AT,
     updatedAt: AT,
   };

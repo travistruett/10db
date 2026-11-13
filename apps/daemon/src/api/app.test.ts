@@ -1272,6 +1272,7 @@ describe('shape routes', () => {
     proposeUnlocked: false,
     round: 0,
     model: null,
+    importedAt: null,
     createdAt: AT,
     updatedAt: AT,
   } as const;

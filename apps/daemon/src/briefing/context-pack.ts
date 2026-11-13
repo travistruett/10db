@@ -103,6 +103,7 @@ export function buildContextPack(
       droppedCount: k.dropped.policies + k.dropped.heuristics + k.dropped.decisions,
       empty: shown === 0,
     },
+    plan: null,
   };
 }
 

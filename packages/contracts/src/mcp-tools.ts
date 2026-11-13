@@ -14,6 +14,7 @@ import {
   WorkstreamId,
 } from './ids';
 import { PrincipleDraft } from './knowledge';
+import { PlanContext } from './plan-record';
 import {
   ClaimKind,
   KnowledgeScope,
@@ -120,6 +121,8 @@ export const ContextPack = z.object({
     droppedCount: z.int(),
     empty: z.boolean(),
   }),
+  /** The task's Plan section and what it cites, for a task made from a Plan; null for the others. */
+  plan: PlanContext.nullable().default(null),
 });
 export type ContextPack = z.infer<typeof ContextPack>;
 

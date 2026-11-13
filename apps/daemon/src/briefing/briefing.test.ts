@@ -76,6 +76,7 @@ const emptyPack: ContextPack = {
     droppedCount: 0,
     empty: true,
   },
+  plan: null,
 };
 const policyId = mintId('Principle');
 const heuristicId = mintId('Principle');
