@@ -1,7 +1,8 @@
 import { Provider } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
-import { joinOpenRouterId, openRouterProvider } from './openrouter-join';
+import type { OpenRouterMeasure } from '@10db/db';
+import { groupMeasuresByModel, joinOpenRouterId, openRouterProvider } from './openrouter-join';
 import { parseCatalogue, type Catalogue } from './source';
 
 const fixture = parseCatalogue(readModelsDevFixture());
@@ -69,5 +70,38 @@ describe('joinOpenRouterId', () => {
 
   it('joins nothing when two entries normalise to the id', () => {
     expect(joinOpenRouterId('anthropic/claude-twin-1.0', withTwinEntries())).toBeNull();
+  });
+});
+
+describe('groupMeasuresByModel', () => {
+  const measure = (id: string): OpenRouterMeasure => ({
+    id,
+    kind: 'speed',
+    key: 'Alpha',
+    intelligence: null,
+    coding: null,
+    agentic: null,
+    accuracy: null,
+    costPerTaskUsd: null,
+    tokensPerSecond: 50,
+    latencyMs: 100,
+    measuredAt: '2026-11-13T00:00:00.000Z',
+  });
+
+  it('groups rows by the catalogue model they join to and drops the rest', () => {
+    const grouped = groupMeasuresByModel(
+      [
+        measure('anthropic/claude-opus-5.5'),
+        measure('google/gemini-x'),
+        measure('anthropic/claude-opus-5.5'),
+      ],
+      fixture,
+    );
+    expect([...grouped.keys()]).toEqual(['claude-opus-5-5']);
+    expect(grouped.get('claude-opus-5-5')).toHaveLength(2);
+  });
+
+  it('answers nothing without a catalogue', () => {
+    expect(groupMeasuresByModel([measure('anthropic/claude-opus-5.5')], null).size).toBe(0);
   });
 });

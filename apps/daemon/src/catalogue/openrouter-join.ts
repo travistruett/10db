@@ -1,4 +1,5 @@
 import { Provider } from '@10db/contracts';
+import type { OpenRouterMeasure } from '@10db/db';
 import { joinModel, RUNTIME_MAKER } from './join';
 import type { Catalogue } from './source';
 
@@ -24,4 +25,21 @@ export function joinOpenRouterId(id: string, catalogue: Catalogue): string | nul
   if (provider === null) return null;
   const model = id.slice(id.indexOf('/') + 1).replace(DATE_SUFFIX, '');
   return joinModel(model, provider, catalogue)?.id ?? null;
+}
+
+/** OpenRouter's rows grouped by the catalogue model each joins to; a row that joins nothing is dropped. */
+export function groupMeasuresByModel(
+  measures: readonly OpenRouterMeasure[],
+  catalogue: Catalogue | null,
+): Map<string, OpenRouterMeasure[]> {
+  const grouped = new Map<string, OpenRouterMeasure[]>();
+  if (catalogue === null) return grouped;
+  for (const measure of measures) {
+    const model = joinOpenRouterId(measure.id, catalogue);
+    if (model === null) continue;
+    const rows = grouped.get(model);
+    if (rows) rows.push(measure);
+    else grouped.set(model, [measure]);
+  }
+  return grouped;
 }

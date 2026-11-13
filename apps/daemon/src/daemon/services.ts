@@ -69,6 +69,7 @@ import {
   getAccount,
   type DbReader,
   listAccountModels,
+  listOpenRouterMeasures,
   listAccounts,
   listBatches,
   listBoardColumns,
@@ -111,7 +112,7 @@ import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
-import { buildModelRows, type CatalogueSync } from '../catalogue';
+import { buildModelRows, groupMeasuresByModel, type CatalogueSync } from '../catalogue';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
@@ -718,6 +719,8 @@ export function createServices(deps: {
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
+        openRouter: groupMeasuresByModel(listOpenRouterMeasures(db), deps.catalogue.catalogue()),
+        now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
     modelPicks: (accountId) => {

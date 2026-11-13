@@ -10,7 +10,12 @@ import {
   RolePicksDto,
   type Effort,
 } from '@10db/contracts';
-import { findModelProfile, listAccountModels, replaceAccountModels } from '@10db/db';
+import {
+  findModelProfile,
+  listAccountModels,
+  replaceAccountModels,
+  replaceEndpointStats,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -71,6 +76,42 @@ async function start(
 }
 
 describe('the model list over HTTP', () => {
+  it("shows OpenRouter's speed on the provider of the asked Bedrock account, naming its source", async () => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'bedrock',
+      label: 'Bedrock',
+      settings: { region: 'us-west-2', awsProfile: 'dev' },
+    });
+    running.state.write((ctx) => {
+      replaceAccountModels(ctx, account.id, [
+        {
+          model: 'claude-opus-5-5',
+          family: 'claude-opus',
+          launchId: 'us.anthropic.claude-opus-5-5',
+          efforts: ['high'],
+          inputPrice: null,
+          outputPrice: null,
+        },
+      ]);
+      replaceEndpointStats(
+        ctx,
+        'anthropic/claude-opus-5.5',
+        [
+          { provider: 'Amazon Bedrock', tokensPerSecond: 77, latencyMs: 150 },
+          { provider: 'Anthropic', tokensPerSecond: 44, latencyMs: 100 },
+        ],
+        new Date().toISOString(),
+      );
+    });
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: 77,
+      speedProvider: 'Amazon Bedrock',
+      sources: { speed: 'openrouter' },
+    });
+  });
+
   it('answers one row per model, merging its efforts, and none for the seeded aliases', async () => {
     const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
     const rows = await api.get('/models', z.array(ModelRowDto));
