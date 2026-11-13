@@ -40,7 +40,9 @@
    git at another git dir, the remote-tracking refs, tags and packed refs, or the refs of `main` and the base branch
    unless one is the current branch, and the builder's global git config is readable for their identity. A push
    and a `gh pr merge` need the builder's credentials, so they run outside the sandbox with `core.hooksPath` at
-   `/dev/null`: the repository's push hooks don't run for an approved push. The card says which. The agent's Bash
+   `/dev/null` and `push.recurseSubmodules=no`: the repository's push hooks don't run for an approved push, and no
+   submodule is pushed along. Every call runs in a process group of its own, killed when its session ends or after
+   10 minutes (`BUILDER_RUN_TIMEOUT_MS`), and the card shows the words 10db runs, not the line as written. The card says which. The agent's Bash
    call then prints what it printed and ends with its exit code (on Codex, whose hook can't rewrite a call, the
    hook's refusal carries what ran instead). Each call carries only options that read nothing outside the
    checkout (commit: `-m`/`--message`, `--no-edit`, `--allow-empty`, `-a`, `-q`, `--no-verify`, paths; merge:

@@ -4299,6 +4299,23 @@ describe('permission broker in a pass', () => {
     }
   });
 
+  // The card shows the words 10db runs, never the line as written: a comment there is not run.
+  it('cards the words the call runs, not a comment on its line', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide } = passBroker(ws, repo.path);
+      const decision = decide(bash("git commit -am 'Add it' # hooks are off"));
+      const item = card();
+      expect(item.body.split('\n\n')[0]).toBe("git commit -am 'Add it'");
+      expect(item.detail).toMatchObject({ summary: "git commit -am 'Add it'" });
+      inbox.answer(item.id, { choice: 'deny' });
+      await decision;
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it('a denied card runs nothing', async () => {
     const repo = createTempRepo();
     try {

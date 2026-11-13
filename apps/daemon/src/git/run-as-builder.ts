@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { systemClock, type Clock } from '../clock';
 import { SECRET_VARIABLES } from '../environment';
 import { isProtected, type PassGitCall } from '../guard';
 import { singleQuoted, type GateRunInput, type GateSandbox } from '../sandbox';
@@ -25,18 +26,60 @@ const BUILDER_RUN_MAX_CHARS = 20_000;
 const keepEnd = (text: string): string =>
   text.length <= BUILDER_RUN_MAX_CHARS ? text : text.slice(-BUILDER_RUN_MAX_CHARS);
 
-/** Runs `argv` with no terminal; never throws: a program that can't start is exit code 127. */
+/** How long a call the builder allowed may run before 10db stops it and what it started. */
+export const BUILDER_RUN_TIMEOUT_MS = 10 * 60_000;
+
+/** The exit code of a call 10db stopped, at its deadline or with its session, as `timeout` gives. */
+const STOPPED_EXIT_CODE = 124;
+
+/**
+ * Runs `argv` with no terminal in a process group of its own; never throws: a program that can't
+ * start is exit code 127. At `BUILDER_RUN_TIMEOUT_MS`, or when `signal` ends it, the whole group is
+ * killed, so nothing a hook or a transport started outlives it.
+ */
 function run(
   argv: readonly string[],
   cwd: string,
   env: Readonly<Record<string, string>>,
   signal: AbortSignal,
+  clock: Clock,
 ): Promise<BuilderRun> {
   const [program = '', ...args] = argv;
   return new Promise((done) => {
+    if (signal.aborted) {
+      done({ exitCode: STOPPED_EXIT_CODE, output: '10db stopped it: its session ended.\n' });
+      return;
+    }
     let stdout = '';
     let stderr = '';
-    const child = spawn(program, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], signal });
+    let stopped: string | null = null;
+    const child = spawn(program, args, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+    const stop = (why: string): void => {
+      stopped ??= why;
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The group is gone already.
+      }
+    };
+    const onAbort = (): void => {
+      stop('10db stopped it: its session ended.');
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    const deadline = clock.setTimeout(() => {
+      stop(`10db stopped it after ${String(BUILDER_RUN_TIMEOUT_MS / 60_000)} minutes.`);
+    }, BUILDER_RUN_TIMEOUT_MS);
+    const finish = (result: BuilderRun): void => {
+      deadline.cancel();
+      signal.removeEventListener('abort', onAbort);
+      done(result);
+    };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -46,10 +89,21 @@ function run(
       stderr = keepEnd(stderr + chunk);
     });
     child.on('error', (error) => {
-      done({ exitCode: 127, output: `${stdout}${stderr}${error.message}\n` });
+      finish({ exitCode: 127, output: `${stdout}${stderr}${error.message}\n` });
     });
     child.on('close', (code) => {
-      done({ exitCode: code ?? 1, output: `${stdout}${stderr}` });
+      // What the call left in its group goes with it.
+      if (child.pid !== undefined)
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // Nothing was left.
+        }
+      finish(
+        stopped === null
+          ? { exitCode: code ?? 1, output: `${stdout}${stderr}` }
+          : { exitCode: STOPPED_EXIT_CODE, output: `${stdout}${stderr}${stopped}\n` },
+      );
     });
   });
 }
@@ -122,8 +176,10 @@ export async function runPassGit(
     readonly bins: { readonly git: string; readonly gh: string | null };
     /** Null where 10db has no sandbox: then it runs no commit or merge, whose hooks it can't contain. */
     readonly sandbox: PassGitSandbox | null;
+    readonly clock?: Clock;
   },
 ): Promise<BuilderRun | BuilderRefusal> {
+  const clock = opts.clock ?? systemClock;
   const place = ownGitDir(opts.checkout);
   if (place === null)
     return refused(
@@ -140,7 +196,8 @@ export async function runPassGit(
   const config = Object.entries({
     ...NO_ATTRIBUTES_CONFIG,
     'core.fsmonitor': 'false',
-    ...(contained ? {} : { 'core.hooksPath': '/dev/null' }),
+    // Nor is a submodule pushed along, whatever the repository's config says.
+    ...(contained ? {} : { 'core.hooksPath': '/dev/null', 'push.recurseSubmodules': 'no' }),
   });
   const gitEnv = {
     GIT_DIR: place.gitDir,
@@ -162,7 +219,7 @@ export async function runPassGit(
     GH_PROMPT_DISABLED: '1',
   };
   const bare = (env: Readonly<Record<string, string>>, ...gitArgs: string[]) =>
-    run([opts.bins.git, ...gitArgs], place.root, env, opts.signal);
+    run([opts.bins.git, ...gitArgs], place.root, env, opts.signal, clock);
   // No attributes from the tree or the worktree either, so no filter or driver a lane named runs.
   const empty = await bare(base, 'hash-object', '-t', 'tree', '--stdin');
   if (empty.exitCode !== 0)
@@ -219,6 +276,7 @@ export async function runPassGit(
         GIT_ATTR_SOURCE: attrSource,
       },
       opts.signal,
+      clock,
     );
   }
   // The daemon's own git and gh, never a program the session's PATH finds; gh's git is that git too.
@@ -237,6 +295,7 @@ export async function runPassGit(
           : `${dirname(opts.bins.git)}${delimiter}${path}`,
     },
     opts.signal,
+    clock,
   );
 }
 
@@ -252,6 +311,7 @@ async function runContained(
   keptBranches: readonly string[],
   gitEnv: Readonly<Record<string, string>>,
   signal: AbortSignal,
+  clock: Clock,
 ): Promise<BuilderRun | BuilderRefusal> {
   const identity = globalGitConfig(sandbox.home, sandbox.input.env);
   const assignments = Object.entries({
@@ -284,7 +344,7 @@ async function runContained(
     const host = Object.fromEntries(
       Object.entries(contained.env).filter(([name]) => name !== 'SRT_DEBUG'),
     );
-    return await run([contained.file, ...contained.args], contained.cwd, host, signal);
+    return await run([contained.file, ...contained.args], contained.cwd, host, signal, clock);
   } finally {
     // Its files are swept later if they can't go now; the call's result stands.
     await contained.dispose().catch(() => undefined);

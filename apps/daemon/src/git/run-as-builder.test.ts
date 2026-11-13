@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -9,19 +10,21 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import {
   createTempRepo,
   createTempRepoWithOrigin,
   FAKE_SRT,
   isolatedGitEnv,
   SANDBOXED,
+  waitFor,
 } from '../../test/fixtures';
 import { passGitCall } from '../guard';
 import { silentLogger } from '../log';
 import { createGateSandbox } from '../sandbox';
 import { createGit } from './git';
-import { runPassGit, type PassGitSandbox } from './run-as-builder';
+import { ManualClock } from '../clock';
+import { BUILDER_RUN_TIMEOUT_MS, runPassGit, type PassGitSandbox } from './run-as-builder';
 import { resolveGit } from './version';
 
 // A pass's commit, push or merge runs once the builder allows it, so nothing a lane could plant in
@@ -287,10 +290,63 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
       await runIn(remote.repo.path, 'git push far feat/page');
       const pushEnv = readFileSync(seen, 'utf8');
       expect(pushEnv).toContain('GIT_TERMINAL_PROMPT=0');
+      // No submodule is pushed along with it, whatever the repository's config says.
+      const at = /^GIT_CONFIG_KEY_(\d+)=push\.recurseSubmodules$/m.exec(pushEnv)?.[1];
+      expect(pushEnv.split('\n')).toContain(`GIT_CONFIG_VALUE_${at ?? 'none'}=no`);
       expect(pushEnv).not.toContain('sk-canary');
       expect(pushEnv).not.toContain('bedrock-canary');
     } finally {
       remote.cleanup();
     }
   });
+  // A call that never ends is stopped with everything it started: its own process group goes,
+  // at its deadline or when its session ends.
+  it.each(['the deadline', 'the session ending'] as const)(
+    'stops a call that hangs, and what it started, at %s',
+    async (when) => {
+      const remote = createTempRepoWithOrigin();
+      try {
+        const child = join(remote.repo.path, '..', `hung-child-${randomBytes(6).toString('hex')}`);
+        onTestFinished(() => {
+          rmSync(child, { force: true });
+        });
+        git(remote.repo.path, 'switch', '-q', '-c', 'feat/page');
+        git(remote.repo.path, 'remote', 'add', 'far', 'ssh://example.invalid/x.git');
+        git(
+          remote.repo.path,
+          'config',
+          'core.sshCommand',
+          `sh -c 'sleep 1000 & echo $! > "${child}"; wait' --`,
+        );
+        const clock = new ManualClock();
+        const session = new AbortController();
+        const pending = runPassGit(callOf('git push far feat/page'), {
+          checkout: remote.repo.path,
+          baseBranch: 'main',
+          env,
+          signal: session.signal,
+          bins,
+          sandbox: sandboxFor(remote.repo.path),
+          clock,
+        });
+        const pid = Number(
+          await waitFor(() => existsSync(child) && readFileSync(child, 'utf8').trim()),
+        );
+        if (when === 'the deadline') clock.advance(BUILDER_RUN_TIMEOUT_MS);
+        else session.abort();
+        const ran = await pending;
+        expect(ran).toMatchObject({ exitCode: 124 });
+        await waitFor(() => {
+          try {
+            process.kill(pid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        });
+      } finally {
+        remote.cleanup();
+      }
+    },
+  );
 });

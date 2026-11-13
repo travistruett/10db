@@ -667,18 +667,20 @@ export function createPermissionBroker(
     call: Extract<PassGitCall, { kind: 'run' }>,
     passGit: NonNullable<BrokerContext['passGit']>,
   ): Promise<ToolDecision> {
+    // The words 10db runs: a comment or spacing on the line as written runs nothing.
+    const line = builderCommandLine(call.argv);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
       title: `Allow ${call.argv.slice(0, call.argv[0] === 'gh' ? 3 : 2).join(' ')}?`,
-      body: `${command}\n\n${passGitCardBody(call)}`,
+      body: `${line}\n\n${passGitCardBody(call)}`,
       options: ONCE_OPTIONS,
       recommendation: null,
       category: QuestionCategory.Access,
       urgency: Urgency.Normal,
-      detail: { toolName: req.toolName, summary: command },
+      detail: { toolName: req.toolName, summary: line },
       signal: ctx.signal,
       escalated: req.escalated,
     });
