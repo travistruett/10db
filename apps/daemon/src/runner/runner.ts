@@ -2087,6 +2087,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           mcpServers: mcpServers.stdio,
           provider,
           taskFiles: taskFilesDir(opts.dataDir, task.id),
+          // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
+          attended: pass !== null,
           ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {

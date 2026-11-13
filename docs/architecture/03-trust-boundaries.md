@@ -298,7 +298,12 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   listed in `disallowedTools` and judged by real path; a secret that is a directory is closed with its tree, to
   the judge and in a `Read(<path>/**)` rule beside its own. A `.env*` link is denied by its own path and by the
   real path it leads to, wherever that is; a link that can't be resolved (dangling, or a loop) reads nothing and
-  is skipped. The walk is asynchronous. A secret file whose path
+  is skipped. In a pass, where the builder is in the session, a Read of one of the checkout's own `.env*` files
+  (a file, or a file in a `.env*` folder, whose real path is in the checkout) asks the builder on a card instead,
+  as in Claude Code: it is an `ask` rule rather than a `disallowedTools` rule, and the guard and the broker card
+  it. The kernel still denies it to commands, a search over it is still refused, and a `.env*` link out of the
+  checkout stays a protected read (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
+  The walk is asynchronous. A secret file whose path
   holds `*`, `?`, `[`, `]`, `{`, `}`, `\` or a newline refuses the lane: Claude Code drops the whole sandbox,
   without an error, on a value it can't parse (spike 14 check 11).
 

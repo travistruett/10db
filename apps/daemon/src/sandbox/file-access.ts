@@ -20,6 +20,12 @@ export interface FileAccessContext {
    * a search over their directory is not refused.
    */
   readonly secretFiles?: readonly string[];
+  /**
+   * The checkout's secret files a Read may open once the builder allows it on a card, where a person
+   * is in the session (a pass), as in Claude Code. Each is also in `secretFiles`, so a search over one
+   * and every other tool stay refused.
+   */
+  readonly secretsOnCard?: readonly string[];
   readonly readList: readonly string[];
   /** The system documentation this context reads without asking: `SYSTEM_DOC_ROOTS` for a lane. */
   readonly systemDocRoots?: readonly string[];
@@ -288,10 +294,21 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
   'outside-copy': 3,
 };
 
+/** Whether `real` is, or is under, one of the checkout's secrets a card may open (`secretsOnCard`). */
+function isSecretOnCard(real: string, ctx: FileAccessContext): boolean {
+  return (ctx.secretsOnCard ?? []).some(
+    (file) =>
+      isEqualOrUnder(real, file) &&
+      spellings(ctx.checkout).some((root) => isEqualOrUnder(file, root)),
+  );
+}
+
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
-  // A secret may be a directory (a `.env` folder, or a `.env` link's target): its whole tree is closed.
+  // A secret may be a directory (a `.env` folder, or a `.env` link's target): its whole tree is closed,
+  // but for a Read of the checkout's own secret where the builder is there to allow it.
+  if (!tree && isSecretOnCard(real, ctx)) return 'ask';
   if ((ctx.secretFiles ?? []).some((file) => isEqualOrUnder(real, file))) return 'protected';
   if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) {
     // A search of an opened folder that holds a secret file would read it: search a narrower one.
@@ -461,8 +478,11 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
     readAsk(toolName, input, cwd) {
       try {
         for (const path of readPathsOf(toolName, input)) {
-          if (readAccess(path, ctx, toolName !== 'Read', cwd).access === 'ask') {
-            return `${path} is outside the paths a lane may read without asking.`;
+          const { access, realPath } = readAccess(path, ctx, toolName !== 'Read', cwd);
+          if (access === 'ask') {
+            return isSecretOnCard(realPath, ctx)
+              ? `${path} holds the project's secrets, so the builder is asked before it is read.`
+              : `${path} is outside the paths a lane may read without asking.`;
           }
         }
         return null;

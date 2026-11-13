@@ -153,6 +153,12 @@ export interface LaneSessionInput {
    */
   readonly readOnly?: boolean;
   /**
+   * A person is in the session (a pass): a Read of one of the checkout's `.env*` files asks the
+   * builder on a card instead of being refused, as in Claude Code. The kernel still denies them to
+   * commands, and every other file tool and search is refused as in a lane.
+   */
+  readonly attended?: boolean;
+  /**
    * The pictures pasted into the lane's task's thread, which its file tools may read though the data
    * directory holds them (Workbench spec §13). Its commands read none. Plan has no task, so none.
    */
@@ -324,6 +330,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const { checkout, toolchain, readList } = access;
       const protectedList = access.protectedReads;
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
+      const secretsOnCard = input.attended === true ? [...access.checkoutSecrets] : [];
       const tmpDir = createLaneTempDir(roots.temp, tempDirLimit(input.provider ?? Provider.Claude));
       // The session's own temp dir root is closed to every other sandbox too.
       const sandboxRoots = [...new Set([...access.sandboxRoots, roots.temp])];
@@ -474,9 +481,13 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,
             ]),
-            ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
+            ...[...secretFiles, ...setupSecrets]
+              .filter((path) => !secretsOnCard.includes(path))
+              .flatMap(secretReadRules),
           ],
           askRules: [
+            // Claude Code asks before a Read of one even if a hook were to allow it.
+            ...secretsOnCard.flatMap(secretReadRules),
             ...claudeProtected.files.flatMap((path) => [
               `Edit(${ruleScope(path)})`,
               `Write(${ruleScope(path)})`,
@@ -493,6 +504,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           home: deps.home,
           protectedReads: protectedList,
           secretFiles: [...secretFiles, ...setupSecrets],
+          ...(secretsOnCard.length === 0 ? {} : { secretsOnCard }),
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
           ...(input.taskFiles === undefined ? {} : { filesDir: input.taskFiles }),

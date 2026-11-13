@@ -100,6 +100,82 @@ describe('readAccess', () => {
     tree?: boolean;
     expected: ReadAccess;
   }[] = [
+    // In a session a person is in, a Read of the checkout's own `.env` file is the builder's to allow
+    // on a card, as in Claude Code; a search over it, a link out of the checkout and a lane stay shut.
+    {
+      name: "a Read of the checkout's .env asks where a person is in the session",
+      setup: () => {
+        writeFileSync(join(checkout, '.env'), 'KEY=1');
+      },
+      path: () => join(checkout, '.env'),
+      context: () => ({
+        secretFiles: [join(checkout, '.env')],
+        secretsOnCard: [join(checkout, '.env')],
+      }),
+      expected: 'ask',
+    },
+    {
+      name: "a Read of a file in the checkout's .env folder asks where a person is in the session",
+      setup: () => {
+        mkdirSync(join(checkout, '.env'));
+        writeFileSync(join(checkout, '.env', 'prod'), 'KEY=1');
+      },
+      path: () => join(checkout, '.env', 'prod'),
+      context: () => ({
+        secretFiles: [join(checkout, '.env')],
+        secretsOnCard: [join(checkout, '.env')],
+      }),
+      expected: 'ask',
+    },
+    {
+      name: "a search of the checkout's .env stays protected where a person is in the session",
+      setup: () => {
+        mkdirSync(join(checkout, '.env'));
+      },
+      path: () => join(checkout, '.env'),
+      context: () => ({
+        secretFiles: [join(checkout, '.env')],
+        secretsOnCard: [join(checkout, '.env')],
+      }),
+      tree: true,
+      expected: 'protected',
+    },
+    {
+      name: 'a search of the checkout over its .env stays refused where a person is in the session',
+      setup: () => {
+        writeFileSync(join(checkout, '.env'), 'KEY=1');
+      },
+      path: () => checkout,
+      context: () => ({
+        secretFiles: [join(checkout, '.env')],
+        secretsOnCard: [join(checkout, '.env')],
+        setupReads: [checkout],
+      }),
+      tree: true,
+      expected: 'contains-protected',
+    },
+    {
+      name: 'a .env that links to ~/.ssh stays protected where a person is in the session',
+      setup: () => {
+        symlinkSync(join(home, '.ssh', 'id_rsa'), join(checkout, '.env'));
+      },
+      path: () => join(checkout, '.env'),
+      context: () => ({
+        protectedReads: [join(home, '.ssh')],
+        secretFiles: [join(checkout, '.env'), join(home, '.ssh', 'id_rsa')],
+        secretsOnCard: [join(checkout, '.env')],
+      }),
+      expected: 'protected',
+    },
+    {
+      name: "a lane's Read of the checkout's .env stays protected",
+      setup: () => {
+        writeFileSync(join(checkout, '.env'), 'KEY=1');
+      },
+      path: () => join(checkout, '.env'),
+      context: () => ({ secretFiles: [join(checkout, '.env')] }),
+      expected: 'protected',
+    },
     {
       name: 'a file in a setup read under ~/.claude is allowed',
       setup: () => {
@@ -801,6 +877,19 @@ describe('fileAccessJudge in the guard', () => {
       'outside the paths a lane may read without asking',
     );
     expect(judge.readAsk('Read', { file_path: join(sibling, 'secret') })).toContain('outside');
+  });
+
+  it("asks the builder before a pass's Read of the checkout's .env, and refuses it in a lane", () => {
+    writeFileSync(join(checkout, '.env'), 'KEY=1');
+    const secrets = { secretFiles: [join(checkout, '.env')] };
+    const pass = fileAccessJudge(context({ ...secrets, secretsOnCard: [join(checkout, '.env')] }));
+    expect(guard(pass, 'Read', { file_path: '.env' })).toEqual({ decision: 'allow' });
+    expect(pass.readAsk('Read', { file_path: '.env' })).toBe(
+      ".env holds the project's secrets, so the builder is asked before it is read.",
+    );
+    expect(guard(pass, 'Grep', { path: '.env', pattern: 'KEY' }).decision).toBe('deny');
+    const lane = fileAccessJudge(context(secrets));
+    expect(guard(lane, 'Read', { file_path: '.env' }).decision).toBe('deny');
   });
 
   it('refuses a Glob whose literal prefix reaches a protected directory', () => {

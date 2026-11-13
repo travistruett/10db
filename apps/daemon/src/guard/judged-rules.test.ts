@@ -392,6 +392,18 @@ const TOOL_ROWS: readonly Row[] = [
     'ask',
     UNCLAIMED,
   ),
+  // A key file in the checkout is no secret 10db lists: the guard leaves its Read to the judge,
+  // whose reads-secrets limit is a soft deny in a pass, so Allow this can clear it.
+  tool(
+    'a Read of a key file in the checkout',
+    'Read',
+    { file_path: 'certs/server.key' },
+    'allow',
+    'allow',
+    {
+      fileAccess: access,
+    },
+  ),
   tool("10db's own tool", 'mcp__10db__complete_step', {}, 'allow', 'allow'),
   tool(
     'a write to .claude/settings.json',

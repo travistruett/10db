@@ -161,6 +161,20 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('.env files in a session a person is in ask before a Read, and stay denied to the kernel', async () => {
+    const env = writeIn(checkout, '.env');
+    const session = await sandbox().forSession(input({ attended: true }));
+    try {
+      expect(session.spec.settings.filesystem.denyRead).toContain(env);
+      expect(session.spec.disallowedTools.filter((rule) => rule.includes('.env'))).toEqual([]);
+      expect(session.spec.askRules).toContain(`Read(/${env})`);
+      expect(session.fileAccess.secretsOnCard).toEqual([env]);
+      expect(session.fileAccess.secretFiles).toContain(env);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("writes only the lane's own temp dir, never a shared cache or pnpm's shared lock directory", async () => {
     const session = await sandbox().forSession(input());
     try {
