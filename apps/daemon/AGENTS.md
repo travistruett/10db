@@ -9,7 +9,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   and problems, never values. `main.ts` exits 4 with one line on an `EnvError` or a `WorktreeRootError`,
   and the desktop supervisor stops instead of restarting into the same refusal.
 - `TENDB_BENCHMARKS=off` keeps a daemon from reading the Artificial Analysis key and from calling AA
-  (`aaKeyReaderFromEnv`: the sync records `no_key`). Only the installed app's daemon syncs; the e2e web
+  (`aaKeyReaderFromEnv`: the sync records `no_key`), and with it from reading OpenRouter's scores and speeds
+  (`daemonOptionsFromEnv` leaves `openRouterSync` off). Only the installed app's daemon syncs; the e2e web
   server, the live acceptance daemon and `scripts/dev.sh` set it, and `tests/repo/src/benchmarks-off.test.ts`
   checks they do. A new launcher of a throwaway daemon sets it too.
 - `TENDB_CATALOGUE=off` keeps a daemon from fetching the model catalogue from models.dev
@@ -27,7 +28,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `test/fixtures/catalogue.json`, and `tests/repo/src/benchmarks-off.test.ts` checks it.
 - `TENDB_JUDGE=off` keeps a daemon from reading any OpenRouter account's key (or the `openrouter-api-key` item
   that `moveOpenRouterKey` moves into an account at start) and from calling OpenRouter (`judgeOff` in
-  `daemonOptionsFromEnv`; every decision then keeps today's rule). Only the installed app's daemon asks models;
+  `daemonOptionsFromEnv`; every decision then keeps today's rule), and keeps the OpenRouter sync (`benchmarks/openrouter-sync.ts`) from running. Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
 - `TENDB_SLACK=off` keeps a daemon from reading the Slack bot token (Keychain service `10db`, account
@@ -78,7 +79,7 @@ Each module's notes are in its own `src/<module>/AGENTS.md`. Read the ones for t
 write a module's notes there, not here. This file keeps what crosses modules.
 
 - `accounts/`: account pauses, the monthly cap, readiness and staggered starts (`src/accounts/AGENTS.md`)
-- `benchmarks/`: Artificial Analysis's model list, synced with the builder's own key (`src/benchmarks/AGENTS.md`)
+- `benchmarks/`: Artificial Analysis's model list and OpenRouter's scores and speeds, each synced with the builder's own key (`src/benchmarks/AGENTS.md`)
 - `catalogue/`: the model catalogue from models.dev and its four rungs (`src/catalogue/AGENTS.md`)
 - `daemon/`: the composition root: start-up, wiring and the services behind the API (`src/daemon/AGENTS.md`)
 - `delivery/`: batches: cutting, joining, gates, landing and pull requests (`src/delivery/AGENTS.md`)
@@ -89,7 +90,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `goals/`: adopting a goal brief, and goal digests (`src/goals/AGENTS.md`)
 - `guard/`: the PreToolUse guard: protected paths, hazards and the shell judge (`src/guard/AGENTS.md`)
 - `hazards/`: a project's hazards, read from its repository, and claims per copy or project (`src/hazards/AGENTS.md`)
-- `judge/`: routine decisions asked of a fast model through OpenRouter (`src/judge/AGENTS.md`)
+- `judge/`: routine decisions asked of a fast model through OpenRouter, and each decision model's cost and time (`src/judge/AGENTS.md`)
 - `keep-awake/`: keeps the Mac awake while lanes run (`src/keep-awake/AGENTS.md`)
 - `knowledge/`: the knowledge rules: scope, the context pack and promotion (`src/knowledge/AGENTS.md`)
 - `load/`: the load guard that holds work while the Mac is overloaded (`src/load/AGENTS.md`)
