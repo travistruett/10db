@@ -1721,6 +1721,32 @@ describe('a Plan made from a bundle', () => {
     });
   });
 
+  it('an effort-only decision that supersedes one in Knowledge refuses Convert', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    patchBody(shapeId, 'd2', (body) => {
+      body['supersedes'] = mintId('Decision');
+    });
+    const out = convertPlan(shapeId);
+    expect(out.ok ? [] : out.errors).toContain(
+      'd2 is for this effort only, so it cannot supersede a decision in Knowledge; make it lasting or drop supersedes',
+    );
+  });
+
+  it('a cite of a dropped decision refuses Convert', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    const d1 = must(
+      listShapeProposals(c.store.db, shapeId).find((r) => r.key === 'd1'),
+      'd1',
+    );
+    write((ctx) => {
+      patchShapeProposal(ctx, d1.id, { state: ShapeProposalState.Rejected });
+    });
+    const out = convertPlan(shapeId);
+    expect(out.ok ? [] : out.errors).toContain(
+      'Pair a device: it cites d1, which is no entry or decision of this Plan',
+    );
+  });
+
   it('an effort-only decision is accepted with no knowledge row and no link', () => {
     const shapeId = importInto(bundleJson(c.project.id));
     convertedPlan(shapeId);

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  mintId,
   PlanImportError,
   PlanImportPreview,
   PlanImportResult,
@@ -156,6 +157,16 @@ describe('POST /projects/:projectId/plans/import', () => {
       'Task t1, cites: nope',
       'Task t1, areas: docs',
     ]);
+    expect(await shapesOf(projectId)).toEqual([]);
+  });
+
+  it('a bundle naming another project than the route is refused, and writes nothing', async () => {
+    const projectId = await seed();
+    const res = await post(`/projects/${projectId}/plans/import`, {
+      bundle: bundleJson(mintId('Project')),
+    });
+    expect(res.status).toBe(400);
+    expect(PlanImportError.parse(res.body).errors.map((e) => e.path)).toContain('projectId');
     expect(await shapesOf(projectId)).toEqual([]);
   });
 

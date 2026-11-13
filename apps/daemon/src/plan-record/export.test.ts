@@ -1,5 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -164,16 +168,53 @@ describe('exportPlan', () => {
     expect(error instanceof Error ? error.message : '').toMatch(/another Plan/);
   });
 
-  it('a link planted in a marked folder as documents/p1.md is not followed', async () => {
+  it.each([
+    [
+      'a symbolic link',
+      (planted: string, target: string) => {
+        symlinkSync(target, planted);
+      },
+    ],
+    [
+      'a hard link',
+      (planted: string, target: string) => {
+        linkSync(target, planted);
+      },
+    ],
+    ['a FIFO', (planted: string) => execFileSync('mkfifo', [planted])],
+  ] as const)(
+    '%s planted in a marked folder as documents/p1.md is replaced, never written through',
+    async (_, plant) => {
+      const dir = join(root.path, 'out');
+      await run(dir);
+      const target = join(root.path, 'target.md');
+      writeFileSync(target, 'untouched');
+      const planted = join(dir, 'documents', 'p1.md');
+      rmSync(planted);
+      plant(planted, target);
+      await run(dir);
+      expect(readFileSync(target, 'utf8')).toBe('untouched');
+      expect(lstatSync(planted).isFile()).toBe(true);
+      expect(readFileSync(planted, 'utf8')).toBe(P1_BODY);
+    },
+  );
+
+  it('a file where the documents folder goes is refused by name', async () => {
     const dir = join(root.path, 'out');
     await run(dir);
-    const target = join(root.path, 'target.md');
-    writeFileSync(target, 'untouched');
-    const planted = join(dir, 'documents', 'p1.md');
-    // Replace the exported file with a link to a file outside the folder.
-    rmSync(planted);
-    symlinkSync(target, planted);
-    await expect(run(dir)).rejects.toThrow();
-    expect(readFileSync(target, 'utf8')).toBe('untouched');
+    rmSync(join(dir, 'documents'), { recursive: true });
+    writeFileSync(join(dir, 'documents'), 'in the way');
+    expect(await refused(dir)).toMatch(/documents/);
+  });
+
+  it('a folder it cannot write is refused by name', async () => {
+    const dir = join(root.path, 'locked');
+    mkdirSync(dir);
+    chmodSync(dir, 0o500);
+    try {
+      expect(await refused(dir)).toMatch(/could not write/);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
   });
 });

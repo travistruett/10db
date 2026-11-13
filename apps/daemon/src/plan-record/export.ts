@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { InvalidError, type PlanExportResult, type ShapeId } from '@10db/contracts';
 import type { DbReader } from '@10db/db';
@@ -61,17 +62,38 @@ async function refuseGitTree(real: string): Promise<void> {
   }
 }
 
-/** Opens a file to write without following a link at its name. */
-async function writeNoFollow(path: string, text: string): Promise<void> {
+/**
+ * Writes a file under a fresh name opened with O_EXCL and O_NOFOLLOW, then renames it over `path`, so
+ * a link, hard link or FIFO planted at `path` is replaced rather than written through.
+ */
+async function writeReplacing(path: string, text: string): Promise<void> {
+  const fresh = `${path}.${randomUUID()}.tmp`;
   const handle = await open(
-    path,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+    fresh,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
     0o644,
   );
   try {
-    await handle.writeFile(text, 'utf8');
-  } finally {
-    await handle.close();
+    try {
+      await handle.writeFile(text, 'utf8');
+    } finally {
+      await handle.close();
+    }
+    await rename(fresh, path);
+  } catch (error) {
+    await rm(fresh, { force: true });
+    throw error;
+  }
+}
+
+/** Runs one file step of the export; a file system error is refused naming the file. */
+async function onFile<T>(path: string, verb: 'read' | 'write', run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof InvalidError) throw error;
+    const code = error instanceof Error && 'code' in error ? String(error.code) : 'failed';
+    throw new InvalidError(`10db could not ${verb} ${path} (${code})`);
   }
 }
 
@@ -99,19 +121,28 @@ export async function exportPlan(
     if (held.length > 0) {
       if (!held.includes(EXPORT_MARKER))
         throw new InvalidError(`${real} is not empty and is not an export of this Plan`);
-      const marker = await readFile(join(real, EXPORT_MARKER), {
-        encoding: 'utf8',
-        flag: constants.O_RDONLY | constants.O_NOFOLLOW,
-      });
+      const markerPath = join(real, EXPORT_MARKER);
+      const marker = await onFile(markerPath, 'read', () =>
+        readFile(markerPath, {
+          encoding: 'utf8',
+          flag: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        }),
+      );
       if (marker.trim() !== shapeId)
         throw new InvalidError(`${real} is the export of another Plan`);
     }
   }
 
   const files = exportLayout(readRecordForExport(db, shapeId));
-  await folderAt(real);
-  await folderAt(join(real, 'documents'));
-  for (const file of files) await writeNoFollow(join(real, file.path), file.text);
-  await writeNoFollow(join(real, EXPORT_MARKER), `${shapeId}\n`);
+  // The marker goes first, so an export that fails part-way leaves a folder its retry accepts.
+  await onFile(real, 'write', () => folderAt(real));
+  const markerPath = join(real, EXPORT_MARKER);
+  await onFile(markerPath, 'write', () => writeReplacing(markerPath, `${shapeId}\n`));
+  const documents = join(real, 'documents');
+  await onFile(documents, 'write', () => folderAt(documents));
+  for (const file of files) {
+    const path = join(real, file.path);
+    await onFile(path, 'write', () => writeReplacing(path, file.text));
+  }
   return { dir: real, files: [...files.map((f) => f.path), EXPORT_MARKER] };
 }

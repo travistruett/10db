@@ -169,7 +169,10 @@ function pinnedRevision(
       };
 }
 
-/** Why a task's cites can't be carried: each must be an entry or a decision proposal of the Plan. */
+/**
+ * Why a task's cites can't be carried: each must be an entry or a decision proposal of the Plan that
+ * is still pending or was converted, not one dropped or replaced.
+ */
 function citeProblems(
   db: DbReader,
   shapeId: ShapeId,
@@ -177,7 +180,13 @@ function citeProblems(
   title: string,
   cites: readonly string[],
 ): string[] {
-  const decisions = new Set(rows.filter((r) => r.kind === 'decision').map((r) => r.key));
+  const live: readonly ShapeProposalState[] = [
+    ShapeProposalState.Pending,
+    ShapeProposalState.Accepted,
+  ];
+  const decisions = new Set(
+    rows.filter((r) => r.kind === 'decision' && live.includes(r.state)).map((r) => r.key),
+  );
   return cites
     .filter((key) => !decisions.has(key) && getShapeEntry(db, shapeId, key) === undefined)
     .map((key) => `${title}: it cites ${key}, which is no entry or decision of this Plan`);
@@ -368,6 +377,10 @@ export function convertProposals(
       const problem =
         record.supersedes === undefined ? null : world.decisionProblem(record.supersedes);
       if (problem !== null) errors.push(`${row.key} supersedes ${problem}`);
+      if (!record.lasting && record.supersedes !== undefined)
+        errors.push(
+          `${row.key} is for this effort only, so it cannot supersede a decision in Knowledge; make it lasting or drop supersedes`,
+        );
     } else if (row.kind === 'principle') {
       const record = ShapeProposalBody.principle.parse(row.body);
       if (
