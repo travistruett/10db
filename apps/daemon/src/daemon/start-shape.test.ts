@@ -193,7 +193,7 @@ describe('a Shape conversation on a started daemon', () => {
     const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
     expect(view.models.default).toBe('claude-sonnet-5-5');
     expect(view.models.offered).toEqual([
-      { model: 'claude-haiku-5-5', tier: 'fast' },
+      { model: 'claude-haiku-5-5', tier: 'efficient' },
       { model: 'claude-sonnet-5-5', tier: 'balanced' },
     ]);
   });

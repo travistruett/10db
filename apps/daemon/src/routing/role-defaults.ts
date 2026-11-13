@@ -7,16 +7,17 @@ import {
   TIERS,
   tierLevel,
   topModel,
+  topSpan,
   type TierPool,
 } from './pools';
 
 /** The tier and effort each role runs on when no score can route it. */
 export const ROLE_DEFAULT: Readonly<Record<StepRole, { tier: ModelTier; effort: Effort }>> = {
-  [StepRole.Plan]: { tier: ModelTier.Strongest, effort: Effort.High },
-  [StepRole.PlanReview]: { tier: ModelTier.Strongest, effort: Effort.High },
+  [StepRole.Plan]: { tier: ModelTier.Capable, effort: Effort.High },
+  [StepRole.PlanReview]: { tier: ModelTier.Capable, effort: Effort.High },
   [StepRole.Implement]: { tier: ModelTier.Balanced, effort: Effort.High },
-  [StepRole.Review]: { tier: ModelTier.Strongest, effort: Effort.High },
-  [StepRole.Qa]: { tier: ModelTier.Fast, effort: Effort.Medium },
+  [StepRole.Review]: { tier: ModelTier.Capable, effort: Effort.High },
+  [StepRole.Qa]: { tier: ModelTier.Efficient, effort: Effort.Medium },
 };
 
 export interface TierPick {
@@ -46,13 +47,14 @@ export function pickByDefault(
   };
 }
 
-/** The tier a role runs on, which a floor moves to the strongest. */
+/** The tier a role runs on, which a floor moves to the top one. */
 export const defaultTier = (role: StepRole, floored: boolean): ModelTier =>
-  floored ? ModelTier.Strongest : ROLE_DEFAULT[role].tier;
+  floored ? ModelTier.Frontier : ROLE_DEFAULT[role].tier;
 
 /**
  * One rung up from a profile: the top model of its tier when it is not already there, then the cheapest model of
- * the next tier up, then, on the top of the strongest, the next effort. A model with no tier climbs from the
+ * the next tier up, then, on the top of the highest, the next effort. The top of Capable is the dearest model of
+ * Capable and Frontier together. A model with no tier climbs from the
  * role's tier, never downward. Undefined at the top.
  */
 export function strongerDefault(
@@ -62,9 +64,10 @@ export function strongerDefault(
 ): ModelProfileDto | undefined {
   const offered = profiles.filter(automatic);
   const tier = from.tier ?? roleTier;
-  const top = topModel(offered.filter((p) => p.tier === tier))[0]?.model;
+  const span = topSpan(tier);
+  const top = topModel(offered.filter((p) => p.tier !== null && span.includes(p.tier)))[0]?.model;
   if (top !== undefined && top !== from.model) return atEffort(top, from.effort, offered);
-  for (const above of TIERS.slice(tierLevel(tier) + 1)) {
+  for (const above of TIERS.slice(tierLevel(tier) + span.length)) {
     const cheapest = modelsByPrice(offered.filter((p) => p.tier === above))[0];
     if (cheapest !== undefined) return atEffort(cheapest, from.effort, offered);
   }

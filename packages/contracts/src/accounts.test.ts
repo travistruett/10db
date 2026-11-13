@@ -53,7 +53,7 @@ describe('AccountInput', () => {
         settings: {
           region: 'eu-central-1',
           awsProfile: null,
-          tierOverrides: { fast: 'eu.anthropic.claude-haiku-5-5-v1:0' },
+          tierOverrides: { efficient: 'eu.anthropic.claude-haiku-5-5-v1:0' },
         },
       },
     },
@@ -64,7 +64,7 @@ describe('AccountInput', () => {
         label: 'OpenRouter',
         settings: {
           baseUrl: 'https://openrouter.ai/api',
-          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
+          tierOverrides: { efficient: 'vendor/small', frontier: 'vendor/large' },
         },
       },
     },
@@ -148,7 +148,7 @@ describe('AccountInput', () => {
       input: {
         kind: 'claude_subscription',
         label: 'x',
-        settings: { tierOverrides: { strongest: 'fast' } },
+        settings: { tierOverrides: { frontier: 'efficient' } },
       },
       message: /tierOverrides/,
     },
@@ -157,7 +157,7 @@ describe('AccountInput', () => {
       input: {
         kind: 'claude_subscription',
         label: 'x',
-        settings: { tierOverrides: { fast: '  ' } },
+        settings: { tierOverrides: { efficient: '  ' } },
       },
       message: /tierOverrides/,
     },

@@ -148,12 +148,8 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Models:
-      return (
-        <>
-          {heading}
-          <ModelsSection />
-        </>
-      );
+      // The page carries its own title, so the Account select and the refresh button sit beside it.
+      return <ModelsSection />;
     case SettingsSectionKey.Team:
       return (
         <>

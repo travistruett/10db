@@ -24,7 +24,7 @@ const highRisk = patternDto({
 const retries = patternDto({
   name: 'Second tries',
   match: { retryOnly: true },
-  setting: { kind: 'tier', tier: 'strongest' },
+  setting: { kind: 'tier', tier: 'capable' },
   position: 1,
 });
 
@@ -94,7 +94,7 @@ describe('Settings › Personas and flows › patterns', () => {
       {
         name: 'Second tries',
         match: { roles: [], riskTags: [], areas: [], retryOnly: true },
-        setting: { kind: 'tier', tier: 'strongest' },
+        setting: { kind: 'tier', tier: 'capable' },
       },
       {
         name: 'High-risk work',

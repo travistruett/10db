@@ -4,13 +4,13 @@ const NOW = '2026-10-17T12:00:00.000Z';
 
 /** The invented models of the tests: a tier and an output price each, never a real model's. */
 const MODELS = {
-  small: { tier: ModelTier.Fast, outputPrice: 1 },
+  small: { tier: ModelTier.Efficient, outputPrice: 1 },
   mid: { tier: ModelTier.Balanced, outputPrice: 5 },
-  big: { tier: ModelTier.Strongest, outputPrice: 25 },
-  /** Dearer than `big` in the same tier: what top of tier picks. */
-  peak: { tier: ModelTier.Strongest, outputPrice: 50 },
-  /** Dearer still: a third model in the Strongest tier. */
-  apex: { tier: ModelTier.Strongest, outputPrice: 75 },
+  big: { tier: ModelTier.Capable, outputPrice: 25 },
+  /** Dearer than `big` in the same tier. */
+  peak: { tier: ModelTier.Capable, outputPrice: 50 },
+  /** Dearer still, and the maker's top: the Frontier model. */
+  apex: { tier: ModelTier.Frontier, outputPrice: 75 },
 } as const;
 type TestModel = keyof typeof MODELS;
 

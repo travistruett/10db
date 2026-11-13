@@ -2,9 +2,10 @@ import { ModelStatus, ModelTier } from '@10db/contracts';
 
 /** How each tier reads in the UI. */
 export const TIER_LABEL: Readonly<Record<ModelTier, string>> = {
-  [ModelTier.Fast]: 'Fast',
+  [ModelTier.Efficient]: 'Efficient',
   [ModelTier.Balanced]: 'Balanced',
-  [ModelTier.Strongest]: 'Strongest',
+  [ModelTier.Capable]: 'Capable',
+  [ModelTier.Frontier]: 'Frontier',
 };
 
 /** How each status reads in a badge; a current model needs none on the list, the drawer says it. */

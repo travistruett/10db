@@ -1,2 +1,2 @@
 /** UI/daemon handshake version. Bump on any breaking change to the API or event stream. */
-export const PROTOCOL_VERSION = 8 as const;
+export const PROTOCOL_VERSION = 9 as const;

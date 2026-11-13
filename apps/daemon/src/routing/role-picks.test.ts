@@ -89,7 +89,7 @@ describe('rolePicks', () => {
     },
     {
       name: 'a global role setting',
-      over: { roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'strongest' })] },
+      over: { roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'capable' })] },
       want: {
         plan: 'mid@high',
         plan_review: 'big@high',
@@ -188,7 +188,7 @@ describe('rolePicks', () => {
   it('leaves the model empty where the account offers nothing for the tier', () => {
     const picks = picksOf({
       profiles: [],
-      roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'fast' })],
+      roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'efficient' })],
     });
     expect(picks.find((p) => p.role === 'qa')).toMatchObject({ profileId: null, model: null });
   });

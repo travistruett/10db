@@ -12,7 +12,12 @@ import { TIER_LABEL } from './model-labels';
 /** The select value of "no setting": an inherited role or a task with no override. */
 export const NO_SETTING = 'none';
 
-const TIER_ORDER: readonly ModelTier[] = [ModelTier.Fast, ModelTier.Balanced, ModelTier.Strongest];
+const TIER_ORDER: readonly ModelTier[] = [
+  ModelTier.Efficient,
+  ModelTier.Balanced,
+  ModelTier.Capable,
+  ModelTier.Frontier,
+];
 
 /** The select value for a setting. Each distinct setting has its own. */
 export function settingValue(setting: ModelSetting | null): string {
