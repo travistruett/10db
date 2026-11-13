@@ -69,9 +69,10 @@ function listEfforts(
       }),
     };
   });
+  // Ranked on Artificial Analysis's own score, so numbers arriving from OpenRouter never move the headline.
   withFacts.sort((a, b) => {
-    const x = a.facts.intelligence;
-    const y = b.facts.intelligence;
+    const x = a.p.scores.intelligence;
+    const y = b.p.scores.intelligence;
     if (x === null || y === null) {
       if (x !== null) return -1;
       if (y !== null) return 1;

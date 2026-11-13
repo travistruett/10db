@@ -192,6 +192,28 @@ describe('buildModelRows', () => {
       });
     });
 
+    it('does not let a relayed score reorder the efforts or change the row’s headline', () => {
+      const [row] = buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [
+          profile({ effort: 'high', scores: scored(60), costPerTaskUsd: 1 }),
+          profile({ effort: 'max', scores: scored(null) }),
+        ],
+        offers: [offer(subscription.id)],
+        openRouter: new Map([
+          ['claude-opus-5-5', [measure({ kind: 'score_aa', intelligence: 61 })]],
+        ]),
+      });
+      expect(row?.efforts.map((e) => [e.effort, e.intelligence, e.sources.intelligence])).toEqual([
+        ['high', 60, 'aa'],
+        ['max', 61, 'aa_via_openrouter'],
+      ]);
+      expect(row).toMatchObject({ intelligence: 60, costPerTaskUsd: 1 });
+      expect(row?.sources.intelligence).toBe('aa');
+    });
+
     it('shows the score OpenRouter relays on the Max effort alone, and names it', () => {
       const row = rowsWith([
         measure({ kind: 'score_aa', intelligence: 55, coding: 31, agentic: 22 }),
