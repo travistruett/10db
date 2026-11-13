@@ -25,7 +25,7 @@ describe('Settings › Planning › Small proposals', () => {
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     expect(save).toHaveProperty('disabled', true);
     fireEvent.change(box, { target: { value: '0' } });
     fireEvent.click(save);
@@ -53,7 +53,7 @@ describe('Settings › Planning › Small proposals', () => {
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: '5' } });
     expect(box).toHaveProperty('value', '5');
@@ -97,7 +97,7 @@ describe('Settings › Planning › Small proposals', () => {
     await waitFor(() => {
       expect(box).toHaveProperty('value', String(saved));
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: typed } });
     expect(box).not.toHaveProperty('value', '');

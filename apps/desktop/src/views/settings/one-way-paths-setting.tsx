@@ -55,7 +55,7 @@ export function OneWayPathsSetting({ project }: { readonly project: ProjectDto }
               });
             }}
           >
-            Save one-way paths
+            Save One-Way Paths
           </Button>
         </Stack>
       </SettingRow>
