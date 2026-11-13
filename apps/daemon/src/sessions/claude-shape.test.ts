@@ -10,10 +10,9 @@ import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { createChannel } from './channel';
-import { startShapeSession } from './claude-shape';
 import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
 import { SKILL_NAMES_LINE } from './setup-prompt';
-import type { QueryFn } from './claude-session';
+import { startShapeSession, type QueryFn } from './claude-session';
 import type {
   SessionEvent,
   ShapeSessionSpec,

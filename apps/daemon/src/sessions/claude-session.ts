@@ -31,6 +31,7 @@ import {
   modelRefusalOf,
   toHookOutput,
   toSdkMcpServer,
+  toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
 import { claudeQueryOptions } from './claude-query-options';
@@ -38,6 +39,7 @@ import {
   canUseToolBridge,
   createHookCwds,
   isClassifierEscalation,
+  measurementHooks,
   preToolUseHook,
   settingsRecheckHooks,
   type ToolGate,
@@ -47,7 +49,7 @@ import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import { settleWithin } from './settle-within';
-import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-check';
+import type { SignInCheck, SignInState } from './sign-in-check';
 import {
   SessionEndReason,
   type LanePermissionMode,
@@ -55,20 +57,15 @@ import {
   type SessionHandle,
   type SessionSpec,
   type ShapeImage,
+  type ShapeSessionHandle,
+  type ShapeSessionSpec,
 } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
-/**
- * How long each start of Claude Code may take to report its account before the prompt is sent. A lane
- * runs at background priority, so on a busy Mac a start can be slow: the wait grows with each start, and
- * there are as many starts as waits. A start that gets no account makes the session ask `claude auth
- * status`; only "not signed in" refuses the account at once, anything else starts again after a pause.
- */
+/** How long each start of a lane's Claude Code may take to report its account before the prompt is sent. */
 const START_WAITS_MS: readonly number[] = [30_000, 60_000, 120_000];
-/** The pause before the second start, and before the third. */
+/** The pause before a lane's second start, and before its third. */
 const START_BACKOFF_MS: readonly number[] = [10_000, 30_000];
-/** How many times a session starts Claude Code before slow starts end in a refusal. */
-const START_ATTEMPTS = START_WAITS_MS.length;
 /** The latest stderr of one start that is kept to say what Claude Code printed. */
 const STDERR_KEPT_CHARS = 4_000;
 const STOP_GRACE_MS = 5_000;
@@ -82,28 +79,6 @@ export type QueryFn = (params: {
   prompt: AsyncIterable<SDKUserMessage>;
   options: Options;
 }) => Query;
-
-export interface LaneSessionDeps {
-  /** 10db's pinned Claude Code (`startPinnedTools`), or `TENDB_CLAUDE_PATH` in its place. */
-  readonly claudePath: string;
-  /** The injected harness plugin directory. */
-  readonly pluginDir: string;
-  readonly logger: Logger;
-  /** How long stop() waits for interrupt, then for exit after abort. */
-  readonly stopGraceMs?: number;
-  /** Times the preflight and the stop grace periods; tests pass a ManualClock. */
-  readonly clock?: Clock;
-  /**
-   * The permission mode a sandboxed session runs in, over the one its spec carries. Only the live
-   * test sets it, to pin a mode whatever the app-wide setting says.
-   */
-  readonly lanePermissionMode?: LanePermissionMode;
-  /**
-   * Asks whether the account a session runs on is signed in, when a start gets no account. Defaults to
-   * `claude auth status` on `claudePath`; tests answer it so none of them runs the builder's claude.
-   */
-  readonly signInCheck?: SignInCheck;
-}
 
 /**
  * What a sandboxed lane runs in when neither the adapter nor the session's spec names a mode. The
@@ -259,12 +234,204 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   };
 }
 
+/**
+ * Plan's SDK options (Shape spec §5.2): the profile's options, the project's approved MCP servers over
+ * the control channel, and a PreToolUse hook that judges the session's calls and its subagents' alike.
+ */
+function exploreQueryOptions(
+  spec: ShapeSessionSpec,
+  deps: {
+    readonly claudePath: string;
+    readonly logger: Logger;
+    readonly gate: ToolGate;
+    readonly abortController: AbortController;
+    readonly onSpawn: (pid: number | null) => void;
+    readonly listedTools: () => Promise<readonly string[]>;
+    readonly spawn: ExploreSpawn | undefined;
+  },
+): Options {
+  const { spawn, gate } = deps;
+  const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
+    {
+      kind: 'explore',
+      systemPrompt: spec.systemPrompt,
+      tools: spec.tools,
+      allowedTools: spec.allowedTools,
+      disallowedTools: spec.disallowedTools,
+      agents: spec.agents,
+      setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+    },
+    spec.sandbox,
+  );
+  // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
+  const cwds = createHookCwds();
+  return {
+    cwd: spec.cwd,
+    model: spec.model,
+    effort: spec.effort,
+    ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
+    // The updater switch comes last, so neither env moves the pinned copy.
+    env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
+    pathToClaudeCodeExecutable: deps.claudePath,
+    ...profileOptions,
+    canUseTool: canUseToolBridge({
+      gate,
+      cwds,
+      canUseTool: (req) => spec.canUseTool(req),
+      escalated: () => false,
+      listedTools: deps.listedTools,
+    }),
+    hooks: {
+      PreToolUse: [
+        preToolUseHook({
+          gate,
+          cwds,
+          judge: (hookInput) =>
+            toShapeHookOutput(
+              spec.preToolUse({
+                toolName: hookInput.tool_name,
+                input: hookInput.tool_input,
+                agentId: hookInput.agent_id,
+                agentType: hookInput.agent_type,
+                cwd: hookInput.cwd,
+              }),
+            ),
+        }),
+      ],
+      ...measurementHooks(spec, deps.logger),
+    },
+    abortController: deps.abortController,
+    ...(spawn === undefined
+      ? {}
+      : { spawnClaudeCodeProcess: (options: SpawnOptions) => spawn(options, deps.onSpawn) }),
+  };
+}
+
+/** Starts Claude Code as the daemon's own child and tells its pid, so the session's commands can be watched. */
+type ExploreSpawn = (
+  options: SpawnOptions,
+  onSpawn: (pid: number | null) => void,
+) => SpawnedProcess;
+
+export interface ClaudeSessionDeps {
+  /** 10db's pinned Claude Code (`startPinnedTools`), or `TENDB_CLAUDE_PATH` in its place. */
+  readonly claudePath: string;
+  readonly logger: Logger;
+  /** How long stop() waits for interrupt, then for exit after abort. */
+  readonly stopGraceMs?: number;
+  /** Times the preflight and the stop grace periods; tests pass a ManualClock. */
+  readonly clock?: Clock;
+}
+
+/** One Claude session and what it is for: a lane's task, or one turn of Plan's conversation. */
+export type ClaudeSession =
+  | {
+      readonly profile: 'lane';
+      readonly spec: SessionSpec;
+      /** The injected harness plugin directory. */
+      readonly pluginDir: string;
+      /** The mode a sandboxed session runs in, over its spec's. */
+      readonly lanePermissionMode?: LanePermissionMode;
+      /** Asks whether the account is signed in, when a start gets no account. */
+      readonly signInCheck: SignInCheck;
+    }
+  | {
+      readonly profile: 'explore';
+      readonly spec: ShapeSessionSpec;
+      readonly spawn?: ExploreSpawn;
+    };
+
+/** One wait per start; how many waits is how many starts (spec §5.4's `attempts`). */
+export interface StartPlan {
+  readonly waitsMs: readonly number[];
+  readonly backoffMs: readonly number[];
+}
+
+/**
+ * A lane runs at background priority, so on a busy Mac a start can be slow: the wait grows with each
+ * start, and there are as many starts as waits (`START_ATTEMPTS = START_WAITS_MS.length`). A start that
+ * gets no account makes the session ask `claude auth status`; only "not signed in" refuses the account
+ * at once, anything else starts again after a pause.
+ */
+export const LANE_STARTS: StartPlan = {
+  waitsMs: START_WAITS_MS,
+  backoffMs: START_BACKOFF_MS,
+};
+/** Plan's conversation is the builder's to wait on: one start, which waits 30 s. */
+export const EXPLORE_STARTS: StartPlan = { waitsMs: [30_000], backoffMs: [] };
+
 /** A line for the prompt naming repo servers that didn't connect, so the agent doesn't hunt for their tools. */
-function failedServersNote(names: readonly string[]): string {
+function laneFailedServersNote(names: readonly string[]): string {
   return (
     `Note from 10db: these MCP servers from the repo's .mcp.json failed to connect and are not in this session: ${names.join(', ')}. ` +
     "Don't look for their tools. Work without them, or say in your handoff that the task needs one."
   );
+}
+
+/** A line for the first message naming project servers that didn't connect, so the session doesn't hunt for their tools. */
+function exploreFailedServersNote(names: readonly string[]): string {
+  return (
+    `Note from 10db: these MCP servers of the project failed to connect and are not in this session: ${names.join(', ')}. ` +
+    "Don't look for their tools; tell the builder when the plan needs one."
+  );
+}
+
+/**
+ * Where a lane and Plan's conversation differ in one session's run; each rule is one row of the
+ * difference table in the plan that merged the two loops. Everything else in the core is shared.
+ */
+const PROFILE_RULES = {
+  lane: {
+    /** What every refusal before the prompt ends with. */
+    unsent: 'No prompt was sent.',
+    mcpUnregistered: 'Claude Code could not register the MCP servers. No prompt was sent.',
+    failedServersNote: laneFailedServersNote,
+    /** The warning for servers that failed to connect, and whether 10db's own is among the names. */
+    failedServersLog: 'claude mcp servers failed to connect',
+    failedServersLogTendb: true,
+    modelCheckTail:
+      "The session stopped at its first turn, before any tool ran; that turn's first request may have been billed.",
+    /** A stop during the account wait still lets the account be checked, then releases the pump. */
+    stopEndsAccountWait: false,
+    /** A rejected rate limit, unless a later turn ends, ends the session as rate limited. */
+    rejectedLimitEnds: true,
+    /** An assistant rate_limit error carries no reset time: the latest rate_limit_event's fills it. */
+    fillsResetsAt: true,
+    /** A later init (after a compaction or restart) is skipped, so `started` comes once. */
+    skipsLaterInit: true,
+    /** A resumed session has had its first reply, whatever this process has seen. */
+    resumeHasReplied: false,
+    /** An interrupt before the prompt went in leaves claude alone. */
+    interruptsBeforePrompt: false,
+    refusedLog: 'claude session refused',
+  },
+  explore: {
+    unsent: 'No message was sent.',
+    mcpUnregistered: 'Claude Code could not register 10db’s tools. No message was sent.',
+    failedServersNote: exploreFailedServersNote,
+    failedServersLog: 'project mcp servers failed to connect',
+    failedServersLogTendb: false,
+    modelCheckTail: 'The session stopped at its first turn, before any tool ran.',
+    stopEndsAccountWait: true,
+    rejectedLimitEnds: false,
+    // Plan's notice wording rests on a null reset time (`shape/service.ts`).
+    fillsResetsAt: false,
+    // `shape/service.ts` takes the new session id from a later `started`.
+    skipsLaterInit: false,
+    resumeHasReplied: true,
+    interruptsBeforePrompt: true,
+    refusedLog: 'shape session refused',
+  },
+} as const;
+
+/** What a session's log lines carry: the session and its workstream, or its conversation. */
+function logFields(session: ClaudeSession): Record<string, string> {
+  switch (session.profile) {
+    case 'lane':
+      return { sessionId: session.spec.sessionId, workstreamId: session.spec.workstreamId };
+    case 'explore':
+      return { sessionId: session.spec.sessionId, shapeId: session.spec.shapeId };
+  }
 }
 
 /** A message sent before the prompt went in, held until it can follow the prompt. */
@@ -278,6 +445,8 @@ interface HeldMessage {
 interface StartAttempt {
   /** What each earlier start printed on stderr; one entry per earlier start that got no account. */
   readonly earlier: readonly string[];
+  /** How long this start and each before it waited for the account. */
+  readonly waitedMs: readonly number[];
   /** How long this start waits for the account. */
   readonly waitMs: number;
   /** No start follows this one. */
@@ -289,17 +458,45 @@ interface StartAttempt {
   readonly unanswered: (printed: string, unsent: readonly HeldMessage[]) => void;
 }
 
+/** A session that ends at once with its one `ended` event. */
+function endedSession(ended: Extract<SessionEvent, { type: 'ended' }>): SessionHandle {
+  const events = createChannel<SessionEvent>();
+  events.push(ended);
+  events.end();
+  return {
+    events,
+    send: () => undefined,
+    interrupt: () => Promise.resolve(null),
+    stop: () => Promise.resolve(),
+  };
+}
+
+/** The repo's committed settings can re-point the endpoint or credentials, which no account check would show. */
+function settingsRefusal(
+  session: ClaudeSession,
+  fixHint: string,
+): Extract<SessionEvent, { type: 'ended' }> | null {
+  if (session.profile !== 'lane' || (session.spec.sandbox ?? null) !== null) return null;
+  const problem = projectSettingsBillingProblem(session.spec.cwd);
+  if (!problem) return null;
+  return {
+    type: 'ended',
+    reason: SessionEndReason.BillingRefused,
+    message: `Billing check failed: ${problem}. No prompt was sent. ${fixHint}`,
+  };
+}
+
 function startSession(
-  spec: SessionSpec,
-  opts: LaneSessionDeps,
+  session: ClaudeSession,
+  opts: ClaudeSessionDeps,
   runQuery: QueryFn,
   attempt: StartAttempt,
 ): SessionHandle {
+  const { spec } = session;
+  const rules = PROFILE_RULES[session.profile];
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
-  const signInCheck: SignInCheck =
-    opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env));
-  const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
+  const log = opts.logger.child(logFields(session));
   const sandboxed = (spec.sandbox ?? null) !== null;
   // A sandboxed session loads no settings file, so only the account can be at fault.
   const fixHint = sandboxed
@@ -317,7 +514,7 @@ function startSession(
   });
   // Settles once the preflight knows whether claude reported an account and, if it did not, has retried or
   // refused the start. A claude that exits before reporting one ends the event stream while the sign-in
-  // check runs; the pump waits here so that exit is a start with no account, not a finished session.
+  // check runs; the lane's pump waits here so that exit is a start with no account, not a finished session.
   let settleAccountStep: () => void = () => undefined;
   const accountStep = new Promise<void>((resolve) => {
     settleAccountStep = resolve;
@@ -392,69 +589,74 @@ function startSession(
     return limitRejected ? 'rate_limited' : 'completed';
   };
 
-  // The repo's committed settings can re-point the endpoint or credentials, which no account check would show.
-  const settingsProblem = sandboxed ? null : projectSettingsBillingProblem(spec.cwd);
+  const settingsProblem = settingsRefusal(session, fixHint);
   if (settingsProblem) {
-    const message = `Billing check failed: ${settingsProblem}. No prompt was sent. ${fixHint}`;
-    log.error({ reason: message }, 'claude session refused');
-    events.push({ type: 'ended', reason: SessionEndReason.BillingRefused, message });
-    events.end();
-    return {
-      events,
-      send: () => undefined,
-      interrupt: () => Promise.resolve(null),
-      stop: () => Promise.resolve(),
-    };
+    log.error({ reason: settingsProblem.message }, rules.refusedLog);
+    return endedSession(settingsProblem);
   }
 
+  const listedTools = (): Promise<readonly string[]> =>
+    currentToolNames(
+      () => q.mcpServerStatus(),
+      initTools,
+      (error) => {
+        log.debug({ err: String(error) }, 'mcp server tool list unavailable');
+      },
+    );
+  const onSpawn = (p: number | null): void => {
+    pid = p;
+  };
+  const recheckSettings = (what: string): HookJSONOutput => {
+    if (haltOutput) return haltOutput;
+    if (halted()) return {};
+    const problem = projectSettingsBillingProblem(spec.cwd);
+    if (!problem) return {};
+    const message = `Billing check failed: ${problem}. ${what} the project's settings during the session, which was stopped. ${fixHint}`;
+    // Record the failure so every tool is denied and no prompt goes in now, answer the hook, and only
+    // then close the process.
+    failure = message;
+    failureReason = SessionEndReason.BillingRefused;
+    resolvePreflight(false);
+    log.error({ reason: message }, rules.refusedLog);
+    clock.setTimeout(() => {
+      input.end();
+      void settleWithin(clock, q.interrupt(), graceMs);
+      abortController.abort();
+    }, HALT_GRACE_MS);
+    haltOutput = { continue: false, stopReason: message, decision: 'block', reason: message };
+    return haltOutput;
+  };
   // The prompt is not pushed yet: it goes in only after the billing preflight passes.
   const q = runQuery({
     prompt: input,
-    options: buildQueryOptions(spec, {
-      claudePath: opts.claudePath,
-      pluginDir: opts.pluginDir,
-      abortController,
-      billingVerified,
-      listedTools: () =>
-        currentToolNames(
-          () => q.mcpServerStatus(),
-          initTools,
-          (error) => {
-            log.debug({ err: String(error) }, 'mcp server tool list unavailable');
-          },
-        ),
-      ...(opts.lanePermissionMode === undefined
-        ? {}
-        : { lanePermissionMode: opts.lanePermissionMode }),
-      onSpawn: (p) => {
-        pid = p;
-      },
-      isRefused: () => failure !== null,
-      recheckSettings: (what) => {
-        if (haltOutput) return haltOutput;
-        if (halted()) return {};
-        const problem = projectSettingsBillingProblem(spec.cwd);
-        if (!problem) return {};
-        const message = `Billing check failed: ${problem}. ${what} the project's settings during the session, which was stopped. ${fixHint}`;
-        // Record the failure so every tool is denied and no prompt goes in now, answer the hook, and only
-        // then close the process.
-        failure = message;
-        failureReason = SessionEndReason.BillingRefused;
-        resolvePreflight(false);
-        log.error({ reason: message }, 'claude session refused');
-        clock.setTimeout(() => {
-          input.end();
-          void settleWithin(clock, q.interrupt(), graceMs);
-          abortController.abort();
-        }, HALT_GRACE_MS);
-        haltOutput = { continue: false, stopReason: message, decision: 'block', reason: message };
-        return haltOutput;
-      },
-      onStderr: (chunk) => {
-        stderrTail = (stderrTail + chunk).slice(-STDERR_KEPT_CHARS);
-        log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
-      },
-    }),
+    options:
+      session.profile === 'lane'
+        ? buildQueryOptions(session.spec, {
+            claudePath: opts.claudePath,
+            pluginDir: session.pluginDir,
+            abortController,
+            billingVerified,
+            listedTools,
+            ...(session.lanePermissionMode === undefined
+              ? {}
+              : { lanePermissionMode: session.lanePermissionMode }),
+            onSpawn,
+            isRefused: () => failure !== null,
+            recheckSettings,
+            onStderr: (chunk) => {
+              stderrTail = (stderrTail + chunk).slice(-STDERR_KEPT_CHARS);
+              log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
+            },
+          })
+        : exploreQueryOptions(session.spec, {
+            claudePath: opts.claudePath,
+            logger: opts.logger,
+            gate: { verified: billingVerified, refused: () => failure !== null },
+            abortController,
+            onSpawn,
+            listedTools,
+            spawn: session.spawn,
+          }),
   });
 
   const refuse = (
@@ -469,10 +671,64 @@ function startSession(
     failureBasis = basis ?? null;
     resolvePreflight(false);
     resolveVerified(false);
-    log.error({ reason: message }, 'claude session refused');
+    log.error({ reason: message }, rules.refusedLog);
     input.end();
     void settleWithin(clock, q.interrupt(), graceMs);
     abortController.abort();
+  };
+  /**
+   * A start that got no account. Plan refuses at once. A lane asks whether the account is signed in:
+   * silence is not a sign-out, since a start under load can take minutes, so a start that is not the
+   * last closes and the session starts another.
+   */
+  const noAccount = async (): Promise<void> => {
+    if (session.profile === 'explore') {
+      refuse(
+        SessionEndReason.BillingRefused,
+        `Claude Code reported no account within ${String(attempt.waitMs / 1_000)} s. ${rules.unsent}`,
+      );
+      return;
+    }
+    // The SDK errors the stream and rejects accountInfo() about the same tick, in either order. Let the pump
+    // see how the stream ended before this decides to start again: a sandbox that cannot start is final
+    // (the pump ends the session), and a keyed account has no await below to give the pump that turn.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    if (over()) return;
+    // Only `claude auth status`, asked of the account's own config directory, says the account is
+    // signed out. A keyed account has no sign-in to check, and a stop in the meantime wants no answer.
+    const checkable = spec.account.kind === AccountKind.ClaudeSubscription && !stopRequested;
+    const signIn: SignInState = checkable ? await session.signInCheck(spec.env) : 'unknown';
+    if (over()) return;
+    if (!attempt.last && !stopRequested && signIn !== 'signed_out') {
+      // One slow start says nothing about the account: close this claude and let the session start another.
+      // Nothing is logged of what it printed beyond its length; the refusal, if it comes, says it.
+      log.warn(
+        { printedChars: stderrTail.length, signIn },
+        'claude reported no account; starting it again',
+      );
+      closedForRetry = true;
+      end(SessionEndReason.Error, null);
+      void settleWithin(clock, q.interrupt(), graceMs);
+      abortController.abort();
+      attempt.unanswered(stderrTail, unsent);
+      return;
+    }
+    const { why, printed } = noAccountWhy(
+      attempt.waitedMs,
+      [...attempt.earlier, stderrTail],
+      spec.account.kind,
+    );
+    // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
+    const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);
+    if (signedOut)
+      refuse(SessionEndReason.AccountRefused, `${signedOut.message}. ${rules.unsent}`, signedOut);
+    else
+      refuse(
+        SessionEndReason.BillingRefused,
+        `Account check failed: ${why}. ${printed}. ${rules.unsent} ${fixHint}`,
+      );
   };
   /**
    * Before the prompt: the account Claude Code loaded must match the project's billing mode. A named
@@ -482,58 +738,14 @@ function startSession(
     account = await settleWithin(clock, q.accountInfo(), attempt.waitMs);
     // An account is what the event pump waits for; a start with none is decided below, after the sign-in check.
     if (account) settleAccountStep();
-    if (ended || failure) return;
+    if (rules.stopEndsAccountWait ? halted() : over()) return;
     if (!account) {
-      // The SDK errors the stream and rejects accountInfo() about the same tick, in either order. Let the pump
-      // see how the stream ended before this decides to start again: a sandbox that cannot start is final
-      // (the pump ends the session), and a keyed account has no await below to give the pump that turn.
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-      if (over()) return;
-      // Silence is not a sign-out: a start under load can take minutes. Only `claude auth status`, asked
-      // of the account's own config directory, says the account is signed out. A keyed account has no
-      // sign-in to check, and a stop in the meantime wants no answer.
-      const checkable = spec.account.kind === AccountKind.ClaudeSubscription && !stopRequested;
-      const signIn: SignInState = checkable ? await signInCheck(spec.env) : 'unknown';
-      if (over()) return;
-      if (!attempt.last && !stopRequested && signIn !== 'signed_out') {
-        // One slow start says nothing about the account: close this claude and let the session start another.
-        // Nothing is logged of what it printed beyond its length; the refusal, if it comes, says it.
-        log.warn(
-          { printedChars: stderrTail.length, signIn },
-          'claude reported no account; starting it again',
-        );
-        closedForRetry = true;
-        end(SessionEndReason.Error, null);
-        void settleWithin(clock, q.interrupt(), graceMs);
-        abortController.abort();
-        attempt.unanswered(stderrTail, unsent);
-        return;
-      }
-      const { why, printed } = noAccountWhy(
-        START_WAITS_MS.slice(0, attempt.earlier.length + 1),
-        [...attempt.earlier, stderrTail],
-        spec.account.kind,
-      );
-      // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
-      const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);
-      if (signedOut)
-        refuse(
-          SessionEndReason.AccountRefused,
-          `${signedOut.message}. No prompt was sent.`,
-          signedOut,
-        );
-      else
-        refuse(
-          SessionEndReason.BillingRefused,
-          `Account check failed: ${why}. ${printed}. No prompt was sent. ${fixHint}`,
-        );
+      await noAccount();
       return;
     }
     const refusal = checkAccount(spec.account, seenFrom(account));
     if (refusal) {
-      refuse(SessionEndReason.AccountRefused, `${refusal.message}. No prompt was sent.`, refusal);
+      refuse(SessionEndReason.AccountRefused, `${refusal.message}. ${rules.unsent}`, refusal);
       return;
     }
     if (stopRequested) {
@@ -550,26 +762,24 @@ function startSession(
         { errName: error instanceof Error ? error.name : 'unknown' },
         'claude mcp servers could not be registered',
       );
-      refuse(
-        SessionEndReason.Error,
-        'Claude Code could not register the MCP servers. No prompt was sent.',
-      );
+      refuse(SessionEndReason.Error, rules.mcpUnregistered);
       return;
     }
     if (halted()) {
       resolvePreflight(false);
       return;
     }
-    if (leftOut.length > 0) log.warn({ servers: leftOut }, 'claude mcp servers failed to connect');
     const repoLeftOut = leftOut.filter((name) => name !== CLAUDE_MCP_SERVER);
+    const logged = rules.failedServersLogTendb ? leftOut : repoLeftOut;
+    if (logged.length > 0) log.warn({ servers: logged }, rules.failedServersLog);
     input.push(
       userMessage(
         repoLeftOut.length > 0
-          ? `${spec.prompt}\n\n${failedServersNote(repoLeftOut)}`
+          ? `${spec.prompt}\n\n${rules.failedServersNote(repoLeftOut)}`
           : spec.prompt,
         undefined,
         spec.images ?? [],
-        spec.promptUuid,
+        session.profile === 'lane' ? session.spec.promptUuid : undefined,
       ),
     );
     promptSent = true;
@@ -586,24 +796,7 @@ function startSession(
 
   /** On the first init: the credentials the CLI actually uses, after the repo's settings were applied. */
   function checkInit(init: SDKSystemMessage): void {
-    // Never log email or organization.
-    log.info(
-      {
-        apiKeySource: init.apiKeySource,
-        apiProvider: account?.apiProvider,
-        subscriptionType: account?.subscriptionType,
-        claudeCodeVersion: init.claude_code_version,
-        model: init.model,
-        // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
-        permissionMode: init.permissionMode,
-      },
-      'claude session billing',
-    );
-    // The servers the CLI loaded: 10db's own plus the repo's. Names and status only, never their config.
-    log.info(
-      { mcpServers: init.mcp_servers.map((s) => ({ name: s.name, status: s.status })) },
-      'claude session mcp',
-    );
+    if (session.profile === 'lane') logInit(log, init, account);
     // init has no plan field, so the preflight's account supplies apiProvider and subscriptionType.
     const credentials = checkInitCredentials(
       spec.account,
@@ -621,7 +814,7 @@ function startSession(
     if (!modelMatches(spec.model, init.model)) {
       refuse(
         SessionEndReason.BillingRefused,
-        `Model check failed: 10db asked for ${spec.model} but Claude Code runs ${init.model}. The session stopped at its first turn, before any tool ran; that turn's first request may have been billed.`,
+        `Model check failed: 10db asked for ${spec.model} but Claude Code runs ${init.model}. ${rules.modelCheckTail}`,
       );
       return;
     }
@@ -630,11 +823,11 @@ function startSession(
 
   let mcpStatusLogged = false;
   /**
-   * Once, after the first turn: MCP startup doesn't block init, so init often still says `pending` for a
-   * server `npx` is downloading. Names and status only; the status's `config` holds header values.
+   * Once, after a lane's first turn: MCP startup doesn't block init, so init often still says `pending`
+   * for a server `npx` is downloading. Names and status only; the status's `config` holds header values.
    */
   const logMcpStatus = (): void => {
-    if (mcpStatusLogged) return;
+    if (session.profile !== 'lane' || mcpStatusLogged) return;
     mcpStatusLogged = true;
     q.mcpServerStatus().then(
       (servers) => {
@@ -661,7 +854,7 @@ function startSession(
   };
 
   /** Whether an assistant message has come yet: only the first can show the model was refused. */
-  let repliedYet = false;
+  let repliedYet = rules.resumeHasReplied && spec.resumeProviderSessionId !== null;
   const pump = async (): Promise<void> => {
     try {
       for await (const msg of q) {
@@ -694,21 +887,27 @@ function startSession(
         if (msg.type === 'system' && msg.subtype === 'init') {
           initTools = msg.tools;
           if (started) {
-            // A later init (after a compaction or restart) is not checked again, but a mode other than the
-            // first init's is logged, so a lane that left auto mode shows up.
-            if (msg.permissionMode !== firstInitMode) {
+            // A later init (after a compaction or restart) is not checked again, but a lane logs a mode
+            // other than the first init's, so a lane that left auto mode shows up.
+            if (session.profile === 'lane' && msg.permissionMode !== firstInitMode) {
               log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
             }
-            continue;
+            if (rules.skipsLaterInit) continue;
+          } else {
+            if (!(await preflightOk)) continue;
+            checkInit(msg);
+            if (failure) continue;
+            firstInitMode = msg.permissionMode;
+            started = true;
           }
-          if (!(await preflightOk)) continue;
-          checkInit(msg);
-          if (failure) continue;
-          firstInitMode = msg.permissionMode;
-          started = true;
         }
         // Claude Code can change mode mid-session, for example leaving auto mode after repeated classifier refusals.
-        if (msg.type === 'system' && msg.subtype === 'status' && msg.permissionMode !== undefined) {
+        if (
+          session.profile === 'lane' &&
+          msg.type === 'system' &&
+          msg.subtype === 'status' &&
+          msg.permissionMode !== undefined
+        ) {
           log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
         }
         for (const event of mapSdkMessage(msg, { pid })) {
@@ -725,21 +924,23 @@ function startSession(
             });
             logMcpStatus();
           } else if (event.type === 'rate_limit') {
-            if (event.status === 'rejected') limitRejected = true;
+            if (rules.rejectedLimitEnds && event.status === 'rejected') limitRejected = true;
             if (event.resetsAt) lastResetsAt = event.resetsAt;
-            // An assistant rate_limit error carries no reset time: use the latest one a rate_limit_event reported.
-            emit(event.resetsAt ? event : { ...event, resetsAt: lastResetsAt });
+            emit(
+              event.resetsAt || !rules.fillsResetsAt ? event : { ...event, resetsAt: lastResetsAt },
+            );
           } else {
             emit(event);
           }
         }
         if (msg.type === 'assistant') readContext();
       }
-      if (!started) await accountStep;
+      if (session.profile === 'lane' && !started) await accountStep;
       end(endReason(), failure);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (
+        session.profile === 'lane' &&
         sandboxed &&
         !started &&
         !failure &&
@@ -754,7 +955,7 @@ function startSession(
         );
         return;
       }
-      if (!started) await accountStep;
+      if (session.profile === 'lane' && !started) await accountStep;
       if (failure) end(failureReason, failure);
       else if (stopRequested) end('stopped', null);
       else end('error', message);
@@ -777,7 +978,7 @@ function startSession(
       });
     },
     async interrupt() {
-      if (halted() || !promptSent) return null;
+      if (halted() || (!rules.interruptsBeforePrompt && !promptSent)) return null;
       return interruptReceipt(await settleWithin(clock, q.interrupt(), graceMs));
     },
     async stop() {
@@ -800,18 +1001,42 @@ function startSession(
   };
 }
 
+/** A lane's first init, logged: the billing it runs on and the servers the CLI loaded. Never email or organization. */
+function logInit(log: Logger, init: SDKSystemMessage, account: AccountInfo | undefined): void {
+  log.info(
+    {
+      apiKeySource: init.apiKeySource,
+      apiProvider: account?.apiProvider,
+      subscriptionType: account?.subscriptionType,
+      claudeCodeVersion: init.claude_code_version,
+      model: init.model,
+      // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
+      permissionMode: init.permissionMode,
+    },
+    'claude session billing',
+  );
+  // The servers the CLI loaded: 10db's own plus the repo's. Names and status only, never their config.
+  log.info(
+    { mcpServers: init.mcp_servers.map((s) => ({ name: s.name, status: s.status })) },
+    'claude session mcp',
+  );
+}
+
 /**
- * A session that starts Claude Code again when a start gets no account from it, up to `START_ATTEMPTS`
- * starts. A slow start (a lane runs at background priority) is not a signed-out account: only the
- * last start's silence is refused. The first start closes without any event, so the caller sees one
- * session; messages sent meanwhile go to the next start, and a stop in between ends it as stopped.
+ * A session that starts Claude Code again when a start gets no account from it, up to one start per
+ * wait in `starts`. A slow start (a lane runs at background priority) is not a signed-out account: only
+ * the last start's silence is refused. A start that closes for another emits no event, so the caller
+ * sees one session; messages sent meanwhile go to the next start, and a stop in between ends it as
+ * stopped.
  */
-export function startLaneSession(
-  spec: SessionSpec,
-  opts: LaneSessionDeps,
+export function startClaudeSession(
+  session: ClaudeSession,
+  deps: ClaudeSessionDeps,
   runQuery: QueryFn,
+  starts: StartPlan,
 ): SessionHandle {
-  const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
+  const attempts = starts.waitsMs.length;
+  const log = deps.logger.child(logFields(session));
   const events = createChannel<SessionEvent>();
   /** What each start that got no account printed. */
   const printed: string[] = [];
@@ -822,7 +1047,7 @@ export function startLaneSession(
   // Read through a function: TypeScript would otherwise keep the narrowing from the assignments.
   const closedStart = (): { readonly unsent: HeldMessage[] } | null => pending;
   const stopAsked = (): boolean => stopRequested;
-  const clock = opts.clock ?? systemClock;
+  const clock = deps.clock ?? systemClock;
   /** Wakes the pause between two starts early; a stop does. */
   let wake: () => void = () => undefined;
   const pause = (ms: number): Promise<void> =>
@@ -835,12 +1060,13 @@ export function startLaneSession(
     });
   const settled = (async () => {
     let carried: readonly HeldMessage[] = [];
-    for (let number = 1; number <= START_ATTEMPTS; number += 1) {
+    for (let number = 1; number <= attempts; number += 1) {
       pending = null;
-      const handle = startSession(spec, opts, runQuery, {
+      const handle = startSession(session, deps, runQuery, {
         earlier: [...printed],
-        waitMs: START_WAITS_MS[number - 1] ?? 0,
-        last: number === START_ATTEMPTS,
+        waitedMs: starts.waitsMs.slice(0, number),
+        waitMs: starts.waitsMs[number - 1] ?? 0,
+        last: number === attempts,
         unanswered: (text, unsent) => {
           printed.push(text);
           pending = { unsent: [...unsent] };
@@ -854,7 +1080,7 @@ export function startLaneSession(
       if (!stopAsked()) {
         // Back off before the next start: a Mac that is too loaded to start Claude Code in time needs a moment.
         log.info({ starts: number }, 'claude session starts again');
-        await pause(START_BACKOFF_MS[number - 1] ?? 0);
+        await pause(starts.backoffMs[number - 1] ?? 0);
       }
       if (stopAsked()) {
         events.push({ type: 'ended', reason: SessionEndReason.Stopped, message: null });
@@ -881,4 +1107,26 @@ export function startLaneSession(
       await settled;
     },
   };
+}
+
+export interface ShapeSessionDeps extends ClaudeSessionDeps {
+  readonly query: QueryFn;
+  /** Starts Claude Code as the daemon's own child and tells its pid, so the session's commands can be watched. */
+  readonly spawn?: ExploreSpawn;
+}
+
+/**
+ * One conversation's Claude Code session. It proves the account before the first message, as a lane
+ * does, and reports the same events; `interrupt` ends the running turn and leaves the session open.
+ */
+export function startShapeSession(
+  spec: ShapeSessionSpec,
+  deps: ShapeSessionDeps,
+): ShapeSessionHandle {
+  return startClaudeSession(
+    { profile: 'explore', spec, ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }) },
+    deps,
+    deps.query,
+    EXPLORE_STARTS,
+  );
 }

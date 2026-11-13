@@ -7,28 +7,43 @@ import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { seenModelsFrom } from './claude-model-list';
 import { userMessage } from './claude-mapping';
 import {
+  LANE_STARTS,
   refusedSession,
   spawnClaude,
-  startLaneSession,
+  startClaudeSession,
+  startShapeSession,
   UNSANDBOXED_REFUSAL,
-  type LaneSessionDeps,
+  type ClaudeSessionDeps,
   type QueryFn,
 } from './claude-session';
-import { startShapeSession } from './claude-shape';
 import { settleWithin } from './settle-within';
+import { claudeAuthStatus, type SignInCheck } from './sign-in-check';
 import {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
   type AccountProbeSpec,
   type CompletionSpec,
+  type LanePermissionMode,
   type SessionAdapter,
 } from './types';
 
 /** How long an identity probe waits for `accountInfo()`. */
 const IDENTITY_PROBE_MS = 15_000;
 
-export interface ClaudeAdapterOptions extends LaneSessionDeps {
+export interface ClaudeAdapterOptions extends ClaudeSessionDeps {
+  /** The injected harness plugin directory. */
+  readonly pluginDir: string;
+  /**
+   * The permission mode a sandboxed session runs in, over the one its spec carries. Only the live
+   * test sets it, to pin a mode whatever the app-wide setting says.
+   */
+  readonly lanePermissionMode?: LanePermissionMode;
+  /**
+   * Asks whether the account a session runs on is signed in, when a start gets no account. Defaults to
+   * `claude auth status` on `claudePath`; tests answer it so none of them runs the builder's claude.
+   */
+  readonly signInCheck?: SignInCheck;
   /** Starts `claude auth login`; tests stand in for the process. */
   readonly spawnLogin?: LoginSpawn;
   /** The SDK's query(); tests pass a scripted one. */
@@ -182,7 +197,20 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
     start: (spec) =>
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)
-        : startLaneSession(spec, opts, runQuery),
+        : startClaudeSession(
+            {
+              profile: 'lane',
+              spec,
+              pluginDir: opts.pluginDir,
+              ...(opts.lanePermissionMode === undefined
+                ? {}
+                : { lanePermissionMode: opts.lanePermissionMode }),
+              signInCheck: opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env)),
+            },
+            opts,
+            runQuery,
+            LANE_STARTS,
+          ),
     startShape: (spec) =>
       startShapeSession(spec, {
         claudePath: opts.claudePath,
