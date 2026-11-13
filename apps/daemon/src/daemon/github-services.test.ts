@@ -29,14 +29,24 @@ type Answer = string | null | GhError;
 
 function setup(initial: { gh: string | null; answer: Answer }) {
   const clock = new ManualClock();
-  const world = {
+  const world: {
+    gh: string | null;
+    answer: Answer;
+    probes: number;
+    hold: Promise<void> | null;
+    resolved: number;
+    children: FakeChild[];
+    events: GithubLoginEndedData[];
+    seenByEvent: GithubStatusDto[];
+  } = {
     gh: initial.gh,
     answer: initial.answer,
     probes: 0,
+    hold: null,
     resolved: 0,
-    children: [] as FakeChild[],
-    events: [] as GithubLoginEndedData[],
-    seenByEvent: [] as GithubStatusDto[],
+    children: [],
+    events: [],
+    seenByEvent: [],
   };
   const spawn: GhLoginSpawn = () => {
     const child = new FakeChild();
@@ -50,13 +60,14 @@ function setup(initial: { gh: string | null; answer: Answer }) {
       world.resolved += 1;
       return world.gh;
     },
-    readLogin: () => {
+    readLogin: async () => {
       world.probes += 1;
-      if (world.gh === null)
-        return Promise.reject(new GhError(GhFailure.NotInstalled, 'gh is not installed'));
-      return world.answer instanceof GhError
-        ? Promise.reject(world.answer)
-        : Promise.resolve(world.answer);
+      // What gh says is fixed when the call starts, as a real call that is already running is.
+      const { gh, answer } = world;
+      await world.hold;
+      if (gh === null) throw new GhError(GhFailure.NotInstalled, 'gh is not installed');
+      if (answer instanceof GhError) throw answer;
+      return answer;
     },
     env: () => ({}),
     emit: (data) => {
@@ -81,6 +92,20 @@ describe('the GitHub status', () => {
       gh: '/gh',
       answer: new GhError(GhFailure.Unreachable, 'offline'),
       state: 'unreachable',
+      login: null,
+    },
+    {
+      name: 'a 401 gh reports as signed out',
+      gh: '/gh',
+      answer: new GhError(GhFailure.SignedOut, 'Bad credentials'),
+      state: 'signed_out',
+      login: null,
+    },
+    {
+      name: 'any other gh failure leaves Sign In on offer',
+      gh: '/gh',
+      answer: new GhError(GhFailure.Failed, 'gh api user failed (exit 1)'),
+      state: 'signed_out',
       login: null,
     },
     {
@@ -162,6 +187,40 @@ describe('Sign In', () => {
     ]);
     // The read at the end is the only probe the status needed.
     expect(world.probes).toBe(2);
+  });
+  it('the end reads the login in a probe that starts after one already running', async () => {
+    const { services, world } = setup({ gh: '/gh', answer: null });
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // A status read starts a probe that sees gh before it saved the token.
+    const early = services.githubStatus(false);
+    await flush();
+    const post = services.startGithubSignin();
+    world.children[0]?.print('one-time code: ABCD-1234\nhttps://github.com/login/device\n');
+    await post;
+    world.answer = 'octocat';
+    world.children[0]?.exit(0);
+    release();
+    await early;
+    await flush();
+    expect(world.events).toEqual([{ ok: true, login: 'octocat', message: null, cancelled: false }]);
+    expect(world.probes).toBe(2);
+  });
+  it('a recheck never returns a probe that began before it', async () => {
+    const { services, world } = setup({ gh: null, answer: 'octocat' });
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const early = services.githubStatus(false);
+    await flush();
+    world.gh = '/opt/homebrew/bin/gh';
+    const rechecked = services.githubStatus(true);
+    release();
+    await early;
+    await expect(rechecked).resolves.toMatchObject({ state: 'signed_in', login: 'octocat' });
   });
   it('DELETE ends the sign-in as cancelled and the status returns to what it was', async () => {
     const { services, world } = setup({ gh: '/gh', answer: null });

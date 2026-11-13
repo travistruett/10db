@@ -117,7 +117,12 @@ export function createGithubLogin(deps: GithubLoginDeps): GithubLogin {
 
   function end(r: Run, data: GithubLoginEndedData): void {
     release(r);
-    deps.ended(data);
+    try {
+      deps.ended(data);
+    } catch {
+      // The end can arrive while the daemon shuts down, with the database already closed: there is no one
+      // left to tell, and a throw here would escape the exit handler as an unhandled rejection.
+    }
   }
 
   function readOutput(r: Run, stream: 'stdout' | 'stderr', chunk: string): void {
@@ -147,6 +152,14 @@ export function createGithubLogin(deps: GithubLoginDeps): GithubLogin {
   async function readExit(r: Run, code: number | null): Promise<void> {
     r.exited = true;
     if (r.over) return;
+    // gh's last line may end without a newline.
+    for (const stream of ['stdout', 'stderr'] as const) {
+      const tail = r.tails[stream];
+      r.tails[stream] = '';
+      if (tail === '') continue;
+      r.lines.push(tail);
+      if (stream === 'stderr') r.stderrLines.push(tail);
+    }
     r.over = true;
     r.timer?.cancel();
     r.timer = null;

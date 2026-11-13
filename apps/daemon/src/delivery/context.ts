@@ -121,22 +121,20 @@ export function raiseIn(write: WriteContext, projectId: ProjectId, card: Card): 
 
 /**
  * Brings the project's open card with `card`'s fold key in line with `card`, inside the caller's
- * write: its title and body, and its detail when `card` has one, so it says what holds now. A
+ * write: its title and body, and the detail keys `card` has (the others stay), so it says what holds now. A
  * dismissed card stays dismissed, and a card that says this already is not written again.
  */
 export function rewriteIn(write: WriteContext, projectId: ProjectId, card: Card): void {
   if (card.foldKey === undefined) return;
   const open = findOpenByFoldKey(write.tx, projectId, card.foldKey);
   if (open === undefined) return;
+  const detail = card.detail ? { ...open.detail, ...card.detail } : undefined;
   const same =
     open.title === card.title &&
     open.body === card.body &&
-    (card.detail === undefined || JSON.stringify(open.detail) === JSON.stringify(card.detail));
+    (detail === undefined || JSON.stringify(open.detail) === JSON.stringify(detail));
   if (same) return;
-  rewordCard(write, open.id, card.body, {
-    title: card.title,
-    ...(card.detail ? { detail: card.detail } : {}),
-  });
+  rewordCard(write, open.id, card.body, { title: card.title, ...(detail ? { detail } : {}) });
 }
 
 /** `withdraw` inside the caller's write. */

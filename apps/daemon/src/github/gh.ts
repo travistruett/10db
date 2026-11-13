@@ -251,7 +251,7 @@ const NO_PR = /no pull requests found/i;
  * 'owner/name'. (repository)` when the repository is gone or closed to the account.
  */
 const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
-const SIGNED_OUT = /gh auth login|not logged in/i;
+const SIGNED_OUT = /gh auth login|not logged in|HTTP 401|Bad credentials/i;
 /**
  * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
  * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out, a
