@@ -160,6 +160,7 @@ import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
+import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -568,6 +569,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
+  backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.

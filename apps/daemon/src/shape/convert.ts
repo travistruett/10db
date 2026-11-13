@@ -48,6 +48,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { proposePlacement } from '../placement';
+import { appendRevision } from '../plan-record';
 import { removedKeys } from './validate';
 import { buildPlanWorld, tasksInside } from './world';
 
@@ -393,13 +394,16 @@ export function convertProposals(
       }
       made.set(row.id, { goalId: written.goal.id, taskIds: ids });
       // The proposed eval is kept as an attachment on the goal, with the spec (§7).
-      if (goal.eval !== undefined)
-        upsertShapeAttachment(ctx, {
-          shapeId,
-          kind: 'eval',
-          key: row.key,
-          body: JSON.stringify(goal.eval, null, 2),
+      if (goal.eval !== undefined) {
+        const body = JSON.stringify(goal.eval, null, 2);
+        const evalId = upsertShapeAttachment(ctx, { shapeId, kind: 'eval', key: row.key, body });
+        appendRevision(ctx, evalId, body, {
+          note: null,
+          author: null,
+          bundleNumber: null,
+          authoredAt: null,
         });
+      }
       linkShapeAttachments(ctx, shapeId, row.key, { goalId: written.goal.id });
     } else {
       const task: Task = ShapeProposalBody.task.parse(row.body);

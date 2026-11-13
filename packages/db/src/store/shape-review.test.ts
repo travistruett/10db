@@ -3,6 +3,7 @@ import {
   EventType,
   InboxKind,
   ShapeFindingKind,
+  ShapeFindingReviewer,
   ShapeFindingSeverity,
   ShapeFindingState,
   ShapeOrigin,
@@ -36,6 +37,7 @@ import {
   setOneWayPaths,
   settleOpenQuestionsOfTask,
   settleShapeFinding,
+  upsertImportedFinding,
   upsertShapeAttachment,
   type Store,
 } from './index';
@@ -89,6 +91,50 @@ describe('findings', () => {
     expect(listShapeFindings(store.db, shapeId).map((f) => f.id)).toEqual([a.value.id, b.value.id]);
     expect(a.value.state).toBe(ShapeFindingState.Open);
     expect(a.events.map((e) => e.type)).toContain(EventType.ShapeChanged);
+  });
+
+  it('an imported finding upserts by key and keeps its words', () => {
+    const howDetail = 'The column exists; nothing writes it yet. '.repeat(80).slice(0, 3000);
+    const imported = {
+      shapeId,
+      effortKey: 'p1',
+      taskKey: null,
+      reviewer: ShapeFindingReviewer.Imported,
+      reviewerName: 'fable plan reviewer',
+      kind: ShapeFindingKind.Finding,
+      severity: ShapeFindingSeverity.High,
+      severityText: 'blocking, security',
+      text: 'Revoked devices keep their session',
+      round: 2,
+      taskHash: null,
+      section: 'task-12',
+      bundleKey: 'p1-r2-3',
+      state: ShapeFindingState.Resolved,
+      outcomeText: 'partial: revoked-device column is a stub',
+      how: 'Added the column',
+      howDetail,
+    };
+    const first = store.write((ctx) => upsertImportedFinding(ctx, imported));
+    expect(first.value).toMatchObject({ created: true, changed: false });
+    expect(first.events.map((e) => e.type)).toEqual([EventType.PlanRecordChanged]);
+    const same = store.write((ctx) => upsertImportedFinding(ctx, imported));
+    expect(same.value).toMatchObject({ created: false, changed: false });
+    expect(same.events).toEqual([]);
+    const moved = store.write((ctx) =>
+      upsertImportedFinding(ctx, { ...imported, outcomeText: 'fixed in revision 3' }),
+    );
+    expect(moved.value).toMatchObject({ created: false, changed: true });
+    expect(listShapeFindings(store.db, shapeId)).toHaveLength(1);
+    expect(getShapeFinding(store.db, first.value.row.id)).toMatchObject({
+      reviewer: 'imported',
+      reviewerName: 'fable plan reviewer',
+      severityText: 'blocking, security',
+      outcomeText: 'fixed in revision 3',
+      section: 'task-12',
+      round: 2,
+      howDetail,
+    });
+    expect(howDetail).toHaveLength(3000);
   });
 
   it('settle once: resolved or dismissed with a one-line how, never twice', () => {

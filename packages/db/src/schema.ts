@@ -117,7 +117,18 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  AnchorResult,
+  BundleOrigin,
+  PlanAnchor,
+  PlanEntryKind,
+  PlanEntryState,
+  SectionIndexEntry,
   ShapeAttachmentId,
+  ShapeAttachmentRevisionId,
+  ShapeEntryId,
+  ShapeEntryVersionId,
+  ShapeFindingReviewer,
+  TaskContextCheckId,
   ShapeFileId,
   ShapeFindingId,
   ShapeFindingKind,
@@ -125,7 +136,6 @@ import type {
   ShapeFindingState,
   ShapeId,
   ShapeLinkId,
-  ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
   ShapeQuestionId,
@@ -1382,10 +1392,19 @@ export const shapes = sqliteTable(
     round: integer('round').notNull().default(0),
     /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
     model: text('model'),
+    /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
+    bundleId: text('bundle_id'),
+    bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),
+    importedAt: text('imported_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('shapes_project_idx').on(t.projectId)],
+  (t) => [
+    index('shapes_project_idx').on(t.projectId),
+    uniqueIndex('shapes_bundle_unique')
+      .on(t.projectId, t.bundleId)
+      .where(sql`${t.bundleId} IS NOT NULL`),
+  ],
 );
 
 /** The conversation's transcript (§5.3): append-only, so it renders and reopens however old it is. */
@@ -1636,7 +1655,7 @@ export const shapeFindings = sqliteTable(
       .references(() => shapes.id),
     effortKey: text('effort_key').notNull(),
     taskKey: text('task_key'),
-    reviewer: text('reviewer').$type<ShapeReviewer>().notNull(),
+    reviewer: text('reviewer').$type<ShapeFindingReviewer>().notNull(),
     kind: text('kind').$type<ShapeFindingKind>().notNull(),
     severity: text('severity').$type<ShapeFindingSeverity>(),
     text: text('text').notNull(),
@@ -1644,10 +1663,27 @@ export const shapeFindings = sqliteTable(
     how: text('how'),
     round: integer('round').notNull(),
     taskHash: text('task_hash'),
+    /** An imported finding's document revision and section. */
+    revisionId: text('revision_id')
+      .$type<ShapeAttachmentRevisionId>()
+      .references(() => shapeAttachmentRevisions.id),
+    section: text('section'),
+    /** An imported finding's reviewer, severity, outcome and full how, in the review's own words. */
+    reviewerName: text('reviewer_name'),
+    severityText: text('severity_text'),
+    outcomeText: text('outcome_text'),
+    howDetail: text('how_detail'),
+    /** The bundle's key for an imported finding; a re-import upserts by it. */
+    bundleKey: text('bundle_key'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('shape_findings_shape_idx').on(t.shapeId, t.id)],
+  (t) => [
+    index('shape_findings_shape_idx').on(t.shapeId, t.id),
+    uniqueIndex('shape_findings_bundle_key_unique')
+      .on(t.shapeId, t.bundleKey)
+      .where(sql`${t.bundleKey} IS NOT NULL`),
+  ],
 );
 
 /**
@@ -1682,8 +1718,14 @@ export const shapeAttachments = sqliteTable(
       .$type<ShapeId>()
       .notNull()
       .references(() => shapes.id),
-    kind: text('kind').$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval'>().notNull(),
+    kind: text('kind')
+      .$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval' | 'research' | 'plan' | 'guide'>()
+      .notNull(),
     key: text('key').notNull(),
+    /** A record document's key (`p1`); null for an app spec or eval, whose document key is `key`. */
+    docKey: text('doc_key'),
+    title: text('title'),
+    /** The latest revision's text. */
     body: text('body').notNull(),
     goalId: text('goal_id')
       .$type<GoalId>()
@@ -1699,6 +1741,144 @@ export const shapeAttachments = sqliteTable(
     uniqueIndex('shape_attachments_one_spec')
       .on(t.shapeId, t.key, t.kind)
       .where(sql`${t.kind} IN ('spec', 'eval')`),
+    uniqueIndex('shape_attachments_doc_key_unique')
+      .on(t.shapeId, t.docKey)
+      .where(sql`${t.docKey} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Every revision of a record document, an app spec or an eval. A revision's text never changes; a new
+ * text is the next number. `bundle_number` is the importing bundle's own number for it.
+ */
+export const shapeAttachmentRevisions = sqliteTable(
+  'shape_attachment_revisions',
+  {
+    id: text('id').$type<ShapeAttachmentRevisionId>().primaryKey(),
+    attachmentId: text('attachment_id')
+      .$type<ShapeAttachmentId>()
+      .notNull()
+      .references(() => shapeAttachments.id),
+    number: integer('number').notNull(),
+    body: text('body').notNull(),
+    /** Hex SHA-256 of the body's UTF-8 bytes. */
+    sha256: text('sha256').notNull(),
+    note: text('note'),
+    author: text('author'),
+    /** The body's sections (`SectionIndexEntry[]`), read on write. */
+    sections: text('sections', { mode: 'json' }).$type<SectionIndexEntry[]>().notNull(),
+    bundleNumber: integer('bundle_number'),
+    authoredAt: text('authored_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('shape_attachment_revisions_number_unique').on(t.attachmentId, t.number),
+    uniqueIndex('shape_attachment_revisions_bundle_number_unique')
+      .on(t.attachmentId, t.bundleNumber)
+      .where(sql`${t.bundleNumber} IS NOT NULL`),
+  ],
+);
+
+/** A record entry of a Plan: intent, a fact, an experiment or a name, keyed within its Plan. */
+export const shapeEntries = sqliteTable(
+  'shape_entries',
+  {
+    id: text('id').$type<ShapeEntryId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    key: text('key').notNull(),
+    kind: text('kind').$type<PlanEntryKind>().notNull(),
+    title: text('title').notNull(),
+    /** The kind's `PlanEntryBody`, as JSON. */
+    body: text('body', { mode: 'json' }).$type<Json>().notNull(),
+    anchors: text('anchors', { mode: 'json' }).$type<PlanAnchor[]>().notNull(),
+    sources: text('sources', { mode: 'json' }).$type<string[]>().notNull(),
+    verified: integer('verified', { mode: 'boolean' }).notNull(),
+    checkedAt: text('checked_at'),
+    state: text('state').$type<PlanEntryState>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('shape_entries_key_unique').on(t.shapeId, t.key)],
+);
+
+/** Each content an entry has had, numbered from 1. Append-only. */
+export const shapeEntryVersions = sqliteTable(
+  'shape_entry_versions',
+  {
+    id: text('id').$type<ShapeEntryVersionId>().primaryKey(),
+    entryId: text('entry_id')
+      .$type<ShapeEntryId>()
+      .notNull()
+      .references(() => shapeEntries.id),
+    number: integer('number').notNull(),
+    /** The entry's content fields at this version, as JSON. */
+    snapshot: text('snapshot', { mode: 'json' }).$type<Json>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('shape_entry_versions_number_unique').on(t.entryId, t.number)],
+);
+
+/**
+ * A task made from a Plan: the revision and section it was made from, the shared sections and the
+ * record items it cites. The packed columns hold the Plan block its last lane brief carried, verbatim.
+ */
+export const taskContext = sqliteTable('task_context', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  shapeId: text('shape_id')
+    .$type<ShapeId>()
+    .notNull()
+    .references(() => shapes.id),
+  revisionId: text('revision_id')
+    .$type<ShapeAttachmentRevisionId>()
+    .notNull()
+    .references(() => shapeAttachmentRevisions.id),
+  section: text('section').notNull(),
+  shared: text('shared', { mode: 'json' }).$type<string[]>().notNull(),
+  cites: text('cites', { mode: 'json' }).$type<string[]>().notNull(),
+  packedText: text('packed_text'),
+  packedAt: text('packed_at'),
+  packedWorkstreamId: text('packed_workstream_id')
+    .$type<WorkstreamId>()
+    .references(() => workstreams.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One check of one anchor of a fact a task cites, by a workstream at the base commit it read.
+ * Append-only: a later check of a new base or version adds rows.
+ */
+export const taskContextChecks = sqliteTable(
+  'task_context_checks',
+  {
+    id: text('id').$type<TaskContextCheckId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    entryKey: text('entry_key').notNull(),
+    entryVersion: integer('entry_version').notNull(),
+    anchorIndex: integer('anchor_index').notNull(),
+    result: text('result').$type<AnchorResult>().notNull(),
+    line: integer('line'),
+    checkedCommit: text('checked_commit').notNull(),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('task_context_checks_workstream_idx').on(t.workstreamId, t.checkedCommit),
+    index('task_context_checks_task_idx').on(t.taskId),
   ],
 );
 
