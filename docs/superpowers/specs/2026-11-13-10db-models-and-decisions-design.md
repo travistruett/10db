@@ -153,8 +153,8 @@ one they are null).
   each model some live account offers and each callable decision model in `/judge/models` (not the
   `~maker/...-latest` routers, which share their target's stats), at most once an hour per model, spread to stay under 30 requests a
   minute. Never on a page view; never with a kill switch on (§3).
-- Rows go to a new table (`openrouter_measures`; the schema change follows `packages/db/AGENTS.md`, which
-  regenerates the migration baseline until the first release), keyed by OpenRouter model id and source: score
+- Rows go to a new table (`openrouter_measures`; one forward-only migration, `pnpm --filter @10db/db generate`, as
+  `packages/db/AGENTS.md` requires since `v0.1.0`), keyed by OpenRouter model id and source: score
   fields, cost per task with its benchmark, and per-provider p50 throughput and latency with when they were read.
   A failed read keeps the last rows and records why, as the AA sync does.
 - Its status joins the AA line on Models: "Speed and more scores from OpenRouter · read 2 h ago", or what is
