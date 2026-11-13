@@ -1,5 +1,4 @@
 export { checkTaskAnchors } from './anchor-check';
-export { locateAnchor } from './anchors';
 export { backfillAttachmentRevisions } from './backfill';
 export { exportPlan } from './export';
 export { importBundle, planImportChanges } from './import';
@@ -8,5 +7,5 @@ export { buildPlanContext } from './plan-context';
 export { planItemLine } from './plan-lines';
 export { inlineBundle, readBundleFile } from './read-bundle';
 export { appendRevision } from './revisions';
-export { findSection, indexSections, sectionText } from './sections';
-export { validateBundle, type StoredRecord } from './validate-bundle';
+export { indexSections, sectionText } from './sections';
+export { validateBundle } from './validate-bundle';
