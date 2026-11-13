@@ -140,26 +140,25 @@ const twoHunks: EditHunks = {
 };
 
 describe('hunksOfPatch', () => {
-  const whole = (hunks: EditHunks) => ({ ...hunks, whole: true });
-  it.each<[string, string, (EditHunks & { whole: boolean }) | null]>([
-    ['a two-hunk diff with headers', `--- a/f.ts\n+++ b/f.ts\n${TWO_HUNKS}`, whole(twoHunks)],
-    ['the same diff without headers', TWO_HUNKS, whole(twoHunks)],
+  it.each<[string, string, EditHunks | null]>([
+    ['a two-hunk diff with headers', `--- a/f.ts\n+++ b/f.ts\n${TWO_HUNKS}`, twoHunks],
+    ['the same diff without headers', TWO_HUNKS, twoHunks],
     [
       'a diff ending with no newline at end of file',
       '@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+B\n\\ No newline at end of file\n',
-      whole({
+      {
         hunks: [
           { oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, before: 'a\nb', after: 'a\nB' },
         ],
         addedLines: 1,
         removedLines: 1,
         truncated: false,
-      }),
+      },
     ],
     [
       'a line before the first hunk that no header explains',
       `rm -rf ~\n${TWO_HUNKS}`,
-      { ...twoHunks, truncated: true, whole: false },
+      { ...twoHunks, truncated: true },
     ],
     ['text that is no diff', 'export const a = 1;\n', null],
     ['a hunk header with nothing parseable after it', '@@ -x +y @@\n', null],

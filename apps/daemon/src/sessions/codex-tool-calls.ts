@@ -6,7 +6,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { z } from 'zod';
-import { hunksOfPatch, hunksOfTexts, startsAsPatch, type EditHunks } from './hunks';
+import { hunksOfPatch, hunksOfTexts, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep } from './types';
 
@@ -166,23 +166,31 @@ function common(
 }
 
 /**
- * A change's hunks. An add or a delete is its text as added or removed, unless the text starts as a
- * unified diff and its hunks hold every line of it: a file whose text only holds a hunk header is
- * shown whole. An update is its unified diff, truncated where its hunks leave a line out; one with
- * no diff has none.
+ * A change's hunks. An add or a delete carries the file's text (the app server's `diff` is its
+ * content), so it shows as added or removed whole, whatever its lines look like. An update is its
+ * unified diff, truncated where its hunks leave a line out or it doesn't parse; a move's diff may end
+ * by naming where it moved, which no hunk holds. One with no diff has none.
  */
-function changeHunks(diff: string, change: EditChange): EditHunks {
-  const parsed = hunksOfPatch(diff);
-  const patch = (): EditHunks | null =>
-    parsed !== null && parsed.whole && startsAsPatch(diff) ? parsed : null;
+function changeHunks(diff: string, change: EditChange, movePath: string | null): EditHunks {
   switch (change) {
     case EditChange.Add:
-      return patch() ?? hunksOfTexts('', diff);
+      return hunksOfTexts('', diff);
     case EditChange.Delete:
-      return patch() ?? hunksOfTexts(diff, '');
+      return hunksOfTexts(diff, '');
     case EditChange.Update:
-    case EditChange.Move:
-      return parsed ?? { hunks: [], addedLines: 0, removedLines: 0, truncated: false };
+    case EditChange.Move: {
+      const moved = movePath === null ? null : `\n\nMoved to: ${movePath}`;
+      const patch = moved !== null && diff.endsWith(moved) ? diff.slice(0, -moved.length) : diff;
+      // A diff that doesn't parse shows nothing of a change it holds, so it is marked truncated.
+      return (
+        hunksOfPatch(patch) ?? {
+          hunks: [],
+          addedLines: 0,
+          removedLines: 0,
+          truncated: patch.trim() !== '',
+        }
+      );
+    }
   }
 }
 
@@ -243,7 +251,11 @@ function untitled(item: unknown, times: ItemTimes): UntitledToolCall[] {
     return patch.data.changes.flatMap((c, index) => {
       if (c.path === '') return [];
       const change = changeOf(c.kind);
-      const hunks = changeHunks(c.diff, change);
+      const hunks = changeHunks(
+        c.diff,
+        change,
+        change === EditChange.Move ? (c.kind.move_path ?? null) : null,
+      );
       return [
         {
           ...common(`${patch.data.id}:${String(index)}`, 'apply_patch', status, times, undefined),
