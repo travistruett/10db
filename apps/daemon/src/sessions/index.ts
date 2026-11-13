@@ -71,3 +71,4 @@ export {
   type RepoFileBytes,
 } from './repo-config-file';
 export { streamEventLogFields, type StreamEvent } from './stream-log';
+export { toolCallActivity, type ToolTarget } from './tool-target';

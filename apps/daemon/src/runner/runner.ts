@@ -238,9 +238,11 @@ import {
   skippedServersNote,
   splitProjectMcp,
   streamEventLogFields,
+  toolCallActivity,
   type LanePermissionMode,
   type AgentAdapter,
   type SessionHandle,
+  type ToolTarget,
   type TurnResult,
 } from '../sessions';
 import {
@@ -2661,6 +2663,46 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     ctl.requestHandoff = requestHandoff;
 
+    /** Ids of the tool calls the live line has named, so each is named once. */
+    const seenCalls = new Set<string>();
+    /** The session is working: the live line names what it does, and a page's turn its files so far. */
+    const noteActivity = (
+      kind: 'text' | 'tool',
+      summary: string,
+      tool: ToolTarget | null,
+    ): void => {
+      // The session is working again (Claude Code woke it, or an answer did): it is not idle.
+      stopWaitingOnBackground();
+      disarmIdleClose(ctl);
+      opts.state.write((ctx) => {
+        patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
+        // A page's working turn carries the files it has written so far (Workbench spec §4.3).
+        const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
+        const data: SessionActivityData = {
+          workstreamId: id,
+          kind,
+          summary: summary.slice(0, 500),
+          tool: tool === null ? null : { name: tool.name, target: tool.target },
+          turn:
+            turn === undefined
+              ? null
+              : {
+                  id: turn.id,
+                  filesTouched: filesTouched(
+                    turnFilesSoFar(ctx.tx, turn),
+                    tool?.written ?? [],
+                    checkout,
+                  ),
+                },
+        };
+        ctx.emit({
+          type: EventType.SessionActivity,
+          entityType: 'session',
+          entityId: session.id,
+          data,
+        });
+      });
+    };
     let outcome: Outcome;
     try {
       for await (const event of handle.events) {
@@ -2746,45 +2788,21 @@ export function createRunner(opts: RunnerOptions): Runner {
             handle.send(readOnly ? BACKGROUND_DONE_NUDGE_READ_ONLY : BACKGROUND_DONE_NUDGE);
             break;
           }
-          case 'activity': {
-            // The session is working again (Claude Code woke it, or an answer did): it is not idle.
-            stopWaitingOnBackground();
-            disarmIdleClose(ctl);
-            const tool = event.kind === 'tool' ? event.tool : null;
-            opts.state.write((ctx) => {
-              patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
-              // A page's working turn carries the files it has written so far (Workbench spec §4.3).
-              const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
-              const data: SessionActivityData = {
-                workstreamId: id,
-                kind: event.kind,
-                summary: event.summary.slice(0, 500),
-                tool: tool === null ? null : { name: tool.name, target: tool.target },
-                turn:
-                  turn === undefined
-                    ? null
-                    : {
-                        id: turn.id,
-                        filesTouched: filesTouched(
-                          turnFilesSoFar(ctx.tx, turn),
-                          tool?.written ?? [],
-                          checkout,
-                        ),
-                      },
-              };
-              ctx.emit({
-                type: EventType.SessionActivity,
-                entityType: 'session',
-                entityId: session.id,
-                data,
-              });
-            });
+          case 'activity':
+            noteActivity(event.kind, event.summary, event.kind === 'tool' ? event.tool : null);
+            break;
+          case 'tool_call': {
+            log.debug(streamEventLogFields(event), 'session stream event');
+            // A call is the live line's once, when first seen: a Codex command reports each piece of output.
+            if (seenCalls.has(event.call.id)) break;
+            seenCalls.add(event.call.id);
+            const { summary, tool } = toolCallActivity(event.call);
+            noteActivity('tool', summary, tool);
             break;
           }
           case 'text_delta':
           case 'reasoning_delta':
           case 'message':
-          case 'tool_call':
           case 'commands':
           case 'plan_update':
             log.debug(streamEventLogFields(event), 'session stream event');

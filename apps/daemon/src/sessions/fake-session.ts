@@ -2,7 +2,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { AccountProblem, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
+import {
+  AccountProblem,
+  DeniedBy,
+  type AccountRefusal,
+  type ModelMarkBasis,
+} from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
 import { limitOfDenial, type ReportedMode } from '../trust';
@@ -15,7 +20,8 @@ import {
   type FakeSent,
   type FakeStep,
 } from './fake-script';
-import { claudeToolTarget } from './tool-target';
+import { readCheckoutText } from './before-text';
+import { createClaudeToolCalls } from './claude-tool-calls';
 import {
   SessionEndReason,
   type InterruptReceipt,
@@ -48,6 +54,17 @@ export interface FakeSessionCore {
   readonly done: Promise<void>;
 }
 
+/** A message as the fake streams it: the text split at its middle code point, then the whole. */
+function sayEvents(itemId: string, text: string): SessionEvent[] {
+  const points = Array.from(text);
+  const first = points.slice(0, Math.floor(points.length / 2)).join('');
+  const second = text.slice(first.length);
+  return [
+    ...(first === '' ? [] : [{ type: 'text_delta', itemId, offset: 0, text: first } as const]),
+    { type: 'text_delta', itemId, offset: first.length, text: second },
+    { type: 'message', itemId, text },
+  ];
+}
 export function createFakeSessionCore(): FakeSessionCore {
   const channel = createChannel<SessionEvent>();
   const cleanups: (() => void)[] = [];
@@ -156,6 +173,13 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
   let takenThisTurn: string[] = [];
   /** A turn is running: a step of it ran and its result has not come. */
   let inTurn = false;
+  let said = 0;
+  let thought = 0;
+  // Each scripted tool call is mapped as Claude Code's would be, its before-text read as the session reads it.
+  const toolCalls = createClaudeToolCalls({
+    now: () => new Date(),
+    before: (_toolUseId, path) => readCheckoutText(spec.cwd, path),
+  });
   /** The running turn's result, as Claude Code reports it: what it took, then its completion. */
   const completeTurn = (
     result: 'success' | 'max_turns' | 'error' | undefined,
@@ -287,14 +311,22 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         return 'continue';
       case 'tool': {
         const input = step.input;
-        emit({
-          type: 'activity',
-          kind: 'tool',
-          summary: step.toolName,
-          tool: claudeToolTarget(step.toolName, input),
-        });
+        const toolUseId = `fake-tool-${String(index)}`;
+        for (const event of toolCalls.use({
+          id: toolUseId,
+          name: step.toolName,
+          input,
+          parentId: null,
+        }))
+          emit(event);
+        const denied = (by: DeniedBy, reason: string): void => {
+          toolCalls.deny(toolUseId, { by, reason, limit: null, soft: null });
+          for (const event of toolCalls.result(toolUseId, { isError: true, content: reason }))
+            emit(event);
+        };
         const verdict = guardVerdict(step.toolName, input, step.reportedMode);
         if (verdict.decision === 'deny') {
+          denied(DeniedBy.TenDb, verdict.reason);
           observe(index, 'denied_by_guard', { reason: verdict.reason });
           return 'continue';
         }
@@ -312,7 +344,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
             spec.canUseTool({
               toolName: step.toolName,
               input,
-              toolUseId: `fake-tool-${String(index)}`,
+              toolUseId,
               escalated: false,
               signal: abort.signal,
             }),
@@ -322,17 +354,45 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
           decision = asked;
         }
         if (decision.behavior === 'deny') {
+          denied(DeniedBy.TenDb, decision.message);
           observe(index, 'tool_denied', { toolName: step.toolName, message: decision.message });
           return 'continue';
         }
         const effective = decision.updatedInput ?? input;
         applyFileEffect(step.toolName, effective);
+        for (const event of toolCalls.result(toolUseId, { isError: false, content: '' }))
+          emit(event);
         observe(index, 'tool_allowed', {
           toolName: step.toolName,
           ...(effective['answers'] ? { answers: effective['answers'] } : {}),
         });
         return 'continue';
       }
+      case 'say':
+        said += 1;
+        for (const event of sayEvents(`fake-msg-${String(said)}`, step.text)) emit(event);
+        return 'continue';
+      case 'think':
+        thought += 1;
+        emit({
+          type: 'reasoning_delta',
+          itemId: `fake-thought-${String(thought)}`,
+          offset: 0,
+          text: step.text,
+        });
+        return 'continue';
+      case 'plan':
+        emit({ type: 'plan_update', steps: step.steps });
+        return 'continue';
+      case 'commands':
+        emit({
+          type: 'commands',
+          commands: step.names.map((name) => ({ name, description: `/${name}` })),
+        });
+        return 'continue';
+      case 'tool_call':
+        emit({ type: 'tool_call', call: step.call });
+        return 'continue';
       case 'mcp': {
         const result = await Promise.race([callMcp(step.tool, step.args), untilStopped]);
         if (result === 'stopped') return 'halt';
@@ -610,6 +670,8 @@ export function runFakeExploreSession(
         );
         break;
       }
+      if (!failed && result.text !== undefined && result.text !== '')
+        for (const event of sayEvents(`fake-msg-${String(number)}`, result.text)) emit(event);
       const percent = result.contextPercent ?? DEFAULT_CONTEXT_PERCENT;
       emit({
         type: 'context',

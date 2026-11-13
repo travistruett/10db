@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { ModelMarkBasis, type SessionId } from '@10db/contracts';
+import { ModelMarkBasis, ToolCallView, type SessionId } from '@10db/contracts';
 import { z } from 'zod';
 import type { InterruptReceipt } from './types';
 
@@ -16,6 +16,20 @@ export const FakeStep = z.discriminatedUnion('do', [
     reportedMode: z.enum(['auto', 'other']).optional(),
   }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
+  /** The agent writes a message: two text deltas, the text split at its middle, then the message. */
+  z.object({ do: z.literal('say'), text: z.string().min(1) }),
+  /** The agent shows its reasoning, in one delta. */
+  z.object({ do: z.literal('think'), text: z.string().min(1) }),
+  z.object({
+    do: z.literal('plan'),
+    steps: z.array(
+      z.object({ text: z.string(), status: z.enum(['pending', 'in_progress', 'completed']) }),
+    ),
+  }),
+  /** The slash commands the session offers, each described by its own name. */
+  z.object({ do: z.literal('commands'), names: z.array(z.string().min(1)) }),
+  /** A tool call as an adapter would report it, as it is. */
+  z.object({ do: z.literal('tool_call'), call: ToolCallView }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
   /** Waits until the test calls `signal` with this name, so a test can place the next step exactly. */
   z.object({ do: z.literal('await_signal'), name: z.string() }),
@@ -78,6 +92,10 @@ export const TURN_STEPS: ReadonlySet<FakeStep['do']> = new Set([
   'tool',
   'mcp',
   'activity',
+  'say',
+  'think',
+  'plan',
+  'tool_call',
 ]);
 
 /** Task title → one step list per session, indexed by the session's sequence within its workstream. */

@@ -87,17 +87,88 @@ describe('FakeAdapter', () => {
     expect(events).toContainEqual({ type: 'activity', kind: 'text', summary: 'second session' });
   });
 
-  it('reports a scripted tool call as activity naming the file it writes', async () => {
+  it('reports a scripted tool call as a running then a done tool call, with no activity', async () => {
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'a.ts', content: 'x' } }]],
     });
     const events = await collect(adapter.open(spec()).events);
-    expect(events).toContainEqual({
-      type: 'activity',
-      kind: 'tool',
-      summary: 'Write',
-      tool: { name: 'Write', target: 'a.ts', written: ['a.ts'] },
+    expect(events.filter((e) => e.type === 'activity')).toEqual([]);
+    const calls = events.flatMap((e) => (e.type === 'tool_call' ? [e.call] : []));
+    expect(calls).toMatchObject([
+      { id: 'fake-tool-0', kind: 'edit', path: 'a.ts', change: 'add', status: 'running' },
+      { id: 'fake-tool-0', kind: 'edit', path: 'a.ts', status: 'done', deniedBy: null },
+    ]);
+  });
+
+  it('reports a call the guard denied as denied by 10db, with its reason', async () => {
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'tool', toolName: 'Bash', input: { command: 'git push' } }]],
     });
+    const events = await collect(
+      adapter.open(spec({ preToolUse: () => ({ decision: 'deny', reason: 'pushes are 10db' }) }))
+        .events,
+    );
+    const calls = events.flatMap((e) => (e.type === 'tool_call' ? [e.call] : []));
+    expect(calls).toMatchObject([
+      { kind: 'command', status: 'running' },
+      { kind: 'command', status: 'denied', deniedBy: '10db', refusal: 'pushes are 10db' },
+    ]);
+  });
+
+  it('streams what it says as two deltas and a message, offset by JS length', async () => {
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'say', text: 'héllo 👋 world' }]] });
+    const events = await collect(adapter.open(spec()).events);
+    const said = events.filter((e) => e.type === 'text_delta' || e.type === 'message');
+    expect(said).toEqual([
+      { type: 'text_delta', itemId: 'fake-msg-1', offset: 0, text: 'héllo ' },
+      { type: 'text_delta', itemId: 'fake-msg-1', offset: 6, text: '👋 world' },
+      { type: 'message', itemId: 'fake-msg-1', text: 'héllo 👋 world' },
+    ]);
+  });
+
+  it('streams its thinking, its plan, its commands and a scripted tool call as they are', async () => {
+    const call = {
+      kind: 'command',
+      id: 'cmd_1',
+      harnessTool: 'command',
+      status: 'running',
+      title: 'ls',
+      startedAt: '2026-11-12T00:00:00.000Z',
+      durationMs: null,
+      parentId: null,
+      refusal: null,
+      deniedBy: null,
+      limit: null,
+      soft: null,
+      command: 'ls',
+      cwd: null,
+      outputTail: '',
+      outputBytes: 0,
+      exitCode: null,
+    } as const;
+    const adapter = new FakeAdapter({
+      Alpha: [
+        [
+          { do: 'think', text: 'hmm' },
+          { do: 'plan', steps: [{ text: 'Read it', status: 'in_progress' }] },
+          { do: 'commands', names: ['compact', 'review'] },
+          { do: 'tool_call', call },
+        ],
+      ],
+    });
+    const events = await collect(adapter.open(spec()).events);
+    expect(events.slice(1, -1)).toEqual([
+      { type: 'reasoning_delta', itemId: 'fake-thought-1', offset: 0, text: 'hmm' },
+      { type: 'plan_update', steps: [{ text: 'Read it', status: 'in_progress' }] },
+      {
+        type: 'commands',
+        commands: [
+          { name: 'compact', description: '/compact' },
+          { name: 'review', description: '/review' },
+        ],
+      },
+      { type: 'tool_call', call },
+    ]);
   });
 
   it('crashes a session that has no script', async () => {
@@ -305,6 +376,23 @@ describe('one open handle per agent session', () => {
     await first.stop();
     await collect(first.events);
     expect(() => adapter.open(spec({ resumeProviderSessionId: 'p1' }))).not.toThrow();
+  });
+
+  it("streams an explore session's reply as two deltas and a message before its turn ends", async () => {
+    const adapter = new FakeAdapter({});
+    adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+    const handle = adapter.open(exploreSpec(null));
+    const events: SessionEvent[] = [];
+    for await (const event of handle.events) {
+      events.push(event);
+      if (event.type === 'turn_complete') void handle.stop();
+    }
+    expect(
+      events
+        .filter((e) => ['text_delta', 'message', 'turn_complete'].includes(e.type))
+        .map((e) => e.type),
+    ).toEqual(['text_delta', 'text_delta', 'message', 'turn_complete']);
+    expect(events).toContainEqual({ type: 'message', itemId: 'fake-msg-1', text: 'Understood.' });
   });
 
   it('refuses an explore session on the agent session a lane holds: the key is the agent session', () => {

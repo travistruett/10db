@@ -15,6 +15,7 @@ import {
   type PassDto,
   type TaskDto,
   type TaskMessageId,
+  type ToolCallView,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -443,6 +444,70 @@ describe("a working turn's live line", () => {
       [PAGE_FILE],
       [PAGE_FILE],
       [PAGE_FILE, form],
+    ]);
+  });
+
+  it('names the tool and counts the files written from tool calls alone, once per call', async () => {
+    const at = '2026-11-12T00:00:00.000Z';
+    const common = {
+      startedAt: at,
+      parentId: null,
+      refusal: null,
+      deniedBy: null,
+      limit: null,
+      soft: null,
+    } as const;
+    const edit = (status: 'running' | 'done'): ToolCallView => ({
+      ...common,
+      kind: 'edit',
+      id: 'fc_1:0',
+      harnessTool: 'apply_patch',
+      status,
+      title: PAGE_FILE,
+      durationMs: status === 'done' ? 5 : null,
+      path: PAGE_FILE,
+      change: 'update',
+      movePath: null,
+      hunks: [],
+      addedLines: 1,
+      removedLines: 0,
+      truncated: false,
+    });
+    const command: ToolCallView = {
+      ...common,
+      kind: 'command',
+      id: 'cmd_1',
+      harnessTool: 'command',
+      status: 'running',
+      title: 'pnpm test',
+      durationMs: null,
+      command: 'pnpm test',
+      cwd: null,
+      outputTail: '',
+      outputBytes: 0,
+      exitCode: null,
+    };
+    const { pass, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool_call', call: edit('running') },
+        { do: 'tool_call', call: edit('done') },
+        { do: 'tool_call', call: command },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+
+    const activity = await waitFor(() => {
+      const now = passView(engine.store.db, pass.id).pages[0]?.turn?.activity;
+      return now?.tool === 'command' ? now : undefined;
+    });
+    expect(activity).toMatchObject({ tool: 'command', target: 'pnpm', filesTouched: [PAGE_FILE] });
+    const rows = listEventsAfter(engine.store.db, 0, 1000).filter(
+      (e) => e.type === 'session.activity' && e.data['workstreamId'] === id,
+    );
+    expect(rows.map((e) => SessionActivityData.parse(e.data).tool)).toEqual([
+      { name: 'apply_patch', target: PAGE_FILE },
+      { name: 'command', target: 'pnpm' },
     ]);
   });
 });
