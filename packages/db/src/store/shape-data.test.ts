@@ -244,6 +244,24 @@ describe('the Shape tables', () => {
     ]);
   });
 
+  it('opens a transcript holding a row it cannot read, leaving that row out', () => {
+    const shape = newShape().value;
+    const said = store.write((ctx) =>
+      insertShapeMessage(ctx, shape.id, { author: 'builder', kind: 'text', body: 'kept' }),
+    ).value;
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, created_at, updated_at)
+         VALUES (?, ?, 2, 'agent', 'tool_call', '{}', ?, ?)`,
+      )
+      .run(
+        mintId('ConversationItem'),
+        shapeConversation(store.db, shape.id).id,
+        ...Array<string>(2).fill(now.toISOString()),
+      );
+    expect(listShapeMessages(store.db, shape.id).map((m) => m.id)).toEqual([said.id]);
+  });
+
   it('keeps a tool line of 150 emoji whole', () => {
     const shape = newShape().value;
     const line = '🙂'.repeat(150);

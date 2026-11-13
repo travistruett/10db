@@ -1,6 +1,7 @@
 import {
   ConversationItemAuthor,
   ConversationItemKind,
+  InvalidError,
   noticeText,
   parseItemBody,
   ShapeMessageAuthor,
@@ -115,8 +116,27 @@ export function shapeItemOf(
   }
 }
 
-/** An item as a Plan row; null for what Plan has no word for. */
+/**
+ * `read`'s answer, or null when the row it reads holds a body its kind can't parse: one such row is
+ * left out, so the rest of a transcript still opens.
+ */
+function readable<T>(read: () => T | null): T | null {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof InvalidError) return null;
+    throw error;
+  }
+}
+
+/** An item as a Plan row; null for what Plan has no word for, or a row it can't read. */
 export function shapeMessageOf(
+  item: Pick<ItemRow, 'author' | 'kind' | 'body'>,
+): { author: ShapeMessageAuthor; kind: ShapeMessageKind; body: string } | null {
+  return readable(() => shapeMessage(item));
+}
+
+function shapeMessage(
   item: Pick<ItemRow, 'author' | 'kind' | 'body'>,
 ): { author: ShapeMessageAuthor; kind: ShapeMessageKind; body: string } | null {
   const author = itemAuthorShape(item.author);
@@ -165,8 +185,14 @@ export function taskItemOf(m: {
   }
 }
 
-/** An item as a thread row; null for what a thread has no word for. */
+/** An item as a thread row; null for what a thread has no word for, or a row it can't read. */
 export function taskMessageOf(
+  item: Pick<ItemRow, 'author' | 'kind' | 'body'>,
+): { author: TaskMessageAuthor; kind: TaskMessageKind; body: string } | null {
+  return readable(() => taskMessage(item));
+}
+
+function taskMessage(
   item: Pick<ItemRow, 'author' | 'kind' | 'body'>,
 ): { author: TaskMessageAuthor; kind: TaskMessageKind; body: string } | null {
   switch (item.kind) {

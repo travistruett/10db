@@ -555,6 +555,20 @@ describe('a task thread on its conversation', () => {
     expect(listTaskFileRows(store.db, taskId).map((f) => f.name)).toEqual(['a.png', 'c.png']);
   });
 
+  it('opens a thread holding a row it cannot read, leaving that row out', () => {
+    const said = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'kept', files: [] }),
+    ).value;
+    const conversation = taskConversationOf(store.db, taskId);
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, created_at, updated_at)
+         VALUES (?, ?, 2, 'agent', 'agent_message', '{}', '2026-11-13T00:00:00.000Z', '2026-11-13T00:00:00.000Z')`,
+      )
+      .run(mintId('ConversationItem'), conversation?.id);
+    expect(listTaskThread(store.db, taskId).map((m) => m.id)).toEqual([said.id]);
+  });
+
   it('keeps a message of the longest length whole', () => {
     const body = 'x'.repeat(TASK_MESSAGE_MAX_CHARS);
     store.write((ctx) => insertBuilderMessage(ctx, taskId, { body, files: [] }));
