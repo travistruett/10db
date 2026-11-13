@@ -47,20 +47,20 @@ test.describe('Settings', () => {
   }) => {
     await page.goto('/settings/overview');
     const main = page.getByRole('main');
+    // A row's link reads its name then its state; the summary line's links read the name alone.
+    const row = (name: string) => main.getByRole('link', { name: new RegExp(`^${name}\\s.+`) });
     await expect(main.getByText(/connections? work|needs? you|need you/).first()).toBeVisible();
     for (const group of ['Model access', 'Services', 'Data and downloads']) {
       await expect(main.getByRole('heading', { name: group })).toBeVisible();
     }
     // The default account always exists.
-    await expect(main.getByRole('link', { name: /Claude plan/ })).toBeVisible();
+    await expect(row('Claude plan')).toBeVisible();
     for (const service of SERVICES) {
-      await expect(main.getByRole('link', { name: new RegExp(service) })).toBeVisible();
+      await expect(row(service)).toBeVisible();
     }
     // The e2e daemon starts with benchmarks and Slack off; the rows say so.
-    await expect(main.getByRole('link', { name: /Artificial Analysis/ })).toContainText(
-      'TENDB_BENCHMARKS=off',
-    );
-    await expect(main.getByRole('link', { name: /Slack/ })).toContainText('TENDB_SLACK=off');
+    await expect(row('Artificial Analysis')).toContainText('TENDB_BENCHMARKS=off');
+    await expect(row('Slack')).toContainText('TENDB_SLACK=off');
     await expectAccessible(page, 'settings overview');
   });
 
