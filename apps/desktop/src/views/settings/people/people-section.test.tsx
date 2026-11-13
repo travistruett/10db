@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { mintId, PersonInput, type PersonDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -265,12 +266,15 @@ describe('Settings › People: Add Person', () => {
     await pickOption(within(dialog).getByLabelText('Find someone in Acme'), /Ana Ortiz/);
     const limit = within(dialog).getByLabelText('New questions a day');
     fireEvent.change(limit, { target: { value: '2.5' } });
-    expect((limit as HTMLInputElement).value).not.toContain('.');
+    expect(limit).toBeInstanceOf(HTMLInputElement);
+    if (limit instanceof HTMLInputElement) expect(limit.value).not.toContain('.');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
     await waitFor(() => {
       expect(saved).toHaveLength(1);
     });
-    const [person] = saved as { slack: { dailyLimit: number } }[];
+    const [person] = z
+      .array(z.object({ slack: z.object({ dailyLimit: z.number() }) }))
+      .parse(saved);
     expect(Number.isInteger(person?.slack.dailyLimit)).toBe(true);
   });
 
