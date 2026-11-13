@@ -39,7 +39,6 @@ import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
 import {
-  READ_CHARGE_MAX_BYTES,
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
@@ -52,6 +51,7 @@ import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '.
 import { createTempRepo, testPolicy } from './fixtures';
 import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
+import { READ_CHARGE_MAX_BYTES } from '../src/conversation';
 
 /** The prompt for a subscription, whose agents take every alias. */
 const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));

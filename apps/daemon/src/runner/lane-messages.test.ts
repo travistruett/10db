@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir, testPolicy } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { pictureLimitsFor } from '../screens';
 import {
   FakeAdapter,
   type FakeScriptBook,
@@ -25,7 +24,7 @@ import {
   type LaneSessionSpec,
 } from '../sessions';
 import { createLaneMessages, outgoingMessage } from './lane-messages';
-import { threadInlineBytes } from './thread-pictures';
+import { heldInlineBytes, pictureLimitsFor } from '../conversation';
 
 // Workbench spec §6.3: a builder message reaches a lane session under its row's uuid, and is marked
 // delivered only when a turn is seen to take it (`user_message_uuids`, which the fake stamps as the SDK
@@ -254,7 +253,7 @@ describe('lane messages', () => {
     const messages = createLaneMessages({ state, taskId, handle, limits });
     const shot = say('Make it blue', 1);
     messages.push(shot);
-    const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
+    const spent = heldInlineBytes(listTaskFileRows(state.db, taskId), limits);
     expect(spent).toBeGreaterThan(0);
 
     await messages.interrupt();
@@ -263,7 +262,7 @@ describe('lane messages', () => {
     expect(messages.consumed([again?.uuid ?? ''])).toEqual([shot.id]);
     expect(again?.images).toBe(0);
     expect(again?.text).toContain(`kept at ${shot.files[0]?.storedPath ?? ''}`);
-    expect(threadInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
+    expect(heldInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
     await handle.stop();
   });
 });

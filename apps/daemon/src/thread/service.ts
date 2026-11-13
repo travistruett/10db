@@ -32,7 +32,8 @@ import {
   type StoredPicture,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { checkPicture, keepPicture, taskFilesDir, type KeptPicture } from './pictures';
+import { taskFilesDir } from './pictures';
+import { checkPicture, keepPicture, type KeptPicture } from '../conversation';
 
 // Workbench spec §4.3, §11, §12. The builder's side of a task's thread: what a message may carry, and
 // the order its parts are kept in: every picture on disk first, then the rows in one write.

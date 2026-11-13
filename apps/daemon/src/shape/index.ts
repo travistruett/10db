@@ -12,7 +12,6 @@ export {
   shapeSystemPrompt,
   shapeToolset,
 } from './policy';
-export { inlineImageIds } from './dropped-files';
 export { createShapeJev, shadowAgreement } from './jev';
 export { READ_CHARGE_MAX_BYTES } from './read-budget';
 export {

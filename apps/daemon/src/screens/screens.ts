@@ -17,9 +17,7 @@ import { getShape, getTask, insertShapeMessage, listShapeMessages } from '@10db/
 import type { StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker } from './broker';
-import { readImageHeader } from './image-check';
-import { inlineBytesSpent } from './inline-budget';
-import type { PictureLimits } from './picture-limits';
+import { inlineBytesSpent, type PictureLimits, readImageHeader } from '../conversation';
 
 // Shape spec §5.5: see_screen. Asks the app's window for a picture of one of its screens, checks the
 // picture, keeps it with the conversation (a file, and a transcript row that names it) and answers the

@@ -14,15 +14,15 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
-import { createScreens, inlineBytesSpent, type ScreenOutcome } from '../screens';
+import { createScreens, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { jpegOfSize } from '../../test/jpeg';
 import { ROUND_LIMITS } from '../../test/picture-limits';
 import { pngOfSize } from '../../test/png';
 import { webpImage } from '../../test/webp';
-import { readImageSize } from '../screens';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
+import { inlineBytesSpent, readImageSize } from '../conversation';
 
 // Shape spec §5.4 Dropped files and §5.6 Starting from a terminal. These run on round, small limits
 // (`ROUND_LIMITS`) so that the budget can be filled with a few megabytes; `picture-limits.test.ts` checks the

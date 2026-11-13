@@ -5,8 +5,8 @@ import type { TaskFileRow } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngOfSize } from '../../test/png';
 import { tempDir, type TempDir } from '../../test/fixtures';
-import { pictureLimitsFor } from '../screens';
-import { blockPictures, threadInlineBytes } from './thread-pictures';
+import { blockPictures, heldInlineBytes } from './block-pictures';
+import { pictureLimitsFor } from './picture-limits';
 
 // Workbench spec §6.3: a picture reaches a lane session as an image block when it fits the account's
 // limits and what the thread's budget has left, counted as Plan counts a conversation's; otherwise as
@@ -104,13 +104,13 @@ describe('blockPictures', () => {
   });
 });
 
-describe('threadInlineBytes', () => {
+describe('heldInlineBytes', () => {
   it('counts the pictures the live session holds as blocks, and no other', () => {
     const files = [
       picture('sent.png', MIB, 800, true),
       picture('path.png', MIB, 800, false),
       picture('wide.png', MIB, 3001, true),
     ];
-    expect(threadInlineBytes(files, CLAUDE)).toBe(files[0]?.size);
+    expect(heldInlineBytes(files, CLAUDE)).toBe(files[0]?.size);
   });
 });

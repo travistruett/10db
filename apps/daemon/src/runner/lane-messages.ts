@@ -22,10 +22,9 @@ import {
   type TaskMessageRow,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import type { PictureLimits } from '../screens';
 import type { SessionHandle, ShapeImage } from '../sessions';
 import { builderMessageText } from '../thread';
-import { blockPictures, threadInlineBytes } from './thread-pictures';
+import { blockPictures, heldInlineBytes, type PictureLimits } from '../conversation';
 
 // Workbench spec §6.3. A builder message is pushed to a lane session under a client uuid, and is
 // delivered only when a turn is seen to take it: pushing puts it in a channel in the daemon's memory,
@@ -190,7 +189,7 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
       return id === null ? [] : [id];
     });
   const push = (message: TaskMessageRow, lead?: string | null): void => {
-    const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
+    const spent = heldInlineBytes(listTaskFileRows(state.db, taskId), limits);
     const out = outgoingMessage(message, spent, limits, deps.readsPictureFiles === true);
     sentUnder.set(out.uuid, message.id);
     // Kept before the session is handed it: a restart then finds every uuid a turn could hold.

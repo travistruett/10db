@@ -12,7 +12,7 @@ import {
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
-import type { PictureLimits, ScreenService } from '../screens';
+import type { ScreenService } from '../screens';
 import { FakeAdapter } from '../sessions';
 import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
@@ -25,6 +25,7 @@ import {
   type ShapeService,
   type ShapeServiceDeps,
 } from './service';
+import type { PictureLimits } from '../conversation';
 
 /** A conversation served by a real shape service on the fake adapter, with a files directory of its own. */
 export interface ServiceFixture {

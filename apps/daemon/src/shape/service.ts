@@ -123,15 +123,7 @@ import {
   unreadableImagesNotice,
 } from './read-budget';
 import { buildDigest } from './digest';
-import {
-  asImage,
-  checkDroppedFile,
-  inlineImageIds,
-  pathReasonText,
-  pathImageReasons,
-  shapeFilesDir,
-  storeFile,
-} from './dropped-files';
+import { asImage, checkDroppedFile, shapeFilesDir, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import {
   proposeNote,
@@ -153,22 +145,25 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import {
-  FRESH_START_LINE,
-  STRICTEST_LIMITS,
-  carriedTooMuch,
-  inlineBytesSpent,
-  inlinePictureBytes,
-  pictureLimitsFor,
-  type PictureLimits,
-  type ScreenService,
-} from '../screens';
+import type { ScreenService } from '../screens';
 import type { Hold } from '../verify';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateNote } from './converted-state';
 import { untoldMissized, type UntoldMissized } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
+import {
+  carriedTooMuch,
+  FRESH_START_LINE,
+  inlineBytesSpent,
+  inlineImageIds,
+  inlinePictureBytes,
+  pathImageReasons,
+  pathReasonText,
+  type PictureLimits,
+  pictureLimitsFor,
+  STRICTEST_LIMITS,
+} from '../conversation';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
 // Propose and Convert guards, the move to a fresh session when the context fills, and the idle close.

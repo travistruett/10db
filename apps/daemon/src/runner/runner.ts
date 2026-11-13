@@ -269,7 +269,6 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
-import { pictureLimitsFor } from '../screens';
 import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
@@ -307,7 +306,7 @@ import {
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
-import { threadInlineBytes } from './thread-pictures';
+import { heldInlineBytes, pictureLimitsFor } from '../conversation';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -2279,7 +2278,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             )
           : outgoingMessage(
               feedback,
-              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              heldInlineBytes(listTaskFileRows(db, task.id), limits),
               limits,
               readsPictureFiles,
             );
