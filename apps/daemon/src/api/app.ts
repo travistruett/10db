@@ -31,6 +31,8 @@ import {
   GoalAdoptInput,
   PlanExportInput,
   PlanImportInput,
+  PlanRecordList,
+  PlanRecordQuery,
   GoalId,
   DevUiConnectionDto,
   HealthResponse,
@@ -767,6 +769,34 @@ export function createApp(deps: ApiDeps) {
             c.req.valid('json'),
           ),
         ),
+    )
+    // The Record view's reads: the record whole, a revision's text, and each list a page at a time.
+    .get('/shapes/:shapeId/record', (c) =>
+      c.json(deps.services.getPlanRecord(ShapeId.parse(c.req.param('shapeId')))),
+    )
+    .get('/shapes/:shapeId/documents/:key/revisions/:number', (c) =>
+      c.json(
+        deps.services.getPlanRevision(
+          ShapeId.parse(c.req.param('shapeId')),
+          c.req.param('key'),
+          z.coerce.number().int().min(1).parse(c.req.param('number')),
+        ),
+      ),
+    )
+    .get(
+      '/shapes/:shapeId/record/:list',
+      validator('query', (value): PlanRecordQuery => PlanRecordQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.getPlanRecordPage(
+            ShapeId.parse(c.req.param('shapeId')),
+            z.enum(PlanRecordList).parse(c.req.param('list')),
+            c.req.valid('query'),
+          ),
+        ),
+    )
+    .get('/tasks/:taskId/plan-context', (c) =>
+      c.json(deps.services.getTaskPlanContext(TaskId.parse(c.req.param('taskId')))),
     )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),

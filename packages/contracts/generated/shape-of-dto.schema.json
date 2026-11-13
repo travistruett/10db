@@ -12,6 +12,13 @@
           "type": "null"
         }
       ]
+    },
+    "title": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

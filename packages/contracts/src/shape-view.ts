@@ -268,8 +268,14 @@ export type ShapeUnpinInput = z.infer<typeof ShapeUnpinInput>;
 export const ShapeResumeInput = z.object({ event: z.string().min(1).max(2000) });
 export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
 
-/** The conversation that made a goal or a task, for its drawer's Open conversation; null when none did. */
-export const ShapeOfDto = z.object({ shapeId: ShapeId.nullable() });
+/**
+ * The conversation that made a goal or a task, for its drawer's Open conversation and "Planned in";
+ * null when none did. `title` is that Plan's title.
+ */
+export const ShapeOfDto = z.object({
+  shapeId: ShapeId.nullable(),
+  title: z.string().nullable().default(null),
+});
 export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 
 /** Withdraw Decision: the builder's reason is required. */

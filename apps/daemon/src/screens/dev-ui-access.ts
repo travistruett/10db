@@ -57,6 +57,10 @@ export const DEV_UI_READS: readonly string[] = [
   '/settings/self-update',
   '/decisions/:id/provenance',
   '/principles/:id/provenance',
+  '/shapes/:shapeId/record',
+  '/shapes/:shapeId/record/:list',
+  '/shapes/:shapeId/documents/:key/revisions/:number',
+  '/tasks/:taskId/plan-context',
 ];
 
 /** The GETs the dev UI may not make, with why: each writes, runs a command, or hands out a token. */
