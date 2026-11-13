@@ -7,7 +7,15 @@ import { isTauri, openInBrowser } from '../../desktop/tauri';
  * app opens only the sites its opener allows (GitHub and Artificial Analysis here); for any other address it
  * says so, and the card keeps the URL in its text.
  */
-export function ExternalLink({ url, label }: { readonly url: string; readonly label: string }) {
+export function ExternalLink({
+  url,
+  label,
+  size = 'sm',
+}: {
+  readonly url: string;
+  readonly label: string;
+  readonly size?: 'xs' | 'sm';
+}) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   return (
     <>
@@ -15,7 +23,7 @@ export function ExternalLink({ url, label }: { readonly url: string; readonly la
         href={url}
         target="_blank"
         rel="noreferrer"
-        size="sm"
+        size={size}
         onClick={(event) => {
           // A browser opens the tab itself; the desktop app's webview would follow nothing.
           if (!isTauri()) return;

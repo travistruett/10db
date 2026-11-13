@@ -67,7 +67,20 @@ describe('team inputs', () => {
       ok: false,
     },
     {
-      name: 'routing rules with a duplicate category and area',
+      name: 'routing rules with a duplicate category, area and person',
+      parse: () => {
+        const personId = mintId('Person');
+        return RoutingRulesInput.safeParse({
+          rules: [
+            { category: 'design', area: 'ui', personId },
+            { category: 'design', area: 'ui', personId },
+          ],
+        });
+      },
+      ok: false,
+    },
+    {
+      name: 'routing rules for one category and area for two people (a tie)',
       parse: () =>
         RoutingRulesInput.safeParse({
           rules: [
@@ -75,7 +88,7 @@ describe('team inputs', () => {
             { category: 'design', area: 'ui', personId: mintId('Person') },
           ],
         }),
-      ok: false,
+      ok: true,
     },
     {
       name: 'routing rules for one category with and without an area',

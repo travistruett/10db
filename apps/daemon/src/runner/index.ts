@@ -1,4 +1,4 @@
-export { createLiveSessions } from './live-sessions';
+export { createLiveSessions, type LiveSessions } from './live-sessions';
 export { outstandingFixEvidence } from './fix-evidence';
 export { applyCheckAnswer, RunnerNotStartedError, type StartSignOff } from './check-answer';
 export { nextActionAfterCrash, nextActionOnAnotherAccount, withUndelivered } from './next-action';

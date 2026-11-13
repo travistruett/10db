@@ -96,13 +96,9 @@ export function createShapeJev(deps: ShapeJevDeps): ShapeJev {
         decision,
         answer: choice,
         confidence: answer.confidence,
-        judgeCallId: answer.callId as Parameters<typeof insertShadowAnswer>[1]['judgeCallId'],
+        judgeCallId: answer.callId,
       });
-      recordJudgeOutcome(
-        ctx,
-        answer.callId as Parameters<typeof recordJudgeOutcome>[1],
-        JudgeOutcome.Shadow,
-      );
+      recordJudgeOutcome(ctx, answer.callId, JudgeOutcome.Shadow);
     });
   }
 

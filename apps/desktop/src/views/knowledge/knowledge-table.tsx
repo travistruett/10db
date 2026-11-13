@@ -1,6 +1,5 @@
 import type { PrincipleKind } from '@10db/contracts';
-import { ActionIcon, Badge, Box, Checkbox, Group, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconColumns3 } from '@tabler/icons-react';
+import { Badge, Box, Group, Text, UnstyledButton } from '@mantine/core';
 import {
   DataTable,
   useDataTableColumns,
@@ -9,7 +8,8 @@ import {
   type DataTableSortStatus,
 } from 'mantine-datatable';
 import type { ReactNode } from 'react';
-import { withColumnHeader } from './column-header';
+import { withColumnHeader } from '../../shell/column-header';
+import { columnChoices, ColumnsMenu, hiddenColumns, toggleColumn } from '../../shell/columns-menu';
 import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels';
 import { PAGE_SIZES, type Paging } from './knowledge-paging';
 import './knowledge-table.css';
@@ -61,51 +61,6 @@ export function ActionsCell({ children }: { readonly children: ReactNode }) {
     >
       {children}
     </Box>
-  );
-}
-
-/** One column the Columns menu can hide or show. */
-interface ColumnChoice {
-  readonly accessor: string;
-  readonly title: ReactNode;
-  readonly shown: boolean;
-}
-
-/** Hides and shows a list's columns; the choice is kept with the rest of its layout. */
-function ColumnsMenu({
-  choices,
-  onToggle,
-}: {
-  readonly choices: readonly ColumnChoice[];
-  readonly onToggle: (accessor: string) => void;
-}) {
-  if (choices.length === 0) return null;
-  return (
-    <Group justify="flex-end">
-      <Menu position="bottom-end" closeOnItemClick={false} withinPortal>
-        <Menu.Target>
-          <ActionIcon variant="subtle" size="sm" aria-label="Columns">
-            <IconColumns3 size={16} stroke={1.5} />
-          </ActionIcon>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Label>Columns</Menu.Label>
-          {choices.map((c) => (
-            <Menu.Item
-              key={c.accessor}
-              leftSection={
-                <Checkbox size="xs" readOnly checked={c.shown} tabIndex={-1} aria-hidden />
-              }
-              onClick={() => {
-                onToggle(c.accessor);
-              }}
-            >
-              {c.title}
-            </Menu.Item>
-          ))}
-        </Menu.Dropdown>
-      </Menu>
-    </Group>
   );
 }
 
@@ -180,22 +135,11 @@ export function KnowledgeTable<T>({
   // The stored layout knows only the columns it has seen, and the hook drops or hides any other, such as
   // State when Past is chosen. So the list's own columns are drawn, with the stored widths, and a column
   // hides only when the builder switched it off.
-  const off = new Set(columnsToggle.filter((t) => !t.toggled).map((t) => t.accessor));
+  const off = hiddenColumns(columns, columnsToggle);
   const stored = new Map(effectiveColumns.map((c) => [String(c.accessor), c]));
-  const choices: ColumnChoice[] = columns
-    .filter((c) => c.toggleable === true)
-    .map((c) => ({
-      accessor: String(c.accessor),
-      title: c.title ?? String(c.accessor),
-      shown: !off.has(String(c.accessor)),
-    }));
+  const choices = columnChoices(columns, columnsToggle);
   const toggle = (accessor: string): void => {
-    const known = columnsToggle.some((t) => t.accessor === accessor);
-    setColumnsToggle(
-      known
-        ? columnsToggle.map((t) => (t.accessor === accessor ? { ...t, toggled: !t.toggled } : t))
-        : [...columnsToggle, { accessor, defaultToggle: true, toggleable: true, toggled: false }],
-    );
+    setColumnsToggle(toggleColumn(columns, columnsToggle, accessor));
   };
   const shown = columns.map((c): DataTableColumn<T> => {
     const accessor = String(c.accessor);
@@ -208,7 +152,14 @@ export function KnowledgeTable<T>({
       toggleable: false,
     };
     return accessor === ACTIONS_COLUMN
-      ? { ...drawn, title: <ColumnsMenu choices={choices} onToggle={toggle} /> }
+      ? {
+          ...drawn,
+          title: (
+            <Group justify="flex-end">
+              <ColumnsMenu choices={choices} onToggle={toggle} />
+            </Group>
+          ),
+        }
       : drawn;
   });
   return (

@@ -182,7 +182,7 @@ describe('a Shape conversation on a started daemon', () => {
       );
       for (const p of listModelProfiles(ctx.tx))
         applyAaMeasurement(ctx, p.id, {
-          scores: { intelligence: 30, coding: 30, agentic: 30 },
+          scores: { intelligence: 30 },
           costPerTaskUsd: 0.1,
           outputTokensPerSecond: 100,
           indexVersion: 'test',
@@ -193,7 +193,7 @@ describe('a Shape conversation on a started daemon', () => {
     const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
     expect(view.models.default).toBe('claude-sonnet-5-5');
     expect(view.models.offered).toEqual([
-      { model: 'claude-haiku-5-5', tier: 'fast' },
+      { model: 'claude-haiku-5-5', tier: 'efficient' },
       { model: 'claude-sonnet-5-5', tier: 'balanced' },
     ]);
   });

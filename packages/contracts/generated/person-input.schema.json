@@ -10,6 +10,52 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 80
+    },
+    "slack": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "userId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sendMode": {
+              "default": "review",
+              "type": "string",
+              "enum": [
+                "review",
+                "auto"
+              ]
+            },
+            "dailyLimit": {
+              "default": 10,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "teamId",
+            "userId"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

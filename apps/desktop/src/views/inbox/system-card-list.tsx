@@ -27,6 +27,11 @@ function cardText(card: SystemCard): { readonly title: string; readonly body: st
         title: card.message,
         body: 'Replace the key in the Keychain; the next sync reads it. Routing uses the last good scores until a sync succeeds.',
       };
+    case SystemCardKind.SlackRefused:
+      return {
+        title: "Slack refused 10db's token",
+        body: 'Reconnect it in Settings › Integrations. Questions already sent stay in your Open tab until it works again, so you can answer them yourself.',
+      };
   }
 }
 

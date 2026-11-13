@@ -9,7 +9,7 @@ import { CompletionError, type AgentAdapter } from '../sessions';
 import { routingInputs } from '../team';
 
 /** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
-const NAMING_MODEL = ModelTier.Fast;
+const NAMING_MODEL = ModelTier.Efficient;
 
 export interface AreaNamerDeps {
   readonly adapter: Pick<AgentAdapter, 'complete'>;

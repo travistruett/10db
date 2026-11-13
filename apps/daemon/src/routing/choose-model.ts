@@ -1,13 +1,11 @@
 import {
   isPickableModel,
-  ROLE_SCORE,
-  ScoreKind,
   type AccountModelDto,
   type Effort,
   type FlowStepDef,
   type ModelProfileDto,
   type ModelSetting,
-  type ModelTier,
+  ModelTier,
   type PatternDto,
   type PatternMatch,
   type PersonaDto,
@@ -18,7 +16,16 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import { higherFloor, stepFloor, type Floor } from './floors';
-import { atEffort, automatic, effortAbove, tierPool, topModel, type TierPool } from './pools';
+import {
+  atEffort,
+  automatic,
+  effortAbove,
+  tierPool,
+  topModel,
+  topSpan,
+  withTopSpan,
+  type TierPool,
+} from './pools';
 import { defaultTier, pickByDefault, ROLE_DEFAULT } from './role-defaults';
 import { route, UnmeasuredError, type RouteChoice } from './router';
 import type { TaskShape } from './skip-rules';
@@ -78,7 +85,6 @@ export interface ModelChoice {
   /** The setting that decided: the first that applied, or Automatic when none did. */
   readonly setting: ModelSetting;
   readonly reason: string;
-  readonly score: ScoreKind;
   readonly overBudget: boolean;
   readonly pinned: boolean;
 }
@@ -150,7 +156,6 @@ function decide(input: ChooseInput): Decided {
 interface Made {
   readonly profile: ModelProfileDto;
   readonly reason: string;
-  readonly score: ScoreKind;
   readonly overBudget: boolean;
 }
 
@@ -179,7 +184,6 @@ function scored(request: Request, considered: readonly ModelProfileDto[]): Made 
   return {
     profile: choice.profile,
     reason: choice.reason,
-    score: choice.score,
     overBudget: choice.overBudget,
   };
 }
@@ -204,7 +208,6 @@ function pickByRole(
     picked && {
       profile: picked.profile,
       reason: `${picked.reason}${note}`,
-      score: ROLE_SCORE[input.def.role],
       overBudget: false,
     }
   );
@@ -222,13 +225,11 @@ function pickIn(request: Request, top: boolean): Made | undefined {
     return scored(request, considered);
   } catch (error) {
     if (!(error instanceof UnmeasuredError)) throw error;
-    const note = `; no profile has ${article(error.kind)} ${error.kind} score to compare on yet (sync Artificial Analysis to route by score)`;
+    const note =
+      '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
     return pickByRole(request, considered, top, note);
   }
 }
-
-/** The indefinite article for a score kind's name. */
-const article = (kind: ScoreKind): string => (kind === ScoreKind.Coding ? 'a' : 'an');
 
 const describeSetting = (setting: ModelSetting): string => {
   switch (setting.kind) {
@@ -253,7 +254,6 @@ const describeSetting = (setting: ModelSetting): string => {
 export function chooseModel(input: ChooseInput): ModelChoice {
   const { def, persona } = input;
   const byScore = input.byScore ?? true;
-  const roleScore = ROLE_SCORE[def.role];
   const personaFloor: Floor =
     persona && persona.minimumScore !== null
       ? { minimum: persona.minimumScore, why: `${persona.key} minimum` }
@@ -280,7 +280,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
         tier: profile.tier ?? roleTier,
         setting: { kind: 'model', model: pin.model },
         reason: `pinned by ${persona.key}`,
-        score: roleScore,
         overBudget: false,
         pinned: true,
       };
@@ -298,7 +297,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
         tier,
         setting: decided.setting,
         reason: `${pinNote}${source}${note}no model offered for the ${tier} tier`,
-        score: roleScore,
         overBudget: false,
         pinned: false,
       };
@@ -309,7 +307,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
       tier: made.profile.tier ?? tier,
       setting: decided.setting,
       reason: `${pinNote}${source}${note}${made.reason}`,
-      score: made.score,
       overBudget: made.overBudget,
       pinned: false,
     };
@@ -320,7 +317,10 @@ export function chooseModel(input: ChooseInput): ModelChoice {
    * with no profile at all (a gateway that lists none) is launched as named; one whose model is retired is not.
    */
   const overrideFor = (tier: ModelTier, note: string): ModelChoice | undefined => {
-    const name = input.tierOverrides[tier];
+    // Capable and Frontier were one tier with one override, so an unset Frontier override is the Capable one.
+    const name =
+      input.tierOverrides[tier] ??
+      (tier === ModelTier.Frontier ? input.tierOverrides[ModelTier.Capable] : undefined);
     if (name === undefined) return undefined;
     const listed = input.accountModels ?? [];
     if (listed.length > 0 && !listed.some((m) => m.model === name && !m.unusable)) return undefined;
@@ -342,7 +342,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
       tier,
       setting: decided.setting,
       reason: `${pinNote}${source}${note}the account's ${tier} model ${name}`,
-      score: roleScore,
       overBudget: false,
       pinned: false,
     };
@@ -350,9 +349,15 @@ export function chooseModel(input: ChooseInput): ModelChoice {
 
   /** The tier's automatic choice, or the account's override for the tier. */
   const inTier = (tier: ModelTier, top: boolean, note: string): ModelChoice => {
-    const pool = tierPool(tier, input.profiles);
+    // A top pick, or a floored step, takes the dearest model of every tier its tier spans.
+    const found = tierPool(tier, input.profiles);
+    const pool = found && (top || floored) ? withTopSpan(found, input.profiles) : found;
+    // Capable and Frontier were one tier, so a step between them has not moved.
+    const together = topSpan(ModelTier.Capable);
     const moved =
-      pool === undefined || pool.tier === tier
+      pool === undefined ||
+      pool.tier === tier ||
+      (together.includes(tier) && together.includes(pool.tier))
         ? ''
         : `no ${tier} model is offered, so the ${pool.tier} tier: `;
     const overridden = top ? undefined : overrideFor(pool?.tier ?? tier, `${note}${moved}`);

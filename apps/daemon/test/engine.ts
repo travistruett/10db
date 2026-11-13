@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { mintId } from '@10db/contracts';
+import { InboxItemId, mintId, RoutedBy } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -24,6 +24,9 @@ import {
   createTestStore,
   findFlowByName,
   getProject,
+  getInboxItem,
+  listPeople,
+  updatePerson,
   getTask,
   getWorkstreamRow,
   insertTask,
@@ -65,7 +68,20 @@ import { createDeliveryJobs } from '../src/delivery';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
-import type { Judge } from '../src/judge';
+import { createJudge, type Judge } from '../src/judge';
+import {
+  createReplyWatch,
+  createSlackConnection,
+  createStakeholderSends,
+  createTimerWatch,
+  createTriage,
+  draftOnOpen,
+  routedAway,
+  type ReplyWatch,
+  type StakeholderSends,
+  type TimerWatch,
+} from '../src/stakeholders';
+import type { SlackClient } from '../src/slack';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
@@ -74,6 +90,7 @@ import {
   applyCheckAnswer,
   RunnerNotStartedError,
   createLiveSessions,
+  type LiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
   type Runner,
@@ -92,6 +109,12 @@ export interface TestEngine {
   /** Every event the engine's writes push, as the daemon's listeners get them. */
   readonly bus: EventBus;
   readonly inbox: InboxService;
+  /** The running sessions' wait observers and signals, as the MCP side reads them. */
+  readonly live: LiveSessions;
+  /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
+  readonly sends: StakeholderSends;
+  readonly replyWatch: ReplyWatch;
+  readonly timerWatch: TimerWatch;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -169,6 +192,13 @@ export async function createTestEngine(
     readonly secret?: string;
     /** How long one request_claim call waits before it answers "still waiting", and how often it looks. */
     readonly claims?: { readonly sliceMs: number; readonly pollMs: number };
+    /**
+     * A fake OpenRouter: with it the engine triages questions through a real judge on this `fetch`, as
+     * the daemon does. Without it the judge is off and the lane's tags decide at insert.
+     */
+    readonly openRouter?: { readonly fetch: typeof fetch; readonly key?: string };
+    /** A fake Slack: with it routed questions are drafted and sent through it, as the daemon does. */
+    readonly slack?: SlackClient;
   } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
@@ -202,8 +232,59 @@ export async function createTestEngine(
     },
     log: silentLogger,
   });
+  const triageJudge: Judge = setup.openRouter
+    ? createJudge({
+        state,
+        clock,
+        fetch: setup.openRouter.fetch,
+        readKey: () => Promise.resolve(setup.openRouter?.key ?? 'test-key-0123456789'),
+        off: false,
+        logger: silentLogger,
+      })
+    : offJudge;
+  const sends = createStakeholderSends({
+    state,
+    slack: setup.slack ?? null,
+    clock,
+    log: silentLogger,
+    parkFor: (id) => {
+      runner?.parkFor(id);
+    },
+  });
+  const draftOpts = {
+    afterDraft: (id: InboxItemId): void => {
+      sends.afterDraft(id).catch(() => undefined);
+    },
+    log: silentLogger,
+  };
+  const triage = createTriage({
+    state,
+    judge: triageJudge,
+    log: silentLogger,
+    afterRouted: (id) => {
+      const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      after?.();
+    },
+  });
+  bus.subscribe((event) => {
+    if (event.type !== 'inbox.changed') return;
+    const id = InboxItemId.safeParse(event.entityId);
+    if (id.success) sends.onCardChanged(getInboxItem(state.db, id.data)).catch(() => undefined);
+  });
   const inbox = createInboxService({
     state,
+    judgeOff: triageJudge.off,
+    parkWaiting: (id) => {
+      runner?.parkFor(id);
+    },
+    onQuestionOpened: (ctx, item) =>
+      item.routedBy === RoutedBy.TriagePending
+        ? () => {
+            void triage.run(item.id);
+          }
+        : draftOnOpen(ctx, item, draftOpts),
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
@@ -231,6 +312,21 @@ export async function createTestEngine(
       answerAccountCard?.(item, answer);
     },
   });
+  const slackConnection = createSlackConnection({
+    state,
+    initial: setup.slack ? 'connected' : 'off',
+  });
+  const replyWatch = createReplyWatch({
+    state,
+    slack: setup.slack ?? null,
+    inbox,
+    judge: triageJudge,
+    sends,
+    clock,
+    log: silentLogger,
+    connection: slackConnection,
+  });
+  const timerWatch = createTimerWatch({ state, clock, log: silentLogger });
   const pauses = createAccountPauses({
     state,
     clock,
@@ -395,6 +491,10 @@ export async function createTestEngine(
     state,
     bus,
     inbox,
+    live,
+    sends,
+    replyWatch,
+    timerWatch,
     runner: created,
     adapter,
     clock,
@@ -464,4 +564,12 @@ export async function createTestEngine(
     },
   };
   return engine;
+}
+
+/** Gives the seeded builder a name, as Settings › Integrations does before a question can be sent. */
+export function nameBuilder(engine: TestEngine, name = 'Travis'): void {
+  engine.store.write((ctx) => {
+    const builder = listPeople(ctx.tx).find((p) => p.isBuilder);
+    if (builder) updatePerson(ctx, builder.id, { handle: builder.handle, name, slack: null });
+  });
 }

@@ -8,8 +8,10 @@ import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
+  InboxItemId,
   PROTOCOL_VERSION,
   Provider,
+  RoutedBy,
   providerOf,
   StepRole,
   type Effort,
@@ -27,6 +29,7 @@ import {
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
+  getInboxItem,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -76,6 +79,18 @@ import {
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
+import { createStakeholderApiServices } from './stakeholder-services';
+import {
+  createReplyWatch,
+  createSlackConnection,
+  createStakeholderSends,
+  createTimerWatch,
+  createTriage,
+  draftOnOpen,
+  routedAway,
+  sweepDrafts,
+} from '../stakeholders';
+import { createSlackClient, type SlackClient } from '../slack';
 import { createTrustServices } from './trust-services';
 import {
   backupDatabase,
@@ -132,6 +147,7 @@ import {
   exportAwsCredentials,
   REQUIRED_TOOLS,
   OPENROUTER_KEY_ACCOUNT,
+  SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
@@ -144,6 +160,7 @@ import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
+import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -193,6 +210,7 @@ import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
+import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
@@ -277,6 +295,9 @@ import {
 } from './sandbox-roots';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
+/** How long one Slack call may take before it counts as unreachable. */
+const SLACK_TIMEOUT_MS = 15_000;
+
 export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
@@ -357,6 +378,11 @@ export interface DaemonOptions {
   readonly catalogueSync?: boolean;
   /** The file holding the catalogue the release embeds, read when nothing is stored; absent or missing means none. */
   readonly catalogueSnapshot?: string;
+  /**
+   * Talk to Slack with the bot token in the Keychain. Off unless given, so a test never reaches the
+   * network; the entry point turns it on unless `TENDB_SLACK=off`.
+   */
+  readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
   /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
@@ -544,6 +570,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
+  backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
@@ -680,8 +708,60 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     log: logger,
   });
+  // Slack is reached only when the entry point turned it on, and only with the bot token in the Keychain.
+  const slackClient: SlackClient | null =
+    opts.slack === true
+      ? createSlackClient({
+          fetch: opts.fetch ?? fetch,
+          token: () => judgeKeychain.readAsync(SLACK_BOT_ACCOUNT),
+          clock,
+          timeoutMs: SLACK_TIMEOUT_MS,
+        })
+      : null;
+  const sends = createStakeholderSends({
+    state,
+    slack: slackClient,
+    clock,
+    log: logger.child({ component: 'stakeholder-sends' }),
+    hasToken: async () => (await judgeKeychain.readAsync(SLACK_BOT_ACCOUNT)) !== null,
+    parkFor: (id) => {
+      runner?.parkFor(id);
+    },
+  });
+  const draftOpts = {
+    afterDraft: (id: InboxItemId): void => {
+      sends.afterDraft(id).catch((error: unknown) => {
+        logger.warn({ err: error, cardId: id }, 'a drafted question could not be sent');
+      });
+    },
+    log: logger.child({ component: 'drafts' }),
+  };
+  // A question no explicit route claimed is routed by the judge right after its card commits.
+  const triage = createTriage({
+    state,
+    judge,
+    log: logger.child({ component: 'triage' }),
+    // A card routed away from the builder is drafted, and the sessions waiting on it park, so the
+    // stakeholder's words are answered through the card and never reach a live ask_human call.
+    afterRouted: (id) => {
+      const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      after?.();
+    },
+  });
   const inbox = createInboxService({
     state,
+    judgeOff: opts.judgeOff === true,
+    parkWaiting: (id) => {
+      runner?.parkFor(id);
+    },
+    onQuestionOpened: (ctx, item) =>
+      item.routedBy === RoutedBy.TriagePending
+        ? () => {
+            void triage.run(item.id);
+          }
+        : draftOnOpen(ctx, item, draftOpts),
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
@@ -1464,6 +1544,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
+  // one, and a send that was mid-post is looked for in Slack.
+  for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
+  const slackConnection = createSlackConnection({
+    state,
+    initial: slackClient === null ? 'off' : 'none',
+  });
+  const replyWatch = createReplyWatch({
+    state,
+    slack: slackClient,
+    inbox,
+    judge,
+    sends,
+    clock,
+    log: logger.child({ component: 'reply-watch' }),
+    connection: slackConnection,
+  });
+  // The timers need no Slack: a card comes back to the builder even while Slack is down.
+  const timerWatch = createTimerWatch({
+    state,
+    clock,
+    log: logger.child({ component: 'stakeholder-timers' }),
+  });
+  bus.subscribe((event) => {
+    if (event.type !== EventType.InboxChanged) return;
+    const id = InboxItemId.safeParse(event.entityId);
+    if (!id.success) return;
+    sends.onCardChanged(getInboxItem(state.db, id.data)).catch((error: unknown) => {
+      logger.warn({ err: error, cardId: id.data }, 'could not settle the send of a changed card');
+    });
+  });
   // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
   // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
@@ -1715,7 +1826,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       judge,
       off: opts.judgeOff === true,
     }),
+    stakeholders: createStakeholderApiServices({
+      state,
+      keychain: judgeKeychain,
+      slack: slackClient,
+      sends,
+      connection: slackConnection,
+      clock,
+      fetch: opts.fetch ?? fetch,
+      reconnect: () => replyWatch.reconnect(),
+    }),
     shape: createShapeServices({ shape, state, clock }),
+    planRecord: createPlanRecordServices({
+      state,
+      dataDir: opts.dataDir,
+      worktreeRoot,
+      sandboxRoots: allSandboxRoots,
+    }),
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,
@@ -2019,6 +2146,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
+  // After recovery: a send left mid-post is looked for in Slack, then replies and timers are watched.
+  void sends.recoverSending();
+  replyWatch.start();
+  timerWatch.start();
   if (selfUpdate) {
     selfUpdate.start();
     selfUpdate.tick().catch((error: unknown) => {
@@ -2050,6 +2181,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
+      await Promise.all([replyWatch.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
       await retiredLandings;
       systemTempAbort.abort();

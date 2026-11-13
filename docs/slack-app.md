@@ -1,7 +1,7 @@
 # Setting up Slack for stakeholder questions
 
-**Status:** designed, not built (`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`).
-Every step in Slack can be done now: the app made here is the one 10db will use. The research behind each
+**Status:** built (`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`). Settings ›
+People in 10db walks you through these steps and copies the manifest for you. The research behind each
 choice, with sources, is `docs/architecture/research/slack-stakeholder-questions.md`.
 
 10db asks a stakeholder in Slack through a small Slack app that you make in your own workspace from a
@@ -85,7 +85,8 @@ including one this guide added since you made it (such as `reactions:write`), me
 the same page (**Install App › Reinstall to Workspace**).
 
 4. Optional: under **Basic Information › Display Information**, upload an icon so your stakeholder
-   recognises the bot.
+   recognises the bot: [`slack-app-icon.png`](slack-app-icon.png) (1024 × 1024), with the background color
+   `#1F262A`.
 
 ## 2. Install it
 
@@ -176,16 +177,20 @@ up. Paste the answers, with the token and ids removed, at the end of
 
 ## 4. In 10db (once built)
 
-1. **Settings › People**: paste the `xoxb-` token in the Slack line and press **Connect**. 10db checks it with
-   Slack and shows "Connected to <workspace> · as @10db".
-2. **Add Person**: pick your stakeholder from the workspace's members. Choose **Review Each** for now: you
-   see every message before it goes. "New questions a day" starts at 10 and can be turned off; it counts only a
-   new question that starts a thread, never the replies or the conversation inside one.
-3. Tell 10db which questions are theirs: on a question card, **Ask Someone…** with "Always send product
+1. **Settings › Integrations**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
+   with Slack, and the card asks you to finish setup: under **Which one is you?**, pick yourself and press
+   **That's Me**, so every message carries your name. The card then reads "<workspace> · posts as @10db ·
+   you're @you".
+2. **Settings › People › Add Person**: find your stakeholder among the workspace's members. Under "Before 10db
+   messages them", keep **Show me each message first** for now: you see every message before it goes. "Up to
+   10 new questions a day" can be set to **No limit**; it counts only a new question that starts a thread,
+   never the replies or the conversation inside one.
+3. Tell 10db which questions are theirs: on a question card, **Ask Someone** with "Always send product
    questions on this goal to them", or **Project Settings › Who Answers**, where you can also add a topic
    ("billing, pricing, invoices") for 10db's judge to match questions against.
-4. Under the people, the timers: a reminder in the thread after 4 hours, and the question back in your Inbox
-   after 8. Both are measured in real time, so one that comes due while your Mac sleeps fires when it wakes.
+4. At the foot of People, under "When someone hasn't answered": a reminder in the thread after 4 hours, and the
+   question back in your Inbox after 8. Both are measured in real time, so one that comes due while your Mac
+   sleeps fires when it wakes.
 
 The first time 10db messages someone, it always shows you the message first.
 
@@ -210,6 +215,6 @@ check like section 3's against such a person.
 
 ## Disconnecting
 
-Removing the token in **Settings › People** stops 10db from sending and reading at once. To revoke it for
+**Disconnect**, in the Slack card's menu in **Settings › Integrations**, stops 10db from sending and reading at once. To revoke it for
 good, open the app at <https://api.slack.com/apps> and press **Uninstall App** under Install App (or delete the
 app): the token stops working everywhere.

@@ -27,6 +27,7 @@ import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
 import { projectViewDto } from './fixtures';
+import { BUILDER_PERSON, slackConnection } from './people-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -169,6 +170,14 @@ export function baseHandlers(
         }),
       ),
     ),
+    // People, Integrations, the Inbox and Who Answers read who the builder can ask and how Slack stands.
+    http.get(daemonUrl('/people', base), () => HttpResponse.json([BUILDER_PERSON])),
+    http.get(daemonUrl('/slack', base), () => HttpResponse.json(slackConnection())),
+    http.get(daemonUrl('/stakeholders/timers', base), () =>
+      HttpResponse.json({ remindAfterHours: 4, returnAfterHours: 8 }),
+    ),
+    http.get(daemonUrl('/projects/:projectId/routing-rules', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/tasks/:taskId/question-routes', base), () => HttpResponse.json([])),
     // Sockets connect and stay quiet unless a test adds its own connection listener.
     eventStream.addEventListener('connection', () => undefined),
   ];

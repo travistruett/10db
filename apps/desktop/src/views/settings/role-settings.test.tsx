@@ -13,14 +13,19 @@ const project = projectDto();
 const OTHER = accountDto({ label: 'Other account' });
 
 const models = [
-  modelRowDto({ model: 'fast-a', name: 'Fast A', tier: 'fast', availableOn: [DEFAULT_ACCOUNT.id] }),
+  modelRowDto({
+    model: 'fast-a',
+    name: 'Fast A',
+    tier: 'efficient',
+    availableOn: [DEFAULT_ACCOUNT.id],
+  }),
   modelRowDto({
     model: 'mid-a',
     name: 'Mid A',
     tier: 'balanced',
     availableOn: [DEFAULT_ACCOUNT.id],
   }),
-  modelRowDto({ model: 'top-b', name: 'Top B', tier: 'strongest', availableOn: [OTHER.id] }),
+  modelRowDto({ model: 'top-b', name: 'Top B', tier: 'capable', availableOn: [OTHER.id] }),
   modelRowDto({
     model: 'house',
     name: 'House',
@@ -45,7 +50,7 @@ const models = [
   modelRowDto({ model: 'gone', name: 'Gone', status: 'retired', availableOn: [] }),
 ];
 
-const CHOICES = ['Automatic', 'Fast', 'Balanced', 'Strongest', 'Top of tier'];
+const CHOICES = ['Automatic', 'Efficient', 'Balanced', 'Capable', 'Frontier', 'Top of tier'];
 
 interface Put {
   readonly path: string;
@@ -115,12 +120,12 @@ describe('Settings › Team › model by role', () => {
     const puts = serve();
     renderWithDaemon(<SectionBody sectionKey={SettingsSectionKey.Team} project={project} />);
     const list = await openChoices('Review model');
-    fireEvent.click(await list.findByRole('option', { name: 'Strongest', hidden: true }));
+    fireEvent.click(await list.findByRole('option', { name: 'Capable', hidden: true }));
     await waitFor(() => {
       expect(puts).toEqual([
         {
           path: '/projects/:projectId/model-settings',
-          body: { roles: [{ role: 'review', setting: { kind: 'tier', tier: 'strongest' } }] },
+          body: { roles: [{ role: 'review', setting: { kind: 'tier', tier: 'capable' } }] },
         },
       ]);
     });

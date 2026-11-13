@@ -1,9 +1,15 @@
-import { InboxKind, type DecisionRecording, type ProjectId } from '@10db/contracts';
-import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import {
+  InboxKind,
+  type DecisionRecording,
+  type InboxItemDto,
+  type ProjectId,
+} from '@10db/contracts';
+import { Alert, Badge, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
+import { usePeople, useSlackConnection } from '../../daemon/people';
 import {
   queryKeys,
   useAnswerInbox,
@@ -15,13 +21,16 @@ import { ProjectFilter } from '../../shell/project-filter';
 import { inProject } from './in-project';
 import { cardAnswer, recommended } from './card-answer';
 import { InboxCard } from './inbox-card';
-import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
+import { inboxRows, isDismissable, openCount, splitInbox, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { PassReadyRow, useOpenPassWorkbench } from './pass-ready-row';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
+import { WaitingInbox } from './waiting-inbox';
+import { CountBadge } from '../../shell/count-badge';
 import { systemCards, type SystemCard } from './system-cards';
+import { stakeholderMode, StakeholderMode } from './route-line';
 import { useInboxKeys } from './use-inbox-keys';
 
 /** Flag cards have no options; the daemon accepts any choice and closes them. */
@@ -38,7 +47,7 @@ interface Draft {
   readonly error: string | null;
 }
 
-type Tab = 'open' | 'resolved';
+type Tab = 'open' | 'waiting' | 'resolved';
 
 /** The Inbox: the cards that wait on the builder, and a view of the ones already closed. */
 export function InboxView() {
@@ -49,11 +58,14 @@ export function InboxView() {
   const { project } = useSearch({ from: '/inbox' });
   const navigate = useNavigate({ from: '/inbox' });
   // 10db's own cards are the app's, not a project's, so they show under every filter.
-  const cards = systemCards(useSystemCheck().data);
-  // The header is drawn here once, the same for both views, so switching moves nothing in it.
-  const openCount = inbox.isSuccess
-    ? inboxRows(inProject(inbox.data, project)).length + cards.length
-    : null;
+  const connection = useSlackConnection();
+  const cards = systemCards(useSystemCheck().data, connection.data);
+  const { open: openItems, waiting: waitingItems } = splitInbox(
+    inProject(inbox.data ?? [], project),
+    connection.data?.state,
+  );
+  // The header is drawn here once, the same for every view, so switching moves nothing in it.
+  const openTotal = inbox.isSuccess ? openCount(openItems) + cards.length : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Stack>
@@ -64,10 +76,32 @@ export function InboxView() {
             aria-label="Inbox view"
             value={tab}
             onChange={(value) => {
-              setTab(value === 'resolved' ? 'resolved' : 'open');
+              setTab(value === 'resolved' ? 'resolved' : value === 'waiting' ? 'waiting' : 'open');
             }}
             data={[
-              { value: 'open', label: openCount === null ? 'Open' : `Open ${String(openCount)}` },
+              {
+                value: 'open',
+                label: (
+                  <Group gap={6} wrap="nowrap">
+                    Open
+                    {openTotal === null ? null : <CountBadge count={openTotal} />}
+                  </Group>
+                ),
+              },
+              {
+                value: 'waiting',
+                label: (
+                  <Group gap={6} wrap="nowrap">
+                    Waiting
+                    {/* Nothing in it needs the builder, so its count is neutral. */}
+                    {waitingItems.length === 0 ? null : (
+                      <Badge size="sm" variant="default" circle={waitingItems.length < 10}>
+                        {waitingItems.length}
+                      </Badge>
+                    )}
+                  </Group>
+                ),
+              },
               { value: 'resolved', label: 'Resolved' },
             ]}
           />
@@ -91,26 +125,28 @@ export function InboxView() {
           />
         </Group>
       </Group>
+      {tab === 'waiting' ? <WaitingInbox items={waitingItems} /> : null}
       {tab === 'open' ? (
         <OpenInbox
+          items={openItems}
           project={project}
           systemCards={cards}
           onHelp={() => {
             setHelpOpen(true);
           }}
         />
-      ) : (
-        <ResolvedInbox project={project} />
-      )}
+      ) : null}
+      {tab === 'resolved' ? <ResolvedInbox project={project} /> : null}
     </Stack>
   );
 }
 
 function OpenInbox({
-  project,
+  items,
   systemCards: ownCards,
   onHelp,
 }: {
+  readonly items: readonly InboxItemDto[];
   readonly project: ProjectId | undefined;
   readonly systemCards: readonly SystemCard[];
   readonly onHelp: () => void;
@@ -119,7 +155,7 @@ function OpenInbox({
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const openWorkbench = useOpenPassWorkbench();
-  const rows = inboxRows(inProject(inbox.data ?? [], project));
+  const rows = inboxRows(items);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   // A failed dismiss belongs to its row, which may not be the open one, so it never touches the draft.
@@ -130,6 +166,9 @@ function OpenInbox({
   // A check card's Send Back note, by card, so deselecting the card does not lose it.
   const [sendBackNotes, setSendBackNotes] = useState<Readonly<Record<string, string>>>({});
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const people = usePeople().data ?? [];
+  // Cards the builder chose to answer themselves instead of sending the drafted message.
+  const [myself, setMyself] = useState<ReadonlySet<string>>(new Set());
 
   // Selection follows the row, not its position: when an answered card leaves the list, the first row is next.
   const found = rows.findIndex((row) => row.key === selectedId);
@@ -148,6 +187,14 @@ function OpenInbox({
   // Until the builder changes it, a question is recorded as the daemon would record it by default.
   const recording =
     own?.record !== undefined ? own.record : selected ? defaultRecording(selected) : null;
+
+  // A drafted message is sent with ⌘↵ only: its options are not live, and a bare Enter sends nothing.
+  const previewing =
+    selected !== null &&
+    !myself.has(selected.id) &&
+    [StakeholderMode.Draft, StakeholderMode.Failed].some(
+      (m) => m === stakeholderMode(selected, people),
+    );
 
   const select = (row: InboxRow): void => {
     setSelectedId(row.key);
@@ -202,6 +249,7 @@ function OpenInbox({
     }
     // A check card is answered by its own buttons, never by a key.
     if (!selectedRow || !selected || selected.kind === InboxKind.Check || answer.isPending) return;
+    if (previewing) return;
     if (isDismissable(selected)) {
       dismiss(selectedRow);
       return;
@@ -234,7 +282,8 @@ function OpenInbox({
 
   useInboxKeys({
     count: rows.length,
-    optionCount: selected?.kind === InboxKind.Check ? 0 : (selected?.options.length ?? 0),
+    optionCount:
+      selected?.kind === InboxKind.Check || previewing ? 0 : (selected?.options.length ?? 0),
     onMove: (delta) => {
       const next = rows[Math.min(rows.length - 1, Math.max(0, index + delta))];
       if (!next || next.key === selectedRow?.key) return false;
@@ -314,6 +363,15 @@ function OpenInbox({
                   setSelectedId(row.key);
                 }}
                 onSubmit={submit}
+                answeringMyself={myself.has(row.items[0].id)}
+                onAnswerMyself={(value) => {
+                  setMyself((current) => {
+                    const next = new Set(current);
+                    if (value) next.add(row.items[0].id);
+                    else next.delete(row.items[0].id);
+                    return next;
+                  });
+                }}
                 onDismiss={() => {
                   dismiss(row);
                 }}

@@ -3,16 +3,20 @@ import {
   ModelStatus,
   type AccountDto,
   type AccountModelDto,
-  type ModelProfileDto,
   type ModelRowDto,
+  type RolePickDto,
 } from '@10db/contracts';
-import { Badge, Drawer, Group, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Drawer, Stack, Table, Text, Title } from '@mantine/core';
+import { Fragment, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useModelOffers, useModelProfiles } from '../../daemon/model-queries';
+import { useModelOffers } from '../../daemon/model-queries';
 import { absoluteTime, fromNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
-import { formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
+import { formatCost, formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
+import { RightsizingChart } from './rightsizing-chart';
+import { DotsMode, intelligenceAxis, rightsizingSeries } from './rightsizing-series';
+import { ROLES } from './role-labels';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -127,109 +131,155 @@ function Accounts({
   );
 }
 
-function Efforts({
-  profiles,
-  now,
-}: {
-  readonly profiles: readonly ModelProfileDto[];
-  readonly now: number;
-}) {
-  const ordered = [...profiles].sort(
-    (a, b) => EFFORT_ORDER.indexOf(a.effort) - EFFORT_ORDER.indexOf(b.effort),
-  );
+/** One line per effort, low to max, the order of the chart above it from left to right. */
+function Efforts({ row }: { readonly row: ModelRowDto }) {
   return (
-    <Table aria-label="Scores per effort" verticalSpacing="xs">
+    <Table aria-label="Effort table" verticalSpacing="xs">
       <Table.Thead>
         <Table.Tr>
           <Table.Th>Effort</Table.Th>
           <Table.Th ta="right">Intelligence</Table.Th>
-          <Table.Th ta="right">Coding</Table.Th>
-          <Table.Th ta="right">Speed</Table.Th>
+          <Table.Th ta="right">Cost per task</Table.Th>
+          <Table.Th ta="right">Steps run</Table.Th>
           <Table.Th ta="right">First pass</Table.Th>
-          <Table.Th ta="right">Escalations</Table.Th>
-          <Table.Th>Measured</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {ordered.map((p) => (
-          <Table.Tr key={p.id}>
-            <Table.Td>{p.effort}</Table.Td>
-            <Table.Td ta="right">{formatScore(p.scores.intelligence)}</Table.Td>
-            <Table.Td ta="right">{formatScore(p.scores.coding)}</Table.Td>
-            <Table.Td ta="right">{formatScore(p.outputTokensPerSecond)}</Table.Td>
-            <Table.Td ta="right">{formatFirstPass(p.firstPassSteps, p.stepsRun)}</Table.Td>
-            <Table.Td ta="right">{p.stepsRun === 0 ? NO_DATA : String(p.escalations)}</Table.Td>
-            <Table.Td>{p.measuredAt === null ? NO_DATA : fromNow(p.measuredAt, now)}</Table.Td>
-          </Table.Tr>
-        ))}
+        {[...row.efforts]
+          .sort((a, b) => EFFORT_ORDER.indexOf(a.effort) - EFFORT_ORDER.indexOf(b.effort))
+          .map((e) => (
+            <Table.Tr key={e.profileId}>
+              <Table.Td>{e.effort}</Table.Td>
+              <Table.Td ta="right">{formatScore(e.intelligence)}</Table.Td>
+              <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
+              <Table.Td ta="right">{e.stepsRun}</Table.Td>
+              <Table.Td ta="right">{formatFirstPass(e.firstPassSteps, e.stepsRun)}</Table.Td>
+            </Table.Tr>
+          ))}
       </Table.Tbody>
     </Table>
   );
 }
 
-function DrawerBody({ row, now }: { readonly row: ModelRowDto; readonly now: number }) {
+function DrawerBody({
+  row,
+  now,
+  picks,
+}: {
+  readonly row: ModelRowDto;
+  readonly now: number;
+  readonly picks: readonly RolePickDto[];
+}) {
   const accounts = useAccounts();
   const offers = useModelOffers();
-  const profiles = useModelProfiles();
   const accountList = accounts.data ?? [];
   const mine = (offers.data ?? []).filter((o) => o.model === row.model);
   const listed = new Set(mine.map((o) => o.accountId));
   const unlisted = accountList.filter((a) => row.availableOn.includes(a.id) && !listed.has(a.id));
   const reason = statusReason(row, offers.data === undefined ? [] : unlisted);
-  const efforts = (profiles.data ?? []).filter((p) => p.model === row.model);
-  const released = efforts.find((p) => p.releaseDate !== null)?.releaseDate ?? null;
+  // One line: the ID, rung, status, maker and age, leaving out what is empty or repeats the name.
+  const facts: { key: string; node: ReactNode }[] = [
+    ...(row.model === row.name
+      ? []
+      : [
+          {
+            key: 'id',
+            node: (
+              <Text span ff="monospace" inherit>
+                {row.model}
+              </Text>
+            ),
+          },
+        ]),
+    ...(row.tier ? [{ key: 'tier', node: `${TIER_LABEL[row.tier]} tier` }] : []),
+    {
+      key: 'status',
+      node: (
+        <Text span inherit>
+          {STATUS_LABEL[row.status]}
+        </Text>
+      ),
+    },
+    ...(row.maker === null || row.maker === row.name ? [] : [{ key: 'maker', node: row.maker }]),
+    ...(row.firstSeenAt === null
+      ? []
+      : [{ key: 'seen', node: `first seen ${fromNow(row.firstSeenAt, now)}` }]),
+  ];
+  const users = picks
+    .filter((p) => p.model === row.model)
+    .map((p) => ROLES.find((r) => r.role === p.role)?.label ?? p.role);
+  // The same chart as the page, of this model's efforts alone and with the roles that pick it ringed.
+  const plot = rightsizingSeries({
+    rows: [row],
+    picks: picks.filter((p) => p.model === row.model),
+    role: null,
+    dots: DotsMode.Every,
+  });
   return (
     <Stack gap="lg">
       <Stack gap={4}>
-        <Text size="sm" ff="monospace">
-          {row.model}
+        <Text size="sm" c="dimmed">
+          {facts.map((fact, i) => (
+            <Fragment key={fact.key}>
+              {i > 0 ? ' · ' : ''}
+              {fact.node}
+            </Fragment>
+          ))}
         </Text>
-        <Group gap="xs">
-          {row.tier ? <Badge variant="light">{TIER_LABEL[row.tier]}</Badge> : null}
-          <Badge variant="light" color="gray">
-            {STATUS_LABEL[row.status]}
-          </Badge>
-        </Group>
         {reason ? (
           <Text size="sm" c="dimmed">
             {reason}
           </Text>
         ) : null}
         <Text size="sm" c="dimmed">
-          {row.maker ?? 'Maker unknown'}
-          {row.family ? ` · ${row.family}` : ''}
-          {released ? ` · released ${released}` : ''}
-          {row.firstSeenAt === null ? '' : ` · first seen ${fromNow(row.firstSeenAt, now)}`}
-        </Text>
-        <Text size="sm" c="dimmed">
           List price per 1M tokens: {formatPrice(row.inputPrice)} in ·{' '}
-          {formatPrice(row.outputPrice)} out
+          {formatPrice(row.outputPrice)} out · speed {formatScore(row.outputTokensPerSecond)}{' '}
+          tokens/s
         </Text>
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>Accounts</Title>
-        <Accounts row={row} offers={mine} accounts={accountList} now={now} />
+        <Title order={4}>What each effort buys</Title>
+        <RightsizingChart
+          result={{
+            ...plot,
+            lines: [],
+            yAxis: intelligenceAxis(plot.points.map((p) => p.intelligence)),
+          }}
+          costLabel="Cost per task (USD, log scale)"
+          height={200}
+        />
+        {users.length === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            Ringed: the pick of {users.join(', ')} on this account.
+          </Text>
+        )}
+        <Efforts row={row} />
+        <Text size="xs" c="dimmed">
+          <ArtificialAnalysisCredit />
+        </Text>
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>Scores per effort</Title>
-        <Efforts profiles={efforts} now={now} />
-        <ArtificialAnalysisCredit />
+        <Title order={4}>Offered by</Title>
+        <Accounts row={row} offers={mine} accounts={accountList} now={now} />
       </Stack>
     </Stack>
   );
 }
 
-/** One model's facts and their age, its scores per effort, its observed steps and the accounts that offer it. */
+/** One model's facts and their age, what each effort buys, and the accounts that offer it. */
 export function ModelDrawer({
   row,
   opened,
   onClose,
   now,
+  picks,
 }: {
   readonly row: ModelRowDto | null;
   readonly opened: boolean;
   readonly onClose: () => void;
   readonly now: number;
+  /** The router's picks on the page's account, whose rings the model's chart draws. */
+  readonly picks: readonly RolePickDto[];
 }) {
   return (
     <Drawer
@@ -240,7 +290,7 @@ export function ModelDrawer({
       title={row?.name ?? 'Model'}
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
-      {row ? <DrawerBody key={row.model} row={row} now={now} /> : null}
+      {row ? <DrawerBody key={row.model} row={row} now={now} picks={picks} /> : null}
     </Drawer>
   );
 }

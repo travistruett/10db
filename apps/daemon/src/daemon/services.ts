@@ -4,12 +4,16 @@ import {
   ACTIVE_STATES,
   AreaRole,
   CatalogueAttempt,
+  type AccountDto,
+  type AccountId,
   type CatalogueStatusDto,
   type BatchId,
   ConflictError,
   Delivery,
   TaskStatus,
   InvalidError,
+  NotFoundError,
+  providerOf,
   isDaemonAddress,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
@@ -61,6 +65,8 @@ import {
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
+  getAccount,
+  type DbReader,
   listAccountModels,
   listAccounts,
   listBatches,
@@ -151,20 +157,30 @@ import {
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
-import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
+import { rolePicks } from '../routing';
+import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
+import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
 import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
 import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
+
+/** An account that is still in use: an archived one is as good as unknown to a read that prices on it. */
+function liveAccount(db: DbReader, id: AccountId): AccountDto {
+  const account = getAccount(db, id);
+  if (account.archived) throw new NotFoundError('account', id);
+  return account;
+}
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -187,7 +203,11 @@ export function createServices(deps: {
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
   readonly judge: JudgeApiServices;
+  /** People, the Slack connection, timers, routes and sends. */
+  readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
+  /** Importing a planning effort into a Plan. */
+  readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
   readonly pictures: Pictures;
@@ -668,9 +688,11 @@ export function createServices(deps: {
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
+    ...deps.stakeholders,
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
+    ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,
     taskScreens: (taskId) => deps.pictures.screens(taskId),
@@ -683,13 +705,24 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    listModels: () =>
+    listModels: (accountId) =>
       buildModelRows({
         profiles: listModelProfiles(db),
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
+        ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
+    modelPicks: (accountId) => {
+      const account = liveAccount(db, accountId);
+      return {
+        accountId,
+        picks: rolePicks({
+          ...routingInputs(db, { accountId, provider: providerOf(account.kind) }),
+          personas: listPersonas(db),
+        }),
+      };
+    },
     listAccountOffers: () => listAccountModels(db),
     catalogueStatus,
     // The builder asked, so every account is read whatever the day's earlier reads were.

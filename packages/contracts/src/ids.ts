@@ -31,6 +31,8 @@ const ID_SCHEMAS = {
   Flow: idSchema('flw', 'FlowId'),
   Person: idSchema('psn', 'PersonId'),
   RoutingRule: idSchema('rtr', 'RoutingRuleId'),
+  PersonContact: idSchema('pcn', 'PersonContactId'),
+  StakeholderSend: idSchema('snd', 'StakeholderSendId'),
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
   Principle: idSchema('pri', 'PrincipleId'),
   Batch: idSchema('bat', 'BatchId'),
@@ -46,6 +48,10 @@ const ID_SCHEMAS = {
   ShapeQuestion: idSchema('sqn', 'ShapeQuestionId'),
   ShapeFile: idSchema('sfl', 'ShapeFileId'),
   ShapeAttachment: idSchema('sat', 'ShapeAttachmentId'),
+  ShapeAttachmentRevision: idSchema('sar', 'ShapeAttachmentRevisionId'),
+  ShapeEntry: idSchema('sen', 'ShapeEntryId'),
+  ShapeEntryVersion: idSchema('sev', 'ShapeEntryVersionId'),
+  TaskContextCheck: idSchema('tcx', 'TaskContextCheckId'),
   LandingGroup: idSchema('lgp', 'LandingGroupId'),
   Pattern: idSchema('pat', 'PatternId'),
   TaskMessage: idSchema('tmg', 'TaskMessageId'),
@@ -77,6 +83,8 @@ const ID_PREFIX = {
   Flow: 'flw',
   Person: 'psn',
   RoutingRule: 'rtr',
+  PersonContact: 'pcn',
+  StakeholderSend: 'snd',
   ModelProfile: 'mpf',
   Principle: 'pri',
   Batch: 'bat',
@@ -92,6 +100,10 @@ const ID_PREFIX = {
   ShapeQuestion: 'sqn',
   ShapeFile: 'sfl',
   ShapeAttachment: 'sat',
+  ShapeAttachmentRevision: 'sar',
+  ShapeEntry: 'sen',
+  ShapeEntryVersion: 'sev',
+  TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
   Pattern: 'pat',
   TaskMessage: 'tmg',
@@ -163,6 +175,10 @@ export const PersonId = ID_SCHEMAS.Person;
 export type PersonId = IdOf<'Person'>;
 export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
 export type RoutingRuleId = IdOf<'RoutingRule'>;
+export const PersonContactId = ID_SCHEMAS.PersonContact;
+export type PersonContactId = IdOf<'PersonContact'>;
+export const StakeholderSendId = ID_SCHEMAS.StakeholderSend;
+export type StakeholderSendId = IdOf<'StakeholderSend'>;
 export const ModelProfileId = ID_SCHEMAS.ModelProfile;
 export type ModelProfileId = IdOf<'ModelProfile'>;
 export const PrincipleId = ID_SCHEMAS.Principle;
@@ -193,6 +209,14 @@ export const ShapeFileId = ID_SCHEMAS.ShapeFile;
 export type ShapeFileId = IdOf<'ShapeFile'>;
 export const ShapeAttachmentId = ID_SCHEMAS.ShapeAttachment;
 export type ShapeAttachmentId = IdOf<'ShapeAttachment'>;
+export const ShapeAttachmentRevisionId = ID_SCHEMAS.ShapeAttachmentRevision;
+export type ShapeAttachmentRevisionId = IdOf<'ShapeAttachmentRevision'>;
+export const ShapeEntryId = ID_SCHEMAS.ShapeEntry;
+export type ShapeEntryId = IdOf<'ShapeEntry'>;
+export const ShapeEntryVersionId = ID_SCHEMAS.ShapeEntryVersion;
+export type ShapeEntryVersionId = IdOf<'ShapeEntryVersion'>;
+export const TaskContextCheckId = ID_SCHEMAS.TaskContextCheck;
+export type TaskContextCheckId = IdOf<'TaskContextCheck'>;
 export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const PatternId = ID_SCHEMAS.Pattern;

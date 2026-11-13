@@ -56,6 +56,11 @@
         "persona.saved",
         "flow.saved",
         "person.saved",
+        "person.removed",
+        "stakeholder_send.changed",
+        "slack.connection.changed",
+        "stakeholder_timers.changed",
+        "inbox.triaged",
         "team.saved",
         "routing_rules.saved",
         "model_profile.saved",
@@ -69,6 +74,8 @@
         "goal.created",
         "goal.changed",
         "shape.changed",
+        "plan.record_changed",
+        "plan.anchor_checked",
         "gate.started",
         "gate.finished"
       ]

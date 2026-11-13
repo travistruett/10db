@@ -1548,7 +1548,7 @@ describe('startDaemon', () => {
       expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
       expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
         enabled: true,
-        tier: 'strongest',
+        tier: 'frontier',
         outputPrice: 20,
       });
 
@@ -1734,7 +1734,7 @@ describe('startDaemon', () => {
       // Hand-set (invented) scores: the profile becomes manual and the only measured one.
       expect(
         await api.patch(`/model-profiles/${sonnetHigh.id}`, ModelProfileDto, {
-          scores: { intelligence: 50, coding: 50, agentic: 50 },
+          scores: { intelligence: 50 },
           costPerTaskUsd: 2,
         }),
       ).toMatchObject({ source: 'manual' });

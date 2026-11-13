@@ -36,12 +36,12 @@ const offer = (model: string): NewAccountModel => ({
   outputPrice: null,
 });
 
-/** The model a step asking for the Fast tier runs on, with the account's overrides and list as stored. */
-function fastModel(): string {
+/** The model a step asking for the Efficient tier runs on, with the account's overrides and list as stored. */
+function efficientModel(): string {
   const accountId = defaultAccountId(store.db);
   if (accountId === null) throw new Error('no default account');
   const inputs = routingInputs(store.db, { accountId, provider: 'claude' });
-  const setting: ModelSetting = { kind: 'tier', tier: ModelTier.Fast };
+  const setting: ModelSetting = { kind: 'tier', tier: ModelTier.Efficient };
   return chooseModel({
     ...inputs,
     def: { role: 'implement', need: 0 },
@@ -66,22 +66,22 @@ describe('routingInputs: the account’s tier overrides', () => {
     { name: 'no override: the tier’s own model', overrides: {}, expected: 'claude-haiku-5-5' },
     {
       name: 'an override for the tier: that model wins over Automatic',
-      overrides: { fast: OVERRIDE },
+      overrides: { efficient: OVERRIDE },
       expected: OVERRIDE,
     },
     {
-      name: 'an override for another tier: the Fast tier is unaffected',
-      overrides: { strongest: OVERRIDE },
+      name: 'an override for another tier: the Efficient tier is unaffected',
+      overrides: { capable: OVERRIDE },
       expected: 'claude-haiku-5-5',
     },
     {
       name: 'an override the account does not list: skipped',
-      overrides: { fast: 'claude-nonesuch-1' },
+      overrides: { efficient: 'claude-nonesuch-1' },
       expected: 'claude-haiku-5-5',
     },
     {
       name: 'an override the account marked unusable: skipped',
-      overrides: { fast: OVERRIDE },
+      overrides: { efficient: OVERRIDE },
       unusable: OVERRIDE,
       expected: 'claude-haiku-5-5',
     },
@@ -93,7 +93,7 @@ describe('routingInputs: the account’s tier overrides', () => {
       if (unusable !== undefined) markAccountModelUnusable(ctx, accountId, unusable);
       patchAccount(ctx, accountId, { settings: { tierOverrides: overrides } });
     });
-    expect(fastModel()).toBe(expected);
+    expect(efficientModel()).toBe(expected);
   });
 });
 
@@ -108,7 +108,9 @@ describe('planning a step with the account’s overrides', () => {
         ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'].map(offer),
       );
       markAccountModelUnusable(ctx, accountId, 'claude-opus-5-5');
-      patchAccount(ctx, accountId, { settings: { tierOverrides: { fast: 'claude-opus-5-5' } } });
+      patchAccount(ctx, accountId, {
+        settings: { tierOverrides: { efficient: 'claude-opus-5-5' } },
+      });
     });
     const plan = planSteps({
       flow: {
@@ -122,7 +124,7 @@ describe('planning a step with the account’s overrides', () => {
         riskTags: [],
         acceptanceCriteria: [],
         areas: [],
-        modelSetting: { kind: 'tier', tier: ModelTier.Fast },
+        modelSetting: { kind: 'tier', tier: ModelTier.Efficient },
       },
       project: { id: mintId('Project'), budgetCeiling: null },
       personas: [],

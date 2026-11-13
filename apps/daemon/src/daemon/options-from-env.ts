@@ -12,6 +12,7 @@ export type EnvDaemonOptions = Pick<
   | 'worktreeRoot'
   | 'limits'
   | 'judgeOff'
+  | 'slack'
   | 'catalogueSync'
   | 'pictures'
 >;
@@ -22,6 +23,11 @@ export type EnvDaemonOptions = Pick<
  */
 export function aaKeyReaderFromEnv(env: DaemonEnv, read: () => string | null): () => string | null {
   return env.TENDB_BENCHMARKS === 'off' ? () => null : read;
+}
+
+/** Whether this daemon may talk to Slack: the installed app's does, a throwaway daemon sets `TENDB_SLACK=off`. */
+export function slackOnFromEnv(env: DaemonEnv): boolean {
+  return env.TENDB_SLACK !== 'off';
 }
 
 /** The catalogue file to read when none is stored: the one the environment names, else the release's own. */
@@ -44,6 +50,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_GATE_SLOTS === undefined ? {} : { limits: { gateSlots: env.TENDB_GATE_SLOTS } }),
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(env.TENDB_JUDGE === 'off' ? { judgeOff: true } : {}),
+    slack: slackOnFromEnv(env),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },
   };

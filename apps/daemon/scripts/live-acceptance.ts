@@ -239,6 +239,8 @@ function startDaemonProcess(): ChildProcess {
       TENDB_CATALOGUE_SNAPSHOT: join(root, 'apps/daemon/test/fixtures/catalogue.json'),
       // Task text and diffs would go to OpenRouter on the builder's key.
       TENDB_JUDGE: 'off',
+      // No question may reach a real person from a throwaway daemon.
+      TENDB_SLACK: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.
       TENDB_PARENT_STDIN: '1',
     },

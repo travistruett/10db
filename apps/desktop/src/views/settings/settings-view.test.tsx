@@ -55,12 +55,11 @@ describe('SettingsView', () => {
     expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
   });
 
-  it('hides a section with nothing built, and lists Team and Personas and flows, which have their model forms', async () => {
+  it('lists Who Answers, Team and Personas and flows, which have their forms', async () => {
     server.use(...baseHandlers());
     renderApp('/settings/general');
     const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
-    expect(within(nav).queryByRole('link', { name: /Routing rules/ })).toBeNull();
-    for (const label of ['Team', 'Personas and flows'])
+    for (const label of ['Who Answers', 'People', 'Team', 'Personas and flows'])
       expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
     // Models is built, so it is listed.
     expect(within(nav).getByRole('link', { name: /Models and benchmarks/ })).toBeTruthy();
@@ -81,14 +80,6 @@ describe('SettingsView', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/settings/general');
     });
-  });
-
-  it('says what an unbuilt section will hold and which plan fills it', async () => {
-    server.use(...baseHandlers());
-    renderApp('/settings/routing-rules');
-    expect(await screen.findByRole('heading', { name: 'Routing rules', level: 3 })).toBeTruthy();
-    expect(screen.getByText(/Not built yet/)).toBeTruthy();
-    expect(screen.getByText(/team editor plan/)).toBeTruthy();
   });
 
   it.each([

@@ -18,7 +18,7 @@ const model = (row: Row): CatalogueModel => ({
   ...row,
 });
 
-const { Strongest, Balanced, Fast } = ModelTier;
+const { Frontier, Capable, Balanced, Efficient } = ModelTier;
 const { Current, Superseded, Retired, Unknown } = ModelStatus;
 
 interface Case {
@@ -46,10 +46,38 @@ const CASES: Case[] = [
       claude('haiku-5-5', 'claude-haiku', 0.5, '2026-10-07'),
     ],
     expected: {
-      'fable-5-1': [Strongest, Current],
-      'opus-5-5': [Strongest, Current],
+      'fable-5-1': [Frontier, Current],
+      'opus-5-5': [Capable, Current],
       'sonnet-5-5': [Balanced, Current],
-      'haiku-5-5': [Fast, Current],
+      'haiku-5-5': [Efficient, Current],
+    },
+  },
+  {
+    name: 'a Claude-shaped line with a top of 40: 20 is Capable, 10 Balanced, 0.5 Efficient',
+    models: [
+      { id: 'top', outputPrice: 40 },
+      { id: 'capable', outputPrice: 20 },
+      { id: 'balanced', outputPrice: 10 },
+      { id: 'efficient', outputPrice: 0.5 },
+    ],
+    expected: {
+      top: [Frontier, Current],
+      capable: [Capable, Current],
+      balanced: [Balanced, Current],
+      efficient: [Efficient, Current],
+    },
+  },
+  {
+    name: 'the top band is 90% of the top: 90 is Frontier, 89 is Capable',
+    models: [
+      { id: 'top', outputPrice: 100 },
+      { id: 'near', outputPrice: 90 },
+      { id: 'below', outputPrice: 89 },
+    ],
+    expected: {
+      top: [Frontier, Current],
+      near: [Frontier, Current],
+      below: [Capable, Current],
     },
   },
   {
@@ -61,14 +89,14 @@ const CASES: Case[] = [
       { id: 'luna', maker: 'openai', outputPrice: 1.2 },
     ],
     expected: {
-      astra: [Strongest, Current],
-      sol: [Strongest, Current],
+      astra: [Frontier, Current],
+      sol: [Capable, Current],
       terra: [Balanced, Current],
-      luna: [Fast, Current],
+      luna: [Efficient, Current],
     },
   },
   {
-    name: 'the GPT line on models.dev prices, where Terra is exactly 10% and counts as Fast',
+    name: 'the GPT line on models.dev prices, where Sol is a Balanced 20% and Terra is exactly 10%, Efficient',
     models: [
       { id: 'gpt-6-astra', maker: 'openai', outputPrice: 50 },
       { id: 'gpt-6.1-sol', maker: 'openai', outputPrice: 10 },
@@ -76,27 +104,27 @@ const CASES: Case[] = [
       { id: 'gpt-6-luna', maker: 'openai', outputPrice: 0.5 },
     ],
     expected: {
-      'gpt-6-astra': [Strongest, Current],
+      'gpt-6-astra': [Frontier, Current],
       'gpt-6.1-sol': [Balanced, Current],
-      'gpt-6.1-terra': [Fast, Current],
-      'gpt-6-luna': [Fast, Current],
+      'gpt-6.1-terra': [Efficient, Current],
+      'gpt-6-luna': [Efficient, Current],
     },
   },
   {
-    name: 'exactly 30% of the top is Strongest',
+    name: 'exactly 30% of the top is Capable',
     models: [
       { id: 'top', outputPrice: 50 },
       { id: 'edge', outputPrice: 15 },
     ],
-    expected: { top: [Strongest, Current], edge: [Strongest, Current] },
+    expected: { top: [Frontier, Current], edge: [Capable, Current] },
   },
   {
-    name: 'exactly 10% of the top is Fast, on prices that are not whole numbers',
+    name: 'exactly 10% of the top is Efficient, on prices that are not whole numbers',
     models: [
       { id: 'top', outputPrice: 55 },
       { id: 'edge', outputPrice: 5.5 },
     ],
-    expected: { top: [Strongest, Current], edge: [Fast, Current] },
+    expected: { top: [Frontier, Current], edge: [Efficient, Current] },
   },
   {
     name: 'an older, dearer model is Superseded and does not set the top',
@@ -107,7 +135,7 @@ const CASES: Case[] = [
     ],
     expected: {
       'opus-5': [null, Superseded],
-      'opus-5-5': [Strongest, Current],
+      'opus-5-5': [Frontier, Current],
       'haiku-5-5': [Balanced, Current],
     },
   },
@@ -130,7 +158,7 @@ const CASES: Case[] = [
       },
     ],
     offered: ['gpt-5.6-sol'],
-    expected: { 'gpt-5.6-sol': [Strongest, Current] },
+    expected: { 'gpt-5.6-sol': [Frontier, Current] },
   },
   {
     name: 'a model nobody offers does not set the top',
@@ -139,12 +167,12 @@ const CASES: Case[] = [
       { id: 'unoffered', outputPrice: 100 },
     ],
     offered: ['offered'],
-    expected: { offered: [Strongest, Current] },
+    expected: { offered: [Frontier, Current] },
   },
   {
-    name: 'one model fills every tier',
+    name: 'a maker with one model has only a Frontier',
     models: [{ id: 'only', outputPrice: 3 }],
-    expected: { only: [Strongest, Current] },
+    expected: { only: [Frontier, Current] },
   },
   {
     name: 'no price and a price of 0 are Unknown and do not set the top',
@@ -156,7 +184,7 @@ const CASES: Case[] = [
     expected: {
       none: [null, Unknown],
       free: [null, Unknown],
-      priced: [Strongest, Current],
+      priced: [Frontier, Current],
     },
   },
   {
@@ -165,7 +193,7 @@ const CASES: Case[] = [
       { id: 'old', outputPrice: 60, deprecated: true },
       { id: 'new', outputPrice: 5 },
     ],
-    expected: { old: [null, Retired], new: [Strongest, Current] },
+    expected: { old: [null, Retired], new: [Frontier, Current] },
   },
   {
     name: 'a model with no release date is never superseded',
@@ -173,7 +201,7 @@ const CASES: Case[] = [
       { id: 'dated', family: 'f', releaseDate: '2026-10-01', outputPrice: 10 },
       { id: 'undated', family: 'f', releaseDate: null, outputPrice: 10 },
     ],
-    expected: { dated: [Strongest, Current], undated: [Strongest, Current] },
+    expected: { dated: [Frontier, Current], undated: [Frontier, Current] },
   },
   {
     name: 'a model with no maker is Unknown and sets no top',
@@ -181,7 +209,7 @@ const CASES: Case[] = [
       { id: 'stray', maker: null, outputPrice: 90 },
       { id: 'known', outputPrice: 10 },
     ],
-    expected: { stray: [null, Unknown], known: [Strongest, Current] },
+    expected: { stray: [null, Unknown], known: [Frontier, Current] },
   },
   {
     name: 'a model with no family ranks by its own price and supersedes nothing',
@@ -189,7 +217,7 @@ const CASES: Case[] = [
       { id: 'a', outputPrice: 10, releaseDate: '2026-10-01' },
       { id: 'b', outputPrice: 10, releaseDate: '2020-01-01' },
     ],
-    expected: { a: [Strongest, Current], b: [Strongest, Current] },
+    expected: { a: [Frontier, Current], b: [Frontier, Current] },
   },
   {
     name: 'makers are ranked apart, so a gateway copy of Claude does not rank with GPT',
@@ -199,9 +227,9 @@ const CASES: Case[] = [
       { id: 'cheap-claude', maker: 'anthropic', outputPrice: 1 },
     ],
     expected: {
-      claude: [Strongest, Current],
-      gpt: [Strongest, Current],
-      'cheap-claude': [Fast, Current],
+      claude: [Frontier, Current],
+      gpt: [Frontier, Current],
+      'cheap-claude': [Efficient, Current],
     },
   },
   {
@@ -210,7 +238,7 @@ const CASES: Case[] = [
       { id: 'direct', family: 'claude-opus', releaseDate: '2026-09-22', outputPrice: 20 },
       { id: 'bedrock', family: 'claude-opus', releaseDate: '2026-09-22', outputPrice: 22 },
     ],
-    expected: { direct: [Strongest, Current], bedrock: [Strongest, Current] },
+    expected: { direct: [Frontier, Current], bedrock: [Frontier, Current] },
   },
 ];
 

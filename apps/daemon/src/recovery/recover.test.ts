@@ -22,6 +22,8 @@ import {
   insertEvidence,
   insertHandoff,
   insertInboxItem,
+  insertPerson,
+  setRoutingRules,
   insertSession,
   listEventsAfter,
   listInbox,
@@ -120,7 +122,6 @@ const flowStep = (role: 'implement' | 'review', sessionFloor: number): Workstrea
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',
@@ -512,6 +513,45 @@ describe('recoverOnStartup', () => {
       nextAction: { kind: 'answer', inboxId: item.id },
     });
     expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason).toBe('daemon_restart');
+  });
+
+  describe('a workstream parked on a question routed to someone else', () => {
+    function routed(states: Parameters<typeof inState>[0]) {
+      const ws = inState(states);
+      const mark = state.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' }));
+      state.write((ctx) =>
+        setRoutingRules(ctx, ws.project.id, {
+          rules: [{ category: 'other', area: 'api', personId: mark.id }],
+        }),
+      );
+      const { item } = ask(ws, 'Q?', new AbortController().signal);
+      expect(item.assignees).toEqual(['mark']);
+      return { ws, item };
+    }
+
+    it.each([
+      ['whose session was still live at the restart', ['STARTING', 'RUNNING', 'WAITING_HUMAN']],
+      ['whose session had already parked', ['STARTING', 'RUNNING', 'WAITING_HUMAN']],
+    ] as const)('stays parked on its card with its action, %s', async (name, states) => {
+      const { ws, item } = routed(states);
+      if (name.includes('already parked'))
+        state.write((ctx) => {
+          patchWorkstream(ctx, ws.workstream.id, null, {
+            currentSessionId: null,
+            nextAction: { kind: 'answer', inboxId: item.id, providerSessionId: 'provider-1' },
+          });
+        });
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'answer', inboxId: item.id },
+      });
+      expect(listInbox(state.db, { states: ['OPEN'] }).map((c) => [c.id, c.assignees])).toEqual([
+        [item.id, ['mark']],
+      ]);
+    });
   });
 
   it('re-queues a waiting workstream whose card is gone', async () => {

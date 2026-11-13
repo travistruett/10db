@@ -28,7 +28,7 @@ export function measureForTests(state: StateStore): void {
       const [bonus, mult] = EFFORT[p.effort];
       const score = base + bonus;
       applyAaMeasurement(ctx, p.id, {
-        scores: { intelligence: score, coding: score, agentic: score },
+        scores: { intelligence: score },
         costPerTaskUsd: cost * mult,
         outputTokensPerSecond: tps,
         indexVersion: 'test',

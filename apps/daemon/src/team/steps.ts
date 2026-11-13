@@ -102,7 +102,7 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
     const ceiling = getProject(db, getTask(db, taskId).projectId).budgetCeiling;
     const named = plan.overBudget.map((i) => {
       const step = plan.steps[i];
-      const need = step ? `${String(step.need)} ${step.score}` : '?';
+      const need = step ? `${String(step.need)} intelligence` : '?';
       return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}: ${step?.reason ?? 'unknown'}`;
     });
     throw new InvalidError(

@@ -18,18 +18,18 @@ import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 /** What a reason says when no profile has a score to route on. */
 const UNSCORED =
-  '; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)';
+  '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
 const NOW = '2026-10-17T12:00:00.000Z';
 const PROJECT = mintId('Project');
 const OTHER_PROJECT = mintId('Project');
 
-/** Two Strongest models, the dearer one only in the pool when a test asks for it. */
+/** Two Capable models, the dearer one only in the pool when a test asks for it. */
 const peakRows = (): ModelProfileDto[] => unscoredCatalogue({}, ['peak']);
 /** Peak, measured: each effort scores two points more and costs a dollar more than the one before. */
 const scoredPeak = (): ModelProfileDto[] =>
   peakRows().map((p, i) => ({
     ...p,
-    scores: { intelligence: 52 + 2 * i, coding: 52 + 2 * i, agentic: 52 + 2 * i },
+    scores: { intelligence: 52 + 2 * i },
     costPerTaskUsd: 8 + i,
   }));
 
@@ -102,7 +102,7 @@ describe('chooseModel: which setting decides', () => {
     },
     {
       name: "the task's own setting",
-      setting: { kind: 'tier', tier: ModelTier.Fast } satisfies ModelSetting,
+      setting: { kind: 'tier', tier: ModelTier.Efficient } satisfies ModelSetting,
     },
     {
       name: "the project's pattern",
@@ -111,7 +111,7 @@ describe('chooseModel: which setting decides', () => {
     { name: 'a global pattern', setting: { kind: 'top_of_tier' } satisfies ModelSetting },
     {
       name: "the project's role setting",
-      setting: { kind: 'tier', tier: ModelTier.Strongest } satisfies ModelSetting,
+      setting: { kind: 'tier', tier: ModelTier.Capable } satisfies ModelSetting,
     },
     {
       name: 'the global role setting',
@@ -122,7 +122,7 @@ describe('chooseModel: which setting decides', () => {
   const everyLevel = (from: number): Partial<ChooseInput> => ({
     profiles: [...testCatalogue(), ...scoredPeak()],
     persona: from <= 0 ? pinned : undefined,
-    task: task(from <= 1 ? { modelSetting: { kind: 'tier', tier: ModelTier.Fast } } : {}),
+    task: task(from <= 1 ? { modelSetting: { kind: 'tier', tier: ModelTier.Efficient } } : {}),
     patterns: [
       ...(from <= 2
         ? [pattern({ kind: 'model', model: 'mid' }, { projectId: PROJECT, position: 3 })]
@@ -131,11 +131,11 @@ describe('chooseModel: which setting decides', () => {
     ],
     roleSettings: [
       ...(from <= 4
-        ? [roleSetting('implement', { kind: 'tier', tier: ModelTier.Strongest }, PROJECT)]
+        ? [roleSetting('implement', { kind: 'tier', tier: ModelTier.Capable }, PROJECT)]
         : []),
       ...(from <= 5 ? [roleSetting('implement', { kind: 'model', model: 'peak' }, null)] : []),
     ],
-    def: { role: 'implement', need: 20 },
+    def: { role: 'implement', need: 25 },
   });
 
   it.each(levels.map((level, from) => ({ ...level, from })))(
@@ -183,12 +183,12 @@ describe('chooseModel: which setting decides', () => {
 
   it('puts the project role before the global role, and ignores another project’s rows', () => {
     const settings = [
-      roleSetting('implement', { kind: 'tier', tier: ModelTier.Fast }, null),
-      roleSetting('implement', { kind: 'tier', tier: ModelTier.Strongest }, OTHER_PROJECT),
+      roleSetting('implement', { kind: 'tier', tier: ModelTier.Efficient }, null),
+      roleSetting('implement', { kind: 'tier', tier: ModelTier.Capable }, OTHER_PROJECT),
     ];
     expect(chooseModel(input({ roleSettings: settings })).setting).toEqual({
       kind: 'tier',
-      tier: ModelTier.Fast,
+      tier: ModelTier.Efficient,
     });
     const own = [...settings, roleSetting('implement', { kind: 'model', model: 'mid' }, PROJECT)];
     expect(chooseModel(input({ roleSettings: own })).setting).toEqual({
@@ -214,7 +214,7 @@ describe('chooseModel: which setting decides', () => {
 
 describe('chooseModel: patterns match on role, risk, area and retry', () => {
   const high = pattern(
-    { kind: 'tier', tier: ModelTier.Strongest },
+    { kind: 'tier', tier: ModelTier.Capable },
     {
       match: {
         roles: ['review'],
@@ -225,7 +225,7 @@ describe('chooseModel: patterns match on role, risk, area and retry', () => {
     },
   );
   const retryOnly = pattern(
-    { kind: 'tier', tier: ModelTier.Strongest },
+    { kind: 'tier', tier: ModelTier.Capable },
     { match: { roles: [], riskTags: [], areas: [], retryOnly: true } },
   );
   it.each([
@@ -274,7 +274,7 @@ describe('chooseModel: patterns match on role, risk, area and retry', () => {
     },
     {
       name: 'an empty match is any step',
-      p: pattern({ kind: 'tier', tier: ModelTier.Strongest }),
+      p: pattern({ kind: 'tier', tier: ModelTier.Capable }),
       role: 'qa',
       t: task(),
       applies: true,
@@ -376,13 +376,13 @@ describe('chooseModel: a tier and the top of it', () => {
   it.each([
     {
       name: 'a tier runs its cheapest model',
-      setting: { kind: 'tier', tier: 'strongest' },
+      setting: { kind: 'tier', tier: 'capable' },
       role: 'implement',
       want: 'big@high',
     },
     {
       name: 'a tier runs the role’s effort',
-      setting: { kind: 'tier', tier: 'fast' },
+      setting: { kind: 'tier', tier: 'efficient' },
       role: 'qa',
       want: 'small@medium',
     },
@@ -426,10 +426,10 @@ describe('chooseModel: a tier and the top of it', () => {
   });
 
   it.each([
-    { name: 'a small need stays in the tier it lands in', need: 20, want: 'small@high' },
+    { name: 'a small need stays in the tier it lands in', need: 25, want: 'small@high' },
     { name: 'a larger need takes its tier to the top', need: 40, want: 'mid@high' },
     {
-      name: 'a need only the strongest tier meets takes it to the dearest model',
+      name: 'a need only the capable tier meets takes it to the dearest model',
       need: 54,
       want: 'peak@medium',
     },
@@ -448,7 +448,7 @@ describe('chooseModel: a tier and the top of it', () => {
     expect(
       pick({
         def: { role: 'implement', need: 40 },
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'strongest' }, null)],
+        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'capable' }, null)],
       }),
     ).toBe('big@high');
   });
@@ -457,11 +457,11 @@ describe('chooseModel: a tier and the top of it', () => {
     const choice = chooseModel(
       input({
         def: { role: 'implement', need: 90 },
-        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'fast' }, null)],
+        roleSettings: [roleSetting('implement', { kind: 'tier', tier: 'efficient' }, null)],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('small@high');
-    expect(choice.reason).toContain('none reaches 90 coding, so the highest scoring');
+    expect(choice.reason).toContain('none reaches 90 intelligence, so the highest scoring');
   });
 
   it('moves to the nearest tier when the account offers none in the one asked for', () => {
@@ -470,11 +470,11 @@ describe('chooseModel: a tier and the top of it', () => {
       input({
         profiles: noFast,
         def: { role: 'qa', need: 20 },
-        roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'fast' }, null)],
+        roleSettings: [roleSetting('qa', { kind: 'tier', tier: 'efficient' }, null)],
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('mid@medium');
-    expect(choice.reason).toContain('no fast model is offered, so the balanced tier');
+    expect(choice.reason).toContain('no efficient model is offered, so the balanced tier');
   });
 });
 
@@ -550,7 +550,7 @@ describe('chooseModel: a role with no setting and no score', () => {
     { name: 'a security review', role: 'review', riskTags: ['security'], want: 'peak@xhigh' },
     { name: 'a QA step', role: 'qa', riskTags: ['migration'], want: 'small@medium' },
   ] as const)(
-    'sends $name to the top of the strongest tier, one effort up, under a floor',
+    'sends $name to the top of the capable tier, one effort up, under a floor',
     ({ role, riskTags, want }) => {
       expect(
         pick({
@@ -575,7 +575,7 @@ describe('chooseModel: a role with no setting and no score', () => {
         }),
       ).reason,
     ).toBe(
-      `by role default: the top model of the strongest tier, one effort up (floor: security-sensitive review)${UNSCORED.replace('a coding', 'an intelligence')}`,
+      `by role default: the top model of the capable tier, one effort up (floor: security-sensitive review)${UNSCORED}`,
     );
   });
 });
@@ -584,14 +584,14 @@ describe('chooseModel: the account’s tier override', () => {
   const profiles = [...unscoredCatalogue(), ...peakRows()];
   it('swaps the tier’s automatic choice for the model the account names', () => {
     const choice = chooseModel(
-      input({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { strongest: 'peak' } }),
+      input({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { capable: 'peak' } }),
     );
     expect(label(choice.profile ?? failed())).toBe('peak@high');
-    expect(choice.reason).toContain("the account's strongest model");
+    expect(choice.reason).toContain("the account's capable model");
   });
 
   it('applies to a tier setting but not to top of tier or a named model', () => {
-    const overrides = { strongest: 'peak', balanced: 'big' } as const;
+    const overrides = { capable: 'peak', balanced: 'big' } as const;
     expect(
       pick({
         profiles,
@@ -603,7 +603,7 @@ describe('chooseModel: the account’s tier override', () => {
       pick({
         profiles,
         def: { role: 'plan', need: 45 },
-        tierOverrides: { strongest: 'big' },
+        tierOverrides: { capable: 'big' },
         roleSettings: [roleSetting('plan', { kind: 'top_of_tier' }, null)],
       }),
     ).toBe('peak@high');
@@ -630,7 +630,7 @@ describe('chooseModel: the account’s tier override', () => {
       pick({
         profiles: retired,
         def: { role: 'review', need: 48 },
-        tierOverrides: { strongest: 'big' },
+        tierOverrides: { capable: 'big' },
       }),
     ).toBe('peak@high');
   });
@@ -646,18 +646,21 @@ describe('chooseModel: nothing to choose from', () => {
   ])('names the tier and no profile with $name, and does not throw', ({ profiles }) => {
     const choice = chooseModel(input({ profiles, def: { role: 'review', need: 48 } }));
     expect(choice.profile).toBeNull();
-    expect(choice.tier).toBe(ModelTier.Strongest);
-    expect(choice.reason).toBe('no model offered for the strongest tier');
+    expect(choice.tier).toBe(ModelTier.Capable);
+    expect(choice.reason).toBe('no model offered for the capable tier');
     expect(choice.setting).toEqual({ kind: 'automatic' });
   });
 
   it('keeps the setting that decided, so a later list can re-resolve it', () => {
     const choice = chooseModel(
-      input({ profiles: [], task: task({ modelSetting: { kind: 'tier', tier: ModelTier.Fast } }) }),
+      input({
+        profiles: [],
+        task: task({ modelSetting: { kind: 'tier', tier: ModelTier.Efficient } }),
+      }),
     );
-    expect(choice.setting).toEqual({ kind: 'tier', tier: ModelTier.Fast });
-    expect(choice.tier).toBe(ModelTier.Fast);
-    expect(choice.reason).toBe("the task's own setting: no model offered for the fast tier");
+    expect(choice.setting).toEqual({ kind: 'tier', tier: ModelTier.Efficient });
+    expect(choice.tier).toBe(ModelTier.Efficient);
+    expect(choice.reason).toBe("the task's own setting: no model offered for the efficient tier");
   });
 });
 
@@ -786,15 +789,15 @@ describe('chooseModel: the account’s override after a scored choice', () => {
   const profiles = [...testCatalogue(), ...scoredPeak()];
   it('swaps the model a scored Automatic choice landed on for its tier’s override', () => {
     const choice = chooseModel(
-      input({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { strongest: 'peak' } }),
+      input({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { capable: 'peak' } }),
     );
     expect(label(choice.profile ?? failed())).toBe('peak@low');
-    expect(choice.reason).toContain("the account's strongest model");
+    expect(choice.reason).toContain("the account's capable model");
   });
 
   it('leaves a scored choice alone when its tier has no override', () => {
     expect(
-      pick({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { fast: 'small' } }),
+      pick({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { efficient: 'small' } }),
     ).toBe('big@high');
   });
 
@@ -803,12 +806,12 @@ describe('chooseModel: the account’s override after a scored choice', () => {
       input({
         profiles,
         def: { role: 'review', need: 48 },
-        tierOverrides: { strongest: 'gateway-model' },
+        tierOverrides: { capable: 'gateway-model' },
       }),
     );
     expect(choice.profile).toBeNull();
     expect(choice.model).toBe('gateway-model');
-    expect(choice.tier).toBe(ModelTier.Strongest);
-    expect(choice.reason).toContain("the account's strongest model gateway-model");
+    expect(choice.tier).toBe(ModelTier.Capable);
+    expect(choice.reason).toContain("the account's capable model gateway-model");
   });
 });

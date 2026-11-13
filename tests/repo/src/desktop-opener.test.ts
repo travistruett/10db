@@ -15,7 +15,7 @@ const Capability = z.object({
 });
 
 describe("the desktop app's opener", () => {
-  it('opens GitHub, OpenAI sign-in pages, and Artificial Analysis, and nothing else', () => {
+  it('opens GitHub, OpenAI sign-in pages, Artificial Analysis and Slack, and nothing else', () => {
     const capability = Capability.parse(
       JSON.parse(readRepoFile('apps/desktop/src-tauri/capabilities/default.json')),
     );
@@ -27,6 +27,9 @@ describe("the desktop app's opener", () => {
       'https://auth.openai.com/*',
       // The credit Artificial Analysis's terms ask for links its site beside every view of its scores.
       'https://artificialanalysis.ai/*',
+      // Settings › Integrations links the page where the Slack app is made; a question links its thread.
+      'https://api.slack.com/*',
+      'https://*.slack.com/*',
     ]);
   });
 

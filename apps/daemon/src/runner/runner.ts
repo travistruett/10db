@@ -10,6 +10,7 @@ import {
   findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  RoutedBy,
   isModelTier,
   JudgeCallId,
   JudgeDecision,
@@ -78,6 +79,7 @@ import {
   getBatch,
   getJudgeConfig,
   getEvidence,
+  BUILDER_HANDLE,
   getInboxItem,
   getPersona,
   getProject,
@@ -118,6 +120,7 @@ import {
   openPassTurn,
   passPageAreas,
   patchWorkstream,
+  questionRoutesForTask,
   recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
@@ -148,6 +151,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   PackReason,
+  recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
@@ -300,6 +304,7 @@ import {
 } from './next-action';
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
+import { checkTaskAnchors } from '../plan-record';
 import { threadInlineBytes } from './thread-pictures';
 
 /**
@@ -443,6 +448,12 @@ export interface Runner {
   handOff(projectId: ProjectId, accountId: AccountId, reason: string): void;
   idle(): Promise<void>;
   deliverParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
+  /**
+   * Parks every live session with a wait on the card, including the sessions whose identical asks
+   * folded into it: a question routed to someone else is answered through its card, and the person's
+   * words never reach a running `ask_human` call. A session with no wait on it is left alone.
+   */
+  parkFor(inboxId: InboxItemId): void;
   /**
    * The builder approved the work a gate-less task finished: it is done, with no session and no review
    * card. Runs inside the write that closes the card, and throws `ConflictError` for a workstream that
@@ -589,6 +600,24 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
 };
 
 /** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
+/**
+ * Whether a question card, read afresh, goes to someone other than the builder. A card still waiting
+ * for triage is the builder's until it is routed.
+ */
+function routedAwayFromBuilder(db: DbReader, item: InboxItemDto): boolean {
+  let card = item;
+  try {
+    card = getInboxItem(db, item.id);
+  } catch {
+    // A card gone from the store is judged by the copy the ask returned.
+  }
+  return (
+    card.kind === InboxKind.Question &&
+    card.routedBy !== RoutedBy.TriagePending &&
+    card.assignees.some((handle) => handle !== BUILDER_HANDLE)
+  );
+}
+
 function needsOneTimeAllowance(choice: string, toolName: string, summary: string): boolean {
   if (choice === PermissionChoice.AllowOnce) return true;
   const stored =
@@ -696,6 +725,8 @@ interface Control {
   parked: boolean;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
+  /** Set while a session runs: parks it at once if it waits on this card. */
+  parkOn: ((inboxId: InboxItemId) => void) | null;
   /**
    * The step's run of handoffs nobody asked for with no commit between them. Any other session ending
    * clears it; a move, which starts no session, and a refused model leave it, so the run only grows.
@@ -1922,6 +1953,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
+    // The task's cited plan anchors are checked against this base before the pack reads them; a
+    // failure leaves them "not checked yet" in the brief and never stops the session.
+    await checkTaskAnchors(
+      { git: opts.git, state: opts.state },
+      { workstreamId: id, taskId: task.id, repo: checkout, rev: baseHead },
+    ).catch((error: unknown) => {
+      opts.logger.warn({ workstreamId: id, err: error }, 'the plan anchor check failed');
+    });
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
@@ -1965,7 +2004,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
-    const contextPack = buildContextPack(db, getWorkstream(db, id));
+    const contextPack = buildContextPack(db, getWorkstream(db, id), undefined, {
+      base: baseHead,
+    });
     // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
     const evidenceId =
       action.kind === 'fix'
@@ -2273,6 +2314,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       handoff: contextPack.handoff,
       answer: permission?.prompt ?? contextPack.pendingAnswer,
       contextPack,
+      questionRoutes: questionRoutesForTask(db, row.taskId),
       step: {
         index: row.stepIndex,
         count: Math.max(row.steps.length, 1),
@@ -2346,6 +2388,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         // A fresh session holds no picture an earlier one was sent.
         if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
+        recordPlanPacked(ctx, task.id, id, contextPack);
         ctx.emit(
           contextPackedEvent(
             s.id,
@@ -2408,6 +2451,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       abort.abort();
     };
     ctl.endWaits = endWaits;
+    /** Parks the session on its oldest open card now: the waits end, then the process stops. */
+    const parkNow = (fallback: InboxItemId): void => {
+      st.parkedFor = firstOpen() ?? fallback;
+      st.waitTimer?.cancel();
+      st.waitTimer = null;
+      // Abort the waits first: an answer that arrives while the session is still stopping then goes
+      // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
+      abort.abort();
+      void handle?.stop();
+    };
+    ctl.parkOn = (inboxId) => {
+      if (st.waitingOn.has(inboxId)) parkNow(inboxId);
+    };
     const stopWaitingOnBackground = (): void => {
       st.heldForBackground = false;
       st.backgroundTimer?.cancel();
@@ -2417,7 +2473,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const observer: WaitObserver = {
       onWaitStart(item) {
         st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
-        if (openWaits() > 1) return;
+        // Triage or Ask Someone may have routed the card since the ask: read it again.
+        const routedAway = routedAwayFromBuilder(db, item);
+        if (openWaits() > 1) {
+          // A second wait on a card for someone else parks the session now; one for the builder
+          // keeps the timer the first wait armed.
+          if (routedAway) parkNow(item.id);
+          return;
+        }
         opts.state.write((ctx) => {
           // A session can ask before its `started` event is processed; STARTING has no edge to WAITING_HUMAN.
           if (getWorkstreamRow(ctx.tx, id).state === S.Starting)
@@ -2428,12 +2491,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             reason: `waiting on ${item.id}`,
           });
         });
+        // A question for someone else is never held live: their words must not reach a running call.
+        if (routedAway) {
+          parkNow(item.id);
+          return;
+        }
         st.waitTimer = opts.clock.setTimeout(() => {
-          st.parkedFor = firstOpen() ?? item.id;
-          // Abort the waits first: an answer that arrives while the session is still stopping then goes
-          // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
-          abort.abort();
-          void handle?.stop();
+          parkNow(item.id);
         }, project.humanWaitMinutes * 60_000);
       },
       onWaitEnd(item) {
@@ -2897,6 +2961,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 signedReason: 'Context ran out before a handoff (10db)',
                 sourceId,
               });
+              recordPlanPacked(ctx, row.taskId, id, pack);
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
             handle.send(
@@ -3165,6 +3230,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.handle = null;
       ctl.requestHandoff = null;
       ctl.endWaits = null;
+      ctl.parkOn = null;
       ctl.messages = null;
       disarmIdleClose(ctl);
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
@@ -4000,6 +4066,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         holdAbort: null,
         parked: false,
         endWaits: null,
+        parkOn: null,
         unaskedHandoffs: null,
         messages: null,
         builderStop: false,
@@ -4048,6 +4115,9 @@ export function createRunner(opts: RunnerOptions): Runner {
           c.requestHandoff?.('account', reason);
     },
     idle: () => (active.size === 0 ? Promise.resolve() : new Promise((r) => idleWaiters.push(r))),
+    parkFor(inboxId) {
+      for (const ctl of active.values()) ctl.parkOn?.(inboxId);
+    },
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;

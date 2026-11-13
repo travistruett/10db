@@ -42,6 +42,34 @@ describe('TaskCard placement', () => {
   });
 });
 
+describe('TaskCard waiting on someone else', () => {
+  const waitingOn = (names: string[]) => ({
+    names,
+    since: new Date(Date.now() - 3 * 3_600_000 - 60_000).toISOString(),
+  });
+
+  it('keeps its own border, with a yellow dot and "Waiting on Mark in Slack · 3h"', () => {
+    card({ workstream: workstreamDto({ state: 'WAITING_HUMAN', waitingOn: waitingOn(['Mark']) }) });
+    const paper = screen.getByTestId('task-card');
+    expect(paper.getAttribute('data-state-color')).toBeNull();
+    expect(paper.style.borderColor).not.toContain('yellow');
+    expect(screen.getByText('Waiting on Mark in Slack · 3h')).toBeTruthy();
+    expect(screen.getByTestId('state-dot').getAttribute('data-color')).toBe('yellow');
+  });
+
+  it('names a tie', () => {
+    card({
+      workstream: workstreamDto({ state: 'WAITING_HUMAN', waitingOn: waitingOn(['Mark', 'Ana']) }),
+    });
+    expect(screen.getByText('Waiting on Mark and Ana in Slack · 3h')).toBeTruthy();
+  });
+
+  it('keeps the yellow border while the builder is the one waited on', () => {
+    card({ workstream: workstreamDto({ state: 'WAITING_HUMAN', waitingOn: null }) });
+    expect(screen.getByTestId('task-card').getAttribute('data-state-color')).toBe('yellow');
+  });
+});
+
 describe('TaskCard state', () => {
   it('says a running task once, in one plain line, with no badge or persona line', () => {
     card({

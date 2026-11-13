@@ -1,4 +1,10 @@
 import type {
+  PlanExportInput,
+  PlanExportResult,
+  PlanImportInput,
+  PlanImportIssue,
+  PlanImportPreview,
+  PlanImportResult,
   AaModelDto,
   AccountConfig,
   AccountModelDto,
@@ -42,6 +48,8 @@ import type {
   GoalListDto,
   HumanTouchDto,
   InboxAnswer,
+  AskSomeoneInput,
+  ComposePreviewDto,
   InboxItemDto,
   InboxItemId,
   InboxState,
@@ -62,6 +70,7 @@ import type {
   ModelProfileDto,
   ModelSettingsInput,
   ModelRowDto,
+  RolePicksDto,
   ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
@@ -132,6 +141,14 @@ import type {
   TaskDto,
   TaskFileId,
   TaskId,
+  PersonId,
+  QuestionRouteDto,
+  SendInput,
+  SlackConnectionDto,
+  SlackMemberDto,
+  SlackTokenInput,
+  StakeholderSendDto,
+  StakeholderTimersDto,
   TaskMessageDto,
   TaskPictureKind,
   TaskScreenId,
@@ -182,6 +199,20 @@ export type ShapeConvertOutcome =
   | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
   | { readonly kind: 'refused'; readonly errors: string[] };
 
+/** What importing a planning effort came to: written, a dry run's preview, or every reason it was refused. */
+export type PlanImportOutcome =
+  | { readonly kind: 'imported'; readonly result: PlanImportResult }
+  | { readonly kind: 'previewed'; readonly preview: PlanImportPreview }
+  | { readonly kind: 'refused'; readonly errors: PlanImportIssue[] };
+
+/** A Plan's record: importing a bundle into it (the route and the builder's `import_plan`). */
+export interface PlanRecordServices {
+  /** Reads, checks and imports a bundle into one Plan, all or nothing; a dry run writes nothing. */
+  importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome>;
+  /** Writes the record as Markdown into a folder outside every checkout; refusals are InvalidErrors. */
+  exportPlan(shapeId: ShapeId, input: PlanExportInput): Promise<PlanExportResult>;
+}
+
 /** The setting that lets 10db install main's build by itself. */
 export interface SelfUpdateServices {
   /** The one app-wide setting (on until the builder turns it off) and the commits involved. */
@@ -227,7 +258,7 @@ export interface TaskLookupServices {
 }
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
-export interface ApiServices {
+export interface ApiServices extends PlanRecordServices {
   /** The judge's status, key, connection test and call log. */
   judgeStatus(): Promise<JudgeStatusDto>;
   patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
@@ -581,6 +612,26 @@ export interface ApiServices {
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;
   listPeople(): PersonDto[];
   createPerson(input: PersonInput): PersonDto;
+  updatePerson(id: PersonId, input: PersonInput): PersonDto;
+  /** Removes a person; the builder, a goal's owner, a person on a criterion and a routed person stay. */
+  removePerson(id: PersonId): void;
+  /** The Slack connection as the reply watch last found it. */
+  slackStatus(): SlackConnectionDto;
+  /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
+  setSlackToken(input: SlackTokenInput): Promise<SlackConnectionDto>;
+  removeSlackToken(): Promise<SlackConnectionDto>;
+  /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
+  listSlackMembers(query: string): Promise<SlackMemberDto[]>;
+  getStakeholderTimers(): StakeholderTimersDto;
+  setStakeholderTimers(input: StakeholderTimersDto): StakeholderTimersDto;
+  /** Who a task's questions go to, by scope. */
+  questionRoutes(taskId: TaskId): QuestionRouteDto[];
+  /** Sends a drafted question to its people (Send, and Send Anyway with `overrideLimit`). */
+  sendInbox(id: InboxItemId, input: SendInput): Promise<StakeholderSendDto>;
+  askSomeone(id: InboxItemId, input: AskSomeoneInput): InboxItemDto;
+  takeBack(id: InboxItemId): Promise<InboxItemDto>;
+  keepWaiting(id: InboxItemId): InboxItemDto;
+  composeFor(id: InboxItemId, personIds: PersonId[]): ComposePreviewDto;
   createFlow(input: FlowInput): FlowDto;
   patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
@@ -595,8 +646,16 @@ export interface ApiServices {
   setGlobalModelSettings(input: ModelSettingsInput): ModelSettingsDto;
   /** As the global one for a project; a null setting hands the role back to the global setting. */
   setProjectModelSettings(projectId: ProjectId, input: ModelSettingsInput): ModelSettingsDto;
-  /** Every model any account can reach, one row each. */
-  listModels(): ModelRowDto[];
+  /**
+   * Every model any account can reach, one row each. With an account, a model it offers lists the efforts it
+   * offers, priced on it. Throws NotFoundError for an unknown or archived account.
+   */
+  listModels(accountId?: AccountId): ModelRowDto[];
+  /**
+   * What routing chooses for each role on an account at the role's starting need, for a task and a project with
+   * no settings of their own. Throws NotFoundError for an unknown or archived account.
+   */
+  modelPicks(accountId: AccountId): RolePicksDto;
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */

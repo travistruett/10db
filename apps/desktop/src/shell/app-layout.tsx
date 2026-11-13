@@ -6,6 +6,7 @@ import {
   Burger,
   Group,
   NavLink,
+  ScrollArea,
   Stack,
   Text,
   VisuallyHidden,
@@ -178,7 +179,10 @@ function FullLayout() {
         }}
       >
         {inSettings ? (
-          <SettingsNav />
+          // Settings lists more sections than a short window holds, so its sidebar scrolls.
+          <AppShell.Section grow component={ScrollArea}>
+            <SettingsNav />
+          </AppShell.Section>
         ) : (
           <>
             {/* Global first, then the selected project's views, then app-wide Settings at the foot:

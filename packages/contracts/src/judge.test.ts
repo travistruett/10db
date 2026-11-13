@@ -18,6 +18,10 @@ describe('judge config', () => {
         shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_record: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_elsewhere: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        question_route: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        thread_answer: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        reply_match: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        approval_read: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
@@ -33,6 +37,17 @@ describe('judge config', () => {
     expect(config.decisions.review_size).toEqual({ enabled: false, model: 'm', floor: 0.5 });
     expect(config.decisions.shape_record).toEqual(DEFAULT_JUDGE_CONFIG.decisions.shape_record);
   });
+
+  it.each(['question_route', 'thread_answer', 'reply_match', 'approval_read'] as const)(
+    'reads a config stored before %s with its default',
+    (decision) => {
+      const config = JudgeConfig.parse({
+        enabled: true,
+        decisions: { review_size: { enabled: true, model: 'm', floor: 0.5 } },
+      });
+      expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
+    },
+  );
 
   it.each([
     ['above one', 1.01],
@@ -61,6 +76,10 @@ describe('judge config patch', () => {
     ['the master switch', { enabled: false }],
     ['one decision field', { decisions: { review_size: { floor: 0.9 } } }],
     ['an empty decision', { decisions: { review_size: {} } }],
+    ['question_route', { decisions: { question_route: { floor: 0.9 } } }],
+    ['thread_answer', { decisions: { thread_answer: { enabled: false } } }],
+    ['reply_match', { decisions: { reply_match: { floor: 0.9 } } }],
+    ['approval_read', { decisions: { approval_read: { enabled: false } } }],
   ])('accepts %s', (_name, patch) => {
     expect(JudgeConfigPatch.safeParse(patch).success).toBe(true);
   });

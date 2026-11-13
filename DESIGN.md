@@ -17,8 +17,9 @@ favors legibility and calm over decoration.
   green), so no stock Mantine color appears.
 - **Primary color:** blue. Status colors: blue = running, yellow = waiting on a human, orange =
   paused (limits), red = failed, green = done or ready, gray = queued or cancelled. Green is the only
-  "OK" color; don't use cyan or teal for success. Every Inbox card waits on the builder, so its kind
-  is yellow, a flag's too: red there would read as an error.
+  "OK" color; don't use cyan or teal for success. Every card in the Inbox's Open tab waits on the
+  builder, so its kind is yellow, a flag's too: red there would read as an error. The Waiting tab holds what the
+  builder waits on someone else for; waiting on someone shows as a line on the card, not a color.
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
 - **Density:** `size="sm"` controls in lists and tables; `md` in forms and dialogs.
 - **Board cards:** compact `Paper`s that drag from anywhere on the card, with no handle: a pointer drag
@@ -160,7 +161,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
   same order (Back to Board, the project's sections, then Global).
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
-  right-aligned.
+  right-aligned. A status is dimmed text after the
+  name, never a pill, in a dense list. Violet marks a role's pick in Settings › Models; orange stays
+  paused.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
   has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
   since contrast is whatever Selenized gives.

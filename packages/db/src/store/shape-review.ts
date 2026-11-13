@@ -8,6 +8,9 @@ import {
   ShapeFindingState,
   ShapeReviewer,
   type GoalId,
+  type ShapeAttachmentId,
+  type ShapeAttachmentRevisionId,
+  type ShapeFindingReviewer,
   type ProjectId,
   type QuestionMeasureDto,
   type ShapeFindingId,
@@ -31,13 +34,39 @@ export interface NewShapeFinding {
   readonly shapeId: ShapeId;
   readonly effortKey: string;
   readonly taskKey: string | null;
-  readonly reviewer: ShapeReviewer;
+  readonly reviewer: ShapeFindingReviewer;
   readonly kind: ShapeFindingKind;
   readonly severity: ShapeFindingSeverity | null;
   readonly text: string;
   readonly round: number;
   readonly taskHash: string | null;
+  /** An imported finding's revision, section and the review's own words. */
+  readonly revisionId?: ShapeAttachmentRevisionId | null;
+  readonly section?: string | null;
+  readonly reviewerName?: string | null;
+  readonly severityText?: string | null;
+  readonly outcomeText?: string | null;
+  readonly howDetail?: string | null;
 }
+
+/** A finding's stored columns from its input, the optional ones null when absent. */
+const findingColumns = (input: NewShapeFinding) => ({
+  shapeId: input.shapeId,
+  effortKey: input.effortKey,
+  taskKey: input.taskKey,
+  reviewer: input.reviewer,
+  kind: input.kind,
+  severity: input.severity,
+  text: input.text,
+  round: input.round,
+  taskHash: input.taskHash,
+  revisionId: input.revisionId ?? null,
+  section: input.section ?? null,
+  reviewerName: input.reviewerName ?? null,
+  severityText: input.severityText ?? null,
+  outcomeText: input.outcomeText ?? null,
+  howDetail: input.howDetail ?? null,
+});
 
 const announce = (ctx: WriteContext, shapeId: ShapeId): void => {
   ctx.emit({
@@ -52,15 +81,72 @@ const announce = (ctx: WriteContext, shapeId: ShapeId): void => {
 export function insertShapeFinding(ctx: WriteContext, input: NewShapeFinding): ShapeFindingRow {
   const row: ShapeFindingRow = {
     id: mintId('ShapeFinding'),
-    ...input,
+    ...findingColumns(input),
     state: ShapeFindingState.Open,
     how: null,
+    bundleKey: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeFindings).values(row).run();
   announce(ctx, input.shapeId);
   return row;
+}
+
+/**
+ * Writes or updates an imported finding by its bundle key within its Plan, with the state and how the
+ * review gave it. Unchanged content writes nothing.
+ */
+export function upsertImportedFinding(
+  ctx: WriteContext,
+  input: NewShapeFinding & {
+    readonly bundleKey: string;
+    readonly state: ShapeFindingState;
+    readonly how: string | null;
+  },
+): { row: ShapeFindingRow; created: boolean; changed: boolean } {
+  const columns = { ...findingColumns(input), state: input.state, how: input.how };
+  const held = ctx.tx
+    .select()
+    .from(schema.shapeFindings)
+    .where(
+      and(
+        eq(schema.shapeFindings.shapeId, input.shapeId),
+        eq(schema.shapeFindings.bundleKey, input.bundleKey),
+      ),
+    )
+    .get();
+  const tell = (): void => {
+    ctx.emit({
+      type: EventType.PlanRecordChanged,
+      entityType: 'shape',
+      entityId: input.shapeId,
+      data: { projectId: getShape(ctx.tx, input.shapeId).projectId, what: 'findings' },
+    });
+  };
+  if (!held) {
+    const row: ShapeFindingRow = {
+      id: mintId('ShapeFinding'),
+      ...columns,
+      bundleKey: input.bundleKey,
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+    };
+    ctx.tx.insert(schema.shapeFindings).values(row).run();
+    tell();
+    return { row, created: true, changed: false };
+  }
+  const same = (Object.keys(columns) as (keyof typeof columns)[]).every(
+    (field) => held[field] === columns[field],
+  );
+  if (same) return { row: held, created: false, changed: false };
+  ctx.tx
+    .update(schema.shapeFindings)
+    .set({ ...columns, updatedAt: ctx.now })
+    .where(eq(schema.shapeFindings.id, held.id))
+    .run();
+  tell();
+  return { row: { ...held, ...columns, updatedAt: ctx.now }, created: false, changed: true };
 }
 
 export function getShapeFinding(db: DbReader, id: ShapeFindingId): ShapeFindingRow {
@@ -165,7 +251,10 @@ export function listRehearsals(db: DbReader, shapeId: ShapeId): ShapeRehearsalRo
 
 export type ShapeAttachmentRow = typeof schema.shapeAttachments.$inferSelect;
 
-/** Keeps an effort's spec or eval; writing it again replaces the earlier text. */
+/**
+ * Keeps an effort's spec or eval and answers its id; writing it again replaces the latest text. Its
+ * revisions are kept apart (`insertAttachmentRevision`).
+ */
 export function upsertShapeAttachment(
   ctx: WriteContext,
   input: {
@@ -174,7 +263,7 @@ export function upsertShapeAttachment(
     readonly key: string;
     readonly body: string;
   },
-): void {
+): ShapeAttachmentId {
   const held = ctx.tx
     .select({ id: schema.shapeAttachments.id })
     .from(schema.shapeAttachments)
@@ -186,6 +275,7 @@ export function upsertShapeAttachment(
       ),
     )
     .get();
+  const id = held?.id ?? mintId('ShapeAttachment');
   if (held)
     ctx.tx
       .update(schema.shapeAttachments)
@@ -196,8 +286,10 @@ export function upsertShapeAttachment(
     ctx.tx
       .insert(schema.shapeAttachments)
       .values({
-        id: mintId('ShapeAttachment'),
+        id,
         ...input,
+        docKey: null,
+        title: null,
         goalId: null,
         taskId: null,
         createdAt: ctx.now,
@@ -205,6 +297,7 @@ export function upsertShapeAttachment(
       })
       .run();
   announce(ctx, input.shapeId);
+  return id;
 }
 
 /**
@@ -225,6 +318,8 @@ export function insertShapeAttachment(
   const row: ShapeAttachmentRow = {
     id: mintId('ShapeAttachment'),
     ...input,
+    docKey: null,
+    title: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

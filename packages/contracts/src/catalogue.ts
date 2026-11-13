@@ -1,11 +1,19 @@
 import { z } from 'zod';
-import { AccountId, PatternId, ProjectId } from './ids';
+import { AccountId, ModelProfileId, PatternId, ProjectId } from './ids';
 import { Effort, RiskTag, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
 
-/** How strong a model is, for routing a step no score can route. */
-export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
+/**
+ * The rung of a maker's price ladder a model sits on, weakest first, for routing a step no score can route.
+ * The names are the makers' own: most efficient, balance of intelligence and cost, most capable, flagship.
+ */
+export const ModelTier = {
+  Efficient: 'efficient',
+  Balanced: 'balanced',
+  Capable: 'capable',
+  Frontier: 'frontier',
+} as const;
 export type ModelTier = ValueOf<typeof ModelTier>;
 
 const TIER_NAMES: ReadonlySet<string> = new Set(Object.values(ModelTier));
@@ -157,6 +165,23 @@ export const AccountModelDto = z.object({
 });
 export type AccountModelDto = z.infer<typeof AccountModelDto>;
 
+/** One effort of a model: what the row would show if this were the effort it stands on. */
+export const ModelEffortDto = z.object({
+  profileId: ModelProfileId,
+  effort: z.enum(Effort),
+  intelligence: z.number().nullable(),
+  /** At the maker's list price, or scaled to the account the list was asked for. */
+  costPerTaskUsd: z.number().min(0).nullable(),
+  outputTokensPerSecond: z.number().nullable(),
+  stepsRun: z.int().min(0),
+  firstPassSteps: z.int().min(0),
+});
+export type ModelEffortDto = z.infer<typeof ModelEffortDto>;
+
+/** Which account's price the model list is costed on; without one, the maker's. */
+export const ModelsQuery = z.strictObject({ account: AccountId.optional() });
+export type ModelsQuery = z.infer<typeof ModelsQuery>;
+
 /** One row of the model list: what the maker publishes, joined with where 10db can run it. */
 export const ModelRowDto = z.object({
   model: z.string().min(1),
@@ -173,14 +198,42 @@ export const ModelRowDto = z.object({
   /** The maker's list price, not what any one account pays. */
   outputPrice: z.number().min(0).nullable(),
   intelligence: z.number().nullable(),
-  coding: z.number().nullable(),
+  /** The cost of the effort the Intelligence comes from, at the maker's price or the account's asked for. */
+  costPerTaskUsd: z.number().min(0).nullable(),
   outputTokensPerSecond: z.number().nullable(),
+  /** One per effort 10db can run, strongest first; the row's figures are the first one's. */
+  efforts: z.array(ModelEffortDto),
   /** Steps 10db has run on this model. */
   stepsRun: z.int().min(0),
   /** The earliest of its profiles; null for a model with no profile, which has nothing to date it by. */
   firstSeenAt: Timestamp.nullable(),
 });
 export type ModelRowDto = z.infer<typeof ModelRowDto>;
+
+/** Which account's offer the router's picks are made on. */
+export const ModelPicksQuery = z.strictObject({ account: AccountId });
+export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
+
+/** What routing chooses for one role at its starting need. */
+export const RolePickDto = z.object({
+  role: z.enum(StepRole),
+  /** The Intelligence the role asks for before any floor. */
+  need: z.number(),
+  /** Null for a pick with no profile: nothing chosen, a tier name, or an override launched as named. */
+  profileId: ModelProfileId.nullable(),
+  model: z.string().min(1).nullable(),
+  effort: z.enum(Effort).nullable(),
+  intelligence: z.number().nullable(),
+  /** On the account asked for; null when AA has not measured the model. */
+  costPerTaskUsd: z.number().min(0).nullable(),
+  /** Routing's own words for the choice, or why it found none. */
+  reason: z.string().min(1),
+});
+export type RolePickDto = z.infer<typeof RolePickDto>;
+
+/** One pick per role in flow order, on one account. */
+export const RolePicksDto = z.object({ accountId: AccountId, picks: z.array(RolePickDto) });
+export type RolePicksDto = z.infer<typeof RolePicksDto>;
 
 /** Where the catalogue came from and how many models it holds. */
 export const CatalogueStatusDto = z.object({

@@ -66,6 +66,13 @@ export const EventType = {
   PersonaSaved: 'persona.saved',
   FlowSaved: 'flow.saved',
   PersonSaved: 'person.saved',
+  PersonRemoved: 'person.removed',
+  /** A stakeholder send changed state or content; `entityId` is the send. */
+  StakeholderSendChanged: 'stakeholder_send.changed',
+  SlackConnectionChanged: 'slack.connection.changed',
+  StakeholderTimersChanged: 'stakeholder_timers.changed',
+  /** A question card was triaged (`InboxTriagedData`). */
+  InboxTriaged: 'inbox.triaged',
   TeamSaved: 'team.saved',
   RoutingRulesSaved: 'routing_rules.saved',
   ModelProfileSaved: 'model_profile.saved',
@@ -79,6 +86,10 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A Plan's record gained or changed documents, entries, findings or proposals; `data.what` says which. */
+  PlanRecordChanged: 'plan.record_changed',
+  /** A task's cited anchors were checked against its workstream's base; `data.counts` per result. */
+  PlanAnchorChecked: 'plan.anchor_checked',
   /** A workstream's gate holds its slot and starts (Shape spec §8: lane time counts from here). */
   GateStarted: 'gate.started',
   /** The gate that `gate.started` began has ended, with its exit code. */

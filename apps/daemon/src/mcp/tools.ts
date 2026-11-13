@@ -13,6 +13,7 @@ import {
   McpToolOutputs,
   PrincipleDraft,
   ProposalKind,
+  QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   REVIEW_ROLES,
   StepRole,
@@ -63,7 +64,7 @@ import {
   type Json,
 } from '@10db/db';
 import type { z } from 'zod';
-import { buildContextPack } from '../briefing';
+import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
   MIGRATIONS_HAZARD,
@@ -103,6 +104,7 @@ import {
   type ClaimResult,
   type SharedGrant,
 } from './claim-wait';
+import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
 
@@ -160,13 +162,17 @@ function stepFilings(
   return proposed + countStepToolOps(db, ws, McpToolName.FileFollowUp);
 }
 
+const CATEGORY_LIST = Object.values(QuestionCategory)
+  .map((c) => `${c} (${QUESTION_CATEGORY_HINTS[c].hint} ${QUESTION_CATEGORY_HINTS[c].covers})`)
+  .join('; ');
+
 export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+  ...PLAN_TOOL_DESCRIPTIONS,
   get_context:
     'Your context pack: the task, acceptance criteria, your claims, the latest handoff, any answer waiting for you, and relevant decisions.',
   find_knowledge:
     'Search the current decisions and confirmed principles that apply to this project, each labelled with its scope and area. Set kind to decision or principle to search one shelf; limit applies to each shelf. Returns an explicit empty result when nothing matches.',
-  ask_human:
-    'Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. 10db adds a "Park the task" choice to your card, except when your task is a page of a Workbench pass; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.',
+  ask_human: `Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. Set category to the one that fits: ${CATEGORY_LIST}. 10db adds a "Park the task" choice to your card, except when your task is a page of a Workbench pass; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.`,
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
@@ -351,7 +357,11 @@ export function createToolHandlers(
   }
 
   return {
-    get_context: () => Promise.resolve(buildContextPack(db, getWorkstream(db, workstreamId))),
+    ...createPlanToolHandlers(db, workstreamId),
+    get_context: () => {
+      const pack = buildContextPack(db, getWorkstream(db, workstreamId));
+      return Promise.resolve({ ...pack, pendingAnswer: quoteSlackAnswer(pack.pendingAnswer) });
+    },
 
     find_knowledge: ({ query, limit, kind }) => {
       const projectId = context().project.id;
@@ -390,6 +400,7 @@ export function createToolHandlers(
         options: input.options,
         recommendation: input.recommendation ?? null,
         category: input.category,
+        ...(input.topic === undefined ? {} : { topic: input.topic }),
         urgency: input.urgency,
         detail: null,
         signal,

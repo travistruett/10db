@@ -67,10 +67,10 @@ describe('offeredModels', () => {
   it('lists each model once with its tier, the weakest tier first and the cheapest first within it', () => {
     const profiles = unscoredCatalogue({}, ['big', 'peak', 'small', 'mid']);
     expect(offeredModels(profiles)).toEqual([
-      { model: 'small', tier: 'fast' },
+      { model: 'small', tier: 'efficient' },
       { model: 'mid', tier: 'balanced' },
-      { model: 'big', tier: 'strongest' },
-      { model: 'peak', tier: 'strongest' },
+      { model: 'big', tier: 'capable' },
+      { model: 'peak', tier: 'capable' },
     ]);
   });
 
@@ -89,7 +89,7 @@ describe('offeredModels', () => {
       })),
     ];
     expect(offeredModels(profiles)).toEqual([
-      { model: 'small', tier: 'fast' },
+      { model: 'small', tier: 'efficient' },
       { model: 'mid', tier: 'balanced' },
       { model: 'house', tier: null },
     ]);

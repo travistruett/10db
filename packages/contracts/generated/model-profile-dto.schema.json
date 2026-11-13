@@ -52,36 +52,10 @@
               "type": "null"
             }
           ]
-        },
-        "coding": {
-          "anyOf": [
-            {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 100
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "agentic": {
-          "anyOf": [
-            {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 100
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [
-        "intelligence",
-        "coding",
-        "agentic"
+        "intelligence"
       ]
     },
     "costPerTaskUsd": {
@@ -161,9 +135,10 @@
         {
           "type": "string",
           "enum": [
-            "fast",
+            "efficient",
             "balanced",
-            "strongest"
+            "capable",
+            "frontier"
           ]
         },
         {

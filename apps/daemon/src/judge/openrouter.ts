@@ -32,6 +32,8 @@ export interface ModelQuestion {
   readonly state: string;
   readonly question: string;
   readonly options: readonly [string, ...string[]];
+  /** What each option means, by option; an option without one is offered by name alone. */
+  readonly criteria?: Readonly<Record<string, string>>;
   readonly key: string;
   readonly fetch: typeof fetch;
   readonly signal: AbortSignal;
@@ -120,7 +122,9 @@ async function askSystemOne(q: ModelQuestion): Promise<ModelAnswer> {
       [QUESTION_NAME]: {
         type: 'choice',
         instructions: q.question,
-        criteria: Object.fromEntries(q.options.map((option) => [option, null])),
+        criteria: Object.fromEntries(
+          q.options.map((option) => [option, q.criteria?.[option] ?? null]),
+        ),
       },
     },
   });
@@ -136,6 +140,13 @@ async function askSystemOne(q: ModelQuestion): Promise<ModelAnswer> {
   };
 }
 
+/** The options by name, each with its description on a line of its own when it has one. */
+export function optionsText(q: Pick<ModelQuestion, 'options' | 'criteria'>): string {
+  if (q.criteria === undefined) return q.options.join(', ');
+  const criteria = q.criteria;
+  return `\n${q.options.map((o) => (criteria[o] === undefined ? `- ${o}` : `- ${o}: ${criteria[o]}`)).join('\n')}`;
+}
+
 async function askChat(q: ModelQuestion): Promise<ModelAnswer> {
   const { value } = await post(q, CHAT_URL, {
     model: q.model,
@@ -149,7 +160,7 @@ async function askChat(q: ModelQuestion): Promise<ModelAnswer> {
       },
       {
         role: 'user',
-        content: `Content:\n${q.state}\n\nQuestion: ${q.question}\nOptions: ${q.options.join(', ')}`,
+        content: `Content:\n${q.state}\n\nQuestion: ${q.question}\nOptions: ${optionsText(q)}`,
       },
     ],
     response_format: {

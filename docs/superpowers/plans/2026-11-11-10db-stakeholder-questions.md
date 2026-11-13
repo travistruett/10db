@@ -3,6 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** built. Where a task below and
+`docs/superpowers/plans/2026-11-11-10db-stakeholder-questions-state-table.md` differ, the build followed the
+table; the spec's §15 lists what changed (top-level replies, `reply_match`, `approval_read`, recovery by
+metadata, the builder's Slack pick).
+
 **Goal:** a lane's question on a task whose questions go to a stakeholder reaches them in Slack, and the
 conversation in the thread answers the card: the task resumes with it, and an option a recipient picked or
 approved is recorded as their decision.
@@ -60,14 +65,14 @@ at the same time and touches some of the same files:
 | `apps/daemon/src/runner/runner.ts`         | Task 6, `onWaitStart` (~2289)   | M2b the lane spec (~2337); M2c the event switch (2535–2990) |
 | `apps/daemon/src/inbox/service.ts`         | Tasks 3, 3b, 7a, 8a             | M4b conversation owners                                      |
 | `apps/desktop/src/views/inbox/inbox-card.tsx` | Task 11                      | M5a Open Session                                             |
-| `packages/db/drizzle/`                     | Tasks 2 and 2b take 0062–0064   | M4a renumbered here to 0065–0070, seeded from 0064            |
+| `packages/db/drizzle/`                     | Tasks 2 and 2b take 0063–0065   | M4a renumbered here to 0066–0071, seeded from 0065            |
 | `packages/contracts/src/protocol.ts`, `contracts.test.ts` | Task 2b takes `PROTOCOL_VERSION` 8 | M4b edited here to take 9                    |
 | registrations (`app.ts`, `services.ts`, `start.ts`, `events.ts`, `schema.ts`, `sections.ts`, `sync.ts`) | additive | additive |
 
 The order: this pull request and Sessions M1 run in parallel. Once M1 (Mantine 9.8) merges, rebase this branch on
 `main` before the view tasks (10–13). This build merges before Sessions M4a and M4b start. The pull request that
 carries this plan already edits the Sessions plans on `main` to match: M4a's migrations follow this plan's
-(0065–0070, seeded from 0064) and M4b takes `PROTOCOL_VERSION` 9. If this build ends up merging after them
+(0066–0071, seeded from 0065; `0062` went to another change first) and M4b takes `PROTOCOL_VERSION` 9. If this build ends up merging after them
 instead, it renumbers its own migrations and takes the next protocol version, and the Sessions plans go back. Don't extend the hand-typed
 `codex-protocol.ts` (M1 replaces it); nothing here needs to.
 

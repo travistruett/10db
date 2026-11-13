@@ -1,6 +1,7 @@
 import {
   mintId,
   type JudgeDecision,
+  type JudgeCallId,
   type JudgeOutcome,
   type JudgeTestResultDto,
   type TaskId,
@@ -10,7 +11,7 @@ import { getJudgeConfig, insertJudgeCall } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { askModel, type ModelAnswer } from './openrouter';
+import { askModel, optionsText, type ModelAnswer } from './openrouter';
 
 /** How long a decision waits for a model before today's rule applies. */
 export const JUDGE_TIMEOUT_MS = 4_000;
@@ -25,6 +26,8 @@ export interface JudgeRequest {
   readonly state: string;
   readonly question: string;
   readonly options: readonly [string, ...string[]];
+  /** What each option means, by option. The call's logged question carries them as text. */
+  readonly criteria?: Readonly<Record<string, string>>;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
   readonly signal?: AbortSignal;
@@ -38,13 +41,13 @@ export type JudgeAnswer =
       readonly model: string;
       readonly latencyMs: number;
       readonly costUsd: number | null;
-      readonly callId: string;
+      readonly callId: JudgeCallId;
     }
   | {
       readonly kind: 'fallback';
       readonly reason: 'off' | 'no_key' | 'timeout' | 'error' | 'stopped';
       readonly detail: string;
-      readonly callId: string;
+      readonly callId: JudgeCallId;
     };
 
 /** What a decision asks of the judge. */
@@ -131,7 +134,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
   /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
   async function attempt(
     model: string,
-    q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'signal'>,
+    q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'criteria' | 'signal'>,
     timeoutMs: number,
   ): Promise<Attempt> {
     const controller = new AbortController();
@@ -165,6 +168,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         state: q.state,
         question: q.question,
         options: q.options,
+        ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
         key,
         fetch: deps.fetch,
         signal: controller.signal,
@@ -211,13 +215,16 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         readonly latencyMs: number | null;
         readonly costUsd: number | null;
         readonly model?: string;
-      }): string =>
+      }): JudgeCallId =>
         deps.state.write((ctx) =>
           insertJudgeCall(ctx, {
             decision: req.decision,
             model: fields.model ?? model,
             state: req.state,
-            question: req.question,
+            question:
+              req.criteria === undefined
+                ? req.question
+                : `${req.question}\nOptions:${optionsText(req)}`,
             answer: fields.answer,
             confidence: fields.confidence,
             outcome: fields.outcome,

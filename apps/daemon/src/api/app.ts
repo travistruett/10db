@@ -29,6 +29,8 @@ import {
   FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
+  PlanExportInput,
+  PlanImportInput,
   GoalId,
   DevUiConnectionDto,
   HealthResponse,
@@ -37,6 +39,8 @@ import {
   InboxState,
   JudgeConfigPatch,
   JudgeKeyInput,
+  ModelPicksQuery,
+  ModelsQuery,
   KeepAwakeInput,
   LanePermissionsDto,
   LiveSystemsDto,
@@ -46,6 +50,11 @@ import {
   NetworkHostInput,
   Month,
   ModelProfilePatch,
+  AskSomeoneInput,
+  PersonId,
+  SendInput,
+  SlackTokenInput,
+  StakeholderTimersDto,
   PersonaId,
   PersonaInput,
   PersonaPatch,
@@ -100,6 +109,7 @@ import {
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type PlanImportError,
   type ScreenRenderRequest,
   type ShapeConvertError,
 } from '@10db/contracts';
@@ -746,6 +756,33 @@ export function createApp(deps: ApiDeps) {
         'x-content-type-options': 'nosniff',
       });
     })
+    // A planning effort as one Plan: 201 when it makes the Plan, 200 for an update or a dry run.
+    .post(
+      '/projects/:projectId/plans/import',
+      validator('json', (value): PlanImportInput => PlanImportInput.parse(value)),
+      async (c) => {
+        const outcome = await deps.services.importPlan(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        if (outcome.kind === 'imported')
+          return c.json(outcome.result, outcome.result.created ? 201 : 200);
+        if (outcome.kind === 'previewed') return c.json(outcome.preview, 200);
+        return c.json({ errors: outcome.errors } satisfies PlanImportError, 400);
+      },
+    )
+    // The record as Markdown, outside every checkout; a refused folder answers 400 naming why.
+    .post(
+      '/shapes/:shapeId/export',
+      validator('json', (value): PlanExportInput => PlanExportInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.exportPlan(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1105,6 +1142,73 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): PersonInput => PersonInput.parse(value)),
       (c) => c.json(deps.services.createPerson(c.req.valid('json')), 201),
     )
+    .put(
+      '/people/:personId',
+      validator('json', (value): PersonInput => PersonInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.updatePerson(PersonId.parse(c.req.param('personId')), c.req.valid('json')),
+        ),
+    )
+    .delete('/people/:personId', (c) => {
+      deps.services.removePerson(PersonId.parse(c.req.param('personId')));
+      return c.json({});
+    })
+    .get('/slack', (c) => c.json(deps.services.slackStatus()))
+    .put(
+      '/slack/token',
+      validator('json', (value): SlackTokenInput => SlackTokenInput.parse(value)),
+      async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
+    )
+    .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .get('/slack/members', async (c) =>
+      c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
+    )
+    .get('/stakeholders/timers', (c) => c.json(deps.services.getStakeholderTimers()))
+    .put(
+      '/stakeholders/timers',
+      validator('json', (value): StakeholderTimersDto => StakeholderTimersDto.parse(value)),
+      (c) => c.json(deps.services.setStakeholderTimers(c.req.valid('json'))),
+    )
+    .get('/tasks/:taskId/question-routes', (c) =>
+      c.json(deps.services.questionRoutes(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/inbox/:id/send',
+      validator('json', (value): SendInput => SendInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.sendInbox(InboxItemId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .post(
+      '/inbox/:id/ask',
+      validator('json', (value): AskSomeoneInput => AskSomeoneInput.parse(value)),
+      (c) =>
+        c.json(deps.services.askSomeone(InboxItemId.parse(c.req.param('id')), c.req.valid('json'))),
+    )
+    .post('/inbox/:id/take-back', async (c) =>
+      c.json(await deps.services.takeBack(InboxItemId.parse(c.req.param('id')))),
+    )
+    .post('/inbox/:id/keep-waiting', (c) =>
+      c.json(deps.services.keepWaiting(InboxItemId.parse(c.req.param('id')))),
+    )
+    .get(
+      '/inbox/:id/compose',
+      validator('query', (query): { personIds?: string } => ({
+        ...(typeof query['personIds'] === 'string' ? { personIds: query['personIds'] } : {}),
+      })),
+      (c) =>
+        c.json(
+          deps.services.composeFor(
+            InboxItemId.parse(c.req.param('id')),
+            (c.req.valid('query').personIds ?? '')
+              .split(',')
+              .filter((id) => id !== '')
+              .map((id) => PersonId.parse(id)),
+          ),
+        ),
+    )
     .post(
       '/flows',
       validator('json', (value): FlowInput => FlowInput.parse(value)),
@@ -1169,7 +1273,16 @@ export function createApp(deps: ApiDeps) {
     .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
-    .get('/models', (c) => c.json(deps.services.listModels()))
+    .get(
+      '/models',
+      validator('query', (query) => ModelsQuery.parse(query)),
+      (c) => c.json(deps.services.listModels(c.req.valid('query').account)),
+    )
+    .get(
+      '/models/picks',
+      validator('query', (query) => ModelPicksQuery.parse(query)),
+      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
+    )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))
     .post('/models/refresh', async (c) => c.json(await deps.services.refreshModels()))

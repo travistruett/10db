@@ -523,7 +523,7 @@ function report(name: string, run: LaneRun, canaries: readonly Canary[]): void {
     guardVerdicts: run.guardVerdicts,
     brokerCalls: run.brokerCalls,
     cards: run.cards.map((c) => ({ title: c.title, body: c.body, detail: c.detail })),
-    events: run.events.filter((e) => e.type !== 'activity' || e.kind === 'text'),
+    events: run.events,
     permissionModes: run.permissionModes,
     profile: run.profile,
   };
@@ -1480,6 +1480,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
             droppedCount: 0,
             empty: true,
           },
+          plan: null,
         },
       });
       const run = await runLane({

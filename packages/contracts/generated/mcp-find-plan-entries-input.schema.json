@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "intent",
+          "fact",
+          "experiment",
+          "name",
+          "decision",
+          "question",
+          "finding",
+          "section"
+        ]
+      }
+    },
+    "limit": {
+      "default": 20,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    }
+  },
+  "required": [
+    "query"
+  ]
+}

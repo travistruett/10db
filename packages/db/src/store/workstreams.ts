@@ -50,6 +50,7 @@ import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
 import { passHoldingTask } from './passes';
 import { getProject } from './projects';
+import { waitingOnWorkstream } from './waiting-on';
 import type { DbReader, WriteContext } from './store';
 import { getTask, mergedDespiteFailure } from './tasks';
 
@@ -92,6 +93,11 @@ export function getWorkstreamRow(db: DbReader, id: WorkstreamId): WorkstreamRow 
   return row;
 }
 
+/** Who the run's question is out with, when it is. */
+function waitingOnFor(db: DbReader, id: WorkstreamId): WorkstreamDto['waitingOn'] {
+  return waitingOnWorkstream(db, id);
+}
+
 function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
   const sessions = db
     .select({ n: count() })
@@ -128,6 +134,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     runNextAt: row.runNextAt,
     notice: row.notice,
     revertTold: revertTold(db, row),
+    waitingOn: waitingOnFor(db, row.id),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

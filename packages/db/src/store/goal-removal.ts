@@ -40,6 +40,7 @@ export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
     for (const task of leaves) cancelNeverStartedTask(ctx, task.id);
     remaining = open.filter((t) => !leaves.includes(t));
   }
+  ctx.tx.delete(schema.routingRules).where(eq(schema.routingRules.goalId, goalId)).run();
   ctx.tx.update(schema.tasks).set({ goalId: null }).where(eq(schema.tasks.goalId, goalId)).run();
   ctx.tx.delete(schema.goalCriteria).where(eq(schema.goalCriteria.goalId, goalId)).run();
   ctx.tx.delete(schema.goalViews).where(eq(schema.goalViews.goalId, goalId)).run();

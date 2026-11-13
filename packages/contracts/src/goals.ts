@@ -229,6 +229,17 @@ export const DigestWaitingOn = z.object({
 });
 export type DigestWaitingOn = z.infer<typeof DigestWaitingOn>;
 
+/** A question out with other people: the builder waits on them, not the other way round. */
+export const DigestWaitingOnSomeone = z.object({
+  inboxItemId: InboxItemId,
+  taskId: TaskId,
+  title: z.string(),
+  names: z.array(z.string()),
+  /** When the wait started. */
+  at: Timestamp,
+});
+export type DigestWaitingOnSomeone = z.infer<typeof DigestWaitingOnSomeone>;
+
 /** The next ready task, or the one it waits on. */
 export const DigestNext = z.object({
   taskId: TaskId,
@@ -299,6 +310,8 @@ export const GoalDigestDto = z.object({
   workingNow: z.array(DigestWorkingNow),
   team: z.array(DigestTeamMember),
   waitingOn: deltaRow(DigestWaitingOn),
+  /** Questions sent to other people and not yet answered; they are not in `waitingOn`. */
+  waitingOnSomeone: z.array(DigestWaitingOnSomeone).default([]),
   next: DigestNext.nullable(),
   deviations: deltaRow(DigestDeviation),
   decisions: deltaRow(DigestDecision),

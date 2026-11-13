@@ -1,35 +1,45 @@
 import { StepRole, type FlowInput } from '@10db/contracts';
 
-/** Starting needs, in the role's index points (spec §15): heuristics to tune, not AA data. */
-const NEED = { plan: 45, planReview: 48, implement: 40, review: 48, qa: 35 } as const;
+/** Starting needs, in Intelligence Index points (spec §15): heuristics to tune, not AA data. */
+export const ROLE_NEED: Readonly<Record<StepRole, number>> = {
+  plan: 45,
+  plan_review: 48,
+  implement: 40,
+  review: 48,
+  qa: 35,
+};
 
 /** The need a Plan conversation's model is chosen for: the plan step's. */
-export const PLAN_NEED = NEED.plan;
+export const PLAN_NEED = ROLE_NEED.plan;
 
 /** The need a task's implement step is chosen for. */
-export const IMPLEMENT_NEED = NEED.implement;
+export const IMPLEMENT_NEED = ROLE_NEED.implement;
 
 export const DEFAULT_FLOWS: readonly FlowInput[] = [
-  { name: 'quick', steps: [{ role: StepRole.Implement, need: NEED.implement }] },
+  { name: 'quick', steps: [{ role: StepRole.Implement, need: ROLE_NEED.implement }] },
   {
     name: 'standard',
     steps: [
-      { role: StepRole.Implement, need: NEED.implement },
-      { role: StepRole.Review, need: NEED.review },
+      { role: StepRole.Implement, need: ROLE_NEED.implement },
+      { role: StepRole.Review, need: ROLE_NEED.review },
     ],
   },
   {
     name: 'full',
     steps: [
-      { role: StepRole.Plan, need: NEED.plan, skip: [{ kind: 'unless_criteria_over', count: 3 }] },
+      {
+        role: StepRole.Plan,
+        need: ROLE_NEED.plan,
+        skip: [{ kind: 'unless_criteria_over', count: 3 }],
+      },
       {
         role: StepRole.PlanReview,
-        need: NEED.planReview,
+        need: ROLE_NEED.plan_review,
         skip: [{ kind: 'unless_risk', tags: ['security', 'auth', 'migration'] }],
       },
-      { role: StepRole.Implement, need: NEED.implement },
-      { role: StepRole.Review, need: NEED.review },
-      { role: StepRole.Qa, need: NEED.qa, skip: [{ kind: 'unless_criteria_over', count: 3 }] },
+      { role: StepRole.Implement, need: ROLE_NEED.implement },
+      { role: StepRole.Review, need: ROLE_NEED.review },
+      { role: StepRole.Qa, need: ROLE_NEED.qa, skip: [{ kind: 'unless_criteria_over', count: 3 }] },
     ],
   },
 ];

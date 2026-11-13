@@ -84,10 +84,11 @@ describe('refusalText', () => {
 });
 
 describe('the builder tools', () => {
-  it('lists exactly the eighteen tools, none of them a lane tool', () => {
+  it('lists exactly the nineteen tools, none of them a lane tool', () => {
     expect(Object.values(BuilderToolName).sort()).toEqual([
       'create_task',
       'edit_task',
+      'import_plan',
       'list_flows',
       'list_inbox',
       'list_projects',
@@ -178,6 +179,22 @@ describe('the builder tools', () => {
     const tool = builderToolList().find((t) => t.name === BuilderToolName.StartShape);
     expect(tool?.description).toContain('never paths');
     expect(tool?.description).toContain('256 KB');
+  });
+
+  it('import_plan takes a project and a bundle path, never an inline bundle', () => {
+    expect(BuilderToolInputs.import_plan.parse({ projectId, bundlePath: '/tmp/b.json' })).toEqual({
+      projectId,
+      bundlePath: '/tmp/b.json',
+      dryRun: false,
+    });
+    expect(
+      BuilderToolInputs.import_plan.safeParse({ projectId, bundlePath: '/tmp/b.json', bundle: {} })
+        .success,
+    ).toBe(false);
+    const tool = builderToolList().find((t) => t.name === 'import_plan');
+    expect(tool?.description).toMatch(/dryRun: true first/);
+    expect(tool?.description).toMatch(/bodyPath/);
+    expect(BUILDER_INSTRUCTIONS).toMatch(/import_plan/);
   });
 
   it('defaults a move’s neighbours to none, so parking is a task and a column', () => {

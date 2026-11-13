@@ -92,7 +92,8 @@ export const QuestionCategory = {
   Product: 'product',
   Design: 'design',
   Engineering: 'engineering',
-  Environment: 'environment',
+  Business: 'business',
+  Access: 'access',
   Other: 'other',
 } as const;
 export type QuestionCategory = ValueOf<typeof QuestionCategory>;
@@ -100,9 +101,70 @@ export type QuestionCategory = ValueOf<typeof QuestionCategory>;
 /** Answers in these categories are recorded as decisions (spec §7). */
 export const DECISION_CATEGORIES: readonly QuestionCategory[] = [
   QuestionCategory.Product,
+  QuestionCategory.Business,
   QuestionCategory.Design,
   QuestionCategory.Engineering,
 ];
+
+/**
+ * The plain question each category answers and what it covers. Every picker, the lane's `ask_human`
+ * description and the judge's criteria read this one table.
+ */
+export const QUESTION_CATEGORY_HINTS: Readonly<
+  Record<QuestionCategory, { readonly hint: string; readonly covers: string }>
+> = {
+  [QuestionCategory.Product]: {
+    hint: 'What should it do?',
+    covers: "scope, behaviour, priorities, who it's for",
+  },
+  [QuestionCategory.Business]: {
+    hint: "Is it allowed / what's the policy?",
+    covers: 'pricing, legal, policy, customers, commitments',
+  },
+  [QuestionCategory.Design]: {
+    hint: 'How should it look, feel or read?',
+    covers: 'screens, flows, wording',
+  },
+  [QuestionCategory.Engineering]: {
+    hint: 'How should it be built?',
+    covers: 'architecture, libraries, trade-offs',
+  },
+  [QuestionCategory.Access]: {
+    hint: "I need something I can't get myself",
+    covers: 'keys, accounts, permissions, data, a service turned on',
+  },
+  [QuestionCategory.Other]: {
+    hint: 'Anything else',
+    covers: "everything else, and Claude Code's AskUserQuestion",
+  },
+};
+
+/** Whether a drafted question waits for the builder's Send, or goes out by itself. */
+export const SendMode = { Review: 'review', Auto: 'auto' } as const;
+export type SendMode = ValueOf<typeof SendMode>;
+
+/** Where a person can be reached. Slack is the only channel so far. */
+export const ContactKind = { Slack: 'slack' } as const;
+export type ContactKind = ValueOf<typeof ContactKind>;
+
+export const SendState = {
+  Draft: 'draft',
+  Sending: 'sending',
+  Sent: 'sent',
+  Answered: 'answered',
+  Closed: 'closed',
+  Failed: 'failed',
+} as const;
+export type SendState = ValueOf<typeof SendState>;
+
+/** Who chose a question card's recipients. */
+export const RoutedBy = {
+  Rule: 'rule',
+  TriagePending: 'triage_pending',
+  Judge: 'judge',
+  Builder: 'builder',
+} as const;
+export type RoutedBy = ValueOf<typeof RoutedBy>;
 
 export const ProposalKind = {
   NewTask: 'new_task',
@@ -173,6 +235,8 @@ export const SourceKind = {
   Agent: 'agent',
   Daemon: 'daemon',
   Builder: 'builder',
+  /** An answer a stakeholder gave in a Slack conversation. */
+  SlackReply: 'slack_reply',
 } as const;
 export type SourceKind = ValueOf<typeof SourceKind>;
 
@@ -236,23 +300,6 @@ export const StepStatus = {
   Failed: 'failed',
 } as const;
 export type StepStatus = ValueOf<typeof StepStatus>;
-
-/** The Artificial Analysis indexes a step can be measured against. */
-export const ScoreKind = {
-  Intelligence: 'intelligence',
-  Coding: 'coding',
-  Agentic: 'agentic',
-} as const;
-export type ScoreKind = ValueOf<typeof ScoreKind>;
-
-/** The score each role is routed on (the builder's choice): code is measured by coding, QA by agentic work. */
-export const ROLE_SCORE: Readonly<Record<StepRole, ScoreKind>> = {
-  plan: ScoreKind.Intelligence,
-  plan_review: ScoreKind.Intelligence,
-  implement: ScoreKind.Coding,
-  review: ScoreKind.Intelligence,
-  qa: ScoreKind.Agentic,
-};
 
 /** Where a profile's scores come from: the AA sync, or the builder's own numbers. */
 export const ProfileSource = { Aa: 'aa', Manual: 'manual' } as const;

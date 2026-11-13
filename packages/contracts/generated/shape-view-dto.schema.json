@@ -46,6 +46,19 @@
             "null"
           ]
         },
+        "importedAt": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -95,9 +108,10 @@
                   {
                     "type": "string",
                     "enum": [
-                      "fast",
+                      "efficient",
                       "balanced",
-                      "strongest"
+                      "capable",
+                      "frontier"
                     ]
                   },
                   {
@@ -513,6 +527,50 @@
                             "XL"
                           ]
                         },
+                        "planRef": {
+                          "type": "object",
+                          "properties": {
+                            "document": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]*$"
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "section": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200,
+                              "pattern": "^[^\\s#]+$"
+                            },
+                            "shared": {
+                              "default": [],
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "pattern": "^[^\\s#]+$"
+                              }
+                            }
+                          },
+                          "required": [
+                            "document",
+                            "revision",
+                            "section"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "cites": {
+                          "default": [],
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]*$"
+                          }
+                        },
                         "annotations": {
                           "default": [],
                           "maxItems": 0,
@@ -869,6 +927,50 @@
                       "XL"
                     ]
                   },
+                  "planRef": {
+                    "type": "object",
+                    "properties": {
+                      "document": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]*$"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "section": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[^\\s#]+$"
+                      },
+                      "shared": {
+                        "default": [],
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "^[^\\s#]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "document",
+                      "revision",
+                      "section"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "cites": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    }
+                  },
                   "ceremony": {
                     "type": "string",
                     "enum": [
@@ -1102,6 +1204,49 @@
                     }
                   },
                   "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    }
+                  },
+                  "planRef": {
+                    "type": "object",
+                    "properties": {
+                      "document": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]*$"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "section": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[^\\s#]+$"
+                      },
+                      "shared": {
+                        "default": [],
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "^[^\\s#]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "document",
+                      "revision",
+                      "section"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "cites": {
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -1510,6 +1655,106 @@
                   "rationale": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "alternatives": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "option": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "whyNot": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "option",
+                        "whyNot"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "quote": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "lasting": {
+                    "default": true,
+                    "type": "boolean"
+                  },
+                  "anchors": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "code"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "line": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{7,40}$"
+                            },
+                            "excerpt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path",
+                            "line",
+                            "commit",
+                            "excerpt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "url"
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "readAt": {
+                              "type": "string",
+                              "format": "date",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "url",
+                            "readAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
                   }
                 },
                 "required": [
@@ -1922,6 +2167,10 @@
                   "about": {
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "blocks": {
+                    "type": "string",
+                    "minLength": 1
                   },
                   "sourceMessageIds": {
                     "minItems": 1,
@@ -2383,7 +2632,55 @@
             "enum": [
               "scope",
               "engineering",
-              "rehearsal"
+              "rehearsal",
+              "imported"
+            ]
+          },
+          "reviewerName": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revisionId": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sar_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "section": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severityText": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcomeText": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "howDetail": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
             ]
           },
           "kind": {

@@ -1,4 +1,5 @@
 export { buildContextPack, contextPackedEvent, PackReason } from './context-pack';
+export { recordPlanPacked } from './context-pack';
 export {
   BACKGROUND_DONE_NUDGE,
   BACKGROUND_DONE_NUDGE_READ_ONLY,
@@ -17,3 +18,4 @@ export {
   RESULT_NUDGE,
 } from './prompts';
 export { failedSteps } from './failed-steps';
+export { quoteSlackAnswer } from './quote-answer';
