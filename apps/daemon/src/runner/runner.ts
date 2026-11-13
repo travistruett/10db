@@ -2779,7 +2779,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
-            // A lane has no thread to show it on; the skips T4 records are where it will show.
+            // A lane has no thread to show it on; the lane's recorded skips are where it will show.
             if (!pass) {
               log.info(
                 { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },

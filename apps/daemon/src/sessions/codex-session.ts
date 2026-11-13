@@ -222,6 +222,8 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
   const state = createTurnState();
   const graceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
   let sends: Promise<void> = Promise.resolve();
+  /** Commands sent while a turn runs: each waits for the turn to end, apart from the steers behind it. */
+  let heldCommands: Promise<void> = Promise.resolve();
   /**
    * Messages sent and not yet handed to Codex: 10db's own queue. Codex drops a steered message that
    * an interrupted turn had not taken yet, so these are what an interrupt leaves still to run.
@@ -994,8 +996,13 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
     send: (text, images = [], uuid) => {
       const message: Outgoing = { text, images, uuid, command: codexCommandOf(text) };
       waiting.add(message);
-      // One at a time, so messages reach Codex in the order they were sent.
-      sends = sends.then(() => deliver(message));
+      // One at a time, so messages reach Codex in the order they were sent. A command sent
+      // mid-turn waits for the turn on a chain of its own, so a steer after it still reaches that turn.
+      if (message.command !== null && state.turnId !== null) {
+        heldCommands = heldCommands.then(() => deliver(message));
+      } else {
+        sends = sends.then(() => deliver(message));
+      }
     },
     // The receipt names what 10db still holds: each runs once the interrupted turn has ended.
     interrupt: async () => {

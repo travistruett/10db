@@ -2218,10 +2218,9 @@ describe('the commands', () => {
     expect(methods(running.server).filter((m) => m === 'turn/start')).toHaveLength(1);
   });
 
-  it('holds /review during a turn, never steering, and sends it once the turn ends, before what follows', async () => {
+  it('holds /review during a turn, never steering it, and sends it once the turn ends', async () => {
     const running = await inTurn(commandScript);
     running.handle.send('/review focus', [], C2);
-    running.handle.send('and then this');
     await settled(running);
     expect(methods(running.server)).not.toContain('turn/steer');
     expect(methods(running.server)).not.toContain('review/start');
@@ -2237,13 +2236,27 @@ describe('the commands', () => {
     await vi.waitFor(() => {
       expect(running.seen).toContainEqual({ type: 'consumed', uuids: [C2] });
     });
-    // The review's turn is the active one, so the next message steers it, after the review request.
+    // The review's turn is the active one, so the next message steers it.
+    running.handle.send('and then this');
     await vi.waitFor(() => {
       expect(methods(running.server)).toContain('turn/steer');
     });
-    const order = methods(running.server);
-    expect(order.indexOf('review/start')).toBeLessThan(order.indexOf('turn/steer'));
     expect(sentParams(running.server, 'turn/steer')).toMatchObject({ expectedTurnId: 'turn-2' });
+  });
+
+  it('steers the running turn with a message sent after a command held for the turn to end', async () => {
+    const running = await inTurn(commandScript);
+    running.handle.send('/compact', [], C2);
+    running.handle.send('keep going');
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/steer');
+    });
+    expect(sentParams(running.server, 'turn/steer')).toMatchObject({ expectedTurnId: 'turn-1' });
+    expect(methods(running.server)).not.toContain('thread/compact/start');
+    await endTurn(running);
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('thread/compact/start');
+    });
   });
 
   it('names a held command in an interrupt’s receipt, and sends it once, after the turn ends', async () => {

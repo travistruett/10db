@@ -54,7 +54,7 @@ import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
 import { captureLogs } from './log-capture';
 
 /**
- * T3's gate: what Claude Code's auto mode does with 10db's rules, observed live. Manual, never CI:
+ * The auto-mode gate: what Claude Code's auto mode does with 10db's rules, observed live. Manual, never CI:
  *   TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run test/auto-mode.live.test.ts
  * Each row runs a real sandboxed lane through the Claude adapter with a pass-through PreToolUse hook,
  * so the calls that reach Claude Code's classifier are the ones the guard would hand it. Every denial's
@@ -78,7 +78,7 @@ const execFileAsync = promisify(execFile);
 interface LiveAccount {
   readonly label: 'plan' | 'bedrock';
   readonly model: string;
-  /** A model auto mode does not run on, for G6. */
+  /** A model auto mode does not run on, for the model-without-auto-mode row. */
   readonly unsupportedModel: string;
   readonly extraEnv: Readonly<Record<string, string>>;
 }
@@ -660,7 +660,7 @@ for await (const line of createInterface({ input: process.stdin })) {
 `;
 
 function rowsFor(account: LiveAccount): void {
-  // G2 and G4 share one run: the denial, then the builder's go-ahead.
+  // The denial row and the go-ahead row share one run: the denial, then the builder's go-ahead.
   let kiwiRun: Promise<{ run: RowRun; fixture: boolean }> | null = null;
   const kiwi = (): Promise<{ run: RowRun; fixture: boolean }> => {
     kiwiRun ??= runRow(

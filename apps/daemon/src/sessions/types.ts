@@ -158,8 +158,6 @@ export interface ExploreProfile {
   readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
 }
 
-export type AgentProfile = LaneProfile | ExploreProfile;
-
 /** Everything an adapter needs to open a session: the core every session shares, and what it is for. */
 export type LaneSessionSpec = AgentSessionCore & { readonly profile: LaneProfile };
 export type ExploreSessionSpec = AgentSessionCore & { readonly profile: ExploreProfile };

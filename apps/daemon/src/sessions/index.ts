@@ -1,10 +1,5 @@
 export { createClaudeAdapter } from './claude-adapter';
-export {
-  capabilitiesOf,
-  claudeCapabilities,
-  codexCapabilities,
-  type AgentCapabilities,
-} from './capabilities';
+export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
 export { CODEX_COMMANDS } from './codex-commands';
 export { patchPaths } from './codex-guard';
@@ -22,7 +17,6 @@ export {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
-  AgentProfileKind,
   SessionEndReason,
 } from './types';
 export type {
@@ -31,10 +25,7 @@ export type {
   InterruptReceipt,
   LanePermissionMode,
   AgentAdapter,
-  AgentProfile,
-  AgentSessionCore,
   AgentSessionSpec,
-  ExploreProfile,
   ExploreSessionSpec,
   LaneProfile,
   LaneSessionSpec,
