@@ -75,6 +75,8 @@
         "goal.created",
         "goal.changed",
         "shape.changed",
+        "plan.record_changed",
+        "plan.anchor_checked",
         "gate.started",
         "gate.finished"
       ]

@@ -4,8 +4,16 @@ import { Effort, RiskTag, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
 
-/** How strong a model is, for routing a step no score can route. */
-export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
+/**
+ * The rung of a maker's price ladder a model sits on, weakest first, for routing a step no score can route.
+ * The names are the makers' own: most efficient, balance of intelligence and cost, most capable, flagship.
+ */
+export const ModelTier = {
+  Efficient: 'efficient',
+  Balanced: 'balanced',
+  Capable: 'capable',
+  Frontier: 'frontier',
+} as const;
 export type ModelTier = ValueOf<typeof ModelTier>;
 
 const TIER_NAMES: ReadonlySet<string> = new Set(Object.values(ModelTier));

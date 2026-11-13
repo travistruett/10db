@@ -29,6 +29,16 @@ import {
 import { PassCardDetail } from './pass-cards';
 import { WorkbenchSetupDto } from './workbench-setup';
 import {
+  PlanBundle,
+  PlanExportInput,
+  PlanExportResult,
+  PlanImportError,
+  PlanImportInput,
+  PlanImportPreview,
+  PlanImportResult,
+} from './plan-bundle';
+import { AnchorCheckDto, PlanAnchor, PlanContext, PlanRef, SectionIndexEntry } from './plan-record';
+import {
   PassCloseAnswerDto,
   PassCloseContinueDto,
   PassClosePreviewDto,
@@ -410,6 +420,18 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-dismiss-input': ShapeDismissInput,
   'shape-model-input': ShapeModelInput,
   'shape-models-dto': ShapeModelsDto,
+  'plan-bundle': PlanBundle,
+  'plan-import-input': PlanImportInput,
+  'plan-import-error': PlanImportError,
+  'plan-import-preview': PlanImportPreview,
+  'plan-import-result': PlanImportResult,
+  'plan-export-input': PlanExportInput,
+  'plan-export-result': PlanExportResult,
+  'plan-anchor': PlanAnchor,
+  'plan-ref': PlanRef,
+  'section-index-entry': SectionIndexEntry,
+  'anchor-check-dto': AnchorCheckDto,
+  'plan-context': PlanContext,
   'task-file-dto': TaskFileDto,
   'task-message-dto': TaskMessageDto,
   'task-message-input': TaskMessageInput,

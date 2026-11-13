@@ -24,7 +24,7 @@ describe('settings sections', () => {
       ['project', 'Agents', 'network-hosts', 'Network hosts'],
       ['app', null, 'overview', 'Overview'],
       ['app', 'Models', 'accounts', 'Accounts'],
-      ['app', 'Models', 'models', 'All models'],
+      ['app', 'Models', 'models', 'Models and scores'],
       ['app', 'Models', 'decisions', 'Decisions'],
       ['app', 'Models', 'personas-and-flows', 'Models by role'],
       ['app', 'Agents', 'lane-permissions', 'Lane permissions'],

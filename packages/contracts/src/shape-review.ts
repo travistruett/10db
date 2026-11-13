@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { ShapeFindingId, ShapeId, ShapeProposalId } from './ids';
+import { ShapeAttachmentRevisionId, ShapeFindingId, ShapeId, ShapeProposalId } from './ids';
 import {
   Ceremony,
   ShapeFindingKind,
+  ShapeFindingReviewer,
   ShapeFindingSeverity,
   ShapeFindingState,
-  ShapeReviewer,
 } from './shape';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §7. What the screen
@@ -22,7 +22,17 @@ export const ShapeFindingDto = z.object({
   shapeId: ShapeId,
   effortKey: z.string(),
   taskKey: z.string().nullable(),
-  reviewer: z.enum(ShapeReviewer),
+  reviewer: z.enum(ShapeFindingReviewer),
+  /** An imported finding's reviewer, in the review's own words. */
+  reviewerName: z.string().nullable().default(null),
+  /** The document revision an imported finding was made on. */
+  revisionId: ShapeAttachmentRevisionId.nullable().default(null),
+  /** The section slug of that revision it is about. */
+  section: z.string().nullable().default(null),
+  /** An imported finding's severity, outcome and how, as the review wrote them. */
+  severityText: z.string().nullable().default(null),
+  outcomeText: z.string().nullable().default(null),
+  howDetail: z.string().nullable().default(null),
   kind: z.enum(ShapeFindingKind),
   /** A question has none. */
   severity: z.enum(ShapeFindingSeverity).nullable(),

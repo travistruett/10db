@@ -1,4 +1,5 @@
 export { buildContextPack, contextPackedEvent, PackReason } from './context-pack';
+export { recordPlanPacked } from './context-pack';
 export {
   BACKGROUND_DONE_NUDGE,
   BACKGROUND_DONE_NUDGE_READ_ONLY,

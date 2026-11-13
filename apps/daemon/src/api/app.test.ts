@@ -1286,6 +1286,7 @@ describe('shape routes', () => {
     proposeUnlocked: false,
     round: 0,
     model: null,
+    importedAt: null,
     createdAt: AT,
     updatedAt: AT,
   } as const;
@@ -1456,7 +1457,7 @@ describe('shape routes', () => {
       shape,
       models: {
         default: 'claude-opus-5-5',
-        offered: [{ model: 'claude-opus-5-5', tier: 'strongest' as const }],
+        offered: [{ model: 'claude-opus-5-5', tier: 'capable' as const }],
       },
       messages: [],
       proposals: [],

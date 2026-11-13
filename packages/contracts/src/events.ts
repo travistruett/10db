@@ -88,6 +88,10 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A Plan's record gained or changed documents, entries, findings or proposals; `data.what` says which. */
+  PlanRecordChanged: 'plan.record_changed',
+  /** A task's cited anchors were checked against its workstream's base; `data.counts` per result. */
+  PlanAnchorChecked: 'plan.anchor_checked',
   /** A workstream's gate holds its slot and starts (Shape spec §8: lane time counts from here). */
   GateStarted: 'gate.started',
   /** The gate that `gate.started` began has ended, with its exit code. */

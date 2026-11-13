@@ -1,4 +1,5 @@
 import {
+  BundleOrigin,
   EventType,
   mintId,
   NotFoundError,
@@ -8,7 +9,7 @@ import {
   type ShapeId,
   type ShapeOrigin,
 } from '@10db/contracts';
-import { asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -27,27 +28,42 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   proposeUnlocked: row.proposeUnlocked,
   round: row.round,
   model: row.model,
+  importedAt: row.importedAt,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
 
-/** Writes a conversation that is listening: no proposal yet, Propose still locked. */
+/**
+ * Writes a conversation that is listening: no proposal yet, Propose still locked. An imported Plan
+ * gives its state, round and bundle.
+ */
 export function insertShape(
   ctx: WriteContext,
   projectId: ProjectId,
-  input: { readonly title: string; readonly origin: ShapeOrigin },
+  input: {
+    readonly title: string;
+    readonly origin: ShapeOrigin;
+    readonly state?: ShapeState;
+    readonly round?: number;
+    readonly bundleId?: string | null;
+    readonly bundleOrigin?: BundleOrigin | null;
+    readonly importedAt?: string | null;
+  },
 ): ShapeDto {
   getProject(ctx.tx, projectId);
   const row: ShapeRow = {
     id: mintId('Shape'),
     projectId,
     title: input.title,
-    state: ShapeState.Listening,
+    state: input.state ?? ShapeState.Listening,
     origin: input.origin,
     sdkSessionId: null,
     proposeUnlocked: false,
-    round: 0,
+    round: input.round ?? 0,
     model: null,
+    bundleId: input.bundleId ?? null,
+    bundleOrigin: input.bundleOrigin ?? null,
+    importedAt: input.importedAt ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -59,6 +75,30 @@ export function insertShape(
     data: { projectId },
   });
   return toShapeDto(row);
+}
+
+/** The Plan a bundle id was imported into in a project, if any. */
+export function getShapeByBundle(
+  db: DbReader,
+  projectId: ProjectId,
+  bundleId: string,
+): ShapeDto | undefined {
+  const row = db
+    .select()
+    .from(schema.shapes)
+    .where(and(eq(schema.shapes.projectId, projectId), eq(schema.shapes.bundleId, bundleId)))
+    .get();
+  return row ? toShapeDto(row) : undefined;
+}
+
+/** Where an imported Plan's bundle was made; null for a conversation. */
+export function getShapeBundleOrigin(db: DbReader, id: ShapeId): BundleOrigin | null {
+  const row = db
+    .select({ bundleOrigin: schema.shapes.bundleOrigin })
+    .from(schema.shapes)
+    .where(eq(schema.shapes.id, id))
+    .get();
+  return row?.bundleOrigin == null ? null : BundleOrigin.parse(row.bundleOrigin);
 }
 
 export function getShape(db: DbReader, id: ShapeId): ShapeDto {

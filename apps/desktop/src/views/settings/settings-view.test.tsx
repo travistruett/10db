@@ -49,14 +49,14 @@ describe('SettingsView', () => {
     expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
   });
 
-  it('lists Who Answers and Models by role at project scope, and People and All models at app scope', async () => {
+  it('lists Who Answers and Models by role at project scope, and People and Models and scores at app scope', async () => {
     server.use(...baseHandlers());
     renderApp('/settings/general');
     const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
     for (const label of ['Who Answers', 'Models by role'])
       expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
     fireEvent.click(within(nav).getByRole('radio', { name: 'All projects' }));
-    for (const label of ['People', 'Models by role', 'All models'])
+    for (const label of ['People', 'Models by role', 'Models and scores'])
       expect(await within(nav).findByRole('link', { name: label })).toBeTruthy();
   });
 

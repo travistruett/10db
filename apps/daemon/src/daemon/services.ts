@@ -168,6 +168,7 @@ import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
 import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
@@ -209,6 +210,8 @@ export function createServices(deps: {
   /** People, the Slack connection, timers, routes and sends. */
   readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
+  /** Importing a planning effort into a Plan. */
+  readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
   readonly pictures: Pictures;
@@ -687,6 +690,7 @@ export function createServices(deps: {
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
+    ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,
     taskScreens: (taskId) => deps.pictures.screens(taskId),

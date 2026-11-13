@@ -1617,7 +1617,7 @@ describe('startDaemon', () => {
       expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
       expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
         enabled: true,
-        tier: 'strongest',
+        tier: 'frontier',
         outputPrice: 20,
       });
 

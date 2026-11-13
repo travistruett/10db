@@ -165,7 +165,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   project" / "All projects" switch under Back to Board picks which half the sections list shows, under subheads,
   so the list fits 1280×720.
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
-  right-aligned.
+  right-aligned. A status is dimmed text after the
+  name, never a pill, in a dense list. Violet marks a role's pick in Settings › Models; orange stays
+  paused.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
   has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
   since contrast is whatever Selenized gives.

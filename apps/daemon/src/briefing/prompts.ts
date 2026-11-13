@@ -17,6 +17,7 @@ import {
 import { quotedWords, renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
+import { renderPlanContext } from './plan-context-text';
 
 interface StepBrief {
   readonly index: number;
@@ -801,6 +802,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Acceptance criteria:',
     bullets(input.task.acceptanceCriteria),
+    ...(input.contextPack.plan ? ['', ...renderPlanContext(input.contextPack.plan)] : []),
     '',
     `Your claims: ${claims}.`,
     '',
@@ -850,6 +852,7 @@ export function compactionReinjection(
     '',
     'Acceptance criteria:',
     bullets(pack.task.acceptanceCriteria),
+    ...(pack.plan ? ['', ...renderPlanContext(pack.plan)] : []),
     '',
     `Your claims: ${claims}.`,
     '',

@@ -40,6 +40,8 @@ export * from './pass-events';
 export * from './pass-shared';
 export * from './passes';
 export * from './picker';
+export * from './plan-bundle';
+export * from './plan-record';
 export * from './review-rounds';
 export * from './sign-in-url';
 export { PROTOCOL_VERSION } from './protocol';

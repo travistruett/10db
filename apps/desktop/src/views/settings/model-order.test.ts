@@ -17,7 +17,7 @@ const B = someAccountId();
 const rows = [
   modelRowDto({
     model: 'm-low',
-    tier: ModelTier.Fast,
+    tier: ModelTier.Efficient,
     availableOn: [A],
     intelligence: 20,
     costPerTaskUsd: 0.1,
@@ -39,7 +39,7 @@ const rows = [
   }),
   modelRowDto({
     model: 'm-top',
-    tier: ModelTier.Strongest,
+    tier: ModelTier.Capable,
     availableOn: [B],
     intelligence: 60,
     costPerTaskUsd: 5,
@@ -58,12 +58,8 @@ describe('sorting the model list', () => {
   it.each([
     { column: ModelColumn.Name, up: ['m-blank', 'm-low', 'm-mid', 'm-top'] },
     { column: ModelColumn.Tier, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.AvailableOn, up: ['m-blank', 'm-low', 'm-top', 'm-mid'] },
     { column: ModelColumn.Intelligence, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
     { column: ModelColumn.CostPerTask, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.Speed, up: ['m-top', 'm-mid', 'm-low', 'm-blank'] },
-    { column: ModelColumn.InputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.OutputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
     { column: ModelColumn.StepsRun, up: ['m-blank', 'm-top', 'm-mid', 'm-low'] },
   ])('orders by $column, no data after the data, Unknown after everything', ({ column, up }) => {
     expect(order(column, SortDirection.Ascending)).toEqual([...up, 'm-unknown']);
@@ -85,14 +81,14 @@ describe('filtering the model list', () => {
     {
       name: 'a tier keeps only that tier',
       query: '',
-      tiers: [ModelTier.Fast],
+      tiers: [ModelTier.Efficient],
       account: null,
       expected: 1,
     },
     {
       name: 'several tiers keep each',
       query: '',
-      tiers: [ModelTier.Fast, ModelTier.Strongest],
+      tiers: [ModelTier.Efficient, ModelTier.Capable],
       account: null,
       expected: 2,
     },
@@ -107,7 +103,7 @@ describe('filtering the model list', () => {
     {
       name: 'a tier nothing has is empty',
       query: '',
-      tiers: [ModelTier.Strongest],
+      tiers: [ModelTier.Capable],
       account: A,
       expected: 0,
     },

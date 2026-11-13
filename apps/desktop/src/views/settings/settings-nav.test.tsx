@@ -16,7 +16,7 @@ const PROJECT_LINKS = [
 const APP_LINKS = [
   'Overview',
   'Accounts',
-  'All models',
+  'Models and scores',
   'Decisions',
   'Models by role',
   'Lane permissions',

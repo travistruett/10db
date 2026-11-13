@@ -5,7 +5,7 @@ import {
   type FlowStepDef,
   type ModelProfileDto,
   type ModelSetting,
-  type ModelTier,
+  ModelTier,
   type PatternDto,
   type PatternMatch,
   type PersonaDto,
@@ -16,7 +16,16 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import { higherFloor, stepFloor, type Floor } from './floors';
-import { atEffort, automatic, effortAbove, tierPool, topModel, type TierPool } from './pools';
+import {
+  atEffort,
+  automatic,
+  effortAbove,
+  tierPool,
+  topModel,
+  topSpan,
+  withTopSpan,
+  type TierPool,
+} from './pools';
 import { defaultTier, pickByDefault, ROLE_DEFAULT } from './role-defaults';
 import { route, UnmeasuredError, type RouteChoice } from './router';
 import type { TaskShape } from './skip-rules';
@@ -308,7 +317,10 @@ export function chooseModel(input: ChooseInput): ModelChoice {
    * with no profile at all (a gateway that lists none) is launched as named; one whose model is retired is not.
    */
   const overrideFor = (tier: ModelTier, note: string): ModelChoice | undefined => {
-    const name = input.tierOverrides[tier];
+    // Capable and Frontier were one tier with one override, so an unset Frontier override is the Capable one.
+    const name =
+      input.tierOverrides[tier] ??
+      (tier === ModelTier.Frontier ? input.tierOverrides[ModelTier.Capable] : undefined);
     if (name === undefined) return undefined;
     const listed = input.accountModels ?? [];
     if (listed.length > 0 && !listed.some((m) => m.model === name && !m.unusable)) return undefined;
@@ -337,9 +349,15 @@ export function chooseModel(input: ChooseInput): ModelChoice {
 
   /** The tier's automatic choice, or the account's override for the tier. */
   const inTier = (tier: ModelTier, top: boolean, note: string): ModelChoice => {
-    const pool = tierPool(tier, input.profiles);
+    // A top pick, or a floored step, takes the dearest model of every tier its tier spans.
+    const found = tierPool(tier, input.profiles);
+    const pool = found && (top || floored) ? withTopSpan(found, input.profiles) : found;
+    // Capable and Frontier were one tier, so a step between them has not moved.
+    const together = topSpan(ModelTier.Capable);
     const moved =
-      pool === undefined || pool.tier === tier
+      pool === undefined ||
+      pool.tier === tier ||
+      (together.includes(tier) && together.includes(pool.tier))
         ? ''
         : `no ${tier} model is offered, so the ${pool.tier} tier: `;
     const overridden = top ? undefined : overrideFor(pool?.tier ?? tier, `${note}${moved}`);

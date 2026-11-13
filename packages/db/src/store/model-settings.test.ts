@@ -31,7 +31,7 @@ describe('role settings', () => {
       setRoleSetting(ctx, {
         role: 'implement',
         projectId: project.id,
-        setting: { kind: 'tier', tier: 'fast' },
+        setting: { kind: 'tier', tier: 'efficient' },
       });
       setRoleSetting(ctx, {
         role: 'implement',
@@ -142,7 +142,7 @@ describe('patterns', () => {
       setPatterns(ctx, null, [
         { name: 'third', match, setting: { kind: 'automatic' } },
         { name: 'first', match, setting: { kind: 'top_of_tier' } },
-        { name: 'second', match, setting: { kind: 'tier', tier: 'fast' } },
+        { name: 'second', match, setting: { kind: 'tier', tier: 'efficient' } },
       ]);
     });
     expect(listPatterns(store.db).map((p) => [p.name, p.position])).toEqual([

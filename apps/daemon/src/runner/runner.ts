@@ -135,6 +135,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   PackReason,
+  recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
@@ -284,6 +285,7 @@ import {
 } from './next-action';
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
+import { checkTaskAnchors } from '../plan-record';
 import { threadInlineBytes } from './thread-pictures';
 
 /**
@@ -1930,6 +1932,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
+    // The task's cited plan anchors are checked against this base before the pack reads them; a
+    // failure leaves them "not checked yet" in the brief and never stops the session.
+    await checkTaskAnchors(
+      { git: opts.git, state: opts.state },
+      { workstreamId: id, taskId: task.id, repo: checkout, rev: baseHead },
+    ).catch((error: unknown) => {
+      opts.logger.warn({ workstreamId: id, err: error }, 'the plan anchor check failed');
+    });
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
@@ -1973,7 +1983,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
-    const contextPack = buildContextPack(db, getWorkstream(db, id));
+    const contextPack = buildContextPack(db, getWorkstream(db, id), undefined, {
+      base: baseHead,
+    });
     // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
     const evidenceId =
       action.kind === 'fix'
@@ -2305,6 +2317,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         // A fresh session holds no picture an earlier one was sent.
         if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
+        recordPlanPacked(ctx, task.id, id, contextPack);
         ctx.emit(
           contextPackedEvent(
             s.id,
@@ -2802,6 +2815,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 signedReason: 'Context ran out before a handoff (10db)',
                 sourceId,
               });
+              recordPlanPacked(ctx, row.taskId, id, pack);
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
             handle.send(

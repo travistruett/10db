@@ -1,16 +1,9 @@
-import {
-  ModelTier,
-  type ModelProfileId,
-  type ModelRowDto,
-  type RolePickDto,
-  type StepRole,
-} from '@10db/contracts';
-import { TIER_LABEL } from './model-labels';
+import type { ModelProfileId, ModelRowDto, RolePickDto, StepRole } from '@10db/contracts';
 import { paretoFrontier, type ParetoPoint } from './pareto';
 import { ROLES } from './role-labels';
 
 /** Which points the chart draws: every effort of every model, or only the frontier. */
-export const DotsMode = { Every: 'every', Pareto: 'pareto' } as const;
+export const DotsMode = { Every: 'every', Frontier: 'frontier' } as const;
 export type DotsMode = (typeof DotsMode)[keyof typeof DotsMode];
 
 /** A model at an effort that has an Intelligence and a cost to place it by. */
@@ -19,10 +12,10 @@ export interface ChartPoint extends ParetoPoint {
   readonly id: number;
   readonly profileId: ModelProfileId;
   readonly name: string;
-  readonly tier: ModelTier | null;
 }
 
-export interface TierSeries {
+/** The points of one colour: gray for a point, blue for one on the frontier. */
+export interface PointSeries {
   readonly name: string;
   readonly color: string;
   readonly data: readonly {
@@ -36,6 +29,8 @@ export interface TierSeries {
 export interface NeedLine {
   readonly need: number;
   readonly label: string;
+  /** Where the label sits: at the right end when a lower line is within a few points, so labels never collide. */
+  readonly labelPosition: 'insideTopLeft' | 'insideRight';
 }
 
 /** A ring on the point a pick stands on. */
@@ -43,30 +38,30 @@ export interface PickRing {
   readonly role: StepRole;
   readonly cost: number;
   readonly intelligence: number;
-  /** Another role is selected, so this one fades. */
-  readonly dimmed: boolean;
 }
 
 export interface RightsizingSeries {
   /** Every measured point, by id; the series hold the ones drawn. */
   readonly points: readonly ChartPoint[];
-  readonly series: readonly TierSeries[];
+  /** The drawn points that are not on the frontier, gray, then the ones that are, blue. */
+  readonly series: readonly PointSeries[];
   /** The frontier of the measured points, cheapest first, whichever are drawn. */
-  readonly pareto: readonly ChartPoint[];
+  readonly frontier: readonly ChartPoint[];
   readonly lines: readonly NeedLine[];
   readonly rings: readonly PickRing[];
-  /** Roles whose pick has no drawn point: unmeasured, a cost of 0, hidden by a filter, or no profile. */
+  /** Roles whose pick has no drawn point: unmeasured, a cost of 0, or no profile. */
   readonly notOnChart: readonly StepRole[];
-  /** From a need up, as far right as the dearest drawn pick; null where no pick is drawn. */
-  readonly area: { readonly need: number; readonly top: number; readonly cost: number } | null;
   /** The log axis's ticks: a 1-2-5 ladder from the rung under the cheapest drawn point to the one over the dearest. */
   readonly ticks: readonly number[];
+  /** The Intelligence axis fitted to the drawn points and need lines; null where nothing is drawn. */
+  readonly yAxis: {
+    readonly domain: readonly [number, number];
+    readonly ticks: readonly number[];
+  } | null;
   /** Efforts with no Intelligence or no cost above 0, which have no place on the chart. */
   readonly omitted: number;
 }
 
-/** The top of the Intelligence scale, where the shaded area ends. */
-const SCALE_TOP = 100;
 const LADDER = [1, 2, 5] as const;
 
 /** The 1-2-5 rungs around a span of costs, from the last at or under `min` to the first over it at or past `max`. */
@@ -88,18 +83,8 @@ export function costTickLabel(value: number): string {
   return value < 0.01 ? `$${String(value)}` : `$${value.toFixed(2)}`;
 }
 
-const SERIES_COLORS: Readonly<Record<ModelTier, string>> = {
-  [ModelTier.Fast]: 'teal',
-  [ModelTier.Balanced]: 'blue',
-  [ModelTier.Strongest]: 'violet',
-};
-const NO_TIER = { name: 'No tier', color: 'gray' } as const;
-const TIER_ORDER: readonly (ModelTier | null)[] = [
-  ModelTier.Fast,
-  ModelTier.Balanced,
-  ModelTier.Strongest,
-  null,
-];
+const OTHER_SERIES = { name: 'Other efforts', color: 'gray.6' } as const;
+const FRONTIER_SERIES = { name: 'Frontier', color: 'blue.6' } as const;
 
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
@@ -118,7 +103,6 @@ function measuredPoints(rows: readonly ModelRowDto[]): { points: ChartPoint[]; o
         model: row.model,
         name: row.name,
         effort: e.effort,
-        tier: row.tier,
         cost: e.costPerTaskUsd,
         intelligence: e.intelligence,
       });
@@ -133,16 +117,38 @@ function needLines(picks: readonly RolePickDto[], role: StepRole | null): NeedLi
     if (role !== null && pick.role !== role) continue;
     byNeed.set(pick.need, [...(byNeed.get(pick.need) ?? []), pick.role]);
   }
-  return [...byNeed].map(([need, roles]) => ({
-    need,
-    label: `${roles.map(roleLabel).join(', ')} ${String(need)}`,
-  }));
+  const needs = [...byNeed.keys()].sort((a, b) => a - b);
+  return [...byNeed].map(([need, roles]) => {
+    const below = needs.filter((n) => n < need).at(-1);
+    return {
+      need,
+      label: `${roles.map(roleLabel).join(', ')} ${String(need)}`,
+      labelPosition:
+        below !== undefined && need - below <= CLOSE_NEEDS ? 'insideRight' : 'insideTopLeft',
+    } as const;
+  });
+}
+
+/** Need lines this close share the plot too tightly for both labels at the left. */
+const CLOSE_NEEDS = 4;
+const Y_STEP = 5;
+
+/** The Intelligence axis around the values, a step of 5 clear of the lowest and highest, ticked every 5 or 10. */
+export function intelligenceAxis(values: readonly number[]): RightsizingSeries['yAxis'] {
+  if (values.length === 0) return null;
+  const low = Math.floor((Math.min(...values) - 1) / Y_STEP) * Y_STEP;
+  const high = Math.ceil((Math.max(...values) + 1) / Y_STEP) * Y_STEP;
+  const step = high - low > 30 ? 10 : 5;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(low / step) * step; t <= high; t += step) ticks.push(t);
+  return { domain: [low, high], ticks };
 }
 
 /**
- * What the Models chart draws, from the rows (already limited to the chart's account and filters), the router's
- * picks for that account, the selected role and the dots mode. A ring is found by profile among the drawn points
- * only, so it never circles a point the chart does not show; in Pareto only the picks' own points stay drawn.
+ * What the Models chart draws, from the rows, the router's picks for the page's account, the selected role and the
+ * dots mode. A ring is found by profile among the drawn points only, so it never circles a point the chart does
+ * not show; on the frontier only, the picks' own points stay drawn. A selected role leaves only its need line and
+ * its ring.
  */
 export function rightsizingSeries(input: {
   readonly rows: readonly ModelRowDto[];
@@ -151,24 +157,21 @@ export function rightsizingSeries(input: {
   readonly dots: DotsMode;
 }): RightsizingSeries {
   const { points, omitted } = measuredPoints(input.rows);
-  const pareto = paretoFrontier(points);
+  const frontier = paretoFrontier(points);
   const pickedProfiles = new Set(input.picks.map((p) => p.profileId));
   const drawn =
     input.dots === DotsMode.Every
       ? points
-      : points.filter((p) => pareto.includes(p) || pickedProfiles.has(p.profileId));
+      : points.filter((p) => frontier.includes(p) || pickedProfiles.has(p.profileId));
 
-  const series = TIER_ORDER.flatMap((tier) => {
-    const here = drawn.filter((p) => p.tier === tier);
-    if (here.length === 0) return [];
-    const look = tier === null ? NO_TIER : { name: TIER_LABEL[tier], color: SERIES_COLORS[tier] };
-    return [
-      {
-        ...look,
-        data: here.map((p) => ({ cost: p.cost, intelligence: p.intelligence, id: p.id })),
-      },
-    ];
-  });
+  const asData = (here: readonly ChartPoint[]) =>
+    here.map((p) => ({ cost: p.cost, intelligence: p.intelligence, id: p.id }));
+  const others = drawn.filter((p) => !frontier.includes(p));
+  const onFrontier = drawn.filter((p) => frontier.includes(p));
+  const series = [
+    ...(others.length === 0 ? [] : [{ ...OTHER_SERIES, data: asData(others) }]),
+    ...(onFrontier.length === 0 ? [] : [{ ...FRONTIER_SERIES, data: asData(onFrontier) }]),
+  ];
 
   const rings: PickRing[] = [];
   const notOnChart: StepRole[] = [];
@@ -178,30 +181,21 @@ export function rightsizingSeries(input: {
       notOnChart.push(pick.role);
       continue;
     }
-    rings.push({
-      role: pick.role,
-      cost: point.cost,
-      intelligence: point.intelligence,
-      dimmed: input.role !== null && pick.role !== input.role,
-    });
+    if (input.role === null || pick.role === input.role)
+      rings.push({ role: pick.role, cost: point.cost, intelligence: point.intelligence });
   }
-
-  const inScope = input.role === null ? rings : rings.filter((r) => r.role === input.role);
-  const needs = input.picks.filter((p) => input.role === null || p.role === input.role);
-  const lowest = needs.length === 0 ? null : Math.min(...needs.map((p) => p.need));
-  const area =
-    lowest === null || inScope.length === 0
-      ? null
-      : { need: lowest, top: SCALE_TOP, cost: Math.max(...inScope.map((r) => r.cost)) };
 
   return {
     points,
     series,
-    pareto,
+    frontier,
     lines: needLines(input.picks, input.role),
     rings,
     notOnChart,
-    area,
+    yAxis: intelligenceAxis([
+      ...drawn.map((p) => p.intelligence),
+      ...needLines(input.picks, input.role).map((l) => l.need),
+    ]),
     ticks: costTicks(Math.min(...drawn.map((p) => p.cost)), Math.max(...drawn.map((p) => p.cost))),
     omitted,
   };
