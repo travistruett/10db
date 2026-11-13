@@ -41,6 +41,21 @@ export function createGithubServices(deps: {
   let cached: Probed | null = null;
   let probing: Promise<Probed> | null = null;
 
+  /**
+   * No gh is not installed; a gh that never reached GitHub is unreachable, never signed out. Any other
+   * failure (a rejected token, an answer gh gave that 10db can't read) is signed out, so the card still
+   * offers Sign In.
+   */
+  function stateOfFailure(error: unknown): GithubState {
+    if (error instanceof GhError) {
+      if (error.kind === GhFailure.NotInstalled) return GithubState.NotInstalled;
+      if (error.kind === GhFailure.Unreachable || error.kind === GhFailure.Timeout)
+        return GithubState.Unreachable;
+      return GithubState.SignedOut;
+    }
+    return GithubState.Unreachable;
+  }
+
   async function probe(): Promise<Probed> {
     let state: GithubState;
     let login: string | null = null;
@@ -48,21 +63,27 @@ export function createGithubServices(deps: {
       login = await deps.readLogin();
       state = login === null ? GithubState.SignedOut : GithubState.SignedIn;
     } catch (error) {
-      // Anything but a plain "no gh" is a login nobody could read, never a signed-out one.
-      state =
-        error instanceof GhError && error.kind === GhFailure.NotInstalled
-          ? GithubState.NotInstalled
-          : GithubState.Unreachable;
+      state = stateOfFailure(error);
     }
     cached = { state, login, at: deps.clock.now() };
     return cached;
   }
 
+  /** A stale status read joins the probe that is running. */
   function probeOnce(): Promise<Probed> {
-    probing ??= probe().finally(() => {
-      probing = null;
+    return probing ?? probeAfterRunning();
+  }
+
+  /**
+   * A probe that starts once the running one ends and answers its own result: the running one may have
+   * read gh before it saved a login or before it was found again.
+   */
+  function probeAfterRunning(): Promise<Probed> {
+    const run: Promise<Probed> = (probing ?? Promise.resolve()).then(probe, probe).finally(() => {
+      if (probing === run) probing = null;
     });
-    return probing;
+    probing = run;
+    return run;
   }
 
   const login = createGithubLogin({
@@ -72,7 +93,7 @@ export function createGithubServices(deps: {
     env: deps.env,
     // The new login is cached before the end is announced, so the screen that refetches on the event
     // reads it.
-    readLogin: async () => (await probeOnce()).login,
+    readLogin: async () => (await probeAfterRunning()).login,
     ended: deps.emit,
   });
 
@@ -92,7 +113,8 @@ export function createGithubServices(deps: {
         !recheck &&
         cached !== null &&
         deps.clock.now().getTime() - cached.at.getTime() < STATUS_FRESH_MS;
-      return dto(fresh && cached !== null ? cached : await probeOnce());
+      if (fresh && cached !== null) return dto(cached);
+      return dto(await (recheck ? probeAfterRunning() : probeOnce()));
     },
     async startGithubSignin(): Promise<GithubSigninDto> {
       const { code, url } = await login.start();
