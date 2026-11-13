@@ -1,6 +1,6 @@
 import { Rigor, StepRole, type Effort, type ProjectDto } from '@10db/contracts';
 import type { DbReader } from '@10db/db';
-import { chooseModel, resolveSteps, ROLE_DEFAULT } from '../routing';
+import { atEffort, chooseModel, offeredModels, resolveSteps, ROLE_DEFAULT } from '../routing';
 import { playbookInputs, routingInputs } from './routing-inputs';
 
 /**
@@ -36,4 +36,22 @@ export function planConversationModel(
   return choice.profile === null && choice.model === choice.tier
     ? undefined
     : { model: choice.model, effort: choice.effort };
+}
+
+/**
+ * What a conversation launches on: the builder's pick while the account still offers it, run at the
+ * conversation's effort snapped to the efforts that model has; otherwise the Plan cell's model and effort.
+ */
+export function conversationRun(
+  db: DbReader,
+  project: ProjectDto,
+  chosen: string | null,
+  effort: Effort | null,
+): { model: string; effort: Effort } | undefined {
+  const planned = planConversationModel(db, project, effort);
+  if (planned === undefined) return undefined;
+  const { profiles } = routingInputs(db, project);
+  if (chosen === null || !offeredModels(profiles).some((o) => o.model === chosen)) return planned;
+  const snapped = atEffort(chosen, effort ?? planned.effort, profiles);
+  return { model: chosen, effort: snapped?.effort ?? planned.effort };
 }
