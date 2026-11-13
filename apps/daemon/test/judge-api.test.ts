@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   AccountCreatedDto,
   AccountDto,
+  DecisionModelListDto,
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
   JudgeStatusDto,
@@ -26,11 +27,29 @@ let data: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
 let openRouterRequests: { url: string; authorization: string | null }[];
 let openRouterAnswer: () => Response;
+let modelListAnswer: () => Response;
+
+const MODEL_LIST_URL = 'https://openrouter.ai/api/v1/models?output_modalities=decisions';
+const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
+const decisionModel = (id: string, name: string) => ({
+  id,
+  name,
+  architecture: { input_modalities: ['text'], output_modalities: ['decisions'] },
+  pricing: { prompt: '0.000000042', completion: '0' },
+  endpoints: ['/api/alpha/decisions'],
+});
 
 beforeEach(() => {
   data = tempDir('judge api');
   daemon = null;
   openRouterRequests = [];
+  modelListAnswer = () =>
+    Response.json({
+      data: [
+        decisionModel('typesafe/jev-1.14', 'TypeSafe: Jev 1.14'),
+        decisionModel('liquid/d1', 'Liquid: D1'),
+      ],
+    });
   openRouterAnswer = () =>
     Response.json({
       model: 'typesafe/jev-1.13-20260917',
@@ -66,7 +85,7 @@ async function start(opts: { keychain?: Keychain; judgeOff?: boolean } = {}) {
         url,
         authorization: new Headers(init?.headers).get('authorization'),
       });
-      return Promise.resolve(openRouterAnswer());
+      return Promise.resolve(url === MODEL_LIST_URL ? modelListAnswer() : openRouterAnswer());
     },
     ...QUIET,
   });
@@ -221,17 +240,81 @@ describe('PATCH /judge', () => {
     const { api } = await start();
     const status = await api.patch('/judge', JudgeStatusDto, {
       enabled: false,
-      decisions: { review_size: { floor: 0.95, model: 'anthropic/claude-haiku-5.5' } },
+      decisions: { review_size: { floor: 0.95, enabled: false } },
     });
     expect(status.config).toEqual({
       enabled: false,
       accountId: null,
       decisions: {
         ...DEFAULT_JUDGE_CONFIG.decisions,
-        review_size: { enabled: true, model: 'anthropic/claude-haiku-5.5', floor: 0.95 },
+        review_size: { enabled: false, model: 'typesafe/jev-1.13', floor: 0.95 },
       },
     });
     expect(await api.get('/judge', JudgeStatusDto)).toEqual(status);
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it('saves a new model only after it answers one test decision with the key decisions run on', async () => {
+    const { api } = await start();
+    await openRouterAccount(api);
+    const status = await api.patch('/judge', JudgeStatusDto, {
+      decisions: { review_size: { model: 'liquid/d1' } },
+    });
+    expect(status.config.decisions.review_size.model).toBe('liquid/d1');
+    expect(openRouterRequests).toEqual([
+      { url: MODEL_LIST_URL, authorization: null },
+      { url: DECISIONS_URL, authorization: `Bearer ${KEY}` },
+    ]);
+  });
+
+  it('asks nothing when the model stays the same', async () => {
+    const { api } = await start();
+    await openRouterAccount(api);
+    await api.patch('/judge', JudgeStatusDto, {
+      decisions: { review_size: { model: 'typesafe/jev-1.13', floor: 0.9 } },
+    });
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it.each([
+    {
+      case: 'the model fails the test decision',
+      account: true,
+      answer: () =>
+        Response.json({ error: { message: 'Model does not answer choice' } }, { status: 400 }),
+      says: /liquid\/d1 didn't answer a test decision.*Model does not answer choice/,
+    },
+    {
+      case: 'the model answers without a confidence',
+      account: true,
+      answer: () =>
+        Response.json({
+          model: 'liquid/d1',
+          answers: { decision: { type: 'choice', choice: 'skip' } },
+          usage: {},
+        }),
+      says: /without a confidence/,
+    },
+    {
+      case: 'there is no key to test it with',
+      account: false,
+      answer: () => Response.json({}),
+      says: /No OpenRouter key is set/,
+    },
+  ])('refuses a model when $case, and keeps the one saved', async ({ account, answer, says }) => {
+    openRouterAnswer = answer;
+    const { api, raw } = await start();
+    if (account) await openRouterAccount(api);
+    const res = await raw('PATCH', '/judge', {
+      enabled: false,
+      decisions: { review_size: { model: 'liquid/d1' } },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(says);
+    expect((await api.get('/judge', JudgeStatusDto)).config).toMatchObject({
+      enabled: true,
+      decisions: { review_size: { model: 'typesafe/jev-1.13' } },
+    });
   });
 
   it('runs decisions on an OpenRouter account, keeps it through a patch that names none, and clears it', async () => {
@@ -400,6 +483,33 @@ describe('POST /accounts/:id/test', () => {
           ).account.id
         : which();
     expect((await raw('POST', `/accounts/${id}/test`)).status).toBe(status);
+    expect(openRouterRequests).toEqual([]);
+  });
+});
+
+describe('GET /judge/models', () => {
+  it("lists OpenRouter's decision models without a key, reading them once for a few hours", async () => {
+    const { api } = await start();
+    const first = await api.get('/judge/models', DecisionModelListDto);
+    expect(first.models).toEqual([
+      expect.objectContaining({ id: 'liquid/d1', maker: 'Liquid', cantCall: null }),
+      expect.objectContaining({ id: 'typesafe/jev-1.14', inputUsdPerMillion: 0.042 }),
+    ]);
+    expect(await api.get('/judge/models', DecisionModelListDto)).toEqual(first);
+    expect(openRouterRequests).toEqual([{ url: MODEL_LIST_URL, authorization: null }]);
+  });
+
+  it('answers 502 naming why when OpenRouter cannot be read', async () => {
+    modelListAnswer = () => new Response('down', { status: 503 });
+    const { raw } = await start();
+    const res = await raw('GET', '/judge/models');
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain('503');
+  });
+
+  it('answers 409 with the judge off, and asks OpenRouter nothing', async () => {
+    const { raw } = await start({ judgeOff: true });
+    expect((await raw('GET', '/judge/models')).status).toBe(409);
     expect(openRouterRequests).toEqual([]);
   });
 });

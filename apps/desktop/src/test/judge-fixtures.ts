@@ -1,4 +1,5 @@
 import {
+  DecisionModelDto,
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
   JudgeCallDto,
@@ -56,6 +57,19 @@ export function judgeCallDto(overrides: Partial<JudgeCallDto> = {}): JudgeCallDt
   });
 }
 
+export function decisionModelDto(overrides: Partial<DecisionModelDto> = {}): DecisionModelDto {
+  return DecisionModelDto.parse({
+    id: 'typesafe/jev-1.13',
+    name: 'Jev 1.13',
+    maker: 'TypeSafe',
+    latest: false,
+    inputUsdPerMillion: 0.042,
+    outputUsdPerMillion: 0,
+    cantCall: null,
+    ...overrides,
+  });
+}
+
 export interface JudgeRequest {
   readonly method: string;
   readonly path: string;
@@ -70,6 +84,10 @@ export function serveJudge(initial: {
   readonly measures?: ShapeMeasuresDto;
   /** The accounts a patch naming `accountId` can resolve to the status's account. */
   readonly accounts?: readonly AccountDto[];
+  /** OpenRouter's decision models, as `GET /judge/models` answers them. */
+  readonly models?: readonly DecisionModelDto[];
+  /** Why the daemon refuses a patch that changes a model, as when the model fails its test decision. */
+  readonly refuseModel?: string;
 }) {
   let status = initial.status ?? judgeStatusDto();
   const sent: JudgeRequest[] = [];
@@ -89,6 +107,12 @@ export function serveJudge(initial: {
     http.patch(daemonUrl('/judge'), async ({ request }) => {
       const body = JudgeConfigPatch.parse(await request.clone().json());
       await note(request);
+      const changesModel = Object.values(body.decisions ?? {}).some((d) => d?.model !== undefined);
+      if (initial.refuseModel !== undefined && changesModel)
+        return HttpResponse.json(
+          { error: 'invalid', message: initial.refuseModel },
+          { status: 400 },
+        );
       const merged = (name: JudgeDecision) => {
         const current = status.config.decisions[name];
         const change = body.decisions?.[name];
@@ -132,6 +156,12 @@ export function serveJudge(initial: {
       return HttpResponse.json(initial.test);
     }),
     http.get(daemonUrl('/judge/calls'), () => HttpResponse.json(initial.calls ?? [])),
+    http.get(daemonUrl('/judge/models'), () =>
+      HttpResponse.json({
+        models: initial.models ?? [decisionModelDto()],
+        fetchedAt: '2026-11-13T12:00:00.000Z',
+      }),
+    ),
     ...baseHandlers(),
   );
   return sent;

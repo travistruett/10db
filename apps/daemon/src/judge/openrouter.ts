@@ -9,12 +9,19 @@ import { z } from 'zod';
  *   `confidence` and per-option `probabilities`; OpenRouter adds `usage.cost`.
  *   https://docs.typesafe.ai/api.md and
  *   https://openrouter.ai/docs/guides/community/typesafe-sdk
+ * - Every other decision model (`output_modalities: ["decisions"]` in OpenRouter's model list, which names
+ *   `/api/alpha/decisions` as the endpoint that serves it): `POST /api/alpha/decisions` takes the same request and
+ *   answers the same shape, except that a choice answer's `confidence` and `probabilities` are optional.
+ *   https://openrouter.ai/docs/client-sdks/typescript/sdks/decisions/README.md
  * - Every other model: `POST /api/v1/chat/completions` with a `json_schema` response format;
  *   OpenRouter reports `usage.cost` in dollars.
  */
-const OPENROUTER_API = 'https://openrouter.ai/api/v1';
-const SYSTEM_ONE_URL = `${OPENROUTER_API}/systemone`;
-const CHAT_URL = `${OPENROUTER_API}/chat/completions`;
+const OPENROUTER = 'https://openrouter.ai';
+const SYSTEM_ONE_URL = `${OPENROUTER}/api/v1/systemone`;
+/** The path OpenRouter's model list names for a model it serves decisions on. */
+export const DECISIONS_PATH = '/api/alpha/decisions';
+const DECISIONS_URL = `${OPENROUTER}${DECISIONS_PATH}`;
+const CHAT_URL = `${OPENROUTER}/api/v1/chat/completions`;
 
 /** The name of the one question a System One call asks; its answer is keyed by it. */
 const QUESTION_NAME = 'decision';
@@ -27,8 +34,17 @@ export class OpenRouterError extends Error {
   override readonly name = 'OpenRouterError';
 }
 
+/** Which of OpenRouter's endpoints a model answers on. */
+export const ModelApi = {
+  SystemOne: 'system_one',
+  Decisions: 'decisions',
+  Chat: 'chat',
+} as const;
+export type ModelApi = (typeof ModelApi)[keyof typeof ModelApi];
+
 export interface ModelQuestion {
   readonly model: string;
+  readonly api: ModelApi;
   readonly state: string;
   readonly question: string;
   readonly options: readonly [string, ...string[]];
@@ -48,9 +64,19 @@ export interface ModelAnswer {
   readonly costUsd: number | null;
 }
 
-/** TypeSafe's System One models are served on their own endpoint; every other model is a chat model. */
-export function usesSystemOne(model: string): boolean {
-  return /^~?typesafe\//.test(model);
+/**
+ * TypeSafe's System One models answer on their own endpoint and every other decision model on the decisions endpoint.
+ * A model is a chat model only when OpenRouter's decision list is known and leaves it out: the picker offers decision
+ * models alone, so with the list unreadable a model is taken to be one.
+ */
+export async function modelApi(
+  model: string,
+  decisionModels: () => Promise<ReadonlySet<string> | null>,
+): Promise<ModelApi> {
+  if (/^~?typesafe\//.test(model)) return ModelApi.SystemOne;
+  const ids = await decisionModels();
+  if (ids === null || ids.has(model)) return ModelApi.Decisions;
+  return ModelApi.Chat;
 }
 
 const ErrorBody = z.object({ error: z.object({ message: z.string() }) });
@@ -58,14 +84,15 @@ const ErrorBody = z.object({ error: z.object({ message: z.string() }) });
 const Cost = z.object({ cost: z.number().nullish() }).nullish();
 const costOf = (usage: z.infer<typeof Cost>): number | null => usage?.cost ?? null;
 
-const SystemOneResponse = z.object({
+/** System One always sends `confidence` and `probabilities`; the decisions endpoint may send neither. */
+const DecisionResponse = z.object({
   model: z.string(),
   answers: z.object({
     [QUESTION_NAME]: z.object({
       type: z.literal('choice'),
       choice: z.string(),
-      confidence: z.number().min(0).max(1),
-      probabilities: z.record(z.string(), z.number().min(0).max(1)),
+      confidence: z.number().min(0).max(1).optional(),
+      probabilities: z.record(z.string(), z.number().min(0).max(1)).optional(),
     }),
   }),
   usage: Cost,
@@ -114,8 +141,9 @@ function checkOffered(q: ModelQuestion, choice: string): void {
     throw new OpenRouterError(`The model chose ${JSON.stringify(choice)}, which was not offered`);
 }
 
-async function askSystemOne(q: ModelQuestion): Promise<ModelAnswer> {
-  const { value } = await post(q, SYSTEM_ONE_URL, {
+/** A System One or decisions call: one `choice` question about `state`, answered by name. */
+async function askDecision(q: ModelQuestion, url: string): Promise<ModelAnswer> {
+  const { value } = await post(q, url, {
     model: q.model,
     state: q.state,
     questions: {
@@ -128,13 +156,17 @@ async function askSystemOne(q: ModelQuestion): Promise<ModelAnswer> {
       },
     },
   });
-  const parsed = SystemOneResponse.safeParse(value);
+  const parsed = DecisionResponse.safeParse(value);
   if (!parsed.success) throw new OpenRouterError('OpenRouter sent no usable choice answer');
   const answer = parsed.data.answers[QUESTION_NAME];
   checkOffered(q, answer.choice);
+  // 10db acts on an answer only at or above a floor, so an answer with no confidence is one it can't use.
+  const confidence = answer.probabilities?.[answer.choice] ?? answer.confidence;
+  if (confidence === undefined)
+    throw new OpenRouterError("The model answered without a confidence, so 10db can't use it");
   return {
     choice: answer.choice,
-    confidence: answer.probabilities[answer.choice] ?? answer.confidence,
+    confidence,
     model: parsed.data.model,
     costUsd: costOf(parsed.data.usage),
   };
@@ -201,7 +233,14 @@ async function askChat(q: ModelQuestion): Promise<ModelAnswer> {
   };
 }
 
-/** One call, in the shape the model's id calls for. Throws OpenRouterError, or what `fetch` throws. */
+/** One call on the endpoint `q.api` names. Throws OpenRouterError, or what `fetch` throws. */
 export function askModel(q: ModelQuestion): Promise<ModelAnswer> {
-  return usesSystemOne(q.model) ? askSystemOne(q) : askChat(q);
+  switch (q.api) {
+    case ModelApi.SystemOne:
+      return askDecision(q, SYSTEM_ONE_URL);
+    case ModelApi.Decisions:
+      return askDecision(q, DECISIONS_URL);
+    case ModelApi.Chat:
+      return askChat(q);
+  }
 }

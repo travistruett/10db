@@ -90,6 +90,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     patchJudge: track('patchJudge'),
     testAccount: track('testAccount'),
     listJudgeCalls: track('listJudgeCalls'),
+    listDecisionModels: track('listDecisionModels'),
     benchmarkStatus: track('benchmarkStatus'),
     syncBenchmarks: track('syncBenchmarks'),
     setBenchmarkKey: track('setBenchmarkKey'),
