@@ -1,4 +1,5 @@
 import {
+  InvalidError,
   KnowledgeScope,
   PrincipleKind,
   PrincipleStatus,
@@ -28,8 +29,6 @@ import {
   cancelTask,
   findDocument,
   getAttachmentRevision,
-  getAttachmentRevisionById,
-  getDocumentAttachment,
   getProject,
   getShape,
   getShapeEntry,
@@ -182,23 +181,6 @@ function citeProblems(
   return cites
     .filter((key) => !decisions.has(key) && getShapeEntry(db, shapeId, key) === undefined)
     .map((key) => `${title}: it cites ${key}, which is no entry or decision of this Plan`);
-}
-
-/** A task's stored pin as a ref in the record's numbering. */
-function refOfContext(
-  db: DbReader,
-  shapeId: ShapeId,
-  held: NonNullable<ReturnType<typeof getTaskContext>>,
-): PlanRef | undefined {
-  const revision = getAttachmentRevisionById(db, held.revisionId);
-  const document = revision ? getDocumentAttachment(db, revision.attachmentId) : undefined;
-  if (!revision || document?.shapeId !== shapeId) return undefined;
-  return {
-    document: document.docKey ?? document.key,
-    revision: revision.number,
-    section: held.section,
-    shared: held.shared,
-  };
 }
 
 /** Each effort in the order its dependencies need, or the keys of a cycle between efforts. */
@@ -457,7 +439,7 @@ export function convertProposals(
   /** Pins a task to its section; the checks above found the revision. */
   const pinTask = (taskId: TaskId, planRef: PlanRef, cites: readonly string[]): void => {
     const found = pinnedRevision(ctx.tx, shapeId, taskId, planRef);
-    if ('problem' in found) throw new Error(found.problem);
+    if ('problem' in found) throw new InvalidError(found.problem);
     upsertTaskContext(ctx, {
       taskId,
       shapeId,
@@ -643,12 +625,19 @@ export function convertProposals(
           ? undefined
           : proposePlacement(project, { areas: change.areas, riskTags: before.riskTags }),
       );
-    if (change.planRef !== undefined || change.cites !== undefined) {
-      const held = getTaskContext(ctx.tx, change.taskId);
-      const ref: PlanRef | undefined =
-        change.planRef ?? (held === undefined ? undefined : refOfContext(ctx.tx, shapeId, held));
-      if (ref !== undefined) pinTask(change.taskId, ref, change.cites ?? held?.cites ?? []);
-    }
+    const held = getTaskContext(ctx.tx, change.taskId);
+    if (change.planRef !== undefined)
+      pinTask(change.taskId, change.planRef, change.cites ?? held?.cites ?? []);
+    // New cites alone keep the task's stored pin as it is; there is no ref to look up again.
+    else if (change.cites !== undefined && held !== undefined)
+      upsertTaskContext(ctx, {
+        taskId: change.taskId,
+        shapeId: held.shapeId,
+        revisionId: held.revisionId,
+        section: held.section,
+        shared: held.shared,
+        cites: change.cites,
+      });
     made.set(row.id, { taskIds: [change.taskId] });
   }
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {

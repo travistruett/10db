@@ -36,6 +36,7 @@ import {
   insertDecision,
   insertSource,
   patchShapeProposal,
+  upsertTaskContext,
   type WriteContext,
 } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -1697,6 +1698,26 @@ describe('a Plan made from a bundle', () => {
       revisionId: revisionOf(shapeId, 'p1', 2).id,
       section: 'task-1',
       cites: ['f1', 'd1', 'i1', 'n1', 'x1'],
+    });
+  });
+
+  it('a change of only cites keeps the stored pin, even one whose section no longer resolves', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    convertedPlan(shapeId);
+    const t1Id = taskOf(shapeId, 't1');
+    const next = bundleJson(c.project.id);
+    const [t1] = goalTasks(next, 0);
+    if (t1) t1['cites'] = ['f1'];
+    importInto(next);
+    const held = must(getTaskContext(c.store.db, t1Id), 't1 context');
+    write((ctx) => {
+      upsertTaskContext(ctx, { ...held, section: 'gone' });
+    });
+    convertedPlan(shapeId);
+    expect(getTaskContext(c.store.db, t1Id)).toMatchObject({
+      revisionId: held.revisionId,
+      section: 'gone',
+      cites: ['f1'],
     });
   });
 
