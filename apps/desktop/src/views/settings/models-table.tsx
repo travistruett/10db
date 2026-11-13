@@ -1,9 +1,14 @@
 import { ModelStatus, type ModelRowDto } from '@10db/contracts';
 import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
+import { useState } from 'react';
+import { pagerProps, type TablePage } from '../../shell/table-pager';
+import { PAGE_SIZES } from '../knowledge/knowledge-paging';
 import { withColumnHeader } from '../../shell/column-header';
 import { ModelSearchFilter, TierFilter } from './model-filters';
 import { formatCost, formatScore, NO_DATA } from './model-format';
+import type { ModelFamily } from './model-families';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import {
   isNewModel,
@@ -22,14 +27,24 @@ const TABULAR = () => ({ fontVariantNumeric: 'tabular-nums' });
 function ModelCell({
   row,
   fresh,
+  older,
+  expanded,
+  nested,
   onOpen,
+  onToggle,
 }: {
   readonly row: ModelRowDto;
   readonly fresh: boolean;
+  /** How many older versions sit under this row; zero shows no toggle. */
+  readonly older: number;
+  readonly expanded: boolean;
+  /** An older version, drawn indented under its family's row. */
+  readonly nested: boolean;
   readonly onOpen: () => void;
+  readonly onToggle: () => void;
 }) {
   return (
-    <Group gap={6} wrap="nowrap">
+    <Group gap={6} wrap="nowrap" pl={nested ? 'lg' : 0}>
       <UnstyledButton
         aria-label={`Open ${row.name}`}
         title={row.name}
@@ -54,6 +69,27 @@ function ModelCell({
           New
         </Text>
       ) : null}
+      {older > 0 ? (
+        <UnstyledButton
+          aria-expanded={expanded}
+          onClick={(event) => {
+            // Showing the older versions is not opening the model.
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <Group gap={2} wrap="nowrap">
+            {expanded ? (
+              <IconChevronDown size={14} stroke={1.5} />
+            ) : (
+              <IconChevronRight size={14} stroke={1.5} />
+            )}
+            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              {older} older
+            </Text>
+          </Group>
+        </UnstyledButton>
+      ) : null}
     </Group>
   );
 }
@@ -64,7 +100,8 @@ function ModelCell({
  * is, and `costNote` says what the cost per task is at, in that column's header.
  */
 export function ModelsTable({
-  rows,
+  families,
+  paging,
   filter,
   onFilter,
   sort,
@@ -75,7 +112,9 @@ export function ModelsTable({
   costNote,
   onOpen,
 }: {
-  readonly rows: readonly ModelRowDto[];
+  /** The page's families; each lead is a row, its older versions open under it. */
+  readonly families: readonly ModelFamily[];
+  readonly paging: TablePage;
   readonly filter: ModelFilter;
   readonly onFilter: (next: ModelFilter) => void;
   readonly sort: ModelSort;
@@ -87,6 +126,8 @@ export function ModelsTable({
   readonly costNote: string;
   readonly onOpen: (row: ModelRowDto) => void;
 }) {
+  const [expanded, setExpanded] = useState<readonly string[]>([]);
+  const olderOf = new Map(families.map((f) => [f.lead.model, f.older]));
   const sortStatus: DataTableSortStatus<ModelRowDto> = {
     columnAccessor: sort.column,
     direction: sort.direction,
@@ -124,15 +165,27 @@ export function ModelsTable({
       cellsStyle: () => ({ minWidth: 200 }),
       filtering: filter.query.trim() !== '',
       filter: <ModelSearchFilter filter={filter} onFilter={onFilter} />,
-      render: (row) => (
-        <ModelCell
-          row={row}
-          fresh={isNewModel(row, now, earliest)}
-          onOpen={() => {
-            onOpen(row);
-          }}
-        />
-      ),
+      render: (row) => {
+        const older = olderOf.get(row.model)?.length ?? 0;
+        const open = expanded.includes(row.model);
+        return (
+          <ModelCell
+            row={row}
+            fresh={isNewModel(row, now, earliest)}
+            older={older}
+            expanded={open}
+            nested={!olderOf.has(row.model)}
+            onOpen={() => {
+              onOpen(row);
+            }}
+            onToggle={() => {
+              setExpanded(
+                open ? expanded.filter((m) => m !== row.model) : [...expanded, row.model],
+              );
+            }}
+          />
+        );
+      },
     }),
     head({
       accessor: ModelColumn.Tier,
@@ -170,7 +223,7 @@ export function ModelsTable({
   return (
     <DataTable<ModelRowDto>
       aria-label="Models"
-      records={[...rows]}
+      records={families.map((f) => f.lead)}
       columns={columns}
       idAccessor={(row) => row.model}
       withTableBorder
@@ -179,7 +232,29 @@ export function ModelsTable({
       verticalSpacing="sm"
       horizontalSpacing="md"
       highlightOnHover
-      {...(rows.length === 0 ? { minHeight: 160 } : {})}
+      {...pagerProps(paging, PAGE_SIZES)}
+      rowExpansion={{
+        trigger: 'never',
+        allowMultiple: true,
+        expanded: { recordIds: [...expanded] },
+        content: ({ record }) => (
+          <DataTable<ModelRowDto>
+            aria-label={`Older versions of ${record.name}`}
+            noHeader
+            records={[...(olderOf.get(record.model) ?? [])]}
+            columns={columns}
+            idAccessor={(row) => row.model}
+            backgroundColor="var(--tendb-color-panel)"
+            verticalSpacing="sm"
+            horizontalSpacing="md"
+            highlightOnHover
+            onRowClick={({ record: older }) => {
+              onOpen(older);
+            }}
+          />
+        ),
+      }}
+      {...(families.length === 0 ? { minHeight: 160 } : {})}
       emptyState={
         <Text c="dimmed" size="sm" ta="center">
           No model matches these filters.

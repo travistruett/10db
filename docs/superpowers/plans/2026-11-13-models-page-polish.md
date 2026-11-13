@@ -99,11 +99,10 @@ expansion and the pager Knowledge already uses.
 **Interfaces:**
 
 - Produces: `interface ModelFamily { readonly key: string; readonly lead: ModelRowDto; readonly older: readonly ModelRowDto[] }`
-  and `groupByFamily(sorted: readonly ModelRowDto[]): ModelFamily[]`.
-  Key is `${maker}/${family}`, or the model ID when either is null. Families come in the order their first row
-  appears in `sorted`. The lead is the first `Current` row of the family in that order, else its first row;
-  `older` is the rest in sorted order.
-- Produces: `MODEL_PAGE_SIZE = 25`.
+  and `groupByFamily(sorted: readonly ModelRowDto[]): ModelFamily[]`. Families are keyed `${maker}/${family}`, or
+  the model ID when either is null. Every Current model leads an entry (two current models of one family are two
+  rows); a family's other versions go under its first Current model, or with none under its first row. Entries
+  keep their lead's place in the sort; `key` is the lead's model ID. Page size is Knowledge's (25).
 
 - [ ] **Step 1:** Write `model-families.test.ts` as a named table: one family of three sorted by Intelligence →
       one group, lead the Current one; two families interleaved → order of first appearance; a Superseded row

@@ -25,7 +25,9 @@ import {
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
+import { usePaging } from '../knowledge/knowledge-paging';
 import { ModelDrawer } from './model-drawer';
+import { groupByFamily } from './model-families';
 import { catalogueLine, costNote } from './model-format';
 import {
   earliestFirstSeen,
@@ -83,6 +85,8 @@ export function ModelsSection() {
   const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
   const [selected, setSelected] = useState<ModelRowDto | null>(null);
   const [opened, setOpened] = useState(false);
+  // The list goes back to its first page whenever what it holds or its order changes.
+  const paging = usePaging(JSON.stringify([filter, sort, accountId]));
 
   const header = (
     <Stack gap={4}>
@@ -225,7 +229,13 @@ export function ModelsSection() {
   // Rows of another account stay up while this one loads; no ring is drawn on a price that is not this account's.
   const settling = models.isPlaceholderData;
   const accountRows = filterModels(everyModel, { ...NO_FILTER, accountId });
-  const listRows = sortModels(filterModels(everyModel, { ...filter, accountId }), sort);
+  const families = groupByFamily(
+    sortModels(filterModels(everyModel, { ...filter, accountId }), sort),
+  );
+  const shownFamilies = families.slice(
+    (paging.page - 1) * paging.pageSize,
+    paging.page * paging.pageSize,
+  );
   const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
   const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role, dots });
   const names = new Map(everyModel.map((r) => [r.model, r.name]));
@@ -305,7 +315,8 @@ export function ModelsSection() {
           </Text>
         ) : (
           <ModelsTable
-            rows={listRows}
+            families={shownFamilies}
+            paging={{ ...paging, total: families.length }}
             filter={filter}
             onFilter={setFilter}
             sort={sort}

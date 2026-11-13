@@ -9,7 +9,7 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { usePlanRecordPage } from '../../../daemon/plan-record-queries';
-import type { TablePage } from '../../knowledge/knowledge-table';
+import type { TablePage } from '../../../shell/table-pager';
 import { usePaging } from '../../knowledge/knowledge-paging';
 import { ANY } from './record-filters';
 
