@@ -1,10 +1,11 @@
-import { Code, List, Table, Text, Title } from '@mantine/core';
+import { Anchor, Code, List, Table, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { Components, ExtraProps } from 'streamdown';
+import { openWebLink } from '../desktop/tauri';
 import classes from './markdown.module.css';
 
-// One Mantine element per markdown tag. A link is drawn as its text and its address, never an
-// anchor: nothing in drawn markdown navigates the window until the opener that confirms exists.
+// One Mantine element per markdown tag. A link never navigates the window: a click asks the
+// builder to confirm its host, then opens it in the browser (`openWebLink`).
 
 /** A heading, marked with the source line it starts on so a view can scroll to a section. */
 function Heading(props: {
@@ -37,18 +38,21 @@ function NotShown({ children }: { readonly children: ReactNode }) {
   );
 }
 
-function LinkText({ href, children }: { readonly href: unknown; readonly children: ReactNode }) {
-  // An autolink's text is its address, so the address is shown once.
-  const address = typeof href === 'string' && href !== children ? href : null;
+/** An `https:` link (10db's safety step has unwrapped every other kind) that opens after a confirm. */
+function Link({ href, children }: { readonly href: unknown; readonly children: ReactNode }) {
+  if (typeof href !== 'string') return <>{children}</>;
   return (
-    <>
+    <Anchor
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        openWebLink(href).catch((error: unknown) => {
+          console.warn('10db: the link did not open', error);
+        });
+      }}
+    >
       {children}
-      {address !== null && (
-        <Text span size="xs" c="dimmed">
-          {` (${address})`}
-        </Text>
-      )}
-    </>
+    </Anchor>
   );
 }
 
@@ -106,7 +110,7 @@ export const MARKDOWN_ELEMENTS: Components = {
     </Code>
   ),
   code: ({ children }) => <code>{children}</code>,
-  a: ({ href, children }) => <LinkText href={href}>{children}</LinkText>,
+  a: ({ href, children }) => <Link href={href}>{children}</Link>,
   // 10db's safety step marks the line it puts in place of an image.
   span: ({ node, children }) =>
     node?.properties['dataBlocked'] === 'image' ? (

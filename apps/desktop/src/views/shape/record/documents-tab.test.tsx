@@ -171,7 +171,9 @@ describe('DocumentsTab', () => {
       expect(region.textContent).toContain('Port 7443 over the tailnet.');
     });
     const shown = region.textContent.replace(/\s+/g, ' ');
-    expect(shown).toContain('the docs (https://ok.example/docs)');
+    expect(within(region).getByRole('link', { name: 'the docs' }).getAttribute('href')).toBe(
+      'https://ok.example/docs',
+    );
     expect(shown).not.toContain('[^1]');
     expect(shown).not.toContain('[docs]');
     await waitFor(() => {
