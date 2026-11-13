@@ -107,17 +107,13 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
-  TaskFileId,
   TaskScreenId,
   ScreenKind,
   ScreenTheme,
   ScreenViewport,
   ScreensMatrix,
   TaskLanding,
-  TaskMessageAuthor,
   TaskMessageId,
-  TaskMessageKind,
-  TaskPictureKind,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -138,17 +134,14 @@ import type {
   ShapeEntryVersionId,
   ShapeFindingReviewer,
   TaskContextCheckId,
-  ShapeFileId,
   ShapeFindingId,
   ShapeFindingKind,
   ShapeFindingSeverity,
   ShapeFindingState,
   ShapeId,
   ShapeLinkId,
-  ShapeMessageAuthor,
   ShapeMessageId,
   ShapeQuestionId,
-  ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalId,
   ShapeProposalKind,
@@ -1416,23 +1409,6 @@ export const shapes = sqliteTable(
   ],
 );
 
-/** The conversation's transcript (§5.3): append-only, so it renders and reopens however old it is. */
-export const shapeMessages = sqliteTable(
-  'shape_messages',
-  {
-    id: text('id').$type<ShapeMessageId>().primaryKey(),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
-      .notNull()
-      .references(() => shapes.id),
-    author: text('author').$type<ShapeMessageAuthor>().notNull(),
-    kind: text('kind').$type<ShapeMessageKind>().notNull(),
-    body: text('body').notNull(),
-    createdAt: createdAt(),
-  },
-  (t) => [index('shape_messages_shape_idx').on(t.shapeId, t.id)],
-);
-
 /** Per task key: the content hash a round last wrote and the fields it changed (§6 Rows). */
 export interface ShapeTaskMark {
   readonly hash: string;
@@ -1477,96 +1453,6 @@ export const shapeProposals = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('shape_proposals_key_unique').on(t.shapeId, t.key)],
-);
-
-/** A file the builder dropped into a conversation (§5.4), or a terminal session handed over (§5.6). */
-export const shapeFiles = sqliteTable(
-  'shape_files',
-  {
-    id: text('id').$type<ShapeFileId>().primaryKey(),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
-      .notNull()
-      .references(() => shapes.id),
-    name: text('name').notNull(),
-    mediaType: text('media_type').notNull(),
-    size: integer('size').notNull(),
-    /** Where the daemon copied it, under the data directory. */
-    storedPath: text('stored_path').notNull(),
-    /** When a turn first carried it to Claude; null until then, so a restart still tells it. */
-    toldAt: text('told_at'),
-    /**
-     * Whether the live session's history holds this file as an image block. Set when a turn sends it
-     * inline, cleared for the whole conversation when a fresh session starts, so the image budget
-     * counts what a resumed session resends and nothing else.
-     */
-    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
-    /**
-     * When a notice first told the builder Claude can't or couldn't Read this image; null until then.
-     * A file has its own mark because a name can repeat in a conversation, and can hold any punctuation.
-     */
-    unreadableToldAt: text('unreadable_told_at'),
-    createdAt: createdAt(),
-  },
-  (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
-);
-
-/**
- * A task's thread (Workbench spec §4.3, §6.3): the builder's messages, the agent's replies and the
- * notices, oldest first by id.
- */
-export const taskMessages = sqliteTable(
-  'task_messages',
-  {
-    id: text('id').$type<TaskMessageId>().primaryKey(),
-    taskId: text('task_id')
-      .$type<TaskId>()
-      .notNull()
-      .references(() => tasks.id),
-    author: text('author').$type<TaskMessageAuthor>().notNull(),
-    kind: text('kind').$type<TaskMessageKind>().notNull(),
-    body: text('body').notNull(),
-    createdAt: createdAt(),
-    /** When it was handed to the session; that alone proves nothing reached a turn. */
-    pushedAt: text('pushed_at'),
-    /** When a turn took it in; a message pushed and not delivered is sent again. */
-    deliveredAt: text('delivered_at'),
-    /**
-     * Every client uuid a push of it went under, oldest first: after a restart, a conversation that
-     * holds one of them took the message (Workbench spec §12).
-     */
-    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
-    turnId: text('turn_id')
-      .$type<PassTurnId>()
-      .references((): AnySQLiteColumn => passTurns.id),
-  },
-  (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
-);
-
-/** A picture the builder pasted into a task's thread, kept under the data directory by its hash. */
-export const taskFiles = sqliteTable(
-  'task_files',
-  {
-    id: text('id').$type<TaskFileId>().primaryKey(),
-    taskId: text('task_id')
-      .$type<TaskId>()
-      .notNull()
-      .references(() => tasks.id),
-    messageId: text('message_id')
-      .$type<TaskMessageId>()
-      .notNull()
-      .references(() => taskMessages.id),
-    name: text('name').notNull(),
-    mediaType: text('media_type').$type<TaskPictureKind>().notNull(),
-    size: integer('size').notNull(),
-    sha256: text('sha256').notNull(),
-    storedPath: text('stored_path').notNull(),
-    /** Whether the live session's history holds it as an image block, as `shape_files.inline_sent`. */
-    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
-    createdAt: createdAt(),
-  },
-  (t) => [index('task_files_task_idx').on(t.taskId, t.id)],
 );
 
 /**

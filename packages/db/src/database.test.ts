@@ -968,7 +968,8 @@ describe('migrating to the inline image count (Shape spec §5.4)', () => {
         AT,
       );
     }
-    migrateDatabase(db);
+    // Through the migration under test: shape_files is gone at the head.
+    migrateDatabase(db, migrationsThrough('0044_shape_files_inline_sent_backfill'));
   });
 
   it('marks every told file as inline, so a resumed session keeps the old safe count', () => {

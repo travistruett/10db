@@ -240,7 +240,7 @@ export const tooBigAlone = (
 
 /**
  * The image bytes the daemon itself sent that the live session carries: every screen it took and every
- * dropped image one of its turns sent as a block (`shape_files.inline_sent`, which a fresh session
+ * dropped image one of its turns sent as a block (`conversation_files.inline_sent`, which a fresh session
  * clears). Images that went as paths, and pictures of an earlier session, are not charged. `filesRoot` is
  * the data directory's `shapes` folder. An image that passes `tooBigAlone` for `limits` is the only one
  * charged, so this is what the session sends from now on, not what an earlier account let it send:

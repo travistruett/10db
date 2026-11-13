@@ -101,7 +101,6 @@ function laneSession(hash = 'hash-lane') {
 describe('the Shape tables', () => {
   it.each([
     ['shapes', ['id', 'project_id', 'title', 'state', 'origin', 'propose_unlocked', 'round']],
-    ['shape_messages', ['id', 'shape_id', 'author', 'kind', 'body', 'created_at']],
     [
       'shape_proposals',
       [

@@ -616,4 +616,14 @@ describe('migration 0070, the conversation copy', () => {
     expect(target('pass_turns', 'message_id')).toBe('conversation_items');
     expect(target('pass_preview_marks', 'notice_id')).toBe('conversation_items');
   });
+
+  it('drops the tables the conversations replaced, leaving no dangling reference', () => {
+    expect(
+      column(
+        `SELECT name FROM sqlite_master WHERE type = 'table'
+           AND name IN ('shape_messages', 'shape_files', 'task_messages', 'task_files')`,
+      ),
+    ).toEqual([]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
 });
