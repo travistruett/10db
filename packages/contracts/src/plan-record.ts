@@ -62,11 +62,14 @@ export type PlanNameKind = ValueOf<typeof PlanNameKind>;
 /** The deepest heading level that starts a section; `#####` and deeper are text. */
 export const SECTION_MAX_LEVEL = 4;
 
+/** The longest a section slug may be, in UTF-16 code units. */
+export const SECTION_SLUG_MAX_LENGTH = 200;
+
 /** A heading's slug, as GitHub makes it; a `Task <n>` heading's is `task-<n>`. */
 export const SectionSlug = z
   .string()
   .min(1)
-  .max(200)
+  .max(SECTION_SLUG_MAX_LENGTH)
   .regex(/^[^\s#]+$/, 'a section slug has no spaces and no #');
 export type SectionSlug = z.infer<typeof SectionSlug>;
 

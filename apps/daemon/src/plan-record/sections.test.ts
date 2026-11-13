@@ -1,3 +1,4 @@
+import { SectionIndexEntry } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { findSection, indexSections, sectionText } from './sections';
 
@@ -107,6 +108,17 @@ describe('indexSections', () => {
     ]);
     const one = findSection(index, 'one');
     expect(one && sectionText(body, one)).toBe('\uFEFF# One\nfirst\n');
+  });
+
+  it('a long heading, repeated, still gives slugs its own schema accepts', () => {
+    const title = `${'a'.repeat(189)}\u{1D400}${'a'.repeat(60)}`;
+    const body = lines(`# ${title}`, `# ${title}`, `## Task ${'9'.repeat(250)}`);
+    const index = indexSections(body);
+    expect(new Set(index.map((s) => s.slug)).size).toBe(3);
+    for (const entry of index) {
+      expect(SectionIndexEntry.safeParse(entry).success).toBe(true);
+      expect(entry.slug.isWellFormed()).toBe(true);
+    }
   });
 
   it('CRLF bodies keep their \\r in section text', () => {

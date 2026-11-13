@@ -1,4 +1,8 @@
-import { SECTION_MAX_LEVEL, type SectionIndexEntry } from '@10db/contracts';
+import {
+  SECTION_MAX_LEVEL,
+  SECTION_SLUG_MAX_LENGTH,
+  type SectionIndexEntry,
+} from '@10db/contracts';
 
 // A document's sections, from its ATX headings, so `doc#slug` names the same text every time. Only
 // headings of levels 1 to SECTION_MAX_LEVEL outside a fence start a section; setext headings are text.
@@ -6,6 +10,9 @@ import { SECTION_MAX_LEVEL, type SectionIndexEntry } from '@10db/contracts';
 const ATX = /^ {0,3}(#{1,6})(?=[ \t]|$)(.*)$/;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const TASK_TITLE = /^Task (\d+)(?=[:. ]|$)/;
+
+/** Room kept below the slug cap for a `-<n>` that makes a repeated slug unique. */
+const SUFFIX_ROOM = 10;
 
 interface Heading {
   level: number;
@@ -51,6 +58,18 @@ function slugOf(title: string): string {
   return slug === '' ? 'section' : slug;
 }
 
+/** A slug cut by whole code points so it and any `-<n>` suffix fit `SectionSlug`. */
+function capped(slug: string): string {
+  const limit = SECTION_SLUG_MAX_LENGTH - SUFFIX_ROOM;
+  if (slug.length <= limit) return slug;
+  let out = '';
+  for (const point of slug) {
+    if (out.length + point.length > limit) break;
+    out += point;
+  }
+  return out;
+}
+
 /** The headings of a body, in order, with fenced lines skipped. */
 function headingsOf(body: string): Heading[] {
   const headings: Heading[] = [];
@@ -85,7 +104,7 @@ function headingsOf(body: string): Heading[] {
       title,
       start,
       isTask: task !== null,
-      base: task === null ? slugOf(title) : `task-${task[1] ?? ''}`,
+      base: capped(task === null ? slugOf(title) : `task-${task[1] ?? ''}`),
     });
   }
   return headings;
