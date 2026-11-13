@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderWithTheme } from '../test/theme';
 import { Markdown } from './index';
 import { MarkdownBoundary } from './markdown-boundary';
-import { MARKDOWN_MAX_LENGTH } from './markdown-fits';
 
 // Markdown an agent or a planning effort wrote is drawn, never trusted: no image, frame or script
 // loads, and no link navigates the window. Links render as their text and address until the opener
@@ -192,7 +191,7 @@ describe('a document too deep or too long to draw', () => {
   it.each<[string, string]>([
     ['quotes 5000 deep', `${'>'.repeat(5000)} x`],
     ['lists 1000 deep', `${'- '.repeat(1000)}x`],
-    ['over the length', `${'word '.repeat(MARKDOWN_MAX_LENGTH / 5)}tail`],
+    ['over 512 Ki', `${'word '.repeat(110_000)}tail`],
   ])('%s shows whole as plain text', (_, input) => {
     const c = draw(input);
     expect(c.querySelector('pre')?.textContent).toBe(input);
