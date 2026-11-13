@@ -1,32 +1,93 @@
 import {
+  ConversationItemAuthor,
+  ConversationItemKind,
+  ConversationOwnerKind,
+  ConversationProfile,
   EventType,
-  mintId,
   NotFoundError,
+  TaskId,
   TaskMessageAuthor,
   TaskMessageKind,
+  TaskPictureKind,
   type TaskFileDto,
   type TaskFileId,
   type PassTurnId,
-  type TaskId,
   type TaskMessageDto,
   type TaskMessageId,
-  type TaskPictureKind,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
+import {
+  getFile,
+  insertFiles,
+  listFiles,
+  listItemFiles,
+  markFilesInline,
+  type ConversationFileRow,
+} from './conversation-files';
+import {
+  deleteItem,
+  findItemByPushUuid,
+  getItem,
+  insertItem,
+  listItems,
+  listUndeliveredMessages,
+  markItemPushedUnder,
+  markItemsDelivered,
+  markItemsHandedBack,
+  markItemsTakenUnder,
+  type ConversationItemRow,
+} from './conversation-items';
+import {
+  conversationOf,
+  getConversation,
+  insertConversation,
+  type ConversationRow,
+} from './conversations';
 import { deleteAppSetting, getAppSetting, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
+import { taskItemOf, taskMessageOf } from './transcript-kinds';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §4.3, §6.3, §11. A task's
-// thread as rows. The daemon keeps a picture's bytes on disk before it calls these; they keep the rows.
+// thread as rows: its conversation's items (decision
+// 2026-11-13-one-conversation-store-keeps-ids-and-orders-by-seq.md), in `seq` order. The daemon keeps
+// a picture's bytes on disk before it calls these; they keep the rows.
 
-export type TaskFileRow = typeof schema.taskFiles.$inferSelect;
-type MessageRow = typeof schema.taskMessages.$inferSelect;
+/** A picture pasted into a task's thread, with where it is kept. */
+export interface TaskFileRow {
+  readonly id: TaskFileId;
+  readonly taskId: TaskId;
+  readonly messageId: TaskMessageId;
+  readonly name: string;
+  readonly mediaType: TaskPictureKind;
+  readonly size: number;
+  readonly sha256: string;
+  readonly storedPath: string;
+  /** Whether the live session's history holds it as an image block. */
+  readonly inlineSent: boolean;
+  readonly createdAt: string;
+}
 
 /** A message of a thread as the daemon reads it: with its pictures and where each is kept. */
-export type TaskMessageRow = MessageRow & { readonly files: readonly TaskFileRow[] };
+export interface TaskMessageRow {
+  readonly id: TaskMessageId;
+  readonly taskId: TaskId;
+  readonly author: TaskMessageAuthor;
+  readonly kind: TaskMessageKind;
+  readonly body: string;
+  readonly createdAt: string;
+  /** When it was handed to the session; that alone proves nothing reached a turn. */
+  readonly pushedAt: string | null;
+  /** When a turn took it in; a message pushed and not delivered is sent again. */
+  readonly deliveredAt: string | null;
+  /** Every client uuid a push of it went under, oldest first. */
+  readonly pushUuids: readonly string[];
+  /** The pass turn the message started, or the turn whose reply it is. */
+  readonly turnId: PassTurnId | null;
+  readonly files: readonly TaskFileRow[];
+}
 
 /** A pasted picture already written to disk, by its hash, at `storedPath`. */
 export interface StoredPicture {
@@ -35,6 +96,91 @@ export interface StoredPicture {
   readonly size: number;
   readonly sha256: string;
   readonly storedPath: string;
+}
+
+const PictureRow = z.object({ itemId: z.string(), mediaType: TaskPictureKind, sha256: z.string() });
+
+/** A conversation file as a thread's picture; a thread's file always has its message, kind and hash. */
+function toTaskFile(taskId: TaskId, row: ConversationFileRow): TaskFileRow {
+  // Read from the database: parsed, as at every boundary.
+  const picture = PictureRow.parse(row);
+  return {
+    id: row.id,
+    taskId,
+    messageId: getItemId(row.itemId),
+    name: row.name,
+    mediaType: picture.mediaType,
+    size: row.size,
+    sha256: picture.sha256,
+    storedPath: row.storedPath,
+    inlineSent: row.inlineSent,
+    createdAt: row.createdAt,
+  };
+}
+
+function getItemId(id: ConversationFileRow['itemId']): TaskMessageId {
+  if (id === null) throw new NotFoundError('task message', 'of a picture');
+  return id;
+}
+
+/** An item as a thread message with its pictures; null for an item a thread has no word for. */
+function toTaskMessage(
+  taskId: TaskId,
+  item: ConversationItemRow,
+  files: readonly ConversationFileRow[],
+): TaskMessageRow | null {
+  const message = taskMessageOf(item);
+  if (message === null) return null;
+  return {
+    id: item.id,
+    taskId,
+    ...message,
+    createdAt: item.createdAt,
+    pushedAt: item.pushedAt,
+    deliveredAt: item.deliveredAt,
+    pushUuids: item.pushUuids,
+    turnId: item.turnId,
+    files: files.filter((f) => f.itemId === item.id).map((f) => toTaskFile(taskId, f)),
+  };
+}
+
+const toTaskMessages = (
+  db: DbReader,
+  taskId: TaskId,
+  items: readonly ConversationItemRow[],
+): TaskMessageRow[] => {
+  const files = listItemFiles(
+    db,
+    items.map((i) => i.id),
+  );
+  return items.flatMap((item) => toTaskMessage(taskId, item, files) ?? []);
+};
+
+/** The task's thread's conversation, or null while nothing was said on it. */
+export function taskConversationOf(db: DbReader, taskId: TaskId): ConversationRow | null {
+  return conversationOf(db, { kind: ConversationOwnerKind.Task, id: taskId });
+}
+
+/** The task's thread's conversation, made by its first item, in the caller's write. */
+function taskConversation(ctx: WriteContext, taskId: TaskId): ConversationRow {
+  const task = getTask(ctx.tx, taskId);
+  return (
+    taskConversationOf(ctx.tx, taskId) ??
+    insertConversation(ctx, {
+      projectId: task.projectId,
+      owner: { kind: ConversationOwnerKind.Task, id: taskId },
+      profile: ConversationProfile.Lane,
+      state: null,
+    })
+  );
+}
+
+/** The task whose thread holds the conversation; throws for any other owner. */
+function threadTask(db: DbReader, conversationId: ConversationRow['id'], what: string, id: string) {
+  const conversation = getConversation(db, conversationId);
+  if (conversation.ownerKind !== ConversationOwnerKind.Task) throw new NotFoundError(what, id);
+  // A task's conversation names the task as its owner; parsed, as text read from the database.
+  return TaskId.parse(conversation.ownerId);
 }
 
 const toFileDto = (row: TaskFileRow): TaskFileDto => ({
@@ -56,8 +202,7 @@ const sendToAgentKey = (id: TaskMessageId): string => `send_to_agent.${id}`;
 const allowThisKey = (id: TaskMessageId): string => `allow-this.${id}`;
 
 const toMessageDto = (
-  row: MessageRow,
-  files: readonly TaskFileRow[],
+  row: TaskMessageRow,
   offer: { readonly sendable: boolean; readonly allowThis: boolean } = {
     sendable: false,
     allowThis: false,
@@ -71,10 +216,40 @@ const toMessageDto = (
   createdAt: row.createdAt,
   pushedAt: row.pushedAt,
   deliveredAt: row.deliveredAt,
-  files: files.map(toFileDto),
+  files: row.files.map(toFileDto),
   sendable: offer.sendable,
   allowThis: offer.allowThis,
 });
+
+/** Appends a row to the task's thread and announces it, in the caller's write. */
+function appendToThread(
+  ctx: WriteContext,
+  taskId: TaskId,
+  message: {
+    readonly author: TaskMessageAuthor;
+    readonly kind: TaskMessageKind;
+    readonly body: string;
+    readonly turnId?: PassTurnId;
+    readonly files?: readonly StoredPicture[];
+  },
+): TaskMessageRow {
+  const task = getTask(ctx.tx, taskId);
+  const conversation = taskConversation(ctx, taskId);
+  const item = insertItem(ctx, conversation.id, {
+    ...taskItemOf(message),
+    turnId: message.turnId ?? null,
+  });
+  const files = insertFiles(ctx, conversation.id, item.id, message.files ?? []);
+  ctx.emit({
+    type: EventType.TaskMessageAdded,
+    entityType: 'task',
+    entityId: taskId,
+    data: { projectId: task.projectId, messageId: item.id },
+  });
+  const row = toTaskMessage(taskId, item, files);
+  if (row === null) throw new NotFoundError('task message', item.id);
+  return row;
+}
 
 /** Appends the builder's message and its pictures to a task's thread, in the caller's write. */
 export function insertBuilderMessage(
@@ -82,70 +257,52 @@ export function insertBuilderMessage(
   taskId: TaskId,
   input: { readonly body: string; readonly files: readonly StoredPicture[] },
 ): TaskMessageDto {
-  const task = getTask(ctx.tx, taskId);
-  const message: MessageRow = {
-    id: mintId('TaskMessage'),
-    taskId,
-    author: TaskMessageAuthor.Builder,
-    kind: TaskMessageKind.Message,
-    body: input.body,
-    createdAt: ctx.now,
-    pushedAt: null,
-    deliveredAt: null,
-    pushUuids: [],
-    turnId: null,
-  };
-  ctx.tx.insert(schema.taskMessages).values(message).run();
-  const files = input.files.map((file): TaskFileRow => ({
-    id: mintId('TaskFile'),
-    taskId,
-    messageId: message.id,
-    ...file,
-    inlineSent: false,
-    createdAt: ctx.now,
-  }));
-  if (files.length > 0) ctx.tx.insert(schema.taskFiles).values(files).run();
-  ctx.emit({
-    type: EventType.TaskMessageAdded,
-    entityType: 'task',
-    entityId: taskId,
-    data: { projectId: task.projectId, messageId: message.id },
-  });
-  return toMessageDto(message, files);
+  return toMessageDto(
+    appendToThread(ctx, taskId, {
+      author: TaskMessageAuthor.Builder,
+      kind: TaskMessageKind.Message,
+      body: input.body,
+      files: input.files,
+    }),
+  );
+}
+
+/** This task's thread message `id`, or NotFoundError for another task's or none. */
+function threadItem(db: DbReader, taskId: TaskId, id: TaskMessageId): ConversationItemRow {
+  const conversation = taskConversationOf(db, taskId);
+  const item = db
+    .select()
+    .from(schema.conversationItems)
+    .where(eq(schema.conversationItems.id, id))
+    .get();
+  if (conversation === null || item?.conversationId !== conversation.id)
+    throw new NotFoundError('task message', id);
+  return item;
 }
 
 /**
  * Takes back a builder message no session was handed, with its pictures' rows, in the caller's write:
  * a page that refused it keeps nothing of it. Answers the pictures' stored paths, which the caller
  * removes once no other row names them; null, removing nothing, for a message a session was handed
- * or a turn took.
+ * or a turn took. Its `seq` is not given out again.
  */
 export function deleteUnsentBuilderMessage(
   ctx: WriteContext,
   taskId: TaskId,
   id: TaskMessageId,
 ): string[] | null {
-  const message = ctx.tx
-    .select()
-    .from(schema.taskMessages)
-    .where(and(eq(schema.taskMessages.id, id), eq(schema.taskMessages.taskId, taskId)))
-    .get();
-  if (!message) throw new NotFoundError('task message', id);
+  const message = threadItem(ctx.tx, taskId, id);
   if (
-    message.author !== TaskMessageAuthor.Builder ||
+    message.author !== ConversationItemAuthor.Builder ||
+    message.kind !== ConversationItemKind.Message ||
     message.pushedAt !== null ||
     message.pushUuids.length > 0 ||
     message.deliveredAt !== null ||
     message.turnId !== null
   )
     return null;
-  const files = ctx.tx
-    .select()
-    .from(schema.taskFiles)
-    .where(eq(schema.taskFiles.messageId, id))
-    .all();
-  ctx.tx.delete(schema.taskFiles).where(eq(schema.taskFiles.messageId, id)).run();
-  ctx.tx.delete(schema.taskMessages).where(eq(schema.taskMessages.id, id)).run();
+  const files = listItemFiles(ctx.tx, [id]);
+  deleteItem(ctx, id);
   const task = getTask(ctx.tx, taskId);
   ctx.emit({
     type: EventType.TaskChanged,
@@ -153,27 +310,14 @@ export function deleteUnsentBuilderMessage(
     entityId: taskId,
     data: { projectId: task.projectId, removedMessageId: id },
   });
-  const stillNamed = new Set(
-    ctx.tx
-      .select({ storedPath: schema.taskFiles.storedPath })
-      .from(schema.taskFiles)
-      .where(eq(schema.taskFiles.taskId, taskId))
-      .all()
-      .map((f) => f.storedPath),
-  );
+  const stillNamed = new Set(listTaskFileRows(ctx.tx, taskId).map((f) => f.storedPath));
   return files.map((f) => f.storedPath).filter((path) => !stillNamed.has(path));
 }
 
 /** A task's thread, oldest first, each message with its pictures and where they are kept. */
 export function listTaskThreadRows(db: DbReader, taskId: TaskId): TaskMessageRow[] {
-  const files = listTaskFileRows(db, taskId);
-  return db
-    .select()
-    .from(schema.taskMessages)
-    .where(eq(schema.taskMessages.taskId, taskId))
-    .orderBy(asc(schema.taskMessages.id))
-    .all()
-    .map((row) => ({ ...row, files: files.filter((f) => f.messageId === row.id) }));
+  const conversation = taskConversationOf(db, taskId);
+  return conversation === null ? [] : toTaskMessages(db, taskId, listItems(db, conversation.id));
 }
 
 /** A task's thread, oldest first, each message with its pictures and whether it offers Send to Agent. */
@@ -195,7 +339,7 @@ export function listTaskThread(db: DbReader, taskId: TaskId): TaskMessageDto[] {
   return rows.map((row) => {
     const sendable = offered.has(sendToAgentKey(row.id));
     // Allow this is a kind of offer: without the offer's text there is nothing to allow.
-    return toMessageDto(row, row.files, {
+    return toMessageDto(row, {
       sendable,
       allowThis: sendable && offered.has(allowThisKey(row.id)),
     });
@@ -242,17 +386,9 @@ export function takeOffer(ctx: WriteContext, id: TaskMessageId): string | null {
  * that has closed has no page to go to. Other offers on the same notices stay.
  */
 export function dropAllowThisOffers(ctx: WriteContext, taskIds: readonly TaskId[]): void {
-  if (taskIds.length === 0) return;
-  const notices = ctx.tx
-    .select({ id: schema.taskMessages.id })
-    .from(schema.taskMessages)
-    .where(
-      and(
-        inArray(schema.taskMessages.taskId, [...taskIds]),
-        eq(schema.taskMessages.kind, TaskMessageKind.Notice),
-      ),
-    )
-    .all();
+  const notices = taskIds.flatMap((taskId) =>
+    listTaskThreadRows(ctx.tx, taskId).filter((m) => m.kind === TaskMessageKind.Notice),
+  );
   for (const { id } of notices) {
     if (getAppSetting(ctx.tx, allowThisKey(id)) === undefined) continue;
     deleteAppSetting(ctx, allowThisKey(id));
@@ -272,25 +408,29 @@ export function offeredText(db: DbReader, id: TaskMessageId): string | null {
 
 /** Every picture pasted into a task's thread, oldest first. */
 export function listTaskFileRows(db: DbReader, taskId: TaskId): TaskFileRow[] {
-  return db
-    .select()
-    .from(schema.taskFiles)
-    .where(eq(schema.taskFiles.taskId, taskId))
-    .orderBy(asc(schema.taskFiles.id))
-    .all();
+  const conversation = taskConversationOf(db, taskId);
+  return conversation === null
+    ? []
+    : listFiles(db, conversation.id).map((row) => toTaskFile(taskId, row));
 }
 
 /** One message with its pictures and where they are kept. */
 export function getTaskMessageRow(db: DbReader, id: TaskMessageId): TaskMessageRow {
-  const row = db.select().from(schema.taskMessages).where(eq(schema.taskMessages.id, id)).get();
-  if (!row) throw new NotFoundError('task message', id);
-  const files = db
-    .select()
-    .from(schema.taskFiles)
-    .where(eq(schema.taskFiles.messageId, id))
-    .orderBy(asc(schema.taskFiles.id))
-    .all();
-  return { ...row, files };
+  const item = getItem(db, id);
+  const taskId = threadTask(db, item.conversationId, 'task message', id);
+  const row = toTaskMessage(taskId, item, listItemFiles(db, [id]));
+  if (row === null) throw new NotFoundError('task message', id);
+  return row;
+}
+
+/** The thread message of this task a push went under `uuid`, or whose own uuid it is; null for none. */
+export function findTaskMessageByUuid(
+  db: DbReader,
+  taskId: TaskId,
+  uuid: string,
+): TaskMessageId | null {
+  const conversation = taskConversationOf(db, taskId);
+  return conversation === null ? null : findItemByPushUuid(db, conversation.id, uuid);
 }
 
 /**
@@ -300,9 +440,9 @@ export function getTaskMessageRow(db: DbReader, id: TaskMessageId): TaskMessageR
 export function markTaskMessagesPushed(ctx: WriteContext, ids: readonly TaskMessageId[]): void {
   if (ids.length === 0) return;
   ctx.tx
-    .update(schema.taskMessages)
-    .set({ pushedAt: ctx.now })
-    .where(inArray(schema.taskMessages.id, [...ids]))
+    .update(schema.conversationItems)
+    .set({ pushedAt: ctx.now, updatedAt: ctx.now })
+    .where(inArray(schema.conversationItems.id, [...ids]))
     .run();
 }
 
@@ -315,12 +455,7 @@ export function markTaskMessagePushedUnder(
   id: TaskMessageId,
   uuid: string,
 ): void {
-  const { pushUuids } = getTaskMessageRow(ctx.tx, id);
-  ctx.tx
-    .update(schema.taskMessages)
-    .set({ pushedAt: ctx.now, pushUuids: [...pushUuids, uuid] })
-    .where(eq(schema.taskMessages.id, id))
-    .run();
+  markItemPushedUnder(ctx, id, uuid);
 }
 
 /**
@@ -334,23 +469,8 @@ export function markTaskMessagesHandedBack(
   taskId: TaskId,
   ids: readonly TaskMessageId[],
 ): TaskMessageId[] {
-  if (ids.length === 0) return [];
-  const where = and(
-    eq(schema.taskMessages.taskId, taskId),
-    inArray(schema.taskMessages.id, [...ids]),
-    isNotNull(schema.taskMessages.pushedAt),
-    isNull(schema.taskMessages.deliveredAt),
-  );
-  const handed = ctx.tx
-    .select({ id: schema.taskMessages.id })
-    .from(schema.taskMessages)
-    .where(where)
-    .orderBy(asc(schema.taskMessages.id))
-    .all()
-    .map((row) => row.id);
-  if (handed.length > 0)
-    ctx.tx.update(schema.taskMessages).set({ pushedAt: null }).where(where).run();
-  return handed;
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  return conversation === null ? [] : markItemsHandedBack(ctx, conversation.id, ids);
 }
 
 /**
@@ -364,11 +484,8 @@ export function markTaskMessagesTakenUnder(
   taskId: TaskId,
   held: readonly string[],
 ): TaskMessageId[] {
-  const holds = new Set(held);
-  const taken = listUndeliveredTaskMessages(ctx.tx, taskId)
-    .filter((m) => m.pushUuids.some((uuid) => holds.has(uuid)))
-    .map((m) => m.id);
-  return markTaskMessagesDelivered(ctx, taskId, taken);
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  return conversation === null ? [] : markItemsTakenUnder(ctx, conversation.id, held);
 }
 
 /**
@@ -380,41 +497,20 @@ export function markTaskMessagesDelivered(
   taskId: TaskId,
   ids: readonly TaskMessageId[],
 ): TaskMessageId[] {
-  if (ids.length === 0) return [];
-  const where = and(
-    eq(schema.taskMessages.taskId, taskId),
-    inArray(schema.taskMessages.id, [...ids]),
-    isNull(schema.taskMessages.deliveredAt),
-  );
-  const marked = ctx.tx
-    .select({ id: schema.taskMessages.id })
-    .from(schema.taskMessages)
-    .where(where)
-    .orderBy(asc(schema.taskMessages.id))
-    .all()
-    .map((row) => row.id);
-  if (marked.length > 0)
-    ctx.tx.update(schema.taskMessages).set({ deliveredAt: ctx.now }).where(where).run();
-  return marked;
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  return conversation === null ? [] : markItemsDelivered(ctx, conversation.id, ids);
 }
 
 /** A task's messages handed to a session that no turn has taken yet, oldest first: each is sent again. */
 export function listUndeliveredTaskMessages(db: DbReader, taskId: TaskId): TaskMessageRow[] {
-  const rows = db
-    .select()
-    .from(schema.taskMessages)
-    .where(
-      and(
-        eq(schema.taskMessages.taskId, taskId),
-        isNotNull(schema.taskMessages.pushedAt),
-        isNull(schema.taskMessages.deliveredAt),
-      ),
-    )
-    .orderBy(asc(schema.taskMessages.id))
-    .all();
-  if (rows.length === 0) return [];
-  const files = listTaskFileRows(db, taskId);
-  return rows.map((row) => ({ ...row, files: files.filter((f) => f.messageId === row.id) }));
+  const conversation = taskConversationOf(db, taskId);
+  if (conversation === null) return [];
+  const ids = listUndeliveredMessages(db, conversation.id).map((m) => m.id);
+  return toTaskMessages(
+    db,
+    taskId,
+    listItems(db, conversation.id).filter((item) => ids.includes(item.id)),
+  );
 }
 
 /**
@@ -427,18 +523,8 @@ export function markTaskFilesInline(
   ids: readonly TaskFileId[],
   fresh: boolean,
 ): void {
-  if (fresh)
-    ctx.tx
-      .update(schema.taskFiles)
-      .set({ inlineSent: false })
-      .where(eq(schema.taskFiles.taskId, taskId))
-      .run();
-  if (ids.length === 0) return;
-  ctx.tx
-    .update(schema.taskFiles)
-    .set({ inlineSent: true })
-    .where(and(eq(schema.taskFiles.taskId, taskId), inArray(schema.taskFiles.id, [...ids])))
-    .run();
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  if (conversation !== null) markFilesInline(ctx, conversation.id, ids, fresh);
 }
 
 /** Appends a line 10db itself writes to a task's thread, such as that a fresh session started. */
@@ -447,27 +533,13 @@ export function insertSystemNotice(
   taskId: TaskId,
   body: string,
 ): TaskMessageDto {
-  const task = getTask(ctx.tx, taskId);
-  const message: MessageRow = {
-    id: mintId('TaskMessage'),
-    taskId,
-    author: TaskMessageAuthor.System,
-    kind: TaskMessageKind.Notice,
-    body,
-    createdAt: ctx.now,
-    pushedAt: null,
-    deliveredAt: null,
-    pushUuids: [],
-    turnId: null,
-  };
-  ctx.tx.insert(schema.taskMessages).values(message).run();
-  ctx.emit({
-    type: EventType.TaskMessageAdded,
-    entityType: 'task',
-    entityId: taskId,
-    data: { projectId: task.projectId, messageId: message.id },
-  });
-  return toMessageDto(message, []);
+  return toMessageDto(
+    appendToThread(ctx, taskId, {
+      author: TaskMessageAuthor.System,
+      kind: TaskMessageKind.Notice,
+      body,
+    }),
+  );
 }
 
 /** Appends the agent's reply at the end of a pass turn, naming the turn, in the caller's write. */
@@ -476,32 +548,39 @@ export function insertAgentReply(
   taskId: TaskId,
   input: { readonly body: string; readonly turnId: PassTurnId },
 ): TaskMessageDto {
-  const task = getTask(ctx.tx, taskId);
-  const message: MessageRow = {
-    id: mintId('TaskMessage'),
-    taskId,
-    author: TaskMessageAuthor.Agent,
-    kind: TaskMessageKind.Reply,
-    body: input.body,
-    createdAt: ctx.now,
-    pushedAt: null,
-    deliveredAt: null,
-    pushUuids: [],
-    turnId: input.turnId,
-  };
-  ctx.tx.insert(schema.taskMessages).values(message).run();
-  ctx.emit({
-    type: EventType.TaskMessageAdded,
-    entityType: 'task',
-    entityId: taskId,
-    data: { projectId: task.projectId, messageId: message.id },
-  });
-  return toMessageDto(message, []);
+  return toMessageDto(
+    appendToThread(ctx, taskId, {
+      author: TaskMessageAuthor.Agent,
+      kind: TaskMessageKind.Reply,
+      body: input.body,
+      turnId: input.turnId,
+    }),
+  );
 }
 
 /** One pasted picture's row, with where its bytes are kept. */
 export function getTaskFile(db: DbReader, id: TaskFileId): TaskFileRow {
-  const row = db.select().from(schema.taskFiles).where(eq(schema.taskFiles.id, id)).get();
-  if (!row) throw new NotFoundError('task file', id);
-  return row;
+  const row = getFile(db, id);
+  return toTaskFile(threadTask(db, row.conversationId, 'task file', id), row);
+}
+
+/** Stamps the turn a message started on it, within the task's thread, in the caller's write. */
+export function markTaskMessageTurn(
+  ctx: WriteContext,
+  taskId: TaskId,
+  messageId: TaskMessageId,
+  turnId: PassTurnId,
+): void {
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  if (conversation === null) return;
+  ctx.tx
+    .update(schema.conversationItems)
+    .set({ turnId, updatedAt: ctx.now })
+    .where(
+      and(
+        eq(schema.conversationItems.id, messageId),
+        eq(schema.conversationItems.conversationId, conversation.id),
+      ),
+    )
+    .run();
 }

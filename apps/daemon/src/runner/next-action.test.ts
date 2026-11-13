@@ -12,8 +12,8 @@ import { keepingFeedback, withUndelivered } from './next-action';
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
 const evidenceId = mintId('Evidence');
-const messageId = mintId('TaskMessage');
-const laterId = mintId('TaskMessage');
+const messageId = mintId('ConversationItem');
+const laterId = mintId('ConversationItem');
 
 describe('nextActionAfterCrash', () => {
   it.each<[string, NextAction, string | null, HandoffDto | null, NextAction['kind']]>([

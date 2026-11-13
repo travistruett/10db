@@ -605,4 +605,15 @@ describe('migration 0070, the conversation copy', () => {
     expect(columns('shapes')).not.toContain('sdk_session_id');
     expect(columns('shapes')).not.toContain('model');
   });
+
+  it('declares a turn’s message and a preview mark’s notice as conversation items', () => {
+    const target = (table: string, from: string) =>
+      rows(
+        z.object({ from: z.string(), table: z.string() }),
+        'SELECT "from", "table" FROM pragma_foreign_key_list(?)',
+        table,
+      ).find((fk) => fk.from === from)?.table;
+    expect(target('pass_turns', 'message_id')).toBe('conversation_items');
+    expect(target('pass_preview_marks', 'notice_id')).toBe('conversation_items');
+  });
 });

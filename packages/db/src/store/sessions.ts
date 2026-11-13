@@ -31,7 +31,7 @@ export function isLaneSession(row: SessionRow): row is LaneSessionRow {
 
 /**
  * A session is inserted for a workstream (a lane) or for a conversation (Plan's). A lane of a task
- * with a thread also names its task's conversation, which is set apart from the insert.
+ * with a thread also names its task's conversation, which the insert finds.
  */
 type SessionOwner =
   | { readonly workstreamId: WorkstreamId; readonly conversationId?: undefined }
@@ -88,6 +88,23 @@ export function sessionShapeId(db: DbReader, row: SessionRow): ShapeId | null {
     : null;
 }
 
+/** The conversation of the workstream's task's thread, which its lane session runs; null for none. */
+function laneConversation(ctx: WriteContext, workstreamId: WorkstreamId): ConversationId | null {
+  const row = ctx.tx
+    .select({ id: schema.conversations.id })
+    .from(schema.workstreams)
+    .innerJoin(
+      schema.conversations,
+      and(
+        eq(schema.conversations.ownerKind, ConversationOwnerKind.Task),
+        eq(schema.conversations.ownerId, schema.workstreams.taskId),
+      ),
+    )
+    .where(eq(schema.workstreams.id, workstreamId))
+    .get();
+  return row?.id ?? null;
+}
+
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
   const { workstreamId, conversationId, ...fields } = input;
   const prior = ctx.tx
@@ -108,7 +125,7 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     id: mintId('Session'),
     ...fields,
     workstreamId: workstreamId ?? null,
-    conversationId: conversationId ?? null,
+    conversationId: conversationId ?? laneConversation(ctx, workstreamId),
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,

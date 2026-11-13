@@ -77,7 +77,7 @@ describe('conversation items', () => {
   it('lists a migrated row before a new one, though the new id sorts first as text', () => {
     const old = migrated('shm', 1);
     const fresh = add(conversation, 'new');
-    expect(fresh.id < old).toBe(true);
+    expect([old, fresh.id].sort()).toEqual([fresh.id, old]);
     expect(fresh.seq).toBe(2);
     expect(listItems(store.db, conversation).map((i) => i.id)).toEqual([old, fresh.id]);
   });

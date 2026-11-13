@@ -2183,7 +2183,7 @@ export const passTurns = sqliteTable(
     seq: integer('seq').notNull(),
     messageId: text('message_id')
       .$type<TaskMessageId>()
-      .references((): AnySQLiteColumn => taskMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
     ending: text('ending').$type<PassTurnEnding>(),
@@ -2420,7 +2420,7 @@ export const passPreviewMarks = sqliteTable(
       .references(() => inboxItems.id),
     noticeId: text('notice_id')
       .$type<TaskMessageId>()
-      .references(() => taskMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

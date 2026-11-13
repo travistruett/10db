@@ -84,7 +84,7 @@ const pushed = (...ids: TaskMessageId[]): void => {
 
 /** The builder messages the sessions were handed after their prompts, by the id each names. */
 const sentMessages = (): string[] =>
-  engine.adapter.sent.map((m) => /\(message (tmg_[^)]+)\)/.exec(m.text)?.[1] ?? m.text);
+  engine.adapter.sent.map((m) => /\(message (cvi_[^)]+)\)/.exec(m.text)?.[1] ?? m.text);
 
 /** The session id the fake reports for the workstream's first session. */
 const firstProviderSession = (): string => `fake-${engine.adapter.prompts[0]?.sessionId ?? ''}`;

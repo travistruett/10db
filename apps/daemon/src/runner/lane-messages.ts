@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
-  idOfUuid,
   idUuid,
   TaskMessageAuthor,
   TaskMessageKind,
@@ -10,6 +9,7 @@ import {
   type TaskMessageId,
 } from '@10db/contracts';
 import {
+  findTaskMessageByUuid,
   getTaskMessageRow,
   listTaskFileRows,
   listTaskThreadRows,
@@ -186,7 +186,7 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
   /** The messages a list of client uuids stands for; a uuid that is no message's stands for none. */
   const messagesOf = (uuids: readonly string[]): TaskMessageId[] =>
     uuids.flatMap((uuid) => {
-      const id = sentUnder.get(uuid) ?? idOfUuid('TaskMessage', uuid);
+      const id = sentUnder.get(uuid) ?? findTaskMessageByUuid(state.db, taskId, uuid);
       return id === null ? [] : [id];
     });
   const push = (message: TaskMessageRow, lead?: string | null): void => {

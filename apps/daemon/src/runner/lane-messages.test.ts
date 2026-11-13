@@ -140,7 +140,7 @@ describe('lane messages', () => {
     expect(undelivered()).toEqual([]);
     expect(getTaskMessageRow(state.db, second.id).deliveredAt).not.toBeNull();
     // A uuid that is no message of this task is not evidence for any.
-    expect(messages.consumed([idUuid(mintId('TaskMessage')), 'not-a-uuid'])).toEqual([]);
+    expect(messages.consumed([idUuid(mintId('ConversationItem')), 'not-a-uuid'])).toEqual([]);
     await handle.stop();
   });
 
@@ -231,7 +231,7 @@ describe('lane messages', () => {
   it('sends Codex every picture as its file on every push, held already or over the budget: a Codex lane cannot open one by its path', () => {
     const shot = say('Make it blue', 2);
     state.write((ctx) => {
-      markTaskFilesInline(ctx, taskId, [shot.files[0]?.id ?? mintId('TaskFile')], false);
+      markTaskFilesInline(ctx, taskId, [shot.files[0]?.id ?? mintId('ConversationFile')], false);
     });
     const limits = pictureLimitsFor(AccountKind.CodexSignin);
     const spentAll = limits.inlineMaxBytes;

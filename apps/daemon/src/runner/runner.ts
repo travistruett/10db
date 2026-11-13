@@ -2536,7 +2536,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     try {
       handle = opts.adapter.open({
         sessionId: session.id,
-        conversationId: null,
+        conversationId: session.conversationId,
         policy,
         cwd: checkout,
         prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),

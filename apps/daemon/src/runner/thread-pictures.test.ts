@@ -35,9 +35,9 @@ function picture(
   const storedPath = join(dir.path, name);
   writeFileSync(storedPath, png);
   return {
-    id: mintId('TaskFile'),
+    id: mintId('ConversationFile'),
     taskId: mintId('Task'),
-    messageId: mintId('TaskMessage'),
+    messageId: mintId('ConversationItem'),
     name,
     mediaType: 'image/png',
     size: png.length,

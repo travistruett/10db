@@ -67,7 +67,7 @@ describe('shape files', () => {
       )
       .run(migrated, shapeConversation(store.db, shapeId).id);
     const fresh = store.write((ctx) => insertShapeFile(ctx, file('new.md'))).value;
-    expect(fresh.id < migrated).toBe(true);
+    expect([migrated, fresh.id].sort()).toEqual([fresh.id, migrated]);
     expect(listShapeFiles(store.db, shapeId).map((f) => f.id)).toEqual([migrated, fresh.id]);
   });
 

@@ -59,13 +59,18 @@ export function buildThreadDigest(
   task: Pick<TaskDto, 'id' | 'title' | 'description'>,
   window: { readonly after: string | null; readonly before: TaskMessageId },
 ): string {
-  const said = listTaskThreadRows(db, task.id).filter(
-    (m) =>
-      m.id < window.before &&
-      (window.after === null || m.createdAt >= window.after) &&
-      ((m.author === TaskMessageAuthor.Builder && m.kind === TaskMessageKind.Message) ||
-        (m.author === TaskMessageAuthor.Agent && m.kind === TaskMessageKind.Reply)),
-  );
+  const thread = listTaskThreadRows(db, task.id);
+  // Before the message by its place in the thread, never by id: a migrated message keeps an older id
+  // that sorts after every new one as text.
+  const at = thread.findIndex((m) => m.id === window.before);
+  const said = thread
+    .slice(0, at < 0 ? thread.length : at)
+    .filter(
+      (m) =>
+        (window.after === null || m.createdAt >= window.after) &&
+        ((m.author === TaskMessageAuthor.Builder && m.kind === TaskMessageKind.Message) ||
+          (m.author === TaskMessageAuthor.Agent && m.kind === TaskMessageKind.Reply)),
+    );
   const lines = [
     "This task's thread continues in a fresh session. Here is where it stands.",
     '',

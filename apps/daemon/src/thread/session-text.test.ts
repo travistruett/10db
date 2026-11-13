@@ -1,11 +1,20 @@
-import { mintId, type TaskDto, type TaskMessageId } from '@10db/contracts';
+import {
+  ConversationItemId,
+  idUuid,
+  mintId,
+  type TaskDto,
+  type TaskMessageId,
+} from '@10db/contracts';
 import {
   createTestStore,
   getTaskMessageRow,
   insertBuilderMessage,
   insertSystemNotice,
   insertTask,
+  insertConversation,
+  insertItem,
   seedProject,
+  taskConversationOf,
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,14 +60,18 @@ const say = (body: string, files: { name: string; storedPath: string }[] = []) =
   ).value;
 };
 
-/** The agent's reply as the end of a turn writes it; no writer of replies exists before pass turns. */
+/** The agent's reply as the end of a turn writes it, on the task's conversation, with no turn. */
 const reply = (body: string): void => {
   clock.advance(1_000);
-  store.db.$client
-    .prepare(
-      "insert into task_messages (id, task_id, author, kind, body, created_at) values (?, ?, 'agent', 'reply', ?, ?)",
-    )
-    .run(mintId('TaskMessage'), task.id, body, clock.now().toISOString());
+  store.write((ctx) => {
+    const conversation = taskConversationOf(ctx.tx, task.id);
+    if (conversation === null) throw new Error('the thread has no conversation');
+    insertItem(ctx, conversation.id, {
+      author: 'agent',
+      kind: 'agent_message',
+      body: { text: body },
+    });
+  });
 };
 
 describe('buildThreadDigest', () => {
@@ -76,13 +89,37 @@ describe('buildThreadDigest', () => {
     expect(digest).toContain('[Picture header.png, kept at /data/tasks/t/files/a.png: Read it');
     const said = digest.split('\n').filter((line) => line.startsWith('['));
     expect(said.map((line) => line.split(']')[0])).toEqual([
-      expect.stringMatching(/^\[builder, message tmg_/),
+      expect.stringMatching(/^\[builder, message cvi_/),
       '[Picture header.png, kept at /data/tasks/t/files/a.png: Read it to see it.',
       '[your reply',
     ]);
     expect(digest).not.toContain('Started a fresh session');
     expect(digest).not.toContain('Now the footer');
     expect(digest).not.toContain('Sent after it');
+  });
+
+  it('names a migrated message said before the new one, though its id sorts after as text', () => {
+    const conversation = store.write((ctx) =>
+      insertConversation(ctx, {
+        projectId: task.projectId,
+        owner: { kind: 'task', id: task.id },
+        profile: 'lane',
+        state: null,
+      }),
+    ).value.id;
+    const migrated = ConversationItemId.parse(`tmg_${idUuid(mintId('ConversationItem'))}`);
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, created_at, updated_at)
+         VALUES (?, ?, 1, 'builder', 'message', '{"text":"From before the upgrade"}', ?, ?)`,
+      )
+      .run(migrated, conversation, clock.now().toISOString(), clock.now().toISOString());
+    store.db.$client
+      .prepare('UPDATE conversations SET next_seq = 2 WHERE id = ?')
+      .run(conversation);
+    const now = say('The message');
+    const digest = buildThreadDigest(store.db, task, { after: null, before: now.id });
+    expect(digest).toContain(`[builder, message ${migrated}] From before the upgrade`);
   });
 
   it('leaves out what was said before the latest handoff, which carries it', () => {

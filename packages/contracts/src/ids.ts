@@ -58,8 +58,6 @@ const ID_SCHEMAS = {
   TaskContextCheck: idSchema(['tcx'], 'TaskContextCheckId'),
   LandingGroup: idSchema(['lgp'], 'LandingGroupId'),
   Pattern: idSchema(['pat'], 'PatternId'),
-  TaskMessage: idSchema(['tmg'], 'TaskMessageId'),
-  TaskFile: idSchema(['tfl'], 'TaskFileId'),
   Pass: idSchema(['pas'], 'PassId'),
   PassTurn: idSchema(['ptn'], 'PassTurnId'),
   TaskScreen: idSchema(['tsc'], 'TaskScreenId'),
@@ -112,8 +110,6 @@ const ID_PREFIX = {
   TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
   Pattern: 'pat',
-  TaskMessage: 'tmg',
-  TaskFile: 'tfl',
   Pass: 'pas',
   PassTurn: 'ptn',
   TaskScreen: 'tsc',
@@ -227,10 +223,6 @@ export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const PatternId = ID_SCHEMAS.Pattern;
 export type PatternId = IdOf<'Pattern'>;
-export const TaskMessageId = ID_SCHEMAS.TaskMessage;
-export type TaskMessageId = IdOf<'TaskMessage'>;
-export const TaskFileId = ID_SCHEMAS.TaskFile;
-export type TaskFileId = IdOf<'TaskFile'>;
 export const PassId = ID_SCHEMAS.Pass;
 export type PassId = IdOf<'Pass'>;
 export const PassTurnId = ID_SCHEMAS.PassTurn;
@@ -255,5 +247,11 @@ export type ShapeMessageId = ConversationItemId;
 /** A file dropped into Plan is a conversation file. */
 export const ShapeFileId = ConversationFileId;
 export type ShapeFileId = ConversationFileId;
+/** A task's thread message is a conversation item. */
+export const TaskMessageId = ConversationItemId;
+export type TaskMessageId = ConversationItemId;
+/** A picture pasted into a task's thread is a conversation file. */
+export const TaskFileId = ConversationFileId;
+export type TaskFileId = ConversationFileId;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

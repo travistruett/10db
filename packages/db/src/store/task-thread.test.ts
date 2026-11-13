@@ -1,7 +1,10 @@
 import {
+  ConversationItemId,
   EventType,
+  idUuid,
   mintId,
   NotFoundError,
+  TASK_MESSAGE_MAX_CHARS,
   TaskMessageAuthor,
   TaskMessageKind,
   type TaskId,
@@ -11,11 +14,17 @@ import {
   createTestStore,
   deleteUnsentBuilderMessage,
   dropAllowThisOffers,
+  findTaskMessageByUuid,
+  getSession,
   getTaskFile,
   getTaskMessageRow,
+  insertAgentReply,
   insertBuilderMessage,
+  insertSession,
   insertSystemNotice,
   insertTask,
+  insertWorkstream,
+  listTaskFileRows,
   listTaskThread,
   listUndeliveredTaskMessages,
   markTaskFilesInline,
@@ -29,6 +38,7 @@ import {
   offerToAgent,
   takeOffer,
   seedProject,
+  taskConversationOf,
   type Store,
 } from './index';
 
@@ -111,7 +121,7 @@ describe('a task thread', () => {
       sha256: 'c'.repeat(64),
       storedPath: `/data/tasks/${taskId}/files/${'c'.repeat(64)}.png`,
     });
-    expect(() => getTaskFile(store.db, mintId('TaskFile'))).toThrow(NotFoundError);
+    expect(() => getTaskFile(store.db, mintId('ConversationFile'))).toThrow(NotFoundError);
   });
 
   it('writes nothing for an unknown task, and nothing when the write it is part of fails', () => {
@@ -127,7 +137,7 @@ describe('a task thread', () => {
       }),
     ).toThrow('the picture never reached the disk');
     expect(listTaskThread(store.db, taskId)).toEqual([]);
-    expect(store.db.$client.prepare('select count(*) as n from task_files').get()).toEqual({
+    expect(store.db.$client.prepare('select count(*) as n from conversation_files').get()).toEqual({
       n: 0,
     });
   });
@@ -164,7 +174,7 @@ describe('a task thread', () => {
     expect(getTaskMessageRow(store.db, elsewhere.id).deliveredAt).toBeNull();
     expect(listUndeliveredTaskMessages(store.db, taskId).map((m) => m.id)).toEqual([first.id]);
     expect(getTaskMessageRow(store.db, unpushed.id).pushedAt).toBeNull();
-    expect(() => getTaskMessageRow(store.db, mintId('TaskMessage'))).toThrow(NotFoundError);
+    expect(() => getTaskMessageRow(store.db, mintId('ConversationItem'))).toThrow(NotFoundError);
   });
 
   it('keeps every client uuid a message was pushed under, in order, and stamps it pushed', () => {
@@ -424,5 +434,151 @@ describe('a task thread', () => {
     expect(listTaskThread(store.db, otherTaskId).map((m) => [m.id, m.allowThis])).toEqual([
       [elsewhere.id, true],
     ]);
+  });
+});
+
+describe('a task thread on its conversation', () => {
+  /** A thread row as the copy leaves a migrated one: its old id at `seq`, `next_seq` past it. */
+  function migrated(pushUuids: readonly string[] = []): ConversationItemId {
+    const conversation =
+      taskConversationOf(store.db, taskId) ??
+      store.write((ctx) => {
+        insertSystemNotice(ctx, taskId, 'opens the thread');
+        return taskConversationOf(ctx.tx, taskId);
+      }).value;
+    if (conversation === null) throw new Error('no conversation');
+    store.db.$client
+      .prepare('DELETE FROM conversation_items WHERE conversation_id = ?')
+      .run(conversation.id);
+    const id = ConversationItemId.parse(`tmg_${idUuid(mintId('ConversationItem'))}`);
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, push_uuids, created_at,
+           updated_at)
+         VALUES (?, ?, 1, 'builder', 'message', '{"text":"From before"}', ?, '2026-11-01T00:00:00.000Z',
+           '2026-11-01T00:00:00.000Z')`,
+      )
+      .run(id, conversation.id, JSON.stringify(pushUuids));
+    store.db.$client
+      .prepare('UPDATE conversations SET next_seq = 2 WHERE id = ?')
+      .run(conversation.id);
+    return id;
+  }
+
+  /** A pass turn of the task, for a reply to name. */
+  function turn() {
+    const workstream = store.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
+    const id = mintId('PassTurn');
+    store.db.$client
+      .prepare(
+        `INSERT INTO pass_turns (id, task_id, workstream_id, seq, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, 1, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`,
+      )
+      .run(id, taskId, workstream.id);
+    return { id, workstreamId: workstream.id };
+  }
+
+  it('lists what is written after a migrated row after it, by seq', () => {
+    const old = migrated();
+    const { id: turnId } = turn();
+    const message = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'New', files: [] }),
+    ).value;
+    const notice = store.write((ctx) => insertSystemNotice(ctx, taskId, 'A notice')).value;
+    const reply = store.write((ctx) =>
+      insertAgentReply(ctx, taskId, { body: 'Done', turnId }),
+    ).value;
+    expect(listTaskThread(store.db, taskId).map((m) => [m.id, m.kind])).toEqual([
+      [old, 'message'],
+      [message.id, 'message'],
+      [notice.id, 'notice'],
+      [reply.id, 'reply'],
+    ]);
+  });
+
+  it.each<{
+    name: string;
+    find: () => { uuid: string; task: TaskId; expected: ConversationItemId | null };
+  }>([
+    {
+      name: 'a migrated message pushed under no uuid is found by its own',
+      find: () => {
+        const id = migrated();
+        return { uuid: idUuid(id), task: taskId, expected: id };
+      },
+    },
+    {
+      name: 'a uuid another message was pushed under finds that one',
+      find: () => {
+        migrated();
+        const other = store.write((ctx) =>
+          insertBuilderMessage(ctx, taskId, { body: 'Pushed', files: [] }),
+        ).value;
+        store.write((ctx) => {
+          markTaskMessagePushedUnder(ctx, other.id, U2);
+        });
+        return { uuid: U2, task: taskId, expected: other.id };
+      },
+    },
+    {
+      name: 'another task’s message is not found',
+      find: () => {
+        const id = migrated();
+        return { uuid: idUuid(id), task: otherTaskId, expected: null };
+      },
+    },
+  ])('$name', ({ find }) => {
+    const { uuid, task, expected } = find();
+    expect(findTaskMessageByUuid(store.db, task, uuid)).toBe(expected);
+  });
+
+  it('gives a message after one taken back the next seq, and its picture lists after those kept', () => {
+    const kept = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Kept', files: [picture('a.png', 'a')] }),
+    ).value;
+    const refused = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Refused', files: [picture('b.png', 'b')] }),
+    ).value;
+    store.write((ctx) => deleteUnsentBuilderMessage(ctx, taskId, refused.id));
+    const next = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Next', files: [picture('c.png', 'c')] }),
+    ).value;
+    expect(
+      store.db.$client
+        .prepare('SELECT seq FROM conversation_items WHERE id = ?')
+        .pluck()
+        .get(next.id),
+    ).toBe(3);
+    expect(listTaskThread(store.db, taskId).map((m) => m.id)).toEqual([kept.id, next.id]);
+    expect(listTaskFileRows(store.db, taskId).map((f) => f.name)).toEqual(['a.png', 'c.png']);
+  });
+
+  it('keeps a message of the longest length whole', () => {
+    const body = 'x'.repeat(TASK_MESSAGE_MAX_CHARS);
+    store.write((ctx) => insertBuilderMessage(ctx, taskId, { body, files: [] }));
+    expect(listTaskThread(store.db, taskId).map((m) => m.body)).toEqual([body]);
+  });
+
+  it('names its conversation on a lane session of a task with a thread, and none on one without', () => {
+    store.write((ctx) => insertBuilderMessage(ctx, taskId, { body: 'Hi', files: [] }));
+    const session = (task: TaskId, hash: string) =>
+      store.write((ctx) =>
+        insertSession(ctx, {
+          workstreamId: insertWorkstream(ctx, task, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }).id,
+          provider: 'claude',
+          model: 'claude-sonnet-5-5',
+          effort: 'medium',
+          mode: 'managed',
+          mcpTokenHash: hash,
+        }),
+      ).value;
+    expect(getSession(store.db, session(taskId, 'h-1').id).conversationId).toBe(
+      taskConversationOf(store.db, taskId)?.id,
+    );
+    expect(getSession(store.db, session(otherTaskId, 'h-2').id).conversationId).toBeNull();
   });
 });
