@@ -126,7 +126,11 @@ function AddAccountForm({
         <Select
           size="md"
           label="Kind"
-          description="What pays for the sessions."
+          description={
+            values.kind === AccountKind.OpenRouter
+              ? "Pays for decisions. Can't run agents yet."
+              : 'What pays for the sessions.'
+          }
           data={KIND_OPTIONS}
           value={values.kind}
           allowDeselect={false}

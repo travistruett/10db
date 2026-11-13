@@ -200,6 +200,13 @@ describe('AddAccountModal', () => {
     };
     const patches = (served: Served) => served.judgeRequests.filter((r) => r.method === 'PATCH');
 
+    it('says what the account pays for in place of sessions', async () => {
+      serve();
+      const dialog = await openModal('OpenRouter key');
+      expect(within(dialog).getByText("Pays for decisions. Can't run agents yet.")).toBeTruthy();
+      expect(within(dialog).queryByText('What pays for the sessions.')).toBeNull();
+    });
+
     it('takes a label, a payer and a key only, then runs decisions on it when they run on none', async () => {
       const served = serve();
       const dialog = await openModal('OpenRouter key');
