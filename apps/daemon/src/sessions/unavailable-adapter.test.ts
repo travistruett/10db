@@ -15,6 +15,7 @@ describe('createUnavailableAdapter', () => {
     );
     const spec: LaneSessionSpec = {
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy(),
       profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
       cwd: '/tmp',

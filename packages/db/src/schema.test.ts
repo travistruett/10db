@@ -301,7 +301,7 @@ describe('the conversation tables', () => {
     ).toThrow(/UNIQUE constraint failed/);
   });
 
-  it('lets a session name its conversation, and still refuses a session with no owner', () => {
+  it('lets a session name its conversation, and refuses a session with no owner', () => {
     const { accountId } = seedConversation();
     expect(columnNames('sessions')).toContain('conversation_id');
     expect(() =>
@@ -312,6 +312,6 @@ describe('the conversation tables', () => {
            VALUES (?, ?, 1, 'claude', 'm', 'medium', 'default', 'h', ?, 0, 0, ?, ?)`,
         )
         .run(mintId('Session'), accountId, now, now, now),
-    ).toThrow(/CHECK constraint failed: sessions_one_owner/);
+    ).toThrow(/CHECK constraint failed: sessions_has_owner/);
   });
 });

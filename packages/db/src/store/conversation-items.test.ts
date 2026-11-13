@@ -1,5 +1,4 @@
 import {
-  ConversationOwnerKind,
   InvalidError,
   idUuid,
   mintId,
@@ -12,7 +11,6 @@ import {
   findItemByPushUuid,
   getConversation,
   getItem,
-  insertConversation,
   insertItem,
   insertShape,
   listItems,
@@ -20,6 +18,7 @@ import {
   markItemsDelivered,
   markItemsHandedBack,
   seedProject,
+  shapeConversation,
   type Store,
 } from './index';
 
@@ -34,15 +33,11 @@ beforeEach(() => {
   ({ store, close } = createTestStore());
   const project = seedProject(store, { name: 'alpha' });
   const owned = () =>
-    store.write((ctx) => {
-      const shape = insertShape(ctx, project.id, { title: 'Plan', origin: 'app' });
-      return insertConversation(ctx, {
-        projectId: project.id,
-        owner: { kind: ConversationOwnerKind.Shape, id: `${shape.id}-c` },
-        profile: 'explore',
-        state: 'idle_cold',
-      }).id;
-    }).value;
+    store.write(
+      (ctx) =>
+        shapeConversation(ctx.tx, insertShape(ctx, project.id, { title: 'Plan', origin: 'app' }).id)
+          .id,
+    ).value;
   conversation = owned();
   other = owned();
 });

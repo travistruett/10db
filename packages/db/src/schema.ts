@@ -626,8 +626,8 @@ export const workstreams = sqliteTable(
 );
 
 /**
- * A session runs a lane's workstream or a Shape conversation, never both and never neither (Shape
- * spec §5.1), so a Shape session takes the project's account and counts in its usage like a lane's.
+ * A session runs a lane's workstream, a conversation, or both (a lane of a task with a thread), never
+ * neither, so a Plan session takes the project's account and counts in its usage like a lane's.
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -636,9 +636,6 @@ export const sessions = sqliteTable(
     workstreamId: text('workstream_id')
       .$type<WorkstreamId>()
       .references(() => workstreams.id),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
-      .references((): AnySQLiteColumn => shapes.id),
     /** The conversation the session runs; a lane of a task with a thread names it beside its workstream. */
     conversationId: text('conversation_id')
       .$type<ConversationId>()
@@ -682,10 +679,12 @@ export const sessions = sqliteTable(
   },
   (t) => [
     index('sessions_workstream_idx').on(t.workstreamId),
-    index('sessions_shape_idx').on(t.shapeId),
     index('sessions_conversation_idx').on(t.conversationId),
     index('sessions_account_started_idx').on(t.accountId, t.startedAt),
-    check('sessions_one_owner', sql`(${t.workstreamId} IS NULL) <> (${t.shapeId} IS NULL)`),
+    check(
+      'sessions_has_owner',
+      sql`${t.conversationId} IS NOT NULL OR ${t.workstreamId} IS NOT NULL`,
+    ),
   ],
 );
 
@@ -1398,14 +1397,10 @@ export const shapes = sqliteTable(
     title: text('title').notNull(),
     state: text('state').$type<ShapeState>().notNull(),
     origin: text('origin').$type<ShapeOrigin>().notNull(),
-    /** The Claude Agent SDK session it resumes; null before the first turn. */
-    sdkSessionId: text('sdk_session_id'),
     /** Set by the builder's first Propose, for good. */
     proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
     /** The last reconciled round; 0 before the first proposal. */
     round: integer('round').notNull().default(0),
-    /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
-    model: text('model'),
     /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
     bundleId: text('bundle_id'),
     bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),

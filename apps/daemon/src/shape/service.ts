@@ -63,6 +63,7 @@ import {
   markShapeFilesUnreadableTold,
   markShapeLinksSizeTold,
   patchShape,
+  shapeConversation,
   setOneWayPaths as setOneWayPathsRow,
   settleOpenQuestionsOfTask,
   updateSessionUsage,
@@ -1074,7 +1075,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
-        shapeId,
+        conversationId: shapeConversation(ctx.tx, shapeId).id,
         provider: providerOf(launch.account.kind),
         model: launch.model,
         effort: launch.effort,
@@ -1166,6 +1167,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     });
     const spec: ExploreSessionSpec = {
       sessionId: row.id,
+      conversationId: row.conversationId,
       policy,
       profile: {
         kind: 'explore',

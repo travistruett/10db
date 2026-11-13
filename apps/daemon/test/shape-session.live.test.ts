@@ -19,6 +19,7 @@ import {
   insertShape,
   seedProject,
   type AccountRow,
+  shapeConversation,
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { serve } from '@hono/node-server';
@@ -120,6 +121,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
@@ -207,7 +209,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const { token, hash } = mintSessionToken();
     state.write((ctx) =>
       insertSession(ctx, {
-        shapeId: shape.id,
+        conversationId: shapeConversation(ctx.tx, shape.id).id,
         provider: 'claude',
         model: 'haiku',
         effort: 'low',
@@ -291,6 +293,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
@@ -413,6 +416,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
@@ -633,6 +637,7 @@ async function readInSession(
   const reads: ShapeToolRequest[] = [];
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',

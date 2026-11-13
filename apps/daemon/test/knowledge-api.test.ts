@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-explicit-any */
 import { join } from 'node:path';
 import { mintId, ProjectDto, ShapeOrigin, type KnowledgeItemDto } from '@10db/contracts';
-import { insertSession, insertShape, insertSource } from '@10db/db';
+import { insertSession, insertShape, insertSource, shapeConversation } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -239,7 +239,7 @@ describe('writing and reading back', () => {
     );
     const session = state.write((ctx) =>
       insertSession(ctx, {
-        shapeId: shape.id,
+        conversationId: shapeConversation(ctx.tx, shape.id).id,
         provider: 'claude',
         model: 'sonnet',
         effort: 'medium',

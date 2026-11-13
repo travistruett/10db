@@ -1,4 +1,5 @@
 import type {
+  ConversationId,
   AccountRefusal,
   DeniedBy,
   Effort,
@@ -86,6 +87,8 @@ export type AgentProfileKind = (typeof AgentProfileKind)[keyof typeof AgentProfi
 /** What every session carries, whatever it is for. */
 export interface AgentSessionCore {
   readonly sessionId: SessionId;
+  /** The conversation the session runs: Plan's, a task's thread, or null for a lane whose task has none. */
+  readonly conversationId: ConversationId | null;
   readonly cwd: string;
   /** The first message; later ones come from `send`. */
   readonly prompt: string;

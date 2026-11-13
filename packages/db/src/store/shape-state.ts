@@ -24,7 +24,8 @@ import {
 import { and, asc, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
-import { getShape } from './shapes';
+import { patchConversation } from './conversations';
+import { getShape, shapeConversation } from './shapes';
 import type { DbReader, WriteContext } from './store';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §5.3, §6 Rows, §11.
@@ -44,14 +45,20 @@ export interface ShapePatch {
   readonly model?: string | null;
 }
 
-/** Changes a conversation and announces it. */
+/** Changes a conversation and announces it; its session and model are kept on its conversation row. */
 export function patchShape(ctx: WriteContext, id: ShapeId, patch: ShapePatch): ShapeDto {
   const before = getShape(ctx.tx, id);
+  const { sdkSessionId, model, ...own } = patch;
   ctx.tx
     .update(schema.shapes)
-    .set({ ...patch, updatedAt: ctx.now })
+    .set({ ...own, updatedAt: ctx.now })
     .where(eq(schema.shapes.id, id))
     .run();
+  if (sdkSessionId !== undefined || model !== undefined)
+    patchConversation(ctx, shapeConversation(ctx.tx, id).id, {
+      ...(sdkSessionId === undefined ? {} : { providerSessionId: sdkSessionId }),
+      ...(model === undefined ? {} : { model }),
+    });
   ctx.emit({
     type: EventType.ShapeChanged,
     entityType: 'shape',
@@ -63,13 +70,8 @@ export function patchShape(ctx: WriteContext, id: ShapeId, patch: ShapePatch): S
 
 /** The Claude Code session a conversation resumes, or null before its first turn. */
 export function getShapeSdkSessionId(db: DbReader, id: ShapeId): string | null {
-  const row = db
-    .select({ sdkSessionId: schema.shapes.sdkSessionId })
-    .from(schema.shapes)
-    .where(eq(schema.shapes.id, id))
-    .get();
-  if (!row) throw new NotFoundError('shape', id);
-  return row.sdkSessionId;
+  getShape(db, id);
+  return shapeConversation(db, id).providerSessionId;
 }
 
 // --- The transcript -----------------------------------------------------------------------------

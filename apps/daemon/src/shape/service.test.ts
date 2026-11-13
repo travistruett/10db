@@ -18,6 +18,7 @@ import {
   getShapeSdkSessionId,
   listShapeMessages,
   listShapeProposals,
+  shapeConversation,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { ManualClock } from '../clock';
@@ -149,6 +150,8 @@ describe('a message', () => {
     expect(session.spec.prompt).toBe(`[m:${sent.id}] Make the board denser.`);
     expect(session.spec.resumeProviderSessionId).toBeNull();
     expect(session.spec.profile.shapeId).toBe(shapeId);
+    const conversationId = shapeConversation(c.store.db, shapeId).id;
+    expect(session.spec.conversationId).toBe(conversationId);
     expect(session.spec.profile.tools).toEqual([
       'Read',
       'Grep',
@@ -161,7 +164,7 @@ describe('a message', () => {
     expect(session.spec.profile.disallowedTools).toContain('Bash');
     expect(session.spec.profile.systemPrompt).toMatch(/note_heard/);
     const row = getSession(c.store.db, session.spec.sessionId);
-    expect(row).toMatchObject({ shapeId, workstreamId: null, endedAt: null });
+    expect(row).toMatchObject({ conversationId, workstreamId: null, endedAt: null });
     reply.open();
     await service.settled(shapeId);
     const claude = transcript().filter((m) => m.author === ShapeMessageAuthor.Claude);

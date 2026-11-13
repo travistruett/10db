@@ -8,12 +8,15 @@ import {
   type Provider,
   type SessionId,
   type SessionMode,
-  type ShapeId,
+  ConversationOwnerKind,
+  ShapeId,
+  type ConversationId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
+import { getConversation } from './conversations';
 import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
@@ -21,15 +24,18 @@ export type SessionRow = typeof schema.sessions.$inferSelect;
 /** A lane's session: the session runs its workstream. */
 export type LaneSessionRow = SessionRow & { readonly workstreamId: WorkstreamId };
 
-/** Whether the session runs a lane's workstream, rather than a Shape conversation. */
+/** Whether the session runs a lane's workstream, rather than only a conversation. */
 export function isLaneSession(row: SessionRow): row is LaneSessionRow {
   return row.workstreamId !== null;
 }
 
-/** A session runs a workstream or a Shape conversation, exactly one (Shape spec §5.1). */
+/**
+ * A session is inserted for a workstream (a lane) or for a conversation (Plan's). A lane of a task
+ * with a thread also names its task's conversation, which is set apart from the insert.
+ */
 type SessionOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: undefined }
-  | { readonly shapeId: ShapeId; readonly workstreamId?: undefined };
+  | { readonly workstreamId: WorkstreamId; readonly conversationId?: undefined }
+  | { readonly conversationId: ConversationId; readonly workstreamId?: undefined };
 
 export type NewSession = SessionOwner & NewSessionFields;
 
@@ -63,24 +69,34 @@ function projectOwner(ctx: WriteContext, input: SessionOwner) {
   }
   const owner = ctx.tx
     .select(columns)
-    .from(schema.shapes)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.shapes.projectId))
+    .from(schema.conversations)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.conversations.projectId))
     .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
-    .where(eq(schema.shapes.id, input.shapeId))
+    .where(eq(schema.conversations.id, input.conversationId))
     .get();
-  if (!owner) throw new NotFoundError('shape', input.shapeId);
+  if (!owner) throw new NotFoundError('conversation', input.conversationId);
   return owner;
 }
 
+/** The shape whose conversation the session runs; null for a session of no Plan conversation. */
+export function sessionShapeId(db: DbReader, row: SessionRow): ShapeId | null {
+  if (row.conversationId === null) return null;
+  const conversation = getConversation(db, row.conversationId);
+  // The owner id of a shape's conversation is a ShapeId; parsed, as text read from the database.
+  return conversation.ownerKind === ConversationOwnerKind.Shape
+    ? ShapeId.parse(conversation.ownerId)
+    : null;
+}
+
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
-  const { workstreamId, shapeId, ...fields } = input;
+  const { workstreamId, conversationId, ...fields } = input;
   const prior = ctx.tx
     .select({ n: count() })
     .from(schema.sessions)
     .where(
       workstreamId !== undefined
         ? eq(schema.sessions.workstreamId, workstreamId)
-        : eq(schema.sessions.shapeId, shapeId),
+        : eq(schema.sessions.conversationId, conversationId),
     )
     .get();
   // A project can move while a session waits for its start, so the runner names the account it launched on.
@@ -92,8 +108,7 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     id: mintId('Session'),
     ...fields,
     workstreamId: workstreamId ?? null,
-    shapeId: shapeId ?? null,
-    conversationId: null,
+    conversationId: conversationId ?? null,
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,

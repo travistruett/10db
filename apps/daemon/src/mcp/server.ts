@@ -10,7 +10,7 @@ import {
   type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getLiveSessionByTokenHash, isLaneSession } from '@10db/db';
+import { getLiveSessionByTokenHash, isLaneSession, sessionShapeId } from '@10db/db';
 import { z } from 'zod';
 import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
@@ -95,13 +95,14 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
     if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
-    // A session's tool set comes from its row: a lane's tools for a workstream, a conversation's for
-    // a shape. A Shape session holds no lane, claim or area, so it never gets a lane's tools.
+    // A session's tool set comes from its row: a lane's tools for a workstream, Plan's for a shape's
+    // conversation. A Plan session holds no lane, claim or area, so it never gets a lane's tools.
+    const shapeId = isLaneSession(session) ? null : sessionShapeId(deps.state.db, session);
     const tools = isLaneSession(session)
       ? laneTools(deps, session.id, session.workstreamId, claimWaits)
-      : session.shapeId === null
+      : shapeId === null
         ? null
-        : shapeTools(deps, session.id, session.shapeId);
+        : shapeTools(deps, session.id, shapeId);
     if (tools === null) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     const server = new McpServer({ name: '10db', version: '0.1.0' });

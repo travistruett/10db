@@ -593,7 +593,8 @@ describe('migrating to Shape sessions (Shape spec §5.1, §13)', () => {
       AT,
       AT,
     );
-    migrateDatabase(db);
+    // Through the migration under test: a later one replaces `shape_id` and this CHECK.
+    migrateDatabase(db, migrationsThrough('0028_session_owner'));
   });
 
   it('keeps a lane session and its handoff, with no shape', () => {

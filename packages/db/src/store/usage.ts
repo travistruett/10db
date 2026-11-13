@@ -83,14 +83,15 @@ export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): 
       costUsd: sql<number | null>`sum(${schema.sessions.costUsd})`,
     })
     .from(schema.sessions)
-    // A session works for a project through its workstream (a lane) or its conversation (Shape).
+    // A session works for a project through its workstream (a lane) or its conversation (Plan); a
+    // lane that names both is one row, counted once, under its workstream's project.
     .leftJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
-    .leftJoin(schema.shapes, eq(schema.shapes.id, schema.sessions.shapeId))
+    .leftJoin(schema.conversations, eq(schema.conversations.id, schema.sessions.conversationId))
     .innerJoin(
       schema.projects,
       eq(
         schema.projects.id,
-        sql`coalesce(${schema.workstreams.projectId}, ${schema.shapes.projectId})`,
+        sql`coalesce(${schema.workstreams.projectId}, ${schema.conversations.projectId})`,
       ),
     )
     .where(inWindow(id, window))

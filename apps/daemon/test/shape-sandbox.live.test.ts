@@ -173,6 +173,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     try {
       const handle = adapter.open({
         sessionId: mintId('Session'),
+        conversationId: null,
         policy: testPolicy('plan'),
         profile: {
           kind: 'explore',

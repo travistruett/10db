@@ -584,4 +584,12 @@ describe('migration 0070, the conversation copy', () => {
     for (const id of named)
       expect(column('SELECT count(*) FROM conversation_items WHERE id = ?', id)).toEqual([1]);
   });
+
+  it('leaves sessions naming their conversation and shapes without a session or model of their own', () => {
+    const columns = (table: string) => column('SELECT name FROM pragma_table_info(?)', table);
+    expect(columns('sessions')).not.toContain('shape_id');
+    expect(columns('sessions')).toContain('conversation_id');
+    expect(columns('shapes')).not.toContain('sdk_session_id');
+    expect(columns('shapes')).not.toContain('model');
+  });
 });

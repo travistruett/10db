@@ -662,6 +662,7 @@ async function runOnLane(
   const prompt = world.model.script(steps);
   const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: world.checkout,

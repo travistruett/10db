@@ -12,6 +12,7 @@ import {
   withdrawDecision,
   withdrawPrinciple,
   type Store,
+  shapeConversation,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { proposePrinciple } from './proposals';
@@ -205,7 +206,10 @@ describe('provenance', () => {
         insertShape(ctx, project.id, { title: 'Density', origin: ShapeOrigin.App }),
       ).value;
       const session = store.write((ctx) =>
-        insertSession(ctx, { shapeId: shape.id, ...sessionFields }),
+        insertSession(ctx, {
+          conversationId: shapeConversation(ctx.tx, shape.id).id,
+          ...sessionFields,
+        }),
       ).value;
       expect(ProvenanceDto.parse(proposeFrom(session.id)).session).toEqual({
         id: session.id,

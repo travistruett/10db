@@ -68,6 +68,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     cwd: '/repo',
     prompt: 'Task: Alpha\nDo it.',
@@ -106,6 +107,7 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     cwd: '/repo',
     prompt: 'First message',

@@ -13,6 +13,7 @@ import {
   insertWorkstream,
   seedProject,
   type Store,
+  shapeConversation,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -80,7 +81,7 @@ function shapeToken(): { token: string; shapeId: string } {
   const { token, hash } = mintSessionToken();
   state.write((ctx) =>
     insertSession(ctx, {
-      shapeId: shape.id,
+      conversationId: shapeConversation(ctx.tx, shape.id).id,
       provider: 'claude',
       model: 'opus',
       effort: 'high',

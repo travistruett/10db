@@ -31,6 +31,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',

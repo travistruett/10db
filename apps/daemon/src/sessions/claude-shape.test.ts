@@ -45,6 +45,7 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     cwd: '/repo',
     prompt: 'First message',

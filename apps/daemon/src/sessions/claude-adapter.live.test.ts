@@ -83,6 +83,7 @@ async function liveSession(spec: {
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: {
       kind: 'lane',
@@ -159,6 +160,7 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',

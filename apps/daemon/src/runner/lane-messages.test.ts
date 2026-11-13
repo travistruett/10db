@@ -71,6 +71,7 @@ const say = (body: string, pictures = 0): TaskMessageRow => {
 function startSession(adapter: FakeAdapter): SessionHandle {
   const spec: LaneSessionSpec = {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: dir.path,

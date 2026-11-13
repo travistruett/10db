@@ -1,5 +1,5 @@
 import { ShapeMessageKind } from '@10db/contracts';
-import { getSession, insertInboxItem, listShapeMessages } from '@10db/db';
+import { getSession, insertInboxItem, listShapeMessages, sessionShapeId } from '@10db/db';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -344,6 +344,8 @@ describe('a conversation’s prepared session', () => {
         })
       ).behavior,
     ).toBe('deny');
-    expect(getSession(f.c.store.db, spec.sessionId).shapeId).toBe(f.c.shape.id);
+    expect(sessionShapeId(f.c.store.db, getSession(f.c.store.db, spec.sessionId))).toBe(
+      f.c.shape.id,
+    );
   });
 });

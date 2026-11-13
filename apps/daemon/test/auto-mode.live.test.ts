@@ -504,6 +504,7 @@ async function drive(spec: RowSpec, checkout: string, dataDir: string): Promise<
     const basePolicy = policyFor(spec.surface, checkout);
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: spec.policy ? spec.policy(basePolicy) : basePolicy,
       profile: {
         kind: 'lane',

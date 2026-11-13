@@ -414,6 +414,7 @@ async function runLane(opts: {
     let providerSessionId: string | null = null;
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy(),
       profile: {
         kind: 'lane',

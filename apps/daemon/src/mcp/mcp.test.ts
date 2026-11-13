@@ -38,6 +38,7 @@ import {
   transitionBatch,
   transitionWorkstream,
   type Store,
+  shapeConversation,
 } from '@10db/db';
 import {
   EventType,
@@ -368,7 +369,7 @@ describe('MCP auth', () => {
     const { token, hash } = mintSessionToken();
     state.write((ctx) =>
       insertSession(ctx, {
-        shapeId: shape.id,
+        conversationId: shapeConversation(ctx.tx, shape.id).id,
         provider: 'claude',
         model: 'opus',
         effort: 'high',
