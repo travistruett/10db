@@ -99,6 +99,7 @@ describe('Evidence', () => {
     const workstreamId = mintId('Workstream');
     const check = {
       entryKey: 'f1',
+      entryVersion: 1,
       anchorIndex: 0,
       result: 'moved' as const,
       line: 2001,

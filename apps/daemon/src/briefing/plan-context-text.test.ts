@@ -14,6 +14,7 @@ const CODE = {
 
 const check = (over: Partial<AnchorCheckDto>): AnchorCheckDto => ({
   entryKey: 'f1',
+  entryVersion: 1,
   anchorIndex: 0,
   result: 'current',
   line: 18,

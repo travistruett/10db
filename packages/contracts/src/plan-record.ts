@@ -195,6 +195,8 @@ export type PlanAlternative = z.infer<typeof PlanAlternative>;
 /** One check of one anchor of a cited fact, by one workstream at the base it read. */
 export const AnchorCheckDto = z.object({
   entryKey: z.string(),
+  /** The version of the entry whose anchor was checked. */
+  entryVersion: z.int().min(1),
   anchorIndex: z.int().min(0),
   result: z.enum(AnchorResult),
   line: z.int().min(1).nullable(),

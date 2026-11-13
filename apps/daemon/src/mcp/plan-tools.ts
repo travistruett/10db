@@ -133,6 +133,7 @@ export function createPlanToolHandlers(
                   .filter((c) => c.entryKey === key && c.entryVersion === entry.version)
                   .map((c) => ({
                     entryKey: c.entryKey,
+                    entryVersion: c.entryVersion,
                     anchorIndex: c.anchorIndex,
                     result: c.result,
                     line: c.line,

@@ -1,5 +1,6 @@
 import {
   matchesSearch,
+  type AnchorCheckDto,
   NotFoundError,
   ShapeProposalBody,
   ShapeProposalState,
@@ -437,6 +438,17 @@ export function readPlanRevision(
   };
 }
 
+/**
+ * A task's newest check run, of each entry's current version only: one run at one base checks a fact
+ * again after a re-import versions it, and the old version's result says nothing about the new one.
+ */
+function currentChecks(db: DbReader, shapeId: ShapeId, taskId: TaskId): AnchorCheckDto[] {
+  const versions = new Map(listShapeEntries(db, shapeId).map((e) => [e.key, e.version]));
+  return latestAnchorChecksOfTask(db, taskId)
+    .filter((r) => versions.get(r.entryKey) === r.entryVersion)
+    .map(anchorCheckDto);
+}
+
 /** The section a task is pinned to, the Plan block its lane last got, and its newest checks. */
 export function readTaskPlanContext(db: DbReader, taskId: TaskId): TaskPlanContextDto {
   getTask(db, taskId);
@@ -454,6 +466,6 @@ export function readTaskPlanContext(db: DbReader, taskId: TaskId): TaskPlanConte
       revision: pin.revision,
     },
     packed,
-    checks: latestAnchorChecksOfTask(db, taskId).map(anchorCheckDto),
+    checks: pin === null ? [] : currentChecks(db, pin.shapeId, taskId),
   };
 }

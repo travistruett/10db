@@ -18,6 +18,7 @@ function context(over: Partial<TaskPlanContextDto>): TaskPlanContextDto {
     checks: [
       {
         entryKey: 'f1',
+        entryVersion: 1,
         anchorIndex: 0,
         result: 'moved',
         line: 2001,
@@ -28,6 +29,7 @@ function context(over: Partial<TaskPlanContextDto>): TaskPlanContextDto {
       },
       {
         entryKey: 'f2',
+        entryVersion: 1,
         anchorIndex: 0,
         result: 'current',
         line: 18,

@@ -17,6 +17,7 @@ const URL_ANCHOR: PlanAnchor = {
 
 const check = (over: Partial<AnchorCheckDto>): AnchorCheckDto => ({
   entryKey: 'f1',
+  entryVersion: 1,
   anchorIndex: 0,
   result: 'current',
   line: 10,
