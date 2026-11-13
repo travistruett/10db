@@ -4,6 +4,7 @@ import 'mantine-datatable/styles.css';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
+import { LinkConfirmHost } from './conversation/link-confirm';
 import type { ConnectionResolver } from './daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from './daemon/provider';
 import type { AppRouter } from './router';
@@ -26,6 +27,7 @@ export function App({ router, queryClient, resolve, intervals }: AppProps) {
       <QueryClientProvider client={queryClient}>
         <DaemonProvider resolve={resolve} {...(intervals ? { intervals } : {})}>
           <RouterProvider router={router} />
+          <LinkConfirmHost />
         </DaemonProvider>
       </QueryClientProvider>
     </MantineProvider>

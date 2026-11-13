@@ -33,7 +33,7 @@ describe("the desktop app's opener", () => {
     ]);
   });
 
-  it('names no http address; loopback pages open through the shell command that parses them', () => {
+  it('names no http address; loopback pages and agent links open through shell commands that parse them', () => {
     const capability = readRepoFile('apps/desktop/src-tauri/capabilities/default.json');
     const urls = Capability.parse(JSON.parse(capability)).permissions.flatMap((p) =>
       typeof p === 'object' ? (p.allow ?? []).map((a) => a.url) : [],
@@ -41,6 +41,10 @@ describe("the desktop app's opener", () => {
     expect(urls.filter((url) => !url.startsWith('https://'))).toEqual([]);
     expect(readRepoFile('apps/desktop/src-tauri/src/lib.rs')).toMatch(
       /generate_handler!\[[^\]]*open_app_page/,
+    );
+    // A link in agent text opens through the shell's command that confirms natively.
+    expect(readRepoFile('apps/desktop/src-tauri/src/lib.rs')).toMatch(
+      /generate_handler!\[[^\]]*open_web_link/,
     );
   });
 });
