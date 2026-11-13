@@ -39,9 +39,11 @@ import {
 import {
   findModelProfile,
   getAccount,
+  getAppSetting,
   getWorkstream,
   listAccountModels,
   listAccounts,
+  listKinds,
   patchAccount,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -118,6 +120,20 @@ describe('startDaemon', () => {
         ...QUIET,
       }),
     ).rejects.toThrow(AlreadyRunningError);
+  });
+
+  it('moves the settings made before the playbook once, after seeding the kinds', async () => {
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+    });
+    expect(getAppSetting(daemon.state.db, 'playbook.moved')).toBe(true);
+    expect(getAppSetting(daemon.state.db, 'playbook.moveReport')).toEqual([]);
+    expect(listKinds(daemon.state.db).map((k) => k.key)).toContain('security');
   });
 
   it('answers 409 for a second project on the same repository', async () => {

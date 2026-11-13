@@ -275,7 +275,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { playbookInputs, routingInputs, seedTeam } from '../team';
+import { moveToPlaybook, playbookInputs, routingInputs, seedTeam } from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -597,6 +597,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  // Settings made before the playbook move into it once, after the seeded kinds exist for the move to name.
+  state.write((ctx) => {
+    moveToPlaybook(ctx);
+  });
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
   state.write((ctx) => {
     addStockHazardCommands(ctx);

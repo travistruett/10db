@@ -1,4 +1,11 @@
-export { DEFAULT_FLOWS, DEFAULT_PROJECT_FLOW, IMPLEMENT_NEED, PLAN_NEED } from './catalogue';
+export {
+  DEFAULT_FLOWS,
+  DEFAULT_PERSONA_FOR,
+  DEFAULT_PROJECT_FLOW,
+  IMPLEMENT_NEED,
+  PLAN_NEED,
+} from './catalogue';
+export { ROLE_DEFAULT } from './role-defaults';
 export { rolePicks } from './role-picks';
 export { planSteps } from './plan-steps';
 export { chooseModel, type ChooseInput } from './choose-model';
