@@ -11,7 +11,7 @@ import { ROLES } from './role-labels';
 /** The switches a kind has on, as the short words the list shows. */
 function switchesOf(kind: KindDto): string[] {
   return [
-    kind.alwaysReviewed ? 'Reviewed' : null,
+    kind.alwaysReviewed ? 'Always reviewed' : null,
     kind.failsAtLimit ? 'Fails at limit' : null,
     kind.ownCopy ? 'Own copy' : null,
     kind.toInbox ? 'Inbox' : null,
@@ -59,7 +59,7 @@ export function KindsSection() {
       render: (kind) => (
         <Group gap={4}>
           {switchesOf(kind).map((word) => (
-            <Badge key={word} size="sm" variant="light" color="gray">
+            <Badge key={word} size="md" tt="none" fw={500} variant="light" color="gray">
               {word}
             </Badge>
           ))}

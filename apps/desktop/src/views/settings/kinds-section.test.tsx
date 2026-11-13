@@ -84,7 +84,7 @@ describe('the kinds list', () => {
     const security = within(await screen.findByRole('row', { name: /Security/ }));
     expect(security.getByText('security')).toBeTruthy();
     expect(security.getByText('Careful')).toBeTruthy();
-    expect(security.getByText('Reviewed')).toBeTruthy();
+    expect(security.getByText('Always reviewed')).toBeTruthy();
     expect(security.getByText('Inbox')).toBeTruthy();
     expect(security.getByText('Review')).toBeTruthy();
     const names = screen.getAllByRole('row').map((r) => r.textContent);
