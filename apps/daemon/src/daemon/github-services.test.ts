@@ -29,15 +29,24 @@ type Answer = string | null | GhError;
 
 function setup(initial: { gh: string | null; answer: Answer }) {
   const clock = new ManualClock();
-  const world = {
+  const world: {
+    gh: string | null;
+    answer: Answer;
+    probes: number;
+    hold: Promise<void> | null;
+    resolved: number;
+    children: FakeChild[];
+    events: GithubLoginEndedData[];
+    seenByEvent: GithubStatusDto[];
+  } = {
     gh: initial.gh,
     answer: initial.answer,
     probes: 0,
-    hold: null as Promise<void> | null,
+    hold: null,
     resolved: 0,
-    children: [] as FakeChild[],
-    events: [] as GithubLoginEndedData[],
-    seenByEvent: [] as GithubStatusDto[],
+    children: [],
+    events: [],
+    seenByEvent: [],
   };
   const spawn: GhLoginSpawn = () => {
     const child = new FakeChild();
