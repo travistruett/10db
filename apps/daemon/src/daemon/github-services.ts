@@ -42,16 +42,14 @@ export function createGithubServices(deps: {
   let probing: Promise<Probed> | null = null;
 
   /**
-   * No gh is not installed; a gh that never reached GitHub is unreachable, never signed out. Any other
-   * failure (a rejected token, an answer gh gave that 10db can't read) is signed out, so the card still
-   * offers Sign In.
+   * No gh is not installed; a rejected token arrives as SignedOut. Every other failure (no network, a
+   * timeout, a GitHub outage or rate limit) is unreachable, never signed out: gh may well be signed in.
    */
   function stateOfFailure(error: unknown): GithubState {
     if (error instanceof GhError) {
       if (error.kind === GhFailure.NotInstalled) return GithubState.NotInstalled;
-      if (error.kind === GhFailure.Unreachable || error.kind === GhFailure.Timeout)
-        return GithubState.Unreachable;
-      return GithubState.SignedOut;
+      if (error.kind === GhFailure.SignedOut) return GithubState.SignedOut;
+      return GithubState.Unreachable;
     }
     return GithubState.Unreachable;
   }

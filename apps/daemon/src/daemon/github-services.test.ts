@@ -102,10 +102,10 @@ describe('the GitHub status', () => {
       login: null,
     },
     {
-      name: 'any other gh failure leaves Sign In on offer',
+      name: 'a GitHub outage or rate limit is unreachable, never signed out',
       gh: '/gh',
-      answer: new GhError(GhFailure.Failed, 'gh api user failed (exit 1)'),
-      state: 'signed_out',
+      answer: new GhError(GhFailure.Failed, 'gh: Server Error (HTTP 502)'),
+      state: 'unreachable',
       login: null,
     },
     {
