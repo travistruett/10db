@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isModelTier, ModelTier } from './catalogue';
+import { InvalidError } from './errors';
 import { AccountId, ProjectId } from './ids';
 import { isSignInUrl } from './sign-in-url';
 import { Provider } from './states';
@@ -46,6 +47,15 @@ export function runsAgents(kind: SupportedAccountKind): kind is AgentAccountKind
 
 /** Why a project may not name an OpenRouter account as its account or backup. */
 export const OPENROUTER_CANT_RUN_AGENTS = "OpenRouter can't run agents yet";
+
+/**
+ * The kind of an account a project runs agents on. A project is never bound to an OpenRouter account
+ * (the store refuses it), so reaching one here is a broken invariant.
+ */
+export function agentKind(kind: SupportedAccountKind): AgentAccountKind {
+  if (!runsAgents(kind)) throw new InvalidError(OPENROUTER_CANT_RUN_AGENTS);
+  return kind;
+}
 
 /** The agent that runs a session on the kind. */
 export function providerOf(kind: AgentAccountKind): Provider {

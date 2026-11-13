@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  agentKind,
   AccountCardDetail,
   accountDisplayName,
   AccountInput,
@@ -218,6 +219,13 @@ describe('OpenRouter accounts', () => {
 
   it('names the refusal a project binding gets', () => {
     expect(OPENROUTER_CANT_RUN_AGENTS).toBe("OpenRouter can't run agents yet");
+  });
+});
+
+describe('agentKind', () => {
+  it('answers an agent kind as itself, and refuses OpenRouter', () => {
+    expect(agentKind('bedrock')).toBe('bedrock');
+    expect(() => agentKind('openrouter')).toThrow(OPENROUTER_CANT_RUN_AGENTS);
   });
 });
 
