@@ -22,11 +22,6 @@ export interface RouteChoice {
   readonly overBudget: boolean;
 }
 
-/** No profile can run a step: nothing measured is on offer to take the strongest of. */
-export class NoProfileError extends Error {
-  override name = 'NoProfileError';
-}
-
 /** No profile has a cost and an Intelligence score to compare on yet: there is nothing to route on. */
 export class UnmeasuredError extends Error {
   override name = 'UnmeasuredError';
@@ -62,18 +57,17 @@ const costNote = (p: ModelProfileDto, accountModels?: readonly AccountModelDto[]
 
 /** The cheapest measured profile at or above the step's need and floor, within the ceiling. */
 export function route(input: RouteInput): RouteChoice {
-  const candidates = measured(input.profiles);
-  if (candidates.length === 0)
-    throw new UnmeasuredError('No profile has an intelligence score yet');
+  const [first, ...others] = measured(input.profiles);
+  if (first === undefined) throw new UnmeasuredError('No profile has an intelligence score yet');
+  const candidates = [first, ...others];
   const minimum = input.need;
   const priced = input.accountModels;
   const able = candidates.filter((p) => (score(p) ?? 0) >= minimum).sort(preference(priced));
   const best = able.find((p) => withinCeiling(p, input.budgetCeiling, priced)) ?? able[0];
   if (!best) {
-    const strongest = [...candidates].sort(
-      (a, b) => (score(b) ?? 0) - (score(a) ?? 0) || preference(priced)(a, b),
-    )[0];
-    if (!strongest) throw new NoProfileError(`No profile reaches ${String(minimum)} intelligence`);
+    const strongerFirst = (a: ModelProfileDto, b: ModelProfileDto): number =>
+      (score(b) ?? 0) - (score(a) ?? 0) || preference(priced)(a, b);
+    const strongest = candidates.reduce((top, p) => (strongerFirst(p, top) < 0 ? p : top), first);
     return {
       profile: strongest,
       overBudget: !withinCeiling(strongest, input.budgetCeiling, priced),

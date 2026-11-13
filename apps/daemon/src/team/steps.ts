@@ -46,7 +46,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { NoProfileError, planSteps } from '../routing';
+import { planSteps } from '../routing';
 import { playbookInputs, routingInputs } from './routing-inputs';
 import {
   commitCoveredByRevert,
@@ -64,20 +64,15 @@ import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps }
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
   const task = getTask(db, taskId);
   const project = getProject(db, task.projectId);
-  try {
-    return planSteps({
-      rigor: task.effectiveRigor,
-      task,
-      taskKinds: task.kinds,
-      project,
-      personas: listPersonas(db),
-      ...playbookInputs(db, project.id),
-      ...routingInputs(db, project),
-    });
-  } catch (error) {
-    if (error instanceof NoProfileError) throw new InvalidError(error.message);
-    throw error;
-  }
+  return planSteps({
+    rigor: task.effectiveRigor,
+    task,
+    taskKinds: task.kinds,
+    project,
+    personas: listPersonas(db),
+    ...playbookInputs(db, project.id),
+    ...routingInputs(db, project),
+  });
 }
 
 /**
@@ -100,7 +95,7 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
       return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}: ${step?.reason ?? 'unknown'}`;
     });
     throw new InvalidError(
-      `${named.join('. ')}. Raise the ceiling, lower the need or pin a persona.`,
+      `${named.join('. ')}. Raise the ceiling or lower the need in Settings › Models.`,
     );
   }
   if (plan.steps.length === 0) throw new InvalidError('The plan resolved to no steps');

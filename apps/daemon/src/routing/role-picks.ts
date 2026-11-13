@@ -9,7 +9,6 @@ import { ROLE_NEED } from './catalogue';
 import { chooseModel, type ChooseInput } from './choose-model';
 import { costOnAccount } from './cost-on-account';
 import { resolveSteps, type PlaybookScopes } from './playbook';
-import { NoProfileError } from './router';
 
 /** What the picks read: what choosing a model reads for a project of the account, and the live personas. */
 export interface RolePicksInput extends Pick<
@@ -54,44 +53,34 @@ export function rolePicks(input: RolePicksInput, rigor: Rigor = Rigor.Standard):
   return Object.values(StepRole).map((role): RolePickDto => {
     const step = resolved.find((s) => s.role === role);
     const need = step?.need ?? ROLE_NEED[role];
-    try {
-      const choice = chooseModel({
-        def: { role, need },
-        requirements: step?.requirements ?? [{ kind: 'automatic' }],
-        effort: step?.effort ?? null,
-        fallback: step?.fallback ?? null,
-        pinned: false,
-        task: { modelSetting: null, effortPin: null },
-        project: { budgetCeiling: null },
-        profiles: input.profiles,
-        tierOverrides: input.tierOverrides,
-        ...(input.accountModels === undefined ? {} : { accountModels: input.accountModels }),
-        byScore: true,
-      });
-      if (choice.profile !== null)
-        return {
-          role,
-          need,
-          ...profileFields(choice.profile, input.accountModels),
-          reason: choice.reason,
-        };
-      // A tier name means the account offers nothing for it; an override the account serves without a profile
-      // is launched as named, with nothing measured.
+    const choice = chooseModel({
+      def: { role, need },
+      requirements: step?.requirements ?? [{ kind: 'automatic' }],
+      effort: step?.effort ?? null,
+      fallback: step?.fallback ?? null,
+      pinned: false,
+      task: { modelSetting: null, effortPin: null },
+      project: { budgetCeiling: null },
+      profiles: input.profiles,
+      tierOverrides: input.tierOverrides,
+      ...(input.accountModels === undefined ? {} : { accountModels: input.accountModels }),
+      byScore: true,
+    });
+    if (choice.profile !== null)
       return {
         role,
         need,
-        ...nothing,
-        ...(isModelTier(choice.model) ? {} : { model: choice.model, effort: choice.effort }),
+        ...profileFields(choice.profile, input.accountModels),
         reason: choice.reason,
       };
-    } catch (error) {
-      if (!(error instanceof NoProfileError)) throw error;
-      return {
-        role,
-        need,
-        ...nothing,
-        reason: `${error.message}; a task planned on this account is refused here`,
-      };
-    }
+    // A tier name means the account offers nothing for it; an override the account serves without a profile
+    // is launched as named, with nothing measured.
+    return {
+      role,
+      need,
+      ...nothing,
+      ...(isModelTier(choice.model) ? {} : { model: choice.model, effort: choice.effort }),
+      reason: choice.reason,
+    };
   });
 }
