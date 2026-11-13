@@ -124,7 +124,10 @@ describe('a planning effort through 10db', () => {
       );
       expect(revision.body).toBe(read(file));
     }
+    // The fixture keeps a CRLF line and two trailing spaces, which an editor must not normalize.
     expect(read('plan.md')).toContain('six digits.\r\n');
+    expect(read('plan.md')).toContain('Sharing.  \nThe device leaves at once.\n');
+    expect(read('plan-2.md')).toContain('Sharing.  \nThe device leaves at once, its session');
     const reviews = await api().get(`/shapes/${shapeId}/record/reviews`, PlanRecordPage);
     expect(reviews.rows).toMatchObject([
       {
@@ -132,13 +135,18 @@ describe('a planning effort through 10db', () => {
         round: 1,
         reviewer: 'fable plan reviewer',
         severityText: 'blocking, security',
+        text: 'A revoked device keeps its session',
         outcomeText: 'partial: the session column is a stub',
+        how: null,
+        howDetail: null,
         state: 'open',
       },
       {
         key: 'plan-r1-2',
         severityText: 'follow-up',
+        text: "The code's lifetime is not named",
         outcomeText: 'fixed: ten minutes, in Calls made',
+        how: 'Named it',
         howDetail: 'Calls made now says a code lasts ten minutes.',
       },
     ]);
@@ -174,6 +182,7 @@ describe('a planning effort through 10db', () => {
     expect(textOf('task-2')).not.toContain('Review Focus');
     expect(textOf('task-2')).not.toContain('Calls made');
     expect(textOf('task-1')).toContain('# not a heading');
+    expect(textOf('review-focus')).toMatch(/^## Review Focus\n/);
     expect(textOf('review-focus')).not.toContain('### Task 2');
     expect(plan?.sections.map((s) => s.slug)).not.toContain('not-a-heading');
 
@@ -221,9 +230,16 @@ describe('a planning effort through 10db', () => {
       return ctx.packed === null ? undefined : ctx;
     }, 20_000);
     const prompt = adapter.prompts[0]?.prompt ?? '';
-    expect(prompt).toContain(context.packed?.text);
+    // The block the drawer shows is the one the prompt carried, whole.
+    const start = prompt.indexOf('Plan context (from Plan');
+    expect(prompt.slice(start, prompt.indexOf('\n\nYour claims:', start))).toBe(
+      context.packed?.text,
+    );
+    // The task is pinned to revision 1, so its lane reads that revision's section, not revision 2's.
     const section = textOf('task-2');
     expect(prompt).toContain(`Your section (plan#task-2):\n${section}`);
+    expect(prompt).not.toContain('its session with it');
+    expect(context.checks).toMatchObject([{ entryKey: 'f1', result: 'moved', line: 6 }]);
     for (const shared of ['starting-point', 'global-constraints'])
       expect(prompt.split(textOf(shared)).length - 1).toBe(1);
     expect(prompt).toContain(

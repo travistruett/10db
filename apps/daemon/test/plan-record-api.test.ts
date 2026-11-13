@@ -1,10 +1,12 @@
 import {
+  DecisionId,
   PlanDocumentRevisionDto,
   PlanImportResult,
   PlanRecordDto,
   PlanRecordPage,
   ProjectDto,
   ShapeOfDto,
+  ShapeProposalId,
   ShapeViewDto,
   TaskDto,
   TaskPlanContextDto,
@@ -199,8 +201,11 @@ describe('a Plan record through the daemon', () => {
     const projectId = await seed();
     const shapeId = await importJson(projectId, bundleJson(projectId));
     const questions = await page(shapeId, 'questions');
-    expect(questions.rows).toMatchObject([
+    if (questions.list !== 'questions') throw new Error('not questions');
+    expect(questions.rows.every((r) => ShapeProposalId.safeParse(r.id).success)).toBe(true);
+    expect(questions.rows.map((r) => ({ ...r, id: 'checked above' }))).toEqual([
       {
+        id: 'checked above',
         key: 'q1',
         source: 'question',
         text: 'Which port?',
@@ -210,6 +215,7 @@ describe('a Plan record through the daemon', () => {
         state: 'pending',
       },
       {
+        id: 'checked above',
         key: 'd2',
         source: 'decision',
         text: 'Which port for pairing?',
@@ -260,8 +266,12 @@ describe('a Plan record through the daemon', () => {
       checks: [{ taskId, results: [{ entryKey: 'f1', anchorIndex: 0, result: 'changed' }] }],
     });
     const decisions = await page(shapeId, 'decisions');
-    expect(decisions.rows[0]).toMatchObject({ key: 'd1', state: 'accepted' });
-    expect(decisions.rows[0] && 'decisionId' in decisions.rows[0]).toBe(true);
+    const d1 = decisions.rows[0];
+    expect(d1).toMatchObject({ key: 'd1', state: 'accepted' });
+    // d1 is lasting, so Convert wrote it to Knowledge.
+    expect(DecisionId.safeParse(d1 && 'decisionId' in d1 ? d1.decisionId : null).success).toBe(
+      true,
+    );
   });
 
   it('a task plan context shows what the lane got after a fact and a finding changed', async () => {

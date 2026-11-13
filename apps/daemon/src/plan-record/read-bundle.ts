@@ -46,13 +46,17 @@ async function readCapped(
   budget: number,
 ): Promise<
   | { ok: true; bytes: Buffer }
-  | { ok: false; why: 'not_file' | 'hard_link' | 'moved' | 'changed' | 'too_big' | 'unreadable' }
+  | {
+      ok: false;
+      why: 'missing' | 'not_file' | 'hard_link' | 'moved' | 'changed' | 'too_big' | 'unreadable';
+    }
 > {
   let handle;
   try {
     handle = await open(realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch {
-    return { ok: false, why: 'not_file' };
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : null;
+    return { ok: false, why: code === 'ENOENT' ? 'missing' : 'not_file' };
   }
   try {
     const stat = await handle.stat();
@@ -91,6 +95,7 @@ function decode(bytes: Buffer): string | null {
 }
 
 const WHY = {
+  missing: 'does not exist',
   not_file: 'is not a regular file',
   hard_link: 'has another hard link, so where it lies cannot be told; copy it instead',
   moved: 'was moved or linked elsewhere while it was opened',

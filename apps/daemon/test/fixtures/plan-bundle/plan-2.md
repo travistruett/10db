@@ -29,4 +29,4 @@ Pair it over the tailnet, by a code.
 ### Task 2: Revoke a device
 
 Revoke it from Settings › Sharing.  
-The device leaves at once.
+The device leaves at once, its session with it.
