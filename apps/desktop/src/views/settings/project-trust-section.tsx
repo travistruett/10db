@@ -127,9 +127,7 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
           )}
           {preview.leftOut.length === 0 ? null : (
             <>
-              <Text size="sm" fw={500}>
-                Left out
-              </Text>
+              <Title order={5}>Left out</Title>
               <FoldedList title="Left out" count={preview.leftOut.length}>
                 <List size="sm">
                   {preview.leftOut.map((item) => (

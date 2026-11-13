@@ -103,6 +103,9 @@ describe('Settings › project Trust', () => {
       within(list).getByRole('button', { name: 'Hide Comes along' }).getAttribute('aria-expanded'),
     ).toBe('true');
 
+    // Both lists are headed the same way.
+    expect(within(list).getByRole('heading', { name: 'Comes along', level: 5 })).toBeTruthy();
+    expect(within(list).getByRole('heading', { name: 'Left out', level: 5 })).toBeTruthy();
     fireEvent.click(within(list).getByRole('button', { name: 'Show Left out' }));
     expect(within(list).getByText('~/.claude/skills/lane')).toBeTruthy();
     expect(within(list).getByText('it lies in, or holds, a folder a lane can write')).toBeTruthy();
