@@ -43,15 +43,20 @@ import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import {
   CompletionError,
   type SessionEvent,
-  type SessionSpec,
-  type ShapeSessionSpec,
+  type ExploreProfile,
+  type ExploreSessionSpec,
+  type LaneProfile,
+  type LaneSessionSpec,
 } from './types';
 
-function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
+type LaneOverrides = Partial<Omit<LaneSessionSpec, 'profile'>> & {
+  readonly profile?: Partial<Omit<LaneProfile, 'kind'>>;
+};
+
+function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
+  const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
     cwd: '/repo',
     prompt: 'Task: Alpha\nDo it.',
     model: 'claude-sonnet-5-5',
@@ -65,21 +70,31 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
       identity: 'builder@example.com',
     },
     projectMcpServers: {},
-    allowedTools: ['Read', 'mcp__10db__*'],
+    sandbox: null,
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'allow' }),
-    ...overrides,
+    ...core,
+    profile: {
+      kind: 'lane',
+      workstreamId: mintId('Workstream'),
+      sequence: 1,
+      allowedTools: ['Read', 'mcp__10db__*'],
+      ...profile,
+    },
   };
 }
 
-/** A Plan conversation's spec, as `startShape` takes it. */
-function shapeSpec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
+type ExploreOverrides = Partial<Omit<ExploreSessionSpec, 'profile'>> & {
+  readonly profile?: Partial<Omit<ExploreProfile, 'kind'>>;
+};
+
+/** A Plan conversation's spec, as `open` takes it with the explore profile. */
+function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
+  const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
-    shapeId: mintId('Shape'),
     cwd: '/repo',
-    systemPrompt: 'You are Shape.',
     prompt: 'First message',
     model: 'claude-sonnet-5-5',
     effort: 'high',
@@ -91,16 +106,22 @@ function shapeSpec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec 
       kind: 'claude_subscription',
       identity: 'builder@example.com',
     },
-    tools: ['Read', 'Grep', 'Glob', 'Agent'],
-    allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
-    disallowedTools: ['Edit', 'Bash'],
-    agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
     sandbox: null,
     projectMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'not in this test' }),
-    ...overrides,
+    ...core,
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are Shape.',
+      tools: ['Read', 'Grep', 'Glob', 'Agent'],
+      allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
+      disallowedTools: ['Edit', 'Bash'],
+      agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
+      ...profile,
+    },
   };
 }
 
@@ -453,7 +474,7 @@ describe('buildQueryOptions', () => {
     },
   );
 
-  it.each<[string, Partial<SessionSpec>]>([
+  it.each<[string, LaneOverrides]>([
     ['an unsandboxed', {}],
     ['a sandboxed', { sandbox: laneSandbox }],
   ])('runs %s session in default mode, with the guard and the broker wired', (_name, given) => {
@@ -499,7 +520,10 @@ describe('buildQueryOptions', () => {
     'runs a sandboxed session in the mode of %s, with the env scrub off only in auto mode',
     (_name, option, fromSpec, mode, scrub) => {
       const options = buildQueryOptions(
-        spec({ sandbox: laneSandbox, ...(fromSpec ? { lanePermissionMode: fromSpec } : {}) }),
+        spec({
+          sandbox: laneSandbox,
+          ...(fromSpec ? { profile: { lanePermissionMode: fromSpec } } : {}),
+        }),
         { ...deps, ...(option ? { lanePermissionMode: option } : {}) },
       );
       expect(options.permissionMode).toBe(mode);
@@ -614,7 +638,7 @@ describe('buildQueryOptions', () => {
     expect(Object.keys(hooks ?? {})).toEqual(['PreToolUse']);
   });
 
-  it.each<[string, Partial<SessionSpec>]>([
+  it.each<[string, LaneOverrides]>([
     ['null', { sandbox: null }],
     ['absent', {}],
   ])('builds exactly the unsandboxed options when the sandbox is %s', (_name, overrides) => {
@@ -655,7 +679,7 @@ describe('buildQueryOptions', () => {
   });
 
   it('bridges canUseTool to the spec with the tool use id and signal', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'deny', message: 'Parked', interrupt: true }),
     );
     const options = buildQueryOptions(spec({ canUseTool }), deps);
@@ -676,7 +700,7 @@ describe('buildQueryOptions', () => {
   });
 
   it('hands canUseTool an MCP tool call the tool names the session lists as of the call, and no other call', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     let listed: string[] = ['Bash'];
@@ -699,7 +723,7 @@ describe('buildQueryOptions', () => {
   });
 
   it('hands canUseTool the directory the hook gave for the same call', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const options = buildQueryOptions(
@@ -741,7 +765,7 @@ describe('buildQueryOptions', () => {
     ['a rule decision reason', { decisionReasonType: 'rule' }, false],
     ['an interaction flag of false', { requiresUserInteraction: false }, false],
   ])('marks the request escalated for %s: %s', async (_name, extra, expected) => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const options = buildQueryOptions(spec({ canUseTool }), deps);
@@ -754,7 +778,7 @@ describe('buildQueryOptions', () => {
   });
 
   it('denies tools without asking the spec when billing was not verified', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const preToolUse = vi.fn(() => ({ decision: 'allow' as const }));
@@ -903,7 +927,7 @@ describe('createClaudeAdapter', () => {
         resultMessage({ input: 100, output: 10, costUsd: 0.01 }),
       ],
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events[0]).toEqual({ type: 'started', providerSessionId: PROVIDER_SESSION, pid: null });
     expect(events).toContainEqual({ type: 'activity', kind: 'text', summary: 'Looking.' });
     expect(events).toContainEqual({
@@ -936,7 +960,7 @@ describe('createClaudeAdapter', () => {
       messages: [initMessage(), assistantMessage([textBlock('hi')])],
       then: 'hang',
     });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const seen: SessionEvent[] = [];
     const done = (async () => {
       for await (const event of handle.events) {
@@ -962,7 +986,7 @@ describe('createClaudeAdapter', () => {
         resultMessage({ input: 1, output: 1, costUsd: 0 }),
       ],
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.filter((e) => e.type === 'started')).toHaveLength(1);
   });
 
@@ -1007,7 +1031,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       allowUnsandboxed: true,
     });
-    await collect(adapter.start(spec()).events);
+    await collect(adapter.open(spec()).events);
     expect(lines.filter((l) => l['msg'] === 'claude session mcp')).toEqual([
       expect.objectContaining({ mcpServers: servers }),
     ]);
@@ -1033,7 +1057,7 @@ describe('createClaudeAdapter', () => {
         resultMessage({ input: 50, output: 5, costUsd: 0.015 }),
       ],
     });
-    const turns = (await collect(adapter.start(spec()).events)).filter(
+    const turns = (await collect(adapter.open(spec()).events)).filter(
       (e) => e.type === 'turn_complete',
     );
     expect(turns).toEqual([
@@ -1062,7 +1086,7 @@ describe('createClaudeAdapter', () => {
         resultMessage({ input: 1, output: 1, costUsd: 0.01 }),
       ],
     });
-    const turns = (await collect(adapter.start(spec()).events)).filter(
+    const turns = (await collect(adapter.open(spec()).events)).filter(
       (e) => e.type === 'turn_complete',
     );
     expect(turns.map((t) => t.text)).toEqual([
@@ -1078,7 +1102,7 @@ describe('createClaudeAdapter', () => {
       then: 'hang',
       account: { apiProvider: 'bedrock' },
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({
       type: 'ended',
@@ -1095,11 +1119,11 @@ describe('createClaudeAdapter', () => {
     const account = new Promise<AccountInfo>((resolve) => {
       answer = resolve;
     });
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const { adapter, record } = adapterFor({ messages: [], then: 'hang', account });
-    const done = collect(adapter.start(spec({ canUseTool })).events);
+    const done = collect(adapter.open(spec({ canUseTool })).events);
     const bridge = record.options?.canUseTool;
     if (!bridge) throw new Error('the adapter passed no canUseTool');
     let settled = false;
@@ -1126,7 +1150,7 @@ describe('createClaudeAdapter', () => {
 
   it('ends a subscription session whose project settings re-added an API key, and allows no tool afterwards', async () => {
     // A repo's committed .claude/settings.json can carry an env block; settingSources ['project'] loads it.
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const preToolUse = vi.fn(() => ({ decision: 'allow' as const }));
@@ -1134,7 +1158,7 @@ describe('createClaudeAdapter', () => {
       messages: [initMessage('ANTHROPIC_API_KEY')],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ canUseTool, preToolUse })).events);
+    const events = await collect(adapter.open(spec({ canUseTool, preToolUse })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({ type: 'ended', reason: 'account_refused' });
     expect(endMessage(events[0])).toContain('apiKeySource ANTHROPIC_API_KEY');
@@ -1148,11 +1172,11 @@ describe('createClaudeAdapter', () => {
   });
 
   it('holds a tool call that arrives after the preflight but before init, until the init check can answer', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const { adapter, record } = adapterFor({ messages: [], then: 'hang' });
-    const handle = adapter.start(spec({ canUseTool }));
+    const handle = adapter.open(spec({ canUseTool }));
     const done = collect(handle.events);
     await vi.waitFor(() => {
       expect(record.inputs).toHaveLength(1);
@@ -1273,7 +1297,7 @@ describe('createClaudeAdapter', () => {
           check,
         );
         const done = collect(
-          adapter.start(spec({ account: account('claude_subscription') })).events,
+          adapter.open(spec({ account: account('claude_subscription') })).events,
         );
         await pastWaits(clock, record, starts);
         const events = await done;
@@ -1303,7 +1327,7 @@ describe('createClaudeAdapter', () => {
           clock,
           check,
         );
-        const done = collect(adapter.start(spec({ account: account('anthropic_api_key') })).events);
+        const done = collect(adapter.open(spec({ account: account('anthropic_api_key') })).events);
         await pastWaits(clock, record, 3);
         const events = await done;
         expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
@@ -1328,7 +1352,7 @@ describe('createClaudeAdapter', () => {
         clock,
         check,
       );
-      const done = collect(adapter.start(spec()).events);
+      const done = collect(adapter.open(spec()).events);
       await pastWaits(clock, record, 2);
       await pastBackoff(clock, record, 3);
       const events = await done;
@@ -1346,7 +1370,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec());
+      const handle = adapter.open(spec());
       const done = collect(handle.events);
       await vi.waitFor(() => {
         expect(record.queries).toBe(1);
@@ -1386,7 +1410,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec());
+      const handle = adapter.open(spec());
       const done = collect(handle.events);
       await vi.waitFor(() => {
         expect(record.queries).toBe(1);
@@ -1410,7 +1434,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec());
+      const handle = adapter.open(spec());
       const done = collect(handle.events);
       await vi.waitFor(() => {
         expect(record.queries).toBe(1);
@@ -1433,7 +1457,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const done = collect(adapter.start(spec()).events);
+      const done = collect(adapter.open(spec()).events);
       await pastWaits(clock, record, 1);
       await pastBackoff(clock, record, 2);
       const events = await done;
@@ -1456,7 +1480,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const done = collect(adapter.start(spec()).events);
+      const done = collect(adapter.open(spec()).events);
       await pastBackoff(clock, record, 2);
       const events = await done;
       expect(record.queries).toBe(2);
@@ -1464,7 +1488,7 @@ describe('createClaudeAdapter', () => {
       const signedIn = adapterFor({
         messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
       });
-      await collect(signedIn.adapter.start(spec()).events);
+      await collect(signedIn.adapter.open(spec()).events);
       expect(signedIn.record.queries).toBe(1);
     });
 
@@ -1504,7 +1528,7 @@ describe('createClaudeAdapter', () => {
             clock,
             check,
           );
-          const done = collect(adapter.start(spec()).events);
+          const done = collect(adapter.open(spec()).events);
           await pastBackoff(clock, record, 2);
           await pastBackoff(clock, record, 3);
           const events = await done;
@@ -1522,7 +1546,7 @@ describe('createClaudeAdapter', () => {
           const check = slowCheck('signed_in');
           const { adapter, record } = adapterFor(exited(then), 1_000, clock, check);
           const done = collect(
-            adapter.start(spec({ account: account('claude_subscription') })).events,
+            adapter.open(spec({ account: account('claude_subscription') })).events,
           );
           await pastBackoff(clock, record, 2);
           await pastBackoff(clock, record, 3);
@@ -1552,7 +1576,7 @@ describe('createClaudeAdapter', () => {
             slowCheck('signed_out'),
           );
           const events = await collect(
-            adapter.start(spec({ account: account('claude_subscription') })).events,
+            adapter.open(spec({ account: account('claude_subscription') })).events,
           );
           expect(record.queries).toBe(1);
           expect(events.map((e) => e.type)).toEqual(['ended']);
@@ -1575,7 +1599,7 @@ describe('createClaudeAdapter', () => {
             }),
         );
         const { adapter, record } = adapterFor(exited('end'), 1_000, clock, check);
-        const handle = adapter.start(spec());
+        const handle = adapter.open(spec());
         const done = collect(handle.events);
         await vi.waitFor(() => {
           expect(check).toHaveBeenCalledTimes(1);
@@ -1609,7 +1633,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const done = collect(adapter.start(spec()).events);
+      const done = collect(adapter.open(spec()).events);
       await pastWaits(clock, record, 3);
       const [ended] = await done;
       const message = endMessage(ended);
@@ -1631,7 +1655,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec());
+      const handle = adapter.open(spec());
       const done = collect(handle.events);
       handle.send('also: mind the lint');
       await pastWaits(clock, record, 1);
@@ -1657,7 +1681,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec());
+      const handle = adapter.open(spec());
       const done = collect(handle.events);
       await vi.waitFor(() => {
         expect(record.queries).toBe(1);
@@ -1676,7 +1700,7 @@ describe('createClaudeAdapter', () => {
       messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
     });
     await collect(
-      adapter.start(
+      adapter.open(
         spec({
           projectMcpServers: {
             mantine: { type: 'http', url: 'https://docs.example/mcp', headers: { A: 'b' } },
@@ -1693,7 +1717,7 @@ describe('createClaudeAdapter', () => {
 
   it('registers no servers when the billing preflight fails', async () => {
     const { adapter, record } = adapterFor({ messages: [], account: { apiProvider: 'bedrock' } });
-    await collect(adapter.start(spec()).events);
+    await collect(adapter.open(spec()).events);
     expect(record.mcpCalls).toEqual([]);
   });
 
@@ -1723,7 +1747,7 @@ describe('createClaudeAdapter', () => {
       allowUnsandboxed: true,
     });
     const events = await collect(
-      adapter.start(
+      adapter.open(
         spec({
           projectMcpServers: {
             mantine: {
@@ -1767,7 +1791,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       allowUnsandboxed: true,
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
     expect(JSON.stringify(lines)).not.toContain('secret-value');
     expect(JSON.stringify(events)).not.toContain('secret-value');
@@ -1779,7 +1803,7 @@ describe('createClaudeAdapter', () => {
       then: 'hang',
       mcpSet: 'reject',
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({ type: 'ended', reason: 'error' });
     expect(endMessage(events[0])).toContain('No prompt was sent');
@@ -1793,7 +1817,7 @@ describe('createClaudeAdapter', () => {
     });
 
     /** A running session in a temp repo, past its preflight, on a clock the test drives. */
-    async function runningSession(overrides: Partial<SessionSpec> = {}) {
+    async function runningSession(overrides: LaneOverrides = {}) {
       const repo = tempDir('adapter-recheck');
       const clock = new ManualClock();
       const { adapter, record } = adapterFor(
@@ -1801,7 +1825,7 @@ describe('createClaudeAdapter', () => {
         1_000,
         clock,
       );
-      const handle = adapter.start(spec({ cwd: repo.path, ...overrides }));
+      const handle = adapter.open(spec({ cwd: repo.path, ...overrides }));
       const done = collect(handle.events);
       await vi.waitFor(() => {
         expect(record.inputs).toHaveLength(1);
@@ -1870,7 +1894,7 @@ describe('createClaudeAdapter', () => {
     );
 
     it('denies every tool from the moment a re-check fails, before the process is closed', async () => {
-      const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
         Promise.resolve({ behavior: 'allow' }),
       );
       const preToolUse = vi.fn(() => ({ decision: 'allow' as const }));
@@ -1934,9 +1958,9 @@ describe('createClaudeAdapter', () => {
     });
 
     it('denies a tool whose permission answer was still pending when a re-check failed', async () => {
-      let answer: (decision: Awaited<ReturnType<SessionSpec['canUseTool']>>) => void = () =>
+      let answer: (decision: Awaited<ReturnType<LaneSessionSpec['canUseTool']>>) => void = () =>
         undefined;
-      const canUseTool = vi.fn<SessionSpec['canUseTool']>(
+      const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(
         () =>
           new Promise((resolve) => {
             answer = resolve;
@@ -1975,7 +1999,7 @@ describe('createClaudeAdapter', () => {
         clock,
       );
       try {
-        const done = collect(adapter.start(spec({ cwd: repo.path })).events);
+        const done = collect(adapter.open(spec({ cwd: repo.path })).events);
         await vi.waitFor(() => {
           expect(record.mcpCalls).toHaveLength(1);
         });
@@ -2038,7 +2062,7 @@ describe('createClaudeAdapter', () => {
           JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://attacker.example' } }),
         );
         const { adapter, record } = adapterFor({ messages: [initMessage()], then: 'hang' });
-        const events = await collect(adapter.start(spec({ cwd: repo.path })).events);
+        const events = await collect(adapter.open(spec({ cwd: repo.path })).events);
         expect(events.map((e) => e.type)).toEqual(['ended']);
         expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
         expect(endMessage(events[0])).toMatch(
@@ -2065,7 +2089,7 @@ describe('createClaudeAdapter', () => {
         messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
       });
       const events = await collect(
-        adapter.start(spec({ cwd: repo.path, sandbox: laneSandbox })).events,
+        adapter.open(spec({ cwd: repo.path, sandbox: laneSandbox })).events,
       );
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
       expect(record.options?.settingSources).toEqual([]);
@@ -2088,7 +2112,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       ...(lanePermissionMode === undefined ? {} : { lanePermissionMode }),
     });
-    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
     expect(fake.record.options?.permissionMode).toBe(expected);
   });
 
@@ -2108,7 +2132,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       lanePermissionMode: 'auto',
     });
-    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
     expect(fake.record.options?.permissionMode).toBe('auto');
     const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
     expect(billing.map((l) => l['permissionMode'])).toEqual(['default']);
@@ -2140,7 +2164,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       lanePermissionMode: 'auto',
     });
-    const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    const events = await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
     const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
     expect(billing.map((l) => l['permissionMode'])).toEqual(['auto']);
@@ -2166,7 +2190,7 @@ describe('createClaudeAdapter', () => {
       query: fake.query,
       lanePermissionMode: 'auto',
     });
-    const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    const events = await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
     const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
     expect(billing.map((l) => l['permissionMode'])).toEqual(['auto']);
@@ -2186,7 +2210,7 @@ describe('createClaudeAdapter', () => {
       clock,
     );
     const done = collect(
-      adapter.start(
+      adapter.open(
         spec({
           sandbox: laneSandbox,
           account: {
@@ -2216,7 +2240,7 @@ describe('createClaudeAdapter', () => {
       account: { apiProvider: 'bedrock' },
     });
     const events = await collect(
-      adapter.start(
+      adapter.open(
         spec({
           account: {
             accountId: mintId('Account'),
@@ -2233,7 +2257,7 @@ describe('createClaudeAdapter', () => {
 
   it('delivers send() to the input stream with next priority, never ahead of the prompt', async () => {
     const { adapter, record } = adapterFor({ messages: [initMessage()], then: 'hang' });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const done = collect(handle.events);
     // Sent while the billing preflight is still running: it must still arrive after the prompt.
     handle.send('Finish this step, then call write_handoff.');
@@ -2268,7 +2292,7 @@ describe('createClaudeAdapter', () => {
       type: 'image',
       source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0K' },
     };
-    const handle = adapter.start(spec({ promptUuid: first, images: [picture] }));
+    const handle = adapter.open(spec({ promptUuid: first, images: [picture] }));
     const done = collect(handle.events);
     handle.send('And the footer', [picture], later);
     await vi.waitFor(() => {
@@ -2294,7 +2318,7 @@ describe('createClaudeAdapter', () => {
 
   it('stops cleanly: interrupt, input ends, ended stopped, and stop resolves after ended', async () => {
     const { adapter, record } = adapterFor({ messages: [initMessage()], then: 'hang' });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const done = collect(handle.events);
     await handle.stop();
     const events = await done;
@@ -2310,7 +2334,7 @@ describe('createClaudeAdapter', () => {
       50,
       clock,
     );
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const done = collect(handle.events);
     await vi.waitFor(() => {
       expect(record.inputs).toHaveLength(1);
@@ -2332,7 +2356,7 @@ describe('createClaudeAdapter', () => {
       messages: [initMessage()],
       then: { throws: 'Claude Code process exited with code 1' },
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.at(-1)).toEqual({
       type: 'ended',
       reason: 'error',
@@ -2346,7 +2370,7 @@ describe('createClaudeAdapter', () => {
         messages: [],
         then: { throws: 'Error processing settings: ENOTDIR\n    at load (cli.js:1:1)' },
       });
-      const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+      const events = await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
       expect(events).toEqual([
         {
           type: 'ended',
@@ -2380,7 +2404,7 @@ describe('createClaudeAdapter', () => {
           clock,
         );
         const done = collect(
-          adapter.start(
+          adapter.open(
             spec({
               sandbox: laneSandbox,
               account: { accountId: mintId('Account'), label: 'Claude plan', kind, identity },
@@ -2404,7 +2428,7 @@ describe('createClaudeAdapter', () => {
         messages: [],
         then: { throws: 'Error processing settings: ENOTDIR' },
       });
-      const events = await collect(adapter.start(spec()).events);
+      const events = await collect(adapter.open(spec()).events);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
     });
 
@@ -2413,7 +2437,7 @@ describe('createClaudeAdapter', () => {
         messages: [initMessage()],
         then: { throws: 'Error processing settings: ENOTDIR' },
       });
-      const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+      const events = await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
     });
 
@@ -2422,7 +2446,7 @@ describe('createClaudeAdapter', () => {
         messages: [],
         then: { throws: 'Claude Code process exited with code 1' },
       });
-      const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+      const events = await collect(adapter.open(spec({ sandbox: laneSandbox })).events);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
     });
   });
@@ -2435,7 +2459,7 @@ describe('createClaudeAdapter', () => {
         assistantMessage([], 'rate_limit'),
       ],
     });
-    const limits = (await collect(adapter.start(spec()).events)).filter(
+    const limits = (await collect(adapter.open(spec()).events)).filter(
       (e) => e.type === 'rate_limit',
     );
     expect(limits.at(-1)).toEqual({
@@ -2451,7 +2475,7 @@ describe('createClaudeAdapter', () => {
     const { adapter } = adapterFor({
       messages: [initMessage(), rateLimitEvent({ status: 'rejected', resetsAt: 1_791_000_000 })],
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events).toContainEqual({
       type: 'rate_limit',
       status: 'rejected',
@@ -2464,7 +2488,7 @@ describe('createClaudeAdapter', () => {
 
   it('ignores send() and stop() after the session ended', async () => {
     const { adapter, record } = adapterFor({ messages: [initMessage()] });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     await collect(handle.events);
     handle.send('late');
     await handle.stop();
@@ -2491,10 +2515,10 @@ describe('createClaudeAdapter', () => {
       allowUnsandboxed: true,
     });
     const lane = spec();
-    await collect(adapter.start(lane).events);
+    await collect(adapter.open(lane).events);
     const refused = logs.lines().filter((l) => l['msg'] === 'claude session refused');
     expect(refused).toHaveLength(1);
-    expect(refused[0]?.['workstreamId']).toBe(lane.workstreamId);
+    expect(refused[0]?.['workstreamId']).toBe(lane.profile.workstreamId);
     expect(refused[0]).not.toHaveProperty('shapeId');
   });
 
@@ -2505,7 +2529,7 @@ describe('createClaudeAdapter', () => {
       1_000,
       clock,
     );
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const done = collect(handle.events);
     expect(await handle.interrupt()).toBeNull();
     expect(record.interrupts).toBe(0);
@@ -2556,7 +2580,7 @@ describe('a Plan session through the adapter', () => {
       clock,
       signInCheck,
     );
-    const done = collect(adapter.startShape(shapeSpec()).events);
+    const done = collect(adapter.open(shapeSpec()).events);
     clock.advance(30_000);
     expect(await lastOf(done)).toEqual({
       type: 'ended',
@@ -2573,7 +2597,7 @@ describe('a Plan session through the adapter', () => {
       then: 'hang',
       account: otherAccount,
     });
-    const ended = await lastOf(collect(adapter.startShape(shapeSpec()).events));
+    const ended = await lastOf(collect(adapter.open(shapeSpec()).events));
     expect(ended).toMatchObject({ type: 'ended', reason: 'account_refused' });
     expect(endMessage(ended)).toMatch(/No message was sent\.$/);
   });
@@ -2583,7 +2607,7 @@ describe('a Plan session through the adapter', () => {
       messages: [initMessage('none', undefined, 'claude-opus-5-5')],
       then: 'hang',
     });
-    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+    expect(await lastOf(collect(adapter.open(shapeSpec()).events))).toEqual({
       type: 'ended',
       reason: 'billing_refused',
       message:
@@ -2593,7 +2617,7 @@ describe('a Plan session through the adapter', () => {
 
   it('ends with Plan’s words when 10db’s tools fail to register', async () => {
     const { adapter } = adapterFor({ messages: [initMessage()], then: 'hang', mcpSet: 'reject' });
-    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+    expect(await lastOf(collect(adapter.open(shapeSpec()).events))).toEqual({
       type: 'ended',
       reason: 'error',
       message: 'Claude Code could not register 10db’s tools. No message was sent.',
@@ -2604,7 +2628,7 @@ describe('a Plan session through the adapter', () => {
     const { adapter } = adapterFor({
       messages: [initMessage(), rateLimitEvent({ status: 'rejected', resetsAt: 1_791_000_000 })],
     });
-    const events = await collect(adapter.startShape(shapeSpec()).events);
+    const events = await collect(adapter.open(shapeSpec()).events);
     expect(events).toContainEqual({
       type: 'rate_limit',
       status: 'rejected',
@@ -2622,7 +2646,7 @@ describe('a Plan session through the adapter', () => {
       1_000,
       clock,
     );
-    const handle = adapter.startShape(shapeSpec());
+    const handle = adapter.open(shapeSpec());
     const done = collect(handle.events);
     expect(await handle.interrupt()).toBeNull();
     expect(record.interrupts).toBe(1);
@@ -2637,7 +2661,7 @@ describe('a Plan session through the adapter', () => {
       1_000,
       clock,
     );
-    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+    expect(await lastOf(collect(adapter.open(shapeSpec()).events))).toEqual({
       type: 'ended',
       reason: 'completed',
       message: null,
@@ -2650,19 +2674,19 @@ describe('a Plan session through the adapter', () => {
       then: { throws: 'Error processing settings: sandbox' },
     });
     expect(
-      await lastOf(collect(adapter.startShape(shapeSpec({ sandbox: laneSandbox })).events)),
+      await lastOf(collect(adapter.open(shapeSpec({ sandbox: laneSandbox })).events)),
     ).toMatchObject({ type: 'ended', reason: 'error' });
   });
 
   it('hands canUseTool escalated: false, whatever the classifier marked', async () => {
-    const asked = vi.fn<ShapeSessionSpec['canUseTool']>(() =>
+    const asked = vi.fn<ExploreSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const { adapter, record } = adapterFor({
       messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
       then: 'hang',
     });
-    const handle = adapter.startShape(shapeSpec({ canUseTool: asked }));
+    const handle = adapter.open(shapeSpec({ canUseTool: asked }));
     const seen: SessionEvent[] = [];
     for await (const event of handle.events) {
       seen.push(event);
@@ -2691,7 +2715,7 @@ describe('a Plan session through the adapter', () => {
       messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
       stderr: '',
     });
-    await collect(adapter.startShape(shapeSpec()).events);
+    await collect(adapter.open(shapeSpec()).events);
     await vi.waitFor(() => {
       expect(record.printed).toBe(1);
     });
@@ -2709,7 +2733,7 @@ describe('a Plan session through the adapter', () => {
       logger: silentLogger,
       query: fake.query,
     });
-    const events = await collect(strict.startShape(shapeSpec({ sandbox: null })).events);
+    const events = await collect(strict.open(shapeSpec({ sandbox: null })).events);
     expect(events.map((e) => e.type)).toContain('turn_complete');
     expect(events.filter((e) => endMessage(e) === UNSANDBOXED_REFUSAL)).toEqual([]);
   });
@@ -2721,7 +2745,7 @@ describe('a Plan session through the adapter', () => {
       then: 'hang',
       account: account.promise,
     });
-    const handle = adapter.startShape(shapeSpec());
+    const handle = adapter.open(shapeSpec());
     const done = collect(handle.events);
     await handle.stop();
     account.resolve(builder);
@@ -2738,7 +2762,7 @@ describe('a Plan session through the adapter', () => {
       then: 'hang',
       account: account.promise,
     });
-    const handle = adapter.startShape(shapeSpec());
+    const handle = adapter.open(shapeSpec());
     const done = collect(handle.events);
     handle.send('later');
     account.resolve(builder);
@@ -2758,7 +2782,7 @@ describe('a Plan session through the adapter', () => {
       1_000,
       clock,
     );
-    const handle = adapter.startShape(shapeSpec());
+    const handle = adapter.open(shapeSpec());
     const done = collect(handle.events);
     const stopping = handle.stop();
     account.resolve(otherAccount);
@@ -2781,7 +2805,7 @@ describe('a Plan session through the adapter', () => {
         { ...initMessage(), session_id: 'prov-session-2' },
       ],
     });
-    const events = await collect(adapter.startShape(shapeSpec()).events);
+    const events = await collect(adapter.open(shapeSpec()).events);
     expect(events.flatMap((e) => (e.type === 'started' ? [e.providerSessionId] : []))).toEqual([
       PROVIDER_SESSION,
       'prov-session-2',
@@ -2797,7 +2821,7 @@ describe('a Plan session through the adapter', () => {
         resultMessage({ input: 1, output: 1, costUsd: 0 }),
       ],
     });
-    const events = await collect(adapter.startShape(shapeSpec()).events);
+    const events = await collect(adapter.open(shapeSpec()).events);
     const limits = events.filter((e) => e.type === 'rate_limit');
     expect(limits).toHaveLength(2);
     expect(limits[1]).toMatchObject({ resetsAt: null });
@@ -2815,12 +2839,12 @@ describe('a Plan session through the adapter', () => {
       logger: logs.logger,
       query: fake.query,
     });
-    await collect(adapter.startShape(shapeSpec()).events);
+    await collect(adapter.open(shapeSpec()).events);
     const refusedSpec = shapeSpec();
-    await collect(adapter.startShape(refusedSpec).events);
+    await collect(adapter.open(refusedSpec).events);
     const refused = logs.lines().filter((l) => l['msg'] === 'shape session refused');
     expect(refused).toHaveLength(1);
-    expect(refused[0]?.['shapeId']).toBe(refusedSpec.shapeId);
+    expect(refused[0]?.['shapeId']).toBe(refusedSpec.profile.shapeId);
     const laneLines = [
       'claude session billing',
       'claude session mcp',
@@ -2843,7 +2867,7 @@ describe('an unsandboxed session', () => {
       logger: silentLogger,
       query: fake.query,
     });
-    const refused = await collect(strict.start(spec()).events);
+    const refused = await collect(strict.open(spec()).events);
     expect(refused).toEqual([{ type: 'ended', reason: 'error', message: UNSANDBOXED_REFUSAL }]);
     expect(fake.record.options).toBeNull();
   });
@@ -2858,7 +2882,7 @@ describe('an unsandboxed session', () => {
       logger: silentLogger,
       query: fake.query,
     });
-    await collect(strict.start(spec({ sandbox: laneSandbox })).events);
+    await collect(strict.open(spec({ sandbox: laneSandbox })).events);
     expect(fake.record.options?.sandbox).toEqual(laneSandbox.settings);
   });
 });
@@ -2874,7 +2898,7 @@ describe('the account check', () => {
         email: 'other@example.com',
       },
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'ended',
@@ -2896,7 +2920,7 @@ describe('the account check', () => {
       },
     });
     const events = await collect(
-      adapter.start(
+      adapter.open(
         spec({
           account: {
             accountId: mintId('Account'),
@@ -2922,7 +2946,7 @@ describe('the account check', () => {
       ],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ model: 'claude-opus-5-5' })).events);
+    const events = await collect(adapter.open(spec({ model: 'claude-opus-5-5' })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({ reason: 'billing_refused' });
     expect(endMessage(events[0])).toMatch(
@@ -2938,7 +2962,7 @@ describe('the account check', () => {
         resultMessage({ input: 1, output: 1, costUsd: 0 }),
       ],
     });
-    const fine = await collect(ok.adapter.start(spec({ model: mapped })).events);
+    const fine = await collect(ok.adapter.open(spec({ model: mapped })).events);
     expect(fine.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
   });
 
@@ -2947,7 +2971,7 @@ describe('the account check', () => {
       messages: [initMessage(), assistantMessage([textBlock('')], 'authentication_failed')],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.at(-1)).toMatchObject({
       type: 'ended',
       reason: 'account_refused',
@@ -2963,7 +2987,7 @@ describe('the account check', () => {
       ],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ model: 'not-a-model' })).events);
+    const events = await collect(adapter.open(spec({ model: 'not-a-model' })).events);
     const ended = events.at(-1);
     expect(ended).toMatchObject({ type: 'ended', reason: 'model_refused', refusalBasis: 'error' });
     expect(ended).not.toHaveProperty('refusal');
@@ -2982,7 +3006,7 @@ describe('the account check', () => {
       ],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ model: launched })).events);
+    const events = await collect(adapter.open(spec({ model: launched })).events);
     expect(events.at(-1)).toMatchObject({
       type: 'ended',
       reason: 'model_refused',
@@ -3032,7 +3056,7 @@ describe('the account check', () => {
           resultMessage({ input: 1, output: 1, costUsd: 0 }),
         ],
       });
-      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      const events = await collect(adapter.open(spec({ model: LAUNCHED })).events);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason });
     });
 
@@ -3045,7 +3069,7 @@ describe('the account check', () => {
           resultMessage({ input: 1, output: 1, costUsd: 0 }),
         ],
       });
-      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      const events = await collect(adapter.open(spec({ model: LAUNCHED })).events);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
     });
   });
@@ -3057,7 +3081,7 @@ describe('the account check', () => {
         resultMessage({ input: 100, output: 10, cacheRead: 400, cacheCreation: 50, costUsd: 0.01 }),
       ],
     });
-    const turns = (await collect(adapter.start(spec()).events)).filter(
+    const turns = (await collect(adapter.open(spec()).events)).filter(
       (e) => e.type === 'turn_complete',
     );
     expect(turns).toEqual([

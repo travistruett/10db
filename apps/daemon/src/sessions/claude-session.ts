@@ -29,7 +29,6 @@ import {
   interruptReceipt,
   mapSdkMessage,
   modelRefusalOf,
-  toHookOutput,
   toSdkMcpServer,
   toShapeHookOutput,
   userMessage,
@@ -54,11 +53,11 @@ import {
   SessionEndReason,
   type LanePermissionMode,
   type SessionEvent,
+  type AgentSessionCore,
   type SessionHandle,
-  type SessionSpec,
   type ShapeImage,
-  type ShapeSessionHandle,
-  type ShapeSessionSpec,
+  type ExploreSessionSpec,
+  type LaneSessionSpec,
 } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
@@ -88,10 +87,10 @@ export type QueryFn = (params: {
 const LANE_PERMISSION_MODE: LanePermissionMode = 'auto';
 
 function laneMode(
-  spec: SessionSpec,
+  spec: LaneSessionSpec,
   deps: Pick<QueryDeps, 'lanePermissionMode'>,
 ): LanePermissionMode {
-  return deps.lanePermissionMode ?? spec.lanePermissionMode ?? LANE_PERMISSION_MODE;
+  return deps.lanePermissionMode ?? spec.profile.lanePermissionMode ?? LANE_PERMISSION_MODE;
 }
 
 export const UNSANDBOXED_REFUSAL =
@@ -163,7 +162,7 @@ export function spawnClaude(
 
 /** 10db's own server and the repo's approved ones, keyed by name. 10db's is written last, so it keeps its name. */
 export function buildMcpServers(
-  spec: Pick<SessionSpec, 'projectMcpServers' | 'mcp'>,
+  spec: Pick<AgentSessionCore, 'projectMcpServers' | 'mcp'>,
 ): Record<string, McpServerConfig> {
   return {
     ...Object.fromEntries(
@@ -183,11 +182,11 @@ export function buildMcpServers(
   };
 }
 
-export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
+export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Options {
   const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
     {
       kind: 'lane',
-      allowedTools: spec.allowedTools,
+      allowedTools: spec.profile.allowedTools,
       permissionMode: laneMode(spec, deps),
       pluginDir: deps.pluginDir,
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
@@ -218,7 +217,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
           gate,
           cwds,
           judge: (hookInput) =>
-            toHookOutput(
+            toShapeHookOutput(
               spec.preToolUse({
                 toolName: hookInput.tool_name,
                 input: hookInput.tool_input,
@@ -239,7 +238,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
  * the control channel, and a PreToolUse hook that judges the session's calls and its subagents' alike.
  */
 function exploreQueryOptions(
-  spec: ShapeSessionSpec,
+  spec: ExploreSessionSpec,
   deps: {
     readonly claudePath: string;
     readonly logger: Logger;
@@ -254,11 +253,11 @@ function exploreQueryOptions(
   const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
     {
       kind: 'explore',
-      systemPrompt: spec.systemPrompt,
-      tools: spec.tools,
-      allowedTools: spec.allowedTools,
-      disallowedTools: spec.disallowedTools,
-      agents: spec.agents,
+      systemPrompt: spec.profile.systemPrompt,
+      tools: spec.profile.tools,
+      allowedTools: spec.profile.allowedTools,
+      disallowedTools: spec.profile.disallowedTools,
+      agents: spec.profile.agents,
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
     },
     spec.sandbox,
@@ -327,7 +326,7 @@ export interface ClaudeSessionDeps {
 export type ClaudeSession =
   | {
       readonly profile: 'lane';
-      readonly spec: SessionSpec;
+      readonly spec: LaneSessionSpec;
       /** The injected harness plugin directory. */
       readonly pluginDir: string;
       /** The mode a sandboxed session runs in, over its spec's. */
@@ -337,7 +336,7 @@ export type ClaudeSession =
     }
   | {
       readonly profile: 'explore';
-      readonly spec: ShapeSessionSpec;
+      readonly spec: ExploreSessionSpec;
       readonly spawn?: ExploreSpawn;
     };
 
@@ -428,9 +427,9 @@ const PROFILE_RULES = {
 function logFields(session: ClaudeSession): Record<string, string> {
   switch (session.profile) {
     case 'lane':
-      return { sessionId: session.spec.sessionId, workstreamId: session.spec.workstreamId };
+      return { sessionId: session.spec.sessionId, workstreamId: session.spec.profile.workstreamId };
     case 'explore':
-      return { sessionId: session.spec.sessionId, shapeId: session.spec.shapeId };
+      return { sessionId: session.spec.sessionId, shapeId: session.spec.profile.shapeId };
   }
 }
 
@@ -1119,10 +1118,7 @@ export interface ShapeSessionDeps extends ClaudeSessionDeps {
  * One conversation's Claude Code session. It proves the account before the first message, as a lane
  * does, and reports the same events; `interrupt` ends the running turn and leaves the session open.
  */
-export function startShapeSession(
-  spec: ShapeSessionSpec,
-  deps: ShapeSessionDeps,
-): ShapeSessionHandle {
+export function startShapeSession(spec: ExploreSessionSpec, deps: ShapeSessionDeps): SessionHandle {
   return startClaudeSession(
     { profile: 'explore', spec, ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }) },
     deps,

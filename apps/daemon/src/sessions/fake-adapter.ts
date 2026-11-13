@@ -1,6 +1,8 @@
 import { AccountKind, Provider, providerOf, type AccountId, type SessionId } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
+import { onProfile } from './agent-profile';
 import { checkAccount, type SeenAccount } from './account-check';
+import { capabilitiesOf, type AgentCapabilities } from './capabilities';
 import type { FakeInterrupt, FakeObservation, FakeScriptBook, FakeSent } from './fake-script';
 import {
   fakeEndedSession,
@@ -14,14 +16,14 @@ import {
   type AccountLogin,
   type AccountLoginOutcome,
   type AccountProbeSpec,
+  type AgentSessionSpec,
   type CompletionSpec,
   type ConversationReadSpec,
   type InterruptReceipt,
-  type SessionAdapter,
+  type AgentAdapter,
+  type ExploreSessionSpec,
+  type LaneSessionSpec,
   type SessionHandle,
-  type SessionSpec,
-  type ShapeSessionHandle,
-  type ShapeSessionSpec,
 } from './types';
 
 /** The email the fake reports for a subscription that expects none, and for an identity probe. */
@@ -78,7 +80,7 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
 }
 
 /** Stands in for Claude Code at the adapter boundary; scripts drive every event. */
-export class FakeAdapter implements SessionAdapter {
+export class FakeAdapter implements AgentAdapter {
   readonly observations: FakeObservation[] = [];
   /** Every message the runner sent a session, in order, with how many images and the uuid it carried. */
   readonly sent: FakeSent[] = [];
@@ -127,7 +129,7 @@ export class FakeAdapter implements SessionAdapter {
   });
 
   /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
-  seen: (spec: SessionSpec) => Partial<SeenAccount> & { readonly model?: string } = () => ({});
+  seen: (spec: LaneSessionSpec) => Partial<SeenAccount> & { readonly model?: string } = () => ({});
   /** What an identity probe reports. */
   probeSeen: SeenAccount = {
     ...NOTHING_SEEN,
@@ -164,6 +166,17 @@ export class FakeAdapter implements SessionAdapter {
     const waiters = this.signalWaiters;
     this.signalWaiters = [];
     for (const wake of waiters) wake();
+  }
+
+  capabilities(account: Pick<AccountExpectation, 'kind'>): AgentCapabilities {
+    return capabilitiesOf(account.kind);
+  }
+
+  open(spec: AgentSessionSpec): SessionHandle {
+    return onProfile(spec, {
+      lane: (lane) => this.openLane(lane),
+      explore: (explore) => this.openExplore(explore),
+    });
   }
 
   complete(ask: CompletionSpec): Promise<string> {
@@ -205,9 +218,9 @@ export class FakeAdapter implements SessionAdapter {
 
   /** What each Shape session started here ran with, and what it was sent after its first message. */
   readonly shapeSessions: {
-    readonly spec: ShapeSessionSpec;
+    readonly spec: ExploreSessionSpec;
     readonly sent: string[];
-    readonly handle: ShapeSessionHandle;
+    readonly handle: SessionHandle;
   }[] = [];
   /** How a Shape session answers a message; the default writes a short reply. */
   shapeBehaviour: FakeShapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
@@ -219,7 +232,7 @@ export class FakeAdapter implements SessionAdapter {
   /** The same for a lane session: its stop waits for it before the session ends. */
   laneStopGate: Promise<void> | null = null;
 
-  startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
+  private openExplore(spec: ExploreSessionSpec): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
     const sent: string[] = [];
     const inner = refusal
@@ -233,7 +246,7 @@ export class FakeAdapter implements SessionAdapter {
           (turn) => this.shapeBehaviour(turn),
           `fake-shape-${String(this.shapeSessions.length + 1)}`,
         );
-    const handle: ShapeSessionHandle = {
+    const handle: SessionHandle = {
       events: inner.events,
       send: (text, images) => {
         sent.push(text);
@@ -249,7 +262,7 @@ export class FakeAdapter implements SessionAdapter {
     return handle;
   }
 
-  start(spec: SessionSpec): SessionHandle {
+  private openLane(spec: LaneSessionSpec): SessionHandle {
     const { model: reportedModel, ...override } = this.seen(spec);
     const refusal = checkAccount(spec.account, { ...expectedSeen(spec.account), ...override });
     if (refusal)
@@ -262,7 +275,7 @@ export class FakeAdapter implements SessionAdapter {
     const title = Object.keys(this.book).find((t) => spec.prompt.includes(`Task: ${t}\n`)) ?? '';
     this.prompts.push({
       sessionId: spec.sessionId,
-      sequence: spec.sequence,
+      sequence: spec.profile.sequence,
       title,
       prompt: spec.prompt,
       promptUuid: spec.promptUuid ?? null,
@@ -272,7 +285,7 @@ export class FakeAdapter implements SessionAdapter {
     });
     return runFakeLaneSession(spec, {
       title,
-      steps: this.book[title]?.[spec.sequence - 1],
+      steps: this.book[title]?.[spec.profile.sequence - 1],
       reportedModel,
       sent: this.sent,
       observations: this.observations,

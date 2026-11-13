@@ -49,9 +49,9 @@ import {
   patchPaths,
   spawnAppServer,
   type CodexChild,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
-  type SessionSpec,
+  type LaneSessionSpec,
   type ShapeImage,
 } from '../src/sessions';
 import {
@@ -418,7 +418,7 @@ interface World {
   readonly mcp: FakeMcp;
   /** The bearer token of the session's MCP server, which Codex alone holds. */
   readonly mcpToken: string;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly laneSandbox: LaneSandbox;
   /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
   readonly roots: SandboxRoots;
@@ -428,7 +428,7 @@ interface World {
   /** Every line the daemon's logger wrote. */
   readonly logs: string[];
   /** Run on each guard call before it is judged, for a test that acts mid-session. */
-  onCall: (call: GuardCall, spec: SessionSpec) => void;
+  onCall: (call: GuardCall, spec: LaneSessionSpec) => void;
   close(): Promise<void>;
 }
 
@@ -436,7 +436,7 @@ interface SessionRun {
   readonly events: readonly SessionEvent[];
   readonly threadId: string | null;
   readonly request: FakeRequest | undefined;
-  readonly spec: SessionSpec;
+  readonly spec: LaneSessionSpec;
 }
 
 let codexPath: string;
@@ -659,10 +659,9 @@ async function runOnLane(
   laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
 ): Promise<SessionRun> {
   const prompt = world.model.script(steps);
-  const spec: SessionSpec = {
+  const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: world.checkout,
     prompt,
     ...(opts.promptUuid === undefined ? {} : { promptUuid: opts.promptUuid }),
@@ -673,7 +672,6 @@ async function runOnLane(
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: [],
     sandbox: laneSession.spec,
     ...(opts.instructions === undefined ? {} : { instructions: opts.instructions }),
     setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
@@ -688,7 +686,7 @@ async function runOnLane(
     },
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.' }),
   };
-  const handle = world.adapter.start(spec);
+  const handle = world.adapter.open(spec);
   const events: SessionEvent[] = [];
   try {
     for await (const event of handle.events) {

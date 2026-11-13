@@ -7,7 +7,7 @@ import type {
 import { z } from 'zod';
 import type { Logger } from '../log';
 import { toHookOutput, toPermissionResult } from './claude-mapping';
-import type { ShapeSessionSpec, ToolDecision, ToolRequest } from './types';
+import type { AgentSessionCore, ToolDecision, ToolRequest } from './types';
 
 export const BILLING_UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
@@ -152,7 +152,7 @@ export function settingsRecheckHooks(
 
 /** Plan's measurement of what each call returned or failed to, for the reads it counts. */
 export function measurementHooks(
-  spec: Pick<ShapeSessionSpec, 'postToolUse' | 'toolFailed'>,
+  spec: Pick<AgentSessionCore, 'postToolUse' | 'toolFailed'>,
   logger: Logger,
 ): NonNullable<Options['hooks']> {
   return {

@@ -2,6 +2,8 @@ import { query as sdkQuery, type SDKUserMessage } from '@anthropic-ai/claude-age
 import { systemClock } from '../clock';
 import { AUTOUPDATE_OFF } from '../environment';
 import { checkAccount, seenFrom, type SeenAccount } from './account-check';
+import { onProfile } from './agent-profile';
+import { claudeCapabilities } from './capabilities';
 import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { seenModelsFrom } from './claude-model-list';
@@ -25,7 +27,7 @@ import {
   type AccountProbeSpec,
   type CompletionSpec,
   type LanePermissionMode,
-  type SessionAdapter,
+  type AgentAdapter,
 } from './types';
 
 /** How long an identity probe waits for `accountInfo()`. */
@@ -191,44 +193,49 @@ async function complete(
 }
 
 /** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec §3). */
-export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
+export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
-    start: (spec) =>
-      (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
-        ? refusedSession(UNSANDBOXED_REFUSAL)
-        : startClaudeSession(
-            {
-              profile: 'lane',
-              spec,
-              pluginDir: opts.pluginDir,
-              ...(opts.lanePermissionMode === undefined
-                ? {}
-                : { lanePermissionMode: opts.lanePermissionMode }),
-              signInCheck: opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env)),
-            },
-            opts,
-            runQuery,
-            LANE_STARTS,
-          ),
-    startShape: (spec) =>
-      startShapeSession(spec, {
-        claudePath: opts.claudePath,
-        logger: opts.logger,
-        query: runQuery,
-        spawn: (options, onSpawn) =>
-          spawnClaude(
-            options,
-            {
-              onSpawn,
-              onStderr: (chunk) => {
-                opts.logger.debug({ stderr: chunk.slice(0, 500) }, 'plan claude stderr');
-              },
-            },
-            'interactive',
-          ),
-        ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
-        ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+    capabilities: (account) => claudeCapabilities(account.kind),
+    open: (spec) =>
+      onProfile(spec, {
+        lane: (lane) =>
+          (lane.sandbox ?? null) === null && opts.allowUnsandboxed !== true
+            ? refusedSession(UNSANDBOXED_REFUSAL)
+            : startClaudeSession(
+                {
+                  profile: 'lane',
+                  spec: lane,
+                  pluginDir: opts.pluginDir,
+                  ...(opts.lanePermissionMode === undefined
+                    ? {}
+                    : { lanePermissionMode: opts.lanePermissionMode }),
+                  signInCheck:
+                    opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env)),
+                },
+                opts,
+                runQuery,
+                LANE_STARTS,
+              ),
+        explore: (explore) =>
+          startShapeSession(explore, {
+            claudePath: opts.claudePath,
+            logger: opts.logger,
+            query: runQuery,
+            spawn: (options, onSpawn) =>
+              spawnClaude(
+                options,
+                {
+                  onSpawn,
+                  onStderr: (chunk) => {
+                    opts.logger.debug({ stderr: chunk.slice(0, 500) }, 'plan claude stderr');
+                  },
+                },
+                'interactive',
+              ),
+            ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
+            ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+          }),
       }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
     startLogin: (login) =>

@@ -14,7 +14,7 @@ import {
 } from '@10db/db';
 import { AccountLaunchError, KeychainError, type Launcher } from '../environment';
 import type { StateStore } from '../events';
-import { ConversationUnreadError, type SessionAdapter } from '../sessions';
+import { ConversationUnreadError, type AgentAdapter } from '../sessions';
 import { resumedSessionOf } from './next-action';
 
 // Workbench spec §12. A lane that resumes a Codex thread while a builder message pushed to it was never
@@ -41,7 +41,7 @@ export type ReadBack =
 
 export interface ReadBackDeps {
   readonly state: StateStore;
-  readonly adapter: Pick<SessionAdapter, 'readClientUuids'>;
+  readonly adapter: Pick<AgentAdapter, 'readClientUuids'>;
   readonly launcher: Pick<Launcher, 'probe'>;
 }
 

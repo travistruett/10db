@@ -81,10 +81,14 @@ async function liveSession(spec: {
     'claude-haiku-5-5',
     [],
   );
-  const handle = adapter.start({
+  const handle = adapter.open({
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    profile: {
+      kind: 'lane',
+      workstreamId: mintId('Workstream'),
+      sequence: 1,
+      allowedTools: spec.allowRead === true ? ['Read'] : [],
+    },
     cwd: repo.path,
     prompt: spec.prompt,
     ...(spec.promptUuid === undefined ? {} : { promptUuid: spec.promptUuid }),
@@ -94,7 +98,7 @@ async function liveSession(spec: {
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: spec.allowRead === true ? ['Read'] : [],
+    sandbox: null,
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -151,21 +155,24 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
     spec.model ?? 'claude-haiku-5-5',
     [],
   );
-  const handle = adapter.startShape({
+  const handle = adapter.open({
     sessionId: mintId('Session'),
-    shapeId: mintId('Shape'),
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are helping plan work. Answer briefly.',
+      tools: ['Read'],
+      allowedTools: [],
+      disallowedTools: [],
+      agents: {},
+    },
     cwd: repo.path,
-    systemPrompt: 'You are helping plan work. Answer briefly.',
     prompt: spec.prompt,
     model: launch.model,
     effort: 'low',
     resumeProviderSessionId: null,
     env: launch.env,
     account: launch.expect,
-    tools: ['Read'],
-    allowedTools: [],
-    disallowedTools: [],
-    agents: {},
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     sandbox: null,

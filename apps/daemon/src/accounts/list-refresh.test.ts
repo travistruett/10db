@@ -24,7 +24,7 @@ import {
   FakeAdapter,
   type SeenAccount,
   type SeenModel,
-  type SessionAdapter,
+  type AgentAdapter,
 } from '../sessions';
 import { createListRefresh, type ListRefresh } from './list-refresh';
 import { createStartGate } from './start-gate';
@@ -55,7 +55,7 @@ beforeEach(() => {
   logger = capturingLogger();
   const base = new FakeAdapter({}).probeSeen;
   // The adapter is the boundary: each account answers as the test staged it, found by its config directory.
-  const adapter: Pick<SessionAdapter, 'probeAccount'> = {
+  const adapter: Pick<AgentAdapter, 'probeAccount'> = {
     probeAccount: (probe) => {
       const configDir = probe.env['CLAUDE_CONFIG_DIR'] ?? '';
       const id = [...behaviour.keys()].find((accountId) => configDir.includes(accountId));

@@ -51,7 +51,7 @@ import {
   loginIdentity,
   type AccountLogin,
   type SeenAccount,
-  type SessionAdapter,
+  type AgentAdapter,
 } from '../sessions';
 import { capStatus } from './cap';
 import { monthOf, monthWindow, usageWindow } from './month';
@@ -139,7 +139,7 @@ export function createAccountService(deps: {
   readonly dataDir: string;
   readonly keychain: Keychain;
   readonly launcher: Pick<Launcher, 'probe'>;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount' | 'startLogin'>;
+  readonly adapter: Pick<AgentAdapter, 'probeAccount' | 'startLogin'>;
   /** Where the models an account lists are kept, once the account check has passed. */
   readonly lists: AccountLists;
   /** Reads an account's list on its own, as a finished sign-in must: no one need be watching a drawer. */

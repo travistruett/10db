@@ -102,9 +102,9 @@ describe('a conversation’s prepared session', () => {
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
     expect(spec.sandbox).toBe(SANDBOX);
     expect(Object.keys(spec.projectMcpServers)).toEqual(['docs']);
-    expect(spec.tools).toContain('Bash');
-    expect(spec.disallowedTools).not.toContain('Bash');
-    expect(spec.agents['code-researcher']?.tools).toContain('Bash');
+    expect(spec.profile.tools).toContain('Bash');
+    expect(spec.profile.disallowedTools).not.toContain('Bash');
+    expect(spec.profile.agents['code-researcher']?.tools).toContain('Bash');
     expect(spec.prompt.startsWith('Note from 10db: billing is waiting for your approval.')).toBe(
       true,
     );
@@ -148,8 +148,8 @@ describe('a conversation’s prepared session', () => {
         plugins: [join(dir, 'setup', 'yours')],
         skillRoots: [join(dir, 'setup', 'yours', 'skills')],
       });
-      expect(spec.tools).toContain('Skill');
-      expect(spec.allowedTools).toContain('Skill');
+      expect(spec.profile.tools).toContain('Skill');
+      expect(spec.profile.allowedTools).toContain('Skill');
       const read = (file: string) =>
         spec.preToolUse({ toolName: 'Read', input: { file_path: file } }).decision;
       expect(read(join(skill, 'SKILL.md'))).toBe('allow');
@@ -212,13 +212,13 @@ describe('a conversation’s prepared session', () => {
     const p = preparing();
     f = createServiceFixture({ prepare: p.prepare });
     const fake = f.adapter;
-    const startShape = fake.startShape.bind(fake);
+    const realOpen = fake.open.bind(fake);
     async function* withPid(events: AsyncIterable<SessionEvent>): AsyncIterable<SessionEvent> {
       for await (const event of events)
         yield event.type === 'started' ? { ...event, pid: 4242 } : event;
     }
-    fake.startShape = (spec) => {
-      const handle = startShape(spec);
+    fake.open = (spec) => {
+      const handle = realOpen(spec);
       return { ...handle, events: withPid(handle.events) };
     };
     f.service.send(f.c.shape.id, 'Hello');
@@ -332,7 +332,7 @@ describe('a conversation’s prepared session', () => {
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
     expect(spec.sandbox).toBeNull();
     expect(spec.projectMcpServers).toEqual({});
-    expect(spec.tools).not.toContain('Bash');
+    expect(spec.profile.tools).not.toContain('Bash');
     expect(spec.preToolUse({ toolName: 'Bash', input: { command: 'ls' } }).decision).toBe('deny');
     expect(
       (

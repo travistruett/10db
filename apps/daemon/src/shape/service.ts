@@ -76,12 +76,12 @@ import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
-  SessionAdapter,
+  AgentAdapter,
+  ExploreSessionSpec,
   SessionEvent,
+  SessionHandle,
   SessionMcpServer,
   ShapeImage,
-  ShapeSessionHandle,
-  ShapeSessionSpec,
   ShapeVerdict,
   ToolDecision,
   ToolRequest,
@@ -223,7 +223,7 @@ export interface ShapePrepared {
 
 export interface ShapeServiceDeps {
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly clock: Clock;
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
@@ -478,7 +478,7 @@ type TurnEnd =
   | { readonly kind: 'ended' };
 
 interface Live {
-  readonly handle: ShapeSessionHandle;
+  readonly handle: SessionHandle;
   readonly sessionId: SessionId;
   /**
    * Ends what the session was prepared with: its cards are withdrawn, what its commands left running is
@@ -1137,11 +1137,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const toolset = shapeToolset(commands !== undefined);
     // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
     const skipped = ready?.note ?? null;
-    const spec: ShapeSessionSpec = {
+    const spec: ExploreSessionSpec = {
       sessionId: row.id,
-      shapeId,
+      profile: {
+        kind: 'explore',
+        shapeId,
+        systemPrompt: shapeSystemPrompt(launch.agentModels),
+        tools: [...toolset.tools],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...toolset.disallowedTools],
+        agents: toolset.agents,
+      },
       cwd: launch.cwd,
-      systemPrompt: shapeSystemPrompt(launch.agentModels),
       instructions: ready?.instructions ?? null,
       ...(setup === null
         ? {}
@@ -1153,10 +1160,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       resumeProviderSessionId: resumeId,
       env: launch.env,
       account: launch.account,
-      tools: [...toolset.tools],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...toolset.disallowedTools],
-      agents: toolset.agents,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       sandbox: ready?.sandbox ?? null,
       projectMcpServers: ready?.projectMcpServers ?? {},
@@ -1280,9 +1283,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       },
     };
-    let handle: ShapeSessionHandle;
+    let handle: SessionHandle;
     try {
-      handle = adapter.startShape(spec);
+      handle = adapter.open(spec);
     } catch (error) {
       // The row was written with its token hash before the adapter ran; end it so no live row
       // keeps a token that getLiveSessionByTokenHash would accept.

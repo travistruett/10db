@@ -62,7 +62,7 @@ import { ManualClock } from '../clock';
 import { loadEnv } from '../env';
 import { CODEX_VERIFIED_ON, type AgentStatus, type ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
-import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
+import { FakeAdapter, type FakeScriptBook, type LaneSessionSpec } from '../sessions';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
@@ -336,7 +336,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-      const specs: SessionSpec[] = [];
+      const specs: LaneSessionSpec[] = [];
       adapter.seen = (spec) => {
         specs.push(spec);
         return {};
@@ -396,7 +396,7 @@ describe('startDaemon', () => {
       for (const dir of roots.systemTempRoots) mkdirSync(dir);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-        const specs: SessionSpec[] = [];
+        const specs: LaneSessionSpec[] = [];
         adapter.seen = (spec) => {
           specs.push(spec);
           return {};
@@ -1193,7 +1193,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     let load = 100;
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     adapter.seen = (spec) => {
       specs.push(spec);
       return {};

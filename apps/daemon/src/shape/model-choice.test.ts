@@ -74,7 +74,7 @@ describe('a conversation’s model', () => {
           input: { subagent_type: 'code-researcher', prompt: 'x', model },
         }).decision;
       expect([agent('sonnet'), agent('opus'), agent('gpt-5.6-sol')]).toEqual([sonnet, opus, gpt]);
-      expect(spec.systemPrompt).toContain(
+      expect(spec.profile.systemPrompt).toContain(
         kind === AccountKind.Bedrock ? "session's model" : '"opus"',
       );
     },

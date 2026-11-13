@@ -123,7 +123,7 @@ import {
   type LaneSession,
   type LaneSessionInput,
 } from '../sandbox';
-import type { FakeScriptBook, SessionEvent, SessionHandle, SessionSpec } from '../sessions';
+import type { FakeScriptBook, SessionEvent, SessionHandle, LaneSessionSpec } from '../sessions';
 import {
   createMemoryKeychain,
   FAKE_SRT,
@@ -374,7 +374,7 @@ describe('runner', () => {
           ],
         ],
       });
-      const start = vi.spyOn(engine.adapter, 'start');
+      const start = vi.spyOn(engine.adapter, 'open');
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
@@ -1534,7 +1534,7 @@ describe('runner', () => {
     };
     /** Runs one session of a new task and returns the spec the adapter was started with. */
     async function runTask(title: keyof typeof BOOK) {
-      const start = vi.spyOn(engine.adapter, 'start');
+      const start = vi.spyOn(engine.adapter, 'open');
       const { workstream } = engine.addTask(title);
       engine.launch(workstream.id);
       await engine.runner.idle();
@@ -1731,7 +1731,7 @@ describe('runner', () => {
 
   it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
-    const start = vi.spyOn(engine.adapter, 'start');
+    const start = vi.spyOn(engine.adapter, 'open');
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     await waitFor(() => ws(workstream.id).state === 'RUNNING');
@@ -1790,8 +1790,8 @@ describe('runner', () => {
   describe('lifecycle edges', () => {
     /** Wraps every handle the fake adapter returns; the wrapper sees each call the runner makes. */
     const interceptStart = (wrap: (handle: SessionHandle) => SessionHandle) => {
-      const real = engine.adapter.start.bind(engine.adapter);
-      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => wrap(real(spec)));
+      const real = engine.adapter.open.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'open').mockImplementation((spec) => wrap(real(spec)));
     };
     const doneScript = [write('src/api/a.txt'), commit('op-edge-0001', ['src/api/a.txt']), turn];
 
@@ -2750,7 +2750,7 @@ describe('accounts', () => {
 
   it('releases the start gate when the adapter throws on a subscription account', async () => {
     engine = await createTestEngine({ Alpha: [[turn]] });
-    engine.adapter.start = () => {
+    engine.adapter.open = () => {
       throw new Error('spawn failed');
     };
     const { workstream } = engine.addTask('Alpha');
@@ -2779,8 +2779,8 @@ const moveTo = (accountId: AccountId) =>
 const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
   engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
 /** Every spec the fake adapter is started with, in order. */
-const recordSpecs = (): SessionSpec[] => {
-  const specs: SessionSpec[] = [];
+const recordSpecs = (): LaneSessionSpec[] => {
+  const specs: LaneSessionSpec[] = [];
   engine.adapter.seen = (spec) => {
     specs.push(spec);
     return {};
@@ -4602,7 +4602,7 @@ describe('the session guard', () => {
 
   it('asks the broker about a call it must see, whatever the permission mode', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     engine.adapter.seen = (spec) => {
       specs.push(spec);
       return {};
@@ -4662,7 +4662,7 @@ describe("a lane's settled read-only line", () => {
       {},
       { laneSandbox: standInSandbox() },
     );
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     engine.adapter.seen = (spec) => {
       specs.push(spec);
       return {};
@@ -4765,8 +4765,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const [spec] = specs;
     const [session] = listSessions(engine.store.db, workstream.id);
     expect(spec?.sandbox).toBe(laneSession?.spec);
-    expect(spec?.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
-    expect(spec?.allowedTools).not.toContain('Read');
+    expect(spec?.profile.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
+    expect(spec?.profile.allowedTools).not.toContain('Read');
     expect(spec?.prompt).toContain('a bare `mktemp` fails in the sandbox');
     expect(probe.inputs[0]).toMatchObject({
       project: { id: engine.project.id, repoPath: engine.repoPath, sandboxLoopback: false },
@@ -4826,8 +4826,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       repoGit('commit', '-q', '-m', 'setup');
     };
     /** Each spec as it started, with where its `yours` plugin's skill links led while it ran. */
-    const recordSetups = (): { spec: SessionSpec; links: Record<string, string> }[] => {
-      const seen: { spec: SessionSpec; links: Record<string, string> }[] = [];
+    const recordSetups = (): { spec: LaneSessionSpec; links: Record<string, string> }[] => {
+      const seen: { spec: LaneSessionSpec; links: Record<string, string> }[] = [];
       engine.adapter.seen = (spec) => {
         const yours = spec.setup?.plugins.find((dir) => dir.endsWith('/yours'));
         const skills = yours === undefined ? [] : readdirSync(join(yours, 'skills'));
@@ -5006,7 +5006,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
-      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.profile.lanePermissionMode).toBe('auto');
       expect(spec.preToolUse(fetchCall).decision).toBe('ask');
       expect(spec.prompt).toContain('WebFetch, WebSearch and repo MCP tools wait on a card');
       await engine.runner.idle();
@@ -5027,9 +5027,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
-      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.profile.lanePermissionMode).toBe('auto');
       expect(spec.preToolUse(fetchCall).decision).toBe('allow');
-      expect(spec.allowedTools).not.toContain('WebFetch');
+      expect(spec.profile.allowedTools).not.toContain('WebFetch');
       expect(spec.prompt).toContain("WebSearch and WebFetch go to auto mode's judge");
       await engine.runner.idle();
     });
@@ -5156,8 +5156,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     });
     /** Reports claude's pid at `started`, as the real adapter does. */
     const reportPid = () => {
-      const real = engine.adapter.start.bind(engine.adapter);
-      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => {
+      const real = engine.adapter.open.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'open').mockImplementation((spec) => {
         const handle = real(spec);
         return {
           ...handle,
@@ -5419,7 +5419,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       await engine.runner.idle();
       expect(specs[0]?.sandbox).toBeNull();
-      expect(specs[0]?.allowedTools).toEqual(allowedToolsFor(engine.project, ToolAccess.Edit));
+      expect(specs[0]?.profile.allowedTools).toEqual(
+        allowedToolsFor(engine.project, ToolAccess.Edit),
+      );
       expect(specs[0]?.prompt).not.toContain('mktemp');
     },
   );
@@ -5441,7 +5443,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const second = engine.addTask('Beta');
     engine.launch(second.workstream.id);
     await engine.runner.idle();
-    expect(specs.map((spec) => spec.lanePermissionMode)).toEqual(['auto', 'default']);
+    expect(specs.map((spec) => spec.profile.lanePermissionMode)).toEqual(['auto', 'default']);
   });
 
   it("reads the project's localhost switch when each session starts, so a change applies at the next one", async () => {
@@ -5532,7 +5534,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
   it('leaves no temp dir behind when the adapter throws on start', async () => {
     const probe = sandboxProbe();
     engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
-    engine.adapter.start = () => {
+    engine.adapter.open = () => {
       throw new Error('spawn failed');
     };
     const { workstream } = engine.addTask('Alpha');
@@ -5550,7 +5552,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     async function* refused(): AsyncGenerator<SessionEvent> {
       yield await Promise.resolve({ type: 'ended', reason: 'sandbox_refused', message: refusal });
     }
-    vi.spyOn(engine.adapter, 'start').mockImplementation(() => ({
+    vi.spyOn(engine.adapter, 'open').mockImplementation(() => ({
       events: refused(),
       send: () => undefined,
       interrupt: () => Promise.resolve(null),
@@ -5716,7 +5718,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { probe, specs, path } = await run(() => [[turn]]);
       expect(probe.inputs[0]?.project.repoPath).toBe(path);
       expect(probe.inputs[0]?.checkouts).toEqual([engine.repoPath, path]);
-      expect(specs[0]?.allowedTools).toContain(`Read(/${realpathSync(path)}/**)`);
+      expect(specs[0]?.profile.allowedTools).toContain(`Read(/${realpathSync(path)}/**)`);
     });
 
     it('the gate runs in the worktree', async () => {
@@ -6289,7 +6291,7 @@ describe("a batch's gate while new work is held", () => {
       {},
       { baseUpdates, hold, gate: recordingGate(order) },
     );
-    const start = vi.spyOn(engine.adapter, 'start');
+    const start = vi.spyOn(engine.adapter, 'open');
     const batch = engine.state.write((ctx) =>
       insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
     );

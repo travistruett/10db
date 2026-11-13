@@ -171,11 +171,18 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     const judged: Judged[] = [];
     let reply = '';
     try {
-      const handle = adapter.startShape({
+      const handle = adapter.open({
         sessionId: mintId('Session'),
-        shapeId: shape.id,
+        profile: {
+          kind: 'explore',
+          shapeId: shape.id,
+          systemPrompt: SHAPE_SYSTEM_PROMPT,
+          tools: [...toolset.tools],
+          allowedTools: SHAPE_ALLOWED_TOOLS,
+          disallowedTools: [...toolset.disallowedTools],
+          agents: toolset.agents,
+        },
         cwd: checkout,
-        systemPrompt: SHAPE_SYSTEM_PROMPT,
         prompt: [
           'Do these three things in order, calling the tool each time even if you expect it to fail:',
           '1. Run `git log --oneline -1` with the Bash tool yourself.',
@@ -188,10 +195,6 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         resumeProviderSessionId: null,
         env: launch.env,
         account: launch.expect,
-        tools: [...toolset.tools],
-        allowedTools: SHAPE_ALLOWED_TOOLS,
-        disallowedTools: [...toolset.disallowedTools],
-        agents: toolset.agents,
         mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
         sandbox,
         projectMcpServers: prepared.projectMcpServers,

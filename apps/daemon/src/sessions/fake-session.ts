@@ -20,10 +20,9 @@ import {
   type InterruptReceipt,
   type SessionEvent,
   type SessionHandle,
-  type SessionSpec,
+  type LaneSessionSpec,
   type ShapeImage,
-  type ShapeSessionHandle,
-  type ShapeSessionSpec,
+  type ExploreSessionSpec,
   type ShapeToolRequest,
   type ShapeVerdict,
   type ToolDecision,
@@ -112,7 +111,7 @@ export interface FakeLaneContext {
 }
 
 /** Stands in for a lane's Claude Code session: the scripted steps drive every event. */
-export function runFakeLaneSession(spec: SessionSpec, context: FakeLaneContext): SessionHandle {
+export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneContext): SessionHandle {
   const { title, steps, reportedModel } = context;
   const core = createFakeSessionCore();
   const emit = (event: SessionEvent): void => {
@@ -177,7 +176,7 @@ export function runFakeLaneSession(spec: SessionSpec, context: FakeLaneContext):
   ): void => {
     context.observations.push({
       sessionId: spec.sessionId,
-      sequence: spec.sequence,
+      sequence: spec.profile.sequence,
       title,
       step,
       kind,
@@ -273,7 +272,8 @@ export function runFakeLaneSession(spec: SessionSpec, context: FakeLaneContext):
         if (
           verdict.decision === 'ask' ||
           step.toolName === 'AskUserQuestion' ||
-          (!settled && !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd))
+          (!settled &&
+            !matchesAllowedTool(step.toolName, input, spec.profile.allowedTools, spec.cwd))
         ) {
           const asked = await Promise.race([
             spec.canUseTool({
@@ -411,7 +411,7 @@ export function runFakeLaneSession(spec: SessionSpec, context: FakeLaneContext):
       return;
     }
     if (!steps) {
-      end('error', `No fake script for "${title}" session ${String(spec.sequence)}`);
+      end('error', `No fake script for "${title}" session ${String(spec.profile.sequence)}`);
       return;
     }
     try {
@@ -477,7 +477,7 @@ export interface FakeShapeTurnResult {
 
 /** One turn the fake runs for a message it was sent. */
 export interface FakeShapeTurn {
-  readonly spec: ShapeSessionSpec;
+  readonly spec: ExploreSessionSpec;
   /** The message the turn answers. */
   readonly message: string;
   /** The images sent with it, as image content blocks. */
@@ -499,10 +499,10 @@ const DEFAULT_CONTEXT_PERCENT = 10;
  * scripted behaviour as one turn, and the turns run one after another.
  */
 export function runFakeExploreSession(
-  spec: ShapeSessionSpec,
+  spec: ExploreSessionSpec,
   behaviour: FakeShapeBehaviour,
   providerSessionId: string,
-): ShapeSessionHandle {
+): SessionHandle {
   const core = createFakeSessionCore();
   const emit = (event: SessionEvent): void => {
     core.emit(event);

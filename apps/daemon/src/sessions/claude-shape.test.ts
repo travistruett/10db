@@ -15,7 +15,8 @@ import { SKILL_NAMES_LINE } from './setup-prompt';
 import { startShapeSession, type QueryFn } from './claude-session';
 import type {
   SessionEvent,
-  ShapeSessionSpec,
+  ExploreProfile,
+  ExploreSessionSpec,
   ShapeToolRequest,
   ShapeToolResult,
   ToolRequest,
@@ -23,12 +24,15 @@ import type {
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
-function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
+type ExploreOverrides = Partial<Omit<ExploreSessionSpec, 'profile'>> & {
+  readonly profile?: Partial<Omit<ExploreProfile, 'kind'>>;
+};
+
+function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
+  const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
-    shapeId: mintId('Shape'),
     cwd: '/repo',
-    systemPrompt: 'You are Shape.',
     prompt: 'First message',
     model: 'claude-sonnet-5-5',
     effort: 'high',
@@ -40,16 +44,22 @@ function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
       kind: 'claude_subscription',
       identity: 'builder@example.com',
     },
-    tools: ['Read', 'Grep', 'Glob', 'Agent'],
-    allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
-    disallowedTools: ['Edit', 'Bash'],
-    agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
     sandbox: null,
     projectMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'not in this test' }),
-    ...overrides,
+    ...core,
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are Shape.',
+      tools: ['Read', 'Grep', 'Glob', 'Agent'],
+      allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
+      disallowedTools: ['Edit', 'Bash'],
+      agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
+      ...profile,
+    },
   };
 }
 
@@ -313,14 +323,16 @@ describe('a Shape session’s SDK options', () => {
     const { query, run } = fakeQuery();
     const handle = startShapeSession(
       spec({
-        agents: {
-          'code-researcher': {
-            description: 'Reads code',
-            prompt: 'Read',
-            tools: ['Read', 'Bash'],
-            model: 'fable',
+        profile: {
+          agents: {
+            'code-researcher': {
+              description: 'Reads code',
+              prompt: 'Read',
+              tools: ['Read', 'Bash'],
+              model: 'fable',
+            },
+            scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] },
           },
-          scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] },
         },
       }),
       deps(query),
@@ -401,7 +413,7 @@ describe('the Claude Code process', () => {
 });
 
 describe('the PreToolUse hook', () => {
-  async function hookFor(preToolUse: ShapeSessionSpec['preToolUse']) {
+  async function hookFor(preToolUse: ExploreSessionSpec['preToolUse']) {
     const { query, run } = fakeQuery();
     const handle = startShapeSession(spec({ preToolUse }), deps(query));
     await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));

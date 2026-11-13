@@ -2,7 +2,7 @@ import { chmod, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import type { SessionSpec } from './types';
+import type { LaneSessionSpec } from './types';
 
 /** What Codex's `PreToolUse` hook sends: the keys 10db reads, with the rest passed over. */
 export const HookInput = z.looseObject({
@@ -137,7 +137,7 @@ function unreadable(toolName: string): string {
  * 10db doesn't know, and a patch that names no path, are refused rather than read as nothing to judge.
  */
 export async function judgeHookCall(
-  spec: Pick<SessionSpec, 'preToolUse' | 'canUseTool'>,
+  spec: Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>,
   hook: HookInput,
   signal: AbortSignal,
 ): Promise<GuardAnswer> {

@@ -27,7 +27,7 @@ import {
 } from './codex-session';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
-import type { SessionEvent, SessionHandle, SessionSpec, ShapeImage } from './types';
+import type { LaneSessionSpec, SessionEvent, SessionHandle, ShapeImage } from './types';
 import { CODEX_VERIFIED_ON } from '../environment';
 
 const FINE = {
@@ -132,11 +132,15 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function specOf(over: Partial<SessionSpec> = {}): SessionSpec {
+function specOf(over: Partial<LaneSessionSpec> = {}): LaneSessionSpec {
   return {
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    profile: {
+      kind: 'lane',
+      workstreamId: mintId('Workstream'),
+      sequence: 1,
+      allowedTools: [],
+    },
     cwd: checkout,
     prompt: 'Do the task',
     model: 'gpt-5.6-sol',
@@ -150,7 +154,6 @@ function specOf(over: Partial<SessionSpec> = {}): SessionSpec {
       identity: 'me@example.com · ws-1',
     },
     projectMcpServers: {},
-    allowedTools: [],
     sandbox,
     mcp: { url: 'http://127.0.0.1:7777/mcp', token: 'tok-secret-1', toolTimeoutMs: 905_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -174,9 +177,9 @@ function depsOf(server: FakeAppServer, over: Partial<CodexSessionDeps> = {}): Co
 
 function startWith(
   script: Record<string, unknown>,
-  specOver: Partial<SessionSpec> = {},
+  specOver: Partial<LaneSessionSpec> = {},
   depsOver: Partial<CodexSessionDeps> = {},
-): { handle: SessionHandle; server: FakeAppServer; spec: SessionSpec } {
+): { handle: SessionHandle; server: FakeAppServer; spec: LaneSessionSpec } {
   const server = fakeAppServer({ ...FINE, ...script });
   const spec = specOf(specOver);
   return { handle: startCodexSession(spec, depsOf(server, depsOver)), server, spec };
@@ -1068,7 +1071,7 @@ interface Running {
 async function inTurn(
   script: Record<string, unknown> = {},
   depsOver: Partial<CodexSessionDeps> = {},
-  specOver: Partial<SessionSpec> = {},
+  specOver: Partial<LaneSessionSpec> = {},
 ): Promise<Running> {
   const clock = new ManualClock();
   const { handle, server } = startWith(
@@ -2090,7 +2093,7 @@ describe('codexThreadConfig', () => {
 describe('the guard socket', () => {
   /** Posts a Bash call to the session's socket; the status and body come back. */
   function post(
-    spec: SessionSpec,
+    spec: LaneSessionSpec,
     command: string,
   ): Promise<{ status: number | undefined; body: string }> {
     return new Promise((done, fail) => {
@@ -2115,10 +2118,10 @@ describe('the guard socket', () => {
     });
   }
 
-  async function running(specOver: Partial<SessionSpec>): Promise<{
+  async function running(specOver: Partial<LaneSessionSpec>): Promise<{
     handle: SessionHandle;
     server: FakeAppServer;
-    spec: SessionSpec;
+    spec: LaneSessionSpec;
   }> {
     const started = startWith({ 'turn/interrupt': {} }, specOver);
     await vi.waitFor(() => {

@@ -222,7 +222,7 @@ import {
   skippedServersNote,
   splitProjectMcp,
   type LanePermissionMode,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionHandle,
   type TurnResult,
 } from '../sessions';
@@ -325,7 +325,7 @@ export interface RunnerOptions {
   /** Paths no session tool or command may touch. */
   readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly inbox: InboxService;
   /** Told when a step finds no model profile for its account, so the scheduler leaves that account's work alone. */
   readonly modelWait?: Pick<ModelListWait, 'hold'>;
@@ -2392,10 +2392,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
-      handle = opts.adapter.start({
+      handle = opts.adapter.open({
         sessionId: session.id,
-        workstreamId: id,
-        sequence: session.sequence,
         cwd: checkout,
         prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
         ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
@@ -2415,12 +2413,17 @@ export function createRunner(opts: RunnerOptions): Runner {
               },
             }
           : {}),
-        ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
-        allowedTools: allowedToolsFor(
-          project,
-          step.tools,
-          laneSession ? { sandboxed: { checkout } } : {},
-        ),
+        profile: {
+          kind: 'lane',
+          workstreamId: id,
+          sequence: session.sequence,
+          allowedTools: allowedToolsFor(
+            project,
+            step.tools,
+            laneSession ? { sandboxed: { checkout } } : {},
+          ),
+          ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
+        },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) =>
           judgePreToolUse({

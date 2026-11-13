@@ -7,8 +7,9 @@ import {
   FakeAdapter,
   loadFakeScriptBook,
   type FakeScriptBook,
+  type LaneProfile,
+  type LaneSessionSpec,
   type SessionEvent,
-  type SessionSpec,
   type ToolRequest,
 } from './index';
 
@@ -20,11 +21,14 @@ afterEach(() => {
   dir.cleanup();
 });
 
-function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
+type LaneOverrides = Partial<Omit<LaneSessionSpec, 'profile'>> & {
+  readonly profile?: Partial<Omit<LaneProfile, 'kind'>>;
+};
+
+function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
+  const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',
     model: 'sonnet',
@@ -38,11 +42,18 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
       identity: 'builder@example.com',
     },
     projectMcpServers: {},
-    allowedTools: ['Write'],
+    sandbox: null,
     mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'allow' }),
-    ...overrides,
+    ...core,
+    profile: {
+      kind: 'lane',
+      workstreamId: mintId('Workstream'),
+      sequence: 1,
+      allowedTools: ['Write'],
+      ...profile,
+    },
   };
 }
 
@@ -59,7 +70,7 @@ describe('FakeAdapter', () => {
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'context', percentage: 40 }, { do: 'turn_complete' }]],
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['started', 'context', 'turn_complete', 'ended']);
     expect(events.at(-1)).toEqual({ type: 'ended', reason: 'completed', message: null });
   });
@@ -69,7 +80,7 @@ describe('FakeAdapter', () => {
       Alpha: [[{ do: 'end' }], [{ do: 'activity', summary: 'second session' }]],
     };
     const adapter = new FakeAdapter(book);
-    const events = await collect(adapter.start(spec({ sequence: 2 })).events);
+    const events = await collect(adapter.open(spec({ profile: { sequence: 2 } })).events);
     expect(events).toContainEqual({ type: 'activity', kind: 'text', summary: 'second session' });
   });
 
@@ -77,7 +88,7 @@ describe('FakeAdapter', () => {
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'a.ts', content: 'x' } }]],
     });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events).toContainEqual({
       type: 'activity',
       kind: 'tool',
@@ -87,12 +98,12 @@ describe('FakeAdapter', () => {
   });
 
   it('crashes a session that has no script', async () => {
-    const events = await collect(new FakeAdapter({}).start(spec()).events);
+    const events = await collect(new FakeAdapter({}).open(spec()).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
   });
 
   it('applies an allowed Write and skips canUseTool for allow-listed tools', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const adapter = new FakeAdapter({
@@ -100,20 +111,20 @@ describe('FakeAdapter', () => {
         [{ do: 'tool', toolName: 'Write', input: { file_path: 'out.txt', content: 'hello' } }],
       ],
     });
-    await collect(adapter.start(spec({ canUseTool })).events);
+    await collect(adapter.open(spec({ canUseTool })).events);
     expect(readFileSync(join(dir.path, 'out.txt'), 'utf8')).toBe('hello');
     expect(canUseTool).not.toHaveBeenCalled();
   });
 
   it('records a guard denial without calling canUseTool or writing', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'x.txt', content: 'x' } }]],
     });
     await collect(
-      adapter.start(
+      adapter.open(
         spec({ canUseTool, preToolUse: () => ({ decision: 'deny', reason: 'outside claims' }) }),
       ).events,
     );
@@ -124,17 +135,17 @@ describe('FakeAdapter', () => {
   });
 
   it('sends a call the guard asks about to canUseTool, though an allow rule covers it', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'deny', message: 'carded' }),
     );
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'x.txt', content: 'x' } }]],
     });
     await collect(
-      adapter.start(
+      adapter.open(
         spec({
           canUseTool,
-          allowedTools: ['Write'],
+          profile: { allowedTools: ['Write'] },
           preToolUse: () => ({ decision: 'ask', reason: 'the broker must see it' }),
         }),
       ).events,
@@ -144,14 +155,14 @@ describe('FakeAdapter', () => {
   });
 
   it('treats a throwing preToolUse as a denial', async () => {
-    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
     );
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'x.txt', content: 'x' } }]],
     });
     const events = await collect(
-      adapter.start(
+      adapter.open(
         spec({
           canUseTool,
           preToolUse: () => {
@@ -178,7 +189,9 @@ describe('FakeAdapter', () => {
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'AskUserQuestion', input: { questions: [] } }]],
     });
-    await collect(adapter.start(spec({ canUseTool, allowedTools: ['AskUserQuestion'] })).events);
+    await collect(
+      adapter.open(spec({ canUseTool, profile: { allowedTools: ['AskUserQuestion'] } })).events,
+    );
     expect(canUseTool).toHaveBeenCalledOnce();
     expect(adapter.observations).toContainEqual(
       expect.objectContaining({
@@ -197,7 +210,7 @@ describe('FakeAdapter', () => {
         ],
       ],
     });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     let ended = false;
     const done = collect(handle.events).then((events) => {
       ended = true;
@@ -222,7 +235,7 @@ describe('FakeAdapter', () => {
 
   it('ends with stopped when stopped during a hang', async () => {
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'hang' }]] });
-    const handle = adapter.start(spec());
+    const handle = adapter.open(spec());
     const done = collect(handle.events);
     await handle.stop();
     expect((await done).at(-1)).toEqual({ type: 'ended', reason: 'stopped', message: null });
@@ -230,14 +243,14 @@ describe('FakeAdapter', () => {
 
   it('records the prompt it was started with', async () => {
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'end' }]] });
-    await collect(adapter.start(spec({ resumeProviderSessionId: 'prov-1' })).events);
+    await collect(adapter.open(spec({ resumeProviderSessionId: 'prov-1' })).events);
     expect(adapter.prompts[0]).toMatchObject({ title: 'Alpha', resume: 'prov-1' });
   });
 
   it('refuses before the prompt when the scripted account differs, and records no prompt', async () => {
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
     adapter.seen = () => ({ email: 'other@example.com' });
-    const events = await collect(adapter.start(spec()).events);
+    const events = await collect(adapter.open(spec()).events);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'ended',

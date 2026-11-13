@@ -1,5 +1,7 @@
 import { createUnavailableAdapter } from './unavailable-adapter';
-import type { SessionAdapter } from './types';
+import type { AccountExpectation } from '../environment';
+import type { AgentCapabilities } from './capabilities';
+import type { AgentAdapter } from './types';
 
 /** Where an agent CLI stands now: a path to run, or the reason no session can start on it. */
 export type AdapterSource =
@@ -8,23 +10,25 @@ export type AdapterSource =
 
 /**
  * An adapter that asks `source` on every call, so a copy still being fetched ends sessions with its
- * reason and the same adapter works once the copy is ready. A copy that is refused never runs.
+ * reason and the same adapter works once the copy is ready. A copy that is refused never runs. It
+ * reports `capabilities` all the while, since what its agent can do doesn't depend on the copy.
  */
 export function createPinnedAdapter(
   source: () => AdapterSource,
-  build: (path: string) => SessionAdapter,
-): SessionAdapter {
-  let built: { readonly path: string; readonly adapter: SessionAdapter } | null = null;
-  const current = (): SessionAdapter => {
+  build: (path: string) => AgentAdapter,
+  capabilities: (account: Pick<AccountExpectation, 'kind'>) => AgentCapabilities,
+): AgentAdapter {
+  let built: { readonly path: string; readonly adapter: AgentAdapter } | null = null;
+  const current = (): AgentAdapter => {
     const now = source();
-    if (!now.ready) return createUnavailableAdapter(now.message);
+    if (!now.ready) return createUnavailableAdapter(now.message, capabilities);
     if (built?.path !== now.path) built = { path: now.path, adapter: build(now.path) };
     return built.adapter;
   };
   return {
+    capabilities: (account) => capabilities(account),
     complete: (spec) => current().complete(spec),
-    start: (spec) => current().start(spec),
-    startShape: (spec) => current().startShape(spec),
+    open: (spec) => current().open(spec),
     probeAccount: (probe) => current().probeAccount(probe),
     startLogin: (login) => current().startLogin(login),
     readClientUuids: (spec) => current().readClientUuids(spec),

@@ -118,11 +118,18 @@ describe.skipIf(!live)('a Shape session, live', () => {
     };
 
     const judged: Judged[] = [];
-    const handle = adapter.startShape({
+    const handle = adapter.open({
       sessionId: mintId('Session'),
-      shapeId: mintId('Shape'),
+      profile: {
+        kind: 'explore',
+        shapeId: mintId('Shape'),
+        systemPrompt: SHAPE_SYSTEM_PROMPT,
+        tools: [...SHAPE_BUILT_IN_TOOLS],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+        agents: SHAPE_AGENTS,
+      },
       cwd: checkout,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
       prompt: [
         `Do these two things in order, calling the tool each time even if you expect it to fail:`,
         `1. Use the WebSearch tool yourself, not through an agent, to search for "vega-lite".`,
@@ -133,10 +140,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       resumeProviderSessionId: null,
       env: launch.env,
       account: launch.expect,
-      tools: [...SHAPE_BUILT_IN_TOOLS],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: SHAPE_AGENTS,
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
       projectMcpServers: {},
@@ -284,11 +287,18 @@ describe.skipIf(!live)('a Shape session, live', () => {
     };
 
     const judged: Judged[] = [];
-    const handle = adapter.startShape({
+    const handle = adapter.open({
       sessionId: mintId('Session'),
-      shapeId: shape.id,
+      profile: {
+        kind: 'explore',
+        shapeId: shape.id,
+        systemPrompt: SHAPE_SYSTEM_PROMPT,
+        tools: [...SHAPE_BUILT_IN_TOOLS],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+        agents: {},
+      },
       cwd: checkout,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
       prompt:
         'Call see_screen with screen "board". Then answer in one line: what colour fills the left half of the picture, and what colour fills the right half? If you received no picture, say NO PICTURE instead.',
       model: launch.model,
@@ -296,10 +306,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       resumeProviderSessionId: null,
       env: launch.env,
       account: launch.expect,
-      tools: [...SHAPE_BUILT_IN_TOOLS],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: {},
       mcp: { url: `http://127.0.0.1:${String(port)}/mcp`, token, toolTimeoutMs: 30_000 },
       sandbox: null,
       projectMcpServers: {},
@@ -401,11 +407,18 @@ describe.skipIf(!live)('a Shape session, live', () => {
     };
 
     const judged: Judged[] = [];
-    const handle = adapter.startShape({
+    const handle = adapter.open({
       sessionId: mintId('Session'),
-      shapeId: mintId('Shape'),
+      profile: {
+        kind: 'explore',
+        shapeId: mintId('Shape'),
+        systemPrompt: SHAPE_SYSTEM_PROMPT,
+        tools: [...SHAPE_BUILT_IN_TOOLS],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+        agents: {},
+      },
       cwd: checkout,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
       prompt: [
         `Do these three things in order, calling the tool each time even if you expect it to fail, and report each result:`,
         `1. Use the Edit tool to change "original" to "edited" in ${target}.`,
@@ -417,10 +430,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       resumeProviderSessionId: null,
       env: launch.env,
       account: launch.expect,
-      tools: [...SHAPE_BUILT_IN_TOOLS],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: {},
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
@@ -616,21 +625,24 @@ async function readInSession(
 
   let providerSessionId = '';
   const reads: ShapeToolRequest[] = [];
-  const handle = adapter.startShape({
+  const handle = adapter.open({
     sessionId: mintId('Session'),
-    shapeId: mintId('Shape'),
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: SHAPE_SYSTEM_PROMPT,
+      tools: [...SHAPE_BUILT_IN_TOOLS],
+      allowedTools: SHAPE_ALLOWED_TOOLS,
+      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+      agents: {},
+    },
     cwd: checkout,
-    systemPrompt: SHAPE_SYSTEM_PROMPT,
     prompt,
     model: launch.model,
     effort: 'low',
     resumeProviderSessionId: null,
     env: launch.env,
     account: launch.expect,
-    tools: [...SHAPE_BUILT_IN_TOOLS],
-    allowedTools: SHAPE_ALLOWED_TOOLS,
-    disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-    agents: {},
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     sandbox: null,
     projectMcpServers: {},

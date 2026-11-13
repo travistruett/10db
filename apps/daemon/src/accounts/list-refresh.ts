@@ -5,7 +5,7 @@ import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { checkAccount, type SeenAccount, type SessionAdapter } from '../sessions';
+import { checkAccount, type SeenAccount, type AgentAdapter } from '../sessions';
 import type { StartGate } from './start-gate';
 
 /** A list read within this long is fresh enough that a session start does not read it again. */
@@ -32,7 +32,7 @@ export interface ListRefresh {
 export function createListRefresh(deps: {
   readonly state: StateStore;
   readonly clock: Clock;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
+  readonly adapter: Pick<AgentAdapter, 'probeAccount'>;
   readonly launcher: Pick<Launcher, 'probe'>;
   readonly startGate: StartGate;
   readonly lists: AccountLists;

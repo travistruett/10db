@@ -49,7 +49,7 @@ import {
   SessionEndReason,
   type SessionEvent,
   type SessionHandle,
-  type SessionSpec,
+  type LaneSessionSpec,
   type ShapeImage,
 } from './types';
 
@@ -198,7 +198,7 @@ function versionOf(userAgent: string): string | null {
  * model, a failed resume or an account that can't be read `error`; no prompt is sent and the child is
  * closed on every path. Each call runs under a deadline on the injected clock.
  */
-export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): SessionHandle {
+export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps): SessionHandle {
   const events = createChannel<SessionEvent>();
   const clock: Clock = deps.clock ?? systemClock;
   const log = deps.logger;

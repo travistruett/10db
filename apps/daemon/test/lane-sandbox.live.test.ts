@@ -410,10 +410,19 @@ async function runLane(opts: {
       },
     );
     let providerSessionId: string | null = null;
-    const handle = adapter.start({
+    const handle = adapter.open({
       sessionId: mintId('Session'),
-      workstreamId: run.workstreamId,
-      sequence: 1,
+      profile: {
+        kind: 'lane',
+        workstreamId: run.workstreamId,
+        sequence: 1,
+        allowedTools: [
+          ...allowedToolsFor(run.project, ToolAccess.Edit, {
+            sandboxed: { checkout: opts.checkout },
+          }),
+          ...(opts.extraAllowedTools ?? []),
+        ],
+      },
       cwd: opts.checkout,
       prompt: opts.prompt,
       model: launch.model,
@@ -424,12 +433,6 @@ async function runLane(opts: {
       projectMcpServers: lane.mcpServers,
       sandbox: lane.spec,
       setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
-      allowedTools: [
-        ...allowedToolsFor(run.project, ToolAccess.Edit, {
-          sandboxed: { checkout: opts.checkout },
-        }),
-        ...(opts.extraAllowedTools ?? []),
-      ],
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       preToolUse: (req) => {

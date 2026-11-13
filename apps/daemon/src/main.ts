@@ -36,6 +36,8 @@ import {
 } from './paths';
 import { readBuildInfo } from './self-update';
 import {
+  claudeCapabilities,
+  codexCapabilities,
   codexLoginStatus,
   createClaudeAdapter,
   createCodexAdapter,
@@ -45,7 +47,7 @@ import {
   loadFakeScriptBook,
   scriptedShapeBehaviour,
   type AdapterSource,
-  type SessionAdapter,
+  type AgentAdapter,
 } from './sessions';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
@@ -122,7 +124,7 @@ function sourceOf(tool: AgentTool): AdapterSource {
   };
 }
 
-function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) {
+function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
   if (env.TENDB_FAKE_SCRIPTS) {
     const fake = new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
     // A Shape conversation on the fake answers deterministically, so the e2e can drive it.
@@ -140,6 +142,7 @@ function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) 
             pluginDir: resolveHarnessDir(),
             logger: logger.child({ component: 'claude' }),
           }),
+        (account) => claudeCapabilities(account.kind),
       ),
       codex: createPinnedAdapter(
         () => sourceOf(AgentTool.Codex),
@@ -149,6 +152,7 @@ function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) 
             logger: logger.child({ component: 'codex' }),
             signInCheck: (sessionEnv) => codexLoginStatus(codexPath, sessionEnv),
           }),
+        (account) => codexCapabilities(account.kind),
       ),
     });
 }

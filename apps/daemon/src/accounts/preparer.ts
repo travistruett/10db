@@ -23,7 +23,7 @@ import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { checkAccount, loginIdentity, type SessionAdapter, type SeenAccount } from '../sessions';
+import { checkAccount, loginIdentity, type AgentAdapter, type SeenAccount } from '../sessions';
 import {
   confirmCard,
   credentialsCard,
@@ -63,7 +63,7 @@ export function createAccountPreparer(opts: {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly inbox: InboxService;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
+  readonly adapter: Pick<AgentAdapter, 'probeAccount'>;
   /** Where the models an account lists are kept, once the account check has passed. */
   readonly lists: AccountLists;
   readonly launcher: Pick<Launcher, 'probe'>;

@@ -15,9 +15,9 @@ import {
   type GuardSocket,
   type HookInput,
 } from './codex-guard';
-import type { SessionSpec } from './types';
+import type { LaneSessionSpec } from './types';
 
-type Spec = Pick<SessionSpec, 'preToolUse' | 'canUseTool'>;
+type Spec = Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>;
 
 const ALLOW_ALL: Spec = {
   preToolUse: () => ({ decision: 'allow' }),

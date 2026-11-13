@@ -244,7 +244,7 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import type { SessionAdapter } from '../sessions';
+import type { AgentAdapter } from '../sessions';
 import { routingInputs, seedTeam } from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
@@ -281,7 +281,7 @@ export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
   /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
-  readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
+  readonly adapter: AgentAdapter | ((logger: Logger) => AgentAdapter);
   readonly logLevel: LogLevel;
   /**
    * The sandbox every lane and every gate runs under. Its roots (tests) move what it makes off the
