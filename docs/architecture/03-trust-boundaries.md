@@ -136,7 +136,7 @@ were made.
   repo hooks).
 - **MCP:** 10db's server over HTTP with a token per session, and approved repo servers (§4.6).
 
-**Built, for every lane** (`apps/daemon/src/sandbox/`, `sessions/claude-adapter.ts`; only fake sessions run
+**Built, for every lane** (`apps/daemon/src/sandbox/`, `sessions/claude-session.ts` and `sessions/claude-query-options.ts`; only fake sessions run
 without it):
 
 - **No repo settings.** `settingSources: []`. A repo's `.claude/settings.json` never loads, so a hook, allow rule,

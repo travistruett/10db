@@ -13,7 +13,7 @@ import {
   ensureAgent,
   systemKeychain,
 } from '../environment';
-import { createLogger } from '../log';
+import { createLogger, silentLogger } from '../log';
 import { createClaudeAdapter } from './index';
 import type { SessionEvent } from './types';
 
@@ -104,6 +104,77 @@ async function liveSession(spec: {
     handle,
     lines,
     repo,
+    cleanup: () => {
+      repo.cleanup();
+    },
+  };
+}
+
+/** A live Plan session on the default account's login: no settings file, plugin or project server. */
+async function livePlanSession(spec: { readonly prompt: string; readonly model?: string }) {
+  const login = await captureLoginEnv({ inherited: process.env });
+  const claudePath = await ensureAgent(AgentTool.Claude);
+  const repo = createTempRepo();
+  const adapter = createClaudeAdapter({
+    claudePath,
+    pluginDir: HARNESS_PLUGIN_DIR,
+    logger: silentLogger,
+  });
+  const launcher = createLauncher({
+    base: login.vars,
+    clientApp: '10db/live-test',
+    keychain: systemKeychain,
+  });
+  const defaultAccount: AccountRow = {
+    id: mintId('Account'),
+    kind: 'claude_subscription',
+    label: 'Claude plan',
+    payer: '',
+    expectedIdentity: null,
+    configDir: launcher.loginConfigDir(),
+    secretRef: null,
+    secretFingerprint: null,
+    settings: {},
+    laneCap: 4,
+    monthlyCapUsd: null,
+    archived: false,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const seen = await adapter.probeAccount({
+    kind: defaultAccount.kind,
+    cwd: repo.path,
+    env: launcher.probe(defaultAccount).env,
+  });
+  const launch = launcher.session(
+    { ...defaultAccount, expectedIdentity: seen.email ?? null },
+    spec.model ?? 'claude-haiku-5-5',
+    [],
+  );
+  const handle = adapter.startShape({
+    sessionId: mintId('Session'),
+    shapeId: mintId('Shape'),
+    cwd: repo.path,
+    systemPrompt: 'You are helping plan work. Answer briefly.',
+    prompt: spec.prompt,
+    model: launch.model,
+    effort: 'low',
+    resumeProviderSessionId: null,
+    env: launch.env,
+    account: launch.expect,
+    tools: ['Read'],
+    allowedTools: [],
+    disallowedTools: [],
+    agents: {},
+    // Nothing listens here; the session runs without 10db's tools.
+    mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+    sandbox: null,
+    projectMcpServers: {},
+    preToolUse: () => ({ decision: 'allow' }),
+    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.' }),
+  });
+  return {
+    handle,
     cleanup: () => {
       repo.cleanup();
     },
@@ -251,4 +322,22 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(providerSessionId).not.toBe('');
     expect(consumed).toContain(again);
   }, 180_000);
+  // The one Claude core runs Plan's preflight too: the account check, the MCP registration and the
+  // first message, against the real SDK.
+  it('runs one Plan turn on the real claude, with no settings, plugin or project server', async () => {
+    const { handle, cleanup } = await livePlanSession({
+      prompt: 'Reply with the single word: ready',
+    });
+    const events: SessionEvent[] = [];
+    for await (const event of handle.events) {
+      events.push(event);
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+    cleanup();
+
+    const types = events.map((e) => e.type);
+    expect(types[0]).toBe('started');
+    expect(types.indexOf('turn_complete')).toBeGreaterThan(0);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+  }, 120_000);
 });
