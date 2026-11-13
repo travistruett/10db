@@ -190,7 +190,9 @@ function kindWords(call: ToolCallView, nested: number): KindWords {
 function deniedMeta(call: ToolCallView): string | null {
   switch (call.deniedBy) {
     case '10db':
-      return '10db stopped this';
+      return call.refusal === null || call.refusal === ''
+        ? '10db stopped this'
+        : `10db stopped this: ${call.refusal}`;
     case 'builder':
       return 'You denied this';
     case 'judge':
@@ -208,12 +210,14 @@ export function toolRowWords(call: ToolCallView, nested = 0): ToolRowWords {
   const said = kind.target === null ? kind.verb : `${kind.verb}${kind.join}${kind.target}`;
   if (call.status === 'denied') {
     const meta = deniedMeta(call);
-    const why = [meta ?? 'denied', call.refusal].filter((p) => p !== null && p !== '');
+    // 10db's own reason is already in its meta; another denier's reason follows it.
+    const reason = call.deniedBy === '10db' ? null : call.refusal;
+    const why = [meta ?? 'denied', reason].filter((p) => p !== null && p !== '');
     return { ...kind, meta, tone: 'dimmed', name: [said, ...why].join(', ') };
   }
   const failed = call.status === 'failed' || (call.kind === 'mcp' && call.error !== null);
   const spoken = kind.spoken === undefined ? kind.meta : kind.spoken;
-  const status = call.kind === 'command' && failed ? `${said}, failed` : said;
+  const status = failed ? `${said}, failed` : said;
   return {
     icon: kind.icon,
     verb: kind.verb,
@@ -256,7 +260,8 @@ export function editGroupWords(entries: readonly ToolEntry[]): { text: string; n
       added += call.addedLines;
       removed += call.removedLines;
     }
-  const files = `Edited ${plural(entries.length, 'file', 'files')}`;
+  const paths = new Set(entries.flatMap(({ call }) => (call.kind === 'edit' ? [call.path] : [])));
+  const files = `Edited ${plural(paths.size, 'file', 'files')}`;
   const counts = `+${String(added)} −${String(removed)}`;
   return { text: `${files} · ${counts}`, name: `${files}, ${counts}` };
 }

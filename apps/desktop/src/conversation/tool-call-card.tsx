@@ -1,8 +1,9 @@
 import type { ToolCallView } from '@10db/contracts';
 import { Box, Button, Group, Stack, Text } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { ToolEntry } from './entry';
 import { CommandBody, EditBody, EditPeek, McpBody, PreviewBody, ReadLine } from './tool-bodies';
+import { useAllowed, useRowOpen } from './row-state';
 import { ToolRow } from './tool-row';
 import { editGroupWords, groupWords, toolRowWords, ToolIcon } from './tool-words';
 
@@ -62,10 +63,13 @@ function Body({
         return (
           <Nested label="Calls of this subagent">
             {nested.map((child) => (
-              <ToolCallCard
+              <CallRow
                 key={child.id}
                 entry={child}
                 nested={[]}
+                peek
+                // A nested subagent's calls are its siblings here, all under the outermost one.
+                callCount={nested.filter((n) => n.call.parentId === child.id).length}
                 {...(loadFull === undefined ? {} : { loadFull })}
                 {...(onAllow === undefined ? {} : { onAllow })}
               />
@@ -108,13 +112,18 @@ function CallRow({
   loadFull,
   onAllow,
   peek,
-}: ToolCallCardProps & { readonly peek: boolean }) {
+  callCount,
+}: ToolCallCardProps & {
+  readonly peek: boolean;
+  /** How many calls a subagent made, when they are not in `nested`. */
+  readonly callCount?: number;
+}) {
   const { call } = entry;
   const failedCommand = call.kind === 'command' && call.status === 'failed';
   // A failed command opens by itself to its last lines; opened by hand it shows its whole tail.
-  const [open, setOpen] = useState<'closed' | 'peek' | 'open'>(failedCommand ? 'peek' : 'closed');
-  const [allowed, setAllowed] = useState(false);
-  const words = toolRowWords(call, nested.length);
+  const [open, setOpen] = useRowOpen(call.id, failedCommand ? 'peek' : 'closed');
+  const [allowed, allow] = useAllowed(call.id);
+  const words = toolRowWords(call, callCount ?? nested.length);
   const canAllow =
     call.status === 'denied' &&
     call.deniedBy === 'judge' &&
@@ -129,7 +138,7 @@ function CallRow({
             running={call.status === 'running'}
             open={open !== 'closed'}
             onToggle={() => {
-              setOpen((was) => (was === 'closed' ? 'open' : 'closed'));
+              setOpen(open === 'closed' ? 'open' : 'closed');
             }}
           />
         </Box>
@@ -138,7 +147,7 @@ function CallRow({
             size="compact-xs"
             variant="default"
             onClick={() => {
-              setAllowed(true);
+              allow();
               onAllow(call);
             }}
           >
@@ -171,9 +180,13 @@ function CallRow({
   );
 }
 
+/** A group's key in the row state, apart from its first call's own. */
+const groupKey = (entries: readonly ToolEntry[]): string => `${entries[0]?.id ?? ''}\0group`;
+
 /** A folded run of reads and searches; opened, one call per line. */
 export function ToolGroupRow({ entries }: { readonly entries: readonly ToolEntry[] }) {
-  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useRowOpen(groupKey(entries), 'closed');
+  const open = opened !== 'closed';
   const words = groupWords(entries);
   const running = entries.at(-1)?.call.status === 'running';
   return (
@@ -188,7 +201,7 @@ export function ToolGroupRow({ entries }: { readonly entries: readonly ToolEntry
         running={running}
         open={open}
         onToggle={() => {
-          setOpen((was) => !was);
+          setOpened(open ? 'closed' : 'open');
         }}
       />
       {open && (
@@ -210,7 +223,8 @@ export function EditGroupRow({
   readonly entries: readonly ToolEntry[];
   readonly loadFull?: LoadFull;
 }) {
-  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useRowOpen(groupKey(entries), 'closed');
+  const open = opened !== 'closed';
   const words = editGroupWords(entries);
   const last = entries.at(-1)?.call;
   const [verb, meta] = words.text.split(' · ');
@@ -226,7 +240,7 @@ export function EditGroupRow({
         running={last?.status === 'running'}
         open={open}
         onToggle={() => {
-          setOpen((was) => !was);
+          setOpened(open ? 'closed' : 'open');
         }}
       />
       {open && (

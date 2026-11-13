@@ -104,7 +104,7 @@ describe('ToolCallCard', () => {
       refusal: 'writes outside the checkout',
     });
     renderWithTheme(<ToolCallCard entry={toolEntry(call)} nested={[]} />);
-    expect(screen.getByText('10db stopped this')).toBeTruthy();
+    expect(screen.getByText('10db stopped this: writes outside the checkout')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /10db stopped this/ }));
     expect(screen.getByText('writes outside the checkout')).toBeTruthy();
   });
@@ -148,6 +148,18 @@ describe('ToolCallCard', () => {
     expect(within(group).getByRole('button', { name: 'Read src/a.ts' })).toBeTruthy();
     expect(within(group).getByRole('button', { name: 'Read src/b.ts' })).toBeTruthy();
   });
+});
+
+it("counts a nested subagent's own calls", () => {
+  const nested = [
+    toolEntry(subagentCall({ id: 'a2', parentId: 'a1' })),
+    toolEntry(readCall({ id: 'k1', parentId: 'a2' })),
+    toolEntry(readCall({ id: 'k2', parentId: 'a2' })),
+  ];
+  renderWithTheme(<ToolCallCard entry={toolEntry(subagentCall())} nested={nested} />);
+  fireEvent.click(screen.getByRole('button', { name: /^Subagent:/ }));
+  const group = screen.getByRole('group', { name: 'Calls of this subagent' });
+  expect(within(group).getByText('2 calls · 1 min')).toBeTruthy();
 });
 
 describe('ToolGroupRow', () => {

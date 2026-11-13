@@ -86,7 +86,26 @@ describe('toolRowWords', () => {
         name: 'github · get_pr: {"number":12}',
       },
     ],
-    ['mcp failed', mcpCall({ status: 'failed', error: 'not found' }), { tone: 'red' }],
+    [
+      'mcp failed',
+      mcpCall({ status: 'failed', error: 'not found' }),
+      { tone: 'red', name: 'github · get_pr: {"number":12}, failed' },
+    ],
+    [
+      'mcp with an error',
+      mcpCall({ error: 'not found' }),
+      { tone: 'red', name: 'github · get_pr: {"number":12}, failed' },
+    ],
+    [
+      'read failed',
+      readCall({ status: 'failed' }),
+      { tone: 'red', name: 'Read src/router.tsx, failed' },
+    ],
+    [
+      'other failed',
+      otherCall({ status: 'failed' }),
+      { tone: 'red', name: 'Used propose_plan: x, failed' },
+    ],
     [
       'subagent',
       subagentCall(),
@@ -150,8 +169,8 @@ describe('toolRowWords', () => {
       'denied with a refusal',
       commandCall({ status: 'denied', deniedBy: '10db', refusal: 'writes outside the checkout' }),
       {
-        meta: '10db stopped this',
-        name: 'Ran pnpm vitest run src/api, 10db stopped this, writes outside the checkout',
+        meta: '10db stopped this: writes outside the checkout',
+        name: 'Ran pnpm vitest run src/api, 10db stopped this: writes outside the checkout',
       },
     ],
     [
@@ -208,14 +227,21 @@ describe('groupWords', () => {
 describe('editGroupWords', () => {
   it('counts the files and their lines', () => {
     const entries = [
-      toolEntry(editCall({ id: 'e1', addedLines: 10, removedLines: 2 })),
-      toolEntry(editCall({ id: 'e2', addedLines: 20, removedLines: 0 })),
-      toolEntry(editCall({ id: 'e3', addedLines: 10, removedLines: 10 })),
+      toolEntry(editCall({ id: 'e1', path: 'src/1.ts', addedLines: 10, removedLines: 2 })),
+      toolEntry(editCall({ id: 'e2', path: 'src/2.ts', addedLines: 20, removedLines: 0 })),
+      toolEntry(editCall({ id: 'e3', path: 'src/3.ts', addedLines: 10, removedLines: 10 })),
     ];
     expect(editGroupWords(entries)).toEqual({
       text: 'Edited 3 files · +40 −12',
       name: 'Edited 3 files, +40 −12',
     });
+  });
+});
+
+describe('editGroupWords over one file', () => {
+  it('counts each file once', () => {
+    const entries = ['e1', 'e2', 'e3'].map((id) => toolEntry(editCall({ id })));
+    expect(editGroupWords(entries).text).toBe('Edited 1 file · +12 −6');
   });
 });
 

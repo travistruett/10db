@@ -12,6 +12,7 @@ import {
 } from './conversation-rows';
 import type { ConversationEntry } from './entry';
 import { ConversationEntryView } from './entry-view';
+import { RowStateProvider } from './row-state';
 import { EditGroupRow, ToolCallCard, ToolGroupRow } from './tool-call-card';
 
 /** Marks a row with the id of the entry it draws, or its group's first. */
@@ -83,16 +84,18 @@ export function ConversationList({
       ? -1
       : articles.findIndex((a) => a.rows.some((r) => idsOf(r).some((id) => marked.has(id))));
   return (
-    <WindowedArticles
-      articles={articles}
-      entryCount={entries.length}
-      marked={marked}
-      highlightNonce={highlight?.nonce}
-      targetIndex={targetIndex}
-      loadFull={loadFull}
-      onAllow={onAllow}
-      agentLabel={agentLabel}
-    />
+    <RowStateProvider>
+      <WindowedArticles
+        articles={articles}
+        entryCount={entries.length}
+        marked={marked}
+        highlightNonce={highlight?.nonce}
+        targetIndex={targetIndex}
+        loadFull={loadFull}
+        onAllow={onAllow}
+        agentLabel={agentLabel}
+      />
+    </RowStateProvider>
   );
 }
 

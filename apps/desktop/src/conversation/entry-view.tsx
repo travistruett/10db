@@ -16,9 +16,9 @@ import {
   IconCopy,
   IconInfoCircle,
 } from '@tabler/icons-react';
-import { useState } from 'react';
 import type { ConversationEntry } from './entry';
 import classes from './entry-view.module.css';
+import { useRowOpen } from './row-state';
 import { Markdown } from './markdown';
 import { formatDuration } from './tool-words';
 
@@ -72,7 +72,8 @@ function Reply({ entry }: { readonly entry: Entry<'reply'> }) {
 
 /** The agent's thinking, closed until the builder opens it. */
 function Reasoning({ entry }: { readonly entry: Entry<'reasoning'> }) {
-  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useRowOpen(entry.id, 'closed');
+  const open = opened !== 'closed';
   const took = formatDuration(entry.durationMs);
   const label = took === null ? 'Thought' : `Thought for ${took}`;
   return (
@@ -80,7 +81,7 @@ function Reasoning({ entry }: { readonly entry: Entry<'reasoning'> }) {
       <UnstyledButton
         aria-expanded={open}
         onClick={() => {
-          setOpen((was) => !was);
+          setOpened(open ? 'closed' : 'open');
         }}
         h={28}
       >

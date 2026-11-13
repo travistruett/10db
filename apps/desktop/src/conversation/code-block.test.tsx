@@ -96,6 +96,11 @@ describe('CodeBlock', () => {
     expect(writeText).toHaveBeenCalledWith('const a: number = 1;');
   });
 
+  it('cuts a long language label', () => {
+    renderWithTheme(<CodeBlock code="x" language={'a'.repeat(200)} />);
+    expect(screen.getByText(`${'a'.repeat(23)}…`)).toBeTruthy();
+  });
+
   it('shows no label with no language', () => {
     const { container } = renderWithTheme(<CodeBlock code="plain" language={null} />);
     expect(container.querySelector('pre')?.textContent).toContain('plain');

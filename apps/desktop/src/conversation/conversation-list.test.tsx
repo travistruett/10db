@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cssVariablesResolver, theme } from '../theme';
-import { readCall, toolEntry } from '../test/tool-call-fixtures';
+import { commandCall, readCall, toolEntry } from '../test/tool-call-fixtures';
 import { ConversationList, type ConversationListProps } from './conversation-list';
 import type { ConversationEntry } from './entry';
 
@@ -123,6 +123,42 @@ describe('ConversationList', () => {
       expect(await screen.findByText('Message 500')).toBeTruthy();
       expect(viewport().scrollTop).toBe(500 * ROW);
       expect(screen.queryByText('Message 2000')).toBeNull();
+    });
+  });
+
+  describe('row state', () => {
+    it('keeps a pressed Allow This pressed after the row scrolls away and back', async () => {
+      count = LONG + 1;
+      const held = toolEntry(
+        commandCall({
+          id: 'held',
+          status: 'denied',
+          deniedBy: 'judge',
+          limit: 'sends_data_out',
+          soft: true,
+        }),
+      );
+      const onAllow = vi.fn();
+      render(ui({ entries: [held, ...conversation(LONG)], onAllow }));
+      fireEvent.click(screen.getByRole('button', { name: 'Allow This' }));
+      scrollViewportTo(1000 * ROW);
+      await screen.findByText('Message 1000');
+      expect(screen.queryByText('You allowed this')).toBeNull();
+      scrollViewportTo(0);
+      expect(await screen.findByText('You allowed this')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Allow This' })).toBeNull();
+      expect(onAllow).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps an opened row open after it scrolls away and back', async () => {
+      count = LONG + 1;
+      const row = toolEntry(commandCall({ id: 'cmd', outputTail: 'PASS all' }));
+      render(ui({ entries: [row, ...conversation(LONG)] }));
+      fireEvent.click(screen.getByRole('button', { name: /^Ran pnpm/ }));
+      scrollViewportTo(1000 * ROW);
+      await screen.findByText('Message 1000');
+      scrollViewportTo(0);
+      expect(await screen.findByText('PASS all')).toBeTruthy();
     });
   });
 

@@ -69,15 +69,56 @@ const base = createShikiAdapter(loadShiki, {
   resolveLanguage: (language: string) => SHIKI_LANGUAGES.get(language.toLowerCase()),
 });
 
+/** The most highlighted text kept, keys and HTML together, in UTF-16 code units. */
+const CACHE_MAX_CHARS = 4_000_000;
+
+type Highlighted = ReturnType<ReturnType<CodeHighlightAdapter['getHighlighter']>>;
+
+/**
+ * Highlighted fences, least recently used first, so a fence the list mounts again as it scrolls
+ * back draws without highlighting again. Bounded by the text it holds.
+ */
+class HighlightCache {
+  private readonly entries = new Map<string, Highlighted>();
+  private size = 0;
+
+  get(key: string): Highlighted | undefined {
+    const hit = this.entries.get(key);
+    if (hit === undefined) return undefined;
+    this.entries.delete(key);
+    this.entries.set(key, hit);
+    return hit;
+  }
+
+  set(key: string, value: Highlighted): void {
+    const cost = key.length + value.highlightedCode.length;
+    if (cost > CACHE_MAX_CHARS) return;
+    this.entries.set(key, value);
+    this.size += cost;
+    for (const [oldest, kept] of this.entries) {
+      if (this.size <= CACHE_MAX_CHARS) break;
+      this.entries.delete(oldest);
+      this.size -= oldest.length + kept.highlightedCode.length;
+    }
+  }
+}
+
 /** Mantine's Shiki adapter, drawing in the Selenized theme of the current scheme. */
 export const shikiAdapter: CodeHighlightAdapter = {
   ...base,
   getHighlighter: (ctx) => {
     const highlight = base.getHighlighter(ctx);
-    return (input) =>
-      highlight({
-        ...input,
-        colorScheme: input.colorScheme === 'light' ? THEME_OF_SCHEME.light : THEME_OF_SCHEME.dark,
-      });
+    // A new highlighter (a new context) draws afresh.
+    const cache = new HighlightCache();
+    return (input) => {
+      const theme = input.colorScheme === 'light' ? THEME_OF_SCHEME.light : THEME_OF_SCHEME.dark;
+      const key = `${theme}\0${input.language ?? ''}\0${input.code}`;
+      const hit = cache.get(key);
+      if (hit !== undefined) return hit;
+      const drawn = highlight({ ...input, colorScheme: theme });
+      // Plain text is what a grammar still loading draws; only a highlighted result is kept.
+      if (drawn.isHighlighted) cache.set(key, drawn);
+      return drawn;
+    };
   },
 };
