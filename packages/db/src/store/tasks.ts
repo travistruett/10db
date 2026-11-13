@@ -45,6 +45,7 @@ import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
+import { checkTaskKinds, effectiveRigorOf } from './kinds';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -188,6 +189,7 @@ export function insertTask(
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
   if (config.flowId) getFlow(ctx.tx, config.flowId);
+  const kinds = checkTaskKinds(ctx.tx, config.kinds);
   refuseUnknownAreas(project, config.areas);
   if (config.dependsOn.length > 0) {
     const deps = ctx.tx
@@ -207,6 +209,7 @@ export function insertTask(
   }
   return writeTask(ctx, projectId, {
     ...config,
+    kinds,
     landing: config.landing ?? taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, config.workspaceMode), reason: null }),
     proposalId: null,
@@ -537,6 +540,9 @@ function writeTask(
     areas: config.areas,
     riskTags: config.riskTags,
     flowId: config.flowId,
+    rigor: config.rigor ?? null,
+    kinds: config.kinds ?? [],
+    effortPin: config.effortPin ?? null,
     proposalId: config.proposalId,
     ...landingColumns(config.landing),
     status: TaskStatus.Open,
@@ -616,6 +622,15 @@ function passHolds(db: DbReader, passId: PassId | null): boolean {
   return pass !== undefined && passHoldsTasks(pass.state);
 }
 
+function projectDefaultRigor(db: DbReader, projectId: ProjectId): Rigor {
+  const row = db
+    .select({ defaultRigor: schema.projects.defaultRigor })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .get();
+  return row?.defaultRigor ?? Rigor.Standard;
+}
+
 function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
@@ -648,10 +663,15 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     areas: row.areas,
     riskTags: row.riskTags,
     flowId: row.flowId,
-    rigor: null,
-    effectiveRigor: Rigor.Standard,
-    kinds: [],
-    effortPin: null,
+    rigor: row.rigor,
+    effectiveRigor: effectiveRigorOf(
+      db,
+      projectDefaultRigor(db, row.projectId),
+      row.rigor,
+      row.kinds,
+    ),
+    kinds: row.kinds,
+    effortPin: row.effortPin,
     landing: landingOf(row),
     workspaceMode: row.workspaceMode,
     placementReason: row.placementReason,
@@ -1015,6 +1035,7 @@ export function patchTask(
   proposed?: Placement,
 ): TaskDto {
   const changes = TaskPatch.parse(patch);
+  if (changes.kinds !== undefined) changes.kinds = checkTaskKinds(ctx.tx, changes.kinds);
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
   if (changes.flowId) getFlow(ctx.tx, changes.flowId);

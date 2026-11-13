@@ -9,6 +9,7 @@ import type {
   WorkstreamFailure,
   BatchId,
   BatchState,
+  CellSetting,
   CiStopped,
   BoardColumnId,
   ClaimId,
@@ -40,6 +41,7 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  KindId,
   KnowledgeScope,
   LandingGroupId,
   JudgeDecision,
@@ -88,6 +90,7 @@ import type {
   ProposalKind,
   Provider,
   QuestionCategory,
+  Rigor,
   RiskTag,
   RoutingRuleId,
   SessionId,
@@ -104,6 +107,7 @@ import type {
   ScreenTheme,
   ScreenViewport,
   ScreensMatrix,
+  TaskKind,
   TaskLanding,
   TaskMessageAuthor,
   TaskMessageId,
@@ -263,6 +267,8 @@ export const projects = sqliteTable('projects', {
   flowId: text('flow_id')
     .$type<FlowId>()
     .references(() => flows.id),
+  /** The rigor a task gets when nothing else sets one. */
+  defaultRigor: text('default_rigor').$type<Rigor>().notNull().default('standard'),
   budgetCeiling: real('budget_ceiling'),
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
@@ -436,6 +442,14 @@ export const tasks = sqliteTable(
     flowId: text('flow_id')
       .$type<FlowId>()
       .references(() => flows.id),
+    /** The rigor set on the task; null follows the project's default and the task's kinds. */
+    rigor: text('rigor').$type<Rigor>(),
+    kinds: text('kinds', { mode: 'json' })
+      .$type<TaskKind[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The builder's effort for every step of the task; null is no pin. */
+    effortPin: text('effort_pin').$type<Effort>(),
     /** The accepted proposal this task was filed from; null for a task made by hand. */
     proposalId: text('proposal_id')
       .$type<ProposalId>()
@@ -1234,6 +1248,77 @@ export const roleSettings = sqliteTable(
   ],
 );
 
+/** A kind of work: its minimum rigor, safety switches, extra steps and per-role overrides. Global. */
+export const kinds = sqliteTable('kinds', {
+  id: text('id').$type<KindId>().primaryKey(),
+  key: text('key').notNull().unique(),
+  label: text('label').notNull(),
+  description: text('description').notNull().default(''),
+  minimumRigor: text('minimum_rigor').$type<Rigor>(),
+  alwaysReviewed: integer('always_reviewed', { mode: 'boolean' }).notNull().default(false),
+  failsAtLimit: integer('fails_at_limit', { mode: 'boolean' }).notNull().default(false),
+  ownCopy: integer('own_copy', { mode: 'boolean' }).notNull().default(false),
+  toInbox: integer('to_inbox', { mode: 'boolean' }).notNull().default(false),
+  addsSteps: text('adds_steps', { mode: 'json' })
+    .$type<StepRole[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  overrides: text('overrides', { mode: 'json' })
+    .$type<Partial<Record<StepRole, CellSetting>>>()
+    .notNull()
+    .default(sql`'{}'`),
+  position: integer('position').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** The steps a rigor runs, as one scope overrides 10db's default: one row per rigor and project, and one per rigor with none. */
+export const playbookRows = sqliteTable(
+  'playbook_rows',
+  {
+    rigor: text('rigor').$type<Rigor>().notNull(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    steps: text('steps', { mode: 'json' }).$type<StepRole[]>().notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('playbook_rows_project_idx')
+      .on(t.rigor, t.projectId)
+      .where(sql`${t.projectId} is not null`),
+    uniqueIndex('playbook_rows_global_idx')
+      .on(t.rigor)
+      .where(sql`${t.projectId} is null`),
+  ],
+);
+
+/** Who runs a step at a rigor, as one scope overrides 10db's default; a null field leaves it to the scope above. */
+export const playbookCells = sqliteTable(
+  'playbook_cells',
+  {
+    rigor: text('rigor').$type<Rigor>().notNull(),
+    role: text('role').$type<StepRole>().notNull(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    personaId: text('persona_id')
+      .$type<PersonaId>()
+      .references(() => personas.id),
+    model: text('model', { mode: 'json' }).$type<ModelSetting>(),
+    effort: text('effort').$type<Effort>(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('playbook_cells_project_idx')
+      .on(t.rigor, t.role, t.projectId)
+      .where(sql`${t.projectId} is not null`),
+    uniqueIndex('playbook_cells_global_idx')
+      .on(t.rigor, t.role)
+      .where(sql`${t.projectId} is null`),
+  ],
+);
+
 /** A rule that gives matching steps a model setting; the lowest position within its scope that matches wins. */
 export const patterns = sqliteTable(
   'patterns',
@@ -1392,6 +1477,8 @@ export const shapes = sqliteTable(
     round: integer('round').notNull().default(0),
     /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
     model: text('model'),
+    /** The effort the builder chose for the conversation; null follows the model's own default. */
+    effort: text('effort').$type<Effort>(),
     /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
     bundleId: text('bundle_id'),
     bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),
