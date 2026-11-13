@@ -39,5 +39,7 @@ export function renderClaudeAutoMode(policy: TrustPolicy): ClaudeAutoModeSetting
     hard_deny: policy.attended
       ? [DEFAULTS, ...coordination]
       : [DEFAULTS, ...limits, ...coordination],
+    // An allow rule would otherwise settle a narrow shell command before the classifier sees it.
+    classifyAllShell: true,
   });
 }

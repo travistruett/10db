@@ -65,6 +65,12 @@ describe('renderClaudeAutoMode', () => {
     expect(settings.environment.at(-1)).toBe(
       'Sensitive remote targets: "api.example.com". These are live: treat a write to any of them as writing to a live system.',
     );
-    expect(settings).not.toHaveProperty('classifyAllShell');
   });
+
+  it.each(['lane', 'pass', 'plan'] as const)(
+    'a %s policy has the classifier judge every shell command, allow rules or not',
+    (surface) => {
+      expect(renderClaudeAutoMode(policyOf(surface)).classifyAllShell).toBe(true);
+    },
+  );
 });
