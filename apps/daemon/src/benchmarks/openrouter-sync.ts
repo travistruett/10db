@@ -99,6 +99,8 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
   let running: { readonly promise: Promise<void>; readonly gen: number } | null = null;
   let timer: Timer | null = null;
   let active = false;
+  /** Set by stop() and cleared by start(): a stopped sync starts no run, whoever asks. */
+  let stopped = false;
   /** Moves on every stop, so a run started before it can tell it was cut short. */
   let generation = 0;
   let controller = new AbortController();
@@ -334,7 +336,8 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
   async function runAndRecheck(gen: number): Promise<void> {
     pokedDuringRun = false;
     await run();
-    if (gen === generation && wasPoked()) {
+    // A poke can land while the key is re-read or the second run is going, so the check repeats until none did.
+    while (gen === generation && wasPoked()) {
       pokedDuringRun = false;
       let next: string | null;
       try {
@@ -348,6 +351,8 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
   }
 
   function poke(): Promise<void> {
+    // After stop() nothing runs until start() again, including a poke that waited on a run unwinding.
+    if (stopped) return Promise.resolve();
     if (running !== null) {
       if (running.gen === generation) {
         pokedDuringRun = true;
@@ -357,9 +362,12 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
       return running.promise.then(poke);
     }
     const gen = generation;
-    const promise = runAndRecheck(gen).finally(() => {
-      if (running?.promise === promise) running = null;
-    });
+    // Started a tick later, so `running` is set before anything the run calls can ask for another poke.
+    const promise = Promise.resolve()
+      .then(() => runAndRecheck(gen))
+      .finally(() => {
+        if (running?.promise === promise) running = null;
+      });
     running = { promise, gen };
     return promise;
   }
@@ -368,10 +376,12 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
     status,
     start() {
       active = true;
+      stopped = false;
       void poke();
     },
     stop() {
       active = false;
+      stopped = true;
       generation += 1;
       controller.abort();
       controller = new AbortController();

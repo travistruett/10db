@@ -45,6 +45,7 @@ let key: string | null;
 let keys: (string | null)[];
 let decisionIds: string[];
 let sync: OpenRouterSync;
+let onKeyRead: ((nth: number) => void) | null;
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -107,6 +108,7 @@ beforeEach(() => {
   handlers = new Map();
   key = KEY;
   keys = [];
+  onKeyRead = null;
   decisionIds = [DECISION, '~typesafe/jev-latest'];
   sync = build();
 });
@@ -122,6 +124,7 @@ function build(): OpenRouterSync {
     fetch: fakeFetch,
     readKey: () => {
       events.push('readKey');
+      onKeyRead?.(events.filter((e) => e === 'readKey').length);
       const next = keys.length > 0 ? (keys.shift() ?? null) : key;
       return Promise.resolve(next);
     },
@@ -299,5 +302,29 @@ describe('openrouter sync', () => {
     await flush();
     expect(requests).toHaveLength(count);
     expect(clock.pendingTimers()).toBe(0);
+  });
+
+  it('sends nothing for a poke after stop(), even one that waited on a run unwinding', async () => {
+    sync.start();
+    await settle(sync.idle());
+    sync.stop();
+    await settle(sync.idle());
+    const count = requests.length;
+    const reads = events.filter((e) => e === 'readKey').length;
+    await sync.poke();
+    expect(requests).toHaveLength(count);
+    expect(events.filter((e) => e === 'readKey')).toHaveLength(reads);
+  });
+
+  it('honours a switch of the key that lands while the recheck reads it', async () => {
+    // Reads: the run's, the recheck's (a poke lands during it, and it sees no change), then the next recheck's
+    // and the second run's, which see the account gone.
+    keys = [KEY, KEY, null, null];
+    onKeyRead = (nth) => {
+      if (nth <= 2) void sync.poke();
+    };
+    await settle(sync.poke());
+    await settle(sync.idle());
+    expect(sync.status()).toMatchObject({ keyConfigured: false, outcome: 'no_key' });
   });
 });
