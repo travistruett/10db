@@ -158,6 +158,15 @@ export function canUseToolBridge(bridge: {
   };
 }
 
+const InputRecord = z.record(z.string(), z.unknown());
+
+/** What a hook's answer decides for its call, or null when it gives no decision. */
+function permissionDecisionOf(output: HookJSONOutput): string | null {
+  if (!('hookSpecificOutput' in output)) return null;
+  const specific = output.hookSpecificOutput;
+  return specific.hookEventName === 'PreToolUse' ? (specific.permissionDecision ?? null) : null;
+}
+
 /** The reason a hook's answer denies its call, or null when it doesn't. */
 function deniedBy(output: HookJSONOutput): string | null {
   if (!('hookSpecificOutput' in output)) return null;
@@ -178,29 +187,73 @@ export function preToolUseHook(hook: {
   readonly judge: (input: PreToolUseHookInput) => HookJSONOutput;
   readonly beforeCall?: (input: PreToolUseHookInput) => void;
   readonly onDenied?: OnDenied;
+  /**
+   * The broker, for a call the judge asks about that a deny rule of Claude Code's would refuse
+   * before it reached `canUseTool`: the hook settles it, on the input the broker gives. Null leaves
+   * the ask to Claude Code.
+   */
+  readonly settleAsk?: (
+    hookInput: PreToolUseHookInput,
+    input: Record<string, unknown>,
+    signal: AbortSignal,
+  ) => Promise<ToolDecision> | null;
 }): HookCallbackMatcher {
   const onDenied = hook.onDenied ?? ignoreDenial;
-  const answer = async (hookInput: PreToolUseHookInput): Promise<HookJSONOutput> => {
+  const refuse = (reason: string): HookJSONOutput => toHookOutput({ decision: 'deny', reason });
+  /** The hook's answer, and whether a denial in it was told already. */
+  const answer = async (
+    hookInput: PreToolUseHookInput,
+    signal: AbortSignal,
+  ): Promise<{ readonly output: HookJSONOutput; readonly told: boolean }> => {
+    const untold = (output: HookJSONOutput) => ({ output, told: false });
     if (!(await hook.gate.verified) || hook.gate.refused())
-      return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
+      return untold(refuse(BILLING_UNVERIFIED));
+    let output: HookJSONOutput;
+    let settling: { decision: Promise<ToolDecision>; input: Record<string, unknown> } | null = null;
+    // The model's own JSON, read here: a call whose input is no object is left to Claude Code.
+    const input = InputRecord.safeParse(hookInput.tool_input);
     try {
       hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
       hook.beforeCall?.(hookInput);
-      return hook.judge(hookInput);
+      output = hook.judge(hookInput);
+      if (permissionDecisionOf(output) === 'ask' && input.success) {
+        const decision = hook.settleAsk?.(hookInput, input.data, signal) ?? null;
+        if (decision !== null) settling = { decision, input: input.data };
+      }
     } catch (error) {
       // A guard that fails must never let the call run.
-      return toHookOutput({
-        decision: 'deny',
-        reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
-      });
+      return untold(
+        refuse(`10db's guard failed: ${error instanceof Error ? error.message : String(error)}`),
+      );
     }
+    if (settling === null) return untold(output);
+    hook.cwds.take(hookInput.tool_use_id);
+    const decision = await settling.decision;
+    // The session can be refused while the answer was pending.
+    if (hook.gate.refused()) return untold(refuse(BILLING_UNVERIFIED));
+    if (decision.behavior === 'deny') {
+      onDenied(hookInput.tool_use_id, {
+        by: decision.by,
+        reason: decision.message,
+        limit: null,
+        soft: null,
+      });
+      return { output: refuse(decision.message), told: true };
+    }
+    return untold({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: decision.updatedInput ?? settling.input,
+      },
+    });
   };
   return {
     hooks: [
-      async (hookInput) => {
+      async (hookInput, _toolUseId, { signal }) => {
         if (hookInput.hook_event_name !== 'PreToolUse') return {};
-        const output = await answer(hookInput);
-        const reason = deniedBy(output);
+        const { output, told } = await answer(hookInput, signal);
+        const reason = told ? null : deniedBy(output);
         if (reason !== null) onDenied(hookInput.tool_use_id, tenDb(reason));
         return output;
       },

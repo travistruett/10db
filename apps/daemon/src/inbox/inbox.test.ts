@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -3230,6 +3239,47 @@ describe('permission broker in a sandboxed lane', () => {
       inbox.answer(card.id, { choice: 'deny' });
       await settle();
     }
+  });
+
+  // Claude Code's deny rule on the secret stays, since its Grep honours only that: the Read the
+  // builder allows reads a copy in the session's own reads folder, and a denied one copies nothing.
+  it("serves an allowed Read of the checkout's .env from a copy, and copies nothing when denied", async () => {
+    const ws = seedWorkstream(base);
+    const env = join(fileAccess.checkout, '.env');
+    writeFileSync(env, 'TOKEN=abc\n');
+    const reads = join(root, 'reads');
+    mkdirSync(reads);
+    const decide = createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: controller.signal,
+        sandbox: {
+          fileAccess: { ...fileAccess, secretFiles: [env], secretsOnCard: [env] },
+          hazards: DEFAULT_HAZARDS,
+          secretReadsDir: reads,
+        },
+      },
+    );
+    const denied = decide(request('Read', { file_path: env }));
+    await settle();
+    expect(onlyOpenCard().body).toBe(env);
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    expect((await denied).behavior).toBe('deny');
+    expect(readdirSync(reads)).toEqual([]);
+
+    const allowed = decide(request('Read', { file_path: env, limit: 10 }));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+    const decision = await allowed;
+    const served = decision.behavior === 'allow' ? decision.updatedInput : undefined;
+    const [copy, ...more] = readdirSync(reads);
+    expect(more).toEqual([]);
+    expect(served).toEqual({ file_path: join(reads, copy ?? ''), limit: 10 });
+    expect(readFileSync(join(reads, copy ?? ''), 'utf8')).toBe('TOKEN=abc\n');
   });
 
   it('still cards a read under the home directory outside the copy, and a write to the manual pages', async () => {

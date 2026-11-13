@@ -87,7 +87,9 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   place (`trust/limits.ts`), the environment the judge reads them in, and the coordination lines of its surface.
 - `sandbox/` opens a session's setup read-only (`setup-reads.ts`: `setupReadRefusal` judges each real path,
   `collapseReads` keeps the profile small; `setup-dir.ts`: `keepSetup` and `createSetupDir`, one
-  `10db-setup-<hex>` dir per session in the files root, removed with its sandbox and swept by `stale-files.ts`;
+  `10db-setup-<hex>` dir per session in the files root, removed with its sandbox and swept by `stale-files.ts`, as is
+  a pass's `10db-read-<hex>` dir (`secret-reads.ts`), where the broker writes a copy of a checkout secret the
+  builder allowed a Read of, since Claude Code's deny rule on the secret stays;
   `plugin-wrapper.ts`: a wrapper per plugin linking `skills`, `agents` and `commands` by folded name and
   re-emitting `hooks/hooks.json` with each command started in the wrapper, never MCP or LSP servers). Every `.env*` file and folder in an opened read, and what a link in a `.env*` folder
   leads to, is denied to the kernel, Claude Code's rules and the file-access judge. Only the lane profile gets

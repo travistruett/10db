@@ -2602,7 +2602,15 @@ export function createRunner(opts: RunnerOptions): Runner {
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
             ...(laneSession
-              ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
+              ? {
+                  sandbox: {
+                    fileAccess: laneSession.fileAccess,
+                    hazards: project.hazards,
+                    ...(laneSession.secretReadsDir === null
+                      ? {}
+                      : { secretReadsDir: laneSession.secretReadsDir }),
+                  },
+                }
               : {}),
             ...(pass
               ? {

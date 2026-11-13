@@ -2,6 +2,7 @@ export { createClaudeAdapter } from './claude-adapter';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
 export { CODEX_COMMANDS } from './codex-commands';
+export { readCheckoutText } from './before-text';
 export { patchPaths } from './codex-guard';
 export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';

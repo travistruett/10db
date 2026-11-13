@@ -56,6 +56,7 @@ import {
   type ExploreSessionSpec,
   type LaneProfile,
   type LaneSessionSpec,
+  type ToolDecision,
 } from './types';
 
 type LaneOverrides = Partial<Omit<LaneSessionSpec, 'profile'>> & {
@@ -745,6 +746,61 @@ describe('buildQueryOptions', () => {
       ['Bash', 'mcp__s__t'],
       undefined,
     ]);
+  });
+
+  // Claude Code's deny rule on a secret beats a hook's ask, so the hook asks the broker itself and
+  // runs the Read on what the broker points it at (a copy of the secret it allowed).
+  it.each<[string, ToolDecision, object]>([
+    [
+      'an allowed Read runs on the input the broker gives',
+      { behavior: 'allow', updatedInput: { file_path: '/files/10db-read-x/copy' } },
+      { permissionDecision: 'allow', updatedInput: { file_path: '/files/10db-read-x/copy' } },
+    ],
+    [
+      'an allowed Read the broker leaves alone runs as it was',
+      { behavior: 'allow' },
+      { permissionDecision: 'allow', updatedInput: { file_path: '.env' } },
+    ],
+    [
+      'a denied Read is denied with the reason',
+      { behavior: 'deny', message: 'the builder said no', by: 'builder' },
+      { permissionDecision: 'deny', permissionDecisionReason: 'the builder said no' },
+    ],
+  ])('settles a Read the guard asks about in the hook: %s', async (_name, decision, expected) => {
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() => Promise.resolve(decision));
+    const denied: unknown[] = [];
+    const options = buildQueryOptions(
+      spec({ canUseTool, preToolUse: () => ({ decision: 'ask', reason: 'a secret' }) }),
+      { ...deps, onDenied: (id, denial) => denied.push([id, denial.by]) },
+    );
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    const output = await hook?.(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Read',
+        tool_input: { file_path: '.env' },
+        tool_use_id: 'toolu_r',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo/apps',
+      },
+      'toolu_r',
+      { signal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', ...expected },
+    });
+    expect(canUseTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'Read',
+        input: { file_path: '.env' },
+        toolUseId: 'toolu_r',
+        cwd: '/repo/apps',
+        escalated: false,
+      }),
+    );
+    // A denial is told once, as the broker's: the builder's Deny stays the builder's.
+    expect(denied).toEqual(decision.behavior === 'deny' ? [['toolu_r', 'builder']] : []);
   });
 
   it('hands canUseTool the directory the hook gave for the same call', async () => {

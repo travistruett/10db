@@ -49,6 +49,7 @@ export {
   expandHome,
   fileAccessJudge,
   isOutsideCopy,
+  isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
@@ -77,3 +78,4 @@ export { singleQuoted } from './posix-quote';
 export type { SetupInput } from './setup-input';
 export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
+export { writeSecretRead } from './secret-reads';

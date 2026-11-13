@@ -43,14 +43,16 @@ import {
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import {
+  isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
   singleQuoted,
   writeAccess,
+  writeSecretRead,
   type FileAccessContext,
 } from '../sandbox';
-import type { ToolDecision, ToolRequest } from '../sessions';
+import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
 
@@ -96,6 +98,11 @@ type BrokerContext = BrokerOwner & {
      * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
      */
     readonly commandsAsk?: boolean;
+    /**
+     * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
+     * Claude Code's deny rule on the secret stays, so the Read runs on a copy there instead.
+     */
+    readonly secretReadsDir?: string;
   };
   /**
    * Present for a pass: a plain commit, push or merge (`passGitCall`) gets a card the builder may
@@ -711,7 +718,47 @@ export function createPermissionBroker(
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);
     if (verdict === null) return askPermission(req);
-    return isDecision(verdict) ? verdict : askPermission(req, verdict);
+    if (isDecision(verdict)) return verdict;
+    const decision = await askPermission(req, verdict);
+    return req.toolName === 'Read' ? servedSecretRead(req, decision, verdict, sandbox) : decision;
+  }
+
+  /**
+   * An allowed Read of the checkout's secret, pointed at a copy in the session's reads folder:
+   * Claude Code's deny rule on the secret stays, since its Grep and Glob honour only that.
+   */
+  function servedSecretRead(
+    req: ToolRequest,
+    decision: ToolDecision,
+    ask: Ask,
+    sandbox: NonNullable<BrokerContext['sandbox']>,
+  ): ToolDecision {
+    const [real] = ask.realPaths ?? [];
+    if (
+      decision.behavior !== 'allow' ||
+      real === undefined ||
+      !isSecretOnCard(real, sandbox.fileAccess)
+    )
+      return decision;
+    const refuse = (why: string): ToolDecision => ({
+      behavior: 'deny',
+      message: `${real} was allowed, but ${why}, so 10db did not read it.`,
+      by: DeniedBy.TenDb,
+    });
+    if (sandbox.secretReadsDir === undefined) return refuse('this session has no place to read it');
+    const text = readCheckoutText(sandbox.fileAccess.checkout, real);
+    if (text.kind !== 'text') return refuse('it is not one plain file inside the checkout');
+    try {
+      return {
+        behavior: 'allow',
+        updatedInput: {
+          ...req.input,
+          file_path: writeSecretRead(sandbox.secretReadsDir, text.text),
+        },
+      };
+    } catch {
+      return refuse('its copy could not be written');
+    }
   }
 
   return async (req) => {

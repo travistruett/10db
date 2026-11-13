@@ -16,10 +16,12 @@
 
 2. **In a pass, a Read of the checkout's `.env*` files asks the builder.** Where the builder is in the session, a
    Read of one of the checkout's own `.env*` files (a file, or a file in a `.env*` folder, whose real path is in the
-   checkout) gets a card the builder can allow, as in Claude Code, instead of a refusal: Claude Code holds it as an
-   `ask` rule rather than a deny rule, and the guard and the broker card it. A lane still refuses it. The kernel
-   still denies `.env*` to commands, a Grep, Glob or LS over one is still refused, and a `.env*` link that leads out
-   of the checkout stays a protected read. A key file in the checkout is no secret 10db lists, so its Read is left
+   checkout) gets a card the builder can allow, as in Claude Code, instead of a refusal. Claude Code keeps its deny
+   rule on the file, since its Grep and Glob honour only that rule, so the PreToolUse hook settles the Read through
+   the broker, and an allowed Read runs on a copy of the file in a folder of the session's own that the kernel and
+   the file-access judge close (`10db-read-<hex>` in the files root). A lane still refuses it. The kernel still
+   denies `.env*` to commands, a Grep, Glob or LS over one is still refused, and a `.env*` link that leads out of
+   the checkout stays a protected read. A key file in the checkout is no secret 10db lists, so its Read is left
    to the judge, whose reads-secrets limit is a soft deny in a pass that Allow this can clear. Credential stores
    outside the checkout (`~/.ssh`, the Keychain, account config) stay unreadable in every session, as decision item
    1 of the trust decision keeps them.
@@ -58,7 +60,9 @@
 - The builder's ruling on T3: "In a pass, `.env` and key reads keep the soft-deny card. Make sure it is a card the
   builder can allow, not a hard refusal." A pass's `.env` read was refused three times over (Claude Code's deny
   rule, the guard and the broker), so no go-ahead could clear it. The Read tool runs in Claude Code's process, not
-  in the kernel sandbox, so a card on it opens the file only for the call the builder allowed.
+  in the kernel sandbox, so a card on it opens the file only for the call the builder allowed. Turning the deny
+  rule into an `ask` rule was turned down: Grep runs ripgrep in Claude Code's process and honours deny rules
+  only, so `Grep {path: ".", glob: ".env*", output_mode: "content"}` would print the file with no card.
 - The spec's fuller design (trust line §2: attended sessions kernel-readable, with the limit line judging each
   read) needs the sandbox profile to differ by surface and its adversarial review; this keeps the profile as it is
   and opens only the Read tool, behind a card.

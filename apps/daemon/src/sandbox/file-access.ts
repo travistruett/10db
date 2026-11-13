@@ -295,7 +295,7 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
 };
 
 /** Whether `real` is, or is under, one of the checkout's secrets a card may open (`secretsOnCard`). */
-function isSecretOnCard(real: string, ctx: FileAccessContext): boolean {
+export function isSecretOnCard(real: string, ctx: FileAccessContext): boolean {
   return (ctx.secretsOnCard ?? []).some(
     (file) =>
       isEqualOrUnder(real, file) &&

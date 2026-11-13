@@ -239,6 +239,19 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
           cwds,
           ...(deps.beforeCall === undefined ? {} : { beforeCall: deps.beforeCall }),
           ...(deps.onDenied === undefined ? {} : { onDenied: deps.onDenied }),
+          // A Read the guard asks about may be of a secret, which a deny rule keeps from canUseTool
+          // (Grep honours only that rule): the broker answers it here, pointing it at a copy.
+          settleAsk: (hookInput, input, signal) =>
+            hookInput.tool_name === 'Read'
+              ? spec.canUseTool({
+                  toolName: hookInput.tool_name,
+                  input,
+                  toolUseId: hookInput.tool_use_id,
+                  escalated: false,
+                  signal,
+                  cwd: hookInput.cwd,
+                })
+              : null,
           judge: (hookInput) => {
             const verdict = spec.preToolUse({
               toolName: hookInput.tool_name,

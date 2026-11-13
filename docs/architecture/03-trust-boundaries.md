@@ -311,9 +311,16 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   real path it leads to, wherever that is; a link that can't be resolved (dangling, or a loop) reads nothing and
   is skipped. In a pass, where the builder is in the session, a Read of one of the checkout's own `.env*` files
   (a file, or a file in a `.env*` folder, whose real path is in the checkout) asks the builder on a card instead,
-  as in Claude Code: it is an `ask` rule rather than a `disallowedTools` rule, and the guard and the broker card
-  it. The kernel still denies it to commands, a search over it is still refused, and a `.env*` link out of the
-  checkout stays a protected read (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
+  as in Claude Code. Its `disallowedTools` rule stays, because Claude Code's Grep and Glob run ripgrep in its own
+  process and honour only that rule (a Grep over `.` with `glob: ".env*"` would otherwise print the file with no
+  card), and a deny rule beats a hook's `ask`. So the guard asks, the PreToolUse hook settles the call itself
+  through the broker (`settleAsk` in `sessions/claude-session-hooks.ts`), and once the builder allows it the broker
+  reads the file as a before-text is read (one plain file in the checkout, opened without following a link) and
+  writes the text to a new file in the session's own `10db-read-<hex>` folder in the files root, which the kernel
+  and the file-access judge close and no deny rule names; the hook answers `allow` with `file_path` pointing
+  there. The folder goes with the session's sandbox and a stale one is swept. The kernel still denies the secret
+  to commands, a search over it is still refused, and a `.env*` link out of the checkout stays a protected read
+  (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).
   The walk is asynchronous. A secret file whose path
   holds `*`, `?`, `[`, `]`, `{`, `}`, `\` or a newline refuses the lane: Claude Code drops the whole sandbox,
   without an error, on a value it can't parse (spike 14 check 11).

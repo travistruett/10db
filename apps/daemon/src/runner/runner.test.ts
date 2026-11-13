@@ -4656,6 +4656,7 @@ describe("a lane's settled read-only line", () => {
         mcpServers: {},
         mcpFailures: [],
         setup: EMPTY_SETUP,
+        secretReadsDir: null,
         setProviderSession: () => undefined,
         trackProcesses: () => Promise.resolve(true),
         endProcesses: () => Promise.resolve(),
