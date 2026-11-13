@@ -86,7 +86,7 @@ Every note from the builder's QA of Settings › Models and benchmarks, and wher
 |---|---|
 | The nav label wraps to two lines; call it **Models** | PR 1 (§10) |
 | Rename the subhead above it (to **AI**) **(call: the name)** | PR 1 |
-| The Account select and the refresh button differ in height | PR 1: the button takes `size="input-sm"` |
+| The Account select and the refresh button differ in height | PR 1: the button takes `size="input-xs"`, the select's own size |
 | The page is flat; give the tables and chart a raised surface | PR 1: this page only, until the Settings rework lands everywhere |
 | Title Case role names ("Plan Review") | PR 1, in `role-labels.ts` |
 | "Used by" reads as purple links | PR 1: plain text |
@@ -432,7 +432,7 @@ Each starts from a fresh `main` and gets its own plan.
 Everything in §2 that does not need the playbook:
 
 - nav label **Models**, the subhead renamed, page title Models;
-- refresh icon at `size="input-sm"`;
+- refresh icon at `size="input-xs"`, the Account select's size;
 - raised panels for this page's tables and chart, through one component the rest of Settings can adopt later;
 - Title Case role labels;
 - "Used by" as plain text (the violet dot stays in the roles table only);
