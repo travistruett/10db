@@ -46,4 +46,9 @@ export {
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
 } from './worktree-list';
-export { runPassGit, type BuilderRefusal, type BuilderRun } from './run-as-builder';
+export {
+  builderCommandLine,
+  runPassGit,
+  type BuilderRefusal,
+  type BuilderRun,
+} from './run-as-builder';

@@ -274,6 +274,27 @@ describe('judgeHookCall', () => {
     expect(await judgeHookCall(spec, bash('make'), NEVER)).toEqual({ allow: true });
   });
 
+  // Codex would run its own copy of a call 10db already ran for the builder, so the hook refuses it
+  // with what ran: the agent reads the result instead of retrying.
+  it('answers a call 10db ran for the builder with what it ran, how it ended and what it printed', async () => {
+    const spec: Spec = {
+      preToolUse: () => ({ decision: 'ask', reason: 'a commit' }),
+      canUseTool: () =>
+        Promise.resolve({
+          behavior: 'allow',
+          updatedInput: { command: "printf '%s' 'done'; exit 1" },
+          ranForBuilder: { command: 'git commit -m x', exitCode: 1, output: 'nothing to commit\n' },
+        }),
+    };
+    const answer = await judgeHookCall(spec, bash("git commit -m x # it's ready"), NEVER);
+    expect(answer).toEqual({
+      allow: false,
+      reason:
+        '10db ran this for the builder: git commit -m x\nIt ended with exit code 1 and printed:\nnothing to commit\n',
+      interrupt: false,
+    });
+  });
+
   it('refuses and asks to interrupt when canUseTool says interrupt', async () => {
     const spec: Spec = {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),

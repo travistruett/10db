@@ -4192,7 +4192,12 @@ describe('permission broker in a pass', () => {
       expect(item.title).toBe('Allow git commit?');
       expect(item.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
       inbox.answer(item.id, { choice: 'allow_once' });
-      const result = replayed(await decision);
+      const allowed = await decision;
+      const result = replayed(allowed);
+      // An agent whose hook can't replay the call (Codex) is told what ran instead.
+      const ran = allowed.behavior === 'allow' ? allowed.ranForBuilder : undefined;
+      expect(ran).toMatchObject({ command: "git commit -m 'Add the page'", exitCode: 0 });
+      expect(ran?.output).toContain('Add the page');
       expect(git('log', '-1', '--format=%s').trim()).toBe('Add the page');
       expect(result).toMatch(/^printf '%s' '.*Add the page.*'; exit 0$/s);
       expect(execFileSync('/bin/sh', ['-c', result], { encoding: 'utf8' })).toContain(

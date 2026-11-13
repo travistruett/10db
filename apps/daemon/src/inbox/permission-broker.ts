@@ -18,7 +18,7 @@ import {
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import type { BuilderRefusal, BuilderRun, Git } from '../git';
+import { builderCommandLine, type BuilderRefusal, type BuilderRun, type Git } from '../git';
 import {
   firstUnread,
   hazardHit,
@@ -684,6 +684,11 @@ export function createPermissionBroker(
       updatedInput: {
         ...req.input,
         command: `printf '%s' ${singleQuoted(ran.output)}; exit ${String(ran.exitCode)}`,
+      },
+      ranForBuilder: {
+        command: builderCommandLine(call.argv),
+        exitCode: ran.exitCode,
+        output: ran.output,
       },
     };
   }

@@ -3,6 +3,7 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isProtected, type PassGitCall } from '../guard';
 import { NO_ATTRIBUTES_CONFIG } from './git';
+import { shellWord } from './shell-word';
 
 /** What a command the builder allowed printed, and how it ended. */
 export interface BuilderRun {
@@ -52,6 +53,11 @@ function run(
 }
 
 const refused = (why: string): BuilderRefusal => ({ refused: why });
+
+/** The words 10db runs for the builder as one shell line, each word quoted when it needs it. */
+export function builderCommandLine(argv: readonly string[]): string {
+  return argv.map(shellWord).join(' ');
+}
 
 /**
  * The checkout's own git dir: `<checkout>/.git` as a folder of its own, never a link or a `.git`

@@ -41,7 +41,19 @@ export interface ToolRequest {
 }
 
 export type ToolDecision =
-  | { readonly behavior: 'allow'; readonly updatedInput?: Record<string, unknown> }
+  | {
+      readonly behavior: 'allow';
+      readonly updatedInput?: Record<string, unknown>;
+      /**
+       * 10db already ran the call for the builder (a pass's allowed commit, push or merge), and
+       * `updatedInput` replays it. An agent whose hook can't change a call is told this instead.
+       */
+      readonly ranForBuilder?: {
+        readonly command: string;
+        readonly exitCode: number;
+        readonly output: string;
+      };
+    }
   | {
       readonly behavior: 'deny';
       readonly message: string;
