@@ -1,7 +1,9 @@
 # 10db working rules
 
 These rules bind every contributor: people, Claude Code and Codex. Each app and package has its own
-`AGENTS.md` with local rules; read the root file and the ones for every directory you touch.
+`AGENTS.md` with local rules, and a module or view keeps its notes in an `AGENTS.md` beside its code; read the
+root file and the ones for every directory you touch, and write a note in the nearest one
+(`docs/architecture/decisions/2026-11-13-module-notes-live-beside-the-module.md`).
 `CLAUDE.md` files are not used here, and a test fails if one appears.
 
 ## What 10db is

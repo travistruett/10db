@@ -1,0 +1,3 @@
+# apps/daemon/src/verify
+
+- Gates are limited machine-wide (`verify/gate-slots.ts`, `decisions/2026-10-28-gate-slots.md`): `startDaemon` wraps the one gate runner with `limitGates` over a single `createGateSlots(limits.gateSlots)` (default 1, `TENDB_GATE_SLOTS`), so a lane's verify gate and a batch's ship gate share it. The gate's timeout starts when it gets a slot. A gate that waits calls `GateRequest.onWaiting`, and `GateRequest.beforeStart` runs once it holds its slot, before its sandbox or command (a false answer is an abort); a new place that starts a gate goes through that same runner, never a second one.
