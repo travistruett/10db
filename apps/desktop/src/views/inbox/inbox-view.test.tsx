@@ -388,6 +388,36 @@ describe('InboxView', () => {
 
   it.each([
     {
+      name: 'links a card that says to sign in to GitHub to Settings › Integrations',
+      detail: { batchId: 'bat_x', openIntegrations: 'github' },
+      href: '/settings/integrations?focus=github',
+    },
+    { name: 'offers no such link on a card without it', detail: { batchId: 'bat_x' }, href: null },
+    {
+      name: 'ignores a focus name that is not a name',
+      detail: { batchId: 'bat_x', openIntegrations: 7 },
+      href: null,
+    },
+  ])('$name', async ({ detail, href }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Batch not started: gh is signed out',
+      body: 'Sign in to GitHub in Settings › Integrations. Then start again.',
+      options: [],
+      detail,
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Sign in to GitHub in Settings', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open Integrations' });
+    if (href === null) expect(anchor).toBeNull();
+    else expect(anchor?.getAttribute('href')).toBe(href);
+  });
+
+  it.each([
+    {
       name: 'links a gate card to its failing step log',
       logPath: '/wt/.gate/test.log',
       shown: true,

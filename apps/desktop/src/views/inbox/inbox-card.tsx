@@ -1,5 +1,6 @@
 import {
   ACCOUNT_CARD_DETAIL,
+  OPEN_INTEGRATIONS_DETAIL,
   AccountCardDetail,
   AccountProblem,
   InboxKind,
@@ -24,6 +25,7 @@ import {
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
+import { z } from 'zod';
 import { CodeSpans } from '../../shell/code-spans';
 import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
@@ -109,6 +111,12 @@ const GITHUB_PAGE = 'https://github.com/';
 function needsAccountModels(item: InboxItemDto): boolean {
   const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
   return card.success && card.data.problem === AccountProblem.NoUsableModel;
+}
+
+/** The Integrations card a flag card sends the builder to (`detail.openIntegrations`), or null. */
+function integrationsFocusOf(item: InboxItemDto): string | null {
+  const focus = z.string().min(1).safeParse(item.detail?.[OPEN_INTEGRATIONS_DETAIL]);
+  return focus.success ? focus.data : null;
 }
 
 function cardLink(item: InboxItemDto): string | null {
@@ -312,6 +320,21 @@ export function InboxCard({
             Open Accounts in Settings
           </Anchor>
         ) : null}
+        {integrationsFocusOf(item) === null ? null : (
+          <Anchor
+            size="sm"
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Integrations }}
+                search={{ focus: integrationsFocusOf(item) ?? undefined }}
+              />
+            )}
+          >
+            Open Integrations
+          </Anchor>
+        )}
         <RouteLineRow item={item} people={people} mode={mode} />
         <SentNotice item={item} />
         {mode === StakeholderMode.Copy ? (

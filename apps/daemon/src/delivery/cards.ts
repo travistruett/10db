@@ -1,6 +1,7 @@
 import {
   BatchFailure,
   BatchState,
+  OPEN_INTEGRATIONS_DETAIL,
   type BatchDto,
   type CardResolvesWhen,
   type BatchId,
@@ -211,6 +212,9 @@ export function detailOf(error: unknown): string {
 
 const NOT_STARTED = 'Batch not started';
 
+/** The detail of a card that tells the builder to sign in to GitHub: the desktop offers Open Integrations. */
+const OPEN_GITHUB_CARD: Record<string, Json> = { [OPEN_INTEGRATIONS_DETAIL]: 'github' };
+
 function ghCard(prefix: string, error: unknown, then: string): Card | null {
   if (!(error instanceof GhError)) return null;
   switch (error.kind) {
@@ -218,11 +222,13 @@ function ghCard(prefix: string, error: unknown, then: string): Card | null {
       return {
         title: `${prefix}: gh is not installed`,
         body: `Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS} Then ${then}.`,
+        detail: OPEN_GITHUB_CARD,
       };
     case 'signed_out':
       return {
         title: `${prefix}: gh is signed out`,
         body: `${SIGN_IN_IN_SETTINGS} Then ${then}.`,
+        detail: OPEN_GITHUB_CARD,
       };
     case 'timeout':
     case 'aborted':
@@ -908,7 +914,10 @@ export const shipCards = {
   network: (batch: BatchDto, step: string, error: unknown): ShipFailure => {
     const gh = ghCard(notShipped(batch), error, 'retry');
     return gh
-      ? { failure: BatchFailure.GhUnavailable, card: { ...gh, detail: answers(batch) } }
+      ? {
+          failure: BatchFailure.GhUnavailable,
+          card: { ...gh, detail: { ...gh.detail, ...answers(batch) } },
+        }
       : {
           failure: BatchFailure.Network,
           card: {
@@ -1239,7 +1248,12 @@ export const prCards = {
    */
   ghUnavailable: (batch: BatchDto, error: unknown): Card => ({
     ...prCards.ghUnavailableText(error),
-    detail: { batchId: batch.id, prUrl: batch.prUrl, [GH_CHECK_DETAIL]: true },
+    detail: {
+      ...prCards.ghUnavailableText(error).detail,
+      batchId: batch.id,
+      prUrl: batch.prUrl,
+      [GH_CHECK_DETAIL]: true,
+    },
     options: [
       {
         label: GH_CHECK_CHOICE,
@@ -1258,12 +1272,14 @@ export const prCards = {
         foldKey,
         title: 'Pull request status unknown: gh is signed out',
         body: `10db reads your pull requests' checks and merge state with gh. ${SIGN_IN_IN_SETTINGS} ${until}`,
+        detail: OPEN_GITHUB_CARD,
       };
     if (kind === 'not_installed')
       return {
         foldKey,
         title: 'Pull request status unknown: gh is not installed',
         body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS} ${until}`,
+        detail: OPEN_GITHUB_CARD,
       };
     return {
       foldKey,
