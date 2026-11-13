@@ -30,8 +30,9 @@ export function patchJudgeConfig(ctx: WriteContext, patch: JudgeConfigPatch): Ju
   // Both inputs were parsed by the contract's schemas, so the merge is a JudgeConfig; parsing again
   // is what guarantees it.
   const accountId = patch.accountId === undefined ? current.accountId : patch.accountId;
-  if (accountId !== null && accountId !== current.accountId) {
-    const account = findAccountRow(ctx.tx, accountId);
+  // A patch that names an account is checked whether or not it changes it; one that names none keeps what is stored.
+  if (patch.accountId !== undefined && patch.accountId !== null) {
+    const account = findAccountRow(ctx.tx, patch.accountId);
     if (!account) throw new InvalidError('Decisions run on an account that exists');
     if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
     if (account.kind !== AccountKind.OpenRouter)

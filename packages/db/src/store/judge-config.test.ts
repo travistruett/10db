@@ -69,6 +69,15 @@ describe('judge config', () => {
       expect(getJudgeConfig(store.db).accountId).toBeNull();
     });
 
+    it('refuses a patch that names the account already set once that account is archived', () => {
+      const account = openRouter();
+      store.write((ctx) => patchJudgeConfig(ctx, { accountId: account.id }));
+      store.write((ctx) => archiveAccount(ctx, account.id));
+      expect(() => store.write((ctx) => patchJudgeConfig(ctx, { accountId: account.id }))).toThrow(
+        InvalidError,
+      );
+    });
+
     it.each<{ name: string; pick: () => ReturnType<typeof mintId<'Account'>> }>([
       { name: 'unknown', pick: () => mintId('Account') },
       {
