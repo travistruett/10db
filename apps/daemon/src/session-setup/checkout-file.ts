@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { readRepoFileBytes, RepoConfigFileError, type RepoFileBytes } from '../sessions';
+import { readRepoFileBytesIn, RepoConfigFileError, type RepoFileBytes } from '../sessions';
 
 const BEHIND_A_LINK = 'it lies behind a link';
 
@@ -15,8 +15,8 @@ function realDir(path: string): string | null {
 /**
  * Reads `relative` under a checkout a lane can write, or returns null when it is absent. The file's folder
  * must have, before and after the read, the real path its spelling has under the checkout's real path, and
- * the path must still name the opened file after that: a folder swapped for a link at any point is refused,
- * never read through. Throws `RepoConfigFileError` with why.
+ * the path must still name the opened file after that, and the open itself refuses a link anywhere on the
+ * way (`openInRoot`): a folder swapped for a link at any point is refused, never read through. Throws `RepoConfigFileError` with why.
  */
 export function readCheckoutFile(
   checkoutReal: string,
@@ -28,7 +28,9 @@ export function readCheckoutFile(
   const before = realDir(expected);
   if (before === null) return null;
   if (before !== expected) throw new RepoConfigFileError(BEHIND_A_LINK);
-  const read = readRepoFileBytes(path, maxBytes);
+  // Opened refusing a link anywhere past the checkout: the checks by path around it can't see a
+  // folder swapped for a link and back while the open goes through it.
+  const read = readRepoFileBytesIn(checkoutReal, relative, maxBytes);
   if (read === null) return null;
   if (realDir(expected) !== expected) throw new RepoConfigFileError(BEHIND_A_LINK);
   let now;

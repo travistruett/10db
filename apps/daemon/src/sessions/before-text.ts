@@ -1,6 +1,5 @@
 import {
   closeSync,
-  constants,
   fstatSync,
   lstatSync,
   openSync,
@@ -8,7 +7,8 @@ import {
   realpathSync,
   type Stats,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, join, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { openInRoot } from './open-in-root';
 
 /** The largest file whose previous text an edit card shows. */
 export const BEFORE_TEXT_MAX_BYTES = 1_048_576;
@@ -101,11 +101,15 @@ export function readCheckoutText(
       return codeOf(error) === 'ENOENT' ? ABSENT : UNREAD;
     }
     if (!seen.isFile()) return UNREAD;
+    // Opened by its spelling under the checkout's real path, refusing a link anywhere on the way:
+    // a folder swapped for a link and back between the path checks is never read through.
+    const spelled = [checkout, realCheckout].find((root) => within(root, absolute));
+    if (spelled === undefined) return UNREAD;
     let fd: number;
     try {
       // Non-blocking, so a FIFO swapped in after the lstat opens at once instead of waiting for a
       // writer and holding the event loop; the fstat below refuses it.
-      fd = fs.openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      fd = openInRoot(realCheckout, relative(spelled, absolute), fs);
     } catch {
       return UNREAD;
     }

@@ -159,6 +159,15 @@ const rows: readonly Row[] = [
     expected: UNREAD,
   },
   {
+    // The open refuses a link anywhere on the way, so a swap no path check sees is never read through.
+    name: 'a file under a linked folder that points inside',
+    setup: () => {
+      linkD(join(checkout, 'd2'));
+    },
+    path: () => 'd/a.ts',
+    expected: UNREAD,
+  },
+  {
     name: 'a hard link to a file outside',
     setup: () => {
       linkSync(join(outside, 'secret'), join(checkout, 'h.ts'));
