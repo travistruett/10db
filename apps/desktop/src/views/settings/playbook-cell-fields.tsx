@@ -9,6 +9,7 @@ import {
 } from '@10db/contracts';
 import { NumberInput, Select, Stack, type ComboboxProps } from '@mantine/core';
 import { useState } from 'react';
+import type { NoneLabels } from './playbook-edits';
 import { automaticAtLeast, TOP_OF_TIERS, topOfTier } from './model-setting-options';
 import { ModelSettingSelect } from './model-setting-select';
 import { TIER_LABEL } from './model-labels';
@@ -23,9 +24,11 @@ const isEffort = (value: string): value is Effort => Object.values(Effort).some(
 /** The minimum Intelligence field; it commits when it loses focus or Enter is pressed, never per keystroke. */
 function MinimumField({
   minimum,
+  placeholder,
   onCommit,
 }: {
   readonly minimum: number | null;
+  readonly placeholder: string;
   readonly onCommit: (minimum: number | null) => void;
 }) {
   const [draft, setDraft] = useState<string | number>(minimum ?? '');
@@ -41,7 +44,7 @@ function MinimumField({
       min={0}
       max={100}
       allowDecimal={false}
-      placeholder="No minimum"
+      placeholder={placeholder}
       value={draft}
       onChange={setDraft}
       onBlur={commit}
@@ -61,7 +64,7 @@ export function CellFields({
   value,
   personas,
   accountIds,
-  noneLabel,
+  none,
   comboboxProps,
   onChange,
 }: {
@@ -70,7 +73,8 @@ export function CellFields({
   readonly personas: readonly PersonaDto[];
   /** Whose models the model field offers; null for every account. */
   readonly accountIds: readonly AccountId[] | null;
-  readonly noneLabel: string;
+  /** What each field's none choice says; the minimum box shows its own as a placeholder. */
+  readonly none: NoneLabels;
   /** For fields inside a popover: keeps each list inside it, so choosing from a list does not close the popover. */
   readonly comboboxProps?: ComboboxProps;
   readonly onChange: (next: CellSetting) => void;
@@ -88,7 +92,7 @@ export function CellFields({
         {...lists}
         allowDeselect={false}
         data={[
-          { value: NONE, label: noneLabel },
+          { value: NONE, label: none.persona },
           ...choices.map((p) => ({
             value: p.id,
             label: p.archived ? `${p.name} (archived)` : p.name,
@@ -105,7 +109,7 @@ export function CellFields({
         {...lists}
         accountIds={accountIds}
         value={model}
-        noneLabel={noneLabel}
+        noneLabel={none.model}
         onChange={(setting) => {
           onChange({ ...value, model: setting });
         }}
@@ -114,6 +118,7 @@ export function CellFields({
         <MinimumField
           key={model.minimum ?? 'none'}
           minimum={model.minimum ?? null}
+          placeholder={none.minimumPlaceholder}
           onCommit={(minimum) => {
             onChange({ ...value, model: automaticAtLeast(minimum) });
           }}
@@ -140,7 +145,7 @@ export function CellFields({
         {...lists}
         allowDeselect={false}
         data={[
-          { value: NONE, label: noneLabel },
+          { value: NONE, label: none.effort },
           ...Object.values(Effort).map((e) => ({ value: e, label: EFFORT_LABELS[e] })),
         ]}
         value={value.effort ?? NONE}

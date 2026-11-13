@@ -8,11 +8,11 @@ import type {
 import { Button, Group, Popover, Stack, Text, Title, UnstyledButton } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { usePersonas } from '../../daemon/persona-queries';
-import { useSetPlaybook } from '../../daemon/playbook-queries';
+import { usePlaybook, useSetPlaybook } from '../../daemon/playbook-queries';
 import { formatCost } from './model-format';
 import { settingSummary } from './model-setting-options';
 import { CellFields } from './playbook-cell-fields';
-import { isEmptyCell, ownCell, scopeSource } from './playbook-edits';
+import { isEmptyCell, noneLabels, ownCell, scopeSource } from './playbook-edits';
 import { rigorLabel } from './rigor-labels';
 import { ROLES } from './role-labels';
 
@@ -24,6 +24,13 @@ function resolvedLine(pick: RolePickDto | undefined, names: ReadonlyMap<string, 
   if (pick === undefined) return 'Reading…';
   if (pick.model === null) return 'Nothing chosen';
   return `${names.get(pick.model) ?? pick.model}${pick.effort === null ? '' : ` · ${pick.effort}`}`;
+}
+
+/** What a pick costs, when that is known, then why it was chosen. */
+function costLine(pick: RolePickDto): string {
+  return pick.model === null || pick.costPerTaskUsd === null
+    ? pick.reason
+    : `${formatCost(pick.costPerTaskUsd)} per task. ${pick.reason}`;
 }
 
 /**
@@ -91,7 +98,11 @@ export function PlaybookCellEditor({
   const personas: readonly PersonaDto[] = usePersonas().data ?? [];
   const set = useSetPlaybook(projectId);
   const own = ownCell(cell, scopeSource(projectId));
-  const noneLabel = projectId === null ? '10db default' : 'Use global';
+  // A project's unset fields follow the global playbook, so what they come to is read from it.
+  const global = usePlaybook(null).data;
+  const globalCell =
+    global?.cells.find((c) => c.rigor === cell.rigor && c.role === cell.role) ?? null;
+  const none = noneLabels({ projectId, cell, globalCell, personas, names });
   return (
     <Popover
       opened={opened}
@@ -123,9 +134,7 @@ export function PlaybookCellEditor({
               {resolvedLine(pick, names)}
             </Text>
             <Text size="xs" c="dimmed">
-              {pick === undefined || pick.model === null
-                ? (pick?.reason ?? '')
-                : `${formatCost(pick.costPerTaskUsd)} per task. ${pick.reason}`}
+              {pick === undefined ? '' : costLine(pick)}
             </Text>
           </Stack>
           <CellFields
@@ -135,7 +144,7 @@ export function PlaybookCellEditor({
             value={own}
             personas={personas}
             accountIds={accountId === null ? null : [accountId]}
-            noneLabel={noneLabel}
+            none={none}
             comboboxProps={{ withinPortal: false }}
             onChange={(next) => {
               set.mutate({ cells: [{ rigor: cell.rigor, role: cell.role, ...next }] });

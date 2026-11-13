@@ -194,21 +194,45 @@ describe('the playbook table', () => {
       ]);
     });
 
-    it('offers Use global in a project and 10db default everywhere', async () => {
-      serve();
+    it('names what an unset field inherits: Global in a project, Default everywhere', async () => {
+      serve({
+        global: playbookDto({
+          cells: [
+            {
+              rigor: 'standard',
+              role: 'review',
+              personaId: own(null, 'default'),
+              model: own({ kind: 'automatic', minimum: 40 }, 'default'),
+              effort: own('low', 'global'),
+            },
+          ],
+        }),
+      });
       renderWithDaemon(<PlaybookTable projectId={project.id} accountId={DEFAULT_ACCOUNT.id} />);
       let cell = await openCell(/^Standard Review/);
-      expect(cell.getByRole('combobox', { name: 'Effort', hidden: true })).toHaveProperty(
-        'value',
-        'Use global',
-      );
+      const value = (name: string) =>
+        cell.getByRole('combobox', { name, hidden: true }).getAttribute('value');
+      expect(value('Effort')).toBe('Global: Low');
+      expect(value('Model')).toBe('Global: Automatic, at least 40');
+      expect(value('Persona')).toBe('Global: the role’s own');
       cleanup();
       renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
       cell = await openCell(/^Standard Review/);
-      expect(cell.getByRole('combobox', { name: 'Effort', hidden: true })).toHaveProperty(
-        'value',
-        '10db default',
-      );
+      expect(value('Model')).toBe('Default: Automatic, at least 40');
+      expect(value('Persona')).toBe('Default: the role’s own');
+      // The effort is set globally, so the field shows it rather than the default under it.
+      expect(value('Effort')).toBe('Low');
+    });
+
+    it('shows no cost line when the pick has no cost', async () => {
+      serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      let cell = await openCell(/^Standard Build/);
+      expect(cell.queryByText(/per task/)).toBeNull();
+      cleanup();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      cell = await openCell(/^Standard Review/);
+      expect(cell.getByText(/\$0\.42 per task/)).toBeTruthy();
     });
 
     it('commits a minimum for Automatic on blur, and a tier for Top of tier', async () => {

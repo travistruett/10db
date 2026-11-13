@@ -32,6 +32,13 @@ import { ROLES } from './role-labels';
 const NO_MINIMUM = 'none';
 const NO_OVERRIDE: CellSetting = { personaId: null, model: null, effort: null };
 
+const NO_OVERRIDE_LABELS = {
+  persona: 'No override',
+  model: 'No override',
+  effort: 'No override',
+  minimumPlaceholder: 'No minimum',
+} as const;
+
 type Overrides = Partial<Record<StepRole, CellSetting>>;
 
 interface Draft {
@@ -257,7 +264,7 @@ export function KindDrawer({
                         value={cell}
                         personas={personas}
                         accountIds={null}
-                        noneLabel="No override"
+                        none={NO_OVERRIDE_LABELS}
                         onChange={(next) => {
                           change({ overrides: { ...draft.overrides, [role]: next } });
                         }}

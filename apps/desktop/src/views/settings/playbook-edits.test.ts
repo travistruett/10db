@@ -1,6 +1,7 @@
 import { StepRole, type PlaybookCellDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { isEmptyCell, ownCell, toggleStep } from './playbook-edits';
+import { isEmptyCell, noneLabels, ownCell, toggleStep } from './playbook-edits';
+import { personaDto } from '../../test/playbook-fixtures';
 
 const cell = (over: Partial<PlaybookCellDto>): PlaybookCellDto => ({
   rigor: 'standard',
@@ -93,5 +94,58 @@ describe('toggleStep', () => {
     },
   ])('$name', ({ from, role, on, want }) => {
     expect(toggleStep(from, role, on)).toEqual(want);
+  });
+});
+
+describe('noneLabels', () => {
+  const reviewer = personaDto({ key: 'reviewer-b', role: 'review', name: 'Reviewer B' });
+  const base = { personas: [reviewer], names: new Map<string, string>() };
+
+  it.each([
+    {
+      name: 'an unset global cell says what the default is',
+      projectId: null,
+      cell: cell({}),
+      globalCell: null,
+      want: {
+        persona: 'Default: the role’s own',
+        model: 'Default: Automatic, at least 40',
+        effort: 'Default: Automatic',
+        minimumPlaceholder: 'Default 40',
+      },
+    },
+    {
+      name: 'a set global field hides the default under it',
+      projectId: null,
+      cell: cell({
+        model: { value: { kind: 'tier', tier: 'capable' }, source: 'global' },
+        effort: { value: 'low', source: 'global' },
+      }),
+      globalCell: null,
+      want: {
+        persona: 'Default: the role’s own',
+        model: 'Default',
+        effort: 'Default',
+        minimumPlaceholder: 'No minimum',
+      },
+    },
+    {
+      name: 'a project names what the global playbook sets',
+      projectId: 'prj_1',
+      cell: cell({}),
+      globalCell: cell({
+        personaId: { value: reviewer.id, source: 'global' },
+        model: { value: { kind: 'top_of_tier', tier: 'frontier' }, source: 'global' },
+        effort: { value: 'xhigh', source: 'global' },
+      }),
+      want: {
+        persona: 'Global: Reviewer B',
+        model: 'Global: Top of Frontier',
+        effort: 'Global: Extra High',
+        minimumPlaceholder: 'No minimum',
+      },
+    },
+  ])('$name', ({ projectId, cell: c, globalCell, want }) => {
+    expect(noneLabels({ projectId, cell: c, globalCell, ...base })).toEqual(want);
   });
 });
