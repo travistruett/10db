@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../../test/daemon';
@@ -9,7 +9,11 @@ import { DEVICE_SIGNIN, githubStatusDto } from '../../../test/github-fixtures';
 type Status = ReturnType<typeof githubStatusDto>;
 
 /** The daemon's side of the GitHub card: a status that changes with Sign In, and what was asked. */
-function serve(initial: Partial<Status> = {}, opts: { readonly signinRefusal?: string } = {}) {
+function serve(
+  initial: Partial<Status> = {},
+  opts: { readonly signinRefusal?: string } = {},
+  path = '/settings/integrations',
+) {
   let status = githubStatusDto(initial);
   const requests: string[] = [];
   const sockets: { send(data: string): void }[] = [];
@@ -63,7 +67,7 @@ function serve(initial: Partial<Status> = {}, opts: { readonly signinRefusal?: s
       ),
     );
   };
-  renderApp('/settings/integrations');
+  renderApp(path);
   return { requests, end, sockets };
 }
 
@@ -90,7 +94,7 @@ afterEach(() => {
 });
 
 describe('Settings › Integrations: GitHub', () => {
-  it('reads "Checking…" in dimmed text until the status arrives', async () => {
+  it('shows a skeleton, not a card, until the status is read, so a focus link lands on its controls', async () => {
     server.use(
       http.get(daemonUrl('/benchmarks/status'), () => HttpResponse.json(benchmarkStatusDto())),
       http.get(daemonUrl('/github'), async () => {
@@ -100,9 +104,24 @@ describe('Settings › Integrations: GitHub', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/integrations');
+    await screen.findByText(/Outside services 10db uses/);
+    expect(screen.queryByRole('group', { name: 'GitHub' })).toBeNull();
+  });
+
+  it('?focus=github focuses the first control once a cold cache has been read', async () => {
+    serve({ state: 'signed_out', login: null }, {}, '/settings/integrations?focus=github');
     const github = await card();
-    expect(within(github).getByText('Checking…')).toBeTruthy();
-    expect(within(github).queryByRole('button')).toBeNull();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(github).getByRole('button', { name: 'Sign In' }));
+    });
+  });
+
+  it('shows the wait whatever the state when a sign-in runs', async () => {
+    serve({ state: 'unreachable', login: null, signingIn: DEVICE_SIGNIN });
+    const github = await card();
+    expect(await within(github).findByText(DEVICE_SIGNIN.code)).toBeTruthy();
+    expect(within(github).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    expect(within(github).queryByRole('button', { name: 'Check Again' })).toBeNull();
   });
 
   it.each([
@@ -205,10 +224,8 @@ describe('Settings › Integrations: GitHub', () => {
       expect(open).toHaveBeenCalledWith(DEVICE_SIGNIN.url, '_blank');
       // The code and the waiting line sit in a polite live region.
       const live = code.closest('[aria-live="polite"]');
-      expect(live).not.toBeNull();
-      expect(
-        within(live as HTMLElement).getByText(/Waiting for you to approve in the browser/),
-      ).toBeTruthy();
+      if (!(live instanceof HTMLElement)) throw new Error('the code is not in a live region');
+      expect(within(live).getByText(/Waiting for you to approve in the browser/)).toBeTruthy();
       expect(
         within(github)
           .getAllByRole('button')
@@ -279,6 +296,65 @@ describe('Settings › Integrations: GitHub', () => {
       expect(within(github).getByText('just now')).toBeTruthy();
       expect(within(github).queryByText(DEVICE_SIGNIN.code)).toBeNull();
       expect(within(github).getByTestId('connection-dot').getAttribute('data-color')).toBe('teal');
+    });
+
+    it('"just now" goes once a later check moves checkedAt on', async () => {
+      const { end, sockets } = serve({
+        state: 'signed_out',
+        login: null,
+        signingIn: DEVICE_SIGNIN,
+      });
+      const github = await card();
+      await within(github).findByText(DEVICE_SIGNIN.code);
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      end({
+        ok: true,
+        login: 'octocat',
+        message: null,
+        cancelled: false,
+        now: { state: 'signed_in', login: 'octocat', checkedAt: '2026-11-12T10:00:05.000Z' },
+      });
+      expect(await within(github).findByText('just now')).toBeTruthy();
+      server.use(
+        http.get(daemonUrl('/github'), () =>
+          HttpResponse.json(githubStatusDto({ checkedAt: '2026-11-12T10:00:40.000Z' })),
+        ),
+      );
+      fireEvent.click(within(github).getByRole('button', { name: 'Check Again' }));
+      await waitFor(() => {
+        expect(within(github).queryByText('just now')).toBeNull();
+      });
+      expect(within(github).getByText('Signed in as octocat')).toBeTruthy();
+    });
+
+    it('"just now" goes after a minute', async () => {
+      const { end, sockets } = serve({
+        state: 'signed_out',
+        login: null,
+        signingIn: DEVICE_SIGNIN,
+      });
+      const github = await card();
+      await within(github).findByText(DEVICE_SIGNIN.code);
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+      });
+      vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout'] });
+      try {
+        end({
+          ok: true,
+          login: 'octocat',
+          message: null,
+          cancelled: false,
+          now: { state: 'signed_in', login: 'octocat' },
+        });
+        expect(await within(github).findByText('just now')).toBeTruthy();
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
+        expect(within(github).queryByText('just now')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("a failed end shows gh's message beside Sign In; a cancelled one shows none", async () => {
