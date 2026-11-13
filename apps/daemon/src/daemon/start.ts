@@ -156,7 +156,13 @@ import {
   type GhLoginProbe,
   type ResolvedTools,
 } from '../environment';
-import { createEventBus, createStateStore, type StateStore } from '../events';
+import {
+  createEventBus,
+  createLiveFrames,
+  createStateStore,
+  type LiveFrames,
+  type StateStore,
+} from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
@@ -411,6 +417,8 @@ export interface DaemonOptions {
   readonly devUiOrigin?: string;
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
+  /** The live channel conversations stream on; one is made when none is given. */
+  readonly liveFrames?: LiveFrames;
   readonly caffeinate?: CaffeinateSpawner;
   /** The system check, given the git and gh the daemon resolved so it reports the ones it runs. */
   readonly systemCheck?: (
@@ -592,6 +600,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  const liveFrames =
+    opts.liveFrames ??
+    createLiveFrames((error) => {
+      logger.error({ err: error }, 'live frame listener failed');
+    });
   // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
   backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
@@ -1850,6 +1863,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     clock,
     bus,
+    liveFrames,
     runner: createdRunner,
     scheduler: createdScheduler,
     moves,

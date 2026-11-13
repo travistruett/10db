@@ -1620,9 +1620,16 @@ export function createApp(deps: ApiDeps) {
         let stop: (() => void) | null = null;
         return {
           onOpen(_event, ws) {
-            stop = streamEvents(after, deps.services, (event) => {
-              ws.send(JSON.stringify(event));
-            });
+            stop = streamEvents(
+              after,
+              deps.services,
+              (event) => {
+                ws.send(JSON.stringify(event));
+              },
+              (frame) => {
+                ws.send(JSON.stringify(frame));
+              },
+            );
           },
           onClose() {
             stop?.();

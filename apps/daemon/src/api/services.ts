@@ -1,4 +1,5 @@
 import type {
+  ConversationDeltaFrame,
   PlanDocumentRevisionDto,
   PlanRecordDto,
   PlanRecordList,
@@ -568,6 +569,8 @@ export interface ApiServices extends PlanRecordServices {
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
+  /** The live frames of what conversations are streaming; never stored, never in the replay. */
+  subscribeLive(listener: (frame: ConversationDeltaFrame) => void): () => void;
   /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;

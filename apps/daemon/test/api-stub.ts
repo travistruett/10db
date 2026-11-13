@@ -38,6 +38,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],
     subscribe: () => () => undefined,
+    subscribeLive: () => () => undefined,
     systemCheck: none,
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,

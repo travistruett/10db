@@ -124,7 +124,7 @@ import {
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
-import type { EventBus, StateStore } from '../events';
+import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
@@ -190,6 +190,7 @@ export function createServices(deps: {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly bus: EventBus;
+  readonly liveFrames: LiveFrames;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
@@ -623,6 +624,7 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
+    subscribeLive: (listener) => deps.liveFrames.subscribe(listener),
     systemCheck: async ({ recheck }) => {
       if (recheck || lastCheck === null) {
         const probing = deps.systemCheck();
