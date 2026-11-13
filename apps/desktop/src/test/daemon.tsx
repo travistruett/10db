@@ -74,6 +74,8 @@ export function baseHandlers(
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
     // Settings › Integrations reads gh's login; signed in, no Sign In running.
     http.get(daemonUrl('/github', base), () => HttpResponse.json(githubStatusDto())),
+    // The task drawer and the sheet read the kinds; none defined.
+    http.get(daemonUrl('/kinds', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),
