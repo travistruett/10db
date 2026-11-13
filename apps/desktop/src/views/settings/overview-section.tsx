@@ -214,6 +214,8 @@ function SummaryLine({ summary }: { readonly summary: Summary }) {
             <Fragment key={summary.ids[i]}>
               {i > 0 ? ', ' : null}
               <Anchor
+                // Inside a line of text, so it is underlined rather than told apart by color alone.
+                underline="always"
                 renderRoot={(props) => (
                   <Link
                     {...props}
