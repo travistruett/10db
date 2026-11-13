@@ -592,10 +592,14 @@ export interface FakeShapeTurn {
   readonly message: string;
   /** The images sent with it, as image content blocks. */
   readonly images: readonly ShapeImage[];
+  /** The client uuid the message went under, when it carried one. */
+  readonly uuid: string | null;
   /** Which message of this session it is, from 1. */
   readonly number: number;
   /** Aborts when the turn is interrupted. */
   readonly signal: AbortSignal;
+  /** Reports an event of the turn as the agent would: a delta, a tool call, a plan. */
+  emit(event: SessionEvent): void;
   /** The session's PreToolUse hook, as Claude Code runs it before each call. */
   guard(request: ShapeToolRequest): ShapeVerdict;
 }
@@ -619,7 +623,7 @@ export function runFakeExploreSession(
   const emit = (event: SessionEvent): void => {
     core.emit(event);
   };
-  const queue: { text: string; images: readonly ShapeImage[] }[] = [];
+  const queue: { text: string; images: readonly ShapeImage[]; uuid: string | null }[] = [];
   let wake: (() => void) | null = null;
   let current: AbortController | null = null;
   let number = 0;
@@ -637,7 +641,7 @@ export function runFakeExploreSession(
 
   const loop = async (): Promise<void> => {
     emit({ type: 'started', providerSessionId, pid: null });
-    queue.push({ text: spec.prompt, images: spec.images ?? [] });
+    queue.push({ text: spec.prompt, images: spec.images ?? [], uuid: spec.promptUuid ?? null });
     while (!core.ended()) {
       const next = queue.shift();
       if (next === undefined) {
@@ -655,9 +659,11 @@ export function runFakeExploreSession(
           spec,
           message: next.text,
           images: next.images,
+          uuid: next.uuid,
           number,
           signal: current.signal,
           guard,
+          emit,
         });
       } catch (error) {
         if (!current.signal.aborted) {
@@ -698,8 +704,8 @@ export function runFakeExploreSession(
 
   return {
     events: core.events,
-    send(text, images = []) {
-      queue.push({ text, images });
+    send(text, images = [], uuid) {
+      queue.push({ text, images, uuid: uuid ?? null });
       wake?.();
     },
     interrupt() {

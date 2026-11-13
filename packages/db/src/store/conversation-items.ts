@@ -233,10 +233,18 @@ export function listUntakenMessageIds(
     .map((r) => r.id);
 }
 
+/** A turn starter: a builder message, or a press whose body names a `prompt` (Propose, Rehearse). */
+const turnStarter = or(
+  builderMessage,
+  and(
+    eq(schema.conversationItems.kind, ConversationItemKind.ShapeEvent),
+    sql`json_extract(${schema.conversationItems.body}, '$.prompt') IS NOT NULL`,
+  ),
+);
+
 /**
- * The conversation's turn starters waiting to be sent, in `seq` order: builder messages, and presses
- * whose body names a `prompt` (Propose, Rehearse), neither delivered nor pushed (one handed back is no
- * longer pushed).
+ * The conversation's turn starters waiting to be sent, in `seq` order, neither delivered nor pushed
+ * (one handed back is no longer pushed).
  */
 export function listQueuedTurnStarters(
   db: DbReader,
@@ -250,13 +258,27 @@ export function listQueuedTurnStarters(
         ofConversation(conversationId),
         isNull(schema.conversationItems.pushedAt),
         isNull(schema.conversationItems.deliveredAt),
-        or(
-          builderMessage,
-          and(
-            eq(schema.conversationItems.kind, ConversationItemKind.ShapeEvent),
-            sql`json_extract(${schema.conversationItems.body}, '$.prompt') IS NOT NULL`,
-          ),
-        ),
+        turnStarter,
+      ),
+    )
+    .orderBy(bySeq)
+    .all();
+}
+
+/** The turn starters a session was handed that no turn has taken yet, in `seq` order. */
+export function listPushedTurnStarters(
+  db: DbReader,
+  conversationId: ConversationId,
+): ConversationItemRow[] {
+  return db
+    .select()
+    .from(schema.conversationItems)
+    .where(
+      and(
+        ofConversation(conversationId),
+        isNotNull(schema.conversationItems.pushedAt),
+        isNull(schema.conversationItems.deliveredAt),
+        turnStarter,
       ),
     )
     .orderBy(bySeq)

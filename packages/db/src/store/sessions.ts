@@ -51,6 +51,8 @@ interface NewSessionFields {
   readonly briefingBaselinePct?: number | null;
   /** The account the session launches on; absent, the project's current account. */
   readonly accountId?: AccountId;
+  /** The row's id, when the caller minted it to prepare the session before the row is written. */
+  readonly id?: SessionId;
 }
 
 /** The account of the project the session works for: through its workstream, or its conversation. */
@@ -106,7 +108,7 @@ function laneConversation(ctx: WriteContext, workstreamId: WorkstreamId): Conver
 }
 
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
-  const { workstreamId, conversationId, ...fields } = input;
+  const { workstreamId, conversationId, id, ...fields } = input;
   const prior = ctx.tx
     .select({ n: count() })
     .from(schema.sessions)
@@ -122,7 +124,7 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
       ? projectOwner(ctx, input)
       : { accountId: input.accountId, kind: getAccountRow(ctx.tx, input.accountId).kind };
   const row: SessionRow = {
-    id: mintId('Session'),
+    id: id ?? mintId('Session'),
     ...fields,
     workstreamId: workstreamId ?? null,
     conversationId: conversationId ?? laneConversation(ctx, workstreamId),
@@ -210,6 +212,19 @@ export function endSession(ctx: WriteContext, id: SessionId, exitReason: string)
       entityId: id,
       data: { exitReason },
     });
+}
+
+/**
+ * The dollars a conversation's sessions cost together; null when none has a cost (a subscription's,
+ * whose dollars are not real money).
+ */
+export function conversationCostUsd(db: DbReader, conversationId: ConversationId): number | null {
+  const row = db
+    .select({ total: sql<number | null>`sum(${schema.sessions.costUsd})` })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.conversationId, conversationId))
+    .get();
+  return row?.total ?? null;
 }
 
 export function getSession(db: DbReader, id: SessionId): SessionRow {

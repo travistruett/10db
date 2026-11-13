@@ -15,6 +15,7 @@ import {
   insertItem,
   insertShape,
   listItems,
+  listPushedTurnStarters,
   listQueuedTurnStarters,
   patchConversation,
   putItem,
@@ -210,7 +211,7 @@ describe('conversation item events and the queue', () => {
     expect(same.events).toEqual([]);
   });
 
-  it('queues the builder messages and prompted presses neither pushed nor delivered, by seq', () => {
+  it('queues the builder messages and prompted presses neither pushed nor delivered, by seq, and lists the pushed apart', () => {
     const waiting = add(conversation, 'waiting');
     const pushed = add(conversation, 'pushed');
     const delivered = add(conversation, 'delivered');
@@ -224,13 +225,21 @@ describe('conversation item events and the queue', () => {
       ).value;
     const propose = press('Propose a plan.');
     press();
+    const rehearse = press('Rehearse the tasks.');
+    const unprompted = press();
     store.write((ctx) => {
       markItemPushedUnder(ctx, pushed.id, 'u-1');
+      markItemPushedUnder(ctx, rehearse.id, 'u-2');
+      markItemPushedUnder(ctx, unprompted.id, 'u-3');
       markItemsDelivered(ctx, conversation, [delivered.id]);
     });
     expect(listQueuedTurnStarters(store.db, conversation).map((i) => i.id)).toEqual([
       waiting.id,
       propose.id,
+    ]);
+    expect(listPushedTurnStarters(store.db, conversation).map((i) => i.id)).toEqual([
+      pushed.id,
+      rehearse.id,
     ]);
   });
 });
