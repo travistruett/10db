@@ -59,7 +59,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/principles/:id/provenance',
   '/shapes/:shapeId/record',
   '/shapes/:shapeId/record/:list',
-  '/shapes/:shapeId/documents/:key/revisions/:number',
+  '/shapes/:shapeId/documents/:documentId/revisions/:number',
   '/tasks/:taskId/plan-context',
 ];
 

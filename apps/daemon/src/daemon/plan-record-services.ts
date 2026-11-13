@@ -28,8 +28,8 @@ export function createPlanRecordServices(deps: {
 }): PlanRecordServices {
   return {
     getPlanRecord: (shapeId) => readPlanRecord(deps.state.db, shapeId),
-    getPlanRevision: (shapeId, key, number) =>
-      readPlanRevision(deps.state.db, shapeId, key, number),
+    getPlanRevision: (shapeId, documentId, number) =>
+      readPlanRevision(deps.state.db, shapeId, documentId, number),
     getPlanRecordPage: (shapeId, list, query) =>
       readPlanRecordPage(deps.state.db, shapeId, list, query),
     getTaskPlanContext: (taskId) => readTaskPlanContext(deps.state.db, taskId),

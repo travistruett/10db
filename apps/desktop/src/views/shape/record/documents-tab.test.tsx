@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pickOption } from '../../../test/combobox';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../../test/daemon';
+import { mintId, type PlanRecordDto } from '@10db/contracts';
 import {
+  P1_DOCUMENT_ID,
   P1_REVISION_2,
   planRecordDto,
   planRecordHandlers,
@@ -24,15 +26,16 @@ afterEach(() => {
   Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
 });
 
-function Holder({ initial = {} }: { readonly initial?: RecordSearch }) {
+function Holder({
+  initial = {},
+  record = planRecordDto(),
+}: {
+  readonly initial?: RecordSearch;
+  readonly record?: PlanRecordDto;
+}) {
   const [search, setSearch] = useState<RecordSearch>(initial);
   return (
-    <DocumentsTab
-      shapeId={RECORD_SHAPE_ID}
-      record={planRecordDto()}
-      search={search}
-      onSearch={setSearch}
-    />
+    <DocumentsTab shapeId={RECORD_SHAPE_ID} record={record} search={search} onSearch={setSearch} />
   );
 }
 
@@ -88,10 +91,45 @@ describe('DocumentsTab', () => {
   it('a section named in the address opens it', async () => {
     server.use(...planRecordHandlers(), ...baseHandlers());
     await renderWithDaemonAndRouter(
-      <Holder initial={{ doc: 'p1', rev: 2, section: 'what-holds' }} />,
+      <Holder initial={{ doc: P1_DOCUMENT_ID, rev: 2, section: 'what-holds' }} />,
     );
     await waitFor(() => {
       expect(scrolled).toEqual(['what-holds']);
     });
+  });
+
+  it('a spec and an eval sharing a key each open their own text', async () => {
+    const specId = mintId('ShapeAttachment');
+    const evalId = mintId('ShapeAttachment');
+    const revisions = (planRecordDto().documents[1]?.revisions ?? []).map((r) => ({
+      ...r,
+      sections: [],
+    }));
+    const shared = { key: 'g1', effortKey: 'g1', revisions };
+    const record = planRecordDto({
+      documents: [
+        { ...shared, id: specId, kind: 'spec', title: 'Pairing spec' },
+        { ...shared, id: evalId, kind: 'eval', title: 'Pairing eval' },
+      ],
+    });
+    server.use(
+      ...planRecordHandlers({
+        record,
+        bodies: {
+          [`${specId}#1`]: 'The spec says pair.',
+          [`${evalId}#1`]: 'The eval checks pairing.',
+        },
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<Holder record={record} />);
+    expect(await screen.findByText('The spec says pair.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Pairing eval/ }));
+    expect(await screen.findByText('The eval checks pairing.')).toBeTruthy();
+    expect(screen.queryByText('The spec says pair.')).toBeNull();
+    const docs = within(screen.getByRole('navigation', { name: 'Documents' }));
+    expect(docs.getByRole('button', { name: /Pairing eval/ }).getAttribute('data-active')).toBe(
+      'true',
+    );
   });
 });

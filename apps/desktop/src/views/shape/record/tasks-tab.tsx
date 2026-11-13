@@ -79,7 +79,7 @@ export function TasksTab({
               if (t.planRef === null) return;
               onSearch({
                 tab: RecordTab.Documents,
-                doc: t.planRef.document,
+                doc: t.planRef.documentId,
                 rev: t.planRef.revision,
                 section: t.planRef.section,
               });

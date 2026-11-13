@@ -112,12 +112,14 @@ describe('a planning effort through 10db', () => {
     const shapeId: ShapeId = first.shapeId;
 
     // 2. Nothing lost: every body, finding, entry, quote and the cost.
+    const { documents } = await api().get(`/shapes/${shapeId}/record`, PlanRecordDto);
     for (const [key, file] of [
       ['research', 'research.md'],
       ['plan', 'plan.md'],
     ] as const) {
+      const id = documents.find((d) => d.key === key)?.id;
       const revision = await api().get(
-        `/shapes/${shapeId}/documents/${key}/revisions/1`,
+        `/shapes/${shapeId}/documents/${String(id)}/revisions/1`,
         PlanDocumentRevisionDto,
       );
       expect(revision.body).toBe(read(file));

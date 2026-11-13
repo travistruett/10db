@@ -62,7 +62,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
   '/shapes/:shapeId/record/:list':
     "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
-  '/shapes/:shapeId/documents/:key/revisions/:number':
+  '/shapes/:shapeId/documents/:documentId/revisions/:number':
     "A Plan's documents are read in the Record view, and no screen Plan draws shows them.",
   '/tasks/:taskId/plan-context':
     "What a lane's brief carried is for the task drawer, and no screen Plan draws shows it.",

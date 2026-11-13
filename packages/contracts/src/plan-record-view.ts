@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   DecisionId,
   ProjectId,
+  ShapeAttachmentId,
   ShapeFindingId,
   ShapeId,
   ShapeProposalId,
@@ -49,6 +50,8 @@ export const PlanRecordRevision = z.object({
 export type PlanRecordRevision = z.infer<typeof PlanRecordRevision>;
 
 export const PlanRecordDocument = z.object({
+  /** The document's own handle: two documents of one Plan can share a key (a goal's spec and eval). */
+  id: ShapeAttachmentId,
   key: z.string(),
   kind: z.enum([...Object.values(PlanDocumentKind), 'eval']),
   title: z.string(),
@@ -77,8 +80,9 @@ export const PlanRecordDto = z.object({
 });
 export type PlanRecordDto = z.infer<typeof PlanRecordDto>;
 
-/** `GET /shapes/:shapeId/documents/:key/revisions/:number`: one revision's text, byte for byte. */
+/** `GET /shapes/:shapeId/documents/:documentId/revisions/:number`: one revision's text, byte for byte. */
 export const PlanDocumentRevisionDto = z.object({
+  documentId: ShapeAttachmentId,
   key: z.string(),
   number: z.int().min(1),
   title: z.string(),
@@ -226,7 +230,12 @@ export const PlanTaskRow = z.object({
   title: z.string(),
   /** The section it was made from, with the record's revision number; null for a task with no pin. */
   planRef: z
-    .object({ document: z.string(), revision: z.int().min(1), section: z.string() })
+    .object({
+      documentId: ShapeAttachmentId,
+      document: z.string(),
+      revision: z.int().min(1),
+      section: z.string(),
+    })
     .nullable(),
 });
 export type PlanTaskRow = z.infer<typeof PlanTaskRow>;

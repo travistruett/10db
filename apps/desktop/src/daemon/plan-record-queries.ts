@@ -7,6 +7,7 @@ import {
   type PlanRecordList,
   type PlanRecordPageSize,
   type PlanRecordQuery,
+  type ShapeAttachmentId,
   type ShapeId,
   type TaskId,
 } from '@10db/contracts';
@@ -21,8 +22,8 @@ import { useDaemon } from './provider';
 
 export const planRecordKeys = {
   record: (shapeId: ShapeId) => ['shapes', 'record', shapeId] as const,
-  revision: (shapeId: ShapeId, key: string, number: number) =>
-    ['shapes', 'record', shapeId, 'revision', key, number] as const,
+  revision: (shapeId: ShapeId, documentId: ShapeAttachmentId, number: number) =>
+    ['shapes', 'record', shapeId, 'revision', documentId, number] as const,
   page: (shapeId: ShapeId, list: PlanRecordList, filters: PlanRecordFilters) =>
     ['shapes', 'record', shapeId, 'page', list, filters] as const,
   taskContext: (taskId: TaskId) => ['tasks', 'plan-context', taskId] as const,
@@ -59,23 +60,27 @@ export function usePlanRecord(shapeId: ShapeId | null) {
 }
 
 /** One revision's text, as stored. A revision never changes, so it is read once. */
-export function usePlanRevision(shapeId: ShapeId, key: string | null, number: number | null) {
+export function usePlanRevision(
+  shapeId: ShapeId,
+  documentId: ShapeAttachmentId | null,
+  number: number | null,
+) {
   const { client } = useDaemon();
   return useQuery({
     queryKey:
-      key !== null && number !== null
-        ? planRecordKeys.revision(shapeId, key, number)
+      documentId !== null && number !== null
+        ? planRecordKeys.revision(shapeId, documentId, number)
         : ['shapes', 'record', shapeId, 'revision', 'none'],
     queryFn: async () => {
-      if (key === null || number === null) throw new Error('Pick a document first.');
+      if (documentId === null || number === null) throw new Error('Pick a document first.');
       return readJson(
-        await client.shapes[':shapeId'].documents[':key'].revisions[':number'].$get({
-          param: { shapeId, key, number: String(number) },
+        await client.shapes[':shapeId'].documents[':documentId'].revisions[':number'].$get({
+          param: { shapeId, documentId, number: String(number) },
         }),
         PlanDocumentRevisionDto,
       );
     },
-    enabled: key !== null && number !== null,
+    enabled: documentId !== null && number !== null,
     staleTime: Infinity,
   });
 }

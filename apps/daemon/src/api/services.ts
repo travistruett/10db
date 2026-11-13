@@ -122,6 +122,7 @@ import type {
   SelfUpdateStatusDto,
   OneWayPathsDto,
   SmallProposalLimitDto,
+  ShapeAttachmentId,
   ShapeConvertInput,
   ShapeConvertResult,
   ShapeDismissInput,
@@ -219,7 +220,11 @@ export interface PlanRecordServices {
   /** The record's documents with every revision, and how many rows each list holds. */
   getPlanRecord(shapeId: ShapeId): PlanRecordDto;
   /** One revision of a document, byte for byte; NotFoundError when there is none. */
-  getPlanRevision(shapeId: ShapeId, key: string, number: number): PlanDocumentRevisionDto;
+  getPlanRevision(
+    shapeId: ShapeId,
+    documentId: ShapeAttachmentId,
+    number: number,
+  ): PlanDocumentRevisionDto;
   /** One page of a list, filtered and sorted here. */
   getPlanRecordPage(shapeId: ShapeId, list: PlanRecordList, query: PlanRecordQuery): PlanRecordPage;
   /** A task's pin, the Plan block its lane last got, and its newest anchor checks. */

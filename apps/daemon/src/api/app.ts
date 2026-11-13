@@ -82,6 +82,7 @@ import {
   ScreenRefusalInput,
   ShapeConvertInput,
   ShapeDismissInput,
+  ShapeAttachmentId,
   ShapeEditInput,
   ShapeFindingId,
   ShapeId,
@@ -774,11 +775,11 @@ export function createApp(deps: ApiDeps) {
     .get('/shapes/:shapeId/record', (c) =>
       c.json(deps.services.getPlanRecord(ShapeId.parse(c.req.param('shapeId')))),
     )
-    .get('/shapes/:shapeId/documents/:key/revisions/:number', (c) =>
+    .get('/shapes/:shapeId/documents/:documentId/revisions/:number', (c) =>
       c.json(
         deps.services.getPlanRevision(
           ShapeId.parse(c.req.param('shapeId')),
-          c.req.param('key'),
+          ShapeAttachmentId.parse(c.req.param('documentId')),
           z.coerce.number().int().min(1).parse(c.req.param('number')),
         ),
       ),

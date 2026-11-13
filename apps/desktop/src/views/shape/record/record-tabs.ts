@@ -1,4 +1,4 @@
-import { BriefKey, SectionSlug, type PlanRecordDto } from '@10db/contracts';
+import { SectionSlug, ShapeAttachmentId, type PlanRecordDto } from '@10db/contracts';
 import { z } from 'zod';
 
 // The Record view's tabs and its address: which tab, document, revision and section are open. Each
@@ -29,8 +29,8 @@ export const RECORD_TABS: readonly {
 
 export interface RecordSearch {
   readonly tab?: RecordTab;
-  /** A document's key. */
-  readonly doc?: string;
+  /** A document's id: two documents of one Plan can share a key. */
+  readonly doc?: ShapeAttachmentId;
   /** A revision number of that document. */
   readonly rev?: number;
   /** A section slug of that revision. */
@@ -43,7 +43,7 @@ const Revision = z.coerce.number().int().min(1);
 /** The parts of a Record address that parse; the rest are dropped. */
 export function recordSearch(search: Record<string, unknown>): RecordSearch {
   const tab = Tab.safeParse(search['tab']);
-  const doc = BriefKey.safeParse(search['doc']);
+  const doc = ShapeAttachmentId.safeParse(search['doc']);
   const rev = Revision.safeParse(search['rev']);
   const section = SectionSlug.safeParse(search['section']);
   return {

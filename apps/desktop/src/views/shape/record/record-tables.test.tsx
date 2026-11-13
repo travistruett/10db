@@ -15,6 +15,7 @@ import { daemonEvent, projectViewDto, taskDto } from '../../../test/fixtures';
 import {
   decisionRow,
   evidenceRow,
+  P1_DOCUMENT_ID,
   planRecordHandlers,
   questionRow,
   RECORD_PROJECT_ID,
@@ -256,7 +257,7 @@ describe('Tasks', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'p1#task-12 · revision 2' }));
     expect(onSearch).toHaveBeenCalledWith({
       tab: 'documents',
-      doc: 'p1',
+      doc: P1_DOCUMENT_ID,
       rev: 2,
       section: 'task-12',
     });

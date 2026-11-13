@@ -10,6 +10,7 @@ import {
   PlanTaskRow,
   PlanRecordList,
   type ProjectId,
+  type ShapeAttachmentId,
   type ShapeId,
 } from '@10db/contracts';
 import { http, HttpResponse } from 'msw';
@@ -23,6 +24,8 @@ const AT = '2026-11-12T08:00:00.000Z';
 
 export const RECORD_SHAPE_ID: ShapeId = mintId('Shape');
 export const RECORD_PROJECT_ID: ProjectId = mintId('Project');
+export const P1_DOCUMENT_ID: ShapeAttachmentId = mintId('ShapeAttachment');
+export const S1_DOCUMENT_ID: ShapeAttachmentId = mintId('ShapeAttachment');
 
 export const P1_REVISION_1 = '# Remote host plan\n## Task 1: Pair a device\nPair it first.\n';
 export const P1_REVISION_2 = [
@@ -74,6 +77,7 @@ export function planRecordDto(overrides: Partial<PlanRecordDto> = {}): PlanRecor
     origin: { kind: 'claude_code', session: 'ses-abc', model: 'claude-opus-5-5', at: AT },
     documents: [
       {
+        id: P1_DOCUMENT_ID,
         key: 'p1',
         kind: 'plan',
         title: 'P1: pairing',
@@ -102,6 +106,7 @@ export function planRecordDto(overrides: Partial<PlanRecordDto> = {}): PlanRecor
         ],
       },
       {
+        id: S1_DOCUMENT_ID,
         key: 's1',
         kind: 'spec',
         title: 'Remote host spec',
@@ -125,11 +130,11 @@ export function planRecordDto(overrides: Partial<PlanRecordDto> = {}): PlanRecor
   });
 }
 
-/** The bodies by `key#number`. */
+/** The bodies by `documentId#number`. */
 export const REVISION_BODIES: Readonly<Record<string, string>> = {
-  'p1#1': P1_REVISION_1,
-  'p1#2': P1_REVISION_2,
-  's1#1': '# Spec\n',
+  [`${P1_DOCUMENT_ID}#1`]: P1_REVISION_1,
+  [`${P1_DOCUMENT_ID}#2`]: P1_REVISION_2,
+  [`${S1_DOCUMENT_ID}#1`]: '# Spec\n',
 };
 
 export function decisionRow(overrides: Partial<PlanDecisionRow> = {}): PlanDecisionRow {
@@ -215,7 +220,7 @@ export function taskRow(overrides: Partial<PlanTaskRow> = {}): PlanTaskRow {
     taskId: mintId('Task'),
     key: 't1',
     title: 'Pair a device',
-    planRef: { document: 'p1', revision: 2, section: 'task-12' },
+    planRef: { documentId: P1_DOCUMENT_ID, document: 'p1', revision: 2, section: 'task-12' },
     ...overrides,
   });
 }
@@ -251,20 +256,34 @@ export function planRecordHandlers(
     readonly record?: PlanRecordDto;
     readonly pages?: (list: PlanRecordList, query: URLSearchParams) => PlanRecordPage;
     readonly seen?: SeenPage[];
+    /** More bodies by `documentId#number`, for documents `record` adds. */
+    readonly bodies?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const record = opts.record ?? planRecordDto();
+  const bodies = { ...REVISION_BODIES, ...opts.bodies };
   return [
     http.get(daemonUrl('/shapes/:shapeId/record'), () => HttpResponse.json(record)),
-    http.get(daemonUrl('/shapes/:shapeId/documents/:key/revisions/:number'), ({ params }) => {
-      const key = String(params['key']);
-      const number = Number(params['number']);
-      const body = REVISION_BODIES[`${key}#${String(number)}`];
-      if (body === undefined)
-        return HttpResponse.json({ error: 'not_found', message: 'no revision' }, { status: 404 });
-      const title = record.documents.find((d) => d.key === key)?.title ?? key;
-      return HttpResponse.json(PlanDocumentRevisionDto.parse({ key, number, title, body }));
-    }),
+    http.get(
+      daemonUrl('/shapes/:shapeId/documents/:documentId/revisions/:number'),
+      ({ params }) => {
+        const documentId = String(params['documentId']);
+        const number = Number(params['number']);
+        const doc = record.documents.find((d) => d.id === documentId);
+        const body = bodies[`${documentId}#${String(number)}`];
+        if (doc === undefined || body === undefined)
+          return HttpResponse.json({ error: 'not_found', message: 'no revision' }, { status: 404 });
+        return HttpResponse.json(
+          PlanDocumentRevisionDto.parse({
+            documentId,
+            key: doc.key,
+            number,
+            title: doc.title,
+            body,
+          }),
+        );
+      },
+    ),
     http.get(daemonUrl('/shapes/:shapeId/record/:list'), ({ params, request }) => {
       const list = z.enum(PlanRecordList).parse(params['list']);
       const query = new URL(request.url).searchParams;

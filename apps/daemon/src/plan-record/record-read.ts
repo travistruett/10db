@@ -15,12 +15,12 @@ import {
   type PlanReviewGroup,
   type PlanReviewRow,
   type PlanTaskRow,
+  type ShapeAttachmentId,
   type ShapeId,
   type TaskId,
   type TaskPlanContextDto,
 } from '@10db/contracts';
 import {
-  findDocument,
   getAttachmentRevision,
   getAttachmentRevisionById,
   getDocumentAttachment,
@@ -309,7 +309,13 @@ function questionRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
 function pinOf(
   db: DbReader,
   taskId: TaskId,
-): { shapeId: ShapeId; document: string; revision: number; section: string } | null {
+): {
+  shapeId: ShapeId;
+  documentId: ShapeAttachmentId;
+  document: string;
+  revision: number;
+  section: string;
+} | null {
   const context = getTaskContext(db, taskId);
   if (!context) return null;
   const revision = getAttachmentRevisionById(db, context.revisionId);
@@ -317,6 +323,7 @@ function pinOf(
   if (!revision || !doc) return null;
   return {
     shapeId: context.shapeId,
+    documentId: doc.id,
     document: doc.docKey ?? doc.key,
     revision: revision.number,
     section: context.section,
@@ -334,7 +341,12 @@ function taskRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): PlanT
         taskId: link.taskId,
         key: link.key,
         title,
-        planRef: pin && { document: pin.document, revision: pin.revision, section: pin.section },
+        planRef: pin && {
+          documentId: pin.documentId,
+          document: pin.document,
+          revision: pin.revision,
+          section: pin.section,
+        },
       },
     ];
   });
@@ -375,6 +387,7 @@ export function readPlanRecord(db: DbReader, shapeId: ShapeId): PlanRecordDto {
     importedAt: shape.importedAt,
     origin: getShapeBundleOrigin(db, shapeId),
     documents: listDocuments(db, shapeId).map((doc) => ({
+      id: doc.id,
       key: doc.documentKey,
       kind: recordKind(doc.kind),
       title: doc.title ?? doc.documentKey,
@@ -400,18 +413,28 @@ export function readPlanRecord(db: DbReader, shapeId: ShapeId): PlanRecordDto {
   };
 }
 
-/** One revision of a Plan's document, byte for byte as stored. */
+/**
+ * One revision of a Plan's document, byte for byte as stored. A document is read by its id, never its
+ * key, since a goal's spec and its eval share one; only a document this Plan's record lists is read.
+ */
 export function readPlanRevision(
   db: DbReader,
   shapeId: ShapeId,
-  key: string,
+  documentId: ShapeAttachmentId,
   number: number,
 ): PlanDocumentRevisionDto {
   getShape(db, shapeId);
-  const doc = findDocument(db, shapeId, key);
+  const doc = listDocuments(db, shapeId).find((d) => d.id === documentId);
   const revision = doc ? getAttachmentRevision(db, doc.id, number) : undefined;
-  if (!doc || !revision) throw new NotFoundError('document revision', `${key}#${String(number)}`);
-  return { key, number, title: doc.title ?? key, body: revision.body };
+  if (!doc || !revision)
+    throw new NotFoundError('document revision', `${documentId}#${String(number)}`);
+  return {
+    documentId,
+    key: doc.documentKey,
+    number,
+    title: doc.title ?? doc.documentKey,
+    body: revision.body,
+  };
 }
 
 /** The section a task is pinned to, the Plan block its lane last got, and its newest checks. */

@@ -144,14 +144,21 @@ describe('a Plan record through the daemon', () => {
   it('a revision body reads back byte for byte', async () => {
     const projectId = await seed();
     const shapeId = await importJson(projectId, bundleJson(projectId));
+    const record = await api().get(`/shapes/${shapeId}/record`, PlanRecordDto);
+    const documentId = record.documents.find((d) => d.key === 'p1')?.id;
+    if (documentId === undefined) throw new Error('no p1');
     const revision = await api().get(
-      `/shapes/${shapeId}/documents/p1/revisions/1`,
+      `/shapes/${shapeId}/documents/${documentId}/revisions/1`,
       PlanDocumentRevisionDto,
     );
-    expect(revision).toEqual({ key: 'p1', number: 1, title: 'P1', body: P1_BODY });
+    expect(revision).toEqual({ documentId, key: 'p1', number: 1, title: 'P1', body: P1_BODY });
     await expect(
-      api().get(`/shapes/${shapeId}/documents/p1/revisions/2`, z.unknown()),
+      api().get(`/shapes/${shapeId}/documents/${documentId}/revisions/2`, z.unknown()),
     ).rejects.toThrow('-> 404');
+    // A key is not a document's handle.
+    await expect(
+      api().get(`/shapes/${shapeId}/documents/p1/revisions/1`, z.unknown()),
+    ).rejects.toThrow('-> 400');
   });
 
   it('reviews page 25 at a time with the total', async () => {
@@ -232,11 +239,13 @@ describe('a Plan record through the daemon', () => {
     const taskId = await startPairing(projectId, shapeId);
 
     const tasks = await page(shapeId, 'tasks', '?pageSize=100');
+    const record = await api().get(`/shapes/${shapeId}/record`, PlanRecordDto);
+    const documentId = record.documents.find((d) => d.key === 'p1')?.id;
     expect(tasks.rows).toContainEqual({
       taskId,
       key: 't1',
       title: 'Pair a device',
-      planRef: { document: 'p1', revision: 1, section: 'task-1' },
+      planRef: { documentId, document: 'p1', revision: 1, section: 'task-1' },
     });
     expect(tasks.rows).toContainEqual(
       expect.objectContaining({ key: 't4', title: 'Document pairing', planRef: null }),

@@ -2,6 +2,7 @@ import type {
   PlanRecordDocument,
   PlanRecordDto,
   SectionIndexEntry,
+  ShapeAttachmentId,
   ShapeId,
 } from '@10db/contracts';
 import { Alert, Box, Group, Loader, NavLink, ScrollArea, Select, Stack, Text } from '@mantine/core';
@@ -58,7 +59,7 @@ function Body({
   section,
 }: {
   readonly shapeId: ShapeId;
-  readonly doc: string;
+  readonly doc: ShapeAttachmentId;
   readonly number: number;
   readonly sections: readonly SectionIndexEntry[];
   readonly section: string | undefined;
@@ -130,7 +131,7 @@ export function DocumentsTab({
   readonly search: RecordSearch;
   readonly onSearch: (next: RecordSearch) => void;
 }) {
-  const doc = record.documents.find((d) => d.key === search.doc) ?? record.documents[0];
+  const doc = record.documents.find((d) => d.id === search.doc) ?? record.documents[0];
   if (doc === undefined)
     return (
       <Text size="sm" c="dimmed">
@@ -150,13 +151,13 @@ export function DocumentsTab({
           <Box component="nav" aria-label="Documents">
             {record.documents.map((d) => (
               <NavLink
-                key={d.key}
+                key={d.id}
                 component="button"
                 label={d.title}
                 description={KIND_LABELS[d.kind]}
-                active={d.key === doc.key}
+                active={d.id === doc.id}
                 onClick={() => {
-                  open({ doc: d.key });
+                  open({ doc: d.id });
                 }}
               />
             ))}
@@ -173,7 +174,7 @@ export function DocumentsTab({
               }))}
               value={String(revision.number)}
               onChange={(value) => {
-                if (value !== null) open({ doc: doc.key, rev: Number(value) });
+                if (value !== null) open({ doc: doc.id, rev: Number(value) });
               }}
             />
           )}
@@ -192,7 +193,7 @@ export function DocumentsTab({
                   active={s.slug === search.section}
                   aria-current={s.slug === search.section ? 'location' : undefined}
                   onClick={() => {
-                    open({ doc: doc.key, rev: revision.number, section: s.slug });
+                    open({ doc: doc.id, rev: revision.number, section: s.slug });
                   }}
                 />
               ))}
@@ -214,7 +215,7 @@ export function DocumentsTab({
         ) : (
           <Body
             shapeId={shapeId}
-            doc={doc.key}
+            doc={doc.id}
             number={revision.number}
             sections={revision.sections}
             section={search.section}
