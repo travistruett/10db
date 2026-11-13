@@ -4,7 +4,7 @@ import {
   OPENROUTER_MODELS_URL,
   endpointsUrl,
   fetchEndpointStats,
-  fetchOpenRouterModelIds,
+  fetchOpenRouterModels,
   fetchOpenRouterScores,
 } from './openrouter-client';
 
@@ -38,7 +38,7 @@ const AA_URL = `${OPENROUTER_BENCHMARKS_URL}?source=artificial-analysis`;
 const OR_URL = `${OPENROUTER_BENCHMARKS_URL}?source=openrouter`;
 
 describe('fetchOpenRouterScores', () => {
-  it('reads an AA item with its date dropped and no benchmark, accuracy or cost', async () => {
+  it('reads an AA item with its permaslug as sent and no benchmark, accuracy or cost', async () => {
     const { fetch } = fakeFetch({
       [AA_URL]: () =>
         json({
@@ -58,7 +58,7 @@ describe('fetchOpenRouterScores', () => {
       kind: 'ok',
       value: [
         {
-          id: 'acme/model-one',
+          permaslug: 'acme/model-one-20260101',
           source: 'aa',
           intelligence: 41.5,
           coding: 33,
@@ -92,7 +92,7 @@ describe('fetchOpenRouterScores', () => {
       kind: 'ok',
       value: [
         {
-          id: 'acme/model-two',
+          permaslug: 'acme/model-two',
           source: 'openrouter',
           intelligence: null,
           coding: null,
@@ -119,7 +119,8 @@ describe('fetchOpenRouterScores', () => {
     });
     const outcome = await fetchOpenRouterScores({ fetch, key: KEY });
     expect(outcome.kind).toBe('ok');
-    if (outcome.kind === 'ok') expect(outcome.value.map((r) => r.id)).toEqual(['acme/a', 'acme/b']);
+    if (outcome.kind === 'ok')
+      expect(outcome.value.map((r) => r.permaslug)).toEqual(['acme/a-20260101', 'acme/b']);
   });
 
   it('asks with the key, AA first', async () => {
@@ -178,15 +179,26 @@ describe('fetchOpenRouterScores', () => {
   });
 });
 
-describe('fetchOpenRouterModelIds', () => {
-  it('reads the ids without a key', async () => {
+describe('fetchOpenRouterModels', () => {
+  it('reads each id with its canonical slug, null where it has none, without a key', async () => {
     const { fetch, calls } = fakeFetch({
       [OPENROUTER_MODELS_URL]: () =>
-        json({ data: [{ id: 'acme/a' }, { id: 7 }, { id: 'acme/b' }] }),
+        json({
+          data: [
+            { id: 'acme/a', canonical_slug: 'acme/a-20990101' },
+            { id: 7 },
+            { id: 'acme/b', canonical_slug: null },
+            { id: 'acme/c' },
+          ],
+        }),
     });
-    expect(await fetchOpenRouterModelIds({ fetch })).toEqual({
+    expect(await fetchOpenRouterModels({ fetch })).toEqual({
       kind: 'ok',
-      value: ['acme/a', 'acme/b'],
+      value: [
+        { id: 'acme/a', canonicalSlug: 'acme/a-20990101' },
+        { id: 'acme/b', canonicalSlug: null },
+        { id: 'acme/c', canonicalSlug: null },
+      ],
     });
     expect(calls).toEqual([{ url: OPENROUTER_MODELS_URL, authorization: null }]);
   });

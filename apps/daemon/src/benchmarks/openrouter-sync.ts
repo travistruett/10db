@@ -3,6 +3,7 @@ import {
   endpointStatsReadAt,
   getAppSetting,
   replaceEndpointStats,
+  type OpenRouterScoreInput,
   replaceOpenRouterScores,
   setAppSetting,
 } from '@10db/db';
@@ -14,9 +15,11 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import {
   fetchEndpointStats,
-  fetchOpenRouterModelIds,
+  fetchOpenRouterModels,
   fetchOpenRouterScores,
+  type OpenRouterModel,
   type OpenRouterOutcome,
+  type OpenRouterScoreRow,
 } from './openrouter-client';
 
 /** OpenRouter's scores and model list are read at most this often. */
@@ -71,6 +74,21 @@ export interface OpenRouterSync {
   idle(): Promise<void>;
 }
 
+const DATE_SUFFIX = /-\d{8}$/;
+
+/**
+ * The OpenRouter id a benchmark row's permaslug names: the listed model whose canonical slug it is (a model's
+ * own id has no variant suffix, so a `:free` copy is passed over), else the permaslug without its date.
+ */
+function toScoreInput(
+  row: OpenRouterScoreRow,
+  models: readonly OpenRouterModel[],
+): OpenRouterScoreInput {
+  const { permaslug, ...rest } = row;
+  const listed = models.find((m) => m.canonicalSlug === permaslug && !m.id.includes(':'));
+  return { ...rest, id: listed?.id ?? permaslug.replace(DATE_SUFFIX, '') };
+}
+
 /** Aborts a run: a stop landed while it waited on the pacer or a request. */
 class RunStopped extends Error {
   override readonly name = 'RunStopped';
@@ -93,7 +111,7 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
   let requests: number[] = [];
   const waits = new Set<{ readonly timer: Timer; readonly done: () => void }>();
   /** OpenRouter's model ids and when they were read; read again a day later. */
-  let modelIds: { readonly ids: readonly string[]; readonly at: number } | null = null;
+  let models: { readonly list: readonly OpenRouterModel[]; readonly at: number } | null = null;
 
   const stored = (): StoredStatus => {
     try {
@@ -207,6 +225,17 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
     };
     const failures: string[] = [];
 
+    // The models, daily, keyless; read first, since the scores are named by their dated slugs.
+    if (models === null || clock.now().getTime() - models.at >= SCORES_EVERY_MS) {
+      const read = await paced(gen, (limited) => fetchOpenRouterModels({ fetch: limited, signal }));
+      if (read.kind === 'ok') models = { list: read.value, at: clock.now().getTime() };
+      else if (ends(read)) {
+        refused(read);
+        return;
+      } else failures.push(read.message);
+    }
+    const listed: readonly OpenRouterModel[] = models?.list ?? [];
+
     // Scores, daily; a failed read keeps the rows held.
     const scoresAt = stored().scoresAt;
     if (scoresAt === null || clock.now().getTime() - Date.parse(scoresAt) >= SCORES_EVERY_MS) {
@@ -224,26 +253,15 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
         else {
           const at = clock.now().toISOString();
           state.write((ctx) => {
-            replaceOpenRouterScores(ctx, scores.value, at);
+            replaceOpenRouterScores(
+              ctx,
+              scores.value.map((row) => toScoreInput(row, listed)),
+              at,
+            );
           });
           record({ scoresAt: at });
         }
       }
-    }
-
-    // The model ids, daily, keyless.
-    let listed: readonly string[] = modelIds?.ids ?? [];
-    if (modelIds === null || clock.now().getTime() - modelIds.at >= SCORES_EVERY_MS) {
-      const models = await paced(gen, (limited) =>
-        fetchOpenRouterModelIds({ fetch: limited, signal }),
-      );
-      if (models.kind === 'ok') {
-        modelIds = { ids: models.value, at: clock.now().getTime() };
-        listed = models.value;
-      } else if (ends(models)) {
-        refused(models);
-        return;
-      } else failures.push(models.message);
     }
 
     // Speed for each wanted model not read within the hour.
@@ -251,7 +269,7 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
     const offered = deps.offered();
     const wanted = new Set<string>();
     if (catalogue !== null)
-      for (const id of listed) {
+      for (const { id } of listed) {
         const model = joinOpenRouterId(id, catalogue);
         if (model !== null && offered.has(model)) wanted.add(id);
       }

@@ -23,6 +23,7 @@ const KEY = 'sk-or-test-key-9876';
 const AA_URL = `${OPENROUTER_BENCHMARKS_URL}?source=artificial-analysis`;
 const OR_URL = `${OPENROUTER_BENCHMARKS_URL}?source=openrouter`;
 const OPUS = 'anthropic/claude-opus-5.5';
+const OLD_STYLE = 'anthropic/claude-opus-4.9';
 const OTHER_OFFERED_ELSEWHERE = 'openai/gpt-6.1-sol';
 const DECISION = 'liquid/d1';
 
@@ -51,7 +52,11 @@ const json = (body: unknown, status = 200): Response =>
 const defaultAnswer = (url: string): Response => {
   if (url === AA_URL)
     return json({
-      data: [{ model_permaslug: 'anthropic/claude-opus-5.5-20261109', intelligence_index: 40 }],
+      data: [
+        { model_permaslug: 'anthropic/claude-opus-5.5-20261109', intelligence_index: 40 },
+        { model_permaslug: 'anthropic/claude-4.9-opus-20990101', intelligence_index: 30 },
+        { model_permaslug: 'acme/unlisted-20990101', intelligence_index: 20 },
+      ],
     });
   if (url === OR_URL)
     return json({
@@ -60,7 +65,14 @@ const defaultAnswer = (url: string): Response => {
       ],
     });
   if (url === OPENROUTER_MODELS_URL)
-    return json({ data: [{ id: OPUS }, { id: OTHER_OFFERED_ELSEWHERE }] });
+    return json({
+      data: [
+        { id: OPUS, canonical_slug: 'anthropic/claude-opus-5.5-20261109' },
+        { id: `${OPUS}:free`, canonical_slug: 'anthropic/claude-opus-5.5-20261109' },
+        { id: OLD_STYLE, canonical_slug: 'anthropic/claude-4.9-opus-20990101' },
+        { id: OTHER_OFFERED_ELSEWHERE },
+      ],
+    });
   return json({
     data: {
       endpoints: [
@@ -152,21 +164,23 @@ describe('openrouter sync', () => {
     await settle(sync.poke());
     expect(events[0]).toBe('readKey');
     expect(requests.map((r) => r.url)).toEqual([
+      OPENROUTER_MODELS_URL,
       AA_URL,
       OR_URL,
-      OPENROUTER_MODELS_URL,
       endpointsUrl(OPUS),
       endpointsUrl(DECISION),
     ]);
     expect(requests.map((r) => r.authorization)).toEqual([
-      `Bearer ${KEY}`,
-      `Bearer ${KEY}`,
       null,
+      `Bearer ${KEY}`,
+      `Bearer ${KEY}`,
       `Bearer ${KEY}`,
       `Bearer ${KEY}`,
     ]);
     expect(sync.status()).toMatchObject({ keyConfigured: true, outcome: 'ok' });
     expect(listOpenRouterMeasures(state.db).map((r) => `${r.id}|${r.kind}|${r.key}`)).toEqual([
+      'acme/unlisted|score_aa|',
+      'anthropic/claude-opus-4.9|score_aa|',
       'anthropic/claude-opus-5.5|score_aa|',
       'anthropic/claude-opus-5.5|score_openrouter|gpqa',
       'anthropic/claude-opus-5.5|speed|Alpha',

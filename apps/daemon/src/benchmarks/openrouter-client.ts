@@ -11,8 +11,8 @@ export const endpointsUrl = (id: string): string =>
 
 /** One score row: an Artificial Analysis index set, or one OpenRouter benchmark's accuracy and cost. */
 export interface OpenRouterScoreRow {
-  /** OpenRouter's permaslug with its trailing `-YYYYMMDD` dropped. */
-  readonly id: string;
+  /** OpenRouter's permaslug, as the benchmarks name the model; it is a model's `canonical_slug`. */
+  readonly permaslug: string;
   readonly source: 'aa' | 'openrouter';
   readonly intelligence: number | null;
   readonly coding: number | null;
@@ -33,7 +33,6 @@ export type OpenRouterOutcome<T> =
   | { readonly kind: 'ok'; readonly value: T }
   | { readonly kind: 'unauthorized' | 'rate_limited' | 'failed'; readonly message: string };
 
-const DATE_SUFFIX = /-\d{8}$/;
 const MESSAGE_BODY_CHARS = 200;
 
 const Envelope = z.looseObject({ data: z.array(z.unknown()) });
@@ -63,7 +62,10 @@ const EndpointsBody = z.looseObject({
   data: z.looseObject({ endpoints: z.array(z.unknown()) }),
 });
 
-const ModelIdItem = z.looseObject({ id: z.string().min(1) });
+const ModelItem = z.looseObject({
+  id: z.string().min(1),
+  canonical_slug: z.string().min(1).nullable().optional(),
+});
 
 interface Request {
   readonly fetch: typeof fetch;
@@ -138,7 +140,7 @@ export async function fetchOpenRouterScores(
   if (aaItems === null) return failed(NOT_UNDERSTOOD);
   for (const item of aaItems)
     rows.push({
-      id: item.model_permaslug.replace(DATE_SUFFIX, ''),
+      permaslug: item.model_permaslug,
       source: 'aa',
       intelligence: item.intelligence_index ?? null,
       coding: item.coding_index ?? null,
@@ -153,7 +155,7 @@ export async function fetchOpenRouterScores(
   if (ownItems === null) return failed(NOT_UNDERSTOOD);
   for (const item of ownItems)
     rows.push({
-      id: item.model_permaslug.replace(DATE_SUFFIX, ''),
+      permaslug: item.model_permaslug,
       source: 'openrouter',
       intelligence: null,
       coding: null,
@@ -165,13 +167,24 @@ export async function fetchOpenRouterScores(
   return { kind: 'ok', value: rows };
 }
 
-/** Every model id OpenRouter lists. The list is public, so no key is sent. */
-export async function fetchOpenRouterModelIds(deps: Request): Promise<OpenRouterOutcome<string[]>> {
+/** One model OpenRouter lists: the id it is called by, and the dated slug the benchmarks name it by. */
+export interface OpenRouterModel {
+  readonly id: string;
+  readonly canonicalSlug: string | null;
+}
+
+/** Every model OpenRouter lists. The list is public, so no key is sent. */
+export async function fetchOpenRouterModels(
+  deps: Request,
+): Promise<OpenRouterOutcome<OpenRouterModel[]>> {
   const res = await getJson(OPENROUTER_MODELS_URL, deps);
   if (res.kind !== 'ok') return res;
-  const found = items(res.value, ModelIdItem);
+  const found = items(res.value, ModelItem);
   if (found === null) return failed(NOT_UNDERSTOOD);
-  return { kind: 'ok', value: found.map((m) => m.id) };
+  return {
+    kind: 'ok',
+    value: found.map((m) => ({ id: m.id, canonicalSlug: m.canonical_slug ?? null })),
+  };
 }
 
 /** One model's p50 throughput and latency per provider; a provider with no stats reads null, never zero. */
