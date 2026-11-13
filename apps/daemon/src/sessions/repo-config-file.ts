@@ -7,7 +7,7 @@ import {
   readSync,
   realpathSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, normalize, sep } from 'node:path';
 import { LinkInPathError, openInRoot } from './open-in-root';
 
 /** A committed config file larger than this is not a config; it is refused unread. */
@@ -72,15 +72,28 @@ export function readRepoFileBytesIn(
     fd = openInRoot(realRoot, relative);
   } catch (error) {
     if (error instanceof LinkInPathError)
-      // Only the wording turns on which part is the link; the open refused either way.
-      throw new RepoConfigFileError(
-        isLink(join(realRoot, relative)) ? 'it must be a regular file, not a link' : error.message,
-      );
+      throw new RepoConfigFileError(linkMessage(realRoot, relative, error.message));
     const code = errorCode(error);
     if (code === 'ENOENT' || code === 'ENOTDIR') return null;
     throw new RepoConfigFileError(code ?? 'error');
   }
   return readOpened(fd, maxBytes);
+}
+
+/**
+ * Why the open refused, naming the part of the path that is a link so the builder knows what to replace. Only
+ * the wording turns on this check by path; the open refused either way.
+ */
+function linkMessage(realRoot: string, relative: string, refused: string): string {
+  const parts = normalize(relative).split(sep);
+  for (let end = 1; end <= parts.length; end += 1) {
+    const part = parts.slice(0, end).join('/');
+    if (!isLink(join(realRoot, part))) continue;
+    return end === parts.length
+      ? 'it must be a regular file, not a link'
+      : `${refused}: ${part} is a link`;
+  }
+  return refused;
 }
 
 function isLink(path: string): boolean {
@@ -124,7 +137,8 @@ export function readRepoConfigFile(path: string): string | null {
 /**
  * A config file the repo commits, at `relative` under the checkout `root`, as UTF-8, opened by `openInRoot`
  * at `REPO_CONFIG_MAX_BYTES`: a link anywhere below the root is refused at the open. The root is resolved to
- * its real path first; a lane can write inside a checkout but not swap the checkout itself.
+ * its real path first and trusted: a lane's worktree root is not lane-writable, but a project nested inside
+ * another registered checkout has a root that checkout's lanes may be able to rename.
  */
 export function readRepoConfigFileIn(root: string, relative: string): string | null {
   let realRoot: string;

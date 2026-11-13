@@ -1,6 +1,8 @@
 # CI on the pull request is the gate; the full local gate is no longer required before a push
 
 - **Date:** 2026-11-13
+- **Amends:** decisions/2026-10-29-lanes-leave-the-gate-to-10db.md (root `AGENTS.md` no longer keeps "done
+  means `make gate` printed `GATE PASS`" for contributors)
 
 ## Decision
 
@@ -17,16 +19,28 @@ proves the tools are installed.
 
 ## Why
 
-CI already runs every step `make gate` runs (`.github/workflows/ci.yml`): typecheck, build, drift and knip in
-`gate-static`, the tests in six shards, e2e in the Playwright image, format, lint and the repo rules in `policy`,
-and the Tauri shell's `make rust-check` on macOS when the desktop's files change
-(`decisions/2026-11-04-desktop-runs-on-macos-only-when-its-files-change.md`). A required check fails the pull
-request, and `main` merges only on green required checks (`decisions/2026-11-02-main-has-no-merge-queue.md`), so
-the local gate repeated work whose result CI decides anyway.
+CI runs every step `make gate` runs (`.github/workflows/ci.yml`): typecheck, build, drift and knip in
+`gate-static`, format, lint and the tests (the `tests/repo` rule tests among them) in six shards, e2e in the
+Playwright image, and the Tauri shell's `make rust-check` in the macOS `desktop` job, which runs for every pull
+request that changes code (`decisions/2026-11-04-desktop-runs-on-macos-only-when-its-files-change.md`). A
+required check fails the pull request, and `main` merges only on green required checks
+(`decisions/2026-11-02-main-has-no-merge-queue.md`), so the local gate repeated work whose result CI decides
+anyway.
+
+It repeated it on a different platform, though: the test shards and e2e run on Linux, where the daemon's Seatbelt
+tests skip and some tests take another branch (`openInRoot` reads `/proc/self/fd` there, and uses
+`O_NOFOLLOW_ANY` only on macOS). With this decision the `desktop` job also runs the daemon's tests that differ on
+macOS: every `test/*.seatbelt.test.ts`, `src/sandbox`, `src/sessions/open-in-root.test.ts`,
+`src/guard/judge.test.ts`, `src/git/lane-writable.test.ts`, `src/keep-awake`,
+`src/session-setup/builder-skills.test.ts` and `src/environment/pinned-install.test.ts`, about 15 seconds. Two
+macOS-only checks run in no CI job: `tests/repo/src/install-app.test.ts`, which `make check-changed` runs on the
+Mac for a change that reaches the repo tests (`scripts/install-app.sh` does), and e2e in WebKit, which only
+`make gate` runs. CI's e2e runs in the Playwright image on Linux. Losing the WebKit run on every change is
+accepted; a WebKit-only failure shows when the app is run.
 
 The repeat was slow and less reliable than CI. Several Claude Code sessions share one 10-core Mac; on 2026-11-13
 its load average was 44. A local gate on 2026-10-28 took 3.3 minutes; one on 2026-11-10 took about 19, 14.5 of
-them in the test step. The Settings build that day (PR #594) went red locally only on tests that depend on load:
+them in the test step. The Settings build (PR #594, 2026-11-13) went red locally only on tests that depend on load:
 a 100 ms wall-clock assertion in `apps/daemon/src/folders/code-routes.test.ts` and the git-heavy `pass/*` tests.
 Each passed alone, and none failed in CI. A pull request's CI on the same day took 5 to 11 minutes.
 

@@ -186,9 +186,11 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
-      # The gate jobs run on Linux, where the real Seatbelt tests skip: run them (the gate's and a repo
-      # MCP server's), with the sandbox module's own tests, on macOS.
-      - run: pnpm --filter @10db/daemon exec vitest run test/gate-sandbox.seatbelt.test.ts test/mcp-sandbox.seatbelt.test.ts src/sandbox
+      # The gate jobs run on Linux, where the real Seatbelt tests skip: run them, with the sandbox module's
+      # own tests and the daemon tests whose cases differ on macOS (O_NOFOLLOW_ANY, macOS paths and
+      # tools), on macOS. CI is the gate (decisions/2026-11-13-ci-is-the-gate-before-a-merge.md), so
+      # nothing else runs them.
+      - run: pnpm --filter @10db/daemon exec vitest run test/gate-sandbox.seatbelt.test.ts test/mcp-sandbox.seatbelt.test.ts test/judged-shell.seatbelt.test.ts test/pass-git.seatbelt.test.ts test/setup-reads.seatbelt.test.ts test/gate-toolchains.seatbelt.test.ts src/sandbox src/sessions/open-in-root.test.ts src/guard/judge.test.ts src/git/lane-writable.test.ts src/keep-awake src/session-setup/builder-skills.test.ts src/environment/pinned-install.test.ts
       # The self-update against macOS's own pgrep and pkill, which neither Linux nor a lane's sandbox has.
       - run: pnpm exec vitest run --project repo tests/repo/src/self-update-real-processes.test.ts
       - run: make rust-check

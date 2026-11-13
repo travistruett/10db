@@ -383,7 +383,7 @@ describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
       writeMcp({ mcpServers: { mantine: MANTINE } });
       symlinkSync(elsewhere.path, join(repo.path, '.10db'));
       expect(readFailure()).toBeInstanceOf(ProjectMcpError);
-      expect(String(readFailure())).toContain('it lies behind a link');
+      expect(String(readFailure())).toContain('it lies behind a link: .10db is a link');
     } finally {
       elsewhere.cleanup();
     }

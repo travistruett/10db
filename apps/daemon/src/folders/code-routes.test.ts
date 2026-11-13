@@ -240,7 +240,7 @@ describe('codeRoutes over a hostile router file', () => {
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
-  it('reads Route tags nested 30,000 deep in linear time, joining no path past the nesting cap', () => {
+  it('reads Route tags nested 30,000 deep in linear time', () => {
     // Linear reads this in tens of milliseconds even under load; joining every path, quadratic, takes seconds.
     const started = performance.now();
     const found = codeRoutes({
