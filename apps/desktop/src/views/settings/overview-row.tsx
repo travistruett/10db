@@ -79,6 +79,7 @@ export function OverviewRowView({ row }: { readonly row: OverviewRow }) {
   return (
     <Box ref={ref}>
       <UnstyledButton
+        display="block"
         w="100%"
         px="md"
         py="sm"
