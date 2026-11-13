@@ -18,7 +18,7 @@ export function createPlanRecordServices(deps: {
   readonly state: StateStore;
   /** 10db's data dir, which a bundle may not be read from and an export may not write into. */
   readonly dataDir: string;
-  /** Where worktrees are made, and the sandbox's roots: an export never writes there either. */
+  /** Where worktrees are made, and the sandbox's roots: neither is read from or written into. */
   readonly worktreeRoot: string;
   readonly sandboxRoots: readonly string[];
 }): PlanRecordServices {
@@ -42,7 +42,7 @@ export function createPlanRecordServices(deps: {
     async importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome> {
       const read =
         'bundlePath' in input
-          ? await readBundleFile(input.bundlePath, { dataDir: deps.dataDir })
+          ? await readBundleFile(input.bundlePath, deps)
           : inlineBundle(input.bundle);
       if (!read.ok) return { kind: 'refused', errors: read.errors };
       const { bundle, bodies } = read;

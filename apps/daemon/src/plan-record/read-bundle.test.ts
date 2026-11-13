@@ -13,13 +13,16 @@ const projectId = mintId('Project');
 
 let root: TempDir;
 let dataDir: string;
+let worktreeRoot: string;
+let sandboxRoot: string;
 let folder: string;
 beforeEach(() => {
   root = tempDir('bundle');
   dataDir = join(root.path, 'data');
+  worktreeRoot = join(root.path, 'worktrees');
+  sandboxRoot = join(root.path, 'sandbox');
   folder = join(root.path, 'effort');
-  mkdirSync(dataDir);
-  mkdirSync(folder);
+  for (const dir of [dataDir, worktreeRoot, sandboxRoot, folder]) mkdirSync(dir);
 });
 afterEach(() => {
   root.cleanup();
@@ -40,7 +43,8 @@ function writeBundle(revisions: unknown[], dir = folder): string {
   return path;
 }
 
-const read = (path: string) => readBundleFile(path, { dataDir });
+const read = (path: string) =>
+  readBundleFile(path, { dataDir, worktreeRoot, sandboxRoots: [sandboxRoot] });
 
 async function refused(path: string): Promise<string> {
   const result = await read(path);
@@ -95,6 +99,25 @@ describe('readBundleFile', () => {
     const link = join(folder, 'outside.json');
     symlinkSync(inside, link);
     expect(await refused(link)).toMatch(/data dir/);
+  });
+
+  it.each([
+    ['the data dir', 'data', /data dir/],
+    ["10db's worktree root", 'worktrees', /worktree root/],
+    ['a sandbox root', 'sandbox', /sandbox root/],
+  ] as const)('a bodyPath from a bundle above it into %s is refused', async (_, place, message) => {
+    writeFileSync(join(root.path, place, 'secret.md'), 'secret');
+    const bundle = writeBundle([{ number: 1, bodyPath: `${place}/secret.md`, at: AT }], root.path);
+    expect(await refused(bundle)).toMatch(message);
+  });
+
+  it.each([
+    ["10db's worktree root", () => worktreeRoot, /worktree root/],
+    ['a sandbox root', () => sandboxRoot, /sandbox root/],
+  ] as const)('a bundle in %s is refused', async (_, place, message) => {
+    expect(await refused(writeBundle([{ number: 1, body: 'x', at: AT }], place()))).toMatch(
+      message,
+    );
   });
 
   it('a bodyPath with .. out of the folder is refused', async () => {

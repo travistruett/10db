@@ -4,9 +4,10 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { PlanBundle, type PlanImportIssue } from '@10db/contracts';
 import { equalOrUnder } from '../git';
 import { realPathOf } from '../guard';
+import { daemonRoots, forbiddenPlaceOf } from './forbidden-places';
 
-// Reading a bundle from disk: only regular files, the bundle anywhere outside the data dir, each body
-// inside the bundle's own folder, every file opened once, the whole read capped, and the text as is.
+// Reading a bundle from disk: only regular files, the bundle and its bodies anywhere outside 10db's
+// data dir, its worktree root and the sandbox's roots, each body inside the bundle's own folder, every file opened once, the whole read capped, and the text as is.
 
 /** The most a bundle and its body files may hold together. */
 export const BUNDLE_MAX_BYTES = 16 * 1024 * 1024;
@@ -126,17 +127,22 @@ function parsed(
   };
 }
 
+/** The places a bundle and its bodies are never read from. */
+export interface BundleReadRules {
+  readonly dataDir: string;
+  readonly worktreeRoot: string;
+  readonly sandboxRoots: readonly string[];
+}
+
 /** Reads a bundle file and its body files under the rules above. */
-export async function readBundleFile(
-  path: string,
-  rules: { readonly dataDir: string },
-): Promise<BundleRead> {
+export async function readBundleFile(path: string, rules: BundleReadRules): Promise<BundleRead> {
   if (!isAbsolute(path)) return refuse('bundlePath', 'The bundle path must be absolute');
   const real = realOrNull(path);
   if (real === null) return refuse('bundlePath', `${path} could not be resolved`);
-  const dataDirs = [resolve(rules.dataDir), realOrNull(rules.dataDir) ?? resolve(rules.dataDir)];
-  if ([resolve(path), real].some((p) => dataDirs.some((d) => equalOrUnder(p, d))))
-    return refuse('bundlePath', `${real} lies in 10db's data dir`);
+  const forbidden = daemonRoots(rules);
+  const bundlePlace = forbiddenPlaceOf([resolve(path), real], forbidden);
+  if (bundlePlace !== null)
+    return refuse('bundlePath', `${real} lies at or under ${bundlePlace.what}`);
   const head = await readCapped(real, BUNDLE_MAX_BYTES);
   if (!head.ok)
     return refuse(
@@ -167,6 +173,11 @@ export async function readBundleFile(
       const target = realOrNull(join(folder, bodyPath));
       if (target === null || !equalOrUnder(target, folder)) {
         errors.push({ path: where, message: `${bodyPath} lies outside the bundle's folder` });
+        continue;
+      }
+      const bodyPlace = forbiddenPlaceOf([resolve(folder, bodyPath), target], forbidden);
+      if (bodyPlace !== null) {
+        errors.push({ path: where, message: `${bodyPath} lies at or under ${bodyPlace.what}` });
         continue;
       }
       reals.set(bodyPath, target);
