@@ -7,6 +7,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { confirmWebLink } from '../conversation/link-confirm';
 import { mcpReview } from '../views/inbox/mcp-approval';
 
 export interface TrayCounts {
@@ -29,6 +30,35 @@ export function isTauri(): boolean {
  */
 export function openInBrowser(url: string): Promise<void> {
   return openUrl(url);
+}
+
+/** Thrown when a link from agent text is not an `https:` address with a host and no user name. */
+export class WebLinkRefusedError extends Error {
+  override readonly name = 'WebLinkRefusedError';
+}
+
+/**
+ * Opens a link from agent text, any `https:` address, once the builder confirms the host the
+ * address names (never the link's text). In the desktop app the shell's `open_web_link` parses it
+ * again and asks natively, so a script in the webview cannot open it unasked; a plain browser asks
+ * through `LinkConfirmHost`. Rejects with `WebLinkRefusedError` before asking for anything else.
+ */
+export async function openWebLink(url: string): Promise<void> {
+  const link = URL.parse(url);
+  if (link?.protocol !== 'https:' || link.hostname === '') {
+    throw new WebLinkRefusedError(`${url} is not an https address`);
+  }
+  if (link.username !== '' || link.password !== '') {
+    throw new WebLinkRefusedError(`${url} carries a user name or password`);
+  }
+  if (isTauri()) {
+    await invoke('open_web_link', { url });
+    return;
+  }
+  if (!(await confirmWebLink(link.hostname, link.href))) return;
+  const opened = window.open(link.href, '_blank');
+  if (opened === null) throw new Error('the browser blocked the page');
+  opened.opener = null;
 }
 
 /** Thrown when a page address is not the selected project's own loopback app address. */
