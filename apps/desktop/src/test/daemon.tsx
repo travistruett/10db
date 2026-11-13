@@ -107,16 +107,10 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/hazard-assessment', base), () =>
       HttpResponse.json({ additions: [], assessedAt: null, commit: null, pendingRemovals: 0 }),
     ),
-    // The model list and the role settings and patterns the task drawer reads; none yet.
+    // The model list the task drawer reads; none yet.
     http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
     // and what each account offers, which an account's tier overrides read; none yet.
     http.get(daemonUrl('/models/offers', base), () => HttpResponse.json([])),
-    http.get(daemonUrl('/model-settings', base), () =>
-      HttpResponse.json({ roles: [], patterns: [] }),
-    ),
-    http.get(daemonUrl('/projects/:projectId/model-settings', base), () =>
-      HttpResponse.json({ roles: [], patterns: [] }),
-    ),
     // Settings › Models and a project's Models by role read the playbook, the kinds, the personas and what
     // each cell resolves to; 10db's defaults, no kinds and nothing chosen.
     http.get(daemonUrl('/playbook', base), () => HttpResponse.json(playbookDto())),

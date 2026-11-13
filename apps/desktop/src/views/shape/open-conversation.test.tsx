@@ -19,7 +19,6 @@ function conversation(): ShapeViewDto {
 function serve(view: ShapeViewDto, ...overrides: RequestHandler[]): void {
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([view.shape])),
     http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(view)),

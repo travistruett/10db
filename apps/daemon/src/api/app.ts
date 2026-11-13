@@ -26,9 +26,6 @@ import {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
-  FlowId,
-  FlowInput,
-  FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
   PlanExportInput,
@@ -71,7 +68,6 @@ import {
   PickSize,
   ProjectId,
   ProjectInput,
-  ModelSettingsInput,
   ProjectPatch,
   PROTOCOL_VERSION,
   RetryInput,
@@ -115,7 +111,6 @@ import {
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   TaskMove,
   TaskPatch,
-  TeamInput,
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
@@ -999,7 +994,6 @@ export function createApp(deps: ApiDeps) {
       async (c) =>
         c.json(await deps.services.proposeAreas(c.req.valid('json').path, c.req.raw.signal)),
     )
-    .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
       '/projects/:projectId',
       validator('json', (value): ProjectPatch => ProjectPatch.parse(value)),
@@ -1116,17 +1110,6 @@ export function createApp(deps: ApiDeps) {
             AccountId.parse(c.req.param('accountId')),
             c.req.valid('query').month ?? null,
           ),
-        ),
-    )
-    .get('/projects/:projectId/team', (c) =>
-      c.json(deps.services.getTeam(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .put(
-      '/projects/:projectId/team',
-      validator('json', (value): TeamInput => TeamInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.setTeam(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
         ),
     )
     .get('/projects/:projectId/routing-rules', (c) =>
@@ -1265,37 +1248,6 @@ export function createApp(deps: ApiDeps) {
               .split(',')
               .filter((id) => id !== '')
               .map((id) => PersonId.parse(id)),
-          ),
-        ),
-    )
-    .post(
-      '/flows',
-      validator('json', (value): FlowInput => FlowInput.parse(value)),
-      (c) => c.json(deps.services.createFlow(c.req.valid('json')), 201),
-    )
-    .patch(
-      '/flows/:flowId',
-      validator('json', (value): FlowPatch => FlowPatch.parse(value)),
-      (c) =>
-        c.json(deps.services.patchFlow(FlowId.parse(c.req.param('flowId')), c.req.valid('json'))),
-    )
-    .get('/model-settings', (c) => c.json(deps.services.getModelSettings(null)))
-    .put(
-      '/model-settings',
-      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
-      (c) => c.json(deps.services.setGlobalModelSettings(c.req.valid('json'))),
-    )
-    .get('/projects/:projectId/model-settings', (c) =>
-      c.json(deps.services.getModelSettings(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .put(
-      '/projects/:projectId/model-settings',
-      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.setProjectModelSettings(
-            ProjectId.parse(c.req.param('projectId')),
-            c.req.valid('json'),
           ),
         ),
     )

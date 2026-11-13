@@ -49,7 +49,6 @@ describe('BoardView', () => {
       serve(
         http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
         http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
-        http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       );
       return tasks;
     }
@@ -86,7 +85,6 @@ describe('BoardView', () => {
           http.get(daemonUrl('/projects/:projectId/goals'), () =>
             HttpResponse.json(goalListDto(summary)),
           ),
-          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
         );
         return { summary, inGoal, loose };
       }
@@ -133,7 +131,6 @@ describe('BoardView', () => {
           http.get(daemonUrl('/projects/:projectId/tasks'), ({ params }) =>
             HttpResponse.json(params['projectId'] === first.id ? [here] : [there]),
           ),
-          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
         );
         return { here, there };
       }
@@ -162,7 +159,6 @@ describe('BoardView', () => {
               ? HttpResponse.json([taskDto({ projectId: first.id, title: 'Alpha' })])
               : HttpResponse.json({ error: 'boom' }, { status: 500 }),
           ),
-          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
         );
         renderApp(`/board?task=${mintId('Task')}`);
         expect(await screen.findByText(/couldn't find the task's project/i)).toBeTruthy();
@@ -1712,7 +1708,6 @@ describe('BoardView', () => {
       http.get(daemonUrl('/projects/:projectId/goals'), () =>
         HttpResponse.json(goalListDto(summary)),
       ),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     );
     renderApp('/board');
     const select = await screen.findByRole('combobox', { name: 'Goal' });
@@ -2501,7 +2496,6 @@ describe('BoardView holding a started task', () => {
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
       http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.post(daemonUrl('/tasks/:taskId/hold'), ({ params }) => {
         calls.push(`hold ${String(params['taskId'])}`);
         return HttpResponse.json({ ...ws, state: 'HELD' });

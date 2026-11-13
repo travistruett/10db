@@ -1953,7 +1953,7 @@ describe('startDaemon', () => {
     }
   });
 
-  it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
+  it('answers 404 for an unknown project on routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
       sandbox: null,
       dataDir: dir.path,
@@ -1978,23 +1978,15 @@ describe('startDaemon', () => {
     };
     const repo = createTempRepo();
     try {
-      const project = await api.post('/projects', ProjectDto, {
+      await api.post('/projects', ProjectDto, {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const head = await api.get('/events/head', EventsHead);
-      expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/candidates?size=1`)).toBe(404);
-      expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
-      expect(
-        await send('PUT', `/projects/${project.id}/team`, {
-          bindings: [{ role: 'review', personaId: mintId('Persona') }],
-          members: [],
-        }),
-      ).toBe(400);
       expect(await api.get('/events/head', EventsHead)).toEqual(head);
     } finally {
       repo.cleanup();
@@ -2008,9 +2000,6 @@ describe('startDaemon', () => {
     };
     expect(await send('POST', '/personas', persona)).toBe(201);
     expect(await send('POST', '/people', { handle: 'sam', name: 'Sam' })).toBe(201);
-    expect(
-      await send('POST', '/flows', { name: 'mine', steps: [{ role: 'implement', need: 40 }] }),
-    ).toBe(201);
   });
 
   it('closes its log file on stop, so a start leaks no file descriptor', async () => {

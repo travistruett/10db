@@ -2,7 +2,6 @@ import {
   BatchDto,
   BoardColumnDto,
   DaemonEvent,
-  FlowDto,
   InboxItemDto,
   mintId,
   PickerCandidate,
@@ -252,17 +251,6 @@ export function candidate(
       overBudget: [],
     },
     planError: null,
-    ...overrides,
-  });
-}
-
-export function flowDto(overrides: Partial<FlowDto> = {}): FlowDto {
-  return FlowDto.parse({
-    id: mintId('Flow'),
-    name: 'quick',
-    steps: [{ role: 'implement', need: 40, skip: [], persona: null }],
-    createdAt: AT,
-    updatedAt: AT,
     ...overrides,
   });
 }

@@ -3,7 +3,6 @@ import {
   mintId,
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
-  RiskTag,
   TaskPatch,
   type BatchDto,
   type TaskDto,
@@ -17,7 +16,6 @@ import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { kindDto } from '../../test/playbook-fixtures';
 import { modelRowDto } from '../../test/model-fixtures';
-import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 import { failureLine } from './task-state';
 
@@ -729,15 +727,6 @@ describe('TaskDrawer', () => {
       // The edit survived the tab switch.
       await openTab('Edit');
       expect(screen.getByLabelText<HTMLInputElement>('Title').value).toBe('Changed');
-    });
-  });
-
-  it('reads risk options in plain words', () => {
-    expect(RISK_LABEL).toEqual({
-      [RiskTag.Security]: 'Security',
-      [RiskTag.Auth]: 'Sign-in and permissions',
-      [RiskTag.Migration]: 'Database migration',
-      [RiskTag.Dependency]: 'Dependencies',
     });
   });
 

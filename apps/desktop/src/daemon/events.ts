@@ -17,7 +17,6 @@ import { humanTouchKeys } from './human-touch-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
 import { modelKeys } from './model-queries';
-import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { PERSONAS_KEY } from './persona-queries';
 import { playbookKeys } from './playbook-queries';
@@ -95,18 +94,13 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   slack: [SLACK_KEY],
   stakeholder_timers: [TIMERS_KEY],
   stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all],
-  flow: [queryKeys.flows, CANDIDATES],
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
-  // The task drawer reads a role's setting and the patterns, and so do the Models page's picks.
-  role_setting: [modelSettingKeys.all, modelKeys.all],
-  pattern: [modelSettingKeys.all, modelKeys.all],
   // Settings › Models reads the playbook and the kinds, and the picks follow both; a kind also changes which
   // rigors a task may take and what its card shows.
   playbook: [playbookKeys.all, modelKeys.all],
   kind: [KINDS_KEY, modelKeys.all, ['tasks'], CANDIDATES],
-  team: [CANDIDATES],
   routing_rules: [CANDIDATES, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   benchmarks: [CANDIDATES],
 };

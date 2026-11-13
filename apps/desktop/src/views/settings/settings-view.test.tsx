@@ -414,7 +414,6 @@ describe('SettingsView', () => {
     const patched: unknown[] = [];
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
         patched.push(await request.json());
         return HttpResponse.json(project);
@@ -437,7 +436,6 @@ describe('SettingsView', () => {
     let calls = 0;
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), () => {
         calls += 1;
         return HttpResponse.json({}, { status: 500 });
@@ -457,7 +455,6 @@ describe('SettingsView', () => {
     const project = projectDto();
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), () =>
         HttpResponse.json({ error: 'not_found', message: 'flow flw_x not found' }, { status: 404 }),
       ),
@@ -474,7 +471,6 @@ describe('SettingsView', () => {
     const project = projectDto();
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/general');
@@ -488,7 +484,6 @@ describe('SettingsView', () => {
     const patched: unknown[] = [];
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
         patched.push(await request.json());
         return HttpResponse.json(
@@ -518,7 +513,6 @@ describe('SettingsView', () => {
     let current = first;
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([current])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     const { queryClient } = renderApp('/settings/general');

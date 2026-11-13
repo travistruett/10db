@@ -48,10 +48,6 @@ import type {
   BoardColumnPatch,
   AreaProposalResult,
   DaemonEvent,
-  FlowDto,
-  FlowId,
-  FlowInput,
-  FlowPatch,
   FolderInspectResult,
   FoundHostDto,
   HazardAssessmentDto,
@@ -84,10 +80,8 @@ import type {
   TrustSwitches,
   McpServerStatusDto,
   ModelProfileDto,
-  ModelSettingsInput,
   ModelRowDto,
   RolePicksDto,
-  ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
@@ -178,8 +172,6 @@ import type {
   RunNextResult,
   TaskMove,
   TaskPatch,
-  TeamDto,
-  TeamInput,
   WorkstreamChangesDto,
   WorkstreamDto,
   WorkstreamId,
@@ -565,7 +557,6 @@ export interface ApiServices extends PlanRecordServices {
   adoptGoal(projectId: ProjectId, input: GoalAdoptInput): Promise<GoalAdoptResult>;
   /** Throws NotFoundError for an unknown goal. */
   getGoal(id: GoalId): GoalDto;
-  listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
@@ -671,8 +662,6 @@ export interface ApiServices extends PlanRecordServices {
   takeBack(id: InboxItemId): Promise<InboxItemDto>;
   keepWaiting(id: InboxItemId): InboxItemDto;
   composeFor(id: InboxItemId, personIds: PersonId[]): ComposePreviewDto;
-  createFlow(input: FlowInput): FlowDto;
-  patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
   /** The sync's last outcome; whether a key is set is read from the Keychain now. */
@@ -683,12 +672,6 @@ export interface ApiServices extends PlanRecordServices {
   removeBenchmarkKey(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
-  /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */
-  getModelSettings(projectId: ProjectId | null): ModelSettingsDto;
-  /** Sets the listed roles everywhere and replaces the patterns when the input has them; answers what is in force. */
-  setGlobalModelSettings(input: ModelSettingsInput): ModelSettingsDto;
-  /** As the global one for a project; a null setting hands the role back to the global setting. */
-  setProjectModelSettings(projectId: ProjectId, input: ModelSettingsInput): ModelSettingsDto;
   /**
    * Every model any account can reach, one row each. With an account, a model it offers lists the efforts it
    * offers, priced on it. Throws NotFoundError for an unknown or archived account.
@@ -728,8 +711,6 @@ export interface ApiServices extends PlanRecordServices {
   refreshModels(): Promise<CatalogueStatusDto>;
   /** Throws InvalidError when the default landing names a branch origin does not have, after asking origin. */
   patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
-  getTeam(projectId: ProjectId): TeamDto;
-  setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
   patchTask(id: TaskId, patch: TaskPatch): TaskDto | Promise<TaskDto>;

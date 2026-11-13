@@ -1,7 +1,6 @@
 import {
   BatchDto,
   BoardColumnDto,
-  FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -61,7 +60,6 @@ export const queryKeys = {
   keepAwake: ['keep-awake'],
   lanePermissions: ['lane-permissions'],
   system: ['system'],
-  flows: ['flows'],
   candidates: (projectId: ProjectId, size: number, goalId: GoalId | null) =>
     ['candidates', projectId, size, goalId] as const,
 } as const;
@@ -71,7 +69,6 @@ const TaskList = z.array(TaskDto);
 const BatchList = z.array(BatchDto);
 export const WorkstreamList = z.array(WorkstreamDto);
 const BoardColumnList = z.array(BoardColumnDto);
-const FlowList = z.array(FlowDto);
 const InboxList = z.array(InboxItemDto);
 
 /** Open cards; shared by the Inbox view, the nav badge and notifications. */
@@ -593,14 +590,6 @@ export function useDeleteBoardColumn() {
         queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
       ]),
-  });
-}
-
-export function useFlows() {
-  const { client } = useDaemon();
-  return useQuery({
-    queryKey: queryKeys.flows,
-    queryFn: async () => readJson(await client.flows.$get(), FlowList),
   });
 }
 

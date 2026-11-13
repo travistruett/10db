@@ -17,7 +17,6 @@ describe('Settings › Planning › Small proposals', () => {
         put.push(body);
         return HttpResponse.json(body);
       }),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/planning');
@@ -45,7 +44,6 @@ describe('Settings › Planning › Small proposals', () => {
         put.push(body);
         return HttpResponse.json(body);
       }),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/planning');
@@ -89,7 +87,6 @@ describe('Settings › Planning › Small proposals', () => {
         put.push(body);
         return HttpResponse.json(body);
       }),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/planning');

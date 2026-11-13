@@ -16,11 +16,8 @@ import {
   NotFoundError,
   providerOf,
   isDaemonAddress,
-  kindsMatchingRiskTags,
   kindsOfTask,
   refuseRigorBelowKinds,
-  TaskKindSource,
-  withKindsNamed,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
@@ -56,12 +53,10 @@ import {
   getPass,
   getPassProgress,
   getTask,
-  getTeam,
   getWorkstream,
   holdTask,
   insertBoardColumn,
   insertBuilderMessage,
-  insertFlow,
   insertPerson,
   insertPersona,
   insertProject,
@@ -79,7 +74,6 @@ import {
   listBatches,
   listBoardColumns,
   listEventsAfter,
-  listFlows,
   listGoalSummaries,
   listInbox,
   listModelProfiles,
@@ -96,7 +90,6 @@ import {
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
-  patchFlow,
   patchModelProfile,
   patchPersona,
   patchProject,
@@ -105,7 +98,6 @@ import {
   resumeTask,
   runNext,
   setRoutingRules,
-  setTeam,
   takeOffer,
   undoHazardAddition,
   isAllowThisOffer,
@@ -181,7 +173,6 @@ import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
-import { createModelSettingsServices } from './model-settings-services';
 import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { PlanRecordServices } from '../api';
@@ -367,13 +358,7 @@ export function createServices(deps: {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
         const known = listKinds(ctx.tx);
-        // Risk tags are the older name of four kinds: a form that still sends them gets those kinds too.
-        const kinds = withKindsNamed(
-          input.kinds ?? [],
-          input.riskTags ?? [],
-          known,
-          TaskKindSource.Builder,
-        );
+        const kinds = input.kinds ?? [];
         refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
         return insertTask(
           ctx,
@@ -621,7 +606,6 @@ export function createServices(deps: {
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
     getGoal: (id) => getGoal(db, id),
-    listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
@@ -712,15 +696,12 @@ export function createServices(deps: {
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
     listPeople: () => listPeople(db),
     createPerson: (input) => deps.state.write((ctx) => insertPerson(ctx, input)),
-    createFlow: (input) => deps.state.write((ctx) => insertFlow(ctx, input)),
-    patchFlow: (id, patch) => deps.state.write((ctx) => patchFlow(ctx, id, patch)),
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
     ...deps.github,
     ...deps.stakeholders,
     ...deps.trust,
-    ...createModelSettingsServices(deps.state),
     ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.planRecord,
@@ -789,11 +770,6 @@ export function createServices(deps: {
     accountUsage: (id, month) => deps.accounts.usage(id, month),
     listAccountPauses: () => deps.accounts.pauses(),
     resumeAccount: (id) => deps.accounts.resume(id),
-    getTeam(projectId) {
-      getProject(db, projectId);
-      return getTeam(db, projectId);
-    },
-    setTeam: (projectId, input) => deps.state.write((ctx) => setTeam(ctx, projectId, input)),
     listRoutingRules(projectId) {
       getProject(db, projectId);
       return listRoutingRules(db, projectId);
@@ -826,18 +802,9 @@ export function createServices(deps: {
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
         const known = listKinds(ctx.tx);
-        // Risk tags are the older name of four kinds: an edit that still sends them sets those kinds.
-        const kinds =
-          patch.riskTags === undefined
-            ? (patch.kinds ?? task.kinds)
-            : kindsMatchingRiskTags(
-                patch.kinds ?? task.kinds,
-                patch.riskTags,
-                known,
-                TaskKindSource.Builder,
-              );
+        const kinds = patch.kinds ?? task.kinds;
         // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
-        if (patch.rigor !== undefined || patch.kinds !== undefined || patch.riskTags !== undefined)
+        if (patch.rigor !== undefined || patch.kinds !== undefined)
           refuseRigorBelowKinds({
             rigor: patch.rigor === undefined ? task.rigor : patch.rigor,
             taskKinds: kinds,
@@ -845,7 +812,7 @@ export function createServices(deps: {
           });
         // The areas or kinds can now match the placement rule, so it is asked again.
         const proposed =
-          patch.areas === undefined && patch.riskTags === undefined && patch.kinds === undefined
+          patch.areas === undefined && patch.kinds === undefined
             ? undefined
             : proposePlacement(getProject(ctx.tx, task.projectId), {
                 areas: patch.areas ?? task.areas,
@@ -864,7 +831,7 @@ export function createServices(deps: {
         return patchTask(
           ctx,
           id,
-          patch.kinds === undefined && patch.riskTags === undefined ? patch : { ...patch, kinds },
+          patch.kinds === undefined ? patch : { ...patch, kinds },
           proposed,
         );
       });
