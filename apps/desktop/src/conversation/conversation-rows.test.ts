@@ -11,6 +11,11 @@ import type { ConversationEntry } from './entry';
 
 const read = (id: string, parentId: string | null = null) => toolEntry(readCall({ id, parentId }));
 const edit = (id: string) => toolEntry(editCall({ id }));
+const deniedRead = (id: string) =>
+  toolEntry(readCall({ id, path: '.env', status: 'denied', deniedBy: '10db', refusal: 'secrets' }));
+const failedRead = (id: string) => toolEntry(readCall({ id, status: 'failed' }));
+const deniedEdit = (id: string) =>
+  toolEntry(editCall({ id, status: 'denied', deniedBy: 'builder' }));
 const command = (id: string) => toolEntry(commandCall({ id }));
 const subagent = (id: string) => toolEntry(subagentCall({ id }));
 const nestedSubagent = (id: string, parentId: string) => toolEntry(subagentCall({ id, parentId }));
@@ -49,6 +54,26 @@ describe('conversationRows', () => {
       ['edits e1 e2 e3', 'tool c1'],
     ],
     ['edit, read, edit', [edit('e1'), read('r1'), edit('e2')], ['tool e1', 'tool r1', 'tool e2']],
+    [
+      'a denied read stands alone between reads',
+      [read('r1'), deniedRead('d1'), read('r2'), read('r3')],
+      ['tool r1', 'tool d1', 'group r2 r3'],
+    ],
+    [
+      'a failed read stands alone',
+      [read('r1'), failedRead('f1'), read('r2')],
+      ['tool r1', 'tool f1', 'tool r2'],
+    ],
+    [
+      'a denied edit stands alone',
+      [edit('e1'), edit('e2'), deniedEdit('d1')],
+      ['edits e1 e2', 'tool d1'],
+    ],
+    [
+      'a running read still folds',
+      [read('r1'), toolEntry(readCall({ id: 'r2', status: 'running' }))],
+      ['group r1 r2'],
+    ],
     [
       'a subagent with two children, and an orphan whose parent is absent',
       [subagent('a1'), read('k1', 'a1'), read('k2', 'a1'), read('o1', 'gone')],

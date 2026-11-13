@@ -12,7 +12,12 @@ export type ConversationRow =
 
 type Fold = 'tool_group' | 'edit_group';
 
+/**
+ * The run `entry` folds into, if any. A call that failed or was denied never folds: its own row
+ * says so, where a fold would count it as one more file read or edited.
+ */
 function foldOf(entry: ToolEntry): Fold | null {
+  if (entry.call.status !== 'done' && entry.call.status !== 'running') return null;
   switch (entry.call.kind) {
     case 'read':
     case 'search':
