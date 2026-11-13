@@ -5,17 +5,19 @@ import {
   Streamdown,
   type StreamdownProps,
 } from 'streamdown';
-import { useMemo } from 'react';
 import { MarkdownBoundary } from './markdown-boundary';
 import { MARKDOWN_ELEMENTS } from './markdown-elements';
-import { markdownFits } from './markdown-fits';
 import { PlainMarkdown } from './markdown-plain';
 import { rehypeAgentSafety, remarkHtmlAsText } from './rehype-agent-safety';
 
 // The one place markdown is drawn. Raw HTML is shown as its text, the tree is sanitized, and 10db's
-// own step drops images and every link that is not `https:`; harden runs after it. A text
-// too long or nested too deeply to draw is shown plain (`markdown-fits.ts`). GFM only: no math, no
-// Mermaid and no highlighter, so none of streamdown's lazy chunks ever loads.
+// own step drops images and every link that is not `https:`; harden runs after it. A text longer
+// than MARKDOWN_MAX_LENGTH is shown plain, and one the parser can't draw (it recurses, so a text
+// nested thousands deep exhausts the stack) falls to `MarkdownBoundary`, which shows it plain too.
+// GFM only: no math, no Mermaid and no highlighter, so none of streamdown's lazy chunks ever loads.
+
+/** The longest text drawn as markdown, in UTF-16 code units; a longer one shows whole as plain text. */
+const MARKDOWN_MAX_LENGTH = 512 * 1024;
 
 const MARKDOWN_REMARK_PLUGINS: NonNullable<StreamdownProps['remarkPlugins']> = [
   ...[defaultRemarkPlugins['gfm'], defaultRemarkPlugins['codeMeta']].filter((p) => p !== undefined),
@@ -39,13 +41,9 @@ const MARKDOWN_REHYPE_PLUGINS: NonNullable<StreamdownProps['rehypePlugins']> = [
   ],
 ];
 
-/**
- * Draws `text` as markdown, or shows it whole as plain text when it is too long or nested too deeply
- * to draw, or when drawing it throws.
- */
+/** Draws `text` as markdown, or shows it whole as plain text when it is too long or drawing it throws. */
 export function Markdown({ text }: { readonly text: string }) {
-  const fits = useMemo(() => markdownFits(text), [text]);
-  if (!fits) return <PlainMarkdown text={text} />;
+  if (text.length > MARKDOWN_MAX_LENGTH) return <PlainMarkdown text={text} />;
   return (
     <MarkdownBoundary text={text}>
       <Streamdown
