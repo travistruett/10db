@@ -79,8 +79,7 @@ const profileOf = (name: string): ModelProfileDto => {
   return found;
 };
 
-function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
-  const profile = profileOf(name);
+function profileStep(profile: ModelProfileDto, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
   return {
     role: 'implement',
     personaId: null,
@@ -103,6 +102,10 @@ function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamSt
     setting: { kind: 'automatic' },
     ...over,
   };
+}
+
+function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
+  return profileStep(profileOf(name), over);
 }
 
 const context = (over: Partial<StepContext> = {}): StepContext => ({
@@ -226,6 +229,33 @@ describe('resolveStep', () => {
       context(),
     );
     expect(out.model).toBe('peak');
+  });
+
+  it('falls back to the next model the account runs when it refuses a Frontier pick, and says why', () => {
+    const apex: ModelProfileDto[] = everything
+      .filter((p) => p.model === 'peak')
+      .map((p) => ({ ...p, id: mintId('ModelProfile'), model: 'apex', tier: ModelTier.Frontier }));
+    const profilesAll = [...everything, ...apex];
+    const rows = [row('big'), row('apex', { unusable: true })];
+    const profiles = offeredProfiles(profilesAll, rows, 'claude');
+    const planned = apex.find((p) => p.effort === 'high');
+    if (!planned) throw new Error('no apex@high');
+    const out = resolveStep(
+      {
+        ...profileStep(planned),
+        setting: tier(ModelTier.Frontier),
+      },
+      ACCOUNT,
+      profiles,
+      rows,
+      context({ plannedTier: ModelTier.Frontier }),
+    );
+    expect(out.model).toBe('big');
+    expect(out.reason).toContain(
+      'apex is marked unusable on Bedrock, so the step was resolved again',
+    );
+    expect(out.reason).toContain("the refused model's tier (frontier)");
+    expect(out.reason).toContain('the cheapest model of the capable tier');
   });
 
   it.each<{ name: string; rows: AccountModelDto[]; setting: ModelSetting }>([
