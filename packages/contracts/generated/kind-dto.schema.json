@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^knd_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,39}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "minimumRigor": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "light",
+            "standard",
+            "careful",
+            "critical"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "alwaysReviewed": {
+      "type": "boolean"
+    },
+    "failsAtLimit": {
+      "type": "boolean"
+    },
+    "ownCopy": {
+      "type": "boolean"
+    },
+    "toInbox": {
+      "type": "boolean"
+    },
+    "addsSteps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "plan",
+          "plan_review",
+          "implement",
+          "review",
+          "qa"
+        ]
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "enum": [
+          "plan",
+          "plan_review",
+          "implement",
+          "review",
+          "qa"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "personaId": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^per_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "default": null,
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "automatic"
+                      },
+                      "minimum": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "tier"
+                      },
+                      "tier": {
+                        "type": "string",
+                        "enum": [
+                          "efficient",
+                          "balanced",
+                          "capable",
+                          "frontier"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "tier"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "top_of_tier"
+                      },
+                      "tier": {
+                        "type": "string",
+                        "enum": [
+                          "efficient",
+                          "balanced",
+                          "capable",
+                          "frontier"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "model"
+                      },
+                      "model": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "model"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effort": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "id",
+    "key",
+    "label",
+    "description",
+    "minimumRigor",
+    "alwaysReviewed",
+    "failsAtLimit",
+    "ownCopy",
+    "toInbox",
+    "addsSteps",
+    "overrides",
+    "position"
+  ]
+}

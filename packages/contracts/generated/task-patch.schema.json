@@ -49,6 +49,62 @@
         }
       ]
     },
+    "rigor": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "light",
+            "standard",
+            "careful",
+            "critical"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,39}$"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "builder",
+              "agent"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "source"
+        ]
+      }
+    },
+    "effortPin": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "areas": {
       "minItems": 1,
       "type": "array",
@@ -121,6 +177,11 @@
                 "kind": {
                   "type": "string",
                   "const": "automatic"
+                },
+                "minimum": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
                 }
               },
               "required": [
@@ -155,6 +216,15 @@
                 "kind": {
                   "type": "string",
                   "const": "top_of_tier"
+                },
+                "tier": {
+                  "type": "string",
+                  "enum": [
+                    "efficient",
+                    "balanced",
+                    "capable",
+                    "frontier"
+                  ]
                 }
               },
               "required": [

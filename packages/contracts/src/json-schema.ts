@@ -123,6 +123,7 @@ import {
 } from './entities';
 import { DaemonEvent } from './events';
 import { FlowDto, FlowInput, FlowPatch } from './flows';
+import { KindDto, KindInput, KindPatch, PlaybookDto, PlaybookInput } from './rigor';
 import {
   AreaProposalInput,
   AreaProposalResult,
@@ -331,6 +332,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,
+  'kind-dto': KindDto,
+  'kind-input': KindInput,
+  'kind-patch': KindPatch,
+  'playbook-dto': PlaybookDto,
+  'playbook-input': PlaybookInput,
   'folder-inspect-input': FolderInspectInput,
   'folder-inspection': FolderInspection,
   'folder-inspect-result': FolderInspectResult,

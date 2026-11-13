@@ -70,6 +70,15 @@
         }
       ]
     },
+    "defaultRigor": {
+      "type": "string",
+      "enum": [
+        "light",
+        "standard",
+        "careful",
+        "critical"
+      ]
+    },
     "budgetCeiling": {
       "anyOf": [
         {

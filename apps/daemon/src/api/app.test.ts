@@ -1286,6 +1286,7 @@ describe('shape routes', () => {
     proposeUnlocked: false,
     round: 0,
     model: null,
+    effort: null,
     importedAt: null,
     createdAt: AT,
     updatedAt: AT,

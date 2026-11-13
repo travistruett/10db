@@ -12,7 +12,7 @@ import {
 } from './ids';
 import { TopicKey } from './knowledge';
 import { PlanAlternative, PlanAnchor, PlanRef } from './plan-record';
-import { KnowledgeScope, PrincipleKind } from './states';
+import { Effort, KnowledgeScope, PrincipleKind } from './states';
 import { SeeScreenInput } from './shape-screens';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
@@ -317,6 +317,8 @@ export const ShapeDto = z.object({
   round: z.int().min(0),
   /** The model ID the builder chose for the conversation; null runs it on the `plan` role's. */
   model: z.string().nullable().default(null),
+  /** The effort the builder chose for the conversation; null follows the model's own default. */
+  effort: z.enum(Effort).nullable().default(null),
   /** When the Plan was imported from a bundle; null for a conversation. */
   importedAt: Timestamp.nullable().default(null),
   createdAt: Timestamp,

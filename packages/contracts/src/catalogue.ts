@@ -71,11 +71,15 @@ export type ModelMarkBasis = ValueOf<typeof ModelMarkBasis>;
 
 const Timestamp = z.iso.datetime();
 
-/** What a step, role or pattern asks of the router: leave it to 10db, a tier, the best, or one model. */
+/**
+ * What a step, role, pattern or playbook cell asks of the router: leave it to 10db (with the lowest
+ * Intelligence Index score the step needs, when it has one), a tier, the best of a tier (of any, when none is
+ * named), or one model.
+ */
 export const ModelSetting = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('automatic') }),
+  z.object({ kind: z.literal('automatic'), minimum: z.number().min(0).max(100).optional() }),
   z.object({ kind: z.literal('tier'), tier: z.enum(ModelTier) }),
-  z.object({ kind: z.literal('top_of_tier') }),
+  z.object({ kind: z.literal('top_of_tier'), tier: z.enum(ModelTier).optional() }),
   z.object({ kind: z.literal('model'), model: z.string().min(1) }),
 ]);
 export type ModelSetting = z.infer<typeof ModelSetting>;

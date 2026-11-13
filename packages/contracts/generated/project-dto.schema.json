@@ -191,6 +191,15 @@
         }
       ]
     },
+    "defaultRigor": {
+      "type": "string",
+      "enum": [
+        "light",
+        "standard",
+        "careful",
+        "critical"
+      ]
+    },
     "budgetCeiling": {
       "type": [
         "number",
@@ -360,6 +369,7 @@
     "nudgePct",
     "humanWaitMinutes",
     "flowId",
+    "defaultRigor",
     "budgetCeiling",
     "delivery",
     "baseBranch",

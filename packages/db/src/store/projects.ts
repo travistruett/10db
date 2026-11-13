@@ -16,6 +16,7 @@ import {
   ProjectLanding,
   ProjectPatch,
   Provider,
+  Rigor,
   SCREENS_MATRIX_DEFAULT,
   WorkspaceMode,
   type AccountId,
@@ -102,11 +103,16 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
 export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
   const row = db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
   if (!row) throw new NotFoundError('project', id);
-  return row;
+  return { ...row, defaultRigor: Rigor.Standard };
 }
 
 export function listProjects(db: DbReader): ProjectDto[] {
-  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
+  return db
+    .select()
+    .from(schema.projects)
+    .orderBy(asc(schema.projects.name))
+    .all()
+    .map((row) => ({ ...row, defaultRigor: Rigor.Standard }));
 }
 
 /**

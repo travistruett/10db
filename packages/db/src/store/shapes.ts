@@ -28,6 +28,7 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   proposeUnlocked: row.proposeUnlocked,
   round: row.round,
   model: row.model,
+  effort: null,
   importedAt: row.importedAt,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,

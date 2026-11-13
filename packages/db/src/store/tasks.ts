@@ -34,6 +34,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type ProposalId,
+  Rigor,
   type RiskTag,
   type TaskConfig,
   type TaskDto,
@@ -507,8 +508,11 @@ export function insertRetryLimitFollowUp(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing' | 'workspaceMode' | 'headline' | 'why'> &
-    Partial<Pick<TaskConfig, 'headline' | 'why'>> &
+  config: Omit<
+    TaskConfig,
+    'landing' | 'workspaceMode' | 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'
+  > &
+    Partial<Pick<TaskConfig, 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'>> &
     Placement & {
       readonly landing: TaskLanding;
       readonly proposalId: ProposalId | null;
@@ -644,6 +648,10 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     areas: row.areas,
     riskTags: row.riskTags,
     flowId: row.flowId,
+    rigor: null,
+    effectiveRigor: Rigor.Standard,
+    kinds: [],
+    effortPin: null,
     landing: landingOf(row),
     workspaceMode: row.workspaceMode,
     placementReason: row.placementReason,

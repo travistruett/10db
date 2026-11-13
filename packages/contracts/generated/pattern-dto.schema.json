@@ -73,6 +73,11 @@
             "kind": {
               "type": "string",
               "const": "automatic"
+            },
+            "minimum": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
             }
           },
           "required": [
@@ -107,6 +112,15 @@
             "kind": {
               "type": "string",
               "const": "top_of_tier"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "efficient",
+                "balanced",
+                "capable",
+                "frontier"
+              ]
             }
           },
           "required": [

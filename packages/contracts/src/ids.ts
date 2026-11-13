@@ -54,6 +54,7 @@ const ID_SCHEMAS = {
   TaskContextCheck: idSchema('tcx', 'TaskContextCheckId'),
   LandingGroup: idSchema('lgp', 'LandingGroupId'),
   Pattern: idSchema('pat', 'PatternId'),
+  Kind: idSchema('knd', 'KindId'),
   TaskMessage: idSchema('tmg', 'TaskMessageId'),
   TaskFile: idSchema('tfl', 'TaskFileId'),
   Pass: idSchema('pas', 'PassId'),
@@ -106,6 +107,7 @@ const ID_PREFIX = {
   TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
   Pattern: 'pat',
+  Kind: 'knd',
   TaskMessage: 'tmg',
   TaskFile: 'tfl',
   Pass: 'pas',
@@ -221,6 +223,8 @@ export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const PatternId = ID_SCHEMAS.Pattern;
 export type PatternId = IdOf<'Pattern'>;
+export const KindId = ID_SCHEMAS.Kind;
+export type KindId = IdOf<'Kind'>;
 export const TaskMessageId = ID_SCHEMAS.TaskMessage;
 export type TaskMessageId = IdOf<'TaskMessage'>;
 export const TaskFileId = ID_SCHEMAS.TaskFile;
