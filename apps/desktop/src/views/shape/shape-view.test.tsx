@@ -302,7 +302,11 @@ describe('Shape: the conversation', () => {
       await within(conversation).findByText('Move density ahead of the scrollbars.'),
     ).toBeTruthy();
     expect(within(conversation).getByText('Four efforts, I think.')).toBeTruthy();
-    expect(within(conversation).getByText('propose_plan · 1 goal, 3 loose · passed')).toBeTruthy();
+    expect(
+      within(conversation).getByRole('button', {
+        name: 'Used propose_plan: 1 goal, 3 loose · passed',
+      }),
+    ).toBeTruthy();
     const sidebar = screen.getByRole('region', { name: 'Proposed' });
     expect(await within(sidebar).findByText('Heard so far')).toBeTruthy();
     expect(within(sidebar).getByText('Thin scrollbars')).toBeTruthy();

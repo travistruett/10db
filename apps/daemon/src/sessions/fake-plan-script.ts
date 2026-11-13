@@ -8,6 +8,18 @@ const MAX_HEARD_CHARS = 80;
 /** What the project's areas are, when a draft names one it hasn't got: "(it has src, ui)". */
 const AREAS_OF_THE_PROJECT = /\(it has ([^)]+)\)/;
 
+/** "show a fence" asks for a reply with a code fence and a link, which the UI draws as markdown. */
+const SHOW_A_FENCE = /\bshow a fence\b/i;
+const FENCE_REPLY = [
+  'Here is the client:',
+  '',
+  '```ts',
+  'export const retries: number = 3; // three tries',
+  '```',
+  '',
+  'See [docs](https://example.com/docs).',
+].join('\n');
+
 /** "see the board", "see the task tsk_…", each with an optional "at 900": a look at one of the app's screens. */
 const SEE_SCREEN = /\bsee the (factory|board|inbox|plan|task (\S+))(?: at (\d+))?/i;
 
@@ -62,7 +74,8 @@ function scriptedDraft(area: string, sources: readonly string[]): Record<string,
  * A Shape session that answers like a small, deterministic Claude, for the e2e and for a daemon on the
  * fake adapter: it echoes what it heard with `note_heard` and replies; on a Propose it states a plan
  * (one goal with two tasks, two loose tasks, one decision) through `propose_plan`, in the project's
- * first area, learning the area from the refusal when the draft's first guess is wrong.
+ * first area, learning the area from the refusal when the draft's first guess is wrong. Asked to
+ * "show a fence", it answers with a code fence and a link, for the window's CSP e2e row.
  */
 export function scriptedShapeBehaviour(): FakeShapeBehaviour {
   /** The builder's message ids each conversation has seen, as a proposal may cite them. */
@@ -127,6 +140,7 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
             : `I saw the ${screen}: ${String(answer.images)} picture.`,
         };
       }
+      if (SHOW_A_FENCE.test(text)) return { text: FENCE_REPLY };
       const items = text
         .split(/[\n.]+/)
         .map((s) => s.trim())
