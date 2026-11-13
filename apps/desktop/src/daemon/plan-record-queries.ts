@@ -3,10 +3,12 @@ import {
   PlanExportResult,
   PlanRecordDto,
   PlanRecordPage,
+  TaskPlanContextDto,
   type PlanRecordList,
   type PlanRecordPageSize,
   type PlanRecordQuery,
   type ShapeId,
+  type TaskId,
 } from '@10db/contracts';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { useRenderMode } from '../screens/render-context';
@@ -14,7 +16,8 @@ import { readJson } from './client';
 import { useDaemon } from './provider';
 
 // A Plan's record. Every key is under `shapeKeys.all` (`['shapes']`), so `plan.record_changed`, whose
-// entity is the Plan, refetches it.
+// entity is the Plan, refetches it; a task's Plan context is under `['tasks']`, so its task's
+// `plan.anchor_checked` and its lane's events refetch it.
 
 export const planRecordKeys = {
   record: (shapeId: ShapeId) => ['shapes', 'record', shapeId] as const,
@@ -22,6 +25,7 @@ export const planRecordKeys = {
     ['shapes', 'record', shapeId, 'revision', key, number] as const,
   page: (shapeId: ShapeId, list: PlanRecordList, filters: PlanRecordFilters) =>
     ['shapes', 'record', shapeId, 'page', list, filters] as const,
+  taskContext: (taskId: TaskId) => ['tasks', 'plan-context', taskId] as const,
 } as const;
 
 /** What a list is narrowed by and which page of it is shown; the daemon applies all of it. */
@@ -113,5 +117,20 @@ export function useExportPlan(shapeId: ShapeId) {
         await client.shapes[':shapeId'].export.$post({ param: { shapeId }, json: { dir } }),
         PlanExportResult,
       ),
+  });
+}
+
+/** The section a task is pinned to, the Plan block its lane got, and its anchor checks. */
+export function useTaskPlanContext(taskId: TaskId) {
+  const { client } = useDaemon();
+  const frame = useRenderMode() !== null;
+  return useQuery({
+    queryKey: planRecordKeys.taskContext(taskId),
+    queryFn: async () =>
+      readJson(
+        await client.tasks[':taskId']['plan-context'].$get({ param: { taskId } }),
+        TaskPlanContextDto,
+      ),
+    enabled: !frame,
   });
 }

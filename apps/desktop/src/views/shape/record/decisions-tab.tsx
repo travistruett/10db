@@ -41,6 +41,7 @@ function DecisionDrawer({
       position="right"
       size="min(560px, 50vw)"
       title={decision?.question}
+      closeButtonProps={{ 'aria-label': 'Close' }}
     >
       {decision === null ? null : (
         <Stack gap="md">

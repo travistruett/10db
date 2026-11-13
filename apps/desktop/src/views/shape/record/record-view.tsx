@@ -2,7 +2,6 @@ import type { PlanRecordDto, ShapeId } from '@10db/contracts';
 import {
   Alert,
   Badge,
-  Box,
   Button,
   Group,
   Loader,
@@ -123,8 +122,20 @@ function RecordTabs({
         ))}
       </Tabs.List>
       {RECORD_TABS.map((t) => (
-        <Tabs.Panel key={t.tab} value={t.tab} pt="md" style={{ flex: 1, minHeight: 0 }}>
-          <Box h="100%">{panelOf(t.tab, { shapeId, record, search, onSearch })}</Box>
+        <Tabs.Panel
+          key={t.tab}
+          value={t.tab}
+          pt="md"
+          // Documents scrolls its outline and its body apart; a table tab scrolls as a whole.
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: t.tab === RecordTab.Documents ? 'hidden' : 'auto',
+          }}
+        >
+          {panelOf(t.tab, { shapeId, record, search, onSearch })}
         </Tabs.Panel>
       ))}
     </Tabs>
@@ -144,7 +155,14 @@ export function RecordView({
   const navigate = useNavigate();
   const tab = search.tab ?? RecordTab.Documents;
   return (
-    <Stack component="section" aria-label="Record" gap="sm" h="100%" mih={0} p="md">
+    <Stack
+      component="section"
+      aria-label="Record"
+      gap="sm"
+      p="md"
+      // A flex item of the shell's main column, as Plan's split pane is, so its height is the window's.
+      style={{ flex: '1 1 0px', minHeight: 420 }}
+    >
       <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
         <Stack gap={2} miw={0}>
           <Group gap="sm" wrap="nowrap" miw={0}>

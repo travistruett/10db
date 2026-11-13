@@ -113,6 +113,10 @@ export function baseHandlers(
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    // A task's drawer asks what its lane got of a Plan; a task filed by hand has none.
+    http.get(daemonUrl('/tasks/:taskId/plan-context', base), () =>
+      HttpResponse.json({ context: null, packed: null, checks: [] }),
+    ),
     // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
     http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>
       HttpResponse.json(

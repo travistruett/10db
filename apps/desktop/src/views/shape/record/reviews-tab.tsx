@@ -136,7 +136,12 @@ export function ReviewsTab({
       render: finding((row) => (
         <Group gap={6} wrap="nowrap">
           {row.severity === null ? null : (
-            <Badge size="sm" variant="light" color={SEVERITY_COLORS[row.severity]}>
+            <Badge
+              size="sm"
+              variant="light"
+              color={SEVERITY_COLORS[row.severity]}
+              style={{ flex: 'none' }}
+            >
               {row.severity}
             </Badge>
           )}

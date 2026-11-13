@@ -68,7 +68,29 @@ function Body({
   const body = revision.data?.body;
   useEffect(() => {
     if (section === undefined || body === undefined) return;
-    pieces.current.get(section)?.scrollIntoView({ block: 'start' });
+    // The pieces draw over a few frames, which moves the section down; it is scrolled to again each
+    // time it moves, until it has stayed put for a few frames.
+    let last = Number.NaN;
+    let still = 0;
+    let frames = 0;
+    let id = 0;
+    const settle = (): void => {
+      const piece = pieces.current.get(section);
+      if (piece) {
+        const top = piece.offsetTop;
+        if (top !== last) {
+          piece.scrollIntoView({ block: 'start' });
+          last = top;
+          still = 0;
+        } else still += 1;
+      }
+      frames += 1;
+      if (still < 3 && frames < 60) id = requestAnimationFrame(settle);
+    };
+    settle();
+    return () => {
+      cancelAnimationFrame(id);
+    };
   }, [section, body]);
   if (revision.isError)
     return (
@@ -121,58 +143,70 @@ export function DocumentsTab({
     onSearch({ tab: RecordTab.Documents, ...next });
   };
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap" h="100%" mih={0}>
-      <Stack gap="sm" w={280} style={{ flex: 'none' }}>
-        <Box component="nav" aria-label="Documents">
-          {record.documents.map((d) => (
-            <NavLink
-              key={d.key}
-              component="button"
-              label={d.title}
-              description={KIND_LABELS[d.kind]}
-              active={d.key === doc.key}
-              onClick={() => {
-                open({ doc: d.key });
-              }}
-            />
-          ))}
-        </Box>
-        {revision === undefined ? null : (
-          <Select
-            label="Revision"
-            size="sm"
-            allowDeselect={false}
-            checkIconPosition="right"
-            data={doc.revisions.map((r) => ({ value: String(r.number), label: revisionLabel(r) }))}
-            value={String(revision.number)}
-            onChange={(value) => {
-              if (value !== null) open({ doc: doc.key, rev: Number(value) });
-            }}
-          />
-        )}
-        {revision === undefined || revision.sections.length === 0 ? null : (
-          <Box component="nav" aria-label="Outline">
-            <Text size="xs" c="dimmed" mb={4}>
-              Outline
-            </Text>
-            {revision.sections.map((s) => (
+    <Group align="stretch" gap="lg" wrap="nowrap" style={{ flex: 1, minHeight: 0 }}>
+      {/* The list and the outline scroll on their own, so a long outline never pushes the body away. */}
+      <ScrollArea w={280} type="auto" offsetScrollbars style={{ flex: 'none', height: '100%' }}>
+        <Stack gap="sm">
+          <Box component="nav" aria-label="Documents">
+            {record.documents.map((d) => (
               <NavLink
-                key={s.slug}
+                key={d.key}
                 component="button"
-                label={s.title}
-                py={4}
-                style={{ paddingLeft: 8 + (s.level - 1) * 14 }}
-                active={s.slug === search.section}
-                aria-current={s.slug === search.section ? 'location' : undefined}
+                label={d.title}
+                description={KIND_LABELS[d.kind]}
+                active={d.key === doc.key}
                 onClick={() => {
-                  open({ doc: doc.key, rev: revision.number, section: s.slug });
+                  open({ doc: d.key });
                 }}
               />
             ))}
           </Box>
-        )}
-      </Stack>
-      <ScrollArea style={{ flex: 1 }} h="100%" type="auto" offsetScrollbars>
+          {revision === undefined ? null : (
+            <Select
+              label="Revision"
+              size="sm"
+              allowDeselect={false}
+              checkIconPosition="right"
+              data={doc.revisions.map((r) => ({
+                value: String(r.number),
+                label: revisionLabel(r),
+              }))}
+              value={String(revision.number)}
+              onChange={(value) => {
+                if (value !== null) open({ doc: doc.key, rev: Number(value) });
+              }}
+            />
+          )}
+          {revision === undefined || revision.sections.length === 0 ? null : (
+            <Box component="nav" aria-label="Outline">
+              <Text size="xs" c="dimmed" mb={4}>
+                Outline
+              </Text>
+              {revision.sections.map((s) => (
+                <NavLink
+                  key={s.slug}
+                  component="button"
+                  label={s.title}
+                  py={4}
+                  style={{ paddingLeft: 8 + (s.level - 1) * 14 }}
+                  active={s.slug === search.section}
+                  aria-current={s.slug === search.section ? 'location' : undefined}
+                  onClick={() => {
+                    open({ doc: doc.key, rev: revision.number, section: s.slug });
+                  }}
+                />
+              ))}
+            </Box>
+          )}
+        </Stack>
+      </ScrollArea>
+      <ScrollArea
+        type="auto"
+        offsetScrollbars
+        style={{ flex: 1, height: '100%' }}
+        // The body scrolls on its own, so the keyboard can reach and scroll it.
+        viewportProps={{ tabIndex: 0, role: 'region', 'aria-label': doc.title }}
+      >
         {revision === undefined ? (
           <Text size="sm" c="dimmed">
             This document has no revision yet.

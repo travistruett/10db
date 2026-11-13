@@ -4,9 +4,10 @@ import {
   type ShapeId,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
 import { IconBooks, IconPlus } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
+import dayjs from 'dayjs';
 import { useEffect, useRef } from 'react';
 import { usePlanRecord } from '../../daemon/plan-record-queries';
 import {
@@ -135,7 +136,14 @@ export function ConversationPane({
   const working =
     (answering || send.isPending || propose.isPending) && !hasCards && !stop.isPending;
   const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
-  const canPropose = shapeId !== null && heardBuilder;
+  // An imported Plan changes only by a re-import: a proposal round would replace what was imported, and
+  // the daemon refuses one, so Propose is neither shown nor reached by ⌘⇧↩.
+  const importedAt = view?.shape.importedAt ?? null;
+  const imported =
+    importedAt === null
+      ? undefined
+      : `Imported ${dayjs(importedAt).format('D MMM YYYY')}. Re-import to change its plan.`;
+  const canPropose = shapeId !== null && heardBuilder && importedAt === null;
 
   const doPropose = (): void => {
     if (canPropose && !(view?.turn.proposing ?? false)) {
@@ -213,16 +221,19 @@ export function ConversationPane({
           <Group gap="xs" wrap="nowrap" align="flex-start">
             {view === undefined ? null : <ModelPicker view={view} />}
             {hasRecord ? (
-              <Button
-                variant="default"
-                size="xs"
-                leftSection={<IconBooks size={14} stroke={1.5} />}
-                onClick={() => {
-                  void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
-                }}
-              >
-                Record
-              </Button>
+              // An icon, so the header still fits beside the Proposed pane at its narrowest.
+              <Tooltip label="Record" withArrow>
+                <ActionIcon
+                  variant="default"
+                  size={30}
+                  aria-label="Record"
+                  onClick={() => {
+                    void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
+                  }}
+                >
+                  <IconBooks size={16} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
             ) : null}
             <Button
               component={Link}
@@ -257,6 +268,7 @@ export function ConversationPane({
         error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         late={late}
+        {...(imported === undefined ? {} : { imported })}
         onDraft={(text) => {
           typed.current = text;
         }}

@@ -351,6 +351,27 @@ describe('Shape: the conversation', () => {
     expect(await screen.findByRole('tab', { name: /Documents/ })).toBeTruthy();
   });
 
+  it('an imported Plan hides Propose and says why', async () => {
+    const view = proposed([looseTaskProposal('density')], { round: 1 });
+    const imported = { ...view, shape: { ...view.shape, importedAt: '2026-11-12T08:00:00.000Z' } };
+    const proposes: string[] = [];
+    serve(
+      ...conversations(imported),
+      http.post(daemonUrl('/shapes/:shapeId/propose'), ({ params }) => {
+        proposes.push(String(params['shapeId']));
+        return HttpResponse.json({ status: 'started' }, { status: 202 });
+      }),
+    );
+    open(imported);
+    expect(
+      await screen.findByText('Imported 12 Nov 2026. Re-import to change its plan.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Propose/ })).toBeNull();
+    fireEvent.keyDown(document, { key: 'Enter', metaKey: true, shiftKey: true });
+    await act(() => Promise.resolve());
+    expect(proposes).toEqual([]);
+  });
+
   it('presses Propose, and reads Propose Again once a round has passed', async () => {
     const view = proposed([looseTaskProposal('density')], { round: 1 });
     const proposes: string[] = [];

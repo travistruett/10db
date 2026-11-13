@@ -26,6 +26,11 @@ export function checkStatus(check: AnchorCheckDto | undefined, anchor: PlanAncho
       detail: null,
     };
   if (check === undefined) return { label: 'Not checked', color: 'gray', detail: null };
+  return resultStatus(check);
+}
+
+/** What one check found, in words, without its anchor: a page's check says it was not fetched. */
+export function resultStatus(check: AnchorCheckDto): AnchorStatus {
   const at = check.checkedCommit === null ? '' : ` at ${check.checkedCommit.slice(0, 8)}`;
   switch (check.result) {
     case AnchorResult.Current:
@@ -41,7 +46,7 @@ export function checkStatus(check: AnchorCheckDto | undefined, anchor: PlanAncho
     case AnchorResult.Unchecked:
       return { label: 'Not checked', color: 'gray', detail: check.note };
     case AnchorResult.Url:
-      return { label: 'Not checked', color: 'gray', detail: null };
+      return { label: 'Page, not fetched', color: 'gray', detail: null };
   }
 }
 

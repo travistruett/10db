@@ -35,6 +35,11 @@ export interface ComposerProps {
   readonly onLateTaken: () => void;
   /** Told what the input holds each time it changes, so a screen replacing it can carry the text. */
   readonly onDraft: (text: string) => void;
+  /**
+   * An imported Plan's line, "Imported 12 Nov 2026. Re-import to change its plan."; with it, Propose
+   * is not offered, since a proposal round would replace what was imported.
+   */
+  readonly imported?: string;
 }
 
 const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
@@ -209,11 +214,12 @@ export function Composer(props: ComposerProps) {
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Stack gap={2}>
           <Text id="shape-composer-hint" size="xs" c="dimmed">
-            {firstRun
-              ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
-              : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops'}
+            {props.imported ??
+              (firstRun
+                ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
+                : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops')}
           </Text>
-          {nothingDecided ? (
+          {nothingDecided && props.imported === undefined ? (
             <Text id="shape-composer-propose-hint" size="xs" c="dimmed">
               Propose turns decided work into tasks. Nothing is decided yet.
             </Text>
@@ -245,14 +251,16 @@ export function Composer(props: ComposerProps) {
           >
             Send
           </Button>
-          <Button
-            loading={proposing}
-            disabled={!canPropose}
-            aria-describedby={nothingDecided ? 'shape-composer-propose-hint' : undefined}
-            onClick={props.onPropose}
-          >
-            {proposeLabel}
-          </Button>
+          {props.imported === undefined ? (
+            <Button
+              loading={proposing}
+              disabled={!canPropose}
+              aria-describedby={nothingDecided ? 'shape-composer-propose-hint' : undefined}
+              onClick={props.onPropose}
+            >
+              {proposeLabel}
+            </Button>
+          ) : null}
         </Group>
       </Group>
     </Stack>

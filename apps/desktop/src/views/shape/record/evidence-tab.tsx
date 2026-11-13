@@ -110,21 +110,35 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
           }}
         />
       ),
-      render: (e) => (
-        <Stack gap={2}>
-          <Text size="sm">
-            {e.title}
-            {e.state === 'superseded' ? (
-              <Text span size="xs" c="dimmed">
-                {' · superseded'}
+      render: (e) => {
+        const intent =
+          e.kind === PlanEntryKind.Intent ? PlanEntryBody.intent.safeParse(e.body) : null;
+        // The builder's words are the row: a title made from them would only say them twice.
+        if (intent?.success)
+          return (
+            <Stack gap={2}>
+              <Text size="sm" lineClamp={4} style={{ whiteSpace: 'pre-wrap' }}>
+                {intent.data.quote}
               </Text>
-            ) : null}
-          </Text>
-          <Text size="xs" c="dimmed" lineClamp={3} style={{ whiteSpace: 'pre-wrap' }}>
-            {entryLine(e)}
-          </Text>
-        </Stack>
-      ),
+              <Text size="xs" c="dimmed">{`${intent.data.speaker} · ${intent.data.saidAt}`}</Text>
+            </Stack>
+          );
+        return (
+          <Stack gap={2}>
+            <Text size="sm">
+              {e.title}
+              {e.state === 'superseded' ? (
+                <Text span size="xs" c="dimmed">
+                  {' · superseded'}
+                </Text>
+              ) : null}
+            </Text>
+            <Text size="xs" c="dimmed" lineClamp={3} style={{ whiteSpace: 'pre-wrap' }}>
+              {entryLine(e)}
+            </Text>
+          </Stack>
+        );
+      },
     },
     {
       accessor: 'anchors',
