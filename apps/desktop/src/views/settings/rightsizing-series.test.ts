@@ -106,7 +106,7 @@ describe('rightsizingSeries need lines', () => {
   it('draws a line per distinct need, merging roles that share one', () => {
     expect(build().lines.map((l) => [l.label, l.need])).toEqual([
       ['Plan 45', 45],
-      ['Plan review, Review 48', 48],
+      ['Plan Review, Review 48', 48],
       ['Build 40', 40],
       ['QA 35', 35],
     ]);

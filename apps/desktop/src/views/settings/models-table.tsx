@@ -12,7 +12,6 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
-import { PICK_COLOR } from './role-picks-panel';
 
 const isModelColumn = (value: unknown): value is ModelColumn =>
   Object.values(ModelColumn).some((c) => c === value);
@@ -161,13 +160,7 @@ export function ModelsTable({
       title: 'Used by',
       noWrap: true,
       render: (row) => (
-        <Text
-          size="xs"
-          c={PICK_COLOR}
-          truncate
-          maw={180}
-          title={(usedBy.get(row.model) ?? []).join(', ')}
-        >
+        <Text size="xs" truncate maw={180} title={(usedBy.get(row.model) ?? []).join(', ')}>
           {(usedBy.get(row.model) ?? []).join(', ')}
         </Text>
       ),

@@ -249,7 +249,8 @@ describe('the Models page', () => {
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
     expect(row.getByText('Capable')).toBeTruthy();
-    expect(row.getByText('Plan, Build')).toBeTruthy();
+    // Used by is plain text: violet marks a pick on the chart and in the roles table only.
+    expect(row.getByText('Plan, Build').getAttribute('style') ?? '').not.toContain('violet');
     for (const cell of ['60', '$2.50', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }

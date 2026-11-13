@@ -56,7 +56,7 @@ const isDotsMode = (value: string): value is DotsMode =>
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
 /**
- * Settings › Models and benchmarks: who each role gets on one account, then Intelligence against cost per task,
+ * Settings › Models: who each role gets on one account, then Intelligence against cost per task,
  * then every model the account runs. A model's detail is in the drawer.
  */
 export function ModelsSection() {
@@ -86,7 +86,7 @@ export function ModelsSection() {
   const header = (
     <Stack gap={4}>
       <Group justify="space-between" align="center" wrap="nowrap">
-        <Title order={3}>Models and scores</Title>
+        <Title order={3}>Models</Title>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
             <Text size="xs" c="red" role="alert">
@@ -120,7 +120,7 @@ export function ModelsSection() {
           >
             <ActionIcon
               variant="default"
-              size="lg"
+              size="input-xs"
               aria-label="Refresh Models"
               loading={refresh.isPending}
               onClick={() => {
