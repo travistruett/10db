@@ -79,7 +79,12 @@ import {
   resumeModelMarks,
   type Catalogue,
 } from '../catalogue';
-import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import {
+  createDecisionModelList,
+  createJudge,
+  JUDGE_LOG_RETENTION_MS,
+  type JudgeService,
+} from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
@@ -648,10 +653,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
+  const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
   const judge = createJudge({
     state,
     clock,
     fetch: opts.fetch ?? fetch,
+    decisionModelIds: () => decisionModels.ids(),
     readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
@@ -1886,6 +1893,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       keychain: judgeKeychain,
       judge,
+      models: decisionModels,
       off: opts.judgeOff === true,
     }),
     stakeholders: createStakeholderApiServices({

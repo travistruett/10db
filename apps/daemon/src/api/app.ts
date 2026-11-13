@@ -1311,6 +1311,7 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
       async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
+    .get('/judge/models', async (c) => c.json(await deps.services.listDecisionModels()))
     .get(
       '/judge/calls',
       validator('query', (query) => JudgeCallsQuery.parse(query)),

@@ -2159,6 +2159,12 @@ describe('judge routes', () => {
       service: 'testAccount',
     },
     { route: 'GET /judge/calls', method: 'GET', path: '/judge/calls', service: 'listJudgeCalls' },
+    {
+      route: 'GET /judge/models',
+      method: 'GET',
+      path: '/judge/models',
+      service: 'listDecisionModels',
+    },
   ])('$route reaches $service behind the token', async ({ method, path, body, service }) => {
     const init = { ...json, method, ...(body ? { body: JSON.stringify(body) } : {}) };
     expect((await app().request(path, { method })).status).toBe(401);

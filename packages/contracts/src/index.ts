@@ -8,6 +8,7 @@ export * from './board';
 export * from './card-resolution';
 export * from './catalogue';
 export * from './command-runners';
+export * from './decision-models';
 export * from './entities';
 export * from './errors';
 export * from './events';
