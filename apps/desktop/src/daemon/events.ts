@@ -1,10 +1,17 @@
-import { AccountLoginEndedData, DaemonEvent, EventsHead, EventType } from '@10db/contracts';
+import {
+  AccountLoginEndedData,
+  DaemonEvent,
+  EventsHead,
+  EventType,
+  GithubLoginEndedData,
+} from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
@@ -61,6 +68,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   pass: [passKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
+  // gh's login changed under a Sign In; the status and the setup check's gh row read it.
+  github: [githubKeys.status, queryKeys.system],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
@@ -158,6 +167,10 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         const ended = AccountLoginEndedData.safeParse(event.data);
         if (ended.success)
           queryClient.setQueryData(accountLoginKey(ended.data.accountId), ended.data);
+      }
+      if (event.type === EventType.GithubLoginEnded) {
+        const ended = GithubLoginEndedData.safeParse(event.data);
+        if (ended.success) queryClient.setQueryData(githubKeys.loginEnd, ended.data);
       }
       // One arrives per tool call: a pass lane's is written into its page, never refetched.
       if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
