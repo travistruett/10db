@@ -69,6 +69,7 @@ import {
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import { GithubSigninDto, GithubStatusDto } from './github';
 import {
   JudgeCallDto,
   JudgeConfigPatch,
@@ -292,6 +293,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'github-signin-dto': GithubSigninDto,
+  'github-status-dto': GithubStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-key-input': JudgeKeyInput,
