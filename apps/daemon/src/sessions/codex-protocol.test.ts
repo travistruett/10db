@@ -14,6 +14,8 @@ import type { ItemCompletedNotification } from './codex-generated/ts/v2/ItemComp
 import type { ItemStartedNotification } from './codex-generated/ts/v2/ItemStartedNotification';
 import type { ModelListResponse as GeneratedModelListResponse } from './codex-generated/ts/v2/ModelListResponse';
 import type { ReasoningSummaryTextDeltaNotification } from './codex-generated/ts/v2/ReasoningSummaryTextDeltaNotification';
+import type { ReviewStartResponse } from './codex-generated/ts/v2/ReviewStartResponse';
+import type { ThreadCompactStartResponse } from './codex-generated/ts/v2/ThreadCompactStartResponse';
 import type { ThreadResumeResponse } from './codex-generated/ts/v2/ThreadResumeResponse';
 import type { ThreadStartResponse } from './codex-generated/ts/v2/ThreadStartResponse';
 import type { ThreadTokenUsageUpdatedNotification } from './codex-generated/ts/v2/ThreadTokenUsageUpdatedNotification';
@@ -26,6 +28,7 @@ import {
   AccountReadResponse,
   AgentMessageDelta,
   CommandOutputDelta,
+  CompactStarted,
   ConfigReadResponse,
   HooksListResponse,
   InitializeResponse,
@@ -36,6 +39,7 @@ import {
   RateLimitsReadResponse,
   RateLimitsUpdated,
   ReasoningSummaryDelta,
+  ReviewStarted,
   ThreadResponse,
   ThreadTurnsPage,
   TokenUsageUpdated,
@@ -86,6 +90,8 @@ expectTypeOf<Wire<CommandExecutionOutputDeltaNotification>>().toExtend<
   z.input<typeof CommandOutputDelta>
 >();
 expectTypeOf<Wire<TurnPlanUpdatedNotification>>().toExtend<z.input<typeof TurnPlanUpdated>>();
+expectTypeOf<Wire<ReviewStartResponse>>().toExtend<z.input<typeof ReviewStarted>>();
+expectTypeOf<Wire<ThreadCompactStartResponse>>().toExtend<z.input<typeof CompactStarted>>();
 
 const GENERATED = join(import.meta.dirname, 'codex-generated');
 
@@ -111,6 +117,8 @@ const ROWS: readonly { readonly type: string; readonly runtime: z.ZodType }[] = 
   { type: 'ReasoningSummaryTextDeltaNotification', runtime: ReasoningSummaryDelta },
   { type: 'CommandExecutionOutputDeltaNotification', runtime: CommandOutputDelta },
   { type: 'TurnPlanUpdatedNotification', runtime: TurnPlanUpdated },
+  { type: 'ReviewStartResponse', runtime: ReviewStarted },
+  { type: 'ThreadCompactStartResponse', runtime: CompactStarted },
 ];
 
 /**

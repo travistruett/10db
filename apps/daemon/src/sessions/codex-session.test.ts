@@ -25,6 +25,7 @@ import {
   USAGE_READ_TRIES,
   type CodexSessionDeps,
 } from './codex-session';
+import { CODEX_COMMANDS } from './codex-commands';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
 import type { LaneSessionSpec, SessionEvent, SessionHandle, ShapeImage } from './types';
@@ -1752,7 +1753,7 @@ describe('the end of a session', () => {
       'turn/start': { error: { code: -32000, message: 'the turn could not begin' } },
     });
     const events = await collect(handle);
-    expect(events.map((e) => e.type)).toEqual(['started', 'ended']);
+    expect(events.map((e) => e.type)).toEqual(['started', 'commands', 'ended']);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
     expect(JSON.stringify(events.at(-1))).not.toContain('No prompt was sent');
   });
@@ -2170,5 +2171,122 @@ describe('the guard socket', () => {
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'sandbox_refused' });
     // The socket opens before the process starts, so there is no process to send anything to.
     expect(methods(server)).toEqual([]);
+  });
+});
+
+/** The second `turn/start` the session sent. */
+const server2nd = (server: FakeAppServer): unknown =>
+  server.sent().filter((r) => r.method === 'turn/start')[1]?.params;
+
+describe('the commands', () => {
+  const C1 = 'c0ffee00-0000-4000-8000-0000000000d1';
+  const C2 = 'c0ffee00-0000-4000-8000-0000000000d2';
+  const C3 = 'c0ffee00-0000-4000-8000-0000000000d3';
+
+  it('lists its commands once the session has started', async () => {
+    const running = await inTurn();
+    const started = types(running.seen).indexOf('started');
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(running.seen.slice(started + 1)).toContainEqual({
+      type: 'commands',
+      commands: CODEX_COMMANDS,
+    });
+  });
+
+  const commandScript = {
+    'thread/compact/start': {},
+    'review/start': { turn: { id: 'turn-2', status: 'inProgress' }, reviewThreadId: THREAD },
+  };
+
+  const endTurn = async (running: Running, id = 'turn-1') => {
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id, status: 'completed' },
+    });
+    await settled(running);
+  };
+
+  it('sends /compact between turns as its call, no turn, and reports it consumed', async () => {
+    const running = await inTurn(commandScript);
+    await endTurn(running);
+    running.handle.send('/compact', [], C1);
+    await vi.waitFor(() => {
+      expect(running.seen).toContainEqual({ type: 'consumed', uuids: [C1] });
+    });
+    expect(methods(running.server).filter((m) => m === 'thread/compact/start')).toHaveLength(1);
+    expect(sentParams(running.server, 'thread/compact/start')).toEqual({ threadId: THREAD });
+    expect(methods(running.server).filter((m) => m === 'turn/start')).toHaveLength(1);
+  });
+
+  it('holds /review during a turn, never steering, and sends it once the turn ends, before what follows', async () => {
+    const running = await inTurn(commandScript);
+    running.handle.send('/review focus', [], C2);
+    running.handle.send('and then this');
+    await settled(running);
+    expect(methods(running.server)).not.toContain('turn/steer');
+    expect(methods(running.server)).not.toContain('review/start');
+    await endTurn(running);
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('review/start');
+    });
+    expect(sentParams(running.server, 'review/start')).toEqual({
+      threadId: THREAD,
+      target: { type: 'custom', instructions: 'focus' },
+      delivery: 'inline',
+    });
+    await vi.waitFor(() => {
+      expect(running.seen).toContainEqual({ type: 'consumed', uuids: [C2] });
+    });
+    // The review's turn is the active one, so the next message steers it, after the review request.
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/steer');
+    });
+    const order = methods(running.server);
+    expect(order.indexOf('review/start')).toBeLessThan(order.indexOf('turn/steer'));
+    expect(sentParams(running.server, 'turn/steer')).toMatchObject({ expectedTurnId: 'turn-2' });
+  });
+
+  it('names a held command in an interrupt’s receipt, and sends it once, after the turn ends', async () => {
+    const running = await inTurn(commandScript);
+    running.handle.send('/review', [], C2);
+    await settled(running);
+    const receipt = running.handle.interrupt();
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/interrupt');
+    });
+    await endTurn(running);
+    expect(await receipt).toEqual({ stillQueued: [C2] });
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('review/start');
+    });
+    await settled(running);
+    expect(methods(running.server).filter((m) => m === 'review/start')).toHaveLength(1);
+  });
+
+  it('sends /model to Codex as an ordinary message', async () => {
+    const running = await inTurn(commandScript);
+    await endTurn(running);
+    running.handle.send('/model', [], C3);
+    await vi.waitFor(() => {
+      expect(methods(running.server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    expect(server2nd(running.server)).toMatchObject({
+      clientUserMessageId: C3,
+      input: [{ type: 'text', text: '/model' }],
+    });
+    expect(methods(running.server)).not.toContain('thread/compact/start');
+  });
+
+  it('logs a refused command and still reports it consumed', async () => {
+    const running = await inTurn({
+      ...commandScript,
+      'thread/compact/start': { error: { code: -32600, message: 'nothing to compact' } },
+    });
+    await endTurn(running);
+    running.handle.send('/compact', [], C1);
+    await vi.waitFor(() => {
+      expect(running.seen).toContainEqual({ type: 'consumed', uuids: [C1] });
+    });
+    expect(endedOf(running.seen)).toEqual([]);
   });
 });

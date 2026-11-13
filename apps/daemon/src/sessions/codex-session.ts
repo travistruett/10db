@@ -24,6 +24,7 @@ import {
   mapCodexNotification,
   rateLimitEvents,
 } from './codex-mapping';
+import { CODEX_COMMANDS, codexCommandOf, type CodexCommandCall } from './codex-commands';
 import {
   ConfigReadResponse,
   HooksListResponse,
@@ -34,6 +35,8 @@ import {
   TurnCompleted,
   TurnStarted,
   TurnStartResponse,
+  CompactStarted,
+  ReviewStarted,
 } from './codex-protocol';
 import {
   CLIENT_ERROR_CODE,
@@ -120,6 +123,8 @@ interface Outgoing {
   readonly text: string;
   readonly images: readonly ShapeImage[];
   readonly uuid: string | undefined;
+  /** The app-server call a slash command is; null for a message to the model. */
+  readonly command: CodexCommandCall | null;
 }
 
 /** The `clientUserMessageId` a message goes under, when it has one. */
@@ -226,6 +231,8 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
   let interrupting: Promise<void> = Promise.resolve();
   /** What each turn an interrupt waits on resolves when its `turn/completed` is read. */
   const turnEnds = new Map<string, () => void>();
+  /** Commands waiting for no turn to run. */
+  const idleWaiters: (() => void)[] = [];
   /**
    * The client uuids handed to each turn and not yet taken, by turn id: what a turn that ends first
    * dropped. A message started with waits under `starting` until its turn is named.
@@ -644,6 +651,8 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
           if (started) events.push(dropped.length > 0 ? { ...event, dropped } : event);
         } else if (started) events.push(event);
       }
+      // A command held for the turn to end goes now.
+      if (state.turnId === null) for (const wake of idleWaiters.splice(0)) wake();
     } catch (error) {
       log.error(
         { method: n.method, errName: error instanceof Error ? error.name : 'unknown' },
@@ -652,12 +661,81 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
     }
   }
 
+  /** Resolves once no turn runs and none is starting, or the session is ending. */
+  const untilIdle = async (): Promise<void> => {
+    for (;;) {
+      if (done || closing) return;
+      if (startInFlight !== null) {
+        await startInFlight;
+        continue;
+      }
+      if (state.turnId === null) return;
+      await Promise.race([
+        new Promise<void>((resolve) => idleWaiters.push(resolve)),
+        over.catch(() => undefined),
+      ]);
+    }
+  };
+
+  /**
+   * Sends a slash command as its own call once no turn runs: a command never steers (call 16).
+   * Accepted or refused, the message it came in is reported consumed; a refusal is not retried.
+   */
+  const runCommand = async (message: Outgoing, command: CodexCommandCall): Promise<void> => {
+    await untilIdle();
+    waiting.delete(message);
+    if (done || closing || threadId === null) return;
+    try {
+      switch (command.method) {
+        case 'thread/compact/start':
+          await ask(command.method, { threadId }, CompactStarted);
+          break;
+        case 'review/start': {
+          const before = turnsCompleted;
+          const reply = await ask(
+            command.method,
+            { threadId, target: command.target, delivery: 'inline' },
+            ReviewStarted,
+          );
+          // The review runs as a turn, which is the active one until it completes.
+          if (
+            state.turnId === null &&
+            turnsCompleted === before &&
+            reply.turn.status === 'inProgress'
+          )
+            state.turnId = reply.turn.id;
+          break;
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof CodexRpcError) || error.code === CLIENT_ERROR_CODE) throw error;
+      log.warn({ method: command.method }, 'codex refused a command');
+    }
+    if (message.uuid !== undefined) {
+      taken.add(message.uuid);
+      events.push({ type: 'consumed', uuids: [message.uuid] });
+    }
+  };
+
   /** Steers the active turn, or starts one between turns; never the turn an interrupt is stopping. */
   const deliver = async (message: Outgoing): Promise<void> => {
     // An interrupt that starts while this one is awaited is waited on too: its receipt names the message.
     for (let awaited = interrupting; ; awaited = interrupting) {
       await awaited;
       if (awaited === interrupting) break;
+    }
+    if (message.command !== null) {
+      try {
+        await runCommand(message, message.command);
+      } catch (error) {
+        if (error instanceof SessionOver) return;
+        log.error(
+          { errName: error instanceof Error ? error.name : 'unknown' },
+          'a command could not be delivered to codex',
+        );
+        finish(SessionEndReason.Error, 'Codex did not accept a command sent to the session.');
+      }
+      return;
     }
     waiting.delete(message);
     if (done || closing || threadId === null) return;
@@ -869,11 +947,13 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
     threadId = thread.thread.id;
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
+    events.push({ type: 'commands', commands: CODEX_COMMANDS });
     try {
       await startTurn(thread.thread.id, {
         text: spec.prompt,
         images: spec.images ?? [],
         uuid: spec.promptUuid,
+        command: null,
       });
     } catch (error) {
       if (isModelRefusal(error))
@@ -912,7 +992,7 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
   return {
     events,
     send: (text, images = [], uuid) => {
-      const message: Outgoing = { text, images, uuid };
+      const message: Outgoing = { text, images, uuid, command: codexCommandOf(text) };
       waiting.add(message);
       // One at a time, so messages reach Codex in the order they were sent.
       sends = sends.then(() => deliver(message));

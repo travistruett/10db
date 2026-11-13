@@ -126,6 +126,12 @@ export const TurnStartResponse = z.looseObject({ turn: Turn });
 
 export const TurnCompleted = z.looseObject({ threadId: z.string(), turn: Turn });
 
+/** `review/start` answers the turn the review runs in. */
+export const ReviewStarted = z.looseObject({ turn: Turn });
+
+/** `thread/compact/start` answers an empty object. */
+export const CompactStarted = z.looseObject({});
+
 const TokenBreakdown = z.looseObject({
   totalTokens: z.number(),
   inputTokens: z.number().optional(),
