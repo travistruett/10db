@@ -17,7 +17,6 @@ export function selenizedShikiTheme(
     fg: variant.fg0,
     bg: variant.bg0,
     colors: { 'editor.background': variant.bg0, 'editor.foreground': variant.fg0 },
-    settings: [],
     tokenColors: [
       {
         scope: ['comment', 'punctuation.definition.comment'],

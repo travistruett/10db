@@ -39,8 +39,12 @@ describe('CodeBlock', () => {
       <CodeBlock code={'const a: number = 1;'} language="ts" />,
     );
     expect(screen.getByText('ts')).toBeTruthy();
+    // Highlighted: its tokens are drawn in more than one color.
     await waitFor(() => {
-      expect(container.querySelector('pre span[style*="color"]')).not.toBeNull();
+      const colors = [...container.querySelectorAll<HTMLElement>('pre span[style]')].map(
+        (span) => span.style.color,
+      );
+      expect(new Set(colors).size).toBeGreaterThan(1);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
     expect(writeText).toHaveBeenCalledWith('const a: number = 1;');
