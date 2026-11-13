@@ -33,7 +33,7 @@ export function PersonAnswers({ person }: { readonly person: PersonDto }) {
   const projects = useProjects().data ?? [];
   const rules = useRoutingRulesOfProjects(projects.map((p) => p.id));
   const { select } = useSelectedProject();
-  if (person.isBuilder) return <Text size="sm">everything else</Text>;
+  if (person.isBuilder) return <Text size="sm">everything not routed</Text>;
   const lines: Line[] = projects.flatMap((project, index) => {
     const mine = (rules[index]?.data ?? []).filter((r) => r.personId === person.id);
     return mine.length === 0 ? [] : [{ project, words: mine.map(scopeWords).join(', ') }];

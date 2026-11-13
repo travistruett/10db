@@ -177,16 +177,20 @@ up. Paste the answers, with the token and ids removed, at the end of
 
 ## 4. In 10db (once built)
 
-1. **Settings › People**: paste the `xoxb-` token in the Slack line and press **Connect**. 10db checks it with
-   Slack and shows "Connected to <workspace> · as @10db".
-2. **Add Person**: pick your stakeholder from the workspace's members. Choose **Review Each** for now: you
-   see every message before it goes. "New questions a day" starts at 10 and can be turned off; it counts only a
-   new question that starts a thread, never the replies or the conversation inside one.
-3. Tell 10db which questions are theirs: on a question card, **Ask Someone…** with "Always send product
+1. **Settings › Integrations**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
+   with Slack, and the card asks you to finish setup: under **Which one is you?**, pick yourself and press
+   **That's Me**, so every message carries your name. The card then reads "<workspace> · posts as @10db ·
+   you're @you".
+2. **Settings › People › Add Person**: find your stakeholder among the workspace's members. Under "Before 10db
+   messages them", keep **Show me each message first** for now: you see every message before it goes. "Up to
+   10 new questions a day" can be set to **No limit**; it counts only a new question that starts a thread,
+   never the replies or the conversation inside one.
+3. Tell 10db which questions are theirs: on a question card, **Ask Someone** with "Always send product
    questions on this goal to them", or **Project Settings › Who Answers**, where you can also add a topic
    ("billing, pricing, invoices") for 10db's judge to match questions against.
-4. Under the people, the timers: a reminder in the thread after 4 hours, and the question back in your Inbox
-   after 8. Both are measured in real time, so one that comes due while your Mac sleeps fires when it wakes.
+4. At the foot of People, under "When someone hasn't answered": a reminder in the thread after 4 hours, and the
+   question back in your Inbox after 8. Both are measured in real time, so one that comes due while your Mac
+   sleeps fires when it wakes.
 
 The first time 10db messages someone, it always shows you the message first.
 
@@ -211,6 +215,6 @@ check like section 3's against such a person.
 
 ## Disconnecting
 
-Removing the token in **Settings › People** stops 10db from sending and reading at once. To revoke it for
+**Disconnect**, in the Slack card's menu in **Settings › Integrations**, stops 10db from sending and reading at once. To revoke it for
 good, open the app at <https://api.slack.com/apps> and press **Uninstall App** under Install App (or delete the
 app): the token stops working everywhere.

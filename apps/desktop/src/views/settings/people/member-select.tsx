@@ -11,9 +11,11 @@ function describe(member: SlackMemberDto): string {
 export function MemberSelect({
   value,
   onPick,
+  label,
 }: {
   readonly value: SlackMemberDto | null;
   readonly onPick: (member: SlackMemberDto | null) => void;
+  readonly label: string;
 }) {
   const [query, setQuery] = useState('');
   const members = useSlackMembers(query, true);
@@ -23,8 +25,8 @@ export function MemberSelect({
     data.push({ value: value.userId, label: describe(value) });
   return (
     <Select
-      label="Slack member"
-      placeholder="Search the workspace"
+      label={label}
+      placeholder="Search by name, title or email"
       searchable
       clearable
       data={data}

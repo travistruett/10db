@@ -24,7 +24,7 @@ import type { DbReader, WriteContext } from './store';
 /** The person running this app: every card nobody else owns goes to them (spec §7). */
 export const BUILDER_HANDLE = 'me';
 
-/** The name the builder has until he sets his own in Settings › People. */
+/** The name the builder has until they pick their Slack member in Settings › Integrations. */
 export const SEED_BUILDER_NAME = 'You';
 
 type PersonaRow = typeof schema.personas.$inferSelect;

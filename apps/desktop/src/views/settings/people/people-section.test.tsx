@@ -1,8 +1,7 @@
 import { mintId, PersonInput, type PersonDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
+import { describe, expect, it } from 'vitest';
 import { pickOption } from '../../../test/combobox';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
 import {
@@ -12,14 +11,12 @@ import {
   slackContact,
   slackMember,
 } from '../../../test/people-fixtures';
-import { SLACK_MANIFEST } from './slack-manifest';
 
-const connectedState = { state: 'connected', teamId: 'T1', teamName: 'Acme', botUserId: 'UBOT' };
+const connected = { state: 'connected', teamId: 'T1', teamName: 'Acme', botUserId: 'UBOT' };
 
 interface Options {
   readonly people?: PersonDto[];
   readonly connection?: Record<string, unknown>;
-  readonly tokenRefusal?: string;
   readonly removeRefusal?: string;
   readonly rules?: unknown[];
 }
@@ -27,8 +24,7 @@ interface Options {
 function serve(options: Options = {}) {
   let people = options.people ?? [BUILDER_PERSON];
   const saved: unknown[] = [];
-  const tokens: string[] = [];
-  let connection = slackConnection(options.connection);
+  const connection = slackConnection(options.connection);
   server.use(
     http.get(daemonUrl('/people'), () => HttpResponse.json(people)),
     http.get(daemonUrl('/projects/:projectId/routing-rules'), () =>
@@ -41,21 +37,6 @@ function serve(options: Options = {}) {
         slackMember({ userId: 'U2', name: 'ana', realName: 'Ana Ortiz', title: 'Design' }),
       ]),
     ),
-    http.put(daemonUrl('/slack/token'), async ({ request }) => {
-      tokens.push(z.object({ token: z.string() }).parse(await request.json()).token);
-      if (options.tokenRefusal !== undefined)
-        return HttpResponse.json(
-          { error: 'invalid', message: options.tokenRefusal },
-          { status: 400 },
-        );
-      connection = slackConnection({
-        state: 'connected',
-        teamId: 'T1',
-        teamName: 'Acme',
-        botUserId: 'UBOT',
-      });
-      return HttpResponse.json(connection);
-    }),
     http.post(daemonUrl('/people'), async ({ request }) => {
       const input = PersonInput.parse(await request.json());
       saved.push(input);
@@ -93,150 +74,56 @@ function serve(options: Options = {}) {
     ...baseHandlers(),
   );
   renderApp('/settings/people');
-  return { saved, tokens };
+  return { saved };
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-describe('Settings › People: the Slack connection', () => {
-  it('not connected shows the three steps, and Copy Manifest copies the manifest', async () => {
-    const writeText = vi.fn(() => Promise.resolve());
-    vi.stubGlobal('navigator', { clipboard: { writeText } });
-    serve();
-    await screen.findByText(/Paste the Bot User OAuth Token/);
-    expect(screen.getByRole('link', { name: /Open Slack Apps/ }).getAttribute('href')).toBe(
-      'https://api.slack.com/apps',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Copy Manifest' }));
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(SLACK_MANIFEST);
-    });
-  });
-
-  it("a refused token shows Slack's reason beside Connect and reads as not connected", async () => {
-    const { tokens } = serve({ tokenRefusal: 'Slack refused the token: invalid_auth' });
-    fireEvent.change(await screen.findByLabelText('Bot User OAuth Token'), {
-      target: { value: 'xoxb-abc' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    expect(await screen.findByText(/Slack refused the token: invalid_auth/)).toBeTruthy();
-    expect(tokens).toEqual(['xoxb-abc']);
-    expect(screen.queryByText(/Connected to/)).toBeNull();
-  });
-
-  it('connected shows the workspace and the bot', async () => {
-    serve({
-      connection: {
-        state: 'connected',
-        teamId: 'T1',
-        teamName: 'Acme',
-        botUserId: 'UBOT',
-        checkedAt: '2026-10-13T12:00:00.000Z',
-      },
-    });
-    expect(await screen.findByText(/Connected to Acme/)).toBeTruthy();
-    expect(screen.queryByLabelText('Bot User OAuth Token')).toBeNull();
-  });
-
-  it('Connect needs nothing but a token while Slack is not connected', async () => {
-    const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
-    serve({ people: [you] });
-    fireEvent.change(await screen.findByLabelText('Bot User OAuth Token'), {
-      target: { value: 'xoxb-abc' },
-    });
-    expect(screen.getByRole('button', { name: 'Connect' })).toHaveProperty('disabled', false);
-  });
-
-  it('connected, with the builder not yet picked, shows "Which one is you?" as unfinished', async () => {
-    const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
-    serve({ people: [you], connection: connectedState });
-    expect(await screen.findByText('Which one is you?')).toBeTruthy();
-    expect(screen.getByRole('button', { name: "That's Me" })).toHaveProperty('disabled', true);
-  });
-
-  it("picking saves the builder's Slack contact and takes the name from the member", async () => {
-    const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
-    const { saved } = serve({ people: [you], connection: connectedState });
-    await screen.findByText('Which one is you?');
-    await pickOption(screen.getByLabelText('Slack member', { selector: 'input' }), /Mark Ellis/);
-    fireEvent.click(screen.getByRole('button', { name: "That's Me" }));
-    await waitFor(() => {
-      expect(saved).toEqual([
-        {
-          handle: 'me',
-          name: 'Mark Ellis',
-          slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
-        },
-      ]);
-    });
-    await waitFor(() => {
-      expect(screen.queryByText('Which one is you?')).toBeNull();
-    });
-  });
-
-  it('is finished once the builder has a Slack contact', async () => {
-    const me = personDto({
-      name: 'Mark Ellis',
-      handle: 'me',
-      isBuilder: true,
-      slack: slackContact('U1'),
-    });
-    serve({ people: [me], connection: connectedState });
-    await screen.findByText(/Connected to Acme/);
-    expect(screen.queryByText('Which one is you?')).toBeNull();
-  });
-
-  it("the builder's row can change the pick later, and still has no Remove", async () => {
-    const me = personDto({
-      name: 'Mark Ellis',
-      handle: 'me',
-      isBuilder: true,
-      slack: slackContact('U1'),
-    });
-    const { saved } = serve({ people: [me], connection: connectedState });
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit Mark Ellis' }));
-    const dialog = await screen.findByRole('dialog');
-    await pickOption(within(dialog).getByLabelText('Slack member'), /Ana Ortiz/);
-    expect(within(dialog).getByLabelText('Name')).toHaveProperty('value', 'Ana Ortiz');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
-    await waitFor(() => {
-      expect(saved).toEqual([
-        {
-          handle: 'me',
-          name: 'Ana Ortiz',
-          slack: { teamId: 'T1', userId: 'U2', sendMode: 'review', dailyLimit: 10 },
-        },
-      ]);
-    });
-    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
-  });
-});
+async function openAddPerson(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole('button', { name: 'Add Person' }));
+  return screen.findByRole('dialog', { name: 'Add Person' });
+}
 
 describe('Settings › People: the list', () => {
-  it("the builder's row has no Remove, and another person's has", async () => {
-    serve({ people: [BUILDER_PERSON, personDto({ name: 'Priya Shah' })] });
-    await screen.findByText('Travis');
-    const builder = screen.getByRole('row', { name: /Travis/ });
+  it("lists the builder first as You, and only another person's row has Remove", async () => {
+    serve({
+      people: [personDto({ name: 'Priya Shah' }), BUILDER_PERSON],
+      connection: connected,
+    });
+    await screen.findByText('You · Travis');
+    const [, first] = screen.getAllByRole('row');
+    expect(first?.textContent).toMatch(/You · Travis/);
+    const builder = screen.getByRole('row', { name: /You · Travis/ });
     const priya = screen.getByRole('row', { name: /Priya Shah/ });
     expect(within(builder).queryByRole('button', { name: /Remove/ })).toBeNull();
     expect(within(priya).getByRole('button', { name: 'Remove Priya Shah' })).toBeTruthy();
   });
 
-  it('shows how each person is reached and sent to', async () => {
+  it('shows how 10db reaches each person as a chip, and how it sends to them', async () => {
     serve({
       people: [
         BUILDER_PERSON,
         personDto({ name: 'Mark Ellis', slack: slackContact('U1', { sendMode: 'auto' }) }),
+        personDto({ name: 'Ana Ortiz', slack: slackContact('U2') }),
         personDto({ name: 'Priya Shah' }),
       ],
+      connection: connected,
     });
-    await screen.findByText('Mark Ellis');
-    const mark = screen.getByRole('row', { name: /Mark Ellis/ });
-    expect(within(mark).getByText('Send Without Asking')).toBeTruthy();
+    const mark = await screen.findByRole('row', { name: /Mark Ellis/ });
+    expect(await within(mark).findByText('Slack @mark')).toBeTruthy();
+    expect(within(mark).getByText('Sent on its own')).toBeTruthy();
+    const ana = screen.getByRole('row', { name: /Ana Ortiz/ });
+    expect(await within(ana).findByText('Slack @ana')).toBeTruthy();
+    expect(within(ana).getByText('Shown to you first')).toBeTruthy();
     const priya = screen.getByRole('row', { name: /Priya Shah/ });
-    expect(within(priya).getByText('not in Slack')).toBeTruthy();
+    expect(within(priya).getByText('Not on Slack')).toBeTruthy();
+    expect(within(priya).getByText('You pass it on')).toBeTruthy();
+  });
+
+  it('points at Integrations while Slack is not connected, or its setup is unfinished', async () => {
+    serve();
+    expect(await screen.findByText(/Slack isn't connected/)).toBeTruthy();
+    expect(
+      screen.getByRole('link', { name: 'Connect it in Integrations' }).getAttribute('href'),
+    ).toBe('/settings/integrations');
   });
 
   it("removing a routed person shows the daemon's refusal", async () => {
@@ -248,10 +135,18 @@ describe('Settings › People: the list', () => {
     expect(await screen.findByText(/reroute them first/)).toBeTruthy();
     expect(screen.getByText('Priya Shah')).toBeTruthy();
   });
+
+  it('keeps the timers in their own group, with the real-time note inside it', async () => {
+    serve();
+    const group = (await screen.findByRole('heading', { name: "When someone hasn't answered" }))
+      .parentElement;
+    expect(group).not.toBeNull();
+    expect(within(group ?? document.body).getByText(/fires when it wakes/)).toBeTruthy();
+  });
 });
 
 describe('Settings › People: Answers', () => {
-  it('lists the routes a person answers as links to Who Answers, and the builder as everything else', async () => {
+  it('lists the routes a person answers as links to Who Answers, and the builder as everything not routed', async () => {
     const mark = personDto({ name: 'Mark Ellis', handle: 'mark' });
     const rule = (category: string, goal: boolean) => ({
       id: mintId('RoutingRule'),
@@ -272,25 +167,23 @@ describe('Settings › People: Answers', () => {
     const link = await screen.findByRole('link', { name: /Demo · product \(a goal\), design/ });
     expect(link.getAttribute('href')).toBe('/settings/routing-rules');
     expect(
-      within(screen.getByRole('row', { name: /Travis/ })).getByText('everything else'),
+      within(screen.getByRole('row', { name: /You · Travis/ })).getByText('everything not routed'),
     ).toBeTruthy();
-    // Sends and Answers are both empty for her.
-    expect(within(screen.getByRole('row', { name: /Priya Shah/ })).getAllByText('—')).toHaveLength(
-      2,
-    );
+    expect(within(screen.getByRole('row', { name: /Priya Shah/ })).getByText('—')).toBeTruthy();
   });
 });
 
 describe('Settings › People: Add Person', () => {
-  const connected = { state: 'connected', teamId: 'T1', teamName: 'Acme', botUserId: 'UBOT' };
-
-  it('picks a member, proposes the handle, and saves review mode with 10 questions a day', async () => {
+  it('finds a member, takes the name from them, and saves review mode with 10 a day', async () => {
     const { saved } = serve({ connection: connected });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Person' }));
-    const dialog = await screen.findByRole('dialog');
-    await pickOption(within(dialog).getByLabelText('Slack member'), /Mark Ellis/);
+    const dialog = await openAddPerson();
+    await pickOption(within(dialog).getByLabelText('Find someone in Acme'), /Mark Ellis/);
     expect(within(dialog).getByLabelText('Name')).toHaveProperty('value', 'Mark Ellis');
-    expect(within(dialog).getByLabelText('Handle')).toHaveProperty('value', 'mark-ellis');
+    expect(within(dialog).queryByLabelText('Handle')).toBeNull();
+    expect(
+      within(dialog).getByRole('radio', { name: 'Show me each message first' }),
+    ).toHaveProperty('checked', true);
+    expect(within(dialog).getByText('The first message is always shown to you.')).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
     await waitFor(() => {
       expect(saved).toEqual([
@@ -303,15 +196,34 @@ describe('Settings › People: Add Person', () => {
     });
   });
 
-  it('describes what the daily limit counts, and Off saves no limit', async () => {
+  it('an edited name is saved, and a handle someone has gets a number', async () => {
+    const { saved } = serve({
+      people: [BUILDER_PERSON, personDto({ name: 'Mark', handle: 'mark-e' })],
+      connection: connected,
+    });
+    const dialog = await openAddPerson();
+    await pickOption(within(dialog).getByLabelText('Find someone in Acme'), /Mark Ellis/);
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Mark E' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Send on its own' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
+    await waitFor(() => {
+      expect(saved).toEqual([
+        {
+          handle: 'mark-e-2',
+          name: 'Mark E',
+          slack: { teamId: 'T1', userId: 'U1', sendMode: 'auto', dailyLimit: 10 },
+        },
+      ]);
+    });
+  });
+
+  it('says what the limit counts, and No limit saves none', async () => {
     const { saved } = serve({ connection: connected });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Person' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(
-      within(dialog).getByText(/Replies, follow-ups and the conversation in a thread never count/),
-    ).toBeTruthy();
-    await pickOption(within(dialog).getByLabelText('Slack member'), /Ana Ortiz/);
-    fireEvent.click(within(dialog).getByRole('switch', { name: 'No limit' }));
+    const dialog = await openAddPerson();
+    expect(within(dialog).getByText("Replies in an existing thread don't count.")).toBeTruthy();
+    await pickOption(within(dialog).getByLabelText('Find someone in Acme'), /Ana Ortiz/);
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'No limit' }));
+    expect(within(dialog).getByLabelText('New questions a day')).toHaveProperty('disabled', true);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
     await waitFor(() => {
       expect(saved).toEqual([
@@ -324,11 +236,13 @@ describe('Settings › People: Add Person', () => {
     });
   });
 
-  it('"Someone not in Slack" saves a person with no contact', async () => {
+  it('"Not on Slack? Add them by name" says what 10db does and saves no contact', async () => {
     const { saved } = serve({ connection: connected });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Person' }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Someone not in Slack' }));
+    const dialog = await openAddPerson();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Not on Slack? Add them by name' }));
+    expect(within(dialog).getByText(/10db can't message them/)).toBeTruthy();
+    expect(within(dialog).queryByText(/email/i)).toBeNull();
+    expect(within(dialog).queryByText('Before 10db messages them')).toBeNull();
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Priya Shah' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
     await waitFor(() => {
@@ -336,13 +250,44 @@ describe('Settings › People: Add Person', () => {
     });
   });
 
+  it('opens on a name while Slack is not connected', async () => {
+    serve();
+    const dialog = await openAddPerson();
+    expect(within(dialog).queryByLabelText(/Find someone/)).toBeNull();
+    expect(within(dialog).getByText(/10db can't message them/)).toBeTruthy();
+  });
+
   it('cannot save without a member or a name', async () => {
     serve({ connection: connected });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Person' }));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await openAddPerson();
     expect(within(dialog).getByRole('button', { name: 'Save Person' })).toHaveProperty(
       'disabled',
       true,
     );
+  });
+
+  it("the builder's row changes their member, keeping their handle, and has no Remove", async () => {
+    const me = personDto({
+      name: 'Mark Ellis',
+      handle: 'me',
+      isBuilder: true,
+      slack: slackContact('U1'),
+    });
+    const { saved } = serve({ people: [me], connection: connected });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Mark Ellis' }));
+    const dialog = await screen.findByRole('dialog');
+    await pickOption(within(dialog).getByLabelText('Which one is you?'), /Ana Ortiz/);
+    expect(within(dialog).getByLabelText('Name')).toHaveProperty('value', 'Ana Ortiz');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
+    await waitFor(() => {
+      expect(saved).toEqual([
+        {
+          handle: 'me',
+          name: 'Ana Ortiz',
+          slack: { teamId: 'T1', userId: 'U2', sendMode: 'review', dailyLimit: 10 },
+        },
+      ]);
+    });
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
   });
 });

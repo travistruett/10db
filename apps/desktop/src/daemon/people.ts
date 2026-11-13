@@ -112,6 +112,16 @@ export function useSlackMembers(query: string, enabled: boolean) {
   });
 }
 
+/**
+ * The connected workspace's member with this id, read from the whole list (the daemon keeps it), or
+ * null while Slack is not connected or the list has not loaded.
+ */
+export function useSlackMember(userId: string | null): SlackMemberDto | null {
+  const connection = useSlackConnection();
+  const members = useSlackMembers('', userId !== null && connection.data?.state === 'connected');
+  return members.data?.find((m) => m.userId === userId) ?? null;
+}
+
 export function useStakeholderTimers() {
   const { client } = useDaemon();
   return useQuery({

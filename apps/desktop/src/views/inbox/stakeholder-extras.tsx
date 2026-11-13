@@ -138,8 +138,8 @@ export function SendInsteadLink({
 
 const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
   refused:
-    "Slack refused 10db's token, so replies can't be read. Reconnect it in Settings › People, or answer this yourself.",
-  none: "Slack's token was removed, so replies can't be read. Add it again in Settings › People, or answer this yourself.",
+    "Slack refused 10db's token, so replies can't be read. Reconnect it in Settings › Integrations, or answer this yourself.",
+  none: "Slack's token was removed, so replies can't be read. Add it again in Settings › Integrations, or answer this yourself.",
   off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or take it back.',
   unreachable:
     "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",

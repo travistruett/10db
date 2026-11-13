@@ -808,7 +808,7 @@ describe('a builder who has not set his name', () => {
     w.route([w.person('mark', { sendMode: 'review' })]);
     const id = w.card();
     seedName();
-    await expect(sends.send(id, {})).rejects.toThrow(/Set your name in Settings › People/);
+    await expect(sends.send(id, {})).rejects.toThrow(/Pick yourself in Settings › Integrations/);
     await expect(sends.send(id, {})).rejects.toBeInstanceOf(ConflictError);
     expect(send(id).state).toBe('draft');
     expect(slack.posts).toEqual([]);

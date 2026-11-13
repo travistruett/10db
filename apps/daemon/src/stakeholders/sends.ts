@@ -474,7 +474,9 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (card.state !== InboxState.Open || stored?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
       if (builderUnnamed(card))
-        throw new ConflictError('Set your name in Settings › People before you send a question');
+        throw new ConflictError(
+          'Pick yourself in Settings › Integrations before you send a question',
+        );
       const draft = input.text === undefined ? recomposed(card, stored) : stored;
       const hits: OutboundHit[] =
         input.text === undefined

@@ -38,9 +38,9 @@ describe('StakeholderTimers', () => {
     });
   });
 
-  it('Remind After can be turned off', async () => {
+  it('the reminder can be turned off', async () => {
     const saved = serve();
-    fireEvent.click(await screen.findByRole('switch', { name: 'Remind me' }));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Send a reminder' }));
     await waitFor(() => {
       expect(saved).toEqual([{ remindAfterHours: null, returnAfterHours: 8 }]);
     });

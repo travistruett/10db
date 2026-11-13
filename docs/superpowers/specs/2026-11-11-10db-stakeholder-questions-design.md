@@ -394,7 +394,7 @@ to, and waits when any of them has reached their daily limit; it counts once aga
 primary reads **Send to Mark and Ana**.
 
 The first send to anyone is always reviewed, whatever their mode. The limit counts new threads in the last 24
-hours: 10 a day by default, set per person in Settings › People, or turned off there **(call)**. The card past
+hours: 10 a day by default, set per person in Settings › People, or set to no limit there **(call)**. The card past
 it says "Mark has had 10 new questions today" and offers **Send Anyway**, which sends past the limit once. A
 draft records why it waits (`heldBy`: `review`, `first_send`, `limit` or `scan`), and the card's copy follows
 it: "Mark has had 10 new questions today" with Send Anyway for `limit`, "First message to Mark: check it before
@@ -478,8 +478,8 @@ they do for any parked card.
   again from that moment. The send stays `sent` and the thread stays watched; a later reply still answers it.
   This amends the goals spec's §9 escalation, which used `humanWaitMinutes`: minutes are the wrong scale for a
   stakeholder.
-- **The timers** are global settings in Settings › People: "Remind after" (default 4 hours, or off) and "Back to
-  you after" (default 8 hours). They are measured in wall-clock time from the send (or the last Keep Waiting),
+- **The timers** are global settings at the foot of Settings › People: "Remind them after" (default 4 hours, or
+  off) and "Bring it back to you after" (default 8 hours). They are measured in wall-clock time from the send (or the last Keep Waiting),
   read from the injected clock, and checked on every tick and on wake. One that came due while the Mac slept
   fires on wake, once; when both came due, the reminder is skipped and the card returns. Due-ness is worked out
   again inside the write that marks it, from the send's own `waitStartedAt`, `remindedAt` and `returnedAt`, so a
@@ -519,8 +519,8 @@ stopped on shutdown.
 - **Where a reply came from** is stored on the send's answer (`replyVia: 'thread' | 'top_level'`). Slice 1 shows
   it nowhere; it is there so the builder can see how people really reply before changing this rule (§14).
 - **A refused token** stops the watch and shows a 10db card ("Slack refused 10db's token. Reconnect it in
-  Settings › People."). Sends stay `sent`; their cards show in Open with that notice so the builder can answer
-  them; on reconnect the watch reads on from each send's cursor, so a reply written during the outage still
+  Settings › Integrations."). Sends stay `sent`; their cards show in Open with that notice so the builder can
+  answer them; on reconnect the watch reads on from each send's cursor, so a reply written during the outage still
   answers its card.
 - **Any connection but `connected` counts as an outage for Open:** `off`, `none` (the token was removed),
   `refused` and `unreachable` (three ticks in a row failed with `unreachable`, `timeout` or an HTTP 5xx; the next
@@ -740,42 +740,68 @@ channel thread instead.
 ## 10. The UI
 
 The rule: **the builder makes a route where the question is, and the table is only for looking.** Three
-surfaces change a lot (the card, the Inbox's Waiting tab, Settings › People); three change by a line (the
+surfaces change a lot (the card, the Inbox's Waiting tab, Settings › Integrations and People); three change by a line (the
 task drawer, the Board card, Factory's goal). Sketches below; the visual mockups are linked from the plan.
 
-### 10.1 Settings › People (global)
+### 10.1 Settings › Integrations and Settings › People (global)
+
+Setting up Slack happens once, so it has its own section; People is only the people.
 
 ```
-┌ Settings ────────────────────────────────────────────────────────────────────────────────────┐
-│ People                                                                        [Add Person]   │
-│ Who answers questions besides you, and how 10db reaches them.                                │
+┌ Settings › Integrations ─────────────────────────────────────────────────────────────────────┐
+│ Integrations                                                                                 │
+│ The services 10db uses to reach the people who answer your questions.                        │
+│ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ # Slack                                                                             [⋯] │ │
+│ │ Acme · posts as @10db · you're @travis                                                   │ │
+│ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Settings › People ───────────────────────────────────────────────────────────────────────────┐
+│ People                                                                                       │
+│ The people who answer your projects' questions, and how 10db reaches each one.               │
 │                                                                                              │
-│ ● Slack  Connected to Acme · as @10db · checked 2 min ago                [Manage]            │
-│                                                                                              │
-│ Name            Slack                      Sends                  Answers                    │
+│ Name                          How it's sent         Answers                     [Add Person] │
 │ ───────────────────────────────────────────────────────────────────────────────────────────  │
-│ You             —                          —                      everything else            │
-│ Mark Ellis      @mark · Acme               Review each            Renewals (goal) · product  │
-│ Dana Ruiz       @dana · Acme               Send without asking    Acme app · design          │
-│ Priya Shah      not in Slack               —                      —                          │
+│ You · Travis [Slack @travis]  —                     everything not routed              Edit  │
+│ Mark Ellis [Slack @mark]      Shown to you first    Renewals · product (a goal)  Edit Remove │
+│ Dana Ruiz [Slack @dana]       Sent on its own       Acme app · design            Edit Remove │
+│ Priya Shah [Not on Slack]     You pass it on        —                            Edit Remove │
+│                                                                                              │
+│ When someone hasn't answered                                                                 │
+│ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ Remind them after                                                  [on] [ 4 ] hours      │ │
+│ │ Bring it back to you after                                              [ 8 ] hours      │ │
+│ │ Hours are real time: a timer that comes due while your Mac sleeps fires when it wakes.   │ │
+│ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Not connected:** the Slack line becomes a three-step guide in place: 1. **Copy Manifest** and **Open Slack
-  Apps ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A
-  refused token says why beside Connect. Once connected, a fourth step, **Which one is you?**, picks the
-  builder's own member from the same Select and saves it on the builder's row with its name: every message
-  carries that name, so nothing is sent until it is picked. The builder's row can change the pick and has no
-  Remove.
-- **Add Person** is a modal: a searchable Select of the workspace's members (avatar, name, title, email), or
-  "Someone not in Slack" with just a name. Then the send mode (a `SegmentedControl`: Review Each · Send Without
-  Asking) and "New questions a day" (a `NumberInput`, default 10, with an Off switch), described under the
-  field: "Counts only a new question that starts a thread. Replies, follow-ups and the conversation in a thread
-  never count." Selecting a member fills the name.
-- A row opens the same modal to edit. "Answers" lists the person's routes, each a link to where it lives.
-- **Timers**, under the people table, apply to everyone: "Remind after" (default 4 hours, or off) and "Back to
-  you after" (default 8 hours), each a `NumberInput` in hours, with the line "Measured in real time; one that
-  comes due while your Mac sleeps fires when it wakes."
+- **Settings › Integrations** has one card per integration; Slack is the first, and a later integration is
+  another card. **Not connected**, the card is a three-step guide: 1. **Copy Manifest** and **Open Slack Apps
+  ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A refused
+  token says why beside Connect. **Connected**, the card is one line, and **Change Who You Are** and
+  **Disconnect** sit in its `⋯` menu, never as buttons; Disconnect asks first, since it stops every send and
+  read at once. **Unfinished** (connected, but the builder has not picked their own member), the card holds a
+  compact yellow callout, "Finish setup: pick yourself so messages carry your name", with the **Which one is
+  you?** Select and **That's Me**; every message carries that name, so nothing is sent until it is picked.
+  Once picked, the callout collapses into the line's "you're @travis".
+- **Settings › People** says what it is for in one line, and while Slack is not connected or its setup is
+  unfinished, a second line links to Integrations. **Add Person** sits on the table's header. The builder's row
+  comes first and reads "You · Travis"; it can change the pick and has no Remove. Each row shows how 10db
+  reaches the person as a small chip (`Slack @mark`, `Not on Slack`); "How it's sent" says what happens before
+  a message goes, and "Answers" lists the person's routes, each a link to where it lives (the builder's is
+  "everything not routed"). A row's Edit opens the same modal.
+- **Add Person** is a modal ordered who → how 10db asks → limit. It leads with one search, "Find someone in
+  Acme" (avatar, name, title, email), and under it a quiet link, "Not on Slack? Add them by name", which shows
+  a name field and one line: "10db can't message them. Their questions come to you, ready to copy, and you
+  answer for them." With Slack not connected the modal opens on the name. A Slack pick fills the name, which
+  stays editable. There is no handle field: 10db makes the handle from the name and adds a number when someone
+  has it already. For a Slack person, "Before 10db messages them" offers **Show me each message first** or
+  **Send on its own**, with "The first message is always shown to you." under it, then "Up to [10] new
+  questions a day" with **No limit** beside it and the hint "Replies in an existing thread don't count."
+- **When someone hasn't answered** is the last group on People and applies to everyone: "Remind them after"
+  (default 4 hours, or off) and "Bring it back to you after" (default 8 hours), each in hours, with the
+  real-time note inside the group.
 - Slice 2 adds "This week": questions sent and the median time to an answer.
 
 ### 10.2 The question card

@@ -1,10 +1,18 @@
 import type { StakeholderTimersDto } from '@10db/contracts';
-import { Alert, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Box, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useSetStakeholderTimers, useStakeholderTimers } from '../../../daemon/people';
 import { SettingRow, SettingsCard } from '../setting-row';
 
 const DEFAULT_REMIND_HOURS = 4;
+
+function Hours() {
+  return (
+    <Text size="sm" c="dimmed" aria-hidden>
+      hours
+    </Text>
+  );
+}
 
 /** When 10db reminds a recipient and when it returns a question to the builder; both in real hours. */
 export function StakeholderTimers() {
@@ -31,14 +39,14 @@ export function StakeholderTimers() {
   const back = typed.back ?? current.returnAfterHours;
   return (
     <Stack gap="xs">
-      <SettingsCard title="Timers">
+      <SettingsCard title="When someone hasn't answered">
         <SettingRow
-          label="Remind after"
-          description="One reminder in the thread. Turn it off to never nudge."
+          label="Remind them after"
+          description="One reminder in their thread. Turn it off to never nudge."
         >
-          <Group gap="sm">
+          <Group gap="sm" justify="flex-end" wrap="nowrap">
             <Switch
-              aria-label="Remind me"
+              aria-label="Send a reminder"
               checked={current.remindAfterHours !== null}
               onChange={(event) => {
                 change({
@@ -65,34 +73,40 @@ export function StakeholderTimers() {
                   });
               }}
             />
+            <Hours />
           </Group>
         </SettingRow>
         <SettingRow
-          label="Back to you after"
-          description="The question returns to your Inbox when nobody has answered."
+          label="Bring it back to you after"
+          description="The question comes back to your Inbox, where you answer it or keep waiting."
         >
-          <NumberInput
-            aria-label="Back to you after (hours)"
-            w={90}
-            min={1}
-            max={168}
-            value={back}
-            onChange={(value) => {
-              if (typeof value === 'number') setTyped((t) => ({ ...t, back: value }));
-            }}
-            onBlur={() => {
-              if (typed.back !== undefined && typed.back !== current.returnAfterHours)
-                change({
-                  remindAfterHours: current.remindAfterHours,
-                  returnAfterHours: typed.back,
-                });
-            }}
-          />
+          <Group gap="sm" justify="flex-end" wrap="nowrap">
+            <NumberInput
+              aria-label="Back to you after (hours)"
+              w={90}
+              min={1}
+              max={168}
+              value={back}
+              onChange={(value) => {
+                if (typeof value === 'number') setTyped((t) => ({ ...t, back: value }));
+              }}
+              onBlur={() => {
+                if (typed.back !== undefined && typed.back !== current.returnAfterHours)
+                  change({
+                    remindAfterHours: current.remindAfterHours,
+                    returnAfterHours: typed.back,
+                  });
+              }}
+            />
+            <Hours />
+          </Group>
         </SettingRow>
+        <Box px="md" py="sm">
+          <Text size="xs" c="dimmed">
+            Hours are real time: a timer that comes due while your Mac sleeps fires when it wakes.
+          </Text>
+        </Box>
       </SettingsCard>
-      <Text size="xs" c="dimmed">
-        Measured in real time; one that comes due while your Mac sleeps fires when it wakes.
-      </Text>
       {save.isError ? (
         <Alert color="red" variant="light">
           {save.error.message}

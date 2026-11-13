@@ -1,39 +1,96 @@
 import type { PersonDto } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
+import { IconBrandSlack } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
-import { usePeople, useRemovePerson } from '../../../daemon/people';
+import {
+  usePeople,
+  useRemovePerson,
+  useSlackConnection,
+  useSlackMember,
+} from '../../../daemon/people';
+import { SettingsSectionKey } from '../sections';
 import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
-import { SlackConnection } from './slack-connection';
 import { StakeholderTimers } from './stakeholder-timers';
 
-function sends(person: PersonDto): string {
-  if (person.slack === null) return '—';
-  return person.slack.sendMode === 'auto' ? 'Send Without Asking' : 'Review Each';
+/** The builder's person is named "You" until they pick their Slack member. */
+function rowName(person: PersonDto): string {
+  if (!person.isBuilder || person.name === 'You') return person.name;
+  return `You · ${person.name}`;
 }
 
-/** Settings › People: who answers besides the builder, and how 10db reaches them. */
+function howSent(person: PersonDto): string {
+  if (person.isBuilder) return '—';
+  if (person.slack === null) return 'You pass it on';
+  return person.slack.sendMode === 'auto' ? 'Sent on its own' : 'Shown to you first';
+}
+
+/** How 10db reaches someone, as a small chip: "Slack @Mark Ellis", or "Not on Slack". */
+function ReachChip({ person }: { readonly person: PersonDto }) {
+  const member = useSlackMember(person.slack?.userId ?? null);
+  if (person.slack === null)
+    return person.isBuilder ? null : (
+      <Badge variant="default" size="sm" tt="none" fw={500}>
+        Not on Slack
+      </Badge>
+    );
+  return (
+    <Badge
+      variant="default"
+      size="sm"
+      tt="none"
+      fw={500}
+      leftSection={<IconBrandSlack size={12} stroke={1.5} aria-hidden />}
+    >
+      {member === null ? 'Slack' : `Slack @${member.name}`}
+    </Badge>
+  );
+}
+
+/** Points at Settings › Integrations while Slack can't carry questions. */
+function ConnectSlackLine({ builder }: { readonly builder: PersonDto | undefined }) {
+  const state = useSlackConnection().data?.state;
+  if (state === undefined || state === 'unreachable' || builder === undefined) return null;
+  const unfinished = state === 'connected' && builder.slack === null;
+  if (state === 'connected' && !unfinished) return null;
+  return (
+    <Text size="sm" c="dimmed">
+      {unfinished
+        ? "Slack's setup isn't finished, so 10db can't message anyone yet."
+        : "Slack isn't connected, so 10db can't message anyone yet."}{' '}
+      <Anchor
+        size="sm"
+        renderRoot={(props) => (
+          <Link
+            {...props}
+            to="/settings/$section"
+            params={{ section: SettingsSectionKey.Integrations }}
+          />
+        )}
+      >
+        {unfinished ? 'Finish it in Integrations' : 'Connect it in Integrations'}
+      </Anchor>
+    </Text>
+  );
+}
+
+/** Settings › People: who answers questions, how 10db reaches each one, and when it stops waiting. */
 export function PeopleSection() {
   const people = usePeople();
   const remove = useRemovePerson();
   // `undefined` is closed, `null` is a new person.
   const [editing, setEditing] = useState<PersonDto | null | undefined>(undefined);
+  const rows = [...(people.data ?? [])].sort((a, b) => Number(b.isBuilder) - Number(a.isBuilder));
 
   return (
-    <Stack>
-      <Group justify="space-between">
+    <Stack gap="lg">
+      <Stack gap="xs">
         <Text c="dimmed" size="sm">
-          Who answers questions besides you, and how 10db reaches them.
+          The people who answer your projects' questions, and how 10db reaches each one.
         </Text>
-        <Button
-          onClick={() => {
-            setEditing(null);
-          }}
-        >
-          Add Person
-        </Button>
-      </Group>
-      <SlackConnection />
+        <ConnectSlackLine builder={rows.find((p) => p.isBuilder)} />
+      </Stack>
       {people.isPending ? <Loader size="sm" /> : null}
       {people.isError ? (
         <Alert color="red" title="Couldn't load people">
@@ -45,29 +102,37 @@ export function PeopleSection() {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Name</Table.Th>
-              <Table.Th>Slack</Table.Th>
-              <Table.Th>Sends</Table.Th>
+              <Table.Th>How it's sent</Table.Th>
               <Table.Th>Answers</Table.Th>
-              <Table.Th />
+              <Table.Th>
+                <Group justify="flex-end">
+                  <Button
+                    size="xs"
+                    onClick={() => {
+                      setEditing(null);
+                    }}
+                  >
+                    Add Person
+                  </Button>
+                </Group>
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {people.data.map((person) => (
+            {rows.map((person) => (
               <Table.Tr key={person.id}>
-                <Table.Td>{person.name}</Table.Td>
                 <Table.Td>
-                  {person.isBuilder
-                    ? '—'
-                    : person.slack === null
-                      ? 'not in Slack'
-                      : `@${person.handle}`}
+                  <Group gap="xs">
+                    <Text size="sm">{rowName(person)}</Text>
+                    <ReachChip person={person} />
+                  </Group>
                 </Table.Td>
-                <Table.Td>{sends(person)}</Table.Td>
+                <Table.Td>{howSent(person)}</Table.Td>
                 <Table.Td>
                   <PersonAnswers person={person} />
                 </Table.Td>
                 <Table.Td>
-                  <Group gap="xs" justify="flex-end">
+                  <Group gap="xs" justify="flex-end" wrap="nowrap">
                     <Button
                       size="xs"
                       variant="subtle"
@@ -107,6 +172,7 @@ export function PeopleSection() {
       <StakeholderTimers />
       <PersonModal
         person={editing ?? null}
+        people={people.data ?? []}
         opened={editing !== undefined}
         onClose={() => {
           setEditing(undefined);
