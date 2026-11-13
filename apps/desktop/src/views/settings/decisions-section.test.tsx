@@ -236,7 +236,7 @@ describe('Settings › Decisions', () => {
             : HttpResponse.json({ models, fetchedAt: '2026-11-13T12:00:00.000Z' }),
         ),
       );
-      expect(await screen.findByText(/could not be read/, {}, { timeout: 5000 })).toBeTruthy();
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
       expect(screen.getByText('typesafe/jev-1.13')).toBeTruthy();
       failing = false;
       fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
