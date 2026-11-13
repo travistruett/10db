@@ -25,7 +25,9 @@ import {
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
+import { TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { ModelDrawer } from './model-drawer';
+import { groupByFamily } from './model-families';
 import { catalogueLine, costNote } from './model-format';
 import {
   earliestFirstSeen,
@@ -37,6 +39,7 @@ import {
   type ModelSort,
 } from './model-order';
 import { ModelsTable } from './models-table';
+import { RaisedPanel } from './raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
@@ -56,7 +59,7 @@ const isDotsMode = (value: string): value is DotsMode =>
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
 /**
- * Settings › Models and benchmarks: who each role gets on one account, then Intelligence against cost per task,
+ * Settings › Models: who each role gets on one account, then Intelligence against cost per task,
  * then every model the account runs. A model's detail is in the drawer.
  */
 export function ModelsSection() {
@@ -82,11 +85,13 @@ export function ModelsSection() {
   const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
   const [selected, setSelected] = useState<ModelRowDto | null>(null);
   const [opened, setOpened] = useState(false);
+  // The list goes back to its first page whenever what it holds or its order changes.
+  const paging = usePaging(JSON.stringify([filter, sort, accountId]), TABLE_PAGE_SIZES[0]);
 
   const header = (
     <Stack gap={4}>
       <Group justify="space-between" align="center" wrap="nowrap">
-        <Title order={3}>Models and scores</Title>
+        <Title order={3}>Models</Title>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
             <Text size="xs" c="red" role="alert">
@@ -120,7 +125,7 @@ export function ModelsSection() {
           >
             <ActionIcon
               variant="default"
-              size="lg"
+              size="input-xs"
               aria-label="Refresh Models"
               loading={refresh.isPending}
               onClick={() => {
@@ -224,7 +229,12 @@ export function ModelsSection() {
   // Rows of another account stay up while this one loads; no ring is drawn on a price that is not this account's.
   const settling = models.isPlaceholderData;
   const accountRows = filterModels(everyModel, { ...NO_FILTER, accountId });
-  const listRows = sortModels(filterModels(everyModel, { ...filter, accountId }), sort);
+  const families = groupByFamily(
+    sortModels(filterModels(everyModel, { ...filter, accountId }), sort),
+  );
+  // A refresh can shrink the list under the page; the page shown is never past the last one.
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
+  const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
   const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
   const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role, dots });
   const names = new Map(everyModel.map((r) => [r.model, r.name]));
@@ -279,11 +289,13 @@ export function ModelsSection() {
             }}
           />
         </Group>
-        <RightsizingChart
-          result={result}
-          costLabel={`Cost per task (USD, log scale). ${note}`}
-          height={300}
-        />
+        <RaisedPanel>
+          <RightsizingChart
+            result={result}
+            costLabel={`Cost per task (USD, log scale). ${note}`}
+            height={300}
+          />
+        </RaisedPanel>
         <Text size="xs" c="dimmed">
           Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account.
           {result.omitted > 0
@@ -302,7 +314,8 @@ export function ModelsSection() {
           </Text>
         ) : (
           <ModelsTable
-            rows={listRows}
+            families={shownFamilies}
+            paging={{ ...paging, page, total: families.length }}
             filter={filter}
             onFilter={setFilter}
             sort={sort}

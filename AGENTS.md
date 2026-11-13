@@ -56,6 +56,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
   Until the first published release the migration baseline is regenerated instead of extended
   (`packages/db/AGENTS.md`).
+- **Briefs, not documents.** Every spec, plan and end-of-run report opens with a brief of one screen
+  for the builder: what changes for them, what it buys, what could go wrong and how we'd know, the
+  calls they might disagree with, and what is needed from them (usually nothing). The rest is for
+  agents. The builder approves by replying to the brief; with nothing needed from them, work goes ahead.
 - Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff
   touches and their dependents); the pre-push hook runs `make precheck`. `make gate` runs every check on the Mac
   and is optional (`docs/architecture/decisions/2026-11-13-ci-is-the-gate-before-a-merge.md`). Docs are part

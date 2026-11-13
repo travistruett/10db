@@ -1,9 +1,13 @@
 import { ModelStatus, type ModelRowDto } from '@10db/contracts';
 import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
+import { useState } from 'react';
+import { pagerProps, TABLE_PAGE_SIZES, type TablePage } from '../../shell/table-pager';
 import { withColumnHeader } from '../../shell/column-header';
 import { ModelSearchFilter, TierFilter } from './model-filters';
 import { formatCost, formatScore, NO_DATA } from './model-format';
+import type { ModelFamily } from './model-families';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import {
   isNewModel,
@@ -12,7 +16,6 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
-import { PICK_COLOR } from './role-picks-panel';
 
 const isModelColumn = (value: unknown): value is ModelColumn =>
   Object.values(ModelColumn).some((c) => c === value);
@@ -23,14 +26,24 @@ const TABULAR = () => ({ fontVariantNumeric: 'tabular-nums' });
 function ModelCell({
   row,
   fresh,
+  older,
+  expanded,
+  nested,
   onOpen,
+  onToggle,
 }: {
   readonly row: ModelRowDto;
   readonly fresh: boolean;
+  /** How many older versions sit under this row; zero shows no toggle. */
+  readonly older: number;
+  readonly expanded: boolean;
+  /** An older version, drawn indented under its family's row. */
+  readonly nested: boolean;
   readonly onOpen: () => void;
+  readonly onToggle: () => void;
 }) {
   return (
-    <Group gap={6} wrap="nowrap">
+    <Group gap={6} wrap="nowrap" pl={nested ? 'lg' : 0}>
       <UnstyledButton
         aria-label={`Open ${row.name}`}
         title={row.name}
@@ -55,6 +68,28 @@ function ModelCell({
           New
         </Text>
       ) : null}
+      {older > 0 ? (
+        <UnstyledButton
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} ${String(older)} older ${older === 1 ? 'version' : 'versions'} of ${row.name}`}
+          onClick={(event) => {
+            // Showing the older versions is not opening the model.
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <Group gap={2} wrap="nowrap">
+            {expanded ? (
+              <IconChevronDown size={14} stroke={1.5} />
+            ) : (
+              <IconChevronRight size={14} stroke={1.5} />
+            )}
+            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              {older} older
+            </Text>
+          </Group>
+        </UnstyledButton>
+      ) : null}
     </Group>
   );
 }
@@ -65,7 +100,8 @@ function ModelCell({
  * is, and `costNote` says what the cost per task is at, in that column's header.
  */
 export function ModelsTable({
-  rows,
+  families,
+  paging,
   filter,
   onFilter,
   sort,
@@ -76,7 +112,9 @@ export function ModelsTable({
   costNote,
   onOpen,
 }: {
-  readonly rows: readonly ModelRowDto[];
+  /** The page's families; each lead is a row, its older versions open under it. */
+  readonly families: readonly ModelFamily[];
+  readonly paging: TablePage;
   readonly filter: ModelFilter;
   readonly onFilter: (next: ModelFilter) => void;
   readonly sort: ModelSort;
@@ -88,6 +126,8 @@ export function ModelsTable({
   readonly costNote: string;
   readonly onOpen: (row: ModelRowDto) => void;
 }) {
+  const [expanded, setExpanded] = useState<readonly string[]>([]);
+  const olderOf = new Map(families.map((f) => [f.lead.model, f.older]));
   const sortStatus: DataTableSortStatus<ModelRowDto> = {
     columnAccessor: sort.column,
     direction: sort.direction,
@@ -125,15 +165,29 @@ export function ModelsTable({
       cellsStyle: () => ({ minWidth: 200 }),
       filtering: filter.query.trim() !== '',
       filter: <ModelSearchFilter filter={filter} onFilter={onFilter} />,
-      render: (row) => (
-        <ModelCell
-          row={row}
-          fresh={isNewModel(row, now, earliest)}
-          onOpen={() => {
-            onOpen(row);
-          }}
-        />
-      ),
+      render: (row) => {
+        const older = olderOf.get(row.model)?.length ?? 0;
+        const open = expanded.includes(row.model);
+        return (
+          <ModelCell
+            row={row}
+            fresh={isNewModel(row, now, earliest)}
+            older={older}
+            expanded={open}
+            nested={!olderOf.has(row.model)}
+            onOpen={() => {
+              onOpen(row);
+            }}
+            onToggle={() => {
+              setExpanded((shown) =>
+                shown.includes(row.model)
+                  ? shown.filter((m) => m !== row.model)
+                  : [...shown, row.model],
+              );
+            }}
+          />
+        );
+      },
     }),
     head({
       accessor: ModelColumn.Tier,
@@ -160,32 +214,46 @@ export function ModelsTable({
       accessor: 'usedBy',
       title: 'Used by',
       noWrap: true,
-      render: (row) => (
-        <Text
-          size="xs"
-          c={PICK_COLOR}
-          truncate
-          maw={180}
-          title={(usedBy.get(row.model) ?? []).join(', ')}
-        >
-          {(usedBy.get(row.model) ?? []).join(', ')}
-        </Text>
-      ),
+      render: (row) => {
+        const own = (usedBy.get(row.model) ?? []).join(', ');
+        // Folded, a family's row also says which roles run on a version under it.
+        const hidden = expanded.includes(row.model)
+          ? ''
+          : (olderOf.get(row.model) ?? []).flatMap((r) => usedBy.get(r.model) ?? []).join(', ');
+        return (
+          <Group gap={6} wrap="nowrap" maw={220}>
+            {own === '' ? null : (
+              <Text size="xs" truncate title={own}>
+                {own}
+              </Text>
+            )}
+            {hidden === '' ? null : (
+              <Text size="xs" c="dimmed" truncate title={`${hidden}, on an older version`}>
+                {`${hidden}, on an older version`}
+              </Text>
+            )}
+          </Group>
+        );
+      },
     },
     numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun),
   ];
   return (
     <DataTable<ModelRowDto>
       aria-label="Models"
-      records={[...rows]}
+      records={families.flatMap((f) =>
+        expanded.includes(f.lead.model) ? [f.lead, ...f.older] : [f.lead],
+      )}
       columns={columns}
       idAccessor={(row) => row.model}
       withTableBorder
+      backgroundColor="var(--tendb-color-panel)"
       borderRadius="md"
       verticalSpacing="sm"
       horizontalSpacing="md"
       highlightOnHover
-      {...(rows.length === 0 ? { minHeight: 160 } : {})}
+      {...pagerProps(paging, TABLE_PAGE_SIZES)}
+      {...(families.length === 0 ? { minHeight: 160 } : {})}
       emptyState={
         <Text c="dimmed" size="sm" ta="center">
           No model matches these filters.

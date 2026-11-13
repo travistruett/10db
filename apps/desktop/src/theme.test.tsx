@@ -118,6 +118,8 @@ describe('theme palette (Selenized, exactly)', () => {
     ['dark column header', Scheme.Dark, '--tendb-color-column-header', SelenizedDark.bg1],
     ['dark column border', Scheme.Dark, '--tendb-color-column-border', SelenizedDark.bg1],
     ['dark board card', Scheme.Dark, '--tendb-color-card', SelenizedDark.bg1],
+    ['light raised panel', Scheme.Light, '--tendb-color-panel', SelenizedLight.bg1],
+    ['dark raised panel', Scheme.Dark, '--tendb-color-panel', SelenizedDark.bg1],
   ])('paints the %s with its Selenized value', (_case, scheme, name, expected) => {
     expect(cssVar(scheme, name)).toBe(expected);
   });

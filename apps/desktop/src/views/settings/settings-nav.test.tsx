@@ -16,7 +16,7 @@ const PROJECT_LINKS = [
 const APP_LINKS = [
   'Overview',
   'Accounts',
-  'Models and scores',
+  'Models',
   'Decisions',
   'Models by role',
   'Lane permissions',
@@ -46,7 +46,7 @@ describe('SettingsNav', () => {
       path: '/settings/accounts',
       selected: 'All projects',
       links: APP_LINKS,
-      groups: ['Models', 'Agents', 'Connections', 'This Mac'],
+      groups: ['AI', 'Agents', 'Connections', 'This Mac'],
     },
   ])(
     'at $path selects $selected and lists only that scope, one group per subhead',

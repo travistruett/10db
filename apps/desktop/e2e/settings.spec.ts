@@ -17,7 +17,7 @@ test.describe('Settings', () => {
     const scope = page.getByRole('radiogroup', { name: SCOPES });
     await expect(scope.getByRole('radio', { name: 'All projects' })).toBeChecked();
 
-    for (const subhead of ['Models', 'Agents', 'Connections', 'This Mac']) {
+    for (const subhead of ['AI', 'Agents', 'Connections', 'This Mac']) {
       await expect(nav.getByRole('group', { name: subhead })).toBeVisible();
     }
     for (const link of ['Overview', 'Accounts', 'Integrations', 'People', 'Updates']) {
