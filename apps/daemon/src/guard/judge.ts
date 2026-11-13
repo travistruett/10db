@@ -19,6 +19,7 @@ import {
   namesSudo,
   type JudgedContext,
 } from './judged-rules';
+import { runsInBackground } from './background-loops';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
 import {
@@ -590,6 +591,18 @@ interface NestedScript {
    * may still run as shell elsewhere.
    */
   readonly forwarded?: boolean;
+  /**
+   * The script runs beside the session (an `&`, a coprocess, the Bash tool's background flag, a
+   * Monitor), where a loop with no end holds a core. A segment the guard can't read there may hide
+   * one, so the unread-shell and pipe-into-shell refusals stand under every judge and the loop's
+   * card is never lost to one.
+   */
+  readonly background?: boolean;
+}
+
+/** Whether a segment of the line starts a job that runs beside it: an `&` or a coprocess. */
+function startsJob(segments: readonly ShellSegment[]): boolean {
+  return segments.some((segment) => segment.separator === '&' || segment.words.includes('coproc'));
 }
 
 function judgeShell(
@@ -599,9 +612,12 @@ function judgeShell(
   depth = 0,
   nested: NestedScript = {},
 ): GuardVerdict {
-  const applies = (rule: JudgedRule): boolean => judgedRuleApplies(rule, ctx);
   const bracesAsData = nested.bracesAsData === true;
   const parse = parseShell(command);
+  const background = nested.background === true || startsJob(parse.segments);
+  const applies = (rule: JudgedRule): boolean =>
+    (background && (rule === JudgedRule.UnreadShell || rule === JudgedRule.PipeIntoShell)) ||
+    judgedRuleApplies(rule, ctx);
   const forwarded = nested.forwarded === true || forwardsOutput(parse.segments);
   const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
   const ordered = parse.certain && !segments.some((s) => s.outOfOrder);
@@ -629,13 +645,14 @@ function judgeShell(
     // see (`watch "$(…)"`, a here-document a shell reads), so a here-document inside one is never
     // data.
     for (const body of segment.nested) {
-      const verdict = judgeShell(input, ctx, body, depth, { forwarded: true });
+      const verdict = judgeShell(input, ctx, body, depth, { forwarded: true, background });
       if (verdict.decision === 'deny') return verdict;
     }
     // A script this segment runs (`sh -c`, `find -exec`, `eval`) writes where the segment writes.
     const inner: NestedScript = {
       bracesAsData,
       forwarded: forwarded || segment.outputForwarded,
+      background,
     };
     // A here-document body is always judged as shell. Its braces are data only when a known data
     // reader takes it and its output is not forwarded (a pipe, a process substitution, a group or
@@ -647,6 +664,7 @@ function judgeShell(
       const verdict = judgeShell(input, ctx, body, depth, {
         bracesAsData: bracesAsData || bodyIsData,
         forwarded,
+        background,
       });
       if (verdict.decision === 'deny') return verdict;
     }
@@ -780,7 +798,10 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
       namesGit: namesGitOrGh(command),
       namesSudo: namesSudo(command),
     };
-    return judgeShell(input, ctx, command);
+    const background =
+      input.toolName === 'Monitor' ||
+      runsInBackground(ToolInput.safeParse(input.toolInput).data ?? {});
+    return judgeShell(input, ctx, command, 0, { background });
   }
   if (
     input.readOnly &&

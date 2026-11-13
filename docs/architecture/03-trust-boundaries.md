@@ -181,7 +181,9 @@ without it):
   socket (`ws`, which opens from Claude Code's own process like WebFetch) with the Web switch on, and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
   under an allow rule that covers the call, and for any command whose text names git, gh, `.git` or `sudo`
   (quotes and backslashes taken out first for `sudo`), so `sudo` behind `env -S` or a pipe into a shell is
-  refused as on the floor. The repo MCP
+  refused as on the floor. A line that runs a job beside the session (an `&`, a coprocess, the Bash tool's
+  background flag, a Monitor) keeps the unread-shell and pipe-into-shell refusals too, since a segment the guard
+  can't read there may hide a loop with no end, whose card a judge would otherwise lose. The repo MCP
   tools and the MCP resource tools keep their card under every judge (live check G8 could not show the classifier
   judging an MCP call). A session on the floor says why in its task's thread, once (`trust/floor-notice.ts`).
 - **The bound under a judge.** What the guard hands a judge is bounded by the kernel or the closed credentials: a

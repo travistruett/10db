@@ -99,6 +99,32 @@ const SHELL_ROWS: readonly Row[] = [
   bash('a hazard spelled out', 'pnpm add left-pad', 'deny', 'deny', UNCLAIMED),
   bash('a hazard behind a variable', 'SUB=add; pnpm $SUB x', 'ask', 'ask', UNCLAIMED),
   bash('an endless loop in the background', 'while :; do :; done &', 'ask', 'ask'),
+  // A segment the guard can't read that runs in the background may hide a loop with no end, so it
+  // keeps the floor's refusal: the loop's card is never lost to a judge.
+  bash(
+    'an endless loop behind env -S, in the background',
+    `env -S 'sh -c "while :; do :; done"' &`,
+    'deny',
+    'deny',
+  ),
+  {
+    name: 'an endless loop behind env -S, run in the background',
+    tool: 'Bash',
+    input: { command: "env -S 'while :; do :; done'", run_in_background: true },
+    rules: 'deny',
+    judged: 'deny',
+  },
+  bash('unread words in the background', "echo $'\\q' &", 'deny', 'deny'),
+  bash(
+    'a loop piped into a shell, in the background',
+    "echo 'while :; do :; done' | sh &",
+    'deny',
+    'deny',
+  ),
+  // Any job in the background makes the whole line one: the guard doesn't track which segment it is.
+  bash('env -S beside a background job', "sleep 1 & env -S 'ls -la'", 'deny', 'deny'),
+  bash('env -S in a coprocess', "coproc env -S 'yes'", 'deny', 'deny'),
+  bash('env -S in a backgrounded shell script', `sh -c "env -S 'yes'" &`, 'deny', 'deny'),
   bash('git commit', 'git commit -m x', 'deny', 'deny'),
   bash('git push', 'git push', 'deny', 'deny'),
   bash('gh pr merge', 'gh pr merge 12', 'deny', 'deny'),
@@ -199,12 +225,14 @@ const OTHER_ROWS: readonly Row[] = [
     rules: 'deny',
     judged: 'allow',
   },
+  // A Monitor command always runs beside the session, so a script piped into a shell there may hide
+  // a loop with no end: it keeps the floor's refusal.
   {
     name: 'a Monitor piping into a shell',
     tool: 'Monitor',
     input: { description: 'watch', timeout_ms: 60_000, command: CURL_SH },
     rules: 'deny',
-    judged: 'allow',
+    judged: 'deny',
   },
   bash('a deploy in a pass', 'vercel deploy --prod', 'deny', 'allow', {
     areas: PASS_AREAS,
