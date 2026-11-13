@@ -67,9 +67,14 @@ export const CellSetting = z.object({
 });
 export type CellSetting = z.infer<typeof CellSetting>;
 
-const Steps = z.array(z.enum(StepRole)).refine((steps) => steps.includes(StepRole.Implement), {
-  message: 'A rigor always runs the build step',
-});
+const Steps = z
+  .array(z.enum(StepRole))
+  .refine((steps) => steps.includes(StepRole.Implement), {
+    message: 'A rigor always runs the build step',
+  })
+  .refine((steps) => !steps.includes(StepRole.PlanReview) || steps.includes(StepRole.Plan), {
+    message: 'A plan review needs a plan to judge',
+  });
 
 const noneTwice = (keys: readonly string[]) => new Set(keys).size === keys.length;
 

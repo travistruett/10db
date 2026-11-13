@@ -79,6 +79,7 @@ describe('chooseModel: a setting the account cannot honour', () => {
     const choice = take({
       requirements: [{ kind: 'model', model: 'mid' }],
       effort: 'max',
+      fallback: { tier: 'balanced', top: false, effort: 'max' },
       pinned: true,
     });
     expect(choice.pinned).toBe(true);
@@ -701,7 +702,12 @@ describe('chooseModel: a fixed effort', () => {
     { name: 'the lowest it offers', effort: 'low', want: 'mid@low' },
   ] as const)('$name', ({ effort, want }) => {
     expect(
-      pick({ profiles: codex, requirements: [{ kind: 'tier', tier: 'balanced' }], effort }),
+      pick({
+        profiles: codex,
+        requirements: [{ kind: 'tier', tier: 'balanced' }],
+        effort,
+        fallback: { tier: 'balanced', top: false, effort },
+      }),
     ).toBe(want);
   });
 
@@ -710,9 +716,28 @@ describe('chooseModel: a fixed effort', () => {
     expect(pick({ effort: 'high', def: { role: 'implement', need: 40 } })).toBe('mid@high');
   });
 
-  it('falls back to the effort of the rung when none is fixed', () => {
-    expect(pick({ profiles: unscoredCatalogue(), effort: null })).toBe('mid@high');
-    expect(pick({ profiles: unscoredCatalogue(), effort: 'low' })).toBe('mid@low');
+  it('falls back to the effort of the rung', () => {
+    const at = (effort: Effort) => ({ tier: 'balanced', top: false, effort }) as const;
+    expect(pick({ profiles: unscoredCatalogue() })).toBe('mid@high');
+    expect(pick({ profiles: unscoredCatalogue(), fallback: at('low') })).toBe('mid@low');
+    expect(pick({ profiles: unscoredCatalogue(), fallback: at('xhigh') })).toBe('mid@xhigh');
+  });
+
+  it('lets the task’s own effort decide alone, even below the rung', () => {
+    expect(pick({ profiles: unscoredCatalogue(), task: task({ effortPin: 'low' }) })).toBe(
+      'mid@low',
+    );
+  });
+
+  it('keeps a fixed effort for the scored profiles while the rung carries its own', () => {
+    expect(pick({ effort: 'low', def: { role: 'implement', need: 40 } })).toBe('big@high');
+    expect(
+      pick({
+        profiles: unscoredCatalogue(),
+        effort: 'low',
+        fallback: { tier: 'balanced', top: false, effort: 'xhigh' },
+      }),
+    ).toBe('mid@xhigh');
   });
 });
 
@@ -746,5 +771,50 @@ describe('chooseModel: the top of a named tier', () => {
     expect(
       pick({ profiles: ladder, def: { role: 'review', need: 40 }, requirements: [setting] }),
     ).toBe(want);
+  });
+});
+
+describe('chooseModel: the strongest of several requirements', () => {
+  it('keeps a Capable override naming a model no profile describes over an automatic pick below it', () => {
+    const choice = chooseModel(
+      input({
+        requirements: [{ kind: 'automatic' }, { kind: 'tier', tier: 'capable' }],
+        tierOverrides: { capable: 'house-model' },
+      }),
+    );
+    expect(choice.model).toBe('house-model');
+    expect(choice.profile).toBeNull();
+  });
+
+  it('keeps a profile-less choice in a lower tier below one with a profile in a higher', () => {
+    const choice = chooseModel(
+      input({
+        requirements: [
+          { kind: 'tier', tier: 'efficient' },
+          { kind: 'tier', tier: 'balanced' },
+        ],
+        tierOverrides: { efficient: 'house-model' },
+      }),
+    );
+    expect(choice.profile ? label(choice.profile) : choice.model).toBe('mid@high');
+  });
+});
+
+describe('chooseModel: when a result is held against a retry', () => {
+  const mid = { kind: 'model', model: 'mid' } as const;
+  it.each([
+    { name: 'the cell’s one model is what runs', over: { requirements: [mid] }, want: true },
+    {
+      name: 'the task’s own setting decides instead',
+      over: { requirements: [mid], task: task({ modelSetting: mid }) },
+      want: false,
+    },
+    {
+      name: 'a refused model’s tier decides instead',
+      over: { requirements: [mid], startOverTier: ModelTier.Balanced },
+      want: false,
+    },
+  ])('$name: $want', ({ over, want }) => {
+    expect(chooseModel(input({ ...over, pinned: true })).pinned).toBe(want);
   });
 });

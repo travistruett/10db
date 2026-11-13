@@ -82,6 +82,16 @@ describe('PlaybookInput', () => {
       },
       ok: false,
     },
+    {
+      name: 'a row with a plan review and no plan',
+      value: { rows: [{ rigor: 'careful', steps: ['plan_review', 'implement'] }] },
+      ok: false,
+    },
+    {
+      name: 'a row with a plan review and a plan',
+      value: { rows: [{ rigor: 'careful', steps: ['plan', 'plan_review', 'implement'] }] },
+      ok: true,
+    },
     { name: 'nothing', value: {}, ok: true },
   ])('$name: parses $ok', ({ value, ok }) => {
     expect(PlaybookInput.safeParse(value).success).toBe(ok);

@@ -36,23 +36,17 @@ const BRIEF = {
     'Security and auth reviews, and migration reviews and plan reviews, run on Frontier at high effort; a migration still gets a Plan Review',
   MIGRATION_BUILD:
     'A migration build moves from the top model at low effort to the top of Capable at high effort',
+  KIND_PLAN_OVERRIDE: 'A security, auth or migration Plan runs on Capable at high effort',
+  KIND_BUILD_OVERRIDE: 'A security or auth build runs on the top of Capable at high effort',
   CAREFUL_UNSCORED: 'Without scores every Careful step runs one effort up',
+  TASK_MODEL_BEATS_PIN: 'A task’s own model setting beats a cell that names one model',
+  STRONGEST_WHEN_UNREACHED:
+    'A step whose need no model reaches runs the strongest offered, and says so',
   ONE_MODEL_HELD:
     'A cell naming one model is never stepped up on a retry; only a persona pin held a step before',
 } as const;
 
-/**
- * Differences that follow the agreed overrides for security, auth and migration kinds (design §6.1: Plan on
- * Capable at high effort, Build on the top of Capable at high effort) but that the Brief's list does not
- * itemize: the seeded high-risk pattern gave these steps the dearest model of their own rung. Kept apart so
- * the Brief can be amended or the overrides changed.
- */
-const NOT_ITEMIZED = {
-  KIND_PLAN_OVERRIDE: 'A security, auth or migration Plan runs on Capable at high effort',
-  KIND_BUILD_OVERRIDE: 'A security or auth build runs on the top of Capable at high effort',
-} as const;
-
-const LINES = { ...BRIEF, ...NOT_ITEMIZED };
+const LINES = BRIEF;
 type Line = keyof typeof LINES;
 
 type Mode = 'scored' | 'unmeasured';
@@ -388,9 +382,9 @@ const CASES: readonly Case[] = [
     tag: 'security',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', null, 'fable@high', 'KIND_RAISES_RIGOR'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
+      ['review', null, 'fable@xhigh', 'KIND_RAISES_RIGOR'],
     ],
   },
   {
@@ -400,9 +394,9 @@ const CASES: readonly Case[] = [
     tag: 'auth',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', null, 'fable@high', 'KIND_RAISES_RIGOR'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
+      ['review', null, 'fable@xhigh', 'KIND_RAISES_RIGOR'],
     ],
   },
   {
@@ -412,10 +406,10 @@ const CASES: readonly Case[] = [
     tag: 'migration',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['plan_review', null, 'fable@high', 'FRONTIER_REVIEW'],
-      ['implement', 'fable@xhigh', 'opus@high', 'MIGRATION_BUILD'],
-      ['review', null, 'fable@high', 'KIND_RAISES_RIGOR'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['plan_review', null, 'fable@xhigh', 'FRONTIER_REVIEW'],
+      ['implement', 'fable@xhigh', 'opus@xhigh', 'MIGRATION_BUILD'],
+      ['review', null, 'fable@xhigh', 'KIND_RAISES_RIGOR'],
     ],
   },
   {
@@ -441,9 +435,8 @@ const CASES: readonly Case[] = [
     tag: 'security',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
     ],
   },
   {
@@ -453,9 +446,8 @@ const CASES: readonly Case[] = [
     tag: 'auth',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
     ],
   },
   {
@@ -465,9 +457,10 @@ const CASES: readonly Case[] = [
     tag: 'migration',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'KIND_RAISES_RIGOR'],
-      ['plan_review', null, 'fable@high', 'FRONTIER_REVIEW'],
-      ['implement', 'fable@xhigh', 'opus@high', 'MIGRATION_BUILD'],
+      ['plan', null, 'opus@xhigh', 'KIND_RAISES_RIGOR'],
+      ['plan_review', null, 'fable@xhigh', 'FRONTIER_REVIEW'],
+      ['implement', 'fable@xhigh', 'opus@xhigh', 'MIGRATION_BUILD'],
+      ['review', 'fable@high', 'fable@xhigh', 'CAREFUL_UNSCORED'],
     ],
   },
   {
@@ -498,10 +491,9 @@ const CASES: readonly Case[] = [
     tag: 'security',
     rigor: 'careful',
     changes: [
-      ['plan', 'fable@high', 'opus@high', 'KIND_PLAN_OVERRIDE'],
+      ['plan', 'fable@high', 'opus@xhigh', 'KIND_PLAN_OVERRIDE'],
       ['plan_review', 'fable@xhigh', null, 'FULL_IS_CAREFUL'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
       ['qa', 'haiku@medium', null, 'FULL_IS_CAREFUL'],
     ],
   },
@@ -512,10 +504,9 @@ const CASES: readonly Case[] = [
     tag: 'auth',
     rigor: 'careful',
     changes: [
-      ['plan', 'fable@high', 'opus@high', 'KIND_PLAN_OVERRIDE'],
+      ['plan', 'fable@high', 'opus@xhigh', 'KIND_PLAN_OVERRIDE'],
       ['plan_review', 'fable@xhigh', null, 'FULL_IS_CAREFUL'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
       ['qa', 'haiku@medium', null, 'FULL_IS_CAREFUL'],
     ],
   },
@@ -526,8 +517,10 @@ const CASES: readonly Case[] = [
     tag: 'migration',
     rigor: 'careful',
     changes: [
-      ['plan', 'fable@high', 'opus@high', 'KIND_PLAN_OVERRIDE'],
-      ['implement', 'fable@xhigh', 'opus@high', 'MIGRATION_BUILD'],
+      ['plan', 'fable@high', 'opus@xhigh', 'KIND_PLAN_OVERRIDE'],
+      ['plan_review', 'fable@high', 'fable@xhigh', 'CAREFUL_UNSCORED'],
+      ['implement', 'fable@xhigh', 'opus@xhigh', 'MIGRATION_BUILD'],
+      ['review', 'fable@high', 'fable@xhigh', 'CAREFUL_UNSCORED'],
       ['qa', 'haiku@medium', null, 'FULL_IS_CAREFUL'],
     ],
   },
@@ -563,9 +556,8 @@ const CASES: readonly Case[] = [
     tag: 'security',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'FULL_IS_CAREFUL'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['plan', null, 'opus@xhigh', 'FULL_IS_CAREFUL'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
     ],
   },
   {
@@ -575,9 +567,8 @@ const CASES: readonly Case[] = [
     tag: 'auth',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'FULL_IS_CAREFUL'],
-      ['implement', 'sonnet@high', 'opus@high', 'KIND_BUILD_OVERRIDE'],
-      ['review', 'fable@xhigh', 'fable@high', 'FRONTIER_REVIEW'],
+      ['plan', null, 'opus@xhigh', 'FULL_IS_CAREFUL'],
+      ['implement', 'sonnet@high', 'opus@xhigh', 'KIND_BUILD_OVERRIDE'],
     ],
   },
   {
@@ -587,9 +578,10 @@ const CASES: readonly Case[] = [
     tag: 'migration',
     rigor: 'careful',
     changes: [
-      ['plan', null, 'opus@high', 'FULL_IS_CAREFUL'],
-      ['plan_review', null, 'fable@high', 'FRONTIER_REVIEW'],
-      ['implement', 'fable@xhigh', 'opus@high', 'MIGRATION_BUILD'],
+      ['plan', null, 'opus@xhigh', 'FULL_IS_CAREFUL'],
+      ['plan_review', null, 'fable@xhigh', 'FRONTIER_REVIEW'],
+      ['implement', 'fable@xhigh', 'opus@xhigh', 'MIGRATION_BUILD'],
+      ['review', 'fable@high', 'fable@xhigh', 'CAREFUL_UNSCORED'],
     ],
   },
   {
@@ -683,14 +675,6 @@ describe('what a task runs, before and after rigor and kinds', () => {
   it('explains every difference by a line of the design', () => {
     const lines = new Set(CASES.flatMap((c) => c.changes.map(([, , , line]) => line)));
     for (const line of lines) expect(Object.keys(LINES)).toContain(line);
-  });
-
-  it('keeps the differences the Brief does not itemize apart, so they are decided on purpose', () => {
-    const used = new Set(CASES.flatMap((c) => c.changes.map(([, , , line]) => line)));
-    expect([...used].filter((line) => line in NOT_ITEMIZED).sort()).toEqual([
-      'KIND_BUILD_OVERRIDE',
-      'KIND_PLAN_OVERRIDE',
-    ]);
   });
 });
 
@@ -945,6 +929,32 @@ const MOVED_ROWS: readonly MovedRow[] = [
     'full(4)',
     ['plan=opus@low', 'implement=fable@max', 'review=opus@medium', 'qa=sonnet@low'],
     [['qa', 'sonnet@low', null, 'FULL_IS_CAREFUL']],
+  ],
+  ['unmeasured', 'implementer minimum 60', 'quick', ['implement=fable@xhigh'], []],
+  [
+    'unmeasured',
+    'implementer minimum 60',
+    'standard',
+    ['implement=fable@xhigh', 'review=opus@high'],
+    [],
+  ],
+  [
+    'unmeasured',
+    'implementer minimum 60',
+    'standard+dependency',
+    ['implement=fable@xhigh', 'review=opus@high'],
+    [],
+  ],
+  [
+    'unmeasured',
+    'implementer minimum 60',
+    'full(4)',
+    ['plan=opus@high', 'implement=fable@xhigh', 'review=opus@high', 'qa=haiku@medium'],
+    [
+      ['plan', 'opus@high', 'opus@xhigh', 'CAREFUL_UNSCORED'],
+      ['review', 'opus@high', 'opus@xhigh', 'CAREFUL_UNSCORED'],
+      ['qa', 'haiku@medium', null, 'FULL_IS_CAREFUL'],
+    ],
   ],
   ['unmeasured', 'global review tier frontier', 'quick', ['implement=sonnet@high'], []],
   [

@@ -124,9 +124,11 @@ describe('resolveSteps: which steps run', () => {
     ]);
   });
 
-  it('leaves out a plan review that has no plan to judge', () => {
+  it('gives a plan review the plan it judges, when a kind adds one to a row with none', () => {
     const kinds = [kind('migration', { addsSteps: [StepRole.PlanReview] })];
     expect(roles(resolve(Rigor.Standard, scopes(), kinds, ['migration']))).toEqual([
+      'plan',
+      'plan_review',
       'implement',
       'review',
     ]);
@@ -241,19 +243,20 @@ describe('resolveSteps: what a step gets', () => {
     expect(step(Rigor.Careful, StepRole.Review, scopes(), kinds, ['a', 'b']).need).toBe(60);
   });
 
-  it('takes the persona of the first kind in the task’s order that names one', () => {
+  it('takes the persona of the first kind in the builder’s order that names one, not the task’s', () => {
     const [first, second] = [mintId('Persona'), mintId('Persona')];
     const kinds = [
-      kind('a', { overrides: { review: override({ personaId: first }) } }),
-      kind('b', { overrides: { review: override({ personaId: second }) } }),
+      kind('b', { position: 1, overrides: { review: override({ personaId: second }) } }),
+      kind('a', { position: 0, overrides: { review: override({ personaId: first }) } }),
     ];
     const cellPersona: PersonaId = mintId('Persona');
     const playbook = scopes({
       cells: [cell(Rigor.Standard, StepRole.Review, { personaId: cellPersona })],
     });
     expect(step(Rigor.Standard, StepRole.Review, playbook, kinds, ['b', 'a']).personaId).toBe(
-      second,
+      first,
     );
+    expect(step(Rigor.Standard, StepRole.Review, playbook, kinds, ['b']).personaId).toBe(second);
     expect(step(Rigor.Standard, StepRole.Review, playbook, kinds, []).personaId).toBe(cellPersona);
   });
 
@@ -268,6 +271,57 @@ describe('resolveSteps: what a step gets', () => {
     expect(got.requirements).toEqual([{ kind: 'automatic', minimum: 52 }, frontier]);
     expect(got.need).toBe(52);
     expect(got.fallback).toEqual({ tier: 'capable', top: true, effort: 'xhigh' });
+  });
+
+  it('runs a kind’s fixed effort on the rung only when it is higher, and a cell’s own effort may lower it', () => {
+    const kinds = [kind('security', { overrides: { plan: override({ effort: 'high' }) } })];
+    // Careful's rung is one effort up (xhigh): a kind that fixes high never lowers it.
+    expect(step(Rigor.Careful, StepRole.Plan, scopes(), kinds, ['security']).fallback?.effort).toBe(
+      'xhigh',
+    );
+    const lowCell = scopes({ cells: [cell(Rigor.Careful, StepRole.Plan, { effort: 'low' })] });
+    expect(step(Rigor.Careful, StepRole.Plan, lowCell).fallback?.effort).toBe('low');
+    expect(step(Rigor.Careful, StepRole.Plan, lowCell, kinds, ['security']).fallback?.effort).toBe(
+      'high',
+    );
+  });
+
+  it('gives a step a kind added the default cell when no overridden row runs the role', () => {
+    const everyRowImplementsOnly = scopes({
+      rows: [Rigor.Light, Rigor.Standard, Rigor.Careful, Rigor.Critical].map((r) =>
+        row(r, StepRole.Implement),
+      ),
+    });
+    const kinds = [kind('checked', { addsSteps: [StepRole.Qa] })];
+    const got = step(Rigor.Light, StepRole.Qa, everyRowImplementsOnly, kinds, ['checked']);
+    expect(got.need).toBe(35);
+    expect(got.fallback).not.toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'a higher minimum raises the rung to the top of Capable, one effort up',
+      rigor: Rigor.Light,
+      minimum: 50,
+      raised: true,
+    },
+    { name: 'a higher minimum on a Careful cell', rigor: Rigor.Careful, minimum: 60, raised: true },
+    {
+      name: 'the cell’s own minimum keeps the rung',
+      rigor: Rigor.Light,
+      minimum: 35,
+      raised: false,
+    },
+    { name: 'a lower minimum keeps the rung', rigor: Rigor.Light, minimum: 20, raised: false },
+  ])('$name', ({ rigor, minimum, raised }) => {
+    const playbook = scopes({
+      cells: [cell(rigor, StepRole.Implement, { model: { kind: 'automatic', minimum } })],
+    });
+    const got = step(rigor, StepRole.Implement, playbook);
+    const plain = step(rigor, StepRole.Implement, scopes());
+    expect(got.fallback).toEqual(
+      raised ? { tier: 'capable', top: true, effort: 'xhigh' } : plain.fallback,
+    );
   });
 
   it('gives a kind’s override of a role the rigor does not run no step', () => {

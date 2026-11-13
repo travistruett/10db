@@ -37,7 +37,10 @@ export interface ChooseInput {
   readonly requirements: readonly ModelSetting[];
   /** The effort the playbook fixes for the step; null leaves it to the router. */
   readonly effort: Effort | null;
-  /** The rung to run on when no profile has a score; null runs the role's default. */
+  /**
+   * The rung to run on when no profile has a score, with the effort it runs at: the cell's, or the rung's own
+   * raised by the kinds'. Null runs the role's default tier at the effort above, when one is fixed.
+   */
   readonly fallback: FallbackRung | null;
   /** The playbook cell names one model: the result is pinned when that model is what runs. */
   readonly pinned: boolean;
@@ -101,7 +104,11 @@ const describeSetting = (setting: ModelSetting): string => {
 
 /** Whether `a` is stronger than `b`: higher Intelligence when both are scored, else the higher rung, the dearer, then the higher effort. */
 function stronger(a: ModelChoice, b: ModelChoice): boolean {
-  if (a.profile === null || b.profile === null) return a.profile !== null && b.profile === null;
+  if (a.profile === null || b.profile === null) {
+    // A choice with no profile is a tier's override launched as named: the higher tier still wins.
+    const tiers = tierLevel(a.tier) - tierLevel(b.tier);
+    return tiers === 0 ? a.profile !== null && b.profile === null : tiers > 0;
+  }
   const [x, y] = [a.profile, b.profile];
   const [sx, sy] = [x.scores.intelligence, y.scores.intelligence];
   if (sx !== null && sy !== null && sx !== sy) return sx > sy;
@@ -125,11 +132,11 @@ export function chooseModel(input: ChooseInput): ModelChoice {
   const rung: FallbackRung = input.fallback ?? {
     tier: ROLE_DEFAULT[def.role].tier,
     top: false,
-    effort: ROLE_DEFAULT[def.role].effort,
+    effort: input.effort ?? ROLE_DEFAULT[def.role].effort,
   };
   const fixed = input.task.effortPin ?? input.effort;
-  const effort = fixed ?? rung.effort;
-
+  // The rung carries its own effort, already raised by the kinds of the task; only the task's pin overrides it.
+  const effort = input.task.effortPin ?? rung.effort;
   const asked: { readonly settings: readonly ModelSetting[]; readonly source: string | null } =
     input.startOverTier !== undefined
       ? {
@@ -175,15 +182,15 @@ export function chooseModel(input: ChooseInput): ModelChoice {
 
   /** The profile of a pool for the step: by score when asked to and the pool carries one, else by the rung. */
   const pickIn = (pool: TierPool, top: boolean): Made | undefined => {
-    const considered = atFixed(top ? topModel(pool.profiles) : pool.profiles);
-    if (!byScore) return byRung(pool, considered, top, '');
+    const profiles = top ? topModel(pool.profiles) : pool.profiles;
+    if (!byScore) return byRung(pool, profiles, top, '');
     try {
-      return scored(considered);
+      return scored(atFixed(profiles));
     } catch (error) {
       if (!(error instanceof UnmeasuredError)) throw error;
       return byRung(
         pool,
-        considered,
+        profiles,
         top,
         '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
       );
@@ -315,7 +322,11 @@ export function chooseModel(input: ChooseInput): ModelChoice {
   }
   return {
     ...best,
+    // Only the cell's own pin is held; a task's setting or a refused model's tier is not the cell's.
     pinned:
-      input.pinned && best.setting.kind === 'model' && best.profile?.model === best.setting.model,
+      input.pinned &&
+      asked.source === null &&
+      best.setting.kind === 'model' &&
+      best.profile?.model === best.setting.model,
   };
 }
