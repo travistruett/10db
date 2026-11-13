@@ -61,7 +61,9 @@ describe('typicalDecisionTokens', () => {
     },
     { name: 'no calls at all: the fallback', stats: [], expected: TYPICAL_TOKENS_FALLBACK },
   ])('$name', ({ stats, expected }) => {
-    expect(typicalDecisionTokens(stats, (m) => prices[m] ?? null)).toBeCloseTo(expected, 6);
+    const typical = typicalDecisionTokens(stats, (m) => prices[m] ?? null);
+    expect(typical.tokens).toBeCloseTo(expected, 6);
+    expect(typical.assumed).toBe(expected === TYPICAL_TOKENS_FALLBACK);
   });
 });
 

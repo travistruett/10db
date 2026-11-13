@@ -7,9 +7,4 @@ export {
   type JudgeService,
 } from './judge';
 export { createDecisionModelList, type DecisionModelList } from './decision-model-list';
-export {
-  TYPICAL_TOKENS_FALLBACK,
-  decisionModelNumbers,
-  measuredDecisionTokens,
-  typicalDecisionTokens,
-} from './decision-model-numbers';
+export { decisionModelNumbers, typicalDecisionTokens } from './decision-model-numbers';

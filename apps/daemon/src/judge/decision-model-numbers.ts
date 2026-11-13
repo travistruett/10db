@@ -5,14 +5,14 @@ import type { JudgeCallModelStat } from '@10db/db';
 export const TYPICAL_TOKENS_FALLBACK = 300;
 
 /**
- * The input tokens of a typical decision as this builder's calls show: the cost logged over the price of a
- * token, summed over the models that charge and logged a cost. A model priced at nothing says nothing about
- * size, and is skipped rather than divided by. Null when no call can say.
+ * The input tokens of a typical decision: as this builder's calls show them, the cost logged over the price of
+ * a token, summed over the models that charge and logged a cost; else a fixed guess, said to be assumed. A model
+ * priced at nothing says nothing about size, and is skipped rather than divided by.
  */
-export function measuredDecisionTokens(
+export function typicalDecisionTokens(
   stats: readonly JudgeCallModelStat[],
   inputPricePerMillion: (model: string) => number | null,
-): number | null {
+): { readonly tokens: number; readonly assumed: boolean } {
   let cost = 0;
   let pricedTokensWorth = 0;
   for (const stat of stats) {
@@ -21,15 +21,9 @@ export function measuredDecisionTokens(
     cost += stat.totalCostUsd;
     pricedTokensWorth += (price / 1_000_000) * stat.costedCalls;
   }
-  return pricedTokensWorth > 0 && cost > 0 ? cost / pricedTokensWorth : null;
-}
-
-/** A typical decision's input tokens: the builder's own, else a fixed guess. */
-export function typicalDecisionTokens(
-  stats: readonly JudgeCallModelStat[],
-  inputPricePerMillion: (model: string) => number | null,
-): number {
-  return measuredDecisionTokens(stats, inputPricePerMillion) ?? TYPICAL_TOKENS_FALLBACK;
+  return pricedTokensWorth > 0 && cost > 0
+    ? { tokens: cost / pricedTokensWorth, assumed: false }
+    : { tokens: TYPICAL_TOKENS_FALLBACK, assumed: true };
 }
 
 /**

@@ -34,8 +34,7 @@ import type { StateStore } from '../events';
 import {
   decisionModelNumbers,
   JUDGE_LOG_RETENTION_MS,
-  measuredDecisionTokens,
-  TYPICAL_TOKENS_FALLBACK,
+  typicalDecisionTokens,
   type DecisionModelList,
   type JudgeService,
 } from '../judge';
@@ -134,8 +133,7 @@ export function createJudgeServices(deps: {
     );
     const priceOf = (model: string): number | null =>
       list.models.find((m) => m.id === model)?.inputUsdPerMillion ?? null;
-    const measured = measuredDecisionTokens(stats, priceOf);
-    const tokens = measured ?? TYPICAL_TOKENS_FALLBACK;
+    const typical = typicalDecisionTokens(stats, priceOf);
     const byModel = new Map(stats.map((s) => [s.model, s]));
     const measures = listOpenRouterMeasures(deps.state.db);
     return {
@@ -145,12 +143,12 @@ export function createJudgeServices(deps: {
         ...decisionModelNumbers(
           model,
           byModel.get(model.id),
-          tokens,
+          typical.tokens,
           openRouterLatencyMs(
             measures.filter((m) => m.id === model.id),
             now,
           ),
-          measured === null,
+          typical.assumed,
         ),
       })),
     };
