@@ -3,9 +3,9 @@ import { lstat, mkdir, open, readdir, readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { InvalidError, type PlanExportResult, type ShapeId } from '@10db/contracts';
 import type { DbReader } from '@10db/db';
-import { equalOrUnder } from '../git';
 import { realPathOf } from '../guard';
 import { exportLayout } from './export-layout';
+import { daemonRoots, forbiddenPlaceOf } from './forbidden-places';
 import { readRecordForExport } from './lookup';
 
 // Exporting a Plan's record as Markdown, only ever outside every checkout, 10db's own roots and any
@@ -21,11 +21,12 @@ export interface ExportForbidden {
   readonly sandboxRoots: readonly string[];
 }
 
-function realOrResolved(path: string): string {
+/** The real path a folder names, made or not yet; a folder that can't be resolved is refused. */
+function realFolderOf(dir: string): string {
   try {
-    return realPathOf(path);
+    return realPathOf(dir);
   } catch {
-    return resolve(path);
+    throw new InvalidError(`${dir} could not be resolved`);
   }
 }
 
@@ -40,18 +41,15 @@ async function exists(path: string): Promise<boolean> {
 
 /** Refuses a folder at or under any forbidden place, read both as written and as the kernel opens it. */
 function refuseForbidden(dir: string, real: string, forbidden: ExportForbidden): void {
-  const places: [string, string][] = [
-    ...forbidden.checkouts.map((p): [string, string] => [p, 'a registered checkout']),
-    [forbidden.worktreeRoot, "10db's worktree root"],
-    [forbidden.dataDir, "10db's data dir"],
-    ...forbidden.sandboxRoots.map((p): [string, string] => [p, 'a sandbox root']),
-  ];
-  for (const [place, what] of places) {
-    const readings = new Set([resolve(place), realOrResolved(place)]);
-    for (const reading of readings)
-      if (equalOrUnder(real, reading) || equalOrUnder(resolve(dir), reading))
-        throw new InvalidError(`${real} lies at or under ${what} (${place})`);
-  }
+  const place = forbiddenPlaceOf(
+    [real, resolve(dir)],
+    [
+      ...forbidden.checkouts.map((path) => ({ path, what: 'a registered checkout' })),
+      ...daemonRoots(forbidden),
+    ],
+  );
+  if (place !== null)
+    throw new InvalidError(`${real} lies at or under ${place.what} (${place.path})`);
 }
 
 /** Refuses a folder in a git work tree: a `.git`, folder or file, at it or any folder above it. */
@@ -91,7 +89,7 @@ export async function exportPlan(
 ): Promise<PlanExportResult> {
   const { dir, shapeId } = input;
   if (!isAbsolute(dir)) throw new InvalidError('The export folder must be an absolute path');
-  const real = realOrResolved(dir);
+  const real = realFolderOf(dir);
   refuseForbidden(dir, real, input.forbidden);
   await refuseGitTree(real);
   if (await exists(real)) {

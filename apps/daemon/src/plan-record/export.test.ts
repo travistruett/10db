@@ -129,6 +129,14 @@ describe('exportPlan', () => {
     expect(await refused(join(root.path, 'sandbox', 'x'))).toMatch(/sandbox/);
   });
 
+  it('a folder that cannot be resolved is refused, even one that would reach the data dir', async () => {
+    const link = join(root.path, 'ln');
+    symlinkSync(forbidden.dataDir, link);
+    // `join` would fold the `..` away; the kernel follows the link before it.
+    expect(await refused(`${link}/missing/../exports`)).toMatch(/could not be resolved/);
+    expect(readdirSync(forbidden.dataDir)).toEqual([]);
+  });
+
   it('a git work tree 10db doesn’t know is refused', async () => {
     const repo = createTempRepo();
     try {
