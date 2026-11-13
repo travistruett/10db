@@ -27,7 +27,7 @@ const keepEnd = (text: string): string =>
   text.length <= BUILDER_RUN_MAX_CHARS ? text : text.slice(-BUILDER_RUN_MAX_CHARS);
 
 /** How long a call the builder allowed may run before 10db stops it and what it started. */
-export const BUILDER_RUN_TIMEOUT_MS = 10 * 60_000;
+const BUILDER_RUN_TIMEOUT_MS = 10 * 60_000;
 
 /** The exit code of a call 10db stopped, at its deadline or with its session, as `timeout` gives. */
 const STOPPED_EXIT_CODE = 124;
@@ -140,6 +140,15 @@ export interface PassGitSandbox {
 
 const withoutSecrets = (env: Readonly<Record<string, string>>): Record<string, string> =>
   Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_VARIABLES.includes(name)));
+
+/** A path's real path, or the path itself when it has none. */
+function realOr(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
 
 /** The builder's global git config, as git finds it: `~/.gitconfig`, else the XDG one. */
 function globalGitConfig(home: string, env: Readonly<Record<string, string>>): string | null {
@@ -330,7 +339,8 @@ async function runContained(
       command,
       approvedGit: {
         gitDir: place.gitDir,
-        globalConfig: identity === null ? [] : [identity],
+        // A dotfiles link opens the file it leads to as well; the builder's home is no lane's to write.
+        globalConfig: identity === null ? [] : [...new Set([identity, realOr(identity)])],
         keptBranches,
       },
     });

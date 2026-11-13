@@ -24,7 +24,7 @@ import { silentLogger } from '../log';
 import { createGateSandbox } from '../sandbox';
 import { createGit } from './git';
 import { ManualClock } from '../clock';
-import { BUILDER_RUN_TIMEOUT_MS, runPassGit, type PassGitSandbox } from './run-as-builder';
+import { runPassGit, type PassGitSandbox } from './run-as-builder';
 import { resolveGit } from './version';
 
 // A pass's commit, push or merge runs once the builder allows it, so nothing a lane could plant in
@@ -332,7 +332,7 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
         const pid = Number(
           await waitFor(() => existsSync(child) && readFileSync(child, 'utf8').trim()),
         );
-        if (when === 'the deadline') clock.advance(BUILDER_RUN_TIMEOUT_MS);
+        if (when === 'the deadline') clock.advance(10 * 60_000);
         else session.abort();
         const ran = await pending;
         expect(ran).toMatchObject({ exitCode: 124 });
