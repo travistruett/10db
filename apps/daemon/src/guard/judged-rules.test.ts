@@ -178,6 +178,7 @@ const SHELL_ROWS: readonly Row[] = [
   bash('sudo inside backticks', "echo `s''udo ls` | sh", 'deny', 'deny'),
   bash('sudo split by an escape and a substitution', "echo $'\\x73'$()udo ls | sh", 'deny', 'deny'),
   bash('sudo beside a decoded substitution', "echo $'\\x24(x)'s''udo ls | sh", 'deny', 'deny'),
+  bash('sudo split by a decoded substitution', "echo $'s\\x24(x)'udo ls | sh", 'deny', 'deny'),
   bash('a read that names sudo', 'grep sudo notes.txt', 'allow', 'allow'),
   bash('rm -r of .git', 'rm -r .git', 'deny', 'deny'),
   bash('rm -r outside the repository', 'rm -r ../other', 'deny', 'deny'),

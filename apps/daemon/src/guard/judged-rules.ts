@@ -92,8 +92,8 @@ function decodedAnsiC(text: string): string {
 
 /**
  * The text with each `$(…)`, backtick pair and `${…}` dropped with what it holds (empty or not,
- * nested ones from the inside out). Run only on text as written, never on decoded text, whose `$(`
- * a shell reads as data.
+ * nested ones from the inside out). Decoded text is read this way too: a shell that a decoded word
+ * is fed to (`echo $'s\x24(x)'udo | sh`) expands it.
  */
 function withoutExpansions(text: string): string {
   let current = text;
@@ -115,16 +115,18 @@ function sudoReadings(command: string): string[] {
     command,
     withoutQuotes(command),
     withoutQuotes(decodedAnsiC(command)),
+    withoutQuotes(withoutExpansions(decodedAnsiC(command))),
     withoutQuotes(dropped),
     withoutQuotes(decodedAnsiC(dropped)),
+    withoutQuotes(withoutExpansions(decodedAnsiC(dropped))),
   ];
 }
 
 /**
  * Whether the command text holds `sudo` as a word in any of its readings (`sudoReadings`), so
- * `s''udo`, `s$()udo`, `s${x}udo` and `$'\x73udo'` count too. A word built at run time (a
- * decode-and-run, a substitution that prints part of it) is not read: there the bound is the
- * classifier and sudo's password prompt, which a session can't answer.
+ * `s''udo`, `s$()udo`, `s${x}udo` and `$'\x73udo'` count too. No further spelling is read (a
+ * decode-and-run, a substitution that prints part of the word, base64): for those the bound is the
+ * classifier plus sudo's password prompt, which a session can't answer.
  */
 export function namesSudo(command: string): boolean {
   return sudoReadings(command).some((reading) => NAMES_SUDO.test(reading));
