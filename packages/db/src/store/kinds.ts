@@ -6,10 +6,8 @@ import {
   KindPatch,
   mintId,
   NotFoundError,
-  effectiveRigor,
   type KindDto,
   type KindId,
-  type Rigor,
   type TaskKind,
 } from '@10db/contracts';
 import { asc, eq, max } from 'drizzle-orm';
@@ -115,20 +113,17 @@ export function moveKind(ctx: WriteContext, id: KindId, position: number): KindD
   return listKinds(ctx.tx);
 }
 
-/** Refuses a task kind whose key no kind has, and keeps the first of a key given twice. */
-export function checkTaskKinds(db: DbReader, kinds: readonly TaskKind[]): TaskKind[] {
-  const known = new Set(listKinds(db).map((k) => k.key));
+/**
+ * Refuses a task kind whose key no kind has, and keeps the first of a key given twice. A key the task
+ * already has stays allowed after its kind is deleted, so editing a task never fails on an old kind.
+ */
+export function checkTaskKinds(
+  db: DbReader,
+  kinds: readonly TaskKind[],
+  held: readonly TaskKind[] = [],
+): TaskKind[] {
+  const known = new Set([...listKinds(db).map((k) => k.key), ...held.map((k) => k.key)]);
   const unknown = kinds.filter((k) => !known.has(k.key)).map((k) => k.key);
   if (unknown.length > 0) throw new InvalidError(`Unknown kinds: ${unknown.join(', ')}`);
   return kinds.filter((k, i) => kinds.findIndex((other) => other.key === k.key) === i);
-}
-
-/** The rigor a task runs at (`effectiveRigor`), reading the kinds from the database. */
-export function effectiveRigorOf(
-  db: DbReader,
-  projectDefault: Rigor,
-  rigor: Rigor | null,
-  taskKinds: readonly TaskKind[],
-): Rigor {
-  return effectiveRigor({ rigor, projectDefault, taskKinds, kinds: listKinds(db) });
 }

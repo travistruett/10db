@@ -6,6 +6,7 @@ import {
   ConflictError,
   DEFAULT_BOARD_COLUMN,
   Delivery,
+  effectiveRigor,
   EventType,
   InvalidError,
   isTerminal,
@@ -27,6 +28,7 @@ import {
   WorkstreamId,
   WorkstreamState,
   type GoalId,
+  type KindDto,
   type BoardColumnId,
   type CiStopped,
   type PassId,
@@ -45,7 +47,7 @@ import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
-import { checkTaskKinds, effectiveRigorOf } from './kinds';
+import { checkTaskKinds, listKinds } from './kinds';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -622,16 +624,26 @@ function passHolds(db: DbReader, passId: PassId | null): boolean {
   return pass !== undefined && passHoldsTasks(pass.state);
 }
 
-function projectDefaultRigor(db: DbReader, projectId: ProjectId): Rigor {
+/** What a task's effective rigor reads besides the task: the kinds and its project's default. */
+interface RigorInputs {
+  readonly kinds: readonly KindDto[];
+  readonly projectDefault: Rigor;
+}
+
+function rigorInputs(db: DbReader, projectId: ProjectId): RigorInputs {
   const row = db
     .select({ defaultRigor: schema.projects.defaultRigor })
     .from(schema.projects)
     .where(eq(schema.projects.id, projectId))
     .get();
-  return row?.defaultRigor ?? Rigor.Standard;
+  return { kinds: listKinds(db), projectDefault: row?.defaultRigor ?? Rigor.Standard };
 }
 
-function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
+function toTaskDto(
+  db: DbReader,
+  row: typeof schema.tasks.$inferSelect,
+  inputs: RigorInputs = rigorInputs(db, row.projectId),
+): TaskDto {
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
     .from(schema.taskDeps)
@@ -664,12 +676,12 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     riskTags: row.riskTags,
     flowId: row.flowId,
     rigor: row.rigor,
-    effectiveRigor: effectiveRigorOf(
-      db,
-      projectDefaultRigor(db, row.projectId),
-      row.rigor,
-      row.kinds,
-    ),
+    effectiveRigor: effectiveRigor({
+      rigor: row.rigor,
+      projectDefault: inputs.projectDefault,
+      taskKinds: row.kinds,
+      kinds: inputs.kinds,
+    }),
     kinds: row.kinds,
     effortPin: row.effortPin,
     landing: landingOf(row),
@@ -708,6 +720,7 @@ export function getTask(db: DbReader, id: TaskId): TaskDto {
 
 /** The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed. */
 export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
+  const inputs = rigorInputs(db, projectId);
   return db
     .select()
     .from(schema.tasks)
@@ -716,7 +729,7 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
     )
     .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
     .all()
-    .map((row) => toTaskDto(db, row));
+    .map((row) => toTaskDto(db, row, inputs));
 }
 
 /**
@@ -1035,7 +1048,8 @@ export function patchTask(
   proposed?: Placement,
 ): TaskDto {
   const changes = TaskPatch.parse(patch);
-  if (changes.kinds !== undefined) changes.kinds = checkTaskKinds(ctx.tx, changes.kinds);
+  if (changes.kinds !== undefined)
+    changes.kinds = checkTaskKinds(ctx.tx, changes.kinds, getTask(ctx.tx, id).kinds);
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
   if (changes.flowId) getFlow(ctx.tx, changes.flowId);

@@ -7,15 +7,7 @@ import {
   type TaskKind,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  checkTaskKinds,
-  deleteKind,
-  effectiveRigorOf,
-  insertKind,
-  listKinds,
-  moveKind,
-  patchKind,
-} from './kinds';
+import { checkTaskKinds, deleteKind, insertKind, listKinds, moveKind, patchKind } from './kinds';
 import type { Store } from './store';
 import { createTestStore } from './test-support';
 
@@ -115,14 +107,5 @@ describe('kinds', () => {
     expect(() => checkTaskKinds(store.db, [{ key: 'nope', source: 'agent' }])).toThrow(
       InvalidError,
     );
-  });
-});
-
-describe('effectiveRigorOf', () => {
-  it('reads the kinds from the database: a kind raises a default below its minimum', () => {
-    add('security', { minimumRigor: Rigor.Careful });
-    const kinds: TaskKind[] = [{ key: 'security', source: 'agent' }];
-    expect(effectiveRigorOf(store.db, 'light', null, kinds)).toBe('careful');
-    expect(effectiveRigorOf(store.db, 'light', null, [])).toBe('light');
   });
 });

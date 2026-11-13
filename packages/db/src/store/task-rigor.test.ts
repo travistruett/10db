@@ -1,10 +1,10 @@
 import { InvalidError, Rigor } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { insertKind } from './kinds';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { deleteKind, insertKind } from './kinds';
 import { getProject, patchProject } from './projects';
 import { getShape, insertShape } from './shapes';
 import type { Store } from './store';
-import { getTask, insertTask, patchTask } from './tasks';
+import { getTask, insertTask, listTasks, patchTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
@@ -80,6 +80,41 @@ describe('a task carries its rigor, kinds and effort pin', () => {
     expect(() =>
       store.write((ctx) => patchTask(ctx, task.id, { kinds: [{ key: 'nope', source: 'agent' }] })),
     ).toThrow(InvalidError);
+  });
+
+  it('lets a task keep a kind the builder has deleted, and refuses it on any other task', () => {
+    const project = seedProject(store);
+    const kind = store.write((ctx) => insertKind(ctx, { key: 'ui', label: 'UI' })).value;
+    const kept = store.write((ctx) =>
+      insertTask(ctx, project.id, { ...brief, kinds: [{ key: 'ui', source: 'builder' }] }),
+    ).value;
+    const other = store.write((ctx) => insertTask(ctx, project.id, brief)).value;
+    store.write((ctx) => {
+      deleteKind(ctx, kind.id);
+    });
+    const patched = store.write((ctx) =>
+      patchTask(ctx, kept.id, { effortPin: 'low', kinds: [{ key: 'ui', source: 'builder' }] }),
+    ).value;
+    expect(patched.kinds).toEqual([{ key: 'ui', source: 'builder' }]);
+    expect(() =>
+      store.write((ctx) => patchTask(ctx, other.id, { kinds: [{ key: 'ui', source: 'agent' }] })),
+    ).toThrow(InvalidError);
+  });
+
+  it('reads the kinds and the project’s default rigor once for a whole list', () => {
+    const project = seedProject(store);
+    store.write((ctx) => insertKind(ctx, { key: 'ui', label: 'UI' }));
+    for (let i = 0; i < 4; i += 1)
+      store.write((ctx) =>
+        insertTask(ctx, project.id, { ...brief, kinds: [{ key: 'ui', source: 'agent' }] }),
+      );
+    const prepared = vi.spyOn(store.db.$client, 'prepare');
+    const tasks = listTasks(store.db, project.id);
+    const reads = (table: string) =>
+      prepared.mock.calls.filter(([sql]) => sql.includes(`from "${table}"`)).length;
+    expect(tasks.map((t) => t.effectiveRigor)).toEqual(tasks.map(() => 'standard'));
+    expect(reads('kinds')).toBe(1);
+    expect(reads('projects')).toBe(1);
   });
 
   it('starts a conversation with no effort', () => {
