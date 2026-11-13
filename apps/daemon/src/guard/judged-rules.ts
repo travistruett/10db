@@ -80,27 +80,52 @@ const INNERMOST_EXPANSION = /\$\([^()]*\)|\$\{[^{}]*\}|`[^`]*`/g;
 /** Enough rounds for any nest a person writes; a deeper one keeps what is left as text. */
 const EXPANSION_ROUNDS = 32;
 
-/**
- * The text as the shell may join it into one word: each ANSI-C `$'…'` decoded, each `$(…)`,
- * backtick pair and `${…}` dropped with what it holds (empty or not, nested ones from the inside
- * out), then every quote, a locale quote's `$` and backslash taken out.
- */
-function joinedText(command: string): string {
-  let text = command.replaceAll(ANSI_C_WORD, (_, body: string) => decodeAnsiC(body).text);
-  for (let round = 0; round < EXPANSION_ROUNDS; round += 1) {
-    const dropped = text.replaceAll(INNERMOST_EXPANSION, '');
-    if (dropped === text) break;
-    text = dropped;
-  }
+/** The text with every quote, a locale quote's `$` and backslash taken out. */
+function withoutQuotes(text: string): string {
   return text.replaceAll(/\$(?=")|['"\\]/g, '');
 }
 
+/** The text with each ANSI-C `$'…'` word replaced by what it decodes to. */
+function decodedAnsiC(text: string): string {
+  return text.replaceAll(ANSI_C_WORD, (_, body: string) => decodeAnsiC(body).text);
+}
+
 /**
- * Whether the command text holds `sudo` as a word, read as the shell may join it (`joinedText`),
- * so `s''udo`, `s$()udo`, `s${x}udo` and `$'\x73udo'` count too. A word built at run time (a
+ * The text with each `$(…)`, backtick pair and `${…}` dropped with what it holds (empty or not,
+ * nested ones from the inside out). Run only on text as written, never on decoded text, whose `$(`
+ * a shell reads as data.
+ */
+function withoutExpansions(text: string): string {
+  let current = text;
+  for (let round = 0; round < EXPANSION_ROUNDS; round += 1) {
+    const dropped = current.replaceAll(INNERMOST_EXPANSION, '');
+    if (dropped === current) break;
+    current = dropped;
+  }
+  return current;
+}
+
+/**
+ * The readings of the text in which a shell may join `sudo` into one word. Each is read on its own,
+ * so a reading only adds a match: dropping an expansion never hides what another reading sees.
+ */
+function sudoReadings(command: string): string[] {
+  const dropped = withoutExpansions(command);
+  return [
+    command,
+    withoutQuotes(command),
+    withoutQuotes(decodedAnsiC(command)),
+    withoutQuotes(dropped),
+    withoutQuotes(decodedAnsiC(dropped)),
+  ];
+}
+
+/**
+ * Whether the command text holds `sudo` as a word in any of its readings (`sudoReadings`), so
+ * `s''udo`, `s$()udo`, `s${x}udo` and `$'\x73udo'` count too. A word built at run time (a
  * decode-and-run, a substitution that prints part of it) is not read: there the bound is the
  * classifier and sudo's password prompt, which a session can't answer.
  */
 export function namesSudo(command: string): boolean {
-  return NAMES_SUDO.test(command) || NAMES_SUDO.test(joinedText(command));
+  return sudoReadings(command).some((reading) => NAMES_SUDO.test(reading));
 }
