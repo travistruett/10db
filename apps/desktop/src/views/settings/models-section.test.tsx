@@ -7,7 +7,7 @@ import {
   type ModelProfileDto,
   type ModelRowDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
@@ -383,6 +383,30 @@ describe('the Models page', () => {
     healthy = true;
     fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
     expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+  });
+
+  it('keeps a loaded page when a later read of the accounts fails, as during a daemon restart', async () => {
+    serve();
+    let down = false;
+    server.use(
+      http.get(daemonUrl('/accounts'), () =>
+        down
+          ? HttpResponse.json({ error: 'internal', message: 'Accounts are down' }, { status: 500 })
+          : HttpResponse.json([SUBSCRIPTION, KEYED]),
+      ),
+    );
+    const { queryClient } = renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    down = true;
+    await queryClient.refetchQueries({ queryKey: ['accounts'] });
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['accounts'])?.status).toBe('error');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    expect(screen.queryByText('Accounts are down')).toBeNull();
   });
 
   it('shows the daemon’s message when the picks cannot be read, and Try Again reads them again', async () => {

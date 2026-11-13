@@ -149,7 +149,8 @@ export function ModelsSection() {
         <Text c="dimmed">Reading accounts…</Text>
       </Stack>
     );
-  if (accounts.isError)
+  // A failed background read keeps the accounts already shown, as during a daemon restart.
+  if (accounts.isError && accounts.data === undefined)
     return (
       <Stack>
         {header}
