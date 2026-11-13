@@ -5,7 +5,8 @@ import {
   type TaskFileId,
   type TaskMessageId,
 } from '@10db/contracts';
-import { listTaskThreadRows, type DbReader, type TaskFileRow, type TaskMessageRow } from '@10db/db';
+import { listTaskThreadRows, type DbReader, type TaskFileRow } from '@10db/db';
+import type { DeliverableMessage } from '../conversation';
 
 // Workbench spec §6.3: how a task's thread reads to a lane session. A picture the builder pasted is
 // named by where it is kept, which the session's Read may open (§13); only a message sent now carries
@@ -22,7 +23,7 @@ const REPEAT_LINE =
   '(10db may send a message again: one with the same id as a message you have seen is the same message, so act on it once.)';
 
 /** What a fresh session is told of a picture it does not hold. */
-const pictureLine = (file: TaskFileRow): string =>
+const pictureLine = (file: Pick<TaskFileRow, 'name' | 'storedPath'>): string =>
   `[Picture ${file.name}, kept at ${file.storedPath}: Read it to see it.]`;
 
 /**
@@ -30,7 +31,7 @@ const pictureLine = (file: TaskFileRow): string =>
  * The pictures in `asBlocks` go with it as image blocks; any other is named by its path.
  */
 export function builderMessageText(
-  message: TaskMessageRow,
+  message: DeliverableMessage,
   asBlocks: ReadonlySet<TaskFileId>,
 ): string {
   const attached = message.files.filter((file) => asBlocks.has(file.id));

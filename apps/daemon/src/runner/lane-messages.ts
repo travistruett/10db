@@ -1,30 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import {
-  idUuid,
   TaskMessageAuthor,
   TaskMessageKind,
-  type TaskFileId,
   type TaskId,
   type TaskMessageId,
 } from '@10db/contracts';
 import {
-  findTaskMessageByUuid,
-  getTaskMessageRow,
-  listTaskFileRows,
   listTaskThreadRows,
-  listUndeliveredTaskMessages,
-  markTaskFilesInline,
-  markTaskMessagePushedUnder,
-  markTaskMessagesDelivered,
-  markTaskMessagesHandedBack,
+  taskConversationOf,
   type DbReader,
   type TaskMessageRow,
 } from '@10db/db';
+import {
+  createDelivery,
+  outgoingMessage as deliveryOutgoing,
+  type OutgoingMessage as DeliveryOutgoingMessage,
+  type PictureLimits,
+} from '../conversation';
 import type { StateStore } from '../events';
-import type { SessionHandle, ShapeImage } from '../sessions';
+import type { SessionHandle } from '../sessions';
 import { builderMessageText } from '../thread';
-import { blockPictures, heldInlineBytes, type PictureLimits } from '../conversation';
 
 // Workbench spec §6.3. A builder message is pushed to a lane session under a client uuid, and is
 // delivered only when a turn is seen to take it: pushing puts it in a channel in the daemon's memory,
@@ -48,47 +43,12 @@ export function untakenMessages(reader: DbReader, taskId: TaskId): TaskMessageId
 }
 
 /** A builder message as a session takes it: its text, its pictures that go as blocks, its uuid. */
-export interface OutgoingMessage {
-  readonly text: string;
-  readonly images: readonly ShapeImage[];
-  readonly uuid: string;
-  /** The pictures sent as blocks, which the live session's history now holds. */
-  readonly blocks: readonly TaskFileId[];
-}
+export type OutgoingMessage = DeliveryOutgoingMessage;
 
 /**
- * The picture as a block, its bytes with the file they were read from, or null when they can no
- * longer be read: it then goes as its path.
- */
-function asBlock(file: TaskMessageRow['files'][number]): ShapeImage | null {
-  try {
-    return {
-      mediaType: file.mediaType,
-      data: readFileSync(file.storedPath).toString('base64'),
-      path: file.storedPath,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The client uuid a push of the message goes under: its row's, the first time it is pushed anywhere,
- * else a new one, since the conversation may already hold the row's (a message handed back is no
- * longer pushed, but went under it).
- */
-function clientUuid(message: TaskMessageRow): string {
-  return message.pushedAt === null && message.pushUuids.length === 0
-    ? idUuid(message.id)
-    : randomUUID();
-}
-
-/**
- * The message as the session is sent it: each picture that fits as a block after `spent` bytes the
- * session already holds goes as one, and the others are named by the paths the session reads. A
- * picture the session already holds as a block (`inline_sent`, as when its message is pushed again)
- * goes by its path, so the session never holds a copy the thread's budget does not count. An agent
- * that reads each picture from its file (`readsPictureFiles`, Codex) is sent every one so.
+ * The message as the session is sent it, in the thread's words: each picture that fits as a block
+ * after `spent` bytes the session already holds goes as one, and the others are named by their paths
+ * (the conversation library's `outgoingMessage`).
  */
 export function outgoingMessage(
   message: TaskMessageRow,
@@ -96,38 +56,14 @@ export function outgoingMessage(
   limits: PictureLimits,
   readsPictureFiles = false,
 ): OutgoingMessage {
-  const chosen = readsPictureFiles
-    ? new Set(message.files.map((file) => file.id))
-    : blockPictures(
-        message.files.filter((file) => !file.inlineSent),
-        spent,
-        limits,
-      );
-  const blocks = message.files.flatMap((file) => {
-    if (!chosen.has(file.id)) return [];
-    const image = asBlock(file);
-    return image === null ? [] : [{ id: file.id, image }];
-  });
-  return {
-    text: builderMessageText(message, new Set(blocks.map((b) => b.id))),
-    images: blocks.map((b) => b.image),
-    uuid: clientUuid(message),
-    blocks: blocks.map((b) => b.id),
-  };
-}
-
-/**
- * The messages to push again after an interrupt, among those pushed and not delivered: one the
- * receipt names as still queued (`stillQueued`) runs as the next turn's start; one it does not name
- * may have been lost with the interrupted turn. With no receipt (null), every one is pushed again,
- * which at-least-once delivery allows: the message's id travels in its text.
- */
-function pushedAgainAfter(
-  undelivered: readonly TaskMessageRow[],
-  stillQueued: ReadonlySet<TaskMessageId> | null,
-): TaskMessageRow[] {
-  if (stillQueued === null) return [...undelivered];
-  return undelivered.filter((m) => !stillQueued.has(m.id));
+  return deliveryOutgoing(
+    message,
+    spent,
+    limits,
+    readsPictureFiles,
+    builderMessageText,
+    randomUUID,
+  );
 }
 
 export interface LaneMessages {
@@ -175,65 +111,16 @@ export interface LaneMessagesDeps {
   readonly readsPictureFiles?: boolean;
 }
 
-/** One lane session's side of the task's thread. */
+/** One lane session's side of the task's thread: the conversation library over its thread. */
 export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
-  const { state, taskId, handle, limits } = deps;
-  /** The message each uuid this session was sent stands for. */
-  const sentUnder = new Map<string, TaskMessageId>(
-    deps.prompt === undefined ? [] : [[deps.prompt.uuid, deps.prompt.messageId]],
-  );
-  /** The messages a list of client uuids stands for; a uuid that is no message's stands for none. */
-  const messagesOf = (uuids: readonly string[]): TaskMessageId[] =>
-    uuids.flatMap((uuid) => {
-      const id = sentUnder.get(uuid) ?? findTaskMessageByUuid(state.db, taskId, uuid);
-      return id === null ? [] : [id];
-    });
-  const push = (message: TaskMessageRow, lead?: string | null): void => {
-    const spent = heldInlineBytes(listTaskFileRows(state.db, taskId), limits);
-    const out = outgoingMessage(message, spent, limits, deps.readsPictureFiles === true);
-    sentUnder.set(out.uuid, message.id);
-    // Kept before the session is handed it: a restart then finds every uuid a turn could hold.
-    state.write((ctx) => {
-      markTaskMessagePushedUnder(ctx, message.id, out.uuid);
-      markTaskFilesInline(ctx, taskId, out.blocks, false);
-    });
-    handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
-  };
-  return {
-    push,
-    pushUntaken(lead) {
-      const handed = new Set(sentUnder.values());
-      let first = true;
-      for (const id of untakenMessages(state.db, taskId)) {
-        if (handed.has(id)) continue;
-        push(getTaskMessageRow(state.db, id), first ? lead : null);
-        first = false;
-      }
-    },
-    consumed(uuids) {
-      const ids = messagesOf(uuids);
-      if (ids.length === 0) return [];
-      return state.write((ctx) => markTaskMessagesDelivered(ctx, taskId, ids));
-    },
-    handBack(uuids) {
-      const ids = messagesOf(uuids);
-      const handed = state.write((ctx) => markTaskMessagesHandedBack(ctx, taskId, ids));
-      for (const [uuid, id] of [...sentUnder]) if (handed.includes(id)) sentUnder.delete(uuid);
-      return handed;
-    },
-    untaken() {
-      const handed = new Set(sentUnder.values());
-      return listUndeliveredTaskMessages(state.db, taskId)
-        .filter((m) => handed.has(m.id))
-        .map((m) => m.id);
-    },
-    async interrupt() {
-      const receipt = await handle.interrupt();
-      for (const message of pushedAgainAfter(
-        listUndeliveredTaskMessages(state.db, taskId),
-        receipt === null ? null : new Set(messagesOf(receipt.stillQueued)),
-      ))
-        push(message);
-    },
-  };
+  const { state, taskId } = deps;
+  return createDelivery({
+    state,
+    conversation: () => taskConversationOf(state.db, taskId)?.id ?? null,
+    handle: deps.handle,
+    limits: deps.limits,
+    ...(deps.prompt === undefined ? {} : { prompt: deps.prompt }),
+    ...(deps.readsPictureFiles === undefined ? {} : { readsPictureFiles: deps.readsPictureFiles }),
+    messageText: builderMessageText,
+  });
 }
