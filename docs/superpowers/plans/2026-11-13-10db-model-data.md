@@ -404,7 +404,7 @@ Decision models behave the same on every account kind: decisions always run on t
 ### Task 9: Docs, the decision record, the gate and the PR
 
 **Files:**
-- Create: `docs/architecture/decisions/2026-11-13-model-numbers-come-from-aa-and-openrouter.md`
+- Create: a decision file in `docs/architecture/decisions/` dated the day it merges, slug `model-numbers-come-from-aa-and-openrouter`
 - Modify: `apps/daemon/AGENTS.md` (the `benchmarks/`, `judge/` and flag paragraphs), `docs/architecture/03-trust-boundaries.md`
   (line 62's "read for each judge call": also read by the sync; §4.12's "the judge is the only code that calls
   OpenRouter": the sync now does too, sending the key and model ids only)
