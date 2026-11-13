@@ -7,11 +7,17 @@ import {
   type ModelProfileDto,
   type ModelRowDto,
 } from '@10db/contracts';
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  renderWithDaemon,
+  renderWithDaemonAndRouter,
+  server,
+} from '../../test/daemon';
 import {
   accountModelDto,
   catalogueStatusDto,
@@ -30,8 +36,8 @@ const KEYED: AccountDto = accountDto({ label: 'Work key', kind: 'anthropic_api_k
 const FAST = modelRowDto({
   model: 'alpha-fast',
   name: 'Alpha Fast',
-  tier: 'fast',
-  availableOn: [KEYED.id],
+  tier: 'efficient',
+  availableOn: [SUBSCRIPTION.id, KEYED.id],
   inputPrice: 1,
   outputPrice: 5,
   intelligence: 31.5,
@@ -42,7 +48,7 @@ const FAST = modelRowDto({
 const STRONG = modelRowDto({
   model: 'alpha-max',
   name: 'Alpha Max',
-  tier: 'strongest',
+  tier: 'capable',
   availableOn: [SUBSCRIPTION.id, KEYED.id],
   inputPrice: 5,
   outputPrice: 25,
@@ -177,230 +183,141 @@ const rowOf = (name: string) => {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: NOW });
-  // The Columns menu keeps its layout in the window's storage.
-  window.localStorage.clear();
 });
 afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Chooses an account in the page's Account select. */
+async function chooseAccount(label: string) {
+  fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
+  fireEvent.click(await screen.findByRole('option', { name: label, hidden: true }));
+}
+
 describe('the Models page', () => {
-  it('lists a row per model with its tier, accounts, scores, prices and speed', async () => {
+  it('opens on who each role gets, above the chart and the model list', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    const roles = await screen.findByRole('region', { name: 'Who each role gets' });
+    const all = await screen.findByRole('heading', { name: 'All models' });
+    expect(roles.compareDocumentPosition(all) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Intelligence and cost' })).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: 'Table' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull();
+    const plan = within(roles).getByRole('row', { name: /Plan/ });
+    expect(within(plan).getByText('Alpha Max · high')).toBeTruthy();
+    expect(within(plan).getByText('$2.50')).toBeTruthy();
+    // A pick the chart does not draw says so; a role with nothing chosen says why instead.
+    expect(
+      within(within(roles).getByRole('row', { name: /Review/ })).getByText('Not on the chart'),
+    ).toBeTruthy();
+    const qa = within(roles).getByRole('row', { name: /QA/ });
+    expect(within(qa).getByText(/refused here/)).toBeTruthy();
+    expect(within(qa).queryByText('Not on the chart')).toBeNull();
+  });
+
+  it('drives the rows and the picks from the one Account select, the default account first', async () => {
+    const asked: (string | null)[] = [];
+    const askedPicks: string[] = [];
+    serve({ asked, askedPicks });
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    expect(asked).toEqual([SUBSCRIPTION.id]);
+    expect(askedPicks).toEqual([SUBSCRIPTION.id]);
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveProperty(
+      'value',
+      'Claude plan',
+    );
+    await chooseAccount('Work key');
+    await waitFor(() => {
+      expect(asked.at(-1)).toBe(KEYED.id);
+      expect(askedPicks.at(-1)).toBe(KEYED.id);
+    });
+    // The list narrows to what the account runs.
+    await waitFor(() => {
+      expect(shownNames().sort()).toEqual(['Alpha Fast', 'Alpha Max']);
+    });
+  });
+
+  it('lists a row per model: tier, scores, cost, the roles that use it and steps run', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     const row = within(
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
-    expect(row.getByText('alpha-max')).toBeTruthy();
-    expect(row.getByText('Strongest')).toBeTruthy();
-    expect(row.getByText('Claude plan, Work key')).toBeTruthy();
-    for (const cell of ['60', '$2.50', '$5.00', '$25.00', '12']) {
+    expect(row.getByText('Capable')).toBeTruthy();
+    expect(row.getByText('Plan, Build')).toBeTruthy();
+    for (const cell of ['60', '$2.50', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }
+    // Input, Output and Speed live in the drawer only.
+    for (const title of [/Input/, /Output/, /Speed/, /Available on/])
+      expect(screen.queryByRole('columnheader', { name: title })).toBeNull();
   });
 
   it('shows a dash where there is no data, never a zero', async () => {
-    serve({ rows: [BLANK] });
+    serve({ rows: [BLANK], forAccount: () => [BLANK] });
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
-    // Intelligence, Cost per task, Input and Output.
-    expect(cells.slice(3, 7).map((c) => c.textContent)).toEqual(['—', '—', '—', '—']);
+    // Intelligence and Cost per task.
+    expect(cells.slice(2, 4).map((c) => c.textContent)).toEqual(['—', '—']);
   });
 
-  it('marks an Unknown model and a model first seen in the last seven days', async () => {
+  it('shows a status as dimmed text after the name, and New for a model first seen in the last seven days', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(within(rowOf('Alpha Max')).getByText('New')).toBeTruthy();
     expect(within(rowOf('Alpha Fast')).queryByText('New')).toBeNull();
-    expect(within(rowOf('house-model')).getByText('Unknown')).toBeTruthy();
+    const unknown = within(rowOf('house-model')).getByText('Unknown');
+    expect(unknown.closest('.mantine-Badge-root')).toBeNull();
   });
 
-  it('hides Speed until the Columns menu shows it, and keeps it shown', async () => {
+  it('opens the drawer from a click anywhere on a row, with the effort table', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    expect(screen.queryByRole('columnheader', { name: /Speed/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Speed (tokens/s)' }));
-    expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
-    expect(within(rowOf('Alpha Max')).getByText('40')).toBeTruthy();
-    cleanup();
-    renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
-  });
-
-  it('expands a row to one line per effort without opening the drawer', async () => {
-    serve();
-    renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(screen.getByRole('button', { name: 'Show efforts of Alpha Max' }));
-    const efforts = await screen.findByRole('table', { name: 'Efforts of Alpha Max' });
+    fireEvent.click(within(rowOf('Alpha Max')).getByText('Capable'));
+    const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    const efforts = within(drawer).getByRole('table', { name: 'Effort table' });
     const high = within(efforts).getByRole('row', { name: /high/ });
     expect(within(high).getByText('$2.50')).toBeTruthy();
     expect(within(high).getByText('75%')).toBeTruthy();
     const low = within(efforts).getByRole('row', { name: /low/ });
     expect(within(low).getByText('$0.40')).toBeTruthy();
     expect(within(low).getByText('25%')).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    // The header names the ID and the tier; Input, Output and Speed are one dimmed line.
+    expect(within(drawer).getByText('alpha-max')).toBeTruthy();
+    expect(within(drawer).getByText(/Capable tier/)).toBeTruthy();
+    expect(within(drawer).getByText(/\$5\.00 in · \$25\.00 out · speed 40 tokens\/s/)).toBeTruthy();
+    expect(within(drawer).getByRole('heading', { name: 'Offered by' })).toBeTruthy();
+    // The drawer shows AA scores and speed, so it carries the credit.
+    expect(within(drawer).getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
   });
 
-  it('asks for the account picked in Available on and shows its cost', async () => {
-    const asked: (string | null)[] = [];
-    const dearer = modelRowDto({
-      ...STRONG,
-      costPerTaskUsd: 2.75,
-      efforts: [modelEffortDto({ effort: 'high', intelligence: 60, costPerTaskUsd: 2.75 })],
-    });
-    serve({ asked, forAccount: () => [dearer] });
-    renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    expect(asked).toEqual([null]);
-    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
-    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
-    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
-    await waitFor(() => {
-      expect(asked.at(-1)).toBe(KEYED.id);
-    });
-    expect(await within(rowOf('Alpha Max')).findByText('$2.75')).toBeTruthy();
-  });
-
-  describe('the Chart view', () => {
-    const openChart = async () => {
-      renderWithDaemon(<ModelsSection />);
-      await screen.findByRole('button', { name: 'Open Alpha Max' });
-      fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
-    };
-
-    it('prices the models and the picks on the default account when no account was chosen', async () => {
-      const asked: (string | null)[] = [];
-      const askedPicks: string[] = [];
-      serve({ asked, askedPicks, forAccount: () => [STRONG] });
-      await openChart();
-      expect(await screen.findByText('Who each role gets')).toBeTruthy();
-      await waitFor(() => {
-        expect(asked.at(-1)).toBe(SUBSCRIPTION.id);
-        expect(askedPicks).toEqual([SUBSCRIPTION.id]);
-      });
-    });
-
-    it('waits for the accounts, then takes the default one', async () => {
-      const asked: (string | null)[] = [];
-      serve({ asked, forAccount: () => [STRONG] });
-      let release: () => void = () => undefined;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      server.use(
-        http.get(daemonUrl('/accounts'), async () => {
-          await gate;
-          return HttpResponse.json([SUBSCRIPTION, KEYED]);
-        }),
-      );
-      await openChart();
-      expect(await screen.findByText('Reading accounts…')).toBeTruthy();
-      expect(screen.queryByText('Add an account to see what each role gets.')).toBeNull();
-      release();
-      await waitFor(() => {
-        expect(asked.at(-1)).toBe(SUBSCRIPTION.id);
-      });
-    });
-
-    it('lists what each role gets, and says where a pick is not on the chart', async () => {
-      serve({ forAccount: () => [STRONG] });
-      await openChart();
-      const panel = await screen.findByRole('region', { name: 'Who each role gets' });
-      const plan = within(panel).getByText('Plan').closest('button');
-      expect(plan).not.toBeNull();
-      expect(within(plan as HTMLElement).getByText('Alpha Max')).toBeTruthy();
-      expect(within(plan as HTMLElement).getByText(/high/)).toBeTruthy();
-      expect(within(plan as HTMLElement).getByText(/\$2\.50/)).toBeTruthy();
-      const review = within(panel).getByText('Review').closest('button');
-      expect(within(review as HTMLElement).getByText('Not on the chart')).toBeTruthy();
-      // A role with nothing chosen says why, not that it is off the chart.
-      const qa = within(panel).getByText('QA').closest('button');
-      expect(within(qa as HTMLElement).getByText(/refused here/)).toBeTruthy();
-      expect(within(qa as HTMLElement).queryByText('Not on the chart')).toBeNull();
-      expect(within(plan as HTMLElement).queryByText('Not on the chart')).toBeNull();
-    });
-
-    it('asks for the picks of the account chosen in the chart, which the table then shows too', async () => {
-      const askedPicks: string[] = [];
-      serve({ askedPicks, forAccount: () => [STRONG] });
-      await openChart();
-      await screen.findByText('Who each role gets');
-      fireEvent.click(screen.getByRole('combobox', { name: 'Chart account' }));
-      fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
-      await waitFor(() => {
-        expect(askedPicks.at(-1)).toBe(KEYED.id);
-      });
-      fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
-      fireEvent.click(await screen.findByRole('button', { name: 'Filter Available on' }));
-      expect(await screen.findByDisplayValue('Work key')).toBeTruthy();
-    });
-
-    it('marks the selected role pressed, and clears it on a second click', async () => {
-      serve({ forAccount: () => [STRONG] });
-      await openChart();
-      const panel = await screen.findByRole('region', { name: 'Who each role gets' });
-      const implement = within(panel).getByText('Build').closest('button') as HTMLElement;
-      expect(implement.getAttribute('aria-pressed')).toBe('false');
-      fireEvent.click(implement);
-      expect(implement.getAttribute('aria-pressed')).toBe('true');
-      expect(
-        (within(panel).getByText('Plan').closest('button') as HTMLElement).getAttribute(
-          'aria-pressed',
-        ),
-      ).toBe('false');
-      fireEvent.click(implement);
-      expect(implement.getAttribute('aria-pressed')).toBe('false');
-    });
-
-    it('says to add an account when there is none, and credits Artificial Analysis under the chart', async () => {
-      serve({ accounts: [], forAccount: () => [STRONG] });
-      await openChart();
-      expect(await screen.findByText('Add an account to see what each role gets.')).toBeTruthy();
-      expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
-    });
-  });
-
-  it('keeps the toolbar and offers every account when one account’s models cannot be read', async () => {
+  it('opens the drawer with Enter on a name', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    server.use(
-      http.get(daemonUrl('/models'), ({ request }) =>
-        new URL(request.url).searchParams.has('account')
-          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
-          : HttpResponse.json([FAST, STRONG, UNKNOWN, BLANK]),
-      ),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
-    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
-    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
-    expect(await screen.findByText('The models of this account could not be read.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Refresh Models' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Show every account' }));
-    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    const name = await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(name);
+    expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
   });
 
-  it('leaves the Chart for the Table when Show every account is chosen after a failed read', async () => {
+  it('marks the selected role pressed, dims the others, and clears it on a second click', async () => {
     serve();
-    server.use(
-      http.get(daemonUrl('/models'), ({ request }) =>
-        new URL(request.url).searchParams.has('account')
-          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
-          : HttpResponse.json([FAST, STRONG, UNKNOWN, BLANK]),
-      ),
-    );
     renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Show every account' }));
-    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Table' }).hasAttribute('checked')).toBe(true);
+    const panel = await screen.findByRole('region', { name: 'Who each role gets' });
+    const button = (label: string) => within(panel).getByRole('button', { name: label });
+    expect(button('Build').getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(button('Build'));
+    expect(button('Build').getAttribute('aria-pressed')).toBe('true');
+    expect(button('Plan').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Plan').closest('tr')?.style.opacity).toBe('0.5');
+    expect(button('Build').closest('tr')?.style.opacity).toBe('1');
+    fireEvent.click(button('Build'));
+    expect(button('Build').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Plan').closest('tr')?.style.opacity).toBe('1');
   });
 
   it('filters by tier from the Tier column, one tier or several', async () => {
@@ -409,23 +326,13 @@ describe('the Models page', () => {
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tier' }));
     const tiers = await screen.findByRole('group', { name: 'Tier' });
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Efficient' }));
     expect(shownNames()).toEqual(['Alpha Fast']);
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Capable' }));
     expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast']);
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
-    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Efficient' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Capable' }));
     expect(shownNames()).toHaveLength(4);
-  });
-
-  it('filters by account from the Available on column', async () => {
-    serve();
-    renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
-    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
-    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
-    expect(shownNames().sort()).toEqual(['Alpha Fast', 'Alpha Max']);
   });
 
   it('searches names and model IDs from the Model column, and says when nothing matches', async () => {
@@ -440,24 +347,106 @@ describe('the Models page', () => {
     expect(await screen.findByText('No model matches these filters.')).toBeTruthy();
   });
 
-  it('sorts by a column, reverses on a second click, and keeps Unknown and blanks last', async () => {
+  it('opens sorted by Intelligence, highest first, and sorts by a column with Unknown and blanks last', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    // The list opens by tier, strongest first; another column keeps that direction.
-    fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence' }));
     expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast', 'Beta Plain', 'house-model']);
     fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence, descending' }));
     expect(shownNames()).toEqual(['Alpha Fast', 'Alpha Max', 'Beta Plain', 'house-model']);
-    expect(screen.getByRole('button', { name: 'Sort by Intelligence, ascending' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sort by Tier' })).toBeNull();
   });
 
-  it('opens the drawer from a click anywhere on a row', async () => {
+  it('says to add an account when there is none, and lists no rows', async () => {
+    serve({ accounts: [] });
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    const link = await screen.findByRole('link', { name: 'Add an account' });
+    expect(link.getAttribute('href')).toBe('/settings/accounts');
+    expect(link.parentElement?.textContent).toBe('Add an account to see what each role gets.');
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
+  });
+
+  it('shows the daemon’s message, not the add-an-account prompt, when the accounts cannot be read', async () => {
     serve();
+    let healthy = false;
+    server.use(
+      http.get(daemonUrl('/accounts'), () =>
+        healthy
+          ? HttpResponse.json([SUBSCRIPTION, KEYED])
+          : HttpResponse.json({ error: 'internal', message: 'Accounts are down' }, { status: 500 }),
+      ),
+    );
     renderWithDaemon(<ModelsSection />);
-    await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(within(rowOf('Alpha Max')).getByText('Strongest'));
-    expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain('Accounts are down');
+    expect(screen.queryByText(/Add an account/)).toBeNull();
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+  });
+
+  it('keeps a loaded page when a later read of the accounts fails, as during a daemon restart', async () => {
+    serve();
+    let down = false;
+    server.use(
+      http.get(daemonUrl('/accounts'), () =>
+        down
+          ? HttpResponse.json({ error: 'internal', message: 'Accounts are down' }, { status: 500 })
+          : HttpResponse.json([SUBSCRIPTION, KEYED]),
+      ),
+    );
+    const { queryClient } = renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    down = true;
+    await queryClient.refetchQueries({ queryKey: ['accounts'] });
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['accounts'])?.status).toBe('error');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    expect(screen.queryByText('Accounts are down')).toBeNull();
+  });
+
+  it('shows the daemon’s message when the picks cannot be read, and Try Again reads them again', async () => {
+    serve();
+    let healthy = false;
+    server.use(
+      http.get(daemonUrl('/models/picks'), ({ request }) =>
+        healthy
+          ? HttpResponse.json(
+              rolePicksDto(
+                AccountId.parse(new URL(request.url).searchParams.get('account')),
+                PICKS,
+              ),
+            )
+          : HttpResponse.json({ error: 'internal', message: 'Picks are down' }, { status: 500 }),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Picks are down');
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('region', { name: 'Who each role gets' })).toBeTruthy();
+  });
+
+  it('shows the daemon’s message when the account’s models cannot be read, and Try Again reads them again', async () => {
+    serve();
+    let healthy = false;
+    server.use(
+      http.get(daemonUrl('/models'), () =>
+        healthy
+          ? HttpResponse.json([STRONG])
+          : HttpResponse.json({ error: 'internal', message: 'The list is down' }, { status: 500 }),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect((await screen.findByRole('alert')).textContent).toContain('The list is down');
+    expect(screen.queryByRole('button', { name: 'Show every account' })).toBeNull();
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
   });
 
   it('says where the data came from and how old it is, and credits Artificial Analysis with a link', async () => {
@@ -534,6 +523,12 @@ describe('the Models page', () => {
     );
     renderWithDaemon(<ModelsSection />);
     expect(await screen.findByText(/fetched 3 hours ago/)).toBeTruthy();
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Refresh Models' }));
+    expect(
+      await screen.findByText(
+        "Fetch prices from models.dev and re-read every account's model list",
+      ),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
     await waitFor(() => {
       expect(
@@ -567,6 +562,7 @@ describe('the Models page', () => {
       name: 'Delta Held',
       tier: null,
       status: 'not_runnable',
+      availableOn: [SUBSCRIPTION.id],
       firstSeenAt: null,
     });
     serve({ rows: [dateless] });
@@ -624,9 +620,9 @@ describe('the Models page', () => {
     expect(within(drawer).getByText('$5.50 in · $27.00 out')).toBeTruthy();
     // One line per effort, with the first-pass rate where steps ran.
     const low = within(drawer).getByRole('row', { name: /low/ });
-    expect(within(low).getByText('75%')).toBeTruthy();
+    expect(within(low).getByText('25%')).toBeTruthy();
     const high = within(drawer).getByRole('row', { name: /high/ });
-    expect(within(high).getAllByText('—').length).toBeGreaterThan(0);
+    expect(within(high).getByText('75%')).toBeTruthy();
   });
 
   it('says which accounts marked a model from an error’s wording, and when each mark ends', async () => {
@@ -680,7 +676,7 @@ describe('the Models page', () => {
       model: 'gamma-new',
       tier: null,
       status: 'unknown',
-      availableOn: [KEYED.id],
+      availableOn: [SUBSCRIPTION.id, KEYED.id],
     });
     serve({
       rows: [unconfirmed],
@@ -689,6 +685,8 @@ describe('the Models page', () => {
     renderWithDaemon(<ModelsSection />);
     fireEvent.click(await screen.findByRole('button', { name: 'Open gamma-new' }));
     const drawer = await screen.findByRole('dialog', { name: 'gamma-new' });
-    expect(await within(drawer).findByText(/Work key has not listed its models yet/)).toBeTruthy();
+    expect(
+      await within(drawer).findByText(/Claude plan, Work key have not listed its models yet/),
+    ).toBeTruthy();
   });
 });

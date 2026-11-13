@@ -5,7 +5,7 @@ import type { NewPattern, WriteContext } from '@10db/db';
 /** The app setting that records the pattern was offered, so deleting or editing it sticks. */
 export const PATTERNS_SEEDED_KEY = 'patterns.seeded';
 
-/** Work that touches security, sign-in or a migration is where the strongest model earns its cost. */
+/** Work that touches security, sign-in or a migration is where the dearest model earns its cost. */
 const HIGH_RISK_PATTERN: NewPattern = {
   name: 'High-risk work',
   match: {

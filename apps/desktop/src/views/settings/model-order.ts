@@ -4,12 +4,8 @@ import { ModelStatus, ModelTier, type AccountId, type ModelRowDto } from '@10db/
 export const ModelColumn = {
   Name: 'name',
   Tier: 'tier',
-  AvailableOn: 'available',
   Intelligence: 'intelligence',
   CostPerTask: 'cost',
-  Speed: 'speed',
-  InputPrice: 'input',
-  OutputPrice: 'output',
   StepsRun: 'steps',
 } as const;
 export type ModelColumn = (typeof ModelColumn)[keyof typeof ModelColumn];
@@ -27,7 +23,7 @@ export interface ModelFilter {
   readonly query: string;
   /** The tiers kept; none keeps every tier, models with no tier included. */
   readonly tiers: readonly ModelTier[];
-  /** Null keeps models of every account. */
+  /** The account the page is on, which keeps only the models it offers; null keeps every account's. */
   readonly accountId: AccountId | null;
 }
 
@@ -35,9 +31,10 @@ export interface ModelFilter {
 export const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const TIER_RANK: Readonly<Record<ModelTier, number>> = {
-  [ModelTier.Fast]: 0,
+  [ModelTier.Efficient]: 0,
   [ModelTier.Balanced]: 1,
-  [ModelTier.Strongest]: 2,
+  [ModelTier.Capable]: 2,
+  [ModelTier.Frontier]: 3,
 };
 
 /** What a row is ordered by in a column; null when it has no data there. */
@@ -47,18 +44,10 @@ function valueOf(row: ModelRowDto, column: ModelColumn): string | number | null 
       return row.name.toLowerCase();
     case ModelColumn.Tier:
       return row.tier === null ? null : TIER_RANK[row.tier];
-    case ModelColumn.AvailableOn:
-      return row.availableOn.length;
     case ModelColumn.Intelligence:
       return row.intelligence;
     case ModelColumn.CostPerTask:
       return row.costPerTaskUsd;
-    case ModelColumn.Speed:
-      return row.outputTokensPerSecond;
-    case ModelColumn.InputPrice:
-      return row.inputPrice;
-    case ModelColumn.OutputPrice:
-      return row.outputPrice;
     case ModelColumn.StepsRun:
       return row.stepsRun;
   }

@@ -48,7 +48,7 @@ const seedProject = () =>
   });
 
 const automatic = { kind: 'automatic' } as const;
-const strongest = { kind: 'tier', tier: 'strongest' } as const;
+const strongest = { kind: 'tier', tier: 'capable' } as const;
 
 describe('the settings that apply everywhere', () => {
   it('start with the one seeded pattern and no role set', async () => {

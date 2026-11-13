@@ -56,7 +56,8 @@ function ColumnHeader<T>({
               direction: sorted === null ? sort.direction : sorted === 'asc' ? 'desc' : 'asc',
             });
           }}
-          style={{ minWidth: 0 }}
+          // A button does not inherit the header's type, so the sort button states it.
+          style={{ minWidth: 0, font: 'inherit' }}
         >
           <Group gap={4} wrap="nowrap">
             <Text inherit truncate>

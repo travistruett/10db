@@ -252,7 +252,7 @@ describe('planSteps', () => {
       'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.steps[1]?.reason).toBe(
-      'by role default: the cheapest model of the strongest tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
+      'by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.overBudget).toEqual([]);
   });
@@ -290,10 +290,10 @@ describe('planSteps', () => {
       ],
       [
         'review',
-        'strongest',
+        'capable',
         null,
         { kind: 'automatic' },
-        'no model offered for the strongest tier',
+        'no model offered for the capable tier',
         false,
       ],
     ]);
@@ -303,13 +303,13 @@ describe('planSteps', () => {
     const plan = planSteps(
       input({
         roleSettings: [
-          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'fast' } },
+          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'efficient' } },
         ],
       }),
     );
     expect(plan.steps.map((s) => s.setting)).toEqual([
       { kind: 'automatic' },
-      { kind: 'tier', tier: 'fast' },
+      { kind: 'tier', tier: 'efficient' },
     ]);
     expect(plan.steps[1]?.model).toBe('small');
   });

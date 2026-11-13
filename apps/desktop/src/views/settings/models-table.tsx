@@ -1,20 +1,9 @@
-import { ModelStatus, type AccountDto, type ModelRowDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Badge,
-  Group,
-  Stack,
-  Table,
-  Text,
-  Tooltip,
-  UnstyledButton,
-} from '@mantine/core';
-import { IconChevronRight } from '@tabler/icons-react';
+import { ModelStatus, type ModelRowDto } from '@10db/contracts';
+import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
-import { useState } from 'react';
 import { withColumnHeader } from '../../shell/column-header';
-import { AccountFilter, ModelSearchFilter, TierFilter } from './model-filters';
-import { formatCost, formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
+import { ModelSearchFilter, TierFilter } from './model-filters';
+import { formatCost, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import {
   isNewModel,
@@ -23,168 +12,82 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { PICK_COLOR } from './role-picks-panel';
 
 const isModelColumn = (value: unknown): value is ModelColumn =>
   Object.values(ModelColumn).some((c) => c === value);
 
-/** The name, model ID and badges of a row; its button is the keyboard's way to what a row click does. */
+const TABULAR = () => ({ fontVariantNumeric: 'tabular-nums' });
+
+/** The name on one line, then its status as dimmed text, and New in blue. The button is the keyboard's way to a row's click. */
 function ModelCell({
   row,
   fresh,
-  expanded,
   onOpen,
-  onExpand,
 }: {
   readonly row: ModelRowDto;
   readonly fresh: boolean;
-  readonly expanded: boolean;
   readonly onOpen: () => void;
-  readonly onExpand: () => void;
 }) {
-  const statusBadge = row.status === ModelStatus.Current ? null : STATUS_LABEL[row.status];
   return (
-    <Stack gap={2}>
-      <Group gap="xs" wrap="nowrap">
-        {row.efforts.length === 0 ? null : (
-          <ActionIcon
-            variant="subtle"
-            size="xs"
-            aria-label={`${expanded ? 'Hide' : 'Show'} efforts of ${row.name}`}
-            aria-expanded={expanded}
-            onClick={(event) => {
-              // The row's own click opens the drawer; the chevron only opens the efforts.
-              event.stopPropagation();
-              onExpand();
-            }}
-          >
-            <IconChevronRight
-              size={14}
-              stroke={1.5}
-              style={{ transform: expanded ? 'rotate(90deg)' : undefined }}
-            />
-          </ActionIcon>
-        )}
-        <UnstyledButton
-          aria-label={`Open ${row.name}`}
-          onClick={(event) => {
-            // The row's own click does the same; one opening is enough.
-            event.stopPropagation();
-            onOpen();
-          }}
-        >
-          <Text size="sm" fw={500}>
-            {row.name}
-          </Text>
-        </UnstyledButton>
-        {fresh ? (
-          <Badge size="sm" variant="light" color="blue">
-            New
-          </Badge>
-        ) : null}
-        {statusBadge ? (
-          <Badge size="sm" variant="light" color="gray">
-            {statusBadge}
-          </Badge>
-        ) : null}
-      </Group>
-      <Text size="xs" c="dimmed" ff="monospace">
-        {row.model}
-      </Text>
-    </Stack>
+    <Group gap={6} wrap="nowrap">
+      <UnstyledButton
+        aria-label={`Open ${row.name}`}
+        title={row.name}
+        onClick={(event) => {
+          // The row's own click does the same; one opening is enough.
+          event.stopPropagation();
+          onOpen();
+        }}
+        style={{ minWidth: 0, flexShrink: 0, maxWidth: 280 }}
+      >
+        <Text size="sm" fw={500} truncate>
+          {row.name}
+        </Text>
+      </UnstyledButton>
+      {row.status === ModelStatus.Current ? null : (
+        <Text size="xs" c="dimmed" truncate style={{ minWidth: 0 }}>
+          {STATUS_LABEL[row.status]}
+        </Text>
+      )}
+      {fresh && row.status === ModelStatus.Current ? (
+        <Text size="xs" c="blue" style={{ whiteSpace: 'nowrap' }}>
+          New
+        </Text>
+      ) : null}
+    </Group>
   );
 }
-
-/** One line per effort of an expanded row. */
-function EffortLines({ row }: { readonly row: ModelRowDto }) {
-  return (
-    <Table aria-label={`Efforts of ${row.name}`} verticalSpacing="xs" withRowBorders={false}>
-      <Table.Thead>
-        <Table.Tr>
-          <Table.Th>Effort</Table.Th>
-          <Table.Th ta="right">Intelligence</Table.Th>
-          <Table.Th ta="right">Cost per task</Table.Th>
-          <Table.Th ta="right">Steps run</Table.Th>
-          <Table.Th ta="right">First pass</Table.Th>
-        </Table.Tr>
-      </Table.Thead>
-      <Table.Tbody>
-        {row.efforts.map((e) => (
-          <Table.Tr key={e.profileId}>
-            <Table.Td>{e.effort}</Table.Td>
-            <Table.Td ta="right">{formatScore(e.intelligence)}</Table.Td>
-            <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
-            <Table.Td ta="right">{e.stepsRun}</Table.Td>
-            <Table.Td ta="right">{formatFirstPass(e.firstPassSteps, e.stepsRun)}</Table.Td>
-          </Table.Tr>
-        ))}
-      </Table.Tbody>
-    </Table>
-  );
-}
-
-/** The columns the Columns menu can hide, which the section keeps the layout of. */
-export const TOGGLEABLE_COLUMNS: DataTableColumn<ModelRowDto>[] = [
-  {
-    accessor: ModelColumn.Speed,
-    title: 'Speed (tokens/s)',
-    toggleable: true,
-    defaultToggle: false,
-  },
-];
-
-const numeric = (
-  accessor: ModelColumn,
-  title: string,
-  value: (row: ModelRowDto) => string | number,
-): DataTableColumn<ModelRowDto> => ({
-  accessor,
-  title,
-  textAlign: 'right',
-  noWrap: true,
-  sortable: true,
-  render: value,
-});
 
 /**
- * The model list as a table. Every column sorts; the Model, Tier and Available on columns filter it from
- * their headers. A row's chevron expands it to one line per effort, and clicking elsewhere on it opens it.
- * `hidden` names the columns the Columns menu has switched off, and `costNote` says what the cost per task is
- * at, in that column's header.
+ * The model list as a calm table. Model, Intelligence, Cost per task and Steps run sort; the Model and Tier
+ * headers filter it. A row, or Enter on its name, opens the drawer. `usedBy` names the roles whose pick a model
+ * is, and `costNote` says what the cost per task is at, in that column's header.
  */
 export function ModelsTable({
   rows,
-  accounts,
-  accountLabels,
   filter,
   onFilter,
   sort,
   onSort,
   now,
   earliest,
-  hidden,
+  usedBy,
   costNote,
   onOpen,
 }: {
   readonly rows: readonly ModelRowDto[];
-  /** The accounts the Available on filter offers. */
-  readonly accounts: readonly AccountDto[];
-  readonly accountLabels: ReadonlyMap<string, string>;
   readonly filter: ModelFilter;
   readonly onFilter: (next: ModelFilter) => void;
   readonly sort: ModelSort;
   readonly onSort: (next: ModelSort) => void;
   readonly now: number;
   readonly earliest: number | null;
-  readonly hidden: ReadonlySet<string>;
+  /** The labels of the roles that pick each model, by model ID. */
+  readonly usedBy: ReadonlyMap<string, readonly string[]>;
   readonly costNote: string;
   readonly onOpen: (row: ModelRowDto) => void;
 }) {
-  const [expandedIds, setExpandedIds] = useState<unknown[]>([]);
-  const toggleExpanded = (model: string): void => {
-    setExpandedIds((ids) =>
-      ids.includes(model) ? ids.filter((id) => id !== model) : [...ids, model],
-    );
-  };
   const sortStatus: DataTableSortStatus<ModelRowDto> = {
     columnAccessor: sort.column,
     direction: sort.direction,
@@ -198,85 +101,78 @@ export function ModelsTable({
   };
   const head = (column: DataTableColumn<ModelRowDto>) =>
     withColumnHeader(column, sortStatus, onSortStatus);
-  const described: DataTableColumn<ModelRowDto>[] = [
-    {
+  const numeric = (
+    accessor: ModelColumn,
+    title: string,
+    value: (row: ModelRowDto) => string | number,
+  ): DataTableColumn<ModelRowDto> =>
+    head({
+      accessor,
+      title,
+      textAlign: 'right',
+      noWrap: true,
+      sortable: true,
+      cellsStyle: TABULAR,
+      render: value,
+    });
+  const columns: DataTableColumn<ModelRowDto>[] = [
+    head({
       accessor: ModelColumn.Name,
       title: 'Model',
       sortable: true,
+      width: '100%',
+      // Names stay readable; a table too wide for its frame scrolls inside it.
+      cellsStyle: () => ({ minWidth: 200 }),
       filtering: filter.query.trim() !== '',
       filter: <ModelSearchFilter filter={filter} onFilter={onFilter} />,
       render: (row) => (
         <ModelCell
           row={row}
           fresh={isNewModel(row, now, earliest)}
-          expanded={expandedIds.includes(row.model)}
           onOpen={() => {
             onOpen(row);
           }}
-          onExpand={() => {
-            toggleExpanded(row.model);
-          }}
         />
       ),
-    },
-    {
+    }),
+    head({
       accessor: ModelColumn.Tier,
       title: 'Tier',
       noWrap: true,
-      sortable: true,
       filtering: filter.tiers.length > 0,
       filter: <TierFilter filter={filter} onFilter={onFilter} />,
-      render: (row) => (row.tier === null ? NO_DATA : TIER_LABEL[row.tier]),
+      render: (row) => (
+        <Text size="sm" c="dimmed">
+          {row.tier === null ? NO_DATA : TIER_LABEL[row.tier]}
+        </Text>
+      ),
+    }),
+    numeric(ModelColumn.Intelligence, 'Intelligence', (row) => formatScore(row.intelligence)),
+    {
+      ...numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => formatCost(row.costPerTaskUsd)),
+      title: (
+        <Tooltip label={costNote} multiline maw={260} withArrow>
+          <span>Cost per task</span>
+        </Tooltip>
+      ),
     },
     {
-      accessor: ModelColumn.AvailableOn,
-      title: 'Available on',
-      sortable: true,
-      filtering: filter.accountId !== null,
-      filter: <AccountFilter filter={filter} onFilter={onFilter} accounts={accounts} />,
-      render: (row) => {
-        const names = row.availableOn.map((id) => accountLabels.get(id) ?? 'Removed account');
-        return names.length === 0 ? NO_DATA : names.join(', ');
-      },
-    },
-  ];
-  const tipped = (
-    column: DataTableColumn<ModelRowDto>,
-    label: string,
-  ): DataTableColumn<ModelRowDto> => ({
-    ...column,
-    title: (
-      <Tooltip label={label} multiline maw={260} withArrow>
-        <span>{column.title}</span>
-      </Tooltip>
-    ),
-  });
-  const columns: DataTableColumn<ModelRowDto>[] = [
-    ...described.map(head),
-    head(numeric(ModelColumn.Intelligence, 'Intelligence', (row) => formatScore(row.intelligence))),
-    tipped(
-      head(
-        numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => formatCost(row.costPerTaskUsd)),
+      accessor: 'usedBy',
+      title: 'Used by',
+      noWrap: true,
+      render: (row) => (
+        <Text
+          size="xs"
+          c={PICK_COLOR}
+          truncate
+          maw={180}
+          title={(usedBy.get(row.model) ?? []).join(', ')}
+        >
+          {(usedBy.get(row.model) ?? []).join(', ')}
+        </Text>
       ),
-      costNote,
-    ),
-    tipped(
-      head(numeric(ModelColumn.InputPrice, 'Input $/1M', (row) => formatPrice(row.inputPrice))),
-      "The maker's list price",
-    ),
-    tipped(
-      head(numeric(ModelColumn.OutputPrice, 'Output $/1M', (row) => formatPrice(row.outputPrice))),
-      "The maker's list price",
-    ),
-    head(numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun)),
-    {
-      ...head(
-        numeric(ModelColumn.Speed, 'Speed (tokens/s)', (row) =>
-          formatScore(row.outputTokensPerSecond),
-        ),
-      ),
-      hidden: hidden.has(ModelColumn.Speed),
     },
+    numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun),
   ];
   return (
     <DataTable<ModelRowDto>
@@ -295,12 +191,6 @@ export function ModelsTable({
           No model matches these filters.
         </Text>
       }
-      rowExpansion={{
-        trigger: 'never',
-        expandable: ({ record }) => record.efforts.length > 0,
-        expanded: { recordIds: expandedIds, onRecordIdsChange: setExpandedIds },
-        content: ({ record }) => <EffortLines row={record} />,
-      }}
       onRowClick={({ record }) => {
         onOpen(record);
       }}

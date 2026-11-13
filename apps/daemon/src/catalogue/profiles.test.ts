@@ -136,7 +136,7 @@ describe('reconcileProfiles', () => {
       releaseDate: '2026-09-22',
       inputPrice: 4,
       outputPrice: 20,
-      tier: ModelTier.Strongest,
+      tier: ModelTier.Frontier,
       status: ModelStatus.Current,
     });
   });
@@ -180,7 +180,7 @@ describe('reconcileProfiles', () => {
       enabled: false,
     });
     expect(status('claude-haiku-5-5')).toMatchObject({
-      tier: ModelTier.Fast,
+      tier: ModelTier.Efficient,
       status: ModelStatus.Current,
       enabled: true,
     });
@@ -227,7 +227,7 @@ describe('reconcileProfiles', () => {
       scores: { intelligence: 40 },
       stepsRun: 1,
       maker: 'anthropic',
-      tier: ModelTier.Strongest,
+      tier: ModelTier.Frontier,
     });
   });
 
@@ -364,7 +364,7 @@ describe('reconcileProfiles', () => {
     reconcile();
     // With no list the maker's models are assumed and ranked.
     expect(findModelProfile(store.db, Provider.Claude, 'claude-haiku-5-5', 'low')).toMatchObject({
-      tier: ModelTier.Fast,
+      tier: ModelTier.Efficient,
       enabled: true,
     });
     store.write((ctx) => {
@@ -401,9 +401,9 @@ describe('reconcileProfiles', () => {
       seen('us.anthropic.claude-haiku-9', 'us.anthropic.claude-haiku-9'),
     ]);
     reconcile();
-    // Alone in the ranked set it is the priciest, so Strongest; what matters is that it is still Current.
+    // Alone in the ranked set it is the priciest, so Frontier; what matters is that it is still Current.
     expect(findModelProfile(store.db, Provider.Claude, 'claude-haiku-5-5', 'low')).toMatchObject({
-      tier: ModelTier.Strongest,
+      tier: ModelTier.Frontier,
       status: ModelStatus.Current,
     });
     expect(

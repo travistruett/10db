@@ -71,8 +71,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 8: the environment question category became access', () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+  it('is 9: the model tiers became four rungs', () => {
+    expect(PROTOCOL_VERSION).toBe(9);
   });
 });
 

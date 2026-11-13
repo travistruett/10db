@@ -99,7 +99,7 @@ describe('toAccountInput', () => {
       values: form('gateway', {
         label: 'G',
         baseUrl: 'https://gw.example.com/v1',
-        tierOverrides: { fast: 'vendor/small', balanced: '  ', strongest: ' vendor/large ' },
+        tierOverrides: { efficient: 'vendor/small', balanced: '  ', capable: ' vendor/large ' },
         organization: 'ignored',
       }),
       input: {
@@ -110,7 +110,7 @@ describe('toAccountInput', () => {
         monthlyCapUsd: null,
         settings: {
           baseUrl: 'https://gw.example.com/v1',
-          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
+          tierOverrides: { efficient: 'vendor/small', capable: 'vendor/large' },
         },
       },
     },
@@ -184,13 +184,13 @@ describe('toAccountInput', () => {
       name: 'a tier override over 200 characters, onto tierOverrides',
       values: form('claude_subscription', {
         label: 'S',
-        tierOverrides: { fast: 'x'.repeat(201) },
+        tierOverrides: { efficient: 'x'.repeat(201) },
       }),
       errors: { tierOverrides: TIER_OVERRIDE_MESSAGE },
     },
     {
       name: 'a tier override that is a tier name, onto tierOverrides',
-      values: form('claude_subscription', { label: 'S', tierOverrides: { strongest: 'fast' } }),
+      values: form('claude_subscription', { label: 'S', tierOverrides: { capable: 'efficient' } }),
       errors: { tierOverrides: TIER_OVERRIDE_MESSAGE },
     },
     {
@@ -229,7 +229,7 @@ const gateway = accountDto({
   label: 'Router',
   settings: {
     baseUrl: 'https://gw.example.com/v1',
-    tierOverrides: { fast: 'vendor/small' },
+    tierOverrides: { efficient: 'vendor/small' },
   },
 });
 
@@ -256,7 +256,7 @@ describe('formValuesOf', () => {
       account: gateway,
       values: {
         baseUrl: 'https://gw.example.com/v1',
-        tierOverrides: { fast: 'vendor/small' },
+        tierOverrides: { efficient: 'vendor/small' },
       },
     },
   ])('reads $name', ({ account, values }) => {
@@ -341,18 +341,18 @@ describe('toAccountPatch', () => {
     {
       name: 'a tier override added sends the whole settings',
       account: gateway,
-      changes: { tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' } },
+      changes: { tierOverrides: { efficient: 'vendor/small', capable: 'vendor/large' } },
       patch: {
         settings: {
           baseUrl: 'https://gw.example.com/v1',
-          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
+          tierOverrides: { efficient: 'vendor/small', capable: 'vendor/large' },
         },
       },
     },
     {
       name: 'the last tier override cleared sends the settings without any',
       account: gateway,
-      changes: { tierOverrides: { fast: '' } },
+      changes: { tierOverrides: { efficient: '' } },
       patch: { settings: { baseUrl: 'https://gw.example.com/v1' } },
     },
     {

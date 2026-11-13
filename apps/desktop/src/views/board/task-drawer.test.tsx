@@ -1486,7 +1486,7 @@ describe('TaskDrawer model setting', () => {
     modelRowDto({
       model: 'fast-a',
       name: 'Fast A',
-      tier: 'fast',
+      tier: 'efficient',
       availableOn: [DEFAULT_ACCOUNT.id],
     }),
   ];

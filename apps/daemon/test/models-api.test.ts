@@ -78,7 +78,7 @@ describe('the model list over HTTP', () => {
     expect(rows.map((r) => r.model)).toEqual(['claude-opus-5-5']);
     expect(rows[0]).toMatchObject({
       maker: 'anthropic',
-      tier: 'strongest',
+      tier: 'frontier',
       status: 'current',
       outputPrice: 20,
       intelligence: null,
@@ -165,7 +165,7 @@ describe('the model list over HTTP', () => {
     expect(listAccountModels(running.state.db)).toEqual([]);
     const rows = await api.get('/models', z.array(ModelRowDto));
     const opus = rows.find((r) => r.model === 'claude-opus-5-5');
-    expect(opus).toMatchObject({ status: 'current', tier: 'strongest' });
+    expect(opus).toMatchObject({ status: 'current', tier: 'capable' });
     expect(opus?.availableOn).toHaveLength(1);
   });
 

@@ -161,7 +161,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
   same order (Back to Board, the project's sections, then Global).
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
-  right-aligned.
+  right-aligned. A status is dimmed text after the
+  name, never a pill, in a dense list. Violet marks a role's pick in Settings › Models; orange stays
+  paused.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
   has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
   since contrast is whatever Selenized gives.
