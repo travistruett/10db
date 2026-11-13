@@ -25,7 +25,8 @@ a Decisions page where each setting sits with the decision it belongs to; and al
   day and per model at most hourly, never on a page view (§5.2).
 - A model joins to the wrong OpenRouter row: the join is exact, then canonical, never fuzzy, as the catalogue's
   own (§5.3); an unjoined model shows no OpenRouter number.
-- OpenRouter's terms forbid showing its numbers: checked before PR 1 merges (§11).
+- OpenRouter's terms: read on 2026-11-13. They allow this use (the builder's own key, shown to that builder) and
+  forbid scraping and redistribution, so its numbers are never committed or shipped (§3).
 
 **Calls the builder might disagree with:** routing stays on AA alone; Coding shows only in a model's drawer, not
 as a column; decision models get no quality axis until the replay task lands; Plan's measures leave Settings.
@@ -103,6 +104,14 @@ decision's model and floor read as if they belonged to every decision.
   one bad row hides nothing else.
 - **AA data stays on the machine**: never in fixtures, docs or the repo, including AA numbers that arrive through
   OpenRouter. Tests use invented numbers.
+- **OpenRouter's data stays the builder's own** (its Terms of Service, updated 2026-08-31, read 2026-11-13):
+  §12 makes its data and compilations OpenRouter's or its licensors' and allows use only as OpenRouter
+  authorizes; §6 forbids scraping the site, reselling API access and building a competing service. 10db reads the
+  documented API with the builder's own key and shows the result to that builder only, which is the use the API
+  is offered for. So: never scrape openrouter.ai pages; never commit OpenRouter numbers, put them in fixtures or
+  ship them in a release snapshot (unlike the models.dev catalogue); every builder reads with their own key. The
+  CC BY 4.0 grant covers only OpenRouter's Datasets endpoints, not Benchmarks. AA numbers that arrive through
+  OpenRouter keep AA's attribution and AA's own rules.
 - **Contracts are additive** (`packages/contracts/AGENTS.md`).
 - **Ownership** with the playbook session, per `COORDINATION-models.md`: this work owns `benchmarks/`,
   `catalogue/`, `judge/`, `model-profiles.ts`, `ModelRowDto` and `decisions-section*`; the playbook PR owns
@@ -313,8 +322,6 @@ provider, takes the median across providers.
 
 ## 11. Left to the builder of the plan
 
-- Read OpenRouter's terms for showing its benchmark and endpoint numbers in an app, before PR 1 merges. If they
-  forbid it, PR 1 keeps the data for the builder's own view and the spec comes back here.
 - Exact table and file names, and the migration.
 - How the sync spreads its requests.
 - The drawer's layout within the shell's drawer conventions.
