@@ -194,6 +194,33 @@ describe('fetchOpenRouterScores', () => {
   });
 });
 
+describe('a request’s time limit', () => {
+  it('gives every request a signal that also follows the run’s own', async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const watching: typeof fetch = (_input, init) => {
+      signals.push(init?.signal);
+      return Promise.resolve(json({ data: [{ id: 'acme/a' }] }));
+    };
+    await fetchOpenRouterModels({ fetch: watching });
+    const run = new AbortController();
+    await fetchOpenRouterModels({ fetch: watching, signal: run.signal });
+    expect(signals[0]?.aborted).toBe(false);
+    expect(signals[1]?.aborted).toBe(false);
+    run.abort();
+    expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it('answers a request that timed out as failed', async () => {
+    const outcome = await fetchOpenRouterModels({
+      fetch: () => Promise.reject(new DOMException('timed out', 'TimeoutError')),
+    });
+    expect(outcome).toEqual({
+      kind: 'failed',
+      message: 'OpenRouter could not be reached (TimeoutError)',
+    });
+  });
+});
+
 describe('fetchOpenRouterModels', () => {
   it('reads each id with its canonical slug, null where it has none, without a key', async () => {
     const { fetch, calls } = fakeFetch({

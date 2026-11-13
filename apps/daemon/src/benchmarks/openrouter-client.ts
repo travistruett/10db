@@ -34,6 +34,8 @@ export type OpenRouterOutcome<T> =
   | { readonly kind: 'unauthorized' | 'rate_limited' | 'failed'; readonly message: string };
 
 const MESSAGE_BODY_CHARS = 200;
+/** One request that takes longer is given up, and answered as a failure. */
+const REQUEST_TIMEOUT_MS = 30_000;
 
 const Envelope = z.looseObject({ data: z.array(z.unknown()) });
 const nullableNumber = z.number().nullable().optional();
@@ -88,7 +90,11 @@ async function getJson(
   if (deps.key !== undefined) headers['authorization'] = `Bearer ${deps.key}`;
   let res: Response;
   try {
-    res = await deps.fetch(url, { headers, ...(deps.signal ? { signal: deps.signal } : {}) });
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    res = await deps.fetch(url, {
+      headers,
+      signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
+    });
   } catch (error) {
     return failed(
       scrub(`OpenRouter could not be reached (${error instanceof Error ? error.name : 'error'})`),
