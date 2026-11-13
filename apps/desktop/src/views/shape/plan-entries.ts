@@ -51,9 +51,10 @@ function toolCall(message: ShapeMessageDto): ToolCallView {
 
 function entryOf(message: ShapeMessageDto): ConversationEntry | null {
   const { id, body } = message;
-  if (message.author === 'note') return { kind: 'notice', id, text: body, tone: 'info' };
   switch (message.kind) {
     case 'text':
+      // A note's text (a resume, a model change) is 10db speaking, not either side.
+      if (message.author === 'note') return { kind: 'notice', id, text: body, tone: 'info' };
       return message.author === 'builder'
         ? { kind: 'builder', id, text: body, extra: null }
         : { kind: 'reply', id, text: body, partial: false };

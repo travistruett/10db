@@ -37,7 +37,7 @@ const one = (m: ShapeMessageDto) => planEntries([m]).map(summary);
 describe('planEntries', () => {
   it.each<[string, ShapeMessageDto, string[]]>([
     [
-      'a note of any kind',
+      'a text note',
       msg({ author: 'note', kind: 'text', body: 'Resumed' }),
       ['notice info Resumed'],
     ],
@@ -55,6 +55,12 @@ describe('planEntries', () => {
       msg({ author: 'builder', kind: 'propose', body: '' }),
       ['notice info You pressed Propose.'],
     ],
+    [
+      'Propose, as the daemon stores it, by a note',
+      msg({ author: 'note', kind: 'propose', body: 'Propose' }),
+      ['notice info You pressed Propose.'],
+    ],
+    ['an edit note by a note', msg({ author: 'note', kind: 'edit', body: 'x' }), []],
     [
       'a rehearsal',
       msg({ author: 'claude', kind: 'rehearse', body: 'Rehearsing' }),
