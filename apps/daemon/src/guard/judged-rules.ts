@@ -1,4 +1,5 @@
 import { JudgeKind } from '@10db/contracts';
+import { decodeAnsiC } from './ansi-c';
 
 /**
  * The guard's refusals and cards that a judge which runs may take over. Every other guard rule
@@ -71,11 +72,33 @@ export function namesGitOrGh(command: string): boolean {
 }
 
 const NAMES_SUDO = /(^|[^A-Za-z0-9_-])sudo([^A-Za-z0-9_-]|$)/;
+const ANSI_C_WORD = /\$'((?:[^'\\]|\\[\s\S])*)'/g;
+/** A substitution or parameter with nothing of its own kind inside: the innermost of a nest. */
+const INNERMOST_EXPANSION = /\$\([^()]*\)|\$\{[^{}]*\}|`[^`]*`/g;
+/** Enough rounds for any nest a person writes; a deeper one keeps what is left as text. */
+const EXPANSION_ROUNDS = 32;
 
 /**
- * Whether the raw command text holds `sudo` as a word, read with every quote and backslash taken
- * out first, so `s''udo` and `s\udo`, which a shell reads as `sudo`, count too.
+ * The text as the shell may join it into one word: each ANSI-C `$'…'` decoded, each `$(…)`,
+ * backtick pair and `${…}` dropped with what it holds (empty or not, nested ones from the inside
+ * out), then every quote, a locale quote's `$` and backslash taken out.
+ */
+function joinedText(command: string): string {
+  let text = command.replaceAll(ANSI_C_WORD, (_, body: string) => decodeAnsiC(body).text);
+  for (let round = 0; round < EXPANSION_ROUNDS; round += 1) {
+    const dropped = text.replaceAll(INNERMOST_EXPANSION, '');
+    if (dropped === text) break;
+    text = dropped;
+  }
+  return text.replaceAll(/\$(?=")|['"\\]/g, '');
+}
+
+/**
+ * Whether the command text holds `sudo` as a word, read as the shell may join it (`joinedText`),
+ * so `s''udo`, `s$()udo`, `s${x}udo` and `$'\x73udo'` count too. A word built at run time (a
+ * decode-and-run, a substitution that prints part of it) is not read: there the bound is the
+ * classifier and sudo's password prompt, which a session can't answer.
  */
 export function namesSudo(command: string): boolean {
-  return NAMES_SUDO.test(command.replaceAll(/['"\\]/g, ''));
+  return NAMES_SUDO.test(command) || NAMES_SUDO.test(joinedText(command));
 }
