@@ -1,5 +1,11 @@
-import { PlanEntryBody, PlanEntryKind, type PlanEvidenceRow, type ShapeId } from '@10db/contracts';
-import { Group, Stack, Text } from '@mantine/core';
+import {
+  PlanEntryBody,
+  PlanEntryKind,
+  PlanEntryState,
+  type PlanEvidenceRow,
+  type ShapeId,
+} from '@10db/contracts';
+import { Stack, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { KnowledgeTable } from '../../knowledge/knowledge-table';
@@ -23,6 +29,17 @@ export const ENTRY_KIND_LABELS: Readonly<Record<PlanEntryKind, string>> = {
 const KIND_OPTIONS = Object.values(PlanEntryKind).map((value) => ({
   value,
   label: ENTRY_KIND_LABELS[value],
+}));
+
+// An entry that stands is not called Current, which is the word for an anchor found at its line.
+const STATE_LABELS: Readonly<Record<PlanEntryState, string>> = {
+  [PlanEntryState.Current]: 'Stands',
+  [PlanEntryState.Superseded]: 'Superseded',
+};
+
+const STATE_OPTIONS = Object.values(PlanEntryState).map((value) => ({
+  value,
+  label: STATE_LABELS[value],
 }));
 
 /** An entry's one line: the quote, the claim, what an experiment shows, or a name's definition. */
@@ -60,16 +77,21 @@ function Anchors({ entry }: { readonly entry: PlanEvidenceRow }) {
       </Text>
     );
   return (
-    <Stack gap={4}>
+    <Stack gap={6}>
       {entry.anchors.map((anchor, index) => (
-        <Group key={`${String(index)}:${anchorPlace(anchor)}`} gap={6} wrap="nowrap">
+        <Stack key={`${String(index)}:${anchorPlace(anchor)}`} gap={2}>
           <Text size="xs" ff="monospace" truncate>
             {anchorPlace(anchor)}
           </Text>
-          {anchorStatuses(anchor, index, entry.checks).map(({ taskId, status }) => (
-            <AnchorBadge key={taskId ?? 'none'} status={status} />
+          {anchorStatuses(anchor, index, entry.checks).map(({ taskId, title, status }) => (
+            <AnchorBadge
+              key={taskId ?? 'none'}
+              status={status}
+              task={title}
+              dimmed={entry.state === PlanEntryState.Superseded}
+            />
           ))}
-        </Group>
+        </Stack>
       ))}
     </Stack>
   );
@@ -78,7 +100,7 @@ function Anchors({ entry }: { readonly entry: PlanEvidenceRow }) {
 export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const [narrowing, setNarrowing] = useState(NOT_NARROWED);
   const { query, page, paging } = useRecordPage(shapeId, 'evidence', narrowing);
-  const narrowed = narrowing.q.trim() !== '' || narrowing.kind !== ANY;
+  const narrowed = narrowing.q.trim() !== '' || narrowing.kind !== ANY || narrowing.state !== ANY;
   const columns: DataTableColumn<PlanEvidenceRow>[] = [
     {
       accessor: 'kind',
@@ -125,14 +147,7 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
           );
         return (
           <Stack gap={2}>
-            <Text size="sm">
-              {e.title}
-              {e.state === 'superseded' ? (
-                <Text span size="xs" c="dimmed">
-                  {' · superseded'}
-                </Text>
-              ) : null}
-            </Text>
+            <Text size="sm">{e.title}</Text>
             <Text size="xs" c="dimmed" lineClamp={3} style={{ whiteSpace: 'pre-wrap' }}>
               {entryLine(e)}
             </Text>
@@ -146,6 +161,28 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
       resizable: true,
       toggleable: true,
       render: (e) => <Anchors entry={e} />,
+    },
+    {
+      accessor: 'state',
+      title: 'State',
+      width: 130,
+      toggleable: true,
+      filtering: narrowing.state !== ANY,
+      filter: (
+        <ChoiceFilter
+          label="State"
+          value={narrowing.state}
+          options={STATE_OPTIONS}
+          onChange={(state) => {
+            setNarrowing({ ...narrowing, state });
+          }}
+        />
+      ),
+      render: (e) => (
+        <Text size="sm" c="dimmed">
+          {STATE_LABELS[e.state]}
+        </Text>
+      ),
     },
     {
       accessor: 'verified',
@@ -174,7 +211,7 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
         sort={NO_SORT}
         onSort={() => undefined}
         paging={paging}
-        empty={emptyLine(narrowed, 'entries', 'This Plan records no evidence.')}
+        empty={emptyLine(query, narrowed, 'entries', 'This Plan records no evidence.')}
       />
     </RecordListStates>
   );

@@ -182,16 +182,21 @@ export function ProposedPane({
               : `Proposed · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
-            <Button
-              variant="default"
-              size="xs"
-              disabled={view === undefined || !unread || view.turn.rehearsing || rehearse.isPending}
-              onClick={() => {
-                rehearse.mutate(undefined);
-              }}
-            >
-              {view?.turn.rehearsing === true ? 'Rehearsing…' : 'Rehearse'}
-            </Button>
+            {/* An imported Plan's tasks were planned elsewhere, and a rehearsal can't read them. */}
+            {view?.shape.importedAt == null ? (
+              <Button
+                variant="default"
+                size="xs"
+                disabled={
+                  view === undefined || !unread || view.turn.rehearsing || rehearse.isPending
+                }
+                onClick={() => {
+                  rehearse.mutate(undefined);
+                }}
+              >
+                {view?.turn.rehearsing === true ? 'Rehearsing…' : 'Rehearse'}
+              </Button>
+            ) : null}
             <Button
               variant="default"
               size="xs"

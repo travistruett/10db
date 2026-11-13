@@ -13,7 +13,7 @@ import dayjs from 'dayjs';
 export interface AnchorStatus {
   readonly label: string;
   readonly color: 'green' | 'yellow' | 'red' | 'gray';
-  /** The check's note or line, for the badge's title. */
+  /** Where and when the check read: its line or note, its commit and its day, shown beside the word. */
   readonly detail: string | null;
 }
 
@@ -31,20 +31,23 @@ export function checkStatus(check: AnchorCheckDto | undefined, anchor: PlanAncho
 
 /** What one check found, in words, without its anchor: a page's check says it was not fetched. */
 export function resultStatus(check: AnchorCheckDto): AnchorStatus {
-  const at = check.checkedCommit === null ? '' : ` at ${check.checkedCommit.slice(0, 8)}`;
+  const detail = (what: string | null): string =>
+    [
+      what,
+      check.checkedCommit === null ? null : `at ${check.checkedCommit.slice(0, 8)}`,
+      dayjs(check.at).format('D MMM YYYY'),
+    ]
+      .filter((part) => part !== null)
+      .join(' · ');
   switch (check.result) {
     case AnchorResult.Current:
-      return { label: 'Current', color: 'green', detail: `line ${String(check.line)}${at}` };
+      return { label: 'Current', color: 'green', detail: detail(`line ${String(check.line)}`) };
     case AnchorResult.Moved:
-      return {
-        label: 'Moved',
-        color: 'yellow',
-        detail: `now at line ${String(check.line)}${at}`,
-      };
+      return { label: 'Moved', color: 'yellow', detail: detail(`now line ${String(check.line)}`) };
     case AnchorResult.Changed:
-      return { label: 'Changed', color: 'red', detail: `not found${at}` };
+      return { label: 'Changed', color: 'red', detail: detail('not found') };
     case AnchorResult.Unchecked:
-      return { label: 'Not checked', color: 'gray', detail: check.note };
+      return { label: 'Not checked', color: 'gray', detail: detail(check.note) };
     case AnchorResult.Url:
       return { label: 'Page, not fetched', color: 'gray', detail: null };
   }
@@ -61,10 +64,17 @@ export function anchorStatuses(
   anchor: PlanAnchor,
   index: number,
   checks: readonly PlanEvidenceTaskChecks[],
-): { readonly taskId: TaskId | null; readonly status: AnchorStatus }[] {
-  const found = checks.flatMap(({ taskId, results }) => {
+): {
+  readonly taskId: TaskId | null;
+  /** The task whose check it is; null when no task has checked it. */
+  readonly title: string | null;
+  readonly status: AnchorStatus;
+}[] {
+  const found = checks.flatMap(({ taskId, title, results }) => {
     const result = results.find((r) => r.anchorIndex === index);
-    return result === undefined ? [] : [{ taskId, status: checkStatus(result, anchor) }];
+    return result === undefined ? [] : [{ taskId, title, status: checkStatus(result, anchor) }];
   });
-  return found.length > 0 ? found : [{ taskId: null, status: checkStatus(undefined, anchor) }];
+  return found.length > 0
+    ? found
+    : [{ taskId: null, title: null, status: checkStatus(undefined, anchor) }];
 }

@@ -3,7 +3,7 @@ import type { ExtraProps } from 'streamdown';
 // 10db's own steps over drawn markdown. Before the tree is built, raw HTML becomes text, so it is
 // shown as written and never rendered. After it is sanitized and before rehype-harden, every image
 // becomes a line saying it was not shown, and every link that is not `https:` becomes its text.
-// What the builder reads is decided here; harden runs after with the same rule.
+// What the builder reads is decided here; harden runs after it and is not relied on.
 
 type HastElement = NonNullable<ExtraProps['node']>;
 type HastChild = HastElement['children'][number];

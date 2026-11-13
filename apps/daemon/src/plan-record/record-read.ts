@@ -158,7 +158,15 @@ function evidenceRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
   );
   // Each task's newest check run, read once for every entry on the page.
   const runs = listShapeLinks(db, shapeId).flatMap((l) =>
-    l.taskId === null ? [] : [{ taskId: l.taskId, rows: latestAnchorChecksOfTask(db, l.taskId) }],
+    l.taskId === null
+      ? []
+      : [
+          {
+            taskId: l.taskId,
+            title: getTask(db, l.taskId).title,
+            rows: latestAnchorChecksOfTask(db, l.taskId),
+          },
+        ],
   );
   return entries.map((e) => ({
     key: e.key,
@@ -172,11 +180,11 @@ function evidenceRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
     checkedAt: e.checkedAt,
     state: e.state,
     // A check of an earlier version of the entry says nothing about this one.
-    checks: runs.flatMap(({ taskId, rows }) => {
+    checks: runs.flatMap(({ taskId, title, rows }) => {
       const results = rows
         .filter((r) => r.entryKey === e.key && r.entryVersion === e.version)
         .map(anchorCheckDto);
-      return results.length === 0 ? [] : [{ taskId, results }];
+      return results.length === 0 ? [] : [{ taskId, title, results }];
     }),
   }));
 }

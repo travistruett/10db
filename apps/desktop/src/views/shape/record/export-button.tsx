@@ -12,18 +12,28 @@ export function ExportButton({ shapeId }: { readonly shapeId: ShapeId }) {
   const exported = useExportPlan(shapeId);
   const [typing, setTyping] = useState(false);
   const [path, setPath] = useState('');
+  // The folder panel's own failure, said where the daemon's refusal goes.
+  const [panelError, setPanelError] = useState<string | null>(null);
   const send = (dir: string): void => {
     setTyping(false);
     exported.mutate(dir);
   };
   const pick = async (): Promise<void> => {
+    setPanelError(null);
     if (!canChooseFolder()) {
       setTyping(true);
       return;
     }
-    const dir = await chooseFolder('Choose a folder for the export');
-    if (dir !== null) send(dir);
+    try {
+      const dir = await chooseFolder('Choose a folder for the export');
+      if (dir !== null) send(dir);
+    } catch (error) {
+      setPanelError(
+        `Couldn't open the folder panel: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
+  const failure = panelError ?? (exported.isError ? exported.error.message : null);
   return (
     <Stack gap={4} align="flex-end">
       <Popover opened={typing} onChange={setTyping} position="bottom-end" trapFocus>
@@ -37,7 +47,7 @@ export function ExportButton({ shapeId }: { readonly shapeId: ShapeId }) {
               void pick();
             }}
           >
-            Export as Markdown
+            Export as Markdown…
           </Button>
         </Popover.Target>
         <Popover.Dropdown>
@@ -66,12 +76,12 @@ export function ExportButton({ shapeId }: { readonly shapeId: ShapeId }) {
           </form>
         </Popover.Dropdown>
       </Popover>
-      {exported.isError ? (
+      {failure === null ? null : (
         <Text size="xs" c="red" maw={420} ta="right" role="alert">
-          {exported.error.message}
+          {failure}
         </Text>
-      ) : null}
-      {exported.isSuccess ? (
+      )}
+      {exported.isSuccess && panelError === null ? (
         <Text size="xs" c="dimmed" maw={420} ta="right" role="status">
           {`Exported ${String(exported.data.files.length)} files to ${exported.data.dir}`}
         </Text>

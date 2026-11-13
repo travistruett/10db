@@ -89,6 +89,7 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
         onSort={() => undefined}
         paging={paging}
         empty={emptyLine(
+          query,
           narrowing.q.trim() !== '',
           'questions',
           'This Plan leaves no question open.',

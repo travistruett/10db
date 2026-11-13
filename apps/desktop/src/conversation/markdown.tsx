@@ -13,7 +13,7 @@ import { PlainMarkdown } from './markdown-plain';
 import { rehypeAgentSafety, remarkHtmlAsText } from './rehype-agent-safety';
 
 // The one place markdown is drawn. Raw HTML is shown as its text, the tree is sanitized, and 10db's
-// own step drops images and every link that is not `https:`; harden is set to the same rule. A text
+// own step drops images and every link that is not `https:`; harden runs after it. A text
 // too long or nested too deeply to draw is shown plain (`markdown-fits.ts`). GFM only: no math, no
 // Mermaid and no highlighter, so none of streamdown's lazy chunks ever loads.
 
@@ -28,10 +28,11 @@ const MARKDOWN_REHYPE_PLUGINS: NonNullable<StreamdownProps['rehypePlugins']> = [
   [
     harden,
     {
-      // Links stay https-only because of 10db's own step above, which has already unwrapped every
-      // other link; harden, set to the same rule, is not relied on as a second wall.
-      allowedLinkPrefixes: ['https://'],
-      allowedProtocols: ['https'],
+      // Links stay https-only because 10db's own step above has already unwrapped every other link;
+      // harden is not a second wall. Its narrowest setting is `*`: a prefix such as `https://` makes it
+      // demand a default origin and throw on every draw, and an invented origin would let it accept
+      // relative links resolved against that origin.
+      allowedLinkPrefixes: ['*'],
       allowedImagePrefixes: [],
       allowDataImages: false,
     },

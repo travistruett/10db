@@ -76,7 +76,17 @@ function ConvertForm({
   const rehearsingCount = chosen
     .flatMap((r) => rowReview(view, r).tasks)
     .filter((t) => t.state === 'rehearsing').length;
-  const warnings = convertWarnings(view, chosen, rehearsing);
+  // An imported Plan's tasks were planned elsewhere: no rehearsal reads them, and they are named once.
+  const imported = view.shape.importedAt !== null;
+  const importedTasks = imported ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
+  const warnings = [
+    ...(importedTasks === 0
+      ? []
+      : [
+          `Imported tasks aren't rehearsed: ${String(importedTasks)} ${importedTasks === 1 ? 'task' : 'tasks'}`,
+        ]),
+    ...convertWarnings(view, chosen, rehearsing),
+  ];
 
   // Once per opening: a task with no mark at its current content gets a rehearsal turn.
   const asked = useRef(false);
@@ -86,10 +96,10 @@ function ConvertForm({
       asked.current = false;
       return;
     }
-    if (asked.current || rehearsing || unread.length === 0) return;
+    if (imported || asked.current || rehearsing || unread.length === 0) return;
     asked.current = true;
     onRehearse(unread);
-  }, [opened, rehearsing, unread, onRehearse]);
+  }, [opened, imported, rehearsing, unread, onRehearse]);
 
   const convert = async (interrupt: boolean): Promise<void> => {
     const ids = chosen.map((r) => r.id);
@@ -194,7 +204,7 @@ function ConvertForm({
                   description={destination(row)}
                 />
                 {row.kind === 'goal' || row.kind === 'task' ? (
-                  <ReviewLines review={rowReview(view, row)} showRehearsal pl={28} />
+                  <ReviewLines review={rowReview(view, row)} showRehearsal={!imported} pl={28} />
                 ) : null}
               </div>
             ))}

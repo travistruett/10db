@@ -45,11 +45,31 @@ describe('RecordView', () => {
       ...baseHandlers(),
     );
     await renderWithDaemonAndRouter(<Holder />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
     expect((await screen.findByRole('alert')).textContent).toBe(
       '/Users/me/demo is the checkout of demo',
     );
     expect(asked).toEqual([{ dir: '/Users/me/demo' }]);
+  });
+
+  it('a folder panel that fails says why, and nothing is exported', async () => {
+    mockIPC((command) => {
+      if (command === 'plugin:dialog|open') throw new Error('the panel is unavailable');
+      return undefined;
+    });
+    const asked: unknown[] = [];
+    server.use(
+      ...planRecordHandlers(),
+      http.post(daemonUrl('/shapes/:shapeId/export'), async ({ request }) => {
+        asked.push(await request.json());
+        return HttpResponse.json({ dir: '/x', files: [] });
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<Holder />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('the panel is unavailable');
+    expect(asked).toEqual([]);
   });
 
   it('export says how many files it wrote, and where', async () => {
@@ -62,7 +82,7 @@ describe('RecordView', () => {
       ...baseHandlers(),
     );
     await renderWithDaemonAndRouter(<Holder />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Exported 2 files to /Users/me/exports');
     });

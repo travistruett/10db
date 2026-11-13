@@ -67,7 +67,15 @@ export function PlanContextDisclosure({ taskId }: { readonly taskId: TaskId }) {
                     <Text size="xs" ff="monospace">
                       {`${check.entryKey} · anchor ${String(check.anchorIndex + 1)}`}
                     </Text>
-                    <AnchorBadge status={resultStatus(check)} />
+                    <AnchorBadge
+                      status={resultStatus(check)}
+                      // A check from another run than the one that got this block read another base.
+                      note={
+                        answer.packed !== null && check.workstreamId !== answer.packed.workstreamId
+                          ? 'checked by an earlier run'
+                          : null
+                      }
+                    />
                   </Group>
                 </List.Item>
               ))}

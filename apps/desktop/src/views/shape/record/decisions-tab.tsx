@@ -163,7 +163,7 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
         sort={NO_SORT}
         onSort={() => undefined}
         paging={paging}
-        empty={emptyLine(narrowed, 'decisions', 'This Plan records no decisions.')}
+        empty={emptyLine(query, narrowed, 'decisions', 'This Plan records no decisions.')}
       />
       <DecisionDrawer
         decision={open}

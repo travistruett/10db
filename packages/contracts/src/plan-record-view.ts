@@ -156,6 +156,8 @@ export type PlanDecisionRow = z.infer<typeof PlanDecisionRow>;
 /** The newest check run of one task, of this entry's anchors. */
 export const PlanEvidenceTaskChecks = z.object({
   taskId: TaskId,
+  /** The task's title, so each task's check is named. */
+  title: z.string(),
   results: z.array(AnchorCheckDto),
 });
 export type PlanEvidenceTaskChecks = z.infer<typeof PlanEvidenceTaskChecks>;

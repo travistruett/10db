@@ -112,7 +112,9 @@ describe('Evidence', () => {
       ...planRecordHandlers({
         pages: (list) =>
           recordPage(list, [
-            evidenceRow({ checks: [{ taskId: mintId('Task'), results: [check] }] }),
+            evidenceRow({
+              checks: [{ taskId: mintId('Task'), title: 'Pair a device', results: [check] }],
+            }),
             evidenceRow({
               key: 'f2',
               title: 'Tailscale serves the host',
@@ -132,6 +134,79 @@ describe('Evidence', () => {
     expect(screen.getByText('The runner packs the context once per session.')).toBeTruthy();
     const page = screen.getByText('tailscale.com').closest('tr');
     expect(page?.textContent).toContain('Read 12 Nov 2026');
+  });
+
+  it('a state filter goes to the daemon', async () => {
+    const seen: SeenPage[] = [];
+    server.use(
+      ...planRecordHandlers({ seen, pages: (list) => recordPage(list, [evidenceRow()]) }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<EvidenceTab shapeId={RECORD_SHAPE_ID} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter State' }));
+    await pickOption(await screen.findByRole('combobox', { name: 'State' }), 'Superseded');
+    await waitFor(() => {
+      expect(seen.at(-1)?.query.get('state')).toBe('superseded');
+    });
+  });
+
+  it('a refused search shows its error in the table, and the search stays', async () => {
+    server.use(
+      http.get(daemonUrl('/shapes/:shapeId/record/:list'), ({ request }) =>
+        new URL(request.url).searchParams.has('q')
+          ? HttpResponse.json({ error: 'invalid', message: 'q is too long' }, { status: 400 })
+          : HttpResponse.json(recordPage('evidence', [evidenceRow()])),
+      ),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<EvidenceTab shapeId={RECORD_SHAPE_ID} />);
+    await screen.findByText('The runner packs once');
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Title' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search' }), {
+      target: { value: 'runner' },
+    });
+    expect(await screen.findByText(/q is too long/)).toBeTruthy();
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Search' })).toBeTruthy();
+  });
+
+  it("names each task's check of an anchor, and dims a superseded fact's", async () => {
+    const check = (result: 'current' | 'changed') => ({
+      entryKey: 'f1',
+      entryVersion: 1,
+      anchorIndex: 0,
+      result,
+      line: result === 'current' ? 1976 : null,
+      checkedCommit: '0123456789abcdef',
+      note: null,
+      workstreamId: mintId('Workstream'),
+      at: '2026-11-12T08:00:00.000Z',
+    });
+    const checks = [
+      { taskId: mintId('Task'), title: 'Pair a device', results: [check('current')] },
+      { taskId: mintId('Task'), title: 'Revoke a device', results: [check('changed')] },
+    ];
+    server.use(
+      ...planRecordHandlers({
+        pages: (list) =>
+          recordPage(list, [
+            evidenceRow({ checks }),
+            evidenceRow({ key: 'f9', title: 'An old claim', state: 'superseded', checks }),
+          ]),
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<EvidenceTab shapeId={RECORD_SHAPE_ID} />);
+    const current = (await screen.findByText('The runner packs once')).closest('tr');
+    expect(current?.textContent).toContain('Pair a device');
+    expect(current?.textContent).toContain('Revoke a device');
+    expect(current?.textContent).toContain('line 1976 · at 01234567 · 12 Nov 2026');
+    const badges = (row: Element | null | undefined) =>
+      [...(row?.querySelectorAll('.mantine-Badge-root') ?? [])].map((b) =>
+        b.getAttribute('data-variant'),
+      );
+    expect(badges(current)).toEqual(['light', 'light']);
+    expect(badges(screen.getByText('An old claim').closest('tr'))).toEqual(['outline', 'outline']);
   });
 });
 
@@ -281,6 +356,33 @@ describe('Tasks', () => {
       rev: 2,
       section: 'task-12',
     });
+  });
+
+  it('a cancelled task says Cancelled, and one gone from the project says Removed', async () => {
+    const cancelled = taskRow();
+    const gone = taskRow({ key: 't2', title: 'Gone' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([
+          taskDto({
+            id: cancelled.taskId,
+            projectId: project.id,
+            title: cancelled.title,
+            status: 'cancelled',
+          }),
+        ]),
+      ),
+      ...planRecordHandlers({ pages: (list) => recordPage(list, [cancelled, gone]) }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(
+      <TasksTab shapeId={RECORD_SHAPE_ID} projectId={project.id} onSearch={() => undefined} />,
+    );
+    expect((await screen.findByText('Cancelled')).closest('tr')?.textContent).toContain(
+      'Pair a device',
+    );
+    expect(screen.getByText('Removed').closest('tr')?.textContent).toContain('Gone');
   });
 
   it("a task's state follows a task.changed event", async () => {

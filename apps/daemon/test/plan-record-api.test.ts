@@ -263,7 +263,13 @@ describe('a Plan record through the daemon', () => {
       key: 'f1',
       version: 1,
       // The temp repository has no src/runner.ts, so its anchor is nowhere to be found.
-      checks: [{ taskId, results: [{ entryKey: 'f1', anchorIndex: 0, result: 'changed' }] }],
+      checks: [
+        {
+          taskId,
+          title: 'Pair a device',
+          results: [{ entryKey: 'f1', anchorIndex: 0, result: 'changed' }],
+        },
+      ],
     });
     const decisions = await page(shapeId, 'decisions');
     const d1 = decisions.rows[0];

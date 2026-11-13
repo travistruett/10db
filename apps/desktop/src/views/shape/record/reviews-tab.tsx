@@ -226,7 +226,7 @@ export function ReviewsTab({
         sort={NO_SORT}
         onSort={() => undefined}
         paging={paging}
-        empty={emptyLine(narrowed, 'findings', 'This Plan records no reviews.')}
+        empty={emptyLine(query, narrowed, 'findings', 'This Plan records no reviews.')}
       />
     </RecordListStates>
   );

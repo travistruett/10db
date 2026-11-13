@@ -1,4 +1,4 @@
-import type { PlanTaskRow, ProjectId, ShapeId } from '@10db/contracts';
+import { TaskStatus, type PlanTaskRow, type ProjectId, type ShapeId } from '@10db/contracts';
 import { Anchor, Group, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
@@ -96,12 +96,20 @@ export function TasksTab({
       toggleable: true,
       render: (t) => {
         const row = states.get(t.taskId);
-        if (row === undefined)
+        // Factory leaves a cancelled task out, so it is said here; one the project no longer has is
+        // Removed.
+        if (row === undefined) {
+          const task = tasks.data?.find((d) => d.id === t.taskId);
           return (
             <Text size="sm" c="dimmed">
-              {tasks.isPending ? '' : 'Removed'}
+              {tasks.isPending
+                ? ''
+                : task?.status === TaskStatus.Cancelled
+                  ? 'Cancelled'
+                  : 'Removed'}
             </Text>
           );
+        }
         return (
           <Group gap={6} wrap="nowrap">
             <Text size="sm" c={row.color === 'gray' ? 'dimmed' : row.color}>
@@ -124,6 +132,7 @@ export function TasksTab({
         onSort={() => undefined}
         paging={paging}
         empty={emptyLine(
+          query,
           narrowing.q.trim() !== '',
           'tasks',
           'Nothing was converted from this Plan yet.',

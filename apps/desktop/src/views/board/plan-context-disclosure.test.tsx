@@ -9,12 +9,13 @@ import { PlanContextDisclosure } from './plan-context-disclosure';
 // checks of the anchors it cites, Current only when found at the line.
 
 const taskId = mintId('Task');
+const lane = mintId('Workstream');
 const PACKED = 'Your section (p1#task-12):\n## Task 12: Revoke a device\nRevoke it.  \n';
 
 function context(over: Partial<TaskPlanContextDto>): TaskPlanContextDto {
   return TaskPlanContextDto.parse({
     context: { shapeId: mintId('Shape'), title: 'Remote host', ref: 'p1#task-12', revision: 1 },
-    packed: { at: '2026-11-12T08:00:00.000Z', workstreamId: mintId('Workstream'), text: PACKED },
+    packed: { at: '2026-11-12T08:00:00.000Z', workstreamId: lane, text: PACKED },
     checks: [
       {
         entryKey: 'f1',
@@ -24,7 +25,7 @@ function context(over: Partial<TaskPlanContextDto>): TaskPlanContextDto {
         line: 2001,
         checkedCommit: '0123456789abcdef',
         note: null,
-        workstreamId: mintId('Workstream'),
+        workstreamId: lane,
         at: '2026-11-12T08:00:00.000Z',
       },
       {
@@ -35,7 +36,7 @@ function context(over: Partial<TaskPlanContextDto>): TaskPlanContextDto {
         line: 18,
         checkedCommit: '0123456789abcdef',
         note: null,
-        workstreamId: mintId('Workstream'),
+        workstreamId: lane,
         at: '2026-11-12T08:00:00.000Z',
       },
     ],
@@ -66,6 +67,26 @@ describe('PlanContextDisclosure', () => {
     expect(moved?.textContent).toContain('Moved');
     expect(moved?.textContent).not.toContain('Current');
     expect(screen.getByText('f2 · anchor 1').closest('li')?.textContent).toContain('Current');
+    // Where and when each check read, as text the keyboard and a screen reader reach.
+    expect(moved?.textContent).toContain('now line 2001 · at 01234567 · 12 Nov 2026');
+    expect(moved?.textContent).not.toContain('earlier run');
+  });
+
+  it('a check by an earlier run of the task says so', async () => {
+    const base = context({});
+    serve({
+      ...base,
+      checks: base.checks.map((c) =>
+        c.entryKey === 'f2' ? { ...c, workstreamId: mintId('Workstream') } : c,
+      ),
+    });
+    renderWithDaemon(<PlanContextDisclosure taskId={taskId} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Plan context/ }));
+    const earlier = (await screen.findByText('f2 · anchor 1')).closest('li');
+    expect(earlier?.textContent).toContain('checked by an earlier run');
+    expect(screen.getByText('f1 · anchor 1').closest('li')?.textContent).not.toContain(
+      'earlier run',
+    );
   });
 
   it('says Not sent yet before the lane was packed', async () => {

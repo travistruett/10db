@@ -51,14 +51,20 @@ describe('anchorStatuses', () => {
   it('reads each task newest check of this anchor, and never another anchor', () => {
     const taskId = mintId('Task');
     const statuses = anchorStatuses(CODE, 1, [
-      { taskId, results: [check({ anchorIndex: 0 }), check({ anchorIndex: 1, result: 'moved' })] },
+      {
+        taskId,
+        title: 'Pair',
+        results: [check({ anchorIndex: 0 }), check({ anchorIndex: 1, result: 'moved' })],
+      },
     ]);
-    expect(statuses.map((s) => [s.taskId, s.status.label])).toEqual([[taskId, 'Moved']]);
+    expect(statuses.map((s) => [s.taskId, s.title, s.status.label])).toEqual([
+      [taskId, 'Pair', 'Moved'],
+    ]);
   });
 
   it('says Not checked when no task checked it', () => {
-    expect(anchorStatuses(CODE, 0, []).map((s) => [s.taskId, s.status.label])).toEqual([
-      [null, 'Not checked'],
+    expect(anchorStatuses(CODE, 0, []).map((s) => [s.taskId, s.title, s.status.label])).toEqual([
+      [null, null, 'Not checked'],
     ]);
   });
 });
