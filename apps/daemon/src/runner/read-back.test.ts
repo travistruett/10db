@@ -25,7 +25,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
 import { createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { ConversationUnreadError, type ConversationReadSpec, type AgentAdapter } from '../sessions';
+import {
+  capabilitiesOf,
+  ConversationUnreadError,
+  type AgentAdapter,
+  type ConversationReadSpec,
+} from '../sessions';
 import { readBackThread, THREAD_UNREAD_NOTICE, TURN_CUT_SHORT, type ReadBack } from './read-back';
 
 // Workbench spec §12: a lane that resumes a Codex thread while a builder message pushed to it was
@@ -87,7 +92,8 @@ function message(body: string, uuids: readonly string[]): TaskMessageId {
  */
 function thread(held: readonly string[] | string) {
   const reads: ConversationReadSpec[] = [];
-  const adapter: Pick<AgentAdapter, 'readClientUuids'> = {
+  const adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'> = {
+    capabilities: (a) => capabilitiesOf(a.kind),
     readClientUuids: (spec) => {
       reads.push(spec);
       return typeof held === 'string'
@@ -100,7 +106,7 @@ function thread(held: readonly string[] | string) {
 
 /** The lane's read-back of the action the workstream holds, as the runner calls it. */
 function readBack(
-  adapter: Pick<AgentAdapter, 'readClientUuids'>,
+  adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'>,
   action: NextAction,
   opts: { readonly account?: AccountId; readonly signal?: AbortSignal } = {},
 ): Promise<ReadBack> {
@@ -282,7 +288,8 @@ describe('reading a Codex thread back before it is resumed', () => {
   it('stops at once with the lane, deciding and keeping nothing', async () => {
     const m = message('m', [U1]);
     const stop = new AbortController();
-    const adapter: Pick<AgentAdapter, 'readClientUuids'> = {
+    const adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'> = {
+      capabilities: (a) => capabilitiesOf(a.kind),
       readClientUuids: (spec) =>
         new Promise((_, reject) => {
           spec.signal?.addEventListener('abort', () => {

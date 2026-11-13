@@ -1,10 +1,4 @@
-import {
-  Provider,
-  providerOf,
-  type NextAction,
-  type TaskId,
-  type WorkstreamId,
-} from '@10db/contracts';
+import type { NextAction, TaskId, WorkstreamId } from '@10db/contracts';
 import {
   insertSystemNotice,
   listUndeliveredTaskMessages,
@@ -41,7 +35,7 @@ export type ReadBack =
 
 export interface ReadBackDeps {
   readonly state: StateStore;
-  readonly adapter: Pick<AgentAdapter, 'readClientUuids'>;
+  readonly adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'>;
   readonly launcher: Pick<Launcher, 'probe'>;
 }
 
@@ -66,7 +60,7 @@ export async function readBackThread(
   const { action } = input;
   const thread = resumedSessionOf(action);
   const unchanged: ReadBack = { kind: 'read', action };
-  if (thread === null || providerOf(input.account.kind) !== Provider.Codex) return unchanged;
+  if (thread === null || !deps.adapter.capabilities(input.account, null).readBack) return unchanged;
   // Oldest first, so the first was written earliest.
   const inDoubt = listUndeliveredTaskMessages(deps.state.db, input.taskId).filter(
     (m) => m.pushUuids.length > 0,
