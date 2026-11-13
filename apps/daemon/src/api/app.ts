@@ -1,4 +1,6 @@
 import {
+  GithubSigninDto,
+  GithubStatusDto,
   AccountId,
   AccountInput,
   AccountPatch,
@@ -166,7 +168,7 @@ export interface ApiDeps {
   onUnexpectedError(error: unknown): void;
 }
 
-const STATUS = { not_found: 404, conflict: 409, invalid: 400 } as const;
+const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 const STREAM_PATH = '/events/stream';
 
@@ -1106,6 +1108,23 @@ export function createApp(deps: ApiDeps) {
     .delete('/people/:personId', (c) => {
       deps.services.removePerson(PersonId.parse(c.req.param('personId')));
       return c.json({});
+    })
+    .get(
+      '/github',
+      validator('query', (query): { recheck?: '1' | undefined } => SystemQuery.parse(query)),
+      async (c) =>
+        c.json(
+          GithubStatusDto.parse(
+            await deps.services.githubStatus(c.req.valid('query').recheck === '1'),
+          ),
+        ),
+    )
+    .post('/github/signin', async (c) =>
+      c.json(GithubSigninDto.parse(await deps.services.startGithubSignin())),
+    )
+    .delete('/github/signin', (c) => {
+      deps.services.cancelGithubSignin();
+      return c.body(null, 204);
     })
     .get('/slack', (c) => c.json(deps.services.slackStatus()))
     .put(

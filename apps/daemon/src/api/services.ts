@@ -136,6 +136,8 @@ import type {
   PersonId,
   QuestionRouteDto,
   SendInput,
+  GithubSigninDto,
+  GithubStatusDto,
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
@@ -589,6 +591,15 @@ export interface ApiServices {
   updatePerson(id: PersonId, input: PersonInput): PersonDto;
   /** Removes a person; the builder, a goal's owner, a person on a criterion and a routed person stay. */
   removePerson(id: PersonId): void;
+  /**
+   * gh's login, probed when the last answer is older than a minute or `recheck` is set (which also
+   * looks for gh again), plus the code and page of a Sign In that waits for the builder.
+   */
+  githubStatus(recheck: boolean): Promise<GithubStatusDto>;
+  /** Runs `gh auth login --web`: 409 while one runs or gh is missing, 502 when gh prints no code. */
+  startGithubSignin(): Promise<GithubSigninDto>;
+  /** Stops the running sign-in; a no-op when none runs. */
+  cancelGithubSignin(): void;
   /** The Slack connection as the reply watch last found it. */
   slackStatus(): SlackConnectionDto;
   /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
