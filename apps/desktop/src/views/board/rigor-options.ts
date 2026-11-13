@@ -1,4 +1,4 @@
-import { RIGORS, rigorAtLeast, type KindDto, type Rigor } from '@10db/contracts';
+import { effectiveRigor, RIGORS, rigorAtLeast, type KindDto, type Rigor } from '@10db/contracts';
 import { RIGOR_LABEL } from './rigor-labels';
 
 export interface RigorOption {
@@ -35,4 +35,24 @@ export function rigorOptions(
         : RIGOR_LABEL[value],
     };
   });
+}
+
+/**
+ * The "follow the project" option, with the rigor it comes to for this task: the project's default, or the
+ * stronger minimum of one of the task's kinds, which it names.
+ */
+export function projectDefaultLabel(
+  kinds: readonly KindDto[],
+  taskKeys: readonly string[],
+  projectDefault: Rigor,
+): string {
+  const effective = effectiveRigor({
+    rigor: null,
+    projectDefault,
+    taskKinds: taskKeys.map((key) => ({ key })),
+    kinds,
+  });
+  if (effective === projectDefault) return `Project default (${RIGOR_LABEL[effective]})`;
+  const raiser = kinds.find((k) => taskKeys.includes(k.key) && k.minimumRigor === effective);
+  return `Project default (${RIGOR_LABEL[effective]}${raiser === undefined ? '' : `, raised by ${raiser.label}`})`;
 }

@@ -69,6 +69,7 @@ export function BatchCandidate({
             aria-label={`Rigor for ${task.title}`}
             size="sm"
             value={task.rigor}
+            projectId={task.projectId}
             kindKeys={task.kinds.map((k) => k.key)}
             onChange={(rigor) => {
               patch.mutate({ taskId: task.id, patch: { rigor } });

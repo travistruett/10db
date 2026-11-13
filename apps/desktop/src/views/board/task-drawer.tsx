@@ -520,6 +520,7 @@ export function TaskDrawer({
                 label="Rigor"
                 description="How much process the task gets."
                 value={rigor}
+                projectId={task.projectId}
                 kindKeys={kinds.map((k) => k.key)}
                 onChange={setRigor}
               />

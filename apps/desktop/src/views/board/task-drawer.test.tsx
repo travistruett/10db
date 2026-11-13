@@ -14,7 +14,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { kindDto } from '../../test/playbook-fixtures';
 import { modelRowDto } from '../../test/model-fixtures';
 import { RISK_LABEL } from './risk-labels';
@@ -409,8 +409,21 @@ describe('TaskDrawer', () => {
       http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
       ...baseHandlers(),
     );
-    open({ task: { kinds: [{ key: 'security', source: 'agent' }] } });
+    const task = taskDto({ kinds: [{ key: 'security', source: 'agent' }] });
+    server.use(
+      http.get(daemonUrl('/projects'), () =>
+        HttpResponse.json([projectViewDto({ id: task.projectId, defaultRigor: 'standard' })]),
+      ),
+    );
+    open({ task });
     const d = await openTab('Edit');
+    // The follow option says what the project's default comes to for this task, and what raised it.
+    await waitFor(() => {
+      expect(within(d).getByRole('combobox', { name: 'Rigor' })).toHaveProperty(
+        'value',
+        'Project default (Careful, raised by Security)',
+      );
+    });
     fireEvent.click(within(d).getByRole('combobox', { name: 'Rigor' }));
     // The kinds arrive after the drawer opens; the option names the kind once they have.
     const light = await screen.findByRole('option', {

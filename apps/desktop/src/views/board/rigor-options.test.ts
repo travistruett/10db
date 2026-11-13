@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { kindDto } from '../../test/playbook-fixtures';
-import { rigorOptions } from './rigor-options';
+import { projectDefaultLabel, rigorOptions } from './rigor-options';
 
 const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
 const docs = kindDto({ key: 'docs', label: 'Docs' });
@@ -36,5 +36,31 @@ describe('rigorOptions', () => {
   it('names the kind that sets the floor on a disabled option', () => {
     const light = rigorOptions([security, docs], ['security']).find((o) => o.value === 'light');
     expect(light?.label).toBe('Light (Security needs Careful or more)');
+  });
+});
+
+describe('projectDefaultLabel', () => {
+  it.each([
+    { name: 'no kinds', keys: [], projectDefault: 'standard', want: 'Project default (Standard)' },
+    {
+      name: 'a kind with no floor',
+      keys: ['docs'],
+      projectDefault: 'light',
+      want: 'Project default (Light)',
+    },
+    {
+      name: 'a floor above the default names the kind',
+      keys: ['security'],
+      projectDefault: 'standard',
+      want: 'Project default (Careful, raised by Security)',
+    },
+    {
+      name: 'a floor at or below the default changes nothing',
+      keys: ['security'],
+      projectDefault: 'critical',
+      want: 'Project default (Critical)',
+    },
+  ] as const)('says $name', ({ keys, projectDefault, want }) => {
+    expect(projectDefaultLabel([security, docs], keys, projectDefault)).toBe(want);
   });
 });

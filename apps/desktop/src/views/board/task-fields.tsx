@@ -1,28 +1,38 @@
-import { Effort, type KindDto, type Rigor, type TaskKind } from '@10db/contracts';
+import { Effort, type KindDto, type ProjectId, type Rigor, type TaskKind } from '@10db/contracts';
 import { MultiSelect, Select, type SelectProps } from '@mantine/core';
 import { useKinds } from '../../daemon/kind-queries';
-import { rigorOptions } from './rigor-options';
+import { useProjects } from '../../daemon/queries';
+import { projectDefaultLabel, rigorOptions } from './rigor-options';
 
 /** The value for "follow the project's rigor": Select cannot hold null as an option. */
 const FOLLOW = '';
 
 export interface RigorSelectProps extends Omit<SelectProps, 'data' | 'value' | 'onChange'> {
   readonly value: Rigor | null;
+  /** The task's project, whose default rigor the follow option names. */
+  readonly projectId: ProjectId;
   /** The keys of the task's kinds, whose minimums disable the weaker rigors. */
   readonly kindKeys: readonly string[];
   readonly onChange: (rigor: Rigor | null) => void;
 }
 
 /** Picks a task's rigor, or the project's; a rigor below the task's kinds' floor is off and names the kind. */
-export function RigorSelect({ value, kindKeys, onChange, ...props }: RigorSelectProps) {
+export function RigorSelect({ value, projectId, kindKeys, onChange, ...props }: RigorSelectProps) {
   const kinds = useKinds().data ?? [];
+  const projectDefault = useProjects().data?.find((p) => p.id === projectId)?.defaultRigor;
   const options = rigorOptions(kinds, kindKeys);
   return (
     <Select
       {...props}
       allowDeselect={false}
       data={[
-        { value: FOLLOW, label: 'Project default' },
+        {
+          value: FOLLOW,
+          label:
+            projectDefault === undefined
+              ? 'Project default'
+              : projectDefaultLabel(kinds, kindKeys, projectDefault),
+        },
         ...options.map((o) => ({ value: o.value, label: o.label, disabled: o.disabled })),
       ]}
       value={value ?? FOLLOW}
