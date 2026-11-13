@@ -292,6 +292,17 @@ describe('validateBundle', () => {
     expect(issues(valid(), stored).join('\n')).toMatch(/f1.*stored as a decision/);
   });
 
+  it('a chain of 20,000 tasks is checked without exhausting the stack', () => {
+    const bundle = valid();
+    bundle['tasks'] = Array.from({ length: 20_000 }, (_, i) => ({
+      key: `c${String(i)}`,
+      title: 'Chain',
+      areas: ['ui'],
+      ...(i > 0 ? { dependsOn: [`c${String(i - 1)}`] } : { dependsOn: ['c19999'] }),
+    }));
+    expect(issues(bundle).join('\n')).toMatch(/A dependency cycle: c0 → c19999 → /);
+  });
+
   it('three problems are three issues at once', () => {
     const bundle = valid();
     bundle['projectId'] = mintId('Project');

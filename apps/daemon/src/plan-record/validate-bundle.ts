@@ -84,27 +84,36 @@ function slugsByRevision(bodies: ReadonlyMap<string, string>): Map<string, Set<s
   );
 }
 
-/** A dependency cycle among the bundle's tasks, as its keys in order, or null. */
+/**
+ * A dependency cycle among the bundle's tasks, as its keys in order, or null. Iterative, so a long
+ * chain in an outside bundle can't exhaust the stack.
+ */
 function cycleOf(edges: ReadonlyMap<string, readonly string[]>): string[] | null {
   const state = new Map<string, 'open' | 'done'>();
-  const path: string[] = [];
-  const visit = (key: string): string[] | null => {
-    if (state.get(key) === 'done') return null;
-    if (state.get(key) === 'open') return [...path.slice(path.indexOf(key)), key];
-    state.set(key, 'open');
-    path.push(key);
-    for (const next of edges.get(key) ?? []) {
-      if (!edges.has(next)) continue;
-      const found = visit(next);
-      if (found) return found;
+  for (const root of edges.keys()) {
+    if (state.has(root)) continue;
+    const path: string[] = [root];
+    const next: number[] = [0];
+    state.set(root, 'open');
+    while (path.length > 0) {
+      const at = path.length - 1;
+      const key = path[at] ?? '';
+      const deps = edges.get(key) ?? [];
+      const i = next[at] ?? 0;
+      if (i >= deps.length) {
+        state.set(key, 'done');
+        path.pop();
+        next.pop();
+        continue;
+      }
+      next[at] = i + 1;
+      const dep = deps[i] ?? '';
+      if (!edges.has(dep) || state.get(dep) === 'done') continue;
+      if (state.get(dep) === 'open') return [...path.slice(path.indexOf(dep)), dep];
+      state.set(dep, 'open');
+      path.push(dep);
+      next.push(0);
     }
-    path.pop();
-    state.set(key, 'done');
-    return null;
-  };
-  for (const key of edges.keys()) {
-    const found = visit(key);
-    if (found) return found;
   }
   return null;
 }
