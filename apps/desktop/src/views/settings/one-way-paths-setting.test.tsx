@@ -27,7 +27,7 @@ describe('Settings › Planning › One-way paths', () => {
     await waitFor(() => {
       expect(box).toHaveProperty('value', 'packages/db/drizzle/**\npackages/contracts/src/**');
     });
-    const save = screen.getByRole('button', { name: 'Save one-way paths' });
+    const save = screen.getByRole('button', { name: 'Save One-Way Paths' });
     expect(save).toHaveProperty('disabled', true);
     fireEvent.change(box, { target: { value: 'packages/db/drizzle/**\n\n  infra/**  \n' } });
     fireEvent.click(save);

@@ -203,26 +203,28 @@ function ShapeMeasures({
   const measures = useShapeMeasures();
   if (measures.data === undefined) return null;
   return (
-    <SettingsCard>
-      <SizingRow sizing={measures.data.sizing} />
-      <QuestionsRow questions={measures.data.questions} />
-      {SHAPE_JUDGE_DECISIONS.map((decision) => (
-        <ShapeDecisionRow
-          key={decision}
-          decision={decision}
-          config={decisions[decision]}
-          agreement={measures.data.shadow.find((a) => a.decision === decision)}
-          disabled={disabled}
-          onEnabled={(enabled) => {
-            onEnabled(decision, enabled);
-          }}
-        />
-      ))}
+    <Stack gap="xs">
+      <SettingsCard>
+        <SizingRow sizing={measures.data.sizing} />
+        <QuestionsRow questions={measures.data.questions} />
+        {SHAPE_JUDGE_DECISIONS.map((decision) => (
+          <ShapeDecisionRow
+            key={decision}
+            decision={decision}
+            config={decisions[decision]}
+            agreement={measures.data.shadow.find((a) => a.decision === decision)}
+            disabled={disabled}
+            onEnabled={(enabled) => {
+              onEnabled(decision, enabled);
+            }}
+          />
+        ))}
+      </SettingsCard>
       <Text size="xs" c="dimmed">
         Plan asks these only for a project with “Send brainstorm messages to fast models” on in its
         settings, and only logs the answers until each has 20 scored answers with 75% agreeing.
       </Text>
-    </SettingsCard>
+    </Stack>
   );
 }
 
