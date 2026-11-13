@@ -370,6 +370,7 @@ export function readPlanRecord(db: DbReader, shapeId: ShapeId): PlanRecordDto {
   const all: PlanRecordQuery = { page: 1, pageSize: 25 };
   return {
     shapeId,
+    projectId: shape.projectId,
     title: shape.title,
     importedAt: shape.importedAt,
     origin: getShapeBundleOrigin(db, shapeId),

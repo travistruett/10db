@@ -8,6 +8,9 @@ export const RecordTab = {
   Documents: 'documents',
   Decisions: 'decisions',
   Evidence: 'evidence',
+  Reviews: 'reviews',
+  Questions: 'questions',
+  Tasks: 'tasks',
 } as const;
 export type RecordTab = (typeof RecordTab)[keyof typeof RecordTab];
 
@@ -19,6 +22,9 @@ export const RECORD_TABS: readonly {
   { tab: RecordTab.Documents, label: 'Documents', count: (r) => r.documents.length },
   { tab: RecordTab.Decisions, label: 'Decisions', count: (r) => r.counts.decisions },
   { tab: RecordTab.Evidence, label: 'Evidence', count: (r) => r.counts.evidence },
+  { tab: RecordTab.Reviews, label: 'Reviews', count: (r) => r.counts.reviews },
+  { tab: RecordTab.Questions, label: 'Questions', count: (r) => r.counts.questions },
+  { tab: RecordTab.Tasks, label: 'Tasks', count: (r) => r.counts.tasks },
 ];
 
 export interface RecordSearch {

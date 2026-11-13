@@ -118,6 +118,7 @@ export function baseHandlers(
       HttpResponse.json(
         PlanRecordDto.parse({
           shapeId: params['shapeId'],
+          projectId: BASE_PROJECT.id,
           title: 'Board polish',
           importedAt: null,
           origin: null,

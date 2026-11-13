@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { DecisionId, ShapeFindingId, ShapeId, ShapeProposalId, TaskId, WorkstreamId } from './ids';
+import {
+  DecisionId,
+  ProjectId,
+  ShapeFindingId,
+  ShapeId,
+  ShapeProposalId,
+  TaskId,
+  WorkstreamId,
+} from './ids';
 import { BundleOrigin } from './plan-bundle';
 import {
   AnchorCheckDto,
@@ -54,6 +62,7 @@ export type PlanRecordDocument = z.infer<typeof PlanRecordDocument>;
 /** `GET /shapes/:shapeId/record`: the documents whole, and how many rows each list holds. */
 export const PlanRecordDto = z.object({
   shapeId: ShapeId,
+  projectId: ProjectId,
   title: z.string(),
   importedAt: Timestamp.nullable(),
   origin: BundleOrigin.nullable(),

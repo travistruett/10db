@@ -1,18 +1,34 @@
-import { mintId } from '@10db/contracts';
+import { mintId, type TaskDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { describe, expect, it, vi } from 'vitest';
+import { useEventStream } from '../../../daemon/events';
 import { pickOption } from '../../../test/combobox';
-import { baseHandlers, renderWithDaemonAndRouter, server } from '../../../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  eventStream,
+  renderWithDaemonAndRouter,
+  server,
+} from '../../../test/daemon';
+import { daemonEvent, projectViewDto, taskDto } from '../../../test/fixtures';
 import {
   decisionRow,
   evidenceRow,
   planRecordHandlers,
+  questionRow,
+  RECORD_PROJECT_ID,
   RECORD_SHAPE_ID,
   recordPage,
+  reviewRow,
+  taskRow,
   type SeenPage,
 } from '../../../test/plan-record-fixtures';
 import { DecisionsTab } from './decisions-tab';
 import { EvidenceTab } from './evidence-tab';
+import { QuestionsTab } from './questions-tab';
+import { ReviewsTab } from './reviews-tab';
+import { TasksTab } from './tasks-tab';
 
 describe('Decisions', () => {
   it('decisions page and open a drawer with alternatives', async () => {
@@ -114,5 +130,175 @@ describe('Evidence', () => {
     expect(screen.getByText('The runner packs the context once per session.')).toBeTruthy();
     const page = screen.getByText('tailscale.com').closest('tr');
     expect(page?.textContent).toContain('Read 12 Nov 2026');
+  });
+});
+
+describe('Reviews', () => {
+  it('reviews group by document, revision and round', async () => {
+    server.use(
+      ...planRecordHandlers({
+        pages: (list) =>
+          recordPage(
+            list,
+            [
+              reviewRow({ key: 'p1-r1-1', text: 'First finding' }),
+              reviewRow({ key: 'p1-r1-2', text: 'Second finding', severity: 'low' }),
+              reviewRow({ key: 'p1-r2-1', round: 2, text: 'Third finding', severity: 'low' }),
+            ],
+            {
+              groups: [
+                { document: 'p1', revision: 1, round: 1, total: 22, high: 9, medium: 0, low: 13 },
+                { document: 'p1', revision: 1, round: 2, total: 1, high: 0, medium: 0, low: 1 },
+              ],
+            },
+          ),
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<ReviewsTab shapeId={RECORD_SHAPE_ID} documents={['p1']} />);
+    const first = await screen.findByText('p1 · revision 1 · round 1 · 9 high, 13 low');
+    const second = screen.getByText('p1 · revision 1 · round 2 · 1 low');
+    const order = (el: HTMLElement) =>
+      Array.from(document.querySelectorAll('tr')).indexOf(
+        el.closest('tr') ?? document.createElement('tr'),
+      );
+    expect(order(first)).toBeLessThan(order(screen.getByText('First finding')));
+    expect(order(screen.getByText('Second finding'))).toBeLessThan(order(second));
+    expect(order(second)).toBeLessThan(order(screen.getByText('Third finding')));
+  });
+
+  it("an imported finding shows its reviewer's name and outcome words", async () => {
+    server.use(
+      ...planRecordHandlers({
+        pages: (list) =>
+          recordPage(list, [reviewRow()], {
+            groups: [
+              { document: 'p1', revision: 1, round: 1, total: 1, high: 1, medium: 0, low: 0 },
+            ],
+          }),
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<ReviewsTab shapeId={RECORD_SHAPE_ID} documents={['p1']} />);
+    const row = (await screen.findByText('Revoked devices keep their session')).closest('tr');
+    expect(row?.textContent).toContain('fable plan reviewer');
+    expect(row?.textContent).toContain('blocking, security');
+    expect(row?.textContent).toContain('partial: revoked-device column is a stub');
+    expect(row?.textContent).toContain('Resolved');
+  });
+
+  it('a document filter goes to the daemon', async () => {
+    const seen: SeenPage[] = [];
+    server.use(...planRecordHandlers({ seen }), ...baseHandlers());
+    await renderWithDaemonAndRouter(
+      <ReviewsTab shapeId={RECORD_SHAPE_ID} documents={['p1', 'spec']} />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter Document' }));
+    await pickOption(await screen.findByRole('combobox', { name: 'Document' }), 'spec');
+    await waitFor(() => {
+      expect(seen.at(-1)?.query.get('document')).toBe('spec');
+    });
+  });
+});
+
+describe('Questions', () => {
+  it('questions list an undecided decision', async () => {
+    server.use(
+      ...planRecordHandlers({
+        pages: (list) =>
+          recordPage(list, [
+            questionRow(),
+            questionRow({
+              key: 'd2',
+              source: 'decision',
+              text: 'Which port for pairing?',
+              for: null,
+              about: null,
+              blocks: null,
+            }),
+          ]),
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<QuestionsTab shapeId={RECORD_SHAPE_ID} />);
+    const asked = (await screen.findByText('Which port?')).closest('tr');
+    expect(asked?.textContent).toContain('designer');
+    expect(asked?.textContent).toContain('t1');
+    expect(asked?.textContent).toContain('P2');
+    const undecided = screen.getByText('Which port for pairing?').closest('tr');
+    expect(undecided?.textContent).toContain('Undecided decision');
+  });
+});
+
+/** The event stream, mounted as the app's shell mounts it. */
+function Stream() {
+  useEventStream();
+  return null;
+}
+
+describe('Tasks', () => {
+  const project = projectViewDto({ id: RECORD_PROJECT_ID });
+
+  it('a task row opens its section', async () => {
+    const row = taskRow();
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([taskDto({ id: row.taskId, projectId: project.id, title: row.title })]),
+      ),
+      ...planRecordHandlers({ pages: (list) => recordPage(list, [row]) }),
+      ...baseHandlers(),
+    );
+    const onSearch = vi.fn();
+    await renderWithDaemonAndRouter(
+      <TasksTab shapeId={RECORD_SHAPE_ID} projectId={project.id} onSearch={onSearch} />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'p1#task-12 · revision 2' }));
+    expect(onSearch).toHaveBeenCalledWith({
+      tab: 'documents',
+      doc: 'p1',
+      rev: 2,
+      section: 'task-12',
+    });
+  });
+
+  it("a task's state follows a task.changed event", async () => {
+    const row = taskRow();
+    let task: TaskDto = taskDto({
+      id: row.taskId,
+      projectId: project.id,
+      title: row.title,
+      boardStatus: 'backlog',
+    });
+    const socket: { send: ((text: string) => void) | null } = { send: null };
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      ...planRecordHandlers({ pages: (list) => recordPage(list, [row]) }),
+      eventStream.addEventListener('connection', ({ client }) => {
+        socket.send = (text) => {
+          client.send(text);
+        };
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(
+      <>
+        <Stream />
+        <TasksTab shapeId={RECORD_SHAPE_ID} projectId={project.id} onSearch={() => undefined} />
+      </>,
+    );
+    const line = await screen.findByText('Not started');
+    expect(line.closest('tr')?.textContent).toContain('Pair a device');
+    task = { ...task, boardStatus: 'ready' };
+    await waitFor(() => {
+      expect(socket.send).not.toBeNull();
+    });
+    socket.send?.(
+      JSON.stringify(
+        daemonEvent({ seq: 7, type: 'task.changed', entityType: 'task', entityId: task.id }),
+      ),
+    );
+    expect(await screen.findByText('Ready')).toBeTruthy();
   });
 });

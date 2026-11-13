@@ -21,10 +21,13 @@ import { DecisionsTab } from './decisions-tab';
 import { DocumentsTab } from './documents-tab';
 import { EvidenceTab } from './evidence-tab';
 import { ExportButton } from './export-button';
+import { QuestionsTab } from './questions-tab';
 import { RECORD_TABS, RecordTab, type RecordSearch } from './record-tabs';
+import { ReviewsTab } from './reviews-tab';
+import { TasksTab } from './tasks-tab';
 
 // A Plan's record, beside its conversation: the documents an effort wrote, what it decided, the
-// evidence it read, and (on later tabs) its reviews, questions and tasks.
+// evidence it read, its reviews, what it left open and the tasks made from it.
 
 const ORIGIN_LABELS: Readonly<Record<NonNullable<PlanRecordDto['origin']>['kind'], string>> = {
   claude_code: 'Claude Code',
@@ -69,6 +72,20 @@ function panelOf(
       return <DecisionsTab shapeId={props.shapeId} />;
     case RecordTab.Evidence:
       return <EvidenceTab shapeId={props.shapeId} />;
+    case RecordTab.Reviews:
+      return (
+        <ReviewsTab shapeId={props.shapeId} documents={props.record.documents.map((d) => d.key)} />
+      );
+    case RecordTab.Questions:
+      return <QuestionsTab shapeId={props.shapeId} />;
+    case RecordTab.Tasks:
+      return (
+        <TasksTab
+          shapeId={props.shapeId}
+          projectId={props.record.projectId}
+          onSearch={props.onSearch}
+        />
+      );
   }
 }
 

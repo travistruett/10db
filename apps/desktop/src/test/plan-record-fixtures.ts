@@ -4,8 +4,12 @@ import {
   PlanDocumentRevisionDto,
   PlanEvidenceRow,
   PlanRecordDto,
+  PlanQuestionRow,
   PlanRecordPage,
+  PlanReviewRow,
+  PlanTaskRow,
   PlanRecordList,
+  type ProjectId,
   type ShapeId,
 } from '@10db/contracts';
 import { http, HttpResponse } from 'msw';
@@ -18,6 +22,7 @@ import { daemonUrl } from './daemon';
 const AT = '2026-11-12T08:00:00.000Z';
 
 export const RECORD_SHAPE_ID: ShapeId = mintId('Shape');
+export const RECORD_PROJECT_ID: ProjectId = mintId('Project');
 
 export const P1_REVISION_1 = '# Remote host plan\n## Task 1: Pair a device\nPair it first.\n';
 export const P1_REVISION_2 = [
@@ -63,6 +68,7 @@ function sectionsOf(
 export function planRecordDto(overrides: Partial<PlanRecordDto> = {}): PlanRecordDto {
   return PlanRecordDto.parse({
     shapeId: RECORD_SHAPE_ID,
+    projectId: RECORD_PROJECT_ID,
     title: 'Remote host',
     importedAt: AT,
     origin: { kind: 'claude_code', session: 'ses-abc', model: 'claude-opus-5-5', at: AT },
@@ -164,6 +170,52 @@ export function evidenceRow(overrides: Partial<PlanEvidenceRow> = {}): PlanEvide
     checkedAt: '2026-11-12',
     state: 'current',
     checks: [],
+    ...overrides,
+  });
+}
+
+export function reviewRow(overrides: Partial<PlanReviewRow> = {}): PlanReviewRow {
+  return PlanReviewRow.parse({
+    id: mintId('ShapeFinding'),
+    key: 'p1-r1-1',
+    document: 'p1',
+    revision: 1,
+    section: 'task-1',
+    round: 1,
+    reviewer: 'fable plan reviewer',
+    reviewerKind: 'imported',
+    kind: 'finding',
+    severity: 'high',
+    severityText: 'blocking, security',
+    text: 'Revoked devices keep their session',
+    state: 'resolved',
+    outcomeText: 'partial: revoked-device column is a stub',
+    how: 'Added the column',
+    howDetail: 'The column exists; nothing writes it yet.',
+    ...overrides,
+  });
+}
+
+export function questionRow(overrides: Partial<PlanQuestionRow> = {}): PlanQuestionRow {
+  return PlanQuestionRow.parse({
+    id: mintId('ShapeProposal'),
+    key: 'q1',
+    source: 'question',
+    text: 'Which port?',
+    for: 'designer',
+    about: 't1',
+    blocks: 'P2',
+    state: 'pending',
+    ...overrides,
+  });
+}
+
+export function taskRow(overrides: Partial<PlanTaskRow> = {}): PlanTaskRow {
+  return PlanTaskRow.parse({
+    taskId: mintId('Task'),
+    key: 't1',
+    title: 'Pair a device',
+    planRef: { document: 'p1', revision: 2, section: 'task-12' },
     ...overrides,
   });
 }
