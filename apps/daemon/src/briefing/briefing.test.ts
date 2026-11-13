@@ -1032,25 +1032,60 @@ describe('buildSessionPrompt for flow steps', () => {
     ).not.toContain('Loaded for you');
   });
 
+  const JUDGED_LANE_RULE =
+    "Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. Don't retry a refused call another way; carry on without it and say in your handoff what it was. A dependency change and a loop with no end in the background wait on a card from the builder.";
+  const JUDGED_PASS_RULE = JUDGED_LANE_RULE.replace(
+    "Don't retry a refused call another way; carry on without it and say in your handoff what it was.",
+    "Don't retry a refused call another way; say what it was and why you need it, and the builder can allow it.",
+  );
+  const WEB_JUDGED_SENTENCE =
+    "WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.";
+
   it.each([
+    ['a judged lane', { judged: true }, JUDGED_LANE_RULE, undefined],
+    ['a judged pass', { judged: true, inPass: true }, JUDGED_PASS_RULE, undefined],
     [
-      'judged by auto mode',
-      true,
-      "A dependency change, a loop with no end in the background and repo MCP tools wait on a card from the builder. WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.",
+      'a judged lane with the web judged',
+      { judged: true, webJudged: true },
+      JUDGED_LANE_RULE,
+      WEB_JUDGED_SENTENCE,
     ],
     [
-      'carded',
-      false,
-      'A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.',
+      'a lane on the floor',
+      { judged: false },
+      "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
+      undefined,
     ],
-  ])('tells a sandboxed Claude lane where the web goes when it is %s', (_name, webJudged, said) => {
+  ])('tells a sandboxed Claude lane its limits: %s', (_name, flags, said, also) => {
     const prompt = buildSessionPrompt({
       ...base,
       action: { kind: 'start' },
       sandboxed: true,
-      webJudged,
+      ...flags,
     });
     expect(prompt).toContain(said);
+    if (also !== undefined) expect(prompt).toContain(also);
+    else expect(prompt).not.toContain("go to auto mode's judge");
+  });
+
+  it('drops the Allow Bash card from the command and edit lines of a judged lane', () => {
+    const judged = buildSessionPrompt({
+      ...base,
+      action: { kind: 'start' },
+      sandboxed: true,
+      judged: true,
+    });
+    expect(judged).not.toContain('Allow Bash');
+    expect(judged).toContain('no pipes through tail or grep.');
+    expect(judged).toContain('Do a multi-line replacement with one Edit call.');
+    expect(judged).toContain('without a permission card. Do a multi-line replacement');
+    const floor = buildSessionPrompt({
+      ...base,
+      action: { kind: 'start' },
+      sandboxed: true,
+      judged: false,
+    });
+    expect(floor).toContain('stops on an "Allow Bash?" card');
   });
 
   it('gives the temp-file line only to a step that can make one', () => {

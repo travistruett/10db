@@ -58,7 +58,15 @@ import {
   type TaskId,
   type TaskDto,
 } from '@10db/contracts';
-import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import {
+  buildTrustPolicy,
+  FloorReason,
+  floorNoticeText,
+  floorReason,
+  judgeForCall,
+  projectLiveSystems,
+  startingJudge,
+} from '../trust';
 import {
   activeClaims,
   clearLease,
@@ -84,6 +92,7 @@ import {
   insertSession,
   insertSource,
   insertSystemNotice,
+  listTaskThread,
   deleteSignOffWait,
   lastTakeOut,
   listAccountModels,
@@ -199,6 +208,7 @@ import {
 import {
   allowedToolsFor,
   laneAutoMode,
+  matchesAllowedTool,
   storableRule,
   trustSwitchesFor,
   warnInvalidTrust,
@@ -220,7 +230,6 @@ import {
   type LaneSession,
 } from '../sandbox';
 import {
-  nativeJudge,
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
@@ -2123,8 +2132,42 @@ export function createRunner(opts: RunnerOptions): Runner {
       }),
       switches,
     });
-    // Where auto mode judges the web, WebSearch and WebFetch go to its classifier instead of a card.
-    const webJudged = switches.web && nativeJudge(account.kind, lanePermissionMode);
+    // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
+    // starts on 10db's rules.
+    const capability = opts.adapter.capabilities(launch.expect, launch.model);
+    const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto');
+    const judged = sessionJudge !== JudgeKind.Rules;
+    const startFloor =
+      laneSession === null
+        ? null
+        : floorReason({
+            kind: account.kind,
+            model: launch.model,
+            autoMode: lanePermissionMode === 'auto',
+          });
+    // The allow list the session runs with, which the guard also reads: an allow rule settles a call
+    // before a judge sees it.
+    const allowedTools = allowedToolsFor(
+      project,
+      step.tools,
+      laneSession ? { sandboxed: { checkout } } : {},
+    );
+    opts.logger.info(
+      {
+        workstreamId: id,
+        surface: policy.surface,
+        judge: sessionJudge,
+        environment: policy.environment,
+      },
+      'trust policy',
+    );
+    /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
+    const sayFloor = (ctx: WriteContext, reason: FloorReason): void => {
+      const text = floorNoticeText(reason, launch.model);
+      if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
+      insertSystemNotice(ctx, task.id, text);
+    };
+    let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -2197,7 +2240,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
-      webJudged,
+      judged,
+      webJudged: judged && switches.web,
       setupLine:
         laneSession === null
           ? null
@@ -2434,16 +2478,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           kind: 'lane',
           workstreamId: id,
           sequence: session.sequence,
-          allowedTools: allowedToolsFor(
-            project,
-            step.tools,
-            laneSession ? { sandboxed: { checkout } } : {},
-          ),
+          allowedTools,
           ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
         },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-        preToolUse: (req) =>
-          judgePreToolUse({
+        preToolUse: (req) => {
+          const judge = judgeForCall(sessionJudge, req.reportedMode ?? null);
+          if (judged && judge === JudgeKind.Rules && !saidLeftAutoMode) {
+            saidLeftAutoMode = true;
+            opts.state.write((ctx) => {
+              sayFloor(ctx, FloorReason.LeftAutoMode);
+            });
+          }
+          return judgePreToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -2462,11 +2509,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
-            // Rules until the lane's real judge is wired in; webOn stays what the native judge gave.
-            judge: JudgeKind.Rules,
-            coveredByAllowRule: false,
-            webOn: webJudged,
-          }),
+            judge,
+            coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
+            webOn: switches.web,
+          });
+        },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
@@ -2629,6 +2676,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 noticed = true;
                 insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
               }
+              if (startFloor !== null) sayFloor(ctx, startFloor);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')

@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { AccountProblem, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
+import type { ReportedMode } from '../trust';
 import { credentialProblem, modelMatches } from './account-check';
 import { createChannel } from './channel';
 import {
@@ -209,9 +210,17 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
   };
 
   // A throwing guard denies: the tool call must never proceed on a guard failure.
-  const guardVerdict = (toolName: string, input: Record<string, unknown>): GuardVerdict => {
+  const guardVerdict = (
+    toolName: string,
+    input: Record<string, unknown>,
+    reportedMode: ReportedMode | undefined,
+  ): GuardVerdict => {
     try {
-      return spec.preToolUse({ toolName, input });
+      return spec.preToolUse({
+        toolName,
+        input,
+        ...(reportedMode === undefined ? {} : { reportedMode }),
+      });
     } catch (error) {
       return {
         decision: 'deny',
@@ -284,7 +293,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
           summary: step.toolName,
           tool: claudeToolTarget(step.toolName, input),
         });
-        const verdict = guardVerdict(step.toolName, input);
+        const verdict = guardVerdict(step.toolName, input, step.reportedMode);
         if (verdict.decision === 'deny') {
           observe(index, 'denied_by_guard', { reason: verdict.reason });
           return 'continue';

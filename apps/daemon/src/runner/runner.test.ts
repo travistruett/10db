@@ -58,6 +58,7 @@ import {
   listTasks,
   listInbox,
   listSessions,
+  listTaskThread,
   listWorkstreams,
   patchAccount,
   patchProject,
@@ -83,6 +84,7 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
+import { setProjectLiveSystems } from '../trust';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
@@ -4985,7 +4987,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
   });
 
   describe('the web in a lane', () => {
-    const fetchCall = { toolName: 'WebFetch', input: { url: 'https://example.net/', prompt: 'x' } };
+    const fetchCall = {
+      toolName: 'WebFetch',
+      input: { url: 'https://example.net/', prompt: 'x' },
+      reportedMode: 'auto' as const,
+    };
 
     it('a gateway lane with web on still cards WebFetch', async () => {
       const probe = sandboxProbe();
@@ -5051,6 +5057,161 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
       expect(spec.preToolUse(fetchCall).decision).toBe('ask');
+      await engine.runner.idle();
+    });
+  });
+
+  describe('a lane judged by auto mode', () => {
+    const deploy = {
+      toolName: 'Bash',
+      input: { command: 'npx vercel deploy --prod --yes' },
+      reportedMode: 'auto' as const,
+    };
+    const GATEWAY: Parameters<typeof createTestEngine>[3] = {
+      account: {
+        kind: 'gateway',
+        label: 'Gateway',
+        settings: { baseUrl: 'https://gateway.example.com' },
+      },
+      secret: 'sk-gateway-test-key',
+    };
+    const PLAN: Parameters<typeof createTestEngine>[3] = {
+      account: { kind: 'claude_subscription', label: 'Plan' },
+    };
+    const start = async (
+      setup: Parameters<typeof createTestEngine>[3],
+      project: Parameters<typeof createTestEngine>[1] = {},
+      book: FakeScriptBook = { Alpha: [[turn]] },
+      flow?: string,
+    ) => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        book,
+        project,
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        setup,
+      );
+      if (setup?.account?.kind === 'claude_subscription') {
+        engine.state.write((ctx) =>
+          patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+        );
+      }
+      const specs = recordSpecs();
+      const { task, workstream } = engine.addTask(
+        'Alpha',
+        ['api'],
+        [],
+        flow === undefined ? undefined : { flow },
+      );
+      return { specs, task, workstream };
+    };
+    const FLOOR_PREFIXES = ["10db's rules judge", 'Claude Code stopped running in auto mode'];
+    /** The floor notices a task's thread holds. */
+    const floorNotices = (taskId: Parameters<typeof listTaskThread>[1]): string[] =>
+      listTaskThread(engine.store.db, taskId)
+        .map((message) => message.body)
+        .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
+    const GATEWAY_NOTICE =
+      "10db's rules judge this session, not auto mode: auto mode doesn't run through a gateway account yet. A call those rules can't settle waits on a card.";
+
+    it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge', async () => {
+      const { specs, task, workstream } = await start(PLAN);
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.model).toBe('claude-sonnet-5-5');
+      expect(spec.preToolUse(deploy).decision).toBe('allow');
+      await engine.runner.idle();
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      expect(floorNotices(task.id)).toEqual([]);
+    });
+
+    it('a gateway lane refuses the same deploy and says why once', async () => {
+      const { specs, task, workstream } = await start(
+        GATEWAY,
+        {},
+        {
+          Alpha: [
+            [write('src/api/a.txt', 'one'), commit('op-floor-0001', ['src/api/a.txt']), turn],
+            [
+              {
+                do: 'mcp' as const,
+                tool: 'complete_step',
+                args: { opId: 'op-floor-0002', summary: 'Looks right.', verdict: 'approve' },
+              },
+              turn,
+            ],
+          ],
+        },
+        'standard',
+      );
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.preToolUse(deploy).decision).toBe('deny');
+      for (let i = 0; i < 10 && ws(workstream.id).state !== 'DONE'; i += 1) {
+        await engine.runner.idle();
+        if (ws(workstream.id).state !== 'DONE') engine.launch(workstream.id);
+      }
+      expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(1);
+      expect(floorNotices(task.id)).toEqual([GATEWAY_NOTICE]);
+    });
+
+    it('with lane auto mode off, a subscription lane refuses it', async () => {
+      const { specs, task, workstream } = await start(PLAN);
+      engine.state.write((ctx) => {
+        setLaneAutoMode(ctx, false);
+      });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.preToolUse(deploy).decision).toBe('deny');
+      await engine.runner.idle();
+      expect(floorNotices(task.id)).toEqual([
+        '10db\'s rules judge this session, not auto mode: "Lanes decide routine permissions" is off in Settings. A call those rules can\'t settle waits on a card.',
+      ]);
+    });
+
+    it('a call reported outside auto mode is refused, and the thread says Claude Code left auto mode', async () => {
+      const { task, workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [{ ...shell('npx vercel deploy --prod --yes'), reportedMode: 'other' as const }, turn],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(engine.adapter.observations.map((o) => o.kind)).toContain('denied_by_guard');
+      expect(floorNotices(task.id)).toEqual([
+        "Claude Code stopped running in auto mode during this session, so 10db's rules judge its calls from here. A call those rules can't settle waits on a card.",
+      ]);
+    });
+
+    it('a project allowing kubectl still refuses kubectl apply in a judged lane', async () => {
+      const { specs, workstream } = await start(PLAN, { allowedCommands: ['kubectl'] });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      const apply = { ...deploy, input: { command: 'kubectl apply -f deploy.yaml' } };
+      expect(spec.preToolUse(apply).decision).toBe('deny');
+      await engine.runner.idle();
+    });
+
+    it('the project’s live systems reach the spec', async () => {
+      const { specs, workstream } = await start(PLAN);
+      engine.state.write((ctx) => {
+        setProjectLiveSystems(ctx, engine.project.id, [
+          'the production database on db.example.com',
+        ]);
+      });
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.policy.surface).toBe('lane');
+      expect(spec.policy.attended).toBe(false);
+      expect(
+        spec.policy.environment.some((line) =>
+          line.includes('"the production database on db.example.com"'),
+        ),
+      ).toBe(true);
       await engine.runner.idle();
     });
   });

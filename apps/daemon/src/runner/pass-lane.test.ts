@@ -342,6 +342,21 @@ describe('a pass task turn by turn', () => {
   });
 });
 
+describe('the policy a pass session runs under', () => {
+  it('is the pass policy, with the builder in it', async () => {
+    const specs: { policy: { surface: string; attended: boolean } }[] = [];
+    const { id } = await openPage([turn('one\n', 'Done.')], 'Make the form tidy', () => {
+      engine.adapter.seen = (spec) => {
+        specs.push(spec);
+        return {};
+      };
+    });
+    await waitFor(() => specs[0]);
+    expect(specs[0]?.policy).toMatchObject({ surface: 'pass', attended: true });
+    await waitFor(isWaiting.bind(null, id));
+  });
+});
+
 describe("a working turn's live line", () => {
   it('names the tool and the file it aims at, and counts the files the turn wrote, not those it read', async () => {
     const form = 'src/settings/form.tsx';

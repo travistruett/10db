@@ -1,3 +1,4 @@
+export { autoModeRuns } from './auto-mode-models';
 export { createClaudeAdapter } from './claude-adapter';
 export {
   capabilitiesOf,
@@ -10,7 +11,6 @@ export { patchPaths } from './codex-guard';
 export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
-export { nativeJudge } from './native-judge';
 export { createRoutedAdapter } from './routed-adapter';
 export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';

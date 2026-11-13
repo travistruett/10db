@@ -8,7 +8,13 @@ const Json: z.ZodType = z.json();
 export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('context'), percentage: z.number().min(0).max(100) }),
   z.object({ do: z.literal('activity'), summary: z.string() }),
-  z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
+  z.object({
+    do: z.literal('tool'),
+    toolName: z.string(),
+    input: z.record(z.string(), Json),
+    /** The permission mode the agent reports with the call, as Claude Code's hook does; absent reports none. */
+    reportedMode: z.enum(['auto', 'other']).optional(),
+  }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
   /** Waits until the test calls `signal` with this name, so a test can place the next step exactly. */

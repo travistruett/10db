@@ -92,7 +92,12 @@ export interface PromptInput {
   readonly instructionsLoaded?: boolean;
   /** What the session's setup brought along and left out, as one rule line, beside the instructions line. */
   readonly setupLine?: string | null;
-  /** Claude Code's auto mode judges the lane's WebSearch and WebFetch, so they wait on no card. */
+  /**
+   * A judge, not 10db's rules alone, settles the lane's calls: Claude Code's auto mode. The lane is told
+   * its limits, and its commands and edits are not described as stopping on a card.
+   */
+  readonly judged?: boolean;
+  /** The judge also settles the lane's WebSearch and WebFetch (the Web switch is on), so they wait on no card. */
   readonly webJudged?: boolean;
 }
 
@@ -215,6 +220,7 @@ const plainCommands = (shape: string): string =>
   `Run project commands in their plain form: \`pnpm exec <tool> …\` or the project's own scripts, with no \`-s\` or \`--silent\`, no trailing \`; echo $?\` (the exit code is reported to you), no \`timeout\` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: \`pnpm exec prettier --write path/a.ts path/b.ts\`, then \`pnpm exec eslint path/a.ts path/b.ts\`. ${shape}`;
 
 const PLAIN_COMMANDS = plainCommands(COMMAND_SHAPE);
+const JUDGED_PLAIN_COMMANDS = plainCommands(COMMAND_SHAPES);
 
 /**
  * readOnlyShellRefusal denies anything outside READ_COMMANDS and read-only git, so pnpm and every
@@ -225,6 +231,7 @@ const readOnlyCommands = (shape: string): string =>
   `The shell takes read-only commands only, so do not run pnpm, a formatter, a linter or a test: the hook refuses them. Formatting, lint and tests are left to the gate. Run each command on its own, naming its paths, from your working directory: \`grep -n name path/a.ts path/b.ts\`, then \`git log -p -- path/a.ts path/b.ts\`. ${shape}`;
 
 const READ_ONLY_COMMANDS = readOnlyCommands(COMMAND_SHAPE);
+const JUDGED_READ_ONLY_COMMANDS = readOnlyCommands(COMMAND_SHAPES);
 
 /**
  * Ending the turn ends the step, and a background command (the Bash tool moves a long one there)
@@ -247,8 +254,22 @@ const AUTO_MODE_REFUSES =
 
 const AUTO_MODE_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.`;
 
-/** The auto-mode line where auto mode judges the web (`PromptInput.webJudged`). */
-const AUTO_MODE_WEB_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background and repo MCP tools wait on a card from the builder. WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.`;
+/** Where a judge settles the lane's calls: the limits it holds and what to do at one. */
+const judgedAutoModeRule = (refusedCall: string): string =>
+  `Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. ${refusedCall} A dependency change and a loop with no end in the background wait on a card from the builder.`;
+
+const JUDGED_LANE_RULE = judgedAutoModeRule(
+  "Don't retry a refused call another way; carry on without it and say in your handoff what it was.",
+);
+
+/** A pass has the builder in it, who can allow a refused call. */
+const JUDGED_PASS_RULE = judgedAutoModeRule(
+  "Don't retry a refused call another way; say what it was and why you need it, and the builder can allow it.",
+);
+
+/** Added to a judged lane's line when the Web switch is on. */
+const WEB_JUDGED_SENTENCE =
+  "WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.";
 
 const CLAUDE_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
@@ -277,6 +298,9 @@ const EDIT_RULE_WAYS =
 
 const EDIT_RULE = `Change files with the Edit or Write tool, never with an interpreter one-liner${EDIT_RULE_WAYS} Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.`;
 
+/** Where a judge settles the lane's calls, a command that writes a file is judged, not carded. */
+const JUDGED_EDIT_RULE = `Change files with the Edit or Write tool, never with an interpreter one-liner${EDIT_RULE_WAYS} Edit and Write change the file in your lane without a permission card. Do a multi-line replacement with one Edit call.`;
+
 /**
  * A Codex lane changes files with apply_patch, and gets no permission card either way: the guard
  * judges each path a patch names against the claims, and a command that writes a file names none.
@@ -296,6 +320,13 @@ const CODEX_RULES: ReadonlyMap<string, string> = new Map([
   [HAND_OFF_RULE, CODEX_HAND_OFF_RULE],
   [PLAIN_COMMANDS, plainCommands(CODEX_COMMAND_SHAPE)],
   [READ_ONLY_COMMANDS, readOnlyCommands(CODEX_COMMAND_SHAPE)],
+]);
+
+/** The lines a judged Claude lane reads without the card they describe. */
+const JUDGED_RULES: ReadonlyMap<string, string> = new Map([
+  [EDIT_RULE, JUDGED_EDIT_RULE],
+  [PLAIN_COMMANDS, JUDGED_PLAIN_COMMANDS],
+  [READ_ONLY_COMMANDS, JUDGED_READ_ONLY_COMMANDS],
 ]);
 
 /** A skill, a persona or a tool result written for Claude names these tools. */
@@ -364,13 +395,22 @@ function readOnlyRules(role: StepRole): string[] {
 interface SetupLines {
   readonly instructionsLoaded: boolean;
   readonly setupLine: string | null;
+  readonly judged: boolean;
+  readonly inPass: boolean;
   readonly webJudged: boolean;
+}
+
+/** The auto-mode line: the limits a judge holds, or what the rules floor refuses and cards. */
+function autoModeLine(setup: SetupLines): string {
+  if (!setup.judged) return AUTO_MODE_RULE;
+  const limits = setup.inPass ? JUDGED_PASS_RULE : JUDGED_LANE_RULE;
+  return setup.webJudged ? `${limits} ${WEB_JUDGED_SENTENCE}` : limits;
 }
 
 /** The sandbox's lines with the instructions line as the setup has it, and the setup line after it. */
 function withSetupLines(lines: readonly string[], setup: SetupLines): string[] {
   return lines.flatMap((line) => {
-    if (line === AUTO_MODE_RULE) return [setup.webJudged ? AUTO_MODE_WEB_RULE : line];
+    if (line === AUTO_MODE_RULE) return [autoModeLine(setup)];
     if (line !== READ_INSTRUCTIONS_RULE) return [line];
     return [
       setup.instructionsLoaded ? INSTRUCTIONS_LOADED_RULE : line,
@@ -395,10 +435,10 @@ function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string
 }
 
 /** A rule as the agent the session runs under reads it: Codex's tools and cards in its own words. */
-function ruleFor(provider: Provider, rule: string): string {
+function ruleFor(provider: Provider, rule: string, judged: boolean): string {
   switch (provider) {
     case Provider.Claude:
-      return rule;
+      return judged ? (JUDGED_RULES.get(rule) ?? rule) : rule;
     case Provider.Codex:
       return CODEX_RULES.get(rule) ?? rule;
   }
@@ -413,7 +453,7 @@ function withSandboxRules(
 ): string[] {
   const sandbox = sandboxed ? sandboxRulesFor(provider, setup) : [];
   return rules.flatMap((rule) => {
-    const own = ruleFor(provider, rule);
+    const own = ruleFor(provider, rule, setup.judged);
     if (rule === PLAIN_COMMANDS) return [own, ...sandbox];
     if (rule === READ_ONLY_COMMANDS) {
       return [own, ...sandbox.filter((line) => line !== TEMP_FILES_RULE)];
@@ -701,6 +741,8 @@ export function buildSessionPrompt(input: PromptInput): string {
         {
           instructionsLoaded: input.instructionsLoaded === true,
           setupLine: input.setupLine ?? null,
+          judged: input.judged === true,
+          inPass: input.inPass === true,
           webJudged: input.webJudged === true,
         },
       ),
