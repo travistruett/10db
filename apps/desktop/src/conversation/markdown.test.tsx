@@ -47,7 +47,13 @@ describe('hostile markdown', () => {
         expect(text(c)).toContain('Image not shown: x');
       },
     ],
-    ['raw img', '<img src="https://evil.example/b.png">', () => undefined],
+    [
+      'raw img shows as its text',
+      '<img src="https://evil.example/b.png">',
+      (c) => {
+        expect(text(c)).toContain('<img src="https://evil.example/b.png">');
+      },
+    ],
     [
       'data image',
       '![d](data:image/png;base64,iVBORw0KGgo=)',
@@ -71,18 +77,39 @@ describe('hostile markdown', () => {
       },
     ],
     [
-      'script',
+      'script shows as its text',
       '<script>alert(1)</script>',
       (c) => {
-        expect(text(c)).not.toContain('alert(1)');
+        expect(text(c)).toContain('<script>alert(1)</script>');
       },
     ],
-    ['iframe', '<iframe src="https://evil.example"></iframe>', () => undefined],
     [
-      'raw anchor',
+      'iframe shows as its text',
+      '<iframe src="https://evil.example"></iframe>',
+      (c) => {
+        expect(text(c)).toContain('<iframe src="https://evil.example"></iframe>');
+      },
+    ],
+    [
+      'raw anchor shows as its text',
       '<a href="https://evil.example">raw</a>',
       (c) => {
-        expect(text(c)).not.toContain('evil.example');
+        expect(text(c)).toContain('<a href="https://evil.example">raw</a>');
+      },
+    ],
+    [
+      'angle brackets in prose stay',
+      'Reach <host> on <fqdn>; it answers Promise<void>.',
+      (c) => {
+        expect(text(c)).toContain('Reach <host> on <fqdn>; it answers Promise<void>.');
+      },
+    ],
+    [
+      'an html block shows as its text',
+      '<div>\nkept\n</div>\n\nafter',
+      (c) => {
+        expect(text(c)).toContain('<div> kept </div>');
+        expect(text(c)).toContain('after');
       },
     ],
     [

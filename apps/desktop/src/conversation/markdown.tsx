@@ -6,15 +6,15 @@ import {
   type StreamdownProps,
 } from 'streamdown';
 import { MARKDOWN_ELEMENTS } from './markdown-elements';
-import { rehypeAgentSafety, remarkDropHtml } from './rehype-agent-safety';
+import { rehypeAgentSafety, remarkHtmlAsText } from './rehype-agent-safety';
 
-// The one place markdown is drawn. Raw HTML is dropped, the tree is sanitized, 10db's own step drops
+// The one place markdown is drawn. Raw HTML is shown as its text, the tree is sanitized, 10db's own step drops
 // images and unsafe links, and harden allows no image and only `https:` links. GFM only: no math, no
 // Mermaid and no highlighter, so none of streamdown's lazy chunks ever loads.
 
 const MARKDOWN_REMARK_PLUGINS: NonNullable<StreamdownProps['remarkPlugins']> = [
   ...[defaultRemarkPlugins['gfm'], defaultRemarkPlugins['codeMeta']].filter((p) => p !== undefined),
-  remarkDropHtml,
+  remarkHtmlAsText,
 ];
 
 const MARKDOWN_REHYPE_PLUGINS: NonNullable<StreamdownProps['rehypePlugins']> = [

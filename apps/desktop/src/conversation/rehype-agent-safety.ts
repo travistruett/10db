@@ -1,7 +1,7 @@
 import type { ExtraProps } from 'streamdown';
 
-// 10db's own steps over drawn markdown. Before the tree is built, raw HTML is dropped, so it is
-// neither rendered nor shown as text. After it is sanitized and before rehype-harden, every image
+// 10db's own steps over drawn markdown. Before the tree is built, raw HTML becomes text, so it is
+// shown as written and never rendered. After it is sanitized and before rehype-harden, every image
 // becomes a line saying it was not shown, and every link that is not `https:` becomes its text.
 // Harden then stays as the second wall, and what the builder reads is decided here.
 
@@ -45,20 +45,38 @@ export function rehypeAgentSafety() {
   };
 }
 
-/** A markdown (mdast) node, as far as dropping raw HTML needs it. */
+/** A markdown (mdast) node, as far as showing raw HTML as text needs it. */
 interface MarkdownNode {
-  readonly type: string;
+  type: string;
+  value?: string;
   children?: MarkdownNode[];
 }
 
-/** The remark plugin: removes every raw HTML node, block or inline, walking with a stack. */
-export function remarkDropHtml() {
+/** Parents whose children are blocks, where raw HTML becomes a paragraph of its text. */
+const FLOW_PARENTS: ReadonlySet<string> = new Set([
+  'root',
+  'blockquote',
+  'listItem',
+  'footnoteDefinition',
+]);
+
+/**
+ * The remark plugin: every raw HTML node, block or inline, becomes text with the same value, so
+ * `<host>` or `Promise<void>` reads as written and no markup is ever rendered. Walks with a stack.
+ */
+export function remarkHtmlAsText() {
   return (tree: MarkdownNode): void => {
     const stack: MarkdownNode[] = [tree];
     for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-      if (node.children === undefined) continue;
-      node.children = node.children.filter((child) => child.type !== 'html');
-      stack.push(...node.children);
+      const children = node.children;
+      if (children === undefined) continue;
+      const flow = FLOW_PARENTS.has(node.type);
+      node.children = children.map((child): MarkdownNode => {
+        if (child.type !== 'html') return child;
+        const text = { type: 'text', value: child.value ?? '' };
+        return flow ? { type: 'paragraph', children: [text] } : text;
+      });
+      for (const child of node.children) stack.push(child);
     }
   };
 }
