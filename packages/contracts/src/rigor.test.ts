@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ModelSetting } from './catalogue';
-import { KindInput, KindPatch, PlaybookInput, Rigor, RIGORS, rigorAtLeast } from './rigor';
+import {
+  effectiveRigor,
+  KindInput,
+  KindPatch,
+  PlaybookInput,
+  Rigor,
+  RIGORS,
+  rigorAtLeast,
+  type TaskKind,
+} from './rigor';
 
 describe('rigorAtLeast', () => {
   it.each(
@@ -103,5 +112,77 @@ describe('KindInput and KindPatch', () => {
   it('refuses a patch that names the key, because a key is immutable', () => {
     expect(KindPatch.safeParse({ key: 'other' }).success).toBe(false);
     expect(KindPatch.safeParse({ label: 'Other' }).success).toBe(true);
+  });
+});
+
+describe('effectiveRigor', () => {
+  const kinds = [
+    { key: 'security', minimumRigor: Rigor.Careful },
+    { key: 'dependency', minimumRigor: Rigor.Standard },
+    { key: 'docs', minimumRigor: null },
+  ];
+  const task = (...keys: string[]): TaskKind[] => keys.map((key) => ({ key, source: 'agent' }));
+
+  it.each([
+    {
+      name: 'no rigor and no kinds takes the project default',
+      def: 'standard',
+      own: null,
+      keys: [],
+      want: 'standard',
+    },
+    {
+      name: 'its own rigor beats the default',
+      def: 'standard',
+      own: 'light',
+      keys: [],
+      want: 'light',
+    },
+    {
+      name: 'a kind with no minimum changes nothing',
+      def: 'light',
+      own: null,
+      keys: ['docs'],
+      want: 'light',
+    },
+    {
+      name: 'a kind raises a default below its minimum',
+      def: 'light',
+      own: null,
+      keys: ['security'],
+      want: 'careful',
+    },
+    {
+      name: 'a kind raises the rigor the builder set too',
+      def: 'standard',
+      own: 'light',
+      keys: ['security'],
+      want: 'careful',
+    },
+    {
+      name: 'a rigor above the minimum stays',
+      def: 'standard',
+      own: 'critical',
+      keys: ['security'],
+      want: 'critical',
+    },
+    {
+      name: 'the strongest minimum of several kinds wins',
+      def: 'light',
+      own: null,
+      keys: ['dependency', 'security'],
+      want: 'careful',
+    },
+    {
+      name: 'a key no kind has adds nothing',
+      def: 'light',
+      own: null,
+      keys: ['gone'],
+      want: 'light',
+    },
+  ] as const)('$name', ({ def, own, keys, want }) => {
+    expect(
+      effectiveRigor({ rigor: own, projectDefault: def, taskKinds: task(...keys), kinds }),
+    ).toBe(want);
   });
 });

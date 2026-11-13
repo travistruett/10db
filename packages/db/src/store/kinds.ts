@@ -6,8 +6,7 @@ import {
   KindPatch,
   mintId,
   NotFoundError,
-  RIGORS,
-  rigorAtLeast,
+  effectiveRigor,
   type KindDto,
   type KindId,
   type Rigor,
@@ -124,23 +123,12 @@ export function checkTaskKinds(db: DbReader, kinds: readonly TaskKind[]): TaskKi
   return kinds.filter((k, i) => kinds.findIndex((other) => other.key === k.key) === i);
 }
 
-/**
- * The rigor a task runs at: its own, else the project's default, and never below the highest minimum
- * of its kinds. A key no kind has any more adds no minimum.
- */
+/** The rigor a task runs at (`effectiveRigor`), reading the kinds from the database. */
 export function effectiveRigorOf(
   db: DbReader,
   projectDefault: Rigor,
   rigor: Rigor | null,
   taskKinds: readonly TaskKind[],
 ): Rigor {
-  const own = rigor ?? projectDefault;
-  if (taskKinds.length === 0) return own;
-  const keys = new Set(taskKinds.map((k) => k.key));
-  const minimums = listKinds(db)
-    .filter((k) => keys.has(k.key))
-    .map((k) => k.minimumRigor)
-    .filter((m): m is Rigor => m !== null);
-  const strongest = RIGORS.filter((r) => minimums.includes(r)).at(-1);
-  return strongest !== undefined && !rigorAtLeast(own, strongest) ? strongest : own;
+  return effectiveRigor({ rigor, projectDefault, taskKinds, kinds: listKinds(db) });
 }

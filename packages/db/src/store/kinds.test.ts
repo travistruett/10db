@@ -119,69 +119,10 @@ describe('kinds', () => {
 });
 
 describe('effectiveRigorOf', () => {
-  const task = (...keys: string[]): TaskKind[] => keys.map((key) => ({ key, source: 'agent' }));
-
-  it.each([
-    {
-      name: 'no rigor and no kinds takes the project default',
-      def: 'standard',
-      own: null,
-      kinds: [],
-      want: 'standard',
-    },
-    {
-      name: 'its own rigor beats the default',
-      def: 'standard',
-      own: 'light',
-      kinds: [],
-      want: 'light',
-    },
-    {
-      name: 'a kind with no minimum changes nothing',
-      def: 'light',
-      own: null,
-      kinds: ['docs'],
-      want: 'light',
-    },
-    {
-      name: 'a kind raises a default below its minimum',
-      def: 'light',
-      own: null,
-      kinds: ['security'],
-      want: 'careful',
-    },
-    {
-      name: 'a kind raises the rigor the builder set too',
-      def: 'standard',
-      own: 'light',
-      kinds: ['security'],
-      want: 'careful',
-    },
-    {
-      name: 'a rigor above the minimum stays',
-      def: 'standard',
-      own: 'critical',
-      kinds: ['security'],
-      want: 'critical',
-    },
-    {
-      name: 'the strongest minimum of several kinds wins',
-      def: 'light',
-      own: null,
-      kinds: ['dependency', 'security'],
-      want: 'careful',
-    },
-    {
-      name: 'a key no kind has adds nothing',
-      def: 'light',
-      own: null,
-      kinds: ['gone'],
-      want: 'light',
-    },
-  ] as const)('$name', ({ def, own, kinds, want }) => {
+  it('reads the kinds from the database: a kind raises a default below its minimum', () => {
     add('security', { minimumRigor: Rigor.Careful });
-    add('dependency', { minimumRigor: Rigor.Standard });
-    add('docs');
-    expect(effectiveRigorOf(store.db, def, own, task(...kinds))).toBe(want);
+    const kinds: TaskKind[] = [{ key: 'security', source: 'agent' }];
+    expect(effectiveRigorOf(store.db, 'light', null, kinds)).toBe('careful');
+    expect(effectiveRigorOf(store.db, 'light', null, [])).toBe('light');
   });
 });

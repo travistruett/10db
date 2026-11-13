@@ -28,6 +28,26 @@ export function rigorAtLeast(rigor: Rigor, minimum: Rigor): boolean {
   return RIGORS.indexOf(rigor) >= RIGORS.indexOf(minimum);
 }
 
+/**
+ * The rigor a task runs at: its own, else the project's default, and never below the highest minimum
+ * of its kinds. A key no kind has adds no minimum.
+ */
+export function effectiveRigor(input: {
+  readonly rigor: Rigor | null;
+  readonly projectDefault: Rigor;
+  readonly taskKinds: readonly { readonly key: string }[];
+  readonly kinds: readonly { readonly key: string; readonly minimumRigor: Rigor | null }[];
+}): Rigor {
+  const own = input.rigor ?? input.projectDefault;
+  const keys = new Set(input.taskKinds.map((k) => k.key));
+  const minimums = input.kinds
+    .filter((k) => keys.has(k.key))
+    .map((k) => k.minimumRigor)
+    .filter((m): m is Rigor => m !== null);
+  const strongest = RIGORS.filter((r) => minimums.includes(r)).at(-1);
+  return strongest !== undefined && !rigorAtLeast(own, strongest) ? strongest : own;
+}
+
 /** Who gave a task one of its kinds: the builder (which pins it) or an agent. */
 export const TaskKindSource = { Builder: 'builder', Agent: 'agent' } as const;
 export type TaskKindSource = ValueOf<typeof TaskKindSource>;
