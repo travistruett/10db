@@ -18,6 +18,8 @@ import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { modelKeys } from './model-queries';
 import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import { PERSONAS_KEY } from './persona-queries';
+import { playbookKeys } from './playbook-queries';
 import {
   PEOPLE_KEY,
   QUESTION_ROUTES_KEY,
@@ -87,7 +89,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
   // and so do the Models page's picks.
-  persona: [CANDIDATES, modelKeys.all],
+  persona: [CANDIDATES, modelKeys.all, PERSONAS_KEY],
   person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   slack: [SLACK_KEY],
   stakeholder_timers: [TIMERS_KEY],
@@ -96,9 +98,11 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
-  // Settings › Team and Personas and flows read a role's setting and the patterns, and so do the Models page's picks.
+  // The task drawer reads a role's setting and the patterns, and so do the Models page's picks.
   role_setting: [modelSettingKeys.all, modelKeys.all],
   pattern: [modelSettingKeys.all, modelKeys.all],
+  // Settings › Models reads the playbook, and the picks follow it.
+  playbook: [playbookKeys.all, modelKeys.all],
   team: [CANDIDATES],
   routing_rules: [CANDIDATES, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   benchmarks: [CANDIDATES],

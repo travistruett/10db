@@ -18,7 +18,6 @@ const APP_LINKS = [
   'Accounts',
   'Models',
   'Decisions',
-  'Models by role',
   'Lane permissions',
   'Trust',
   'Integrations',

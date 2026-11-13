@@ -4,11 +4,11 @@ import {
   SETTINGS_SECTIONS,
   SettingsScope,
   firstAppSection,
+  sectionForAddress,
   SettingsSectionKey,
 } from './sections';
 
-const PLANNING_REMAINDER =
-  "Not built yet: which persona runs each role, and the project's human members.";
+const PLANNING_REMAINDER = "Not built yet: the project's human members.";
 
 describe('settings sections', () => {
   it('lists every section once, in the order and under the subheads the sidebar shows', () => {
@@ -26,7 +26,6 @@ describe('settings sections', () => {
       ['app', 'AI', 'accounts', 'Accounts'],
       ['app', 'AI', 'models', 'Models'],
       ['app', 'AI', 'decisions', 'Decisions'],
-      ['app', 'AI', 'personas-and-flows', 'Models by role'],
       ['app', 'Agents', 'lane-permissions', 'Lane permissions'],
       ['app', 'Agents', 'trust', 'Trust'],
       ['app', 'Connections', 'integrations', 'Integrations'],
@@ -47,14 +46,8 @@ describe('settings sections', () => {
     expect(firstAppSection()).toBe(SettingsSectionKey.Overview);
   });
 
-  it.each([
-    { key: 'team', planned: PLANNING_REMAINDER },
-    {
-      key: 'personas-and-flows',
-      planned: 'Not built yet: personas, their instructions and pins, and the flows of steps.',
-    },
-  ])('says what $key still lacks, with no plan named', ({ key, planned }) => {
-    expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned).toBe(planned);
+  it('says what Models by role still lacks, with no plan named', () => {
+    expect(SETTINGS_SECTIONS.find((s) => s.key === 'team')?.planned).toBe(PLANNING_REMAINDER);
   });
 
   it.each([
@@ -77,12 +70,11 @@ describe('settings sections', () => {
     { key: 'accounts', planned: false },
     { key: 'decisions', planned: false },
     { key: 'models', planned: false },
-    { key: 'personas-and-flows', planned: true },
   ])('marks $key planned: $planned', ({ key, planned }) => {
     expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned !== null).toBe(planned);
   });
 
-  it('lists every section as built, even Team and Personas and flows, whose editors are still to come', () => {
+  it('lists every section as built, even Team, whose remainder is still to come', () => {
     expect(SETTINGS_SECTIONS.filter((s) => !s.built).map((s) => s.key)).toEqual([]);
   });
 
@@ -91,7 +83,15 @@ describe('settings sections', () => {
     { value: 'accounts', ok: true },
     { value: 'General', ok: false },
     { value: 'nope', ok: false },
+    { value: 'personas-and-flows', ok: false },
   ])('recognizes $value as a section: $ok', ({ value, ok }) => {
     expect(isSettingsSectionKey(value)).toBe(ok);
+  });
+
+  it.each([
+    { value: 'personas-and-flows', lands: 'models' },
+    { value: 'nope', lands: 'general' },
+  ])('sends the address $value to $lands', ({ value, lands }) => {
+    expect(sectionForAddress(value)).toBe(lands);
   });
 });

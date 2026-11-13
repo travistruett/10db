@@ -8,7 +8,6 @@ import { IntegrationsSection } from './integrations/integrations-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
 import { PeopleSection } from './people/people-section';
-import { PatternsSection } from './patterns-section';
 import { PlannedRemainder } from './planned-section';
 import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
@@ -21,7 +20,7 @@ import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
 import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsSectionKey } from './sections';
-import { RoleSettings } from './role-settings';
+import { ProjectPlaybook } from './project-playbook';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
 
@@ -173,29 +172,10 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. Use global follows All projects › Models by role.`}
+              {`For ${project.name} only. Use global follows All projects › Models.`}
             </ScopeLine>
           ) : null}
-          {project ? (
-            <>
-              <RoleSettings key={`roles-${project.id}`} project={project} />
-              <PatternsSection key={`patterns-${project.id}`} project={project} />
-            </>
-          ) : (
-            <NoProject />
-          )}
-          <PlannedRemainder section={section} />
-        </>
-      );
-    case SettingsSectionKey.PersonasAndFlows:
-      return (
-        <>
-          {heading}
-          <ScopeLine>
-            For every project. A project can override this in its own Models by role.
-          </ScopeLine>
-          <RoleSettings project={null} />
-          <PatternsSection project={null} />
+          {project ? <ProjectPlaybook key={project.id} project={project} /> : <NoProject />}
           <PlannedRemainder section={section} />
         </>
       );

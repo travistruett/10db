@@ -1,5 +1,5 @@
 import type { AccountId, ModelSetting } from '@10db/contracts';
-import { Select } from '@mantine/core';
+import { Select, type ComboboxProps } from '@mantine/core';
 import { useModels } from '../../daemon/model-queries';
 import { NO_SETTING, settingChoices, settingValue } from './model-setting-options';
 
@@ -13,6 +13,8 @@ interface Common {
   readonly value: ModelSetting | null;
   /** Shown while nothing is chosen. */
   readonly placeholder?: string;
+  /** For a field inside a popover, whose list must stay inside it so choosing from the list does not close it. */
+  readonly comboboxProps?: ComboboxProps;
 }
 
 /** A field that must hold a setting, or one that can also hold none (an inherited role, a task with no override). */
@@ -52,6 +54,7 @@ export function ModelSettingSelect(props: ModelSettingSelectProps) {
       data={groups}
       value={shown}
       allowDeselect={false}
+      {...(props.comboboxProps === undefined ? {} : { comboboxProps: props.comboboxProps })}
       onChange={choose}
     />
   );

@@ -341,9 +341,17 @@ describe('useEventStream', () => {
       'role_setting',
       'pattern',
       'persona',
+      'playbook',
     ]) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['models']]));
     }
+  });
+
+  it.each([
+    { entity: 'playbook', key: ['playbook'] },
+    { entity: 'persona', key: ['personas'] },
+  ])('refetches the $entity lists the settings page reads when one changes', ({ entity, key }) => {
+    expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([key]));
   });
 
   it('refetches the role settings and patterns when either changes', () => {
