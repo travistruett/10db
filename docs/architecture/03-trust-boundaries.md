@@ -158,11 +158,36 @@ without it):
   that brings its own host list (`allowed_domains`). A hook `ask` reaches `canUseTool` in auto mode, as does a
   content-scoped `permissions.ask` rule (spike rows g and h). A Bash command that reaches a host the project does
   not list is refused by the sandbox proxy with no card (the builder accepted that; the briefing tells the lane to
-  ask). Inline `autoMode` rules, with `$defaults` first, hard-deny the full gate and CPU load and soft-deny paths
-  outside the worktree; the exact gate command is not in the allow list. Claude Code forces `default` mode while
+  ask). The inline `autoMode` rules are the session's `TrustPolicy` (`trust/policy.ts`) rendered by
+  `sessions/claude-auto-mode.ts`, `$defaults` first in all four lists: the environment the classifier reads (the
+  project, the sandbox, the checkout's tracked files as the session's to change, the project's live systems), the
+  four limits (destroying data the session didn't create, sending data out, reading secrets, writing to live
+  systems) as `soft_deny` where a person is in the session (a pass) and `hard_deny` where none is (a lane), and the
+  coordination lines (the full gate, git and gh commits, pushes and merges, CPU load) as `hard_deny` everywhere.
+  `classifyAllShell` is on, so an allow rule that matches a narrow Bash command no longer settles it before the
+  classifier (live check G5). Every value 10db didn't write (the project name, the checkout, the gate command, a
+  live system) is a JSON string inside its line, and a live system can hold no control or line-separator
+  character and never `$defaults` (`LiveSystem`). Claude Code forces `default` mode while
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so an auto-mode session sets it to `0` (see Environment). The classifier is
   policy, not a boundary: the sandbox is the boundary
   (`decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`).
+- **The judge, per call.** A session starts on its agent's judge (`capabilities.judge`: Claude Code's auto mode
+  where it runs on the account kind and model, `trust/auto-mode-models.ts`) when it asks for auto mode, else on
+  the `rules` floor (`startingJudge`). Each call is then judged by the mode Claude Code reports with it, the
+  PreToolUse hook's `permission_mode` (`judgeForCall`): anything but `auto` is the floor for that call (live check
+  G6: a model auto mode doesn't run reports `default`). On the floor the guard is today's whole guard. Where a
+  judge runs, `guard/judged-rules.ts` hands it deploys, unreadable shell (unread words, a hidden redirection,
+  `env -S`), a pipe into a shell and an `rm -r` the guard can't judge, plus WebFetch and WebSearch with the Web
+  switch on and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
+  under an allow rule that covers the call, and for any command whose text names git, gh or `.git`. The repo MCP
+  tools and the MCP resource tools keep their card under every judge (live check G8 could not show the classifier
+  judging an MCP call). A session on the floor says why in its task's thread, once (`trust/floor-notice.ts`).
+- **The bound under a judge.** What the guard hands a judge is bounded by the kernel or the closed credentials: a
+  hidden `git commit`, branch change or removal of git's refs fails in the kernel (`gitState` is `denyWrite`;
+  `test/judged-shell.seatbelt.test.ts`), and a hidden `git push` or `gh pr merge` has no credentials (the Keychain
+  and gh's config are protected reads) and is refused by its text anyway. `sudo`, `allowed_domains`, `rm -r` of a
+  plain `.git` path or a path outside the repository, an over-long path, hazards and their unread forms, claims,
+  pass pages and every file-access rule apply under every judge.
 - **What comes along (Settings › Trust,** `session-setup/`, `sandbox/setup-dir.ts`). Each lane and pass reads
   the trust switches and plans its setup when its session starts; a switch flipped meanwhile applies from the next
   session.
@@ -194,8 +219,8 @@ without it):
     matched by their names folded as APFS folds them (case and Unicode normalization), so `Hooks/` or `.MCP.json`
     reaches no wrapper. The live check found `strictMcpConfig: true` alone also kept a plugin's `.mcp.json` server
     from starting on 2.1.302; 10db relies on the wrapper either way.
-  - **The web, where auto mode judges it.** In a sandboxed lane in auto mode on a Claude plan, the API or Bedrock,
-    with the Web switch on (`sessions/native-judge.ts`), the guard leaves WebSearch and WebFetch to Claude Code's
+  - **The web, where auto mode judges it.** In a sandboxed lane whose call is judged by auto mode (see "The judge,
+    per call"), with the Web switch on (`GuardInput.webOn`), the guard leaves WebSearch and WebFetch to Claude Code's
     classifier instead of sending them to the broker. No web tool is in `allowedTools`, so no allow rule settles
     a call before the classifier. A gateway lane, a lane in `default` mode, a model auto mode doesn't support and
     every lane with the Web switch off still card them. The classifier is policy, not a boundary (live check L2:
@@ -915,6 +940,20 @@ guard task tests each one.
 
 ## 7. Known and accepted
 
+- **Auto mode's classifier is policy.** Where it judges a call, a call it lets through still runs inside the
+  sandbox; a call it refuses names no rule (live checks L2 and the T3 gate: every classifier denial said "it gave
+  no explanation"), so a denial maps to a limit only when its text names one (`limitOfDenial`), which is rare.
+- **Allow this can't tell a soft deny from a hard one.** Claude Code's denial doesn't say whether one of the
+  policy's soft limits or one of its own `$defaults` hard denies fired, so a pass offers Allow this on every
+  classifier denial short enough to name whole. Against a hard deny the go-ahead is refused again, and the notice
+  says so. A built-in safety check (`safetyCheck`) is shown with no Allow this: only the builder can run it, in a
+  terminal.
+- **Reviewed tools go to the judge.** A tool the pinned Claude Code lists and 10db has reviewed as running inside
+  the session (`guard/reviewed-tools.ts`) is judged, not carded, where a judge runs; a Claude Code bump fails a repo
+  test until its tools are reviewed again. A tool no list names still asks under every judge.
+- **The T3 gate ran on the Claude plan only.** Its rows (inline settings, a custom soft deny and its go-ahead, a
+  deploy denied with and without an allow rule, the per-call mode, a safety check, a tracked file's delete, an MCP
+  call) passed there; none ran on Bedrock in this build, and the gateway has no judge but the rules.
 - **Its own account.** A lane's claude process holds its own account's credential. A steered lane can spend
   its account's quota, up to the monthly cap on a metered account.
 - **Its own checkout.** A lane reads and changes everything there except the project's secret files, including
