@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SelenizedDark, SelenizedLight, type SelenizedVariant } from '../selenized';
-import { SELENIZED_SHIKI_THEMES, selenizedShikiTheme } from './selenized-shiki';
+import { SELENIZED_SHIKI_THEMES } from './selenized-shiki';
 
 /** Every color a Selenized variant has, in lower case. */
 function valuesOf(variant: SelenizedVariant): Set<string> {
@@ -14,10 +14,9 @@ function valuesOf(variant: SelenizedVariant): Set<string> {
 
 describe('the Selenized Shiki themes', () => {
   it.each([
-    ['dark', SelenizedDark, 'dark'],
-    ['light', SelenizedLight, 'light'],
-  ] as const)("%s uses only its variant's colors", (_name, variant, type) => {
-    const theme = selenizedShikiTheme(variant, type);
+    ['dark', SELENIZED_SHIKI_THEMES[0], SelenizedDark, 'dark'],
+    ['light', SELENIZED_SHIKI_THEMES[1], SelenizedLight, 'light'],
+  ] as const)("%s uses only its variant's colors", (_name, theme, variant, type) => {
     const allowed = valuesOf(variant);
     const colors = [
       ...Object.values(theme.colors ?? {}),

@@ -45,7 +45,7 @@ const ALIASES = {
  * A fence's language to the lazy import of its grammar. A Map, since the language is the agent's
  * text and a plain object would answer `constructor` or `__proto__`.
  */
-export const SHIKI_LANGUAGES: ReadonlyMap<string, () => GrammarModule> = new Map([
+const SHIKI_LANGUAGES: ReadonlyMap<string, () => GrammarModule> = new Map([
   ...Object.entries(GRAMMARS),
   ...Object.entries(ALIASES).map(([alias, name]) => [alias, GRAMMARS[name]] as const),
 ]);

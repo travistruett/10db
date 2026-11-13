@@ -6,10 +6,7 @@ import { SelenizedDark, SelenizedLight, type SelenizedVariant } from '../seleniz
 // strings cyan, keywords yellow, types green, functions blue, imports orange, escapes red.
 
 /** A code theme drawn only in `variant`'s colors, on its `bg_0` with its `fg_0` text. */
-export function selenizedShikiTheme(
-  variant: SelenizedVariant,
-  type: 'light' | 'dark',
-): ThemeRegistration {
+function selenizedShikiTheme(variant: SelenizedVariant, type: 'light' | 'dark'): ThemeRegistration {
   const a = variant.accents;
   return {
     name: `selenized-${type}`,
