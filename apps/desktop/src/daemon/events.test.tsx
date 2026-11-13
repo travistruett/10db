@@ -332,8 +332,16 @@ describe('useEventStream', () => {
     }
   });
 
-  it("refetches the Models page when a profile or an account's list changes", () => {
-    for (const entity of ['model_profile', 'account_models']) {
+  it('refetches the Models page when a profile, an account or its list, a role setting, a pattern or a persona changes', () => {
+    // The router's picks read all of them.
+    for (const entity of [
+      'model_profile',
+      'account_models',
+      'account',
+      'role_setting',
+      'pattern',
+      'persona',
+    ]) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['models']]));
     }
   });
