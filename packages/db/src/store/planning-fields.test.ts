@@ -33,7 +33,6 @@ const step = (role: WorkstreamStep['role'], sessionFloor = 0): WorkstreamStep =>
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'opus',
   effort: 'high',

@@ -22,20 +22,13 @@ export interface ModelRowsInput {
   readonly catalogue: Catalogue | null;
 }
 
-/** The profile that stands for a model's scores: its strongest effort by Intelligence, then Coding. */
+/** The profile that stands for a model's scores: its strongest effort by Intelligence. */
 function strongestScored(profiles: readonly ModelProfileDto[]): ModelProfileDto | null {
   let best: ModelProfileDto | null = null;
   for (const p of profiles) {
-    const { intelligence, coding } = p.scores;
-    if (intelligence === null && coding === null) continue;
-    if (best === null) {
-      best = p;
-      continue;
-    }
-    const gap =
-      (intelligence ?? -1) - (best.scores.intelligence ?? -1) ||
-      (coding ?? -1) - (best.scores.coding ?? -1);
-    if (gap > 0) best = p;
+    const { intelligence } = p.scores;
+    if (intelligence === null) continue;
+    if (best === null || intelligence > (best.scores.intelligence ?? -1)) best = p;
   }
   return best;
 }
@@ -132,7 +125,6 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       inputPrice: described?.inputPrice ?? null,
       outputPrice: described?.outputPrice ?? null,
       intelligence: scored?.scores.intelligence ?? null,
-      coding: scored?.scores.coding ?? null,
       outputTokensPerSecond:
         scored?.outputTokensPerSecond ??
         profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??

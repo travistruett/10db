@@ -214,7 +214,6 @@ describe('ModelRowDto', () => {
       inputPrice: null,
       outputPrice: null,
       intelligence: null,
-      coding: null,
       outputTokensPerSecond: null,
       stepsRun: 0,
       firstSeenAt: '2026-11-06T12:00:00.000Z',
@@ -272,6 +271,7 @@ describe('WorkstreamStep setting', () => {
     personaId: null,
     personaName: 'Implementer',
     tools: 'edit',
+    // Steps planned while routing kept a score kind per role still carry it; it is dropped on reading.
     score: 'coding',
     profileId: null,
     model: 'sonnet',

@@ -9,7 +9,7 @@ import {
   type DataTableSortStatus,
 } from 'mantine-datatable';
 import type { ReactNode } from 'react';
-import { withColumnHeader } from './column-header';
+import { withColumnHeader } from '../../shell/column-header';
 import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels';
 import { PAGE_SIZES, type Paging } from './knowledge-paging';
 import './knowledge-table.css';

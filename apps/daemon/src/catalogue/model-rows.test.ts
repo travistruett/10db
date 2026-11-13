@@ -32,7 +32,7 @@ function profile(over: Partial<ModelProfileDto>): ModelProfileDto {
     model: 'claude-opus-5-5',
     effort: 'high',
     aaSlug: null,
-    scores: { intelligence: null, coding: null, agentic: null },
+    scores: { intelligence: null },
     costPerTaskUsd: null,
     outputTokensPerSecond: null,
     source: 'aa',
@@ -71,11 +71,7 @@ function offer(accountId: AccountId, over: Partial<AccountModelDto> = {}): Accou
   };
 }
 
-const scored = (intelligence: number | null, coding: number | null) => ({
-  intelligence,
-  coding,
-  agentic: null,
-});
+const scored = (intelligence: number | null) => ({ intelligence });
 
 describe('buildModelRows', () => {
   it('merges every effort of a model and every account offering it into one row', () => {
@@ -85,14 +81,14 @@ describe('buildModelRows', () => {
       profiles: [
         profile({
           effort: 'low',
-          scores: scored(30, 28),
+          scores: scored(30),
           outputTokensPerSecond: 90,
           stepsRun: 2,
           createdAt: '2026-11-05T10:00:00.000Z',
         }),
         profile({
           effort: 'high',
-          scores: scored(40, 41),
+          scores: scored(40),
           outputTokensPerSecond: 60,
           stepsRun: 3,
           createdAt: '2026-11-01T10:00:00.000Z',
@@ -118,7 +114,6 @@ describe('buildModelRows', () => {
         outputPrice: 25,
         // The strongest scored effort's scores and speed, not an average or a mix of efforts.
         intelligence: 40,
-        coding: 41,
         outputTokensPerSecond: 60,
         stepsRun: 5,
         firstSeenAt: '2026-11-01T10:00:00.000Z',
@@ -130,12 +125,11 @@ describe('buildModelRows', () => {
     const [row] = buildModelRows({
       catalogue: CATALOGUE,
       accounts: [subscription],
-      profiles: [profile({ scores: scored(null, null) })],
+      profiles: [profile({ scores: scored(null) })],
       offers: [offer(subscription.id)],
     });
     expect(row).toMatchObject({
       intelligence: null,
-      coding: null,
       outputTokensPerSecond: null,
     });
   });
@@ -145,31 +139,31 @@ describe('buildModelRows', () => {
       catalogue: CATALOGUE,
       accounts: [subscription],
       profiles: [
-        profile({ effort: 'low', scores: scored(null, null), outputTokensPerSecond: 200 }),
-        profile({ effort: 'high', scores: scored(35, null), outputTokensPerSecond: 50 }),
+        profile({ effort: 'low', scores: scored(null), outputTokensPerSecond: 200 }),
+        profile({ effort: 'high', scores: scored(35), outputTokensPerSecond: 50 }),
       ],
       offers: [offer(subscription.id)],
     });
-    expect(row).toMatchObject({ intelligence: 35, coding: null, outputTokensPerSecond: 50 });
+    expect(row).toMatchObject({ intelligence: 35, outputTokensPerSecond: 50 });
   });
 
   it.each([
     {
       name: 'the strongest scored effort when it has one',
-      low: { speed: 200, scores: scored(null, null) },
-      high: { speed: 50, scores: scored(35, null) },
+      low: { speed: 200, scores: scored(null) },
+      high: { speed: 50, scores: scored(35) },
       expected: 50,
     },
     {
       name: 'another effort when the strongest scored one has none',
-      low: { speed: 120, scores: scored(null, null) },
-      high: { speed: null, scores: scored(35, null) },
+      low: { speed: 120, scores: scored(null) },
+      high: { speed: null, scores: scored(35) },
       expected: 120,
     },
     {
       name: 'nothing when no effort has one',
-      low: { speed: null, scores: scored(null, null) },
-      high: { speed: null, scores: scored(35, null) },
+      low: { speed: null, scores: scored(null) },
+      high: { speed: null, scores: scored(35) },
       expected: null,
     },
   ])('takes speed from $name', ({ low, high, expected }) => {

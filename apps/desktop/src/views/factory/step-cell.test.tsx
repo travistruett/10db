@@ -17,12 +17,11 @@ const step = (
   personaId: null,
   personaName,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model,
   effort,
   need: 40,
-  reason: 'cheapest profile at or above 40 coding',
+  reason: 'cheapest profile at or above 40 intelligence',
   overBudget: false,
   pinned: false,
   status: 'running',
@@ -108,7 +107,7 @@ describe('StepCell', () => {
       }),
     );
     expect(screen.getByText('Implementer · sonnet@medium').getAttribute('title')).toBe(
-      'cheapest profile at or above 40 coding',
+      'cheapest profile at or above 40 intelligence',
     );
   });
 });

@@ -30,7 +30,6 @@ const FAST = modelRowDto({
   inputPrice: 1,
   outputPrice: 5,
   intelligence: 31.5,
-  coding: 28,
   outputTokensPerSecond: 180,
   stepsRun: 4,
   firstSeenAt: '2026-09-01T10:00:00.000Z',
@@ -43,7 +42,6 @@ const STRONG = modelRowDto({
   inputPrice: 5,
   outputPrice: 25,
   intelligence: 60,
-  coding: 55,
   outputTokensPerSecond: 40,
   stepsRun: 12,
   firstSeenAt: '2026-11-05T10:00:00.000Z',
@@ -116,7 +114,7 @@ describe('the Models page', () => {
     expect(row.getByText('alpha-max')).toBeTruthy();
     expect(row.getByText('Strongest')).toBeTruthy();
     expect(row.getByText('Claude plan, Work key')).toBeTruthy();
-    for (const cell of ['60', '55', '40', '$5.00', '$25.00', '12']) {
+    for (const cell of ['60', '40', '$5.00', '$25.00', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }
   });
@@ -126,8 +124,8 @@ describe('the Models page', () => {
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
-    // Intelligence, Coding, Speed, Input and Output.
-    expect(cells.slice(3, 8).map((c) => c.textContent)).toEqual(['—', '—', '—', '—', '—']);
+    // Intelligence, Speed, Input and Output.
+    expect(cells.slice(3, 7).map((c) => c.textContent)).toEqual(['—', '—', '—', '—']);
   });
 
   it('marks an Unknown model and a model first seen in the last seven days', async () => {
@@ -139,39 +137,61 @@ describe('the Models page', () => {
     expect(within(rowOf('house-model')).getByText('Unknown')).toBeTruthy();
   });
 
-  it('filters by tier with the segmented control', async () => {
+  it('filters by tier from the Tier column, one tier or several', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    const tiers = screen.getByRole('radiogroup', { name: 'Tier' });
-    fireEvent.click(within(tiers).getByLabelText('Fast'));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Tier' }));
+    const tiers = await screen.findByRole('group', { name: 'Tier' });
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
     expect(shownNames()).toEqual(['Alpha Fast']);
-    fireEvent.click(within(tiers).getByLabelText('Strongest'));
-    expect(shownNames()).toEqual(['Alpha Max']);
-    fireEvent.click(within(tiers).getByLabelText('All'));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
+    expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast']);
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Fast' }));
+    fireEvent.click(within(tiers).getByRole('checkbox', { name: 'Strongest' }));
     expect(shownNames()).toHaveLength(4);
   });
 
-  it('filters by account', async () => {
+  it('filters by account from the Available on column', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(screen.getByRole('combobox', { name: 'Account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
     fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
     expect(shownNames().sort()).toEqual(['Alpha Fast', 'Alpha Max']);
+  });
+
+  it('searches names and model IDs from the Model column, and says when nothing matches', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Model' }));
+    const search = await screen.findByRole('textbox', { name: 'Search models' });
+    fireEvent.change(search, { target: { value: 'beta-pl' } });
+    expect(shownNames()).toEqual(['Beta Plain']);
+    fireEvent.change(search, { target: { value: 'nothing like it' } });
+    expect(await screen.findByText('No model matches these filters.')).toBeTruthy();
   });
 
   it('sorts by a column, reverses on a second click, and keeps Unknown and blanks last', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
-    fireEvent.click(screen.getByRole('button', { name: 'Intelligence' }));
-    expect(shownNames()).toEqual(['Alpha Fast', 'Alpha Max', 'Beta Plain', 'house-model']);
-    fireEvent.click(screen.getByRole('button', { name: 'Intelligence' }));
+    // The list opens by tier, strongest first; another column keeps that direction.
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence' }));
     expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast', 'Beta Plain', 'house-model']);
-    expect(
-      screen.getByRole('columnheader', { name: /Intelligence/ }).getAttribute('aria-sort'),
-    ).toBe('descending');
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence, descending' }));
+    expect(shownNames()).toEqual(['Alpha Fast', 'Alpha Max', 'Beta Plain', 'house-model']);
+    expect(screen.getByRole('button', { name: 'Sort by Intelligence, ascending' })).toBeTruthy();
+  });
+
+  it('opens the drawer from a click anywhere on a row', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(within(rowOf('Alpha Max')).getByText('Strongest'));
+    expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
   });
 
   it('says where the data came from and how old it is, and credits Artificial Analysis with a link', async () => {
@@ -313,7 +333,7 @@ describe('the Models page', () => {
         modelProfileDto({
           model: 'alpha-max',
           effort: 'low',
-          scores: { intelligence: 50, coding: 40, agentic: null },
+          scores: { intelligence: 50 },
           stepsRun: 4,
           firstPassSteps: 3,
           escalations: 1,
@@ -322,7 +342,7 @@ describe('the Models page', () => {
         modelProfileDto({
           model: 'alpha-max',
           effort: 'high',
-          scores: { intelligence: 60, coding: 55, agentic: null },
+          scores: { intelligence: 60 },
         }),
       ],
     });

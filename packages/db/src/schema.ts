@@ -1159,8 +1159,6 @@ export const modelProfiles = sqliteTable(
     effort: text('effort').$type<Effort>().notNull(),
     aaSlug: text('aa_slug'),
     intelligence: real('intelligence'),
-    coding: real('coding'),
-    agentic: real('agentic'),
     costPerTaskUsd: real('cost_per_task_usd'),
     outputTokensPerSecond: real('output_tokens_per_second'),
     source: text('source').$type<ProfileSource>().notNull(),

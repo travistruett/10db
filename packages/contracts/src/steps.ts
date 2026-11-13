@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
-import { Effort, ROLE_SCORE, ScoreKind, StepRole, StepStatus, ToolAccess, Verdict } from './states';
+import { Effort, StepRole, StepStatus, ToolAccess, Verdict } from './states';
 
 /** Longest result a step may record: a plan or a review's notes. */
 export const MAX_STEP_SUMMARY = 8000;
@@ -34,7 +34,6 @@ export const WorkstreamStep = z.object({
   personaId: PersonaId.nullable(),
   personaName: z.string(),
   tools: z.enum(ToolAccess),
-  score: z.enum(ScoreKind),
   profileId: ModelProfileId.nullable(),
   model: z.string().min(1),
   effort: z.enum(Effort),
@@ -115,7 +114,6 @@ export function currentStep(ws: StepPosition): WorkstreamStep {
     personaId: null,
     personaName: ROLE_LABEL.implement,
     tools: ToolAccess.Edit,
-    score: ROLE_SCORE.implement,
     profileId: null,
     model: ws.model,
     effort: ws.effort,

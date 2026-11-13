@@ -47,9 +47,9 @@ export interface AaMeasurement {
 }
 
 type Row = typeof schema.modelProfiles.$inferSelect;
-const toDto = ({ intelligence, coding, agentic, ...rest }: Row): ModelProfileDto => ({
+const toDto = ({ intelligence, ...rest }: Row): ModelProfileDto => ({
   ...rest,
-  scores: { intelligence, coding, agentic },
+  scores: { intelligence },
 });
 
 export function insertModelProfile(ctx: WriteContext, input: NewModelProfile): ModelProfileDto {
@@ -66,8 +66,6 @@ export function insertModelProfile(ctx: WriteContext, input: NewModelProfile): M
     outputPrice: null,
     releaseDate: null,
     intelligence: null,
-    coding: null,
-    agentic: null,
     costPerTaskUsd: null,
     outputTokensPerSecond: null,
     source: ProfileSource.Aa,

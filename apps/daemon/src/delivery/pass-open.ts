@@ -140,7 +140,7 @@ export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
     throw new InvalidError(`The ${plan.flowName} flow of "${task.title}" has no implement step`);
   if (plan.overBudget.includes(at))
     throw new InvalidError(
-      `The implement step of "${task.title}" (need ${String(step.need)} ${step.score}) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling, lower the need or pin a persona.`,
+      `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling, lower the need or pin a persona.`,
     );
   return { flowName: plan.flowName, steps: [step], overBudget: [] };
 }

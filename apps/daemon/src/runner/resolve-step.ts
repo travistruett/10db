@@ -98,7 +98,6 @@ export function resolveStep(
     setting: startOverTier === undefined ? choice.setting : step.setting,
     overBudget: choice.overBudget,
     pinned: choice.pinned,
-    score: choice.score,
     reason: `${whyNot(step, account, profiles, accountModels)}, so the step was resolved again: ${choice.reason}`,
   };
 }

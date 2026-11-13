@@ -84,7 +84,7 @@ describe('model profiles', () => {
     enabled: true,
   } as const;
   const measurement = {
-    scores: { intelligence: 50, coding: 45, agentic: 40 },
+    scores: { intelligence: 50 },
     costPerTaskUsd: 1.5,
     outputTokensPerSecond: 80,
     indexVersion: '9.9',
@@ -95,7 +95,7 @@ describe('model profiles', () => {
     const profile = store.write((ctx) => insertModelProfile(ctx, definition)).value;
     expect(profile).toMatchObject({
       source: 'aa',
-      scores: { intelligence: null, coding: null, agentic: null },
+      scores: { intelligence: null },
       costPerTaskUsd: null,
     });
     expect(findModelProfile(store.db, 'claude', 'sonnet', 'high')).toEqual(profile);
@@ -165,7 +165,7 @@ describe('model profiles', () => {
       status: 'superseded',
       inputPrice: 2,
       enabled: false,
-      scores: { intelligence: 50, coding: 45, agentic: 40 },
+      scores: { intelligence: 50 },
     });
   });
 

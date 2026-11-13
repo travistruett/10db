@@ -205,7 +205,7 @@ describe('reconcileProfiles', () => {
         enabled: false,
       });
       applyAaMeasurement(ctx, made.id, {
-        scores: { intelligence: 40, coding: 41, agentic: 42 },
+        scores: { intelligence: 40 },
         costPerTaskUsd: 1,
         outputTokensPerSecond: 50,
         indexVersion: 'v',
@@ -224,7 +224,7 @@ describe('reconcileProfiles', () => {
       id: existing.id,
       enabled: true,
       aaSlug: 'slug',
-      scores: { intelligence: 40, coding: 41, agentic: 42 },
+      scores: { intelligence: 40 },
       stepsRun: 1,
       maker: 'anthropic',
       tier: ModelTier.Strongest,

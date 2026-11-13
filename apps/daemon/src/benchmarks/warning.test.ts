@@ -12,7 +12,6 @@ const status = (outcome: BenchmarkStatusDto['outcome'], message: string | null =
     models: 0,
     indexVersion: null,
     unmeasuredProfiles: [],
-    missingScores: [],
   }) satisfies BenchmarkStatusDto;
 
 describe('syncWarning', () => {

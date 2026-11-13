@@ -41,14 +41,6 @@
               "edit"
             ]
           },
-          "score": {
-            "type": "string",
-            "enum": [
-              "intelligence",
-              "coding",
-              "agentic"
-            ]
-          },
           "profileId": {
             "anyOf": [
               {
@@ -316,7 +308,6 @@
           "personaId",
           "personaName",
           "tools",
-          "score",
           "profileId",
           "model",
           "effort",

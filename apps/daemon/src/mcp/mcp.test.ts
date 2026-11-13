@@ -2510,7 +2510,6 @@ const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',

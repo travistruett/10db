@@ -99,12 +99,6 @@
         "null"
       ]
     },
-    "coding": {
-      "type": [
-        "number",
-        "null"
-      ]
-    },
     "outputTokensPerSecond": {
       "type": [
         "number",
@@ -141,7 +135,6 @@
     "inputPrice",
     "outputPrice",
     "intelligence",
-    "coding",
     "outputTokensPerSecond",
     "stepsRun",
     "firstSeenAt"

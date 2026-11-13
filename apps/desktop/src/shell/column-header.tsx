@@ -25,6 +25,7 @@ function ColumnHeader<T>({
   onSort,
   filter,
   filtering,
+  alignEnd,
 }: {
   readonly title: string;
   readonly accessor: DataTableSortStatus<T>['columnAccessor'];
@@ -33,6 +34,8 @@ function ColumnHeader<T>({
   readonly onSort: (next: DataTableSortStatus<T>) => void;
   readonly filter: DataTableColumn<T>['filter'];
   readonly filtering: boolean;
+  /** A right-aligned column, such as a number, keeps its title over its values. */
+  readonly alignEnd: boolean;
 }) {
   const [opened, { close, toggle }] = useDisclosure(false);
   const sorted = sort.columnAccessor === accessor ? sort.direction : null;
@@ -40,7 +43,7 @@ function ColumnHeader<T>({
     sorted === 'asc' ? IconArrowUp : sorted === 'desc' ? IconArrowDown : IconSelector;
   const FilterIcon = filtering ? IconFilterFilled : IconFilter;
   return (
-    <Group gap={4} wrap="nowrap" justify="space-between">
+    <Group gap={4} wrap="nowrap" justify={alignEnd ? 'flex-end' : 'space-between'}>
       {sortable ? (
         <UnstyledButton
           aria-label={
@@ -122,6 +125,7 @@ export function withColumnHeader<T>(
       onSort={onSort}
       filter={column.filter}
       filtering={column.filtering === true}
+      alignEnd={column.textAlign === 'right'}
     />
   );
   const drawn: DataTableColumn<T> = { ...column, title: header, sortable: false };

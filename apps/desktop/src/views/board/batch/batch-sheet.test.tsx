@@ -507,7 +507,7 @@ describe('BatchSheet', () => {
           .getAllByRole('cell')
           .map((cell) => cell.textContent),
       );
-    const why = 'cheapest profile at or above 40 coding';
+    const why = 'cheapest profile at or above 40 intelligence';
     expect(rows).toEqual([
       ['Implementer', 'Implementer', 'sonnet@high', why],
       ['Reviewer', 'Reviewer', 'sonnet@high', why],
