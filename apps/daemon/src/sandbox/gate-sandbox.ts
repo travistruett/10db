@@ -1,10 +1,11 @@
-import { chmodSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
+import { pathsEqual } from './protected-reads';
 import { buildLaneProfile } from './profile';
 import {
   laneRootsOf,
@@ -64,6 +65,48 @@ export interface GateRunInput {
    * install scripts, no pnpmfile) should ask: nothing else in the sandbox may write there.
    */
   readonly packageInstall?: boolean;
+  /**
+   * A pass's commit or merge the builder allowed, which runs here so the hooks it starts are
+   * contained: the checkout's own git dir opens for writing, but for what git reads to run a
+   * program or to find another git dir, and the builder's git config files that exist open for
+   * reading, so the commit carries their identity.
+   */
+  readonly approvedGit?: {
+    readonly gitDir: string;
+    readonly globalConfig: readonly string[];
+    /** Branches whose refs stay closed: `main` and the base branch, where 10db lands the work. */
+    readonly keptBranches: readonly string[];
+  };
+}
+
+/**
+ * What an approved commit never writes in the git dir it opens: hooks and config (each names a
+ * program git runs), `info` (attributes and excludes), a submodule's or a worktree's git dir with
+ * their own hooks and config, and the files that point git at another git dir.
+ */
+const CLOSED_GIT_ENTRIES = [
+  'hooks',
+  'config',
+  'config.worktree',
+  'info',
+  'modules',
+  'worktrees',
+  'commondir',
+  'gitdir',
+  // A commit or a merge moves only the current branch: the remote-tracking refs, the tags and the
+  // packed refs (where `main` may live) stay as they are.
+  'refs/remotes',
+  'refs/tags',
+  'packed-refs',
+] as const;
+
+/** A path's real path, or the path itself when it has none. */
+function realOr(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
 }
 
 /** One gate run under the sandbox: the process to spawn, and its own temp dir. */
@@ -142,6 +185,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         },
       );
       const { checkout, toolchain } = access;
+      const approved = input.approvedGit;
       const lockPath =
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
       // What an earlier run or a crash left is not trusted either.
@@ -210,11 +254,23 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             ...access.gitReads,
             ...(lockPath === null ? [] : [lockPath]),
             ...(docker?.reads ?? []),
+            ...(approved?.globalConfig.filter((file) => existsSync(file)) ?? []),
           ],
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
           denyWrites: [
-            ...access.gitState,
+            ...(approved === undefined
+              ? access.gitState
+              : [
+                  ...access.gitState.filter(
+                    (path) => !pathsEqual(realOr(path), realOr(approved.gitDir)),
+                  ),
+                  ...CLOSED_GIT_ENTRIES.map((name) => join(approved.gitDir, name)),
+                  ...approved.keptBranches.flatMap((branch) => [
+                    join(approved.gitDir, 'refs', 'heads', branch),
+                    join(approved.gitDir, 'logs', 'refs', 'heads', branch),
+                  ]),
+                ]),
             ...access.otherCheckouts,
             ...SRT_SHARED_TEMP,
             ...access.pinnedTools,

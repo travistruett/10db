@@ -73,6 +73,7 @@ import { execFileSync } from 'node:child_process';
 import {
   createTempRepo,
   createTempRepoWithOrigin,
+  FAKE_SRT,
   isolatedGitEnv,
   seedWorkstream,
 } from '../../test/fixtures';
@@ -87,7 +88,12 @@ import {
   removeNetworkHost,
   storableRule,
 } from '../permissions';
-import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
+import {
+  createGateSandbox,
+  protectedReads,
+  SYSTEM_DOC_ROOTS,
+  type FileAccessContext,
+} from '../sandbox';
 import type { ToolDecision } from '../sessions';
 import {
   createInboxService,
@@ -4186,9 +4192,33 @@ describe('a card 10db closes because its cause is gone', () => {
 });
 
 describe('permission broker in a pass', () => {
+  /** Where the gate's sandbox, with srt's stand-in, keeps its files. */
+  let roots: string;
+  beforeEach(() => {
+    roots = realpathSync(mkdtempSync('/tmp/sbi-'));
+    for (const dir of ['home', 't', 'r', 'l']) mkdirSync(join(roots, dir));
+  });
+  afterEach(() => {
+    rmSync(roots, { recursive: true, force: true });
+  });
+
   /** A pass's broker over a real repository, running what the builder allows as the runner does. */
   function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string) {
     const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' };
+    const home = join(roots, 'home');
+    const gitDirs = createGit();
+    const gate = createGateSandbox({
+      home,
+      dataDir: join(home, 'data'),
+      loginConfigDir: null,
+      tmpRoot: join(roots, 't'),
+      filesRoot: join(roots, 'r'),
+      codexLaneTempRoot: join(roots, 'l'),
+      gitDirs: (path) => gitDirs.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      log: silentLogger,
+    });
     const signal = new AbortController().signal;
     const git = (...args: string[]) =>
       execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), encoding: 'utf8' });
@@ -4209,6 +4239,16 @@ describe('permission broker in a pass', () => {
               env,
               signal,
               bins: { git: await resolveGit(), gh: 'gh' },
+              sandbox: {
+                gate,
+                input: {
+                  project: { repoPath: repo, sandboxLoopback: false, sandboxDocker: false },
+                  env,
+                  rules: [],
+                  checkouts: [repo],
+                },
+                home,
+              },
             }),
         },
       },
@@ -4240,6 +4280,7 @@ describe('permission broker in a pass', () => {
       const decision = decide(bash("git commit -m 'Add the page'"));
       const item = card();
       expect(item.title).toBe('Allow git commit?');
+      expect(item.body).toContain("inside the sandbox, where the repository's hooks run too");
       expect(item.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
       inbox.answer(item.id, { choice: 'allow_once' });
       const allowed = await decision;
@@ -4298,6 +4339,7 @@ describe('permission broker in a pass', () => {
       git('switch', '-q', '-c', 'feat/page');
       git('commit', '--allow-empty', '-q', '-m', 'page');
       const decision = decide(bash('git push -u origin feat/page'));
+      expect(card().body).toContain("runs none of the repository's hooks for it");
       inbox.answer(card().id, { choice: 'allow_once' });
       expect(replayed(await decision)).toMatch(/; exit 0$/);
       expect(

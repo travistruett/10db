@@ -1422,6 +1422,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
     laneSandbox,
+    gateSandbox: sandboxes?.gate ?? null,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
     builderHome,

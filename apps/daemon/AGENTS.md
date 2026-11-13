@@ -77,8 +77,8 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `PATH` entry or tool variable that names one, a lockfile). Remove a capability rather than check for its
   misuse. Never deny individual secrets inside an otherwise open tree: open only what is needed. Its
   exceptions are what the builder approved: a pass's plain commit, push or merge the builder allowed on a card,
-  which 10db runs once as the builder would (`git/run-as-builder.ts`: in the checkout's own git dir, so its own hooks run, the card says
-  so), and what the builder installed: Claude Code reads the builder's skills and plugins (Settings ›
+  which 10db runs once as the builder would (`git/run-as-builder.ts`: in the checkout's own git dir, a commit or merge inside the gate's
+  sandbox, whose hooks then run contained, and a push or `gh pr merge` outside it with no hook; the card says which), and what the builder installed: Claude Code reads the builder's skills and plugins (Settings ›
   Trust) outside the sandbox, and each skill or plugin whose real path a lane could write is left out. Their
   hooks and `allowed-tools` run as in Claude Code (live checks L3b and L3c: the guard doesn't judge a hook's
   rewrite again, and `allowed-tools` skips the card, never a guard deny); a plugin hook starts in its wrapper's

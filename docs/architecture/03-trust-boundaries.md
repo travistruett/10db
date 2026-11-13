@@ -167,11 +167,17 @@ without it):
   In a pass a plain `git commit`, `git push <remote> <branch>`, `git merge <branch>` or `gh pr merge [<number>]`
   alone on its line, with only options that read nothing outside the checkout (`guard/pass-git.ts`), is the
   builder's instead: the hook asks, so the classifier never sees it, the broker raises one card (Allow once or
-  Deny), and once allowed 10db runs that exact call outside the sandbox (`git/run-as-builder.ts`) at the
-  checkout's root with `GIT_DIR` and `GIT_WORK_TREE` set to its own `.git` folder, `core.fsmonitor` off and the
-  session's environment, so the builder's credentials and the checkout's own hooks (which a pass can't write)
-  take part, as in Claude Code; the agent's Bash call then prints what it printed and ends with its exit code. A
-  push goes only to a remote the checkout lists. A force push, a push of or to `main` or the base branch, a call
+  Deny), and once allowed 10db runs that exact call (`git/run-as-builder.ts`) at the checkout's root with
+  `GIT_DIR` and `GIT_WORK_TREE` set to its own `.git` folder, `core.fsmonitor` off and the project env with no
+  account credential. A commit or a merge runs inside the gate's sandbox, because the hook runners it starts read
+  files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`): the checkout and its `.git` are
+  writable there but not `.git/hooks`, `.git/config`, `.git/info`, the files that point at another git dir or
+  the refs of `main` and the base branch (but the current one),
+  and the builder's global git config is readable for their identity. A push or a `gh pr merge` needs the
+  builder's credentials, so it runs outside the sandbox with `core.hooksPath` at `/dev/null`, and the card says
+  the repository's push hooks don't run. The agent's Bash call then prints what it printed and ends with its exit
+  code (on Codex, whose hook can't rewrite a call, the hook's refusal carries that instead). A push goes only to
+  a remote the checkout lists. A force push, a push of or to `main` or the base branch, a call
   that reads a file outside the checkout, another repository, git's own options and every other spelling stay
   refused, and lanes are unchanged
   (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`).

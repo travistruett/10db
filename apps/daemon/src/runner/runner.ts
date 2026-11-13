@@ -234,6 +234,7 @@ import {
   fileAccessJudge,
   SandboxProfileError,
   SandboxTempDirError,
+  type GateSandbox,
   type LaneSandbox,
   type LaneSession,
 } from '../sandbox';
@@ -398,6 +399,11 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * The gate's sandbox, where a pass's commit or merge the builder allowed runs so its hooks are
+   * contained; absent or null, 10db runs no such commit or merge.
+   */
+  readonly gateSandbox?: GateSandbox | null;
   /**
    * Where a ChatGPT lane's temp dir is made (`codexLaneTempRoot` of the home, as the daemon made it
    * private), apart from Claude lanes' and outside `/private/tmp`, which Codex opens to every lane.
@@ -2616,14 +2622,31 @@ export function createRunner(opts: RunnerOptions): Runner {
               ? {
                   passGit: {
                     baseBranch: project.baseBranch,
-                    run: (call) =>
-                      runPassGit(call, {
+                    run: (call) => {
+                      // The project env: the login shell's, never the account's credentials.
+                      const env = opts.launcher.projectEnv();
+                      const gate = opts.gateSandbox ?? null;
+                      return runPassGit(call, {
                         checkout,
                         baseBranch: project.baseBranch,
-                        env: launch.env,
+                        env,
                         signal: abort.signal,
                         bins: opts.gitTools,
-                      }),
+                        sandbox:
+                          gate === null
+                            ? null
+                            : {
+                                gate,
+                                input: {
+                                  project: projectAtCheckout(project, checkout),
+                                  env,
+                                  rules: listPermissionRules(db, project.id, id),
+                                  checkouts: allCheckouts(db),
+                                },
+                                home: opts.builderHome,
+                              },
+                      });
+                    },
                   },
                 }
               : {}),

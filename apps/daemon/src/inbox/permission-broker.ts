@@ -182,8 +182,14 @@ const HOST_CARD_BODY =
 const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
 
-const PASS_GIT_CARD_BODY =
-  "Allowing it runs this call once, as you would in a terminal: 10db runs it outside the sandbox with your git and your credentials, so the repository's hooks run too, and the agent sees what it printed. A force push and a push to main or the base branch stay refused.";
+/** What allowing a pass's commit, push or merge does: a commit's hooks run contained, a push runs none. */
+function passGitCardBody(call: Extract<PassGitCall, { kind: 'run' }>): string {
+  const pushes = call.argv[0] === 'gh' || call.argv[1] === 'push';
+  const how = pushes
+    ? "10db runs it outside the sandbox with your git and your credentials, and runs none of the repository's hooks for it (its pre-push hook included)"
+    : "10db runs it with your git identity inside the sandbox, where the repository's hooks run too but can write only the checkout and its history, and no credential of yours reaches them";
+  return `Allowing it runs this call once: ${how}. The agent sees what it printed. A force push and a push to main or the base branch stay refused.`;
+}
 
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
@@ -667,7 +673,7 @@ export function createPermissionBroker(
       sessionId: ctx.sessionId,
       kind: 'permission',
       title: `Allow ${call.argv.slice(0, call.argv[0] === 'gh' ? 3 : 2).join(' ')}?`,
-      body: `${command}\n\n${PASS_GIT_CARD_BODY}`,
+      body: `${command}\n\n${passGitCardBody(call)}`,
       options: ONCE_OPTIONS,
       recommendation: null,
       category: QuestionCategory.Access,

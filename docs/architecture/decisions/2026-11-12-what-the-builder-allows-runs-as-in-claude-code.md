@@ -28,13 +28,21 @@
 
 3. **In a pass, a plain commit, push or merge asks, then runs.** `git commit …`, `git push <remote> <branch>`,
    `git merge <branch>` or `gh pr merge [<number>]`, alone on its line with literal words (`guard/pass-git.ts`),
-   gets one card (Allow once or Deny) instead of the guard's refusal. Once allowed, 10db runs that exact call as the
-   builder would in a terminal (`git/run-as-builder.ts`): at the checkout's root, with `GIT_DIR` and `GIT_WORK_TREE`
-   set to the checkout's own `.git` folder (a `.git` file, a link, or a git dir naming another common dir is
-   refused), `core.fsmonitor` off, prompts off, and the session's environment, so the builder's credentials and
-   the checkout's own hooks take part (a pass can't write `.git`: its git state is kernel-denied and the file
-   tools never write it). The card says so. The agent's Bash call then prints what it printed and ends with its
-   exit code. Nothing the agent wrote rides along: each call carries only options that read nothing outside the
+   gets one card (Allow once or Deny) instead of the guard's refusal. Once allowed, 10db runs that exact call
+   (`git/run-as-builder.ts`) at the checkout's root, with `GIT_DIR` and `GIT_WORK_TREE` set to the checkout's own
+   `.git` folder (a `.git` file, a link, or a git dir naming another common dir is refused), `core.fsmonitor` off,
+   no attributes from the tree, prompts off, through the daemon's own git and gh, and with no account credential
+   (`ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK` and the rest of `SECRET_VARIABLES`) in its environment. A
+   commit or a merge runs inside the gate's sandbox, built from the lane profile: the hook runners it starts
+   (lefthook, husky, pre-commit) read files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`,
+   lint configs, package scripts), so they run contained. The checkout and its `.git` folder are writable there,
+   but not `.git/hooks`, `.git/config`, `config.worktree`, `.git/info`, `modules`, `worktrees`, the files that point
+   git at another git dir, the remote-tracking refs, tags and packed refs, or the refs of `main` and the base branch
+   unless one is the current branch, and the builder's global git config is readable for their identity. A push
+   and a `gh pr merge` need the builder's credentials, so they run outside the sandbox with `core.hooksPath` at
+   `/dev/null`: the repository's push hooks don't run for an approved push. The card says which. The agent's Bash
+   call then prints what it printed and ends with its exit code (on Codex, whose hook can't rewrite a call, the
+   hook's refusal carries what ran instead). Each call carries only options that read nothing outside the
    checkout (commit: `-m`/`--message`, `--no-edit`, `--allow-empty`, `-a`, `-q`, `--no-verify`, paths; merge:
    those for a merge and a branch name; push: `-u`, `-q`, `-v`, `-n`, `--no-verify`, `--follow-tags`; gh: the
    merge method, `--auto`, `--subject`, `--body`), a push names a remote the checkout's own
@@ -70,7 +78,12 @@
   Allow this, as in Claude Code, and runs once allowed. Force-push and a push to `main` (or the default branch)
   stay refused." A pass's checkout keeps its git state write-denied to the kernel and its credentials closed, so
   the agent's own call could not run even after a go-ahead. 10db running the exact call the builder allowed keeps
-  the sandbox as it is: no command the agent chooses leaves it, and the one that does is the one on the card.
+  the sandbox as it is. The call's own words are the builder's, but the hooks a commit starts are not: their
+  runners read files the agent wrote, so what they run is the agent's code. A commit and a merge therefore run
+  inside the sandbox, and a push and a pull request merge, which need the credentials, run no hook at all.
+- Turned down: running every allowed call outside the sandbox with the repository's hooks, as a terminal would.
+  The hook runners read agent-writable files, so the agent's code would run as the builder with the session's
+  account credentials.
 - Turned down: letting the pass's sandbox run commands unsandboxed (`allowUnsandboxedCommands` with the broker
   setting `dangerouslyDisableSandbox`). It changes the profile for every command and runs the call with the
   lane's command environment (`GIT_CONFIG_GLOBAL=/dev/null`, an empty `XDG_CONFIG_HOME`), so a commit has no

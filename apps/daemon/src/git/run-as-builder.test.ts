@@ -1,18 +1,38 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { createTempRepo, createTempRepoWithOrigin, isolatedGitEnv } from '../../test/fixtures';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  FAKE_SRT,
+  isolatedGitEnv,
+  SANDBOXED,
+} from '../../test/fixtures';
 import { passGitCall } from '../guard';
-import { runPassGit } from './run-as-builder';
+import { silentLogger } from '../log';
+import { createGateSandbox } from '../sandbox';
+import { createGit } from './git';
+import { runPassGit, type PassGitSandbox } from './run-as-builder';
 import { resolveGit } from './version';
 
-// A pass's commit, push or merge runs outside the sandbox once the builder allows it, so nothing a
-// lane could plant in the checkout (a repository of its own, a remote that is a path) may ride along.
-const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' } as Record<
-  string,
-  string
->;
+// A pass's commit, push or merge runs once the builder allows it, so nothing a lane could plant in
+// the checkout (a repository of its own, a remote that is a path, a hook runner's config) may ride
+// along outside the sandbox.
+const env = {
+  ...isolatedGitEnv(),
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  ANTHROPIC_API_KEY: 'sk-canary',
+  AWS_BEARER_TOKEN_BEDROCK: 'bedrock-canary',
+} as Record<string, string>;
 const signal = new AbortController().signal;
 const git = (repo: string, ...args: string[]) =>
   execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
@@ -25,9 +45,43 @@ function callOf(command: string) {
 
 // The daemon's own git, as `startDaemon` resolves it.
 let bins = { git: 'git', gh: 'gh' };
+/** The gate's sandbox, with srt's stand-in: what runs inside, never Seatbelt itself. */
+let root: string;
+let home: string;
 beforeAll(async () => {
   bins = { git: await resolveGit(), gh: 'gh' };
+  root = realpathSync(mkdtempSync('/tmp/sbp-'));
+  home = join(root, 'home');
+  for (const dir of ['home', 't', 'r', 'l']) mkdirSync(join(root, dir));
 });
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+function sandboxFor(checkout: string): PassGitSandbox {
+  const gitDirs = createGit();
+  return {
+    gate: createGateSandbox({
+      home,
+      dataDir: join(home, 'data'),
+      loginConfigDir: null,
+      tmpRoot: join(root, 't'),
+      filesRoot: join(root, 'r'),
+      codexLaneTempRoot: join(root, 'l'),
+      gitDirs: (path) => gitDirs.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      log: silentLogger,
+    }),
+    input: {
+      project: { repoPath: checkout, sandboxLoopback: false, sandboxDocker: false },
+      env,
+      rules: [],
+      checkouts: [checkout],
+    },
+    home,
+  };
+}
 
 const runIn = (checkout: string, command: string, extraEnv: Record<string, string> = {}) =>
   runPassGit(callOf(command), {
@@ -36,9 +90,10 @@ const runIn = (checkout: string, command: string, extraEnv: Record<string, strin
     env: { ...env, ...extraEnv },
     signal,
     bins,
+    sandbox: sandboxFor(checkout),
   });
 
-describe('runPassGit', () => {
+describe.skipIf(SANDBOXED)('runPassGit', () => {
   it('runs no filter or diff driver a .gitattributes in the checkout names', async () => {
     const repo = createTempRepo();
     try {
@@ -165,6 +220,75 @@ describe('runPassGit', () => {
       expect(git(remote.repo.path, 'rev-parse', 'origin/main')).not.toBe(
         git(remote.repo.path, 'rev-parse', 'HEAD'),
       );
+    } finally {
+      remote.cleanup();
+    }
+  });
+  it('runs a commit inside the sandbox, its hooks with no account credential', async () => {
+    const repo = createTempRepo();
+    try {
+      const seen = join(repo.path, 'hook-env.txt');
+      writeFileSync(
+        join(repo.path, '.git', 'hooks', 'pre-commit'),
+        `#!/bin/sh\nenv > '${seen}'\n`,
+        {
+          mode: 0o755,
+        },
+      );
+      const ran = await runIn(repo.path, 'git commit --allow-empty -m x');
+      expect(ran).toMatchObject({ exitCode: 0 });
+      // srt's stand-in says it ran the call: the commit went through the gate's sandbox.
+      expect('output' in ran ? ran.output : '').toContain('fake srt');
+      const hookEnv = readFileSync(seen, 'utf8');
+      expect(hookEnv).not.toContain('sk-canary');
+      expect(hookEnv).not.toContain('bedrock-canary');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('refuses a commit where no sandbox can contain its hooks', async () => {
+    const repo = createTempRepo();
+    try {
+      const before = git(repo.path, 'rev-parse', 'HEAD');
+      const ran = await runPassGit(callOf('git commit --allow-empty -m x'), {
+        checkout: repo.path,
+        baseBranch: 'main',
+        env,
+        signal,
+        bins,
+        sandbox: null,
+      });
+      expect(ran).toHaveProperty('refused');
+      expect(git(repo.path, 'rev-parse', 'HEAD')).toBe(before);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("runs none of the repository's hooks for a push, and hands git no account credential", async () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      const hookRan = join(remote.repo.path, '..', `pre-push-ran-${String(process.pid)}`);
+      writeFileSync(
+        join(remote.repo.path, '.git', 'hooks', 'pre-push'),
+        `#!/bin/sh\ntouch '${hookRan}'\n`,
+        { mode: 0o755 },
+      );
+      git(remote.repo.path, 'switch', '-q', '-c', 'feat/page');
+      expect(await runIn(remote.repo.path, 'git push origin feat/page')).toMatchObject({
+        exitCode: 0,
+      });
+      expect(existsSync(hookRan)).toBe(false);
+      // The builder's own config names a transport command; it sees the push's environment.
+      const seen = join(remote.repo.path, '..', `push-env-${String(process.pid)}`);
+      git(remote.repo.path, 'remote', 'add', 'far', 'ssh://example.invalid/x.git');
+      git(remote.repo.path, 'config', 'core.sshCommand', `sh -c 'env > "${seen}"; exit 1' --`);
+      await runIn(remote.repo.path, 'git push far feat/page');
+      const pushEnv = readFileSync(seen, 'utf8');
+      expect(pushEnv).toContain('GIT_TERMINAL_PROMPT=0');
+      expect(pushEnv).not.toContain('sk-canary');
+      expect(pushEnv).not.toContain('bedrock-canary');
     } finally {
       remote.cleanup();
     }

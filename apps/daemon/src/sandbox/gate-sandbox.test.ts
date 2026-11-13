@@ -223,6 +223,52 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     }
   });
 
+  // A commit the builder allowed runs its hooks in here: it writes the checkout's git dir, never
+  // what git reads to run a program (hooks, config, info) or a pointer to another git dir.
+  it("an approved commit writes the checkout's git dir but its hooks, config, pointers and kept refs, and reads the builder's git identity", async () => {
+    const other = createTempRepo();
+    const gitDir = join(checkout, '.git');
+    const identity = join(home, '.gitconfig');
+    writeFileSync(identity, '[user]\n\tname = Builder\n');
+    try {
+      await withRun(
+        input({
+          checkouts: [repo.path, other.path],
+          approvedGit: {
+            gitDir,
+            globalConfig: [identity, join(home, '.config', 'git', 'config')],
+            keptBranches: ['main', 'develop'],
+          },
+        }),
+        (run) => {
+          const { filesystem } = settingsOf(run);
+          expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout]);
+          const denyWrite = filesystem['denyWrite'] ?? [];
+          expect(denyWrite).not.toContain(gitDir);
+          expect(denyWrite).toEqual(
+            expect.arrayContaining([
+              ...['hooks', 'config', 'config.worktree', 'info', 'modules', 'worktrees'].map(
+                (name) => join(gitDir, name),
+              ),
+              ...['commondir', 'gitdir'].map((name) => join(gitDir, name)),
+              // The branches 10db lands work on, and every ref but the session's own branches.
+              ...['refs/heads/main', 'refs/heads/develop', 'refs/remotes', 'refs/tags'].map(
+                (name) => join(gitDir, name),
+              ),
+              join(gitDir, 'packed-refs'),
+              join(realpathSync(other.path), '.git'),
+            ]),
+          );
+          // Only the builder's config that is there is opened.
+          expect(filesystem['allowRead']).toContain(identity);
+          expect(filesystem['allowRead']).not.toContain(join(home, '.config', 'git', 'config'));
+        },
+      );
+    } finally {
+      other.cleanup();
+    }
+  });
+
   it('makes another project read-only as a whole, one nested in this checkout included', async () => {
     const nested = join(checkout, 'nested');
     execFileSync('git', ['init', '-q', '-b', 'main', nested], {
