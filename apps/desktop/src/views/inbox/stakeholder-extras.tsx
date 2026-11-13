@@ -31,7 +31,7 @@ export function RouteLineRow({
     <Group gap="xs">
       {line.pending ? <Loader size="xs" /> : null}
       <Text size="sm" c="dimmed">
-        {line.text}
+        {mode === StakeholderMode.Copy ? `${line.text} · chosen by you` : line.text}
       </Text>
       {mode === StakeholderMode.Copy ? (
         <AskSomeone item={item} people={people} label="Change" variant="subtle" />

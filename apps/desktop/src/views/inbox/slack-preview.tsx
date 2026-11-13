@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useSendInbox } from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
 import { joinNames, routeLine } from './route-line';
+import { sendFailureWords } from './send-failure';
 
 /** What a held pattern is, in words a builder knows. */
 const PATTERN_WORDS: Readonly<Record<string, string>> = {
@@ -40,6 +41,13 @@ function SlackText({ text }: { readonly text: string }) {
       )}
     </Text>
   );
+}
+
+function sentTo(send: StakeholderSendDto, people: readonly PersonDto[]): PersonDto[] {
+  return send.people.flatMap((p) => {
+    const person = people.find((candidate) => candidate.id === p.personId);
+    return p.recipient && person !== undefined ? [person] : [];
+  });
 }
 
 function recipientNames(send: StakeholderSendDto): string[] {
@@ -79,7 +87,9 @@ export function SlackPreview({
   // A held message cannot go as it is: opening Edit changes nothing, and only different text is scanned again.
   const blocked = send.heldBy === 'scan' && (edited === null || edited === send.text);
   const limit = people.find((p) => p.id === send.people[0]?.personId)?.slack?.dailyLimit ?? null;
-  const line = routeLine(item, people);
+  // A failed card falls back to the builder; the line names who the message was for.
+  const sentPeople = sentTo(send, people);
+  const line = routeLine(item, people, sentPeople.length > 0 ? sentPeople : undefined);
 
   const submit = (overrideLimit: boolean): void => {
     if (sendInbox.isPending) return;
@@ -163,7 +173,7 @@ export function SlackPreview({
         ))}
         {send.state === 'failed' ? (
           <Alert color="red" variant="light">
-            {send.error ?? 'Slack did not take the message.'}
+            {sendFailureWords(send.error, names)}
           </Alert>
         ) : null}
         {send.heldBy === 'scan' && hold !== undefined ? (

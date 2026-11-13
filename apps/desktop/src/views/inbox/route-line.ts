@@ -89,9 +89,10 @@ export function routeLine(
     return { text: 'Finding who answers…', pending: true };
   const names = (named ?? recipientsOf(item, people)).map((p) => p.name);
   const who = joinNames(names.length > 0 ? names : item.assignees);
+  // Named recipients come from the send, not the card, so who chose them is not the card's to say.
   const by =
     named !== undefined
-      ? ' · chosen by you'
+      ? ''
       : item.routedBy === RoutedBy.Judge
         ? ' · chosen by Jev'
         : item.routedBy === RoutedBy.Builder

@@ -190,8 +190,20 @@ describe('a card with a draft', () => {
   });
 
   it("a failed send shows Slack's words, Send again, and Change as its one way to reroute", async () => {
-    const posted = serve(card({ state: 'failed', error: 'Slack refused: channel_not_found.' }));
-    expect(await screen.findByText(/Slack refused: channel_not_found/)).toBeTruthy();
+    // The daemon stores the bare code and hands a failed card back to the builder.
+    const posted = serve(
+      card(
+        { state: 'failed', error: 'channel_not_found' },
+        { assignees: ['me'], routedBy: 'builder' },
+      ),
+    );
+    expect(
+      await screen.findByText(
+        'Slack refused: channel_not_found. Mark may have left the workspace.',
+      ),
+    ).toBeTruthy();
+    // It still names who the message was for, not the builder it fell back to.
+    expect(screen.getByText('Product question → Mark')).toBeTruthy();
     expect(screen.queryAllByRole('button', { name: /Ask Someone/ })).toHaveLength(0);
     expect(screen.getAllByRole('button', { name: 'Change' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /Send to Mark/ }));
