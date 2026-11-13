@@ -78,6 +78,7 @@ import {
   type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import { createBenchmarkServices } from './benchmark-services';
 import { createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -368,6 +369,8 @@ export interface DaemonOptions {
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
+  /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
+  readonly benchmarksOff?: boolean;
   readonly fetch?: typeof fetch;
   /**
    * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
@@ -1804,6 +1807,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : noSystemCheck(),
     agents: opts.agents ?? null,
     benchmarks,
+    benchmarkApi: createBenchmarkServices({
+      benchmarks,
+      keychain: judgeKeychain,
+      off: opts.benchmarksOff === true,
+    }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,

@@ -1,14 +1,19 @@
 import { Stack, Text } from '@mantine/core';
+import { AaCard } from './aa-card';
 import { SlackCard } from './slack-card';
 
-/** Settings › Integrations: one card per service 10db reaches people through, each set up once. */
+/**
+ * Settings › Integrations: one card per outside service that isn't a model, each set up once. GitHub's card
+ * comes first and joins in its own change.
+ */
 export function IntegrationsSection() {
   return (
     <Stack>
       <Text c="dimmed" size="sm">
-        The services 10db uses to reach the people who answer your questions.
+        Outside services 10db uses that aren't models. Model access is in Accounts.
       </Text>
       <SlackCard />
+      <AaCard />
     </Stack>
   );
 }

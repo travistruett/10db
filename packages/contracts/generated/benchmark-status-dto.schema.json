@@ -69,6 +69,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "off": {
+      "default": false,
+      "type": "boolean"
+    },
+    "syncing": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [
