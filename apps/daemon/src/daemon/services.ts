@@ -154,6 +154,7 @@ import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
+import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
@@ -185,6 +186,8 @@ export function createServices(deps: {
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
   readonly judge: JudgeApiServices;
+  /** People, the Slack connection, timers, routes and sends. */
+  readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
@@ -659,6 +662,7 @@ export function createServices(deps: {
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
+    ...deps.stakeholders,
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
     ...deps.shape,

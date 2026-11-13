@@ -66,6 +66,13 @@ export const EventType = {
   PersonaSaved: 'persona.saved',
   FlowSaved: 'flow.saved',
   PersonSaved: 'person.saved',
+  PersonRemoved: 'person.removed',
+  /** A stakeholder send changed state or content; `entityId` is the send. */
+  StakeholderSendChanged: 'stakeholder_send.changed',
+  SlackConnectionChanged: 'slack.connection.changed',
+  StakeholderTimersChanged: 'stakeholder_timers.changed',
+  /** A question card was triaged (`InboxTriagedData`). */
+  InboxTriaged: 'inbox.triaged',
   TeamSaved: 'team.saved',
   RoutingRulesSaved: 'routing_rules.saved',
   ModelProfileSaved: 'model_profile.saved',

@@ -4,6 +4,7 @@ export {
   KeychainError,
   keychainWith,
   OPENROUTER_KEY_ACCOUNT,
+  SLACK_BOT_ACCOUNT,
   secretFingerprint,
   systemKeychain,
   unavailableKeychain,

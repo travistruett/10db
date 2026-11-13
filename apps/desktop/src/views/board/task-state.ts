@@ -23,6 +23,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
+import { joinNames } from '../inbox/route-line';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { FAILURE_LABELS } from './batch-labels';
 import { ciLine, type CiLink } from './ci-line';
@@ -38,12 +39,22 @@ export interface TaskState {
   readonly link?: CiLink | null;
   /** A failure's raw reason, behind the plain line: the card's tooltip. */
   readonly detail?: string | null;
+  /** The card keeps its plain border: the line and its dot say the state, because nothing is asked of the builder. */
+  readonly plainBorder?: boolean;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */
 function lowerFirst(text: string): string {
   const [first = '', second = ''] = text;
   return second === second.toLowerCase() ? first.toLowerCase() + text.slice(1) : text;
+}
+
+/** How long ago, in the largest whole unit: "12m", "3h", "2d". */
+export function elapsedWords(since: string, now: number = Date.now()): string {
+  const minutes = Math.max(0, Math.floor((now - new Date(since).getTime()) / 60_000));
+  if (minutes >= 24 * 60) return `${String(Math.floor(minutes / (24 * 60)))}d`;
+  if (minutes >= 60) return `${String(Math.floor(minutes / 60))}h`;
+  return `${String(minutes)}m`;
 }
 
 /** A step as a failure line names it. */
@@ -459,6 +470,13 @@ function stateOf(
     case S.Verifying:
       return { line: gateCommand ? `Checking: ${gateCommand}` : 'Checking', color: 'blue' };
     case S.WaitingHuman:
+      // A question out with someone else needs nothing from the builder: a line and a dot, no yellow border.
+      if (workstream.waitingOn)
+        return {
+          line: `Waiting on ${joinNames(workstream.waitingOn.names)} in Slack · ${elapsedWords(workstream.waitingOn.since)}`,
+          color: 'yellow',
+          plainBorder: true,
+        };
       // A pass's page is answered and signed off in the Workbench.
       return batch?.passId == null
         ? { line: 'Waiting on you: answer in Inbox', color: 'yellow' }

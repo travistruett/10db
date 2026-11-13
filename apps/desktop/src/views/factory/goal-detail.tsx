@@ -20,6 +20,7 @@ import {
   GoalBar,
   GoalFooter,
   NeedsYou,
+  WaitingOnOthers,
   SinceYouLooked,
   type OpenedDigest,
 } from './goal-digest';
@@ -102,6 +103,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
         </Group>
       </Group>
       <NeedsYou digest={digest} rows={rows} />
+      <WaitingOnOthers digest={digest} />
       <GoalTasks
         goalId={goal.id}
         rows={rows}

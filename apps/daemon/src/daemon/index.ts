@@ -6,6 +6,7 @@ export {
   daemonOptionsFromEnv,
 } from './options-from-env';
 export { createKnowledgeServices } from './knowledge-services';
+export { createStakeholderApiServices } from './stakeholder-services';
 export { startDaemon, type RunningDaemon } from './start';
 export {
   allSandboxRootsOf,

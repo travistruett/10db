@@ -12,6 +12,7 @@ export {
   proposePrinciple,
   rejectProposal,
 } from './proposals';
+export { quotedWords } from './quoted-words';
 export { decisionProvenance, principleProvenance } from './provenance';
 export {
   actionSourceFor,

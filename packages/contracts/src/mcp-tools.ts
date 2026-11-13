@@ -19,6 +19,7 @@ import {
   KnowledgeScope,
   PrincipleKind,
   ProposalKind,
+  QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   RiskTag,
   Severity,
@@ -95,7 +96,17 @@ export const ContextPack = z.object({
   claims: z.array(z.object({ kind: z.enum(ClaimKind), name: z.string() })),
   handoff: HandoffDto.nullable(),
   pendingAnswer: z
-    .object({ question: z.string(), answer: z.string(), note: z.string().nullable() })
+    .object({
+      question: z.string(),
+      answer: z.string(),
+      note: z.string().nullable(),
+      /** Who gave the answer: a handle, or null when the builder did. */
+      answeredBy: z.string().nullable().default(null),
+      via: z.enum(['inbox', 'slack']).default('inbox'),
+      /** The answerer's own words, when they chose none of the options. */
+      words: z.string().nullable().default(null),
+      conversation: z.array(z.object({ name: z.string(), text: z.string() })).default([]),
+    })
     .nullable(),
   knowledge: z.object({
     policies: z.array(PrincipleHit),
@@ -156,9 +167,20 @@ export const McpToolInputs = {
   }),
   ask_human: z.object({
     opId: OpId,
-    category: z.enum(QuestionCategory),
+    category: z.enum(QuestionCategory).describe(
+      Object.values(QuestionCategory)
+        .map(
+          (c) => `${c}: ${QUESTION_CATEGORY_HINTS[c].hint} (${QUESTION_CATEGORY_HINTS[c].covers})`,
+        )
+        .join('; '),
+    ),
     question: z.string().min(1).max(2000),
     options: z.array(InboxOption).min(2).max(4),
+    topic: z
+      .string()
+      .max(120)
+      .optional()
+      .describe("One of the project's topics from your briefing, when the question is about one"),
     recommendation: z.string().optional(),
     urgency: z.enum(Urgency).default(Urgency.Normal),
     consequences: z.string().optional(),

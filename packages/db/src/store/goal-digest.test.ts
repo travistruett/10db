@@ -45,7 +45,8 @@ import { insertTask, setTaskStatus } from './tasks';
 import { BUILDER_HANDLE, insertPerson } from './team';
 import { createTestStore, seedProject } from './test-support';
 import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
-import { insertWorkstream, runNext } from './workstreams';
+import { getWorkstream, insertWorkstream, runNext } from './workstreams';
+import { insertDraft, markReturned, markSending, markSent } from './stakeholder-sends';
 
 let store: Store;
 let close: () => void;
@@ -257,6 +258,85 @@ describe('a goal’s status', () => {
     expect(digest.waitingOn.recent).toEqual([
       expect.objectContaining({ taskId: b, title: 'Which name reads best?', assigneeName: 'You' }),
     ]);
+  });
+
+  describe('a question sent to someone else', () => {
+    const SLACK = { teamId: 'T1', userId: 'U1', sendMode: 'review' as const, dailyLimit: 10 };
+
+    /** A card on `workstream` whose send went out to Mark, and whether it has come back. */
+    function sentTo(workstream: WorkstreamId, returned = false) {
+      const item = card(workstream, 'How long should access last?');
+      const mark = store.write((ctx) =>
+        insertPerson(ctx, { handle: 'mark', name: 'Mark', slack: SLACK }),
+      ).value;
+      const send = store.write((ctx) =>
+        insertDraft(ctx, { inboxItemId: item.id, recipients: [mark.id], text: 'Hi', hits: [] }),
+      ).value;
+      store.write((ctx) => {
+        markSending(ctx, send.id, { textSha256: 'a', threadTs: null, startedAt: at(8) });
+      });
+      store.write((ctx) => {
+        markSent(ctx, send.id, {
+          channelId: 'D1',
+          threadTs: '1.1',
+          messageTs: '1.1',
+          permalink: null,
+          at: at(8),
+        });
+      });
+      if (returned)
+        store.write((ctx) => {
+          markReturned(ctx, send.id, 'timer');
+        });
+      return item;
+    }
+
+    it('is waiting on someone, not on you, and names who', () => {
+      const { goal, b } = adopt();
+      sentTo(run(b, WorkstreamState.WaitingHuman));
+      const digest = goalDigest(store.db, goal.id, null);
+      expect(digest.status).toBe(GoalStatus.WaitingOnSomeone);
+      expect(digest.waitingOn).toEqual({ recent: [], earlier: [] });
+      expect(digest.waitingOnSomeone).toEqual([
+        expect.objectContaining({ taskId: b, names: ['Mark'], at: at(8) }),
+      ]);
+    });
+
+    it('is waiting on you while a builder card is open beside it', () => {
+      const { goal, a, b } = adopt();
+      sentTo(run(b, WorkstreamState.WaitingHuman));
+      card(run(a, WorkstreamState.WaitingHuman));
+      const digest = goalDigest(store.db, goal.id, null);
+      expect(digest.status).toBe(GoalStatus.WaitingOnYou);
+      expect(digest.waitingOn.recent).toHaveLength(1);
+      expect(digest.waitingOnSomeone).toHaveLength(1);
+    });
+
+    it('is waiting on you again once the question came back', () => {
+      const { goal, b } = adopt();
+      sentTo(run(b, WorkstreamState.WaitingHuman), true);
+      const digest = goalDigest(store.db, goal.id, null);
+      expect(digest.status).toBe(GoalStatus.WaitingOnYou);
+      expect(digest.waitingOnSomeone).toEqual([]);
+    });
+
+    it('leaves the run waiting on you while the builder also has a card open on it', () => {
+      const { b } = adopt();
+      const ws = run(b, WorkstreamState.WaitingHuman);
+      sentTo(ws);
+      expect(getWorkstream(store.db, ws).waitingOn).not.toBeNull();
+      card(ws, 'Something only you can answer');
+      expect(getWorkstream(store.db, ws).waitingOn).toBeNull();
+    });
+
+    it('puts waitingOn on the run whose question is out, and on no other', () => {
+      const { b, c } = adopt();
+      const waiting = run(b, WorkstreamState.WaitingHuman);
+      const other = run(c, WorkstreamState.Running);
+      sentTo(waiting);
+      expect(getWorkstream(store.db, waiting).waitingOn).toEqual({ names: ['Mark'], since: at(8) });
+      expect(getWorkstream(store.db, other).waitingOn).toBeNull();
+    });
   });
 
   it('ignores a card that was answered', () => {

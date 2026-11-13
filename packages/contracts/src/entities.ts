@@ -16,6 +16,7 @@ import {
   InboxItemId,
   LandingGroupId,
   PassId,
+  PersonId,
   PermissionRuleId,
   ProjectId,
   SessionId,
@@ -34,12 +35,14 @@ import {
   Provider,
   QuestionCategory,
   RiskTag,
+  RoutedBy,
   TaskStatus,
   Urgency,
   WorkspaceMode,
   WorkstreamState,
 } from './states';
 import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
+import { StakeholderSendDto } from './slack';
 import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
@@ -1038,6 +1041,14 @@ export const WorkstreamDto = z.object({
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
   /**
+   * Who the task's question is out with, and since when: set only while its card has a sent send that has
+   * not come back, so the line never contradicts the Inbox's Open tab. The builder's own wait is not this.
+   */
+  waitingOn: z
+    .object({ names: z.array(z.string()), since: Timestamp })
+    .nullable()
+    .default(null),
+  /**
    * Whether a note told this run's session that its commits were reverted by Ship without it (a Retry
    * or a start that joined the batch wrote it), and that revert still stands: false once Ship without
    * it finds none on the branch. The notice slot can't say so: a joined run holds none, and a wait can
@@ -1071,6 +1082,25 @@ export const InboxAnswer = z.object({
   record: DecisionRecording.nullable().optional(),
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
+
+/**
+ * An answer as stored. The extra keys are written by the daemon only; `InboxAnswer`, the HTTP body,
+ * drops them, so a client cannot answer as someone else.
+ */
+export const RecordedAnswer = InboxAnswer.extend({
+  answeredBy: z.string().optional(),
+  via: z.enum(['inbox', 'slack']).optional(),
+  /** The answerer's own words, when they chose none of the options. */
+  words: z.string().max(20000).optional(),
+  /** Others in the conversation, by name. */
+  with: z.array(z.string()).optional(),
+  /** What was said in the conversation that settled it, one entry per message, for the lane's resume. */
+  conversation: z
+    .array(z.object({ name: z.string().max(200), text: z.string().max(4000) }))
+    .max(100)
+    .optional(),
+});
+export type RecordedAnswer = z.infer<typeof RecordedAnswer>;
 
 /** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
 export const RetryInput = z.object({ note: z.string().max(4000).optional() });
@@ -1210,24 +1240,43 @@ export const InboxTarget = z.object({
 });
 export type InboxTarget = z.infer<typeof InboxTarget>;
 
-export const InboxItemDto = z.object({
-  id: InboxItemId,
-  projectId: ProjectId,
-  kind: z.enum(InboxKind),
-  state: z.enum(InboxState),
-  title: z.string(),
-  body: z.string(),
-  options: z.array(InboxOption),
-  recommendation: z.string().nullable(),
-  category: z.enum(QuestionCategory),
-  urgency: z.enum(Urgency),
-  assignee: z.string(),
-  detail: z.record(z.string(), z.json()).nullable(),
-  answer: InboxAnswer.nullable(),
-  targets: z.array(InboxTarget),
-  createdAt: Timestamp,
-  updatedAt: Timestamp,
-});
+export const InboxItemDto = z
+  .object({
+    id: InboxItemId,
+    projectId: ProjectId,
+    kind: z.enum(InboxKind),
+    state: z.enum(InboxState),
+    title: z.string(),
+    body: z.string(),
+    options: z.array(InboxOption),
+    recommendation: z.string().nullable(),
+    category: z.enum(QuestionCategory),
+    urgency: z.enum(Urgency),
+    assignee: z.string(),
+    /** Every handle the card is routed to, in routing order. */
+    assignees: z.array(z.string()).default([]),
+    routedBy: z.enum(RoutedBy).default(RoutedBy.Rule),
+    /** What triage suggested below the floor, for the builder to confirm. */
+    routeSuggestion: z
+      .object({ personIds: z.array(PersonId), confidence: z.number() })
+      .nullable()
+      .default(null),
+    /**
+     * Handles of people this question was meant for who are not on Slack: the card stays the builder's, and
+     * Copy for <name> offers them the message. Empty once the card is routed to Slack people or answered.
+     */
+    copyFor: z.array(z.string()).default([]),
+    send: StakeholderSendDto.nullable().default(null),
+    detail: z.record(z.string(), z.json()).nullable(),
+    answer: RecordedAnswer.nullable(),
+    targets: z.array(InboxTarget),
+    createdAt: Timestamp,
+    updatedAt: Timestamp,
+  })
+  // A card stored before routing named one assignee; its list is that one.
+  .overwrite((card) =>
+    card.assignees.length === 0 ? { ...card, assignees: [card.assignee] } : card,
+  );
 export type InboxItemDto = z.infer<typeof InboxItemDto>;
 
 export const PermissionRuleDto = z.object({

@@ -1,9 +1,10 @@
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase, type TendbDatabase } from './index';
+import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
+import { migrationsBefore } from './migrations-test-support';
 
 const AT = '2026-10-21T12:00:00.000Z';
 const LATER = '2026-11-02T12:00:00.000Z';
@@ -23,30 +24,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** The migrations that came before the one under test: a copy of the folder with its journal cut short. */
-function migrationsBefore(tag: string): string {
-  const before = join(dir, 'before');
-  cpSync(DB_MIGRATIONS_DIR, before, { recursive: true });
-  const journalPath = join(before, 'meta/_journal.json');
-  // A journal this test just copied from the shipped migrations; the shape is known.
-  const journal = Journal.parse(JSON.parse(readFileSync(journalPath, 'utf8')));
-  const cut = journal.entries.findIndex((e) => e.tag === tag);
-  const keep = new Set(journal.entries.slice(0, cut).map((e) => e.tag));
-  journal.entries = journal.entries.filter((e) => keep.has(e.tag));
-  writeFileSync(journalPath, JSON.stringify(journal, null, 2));
-  for (const file of readdirSync(before)) {
-    if (file.endsWith('.sql') && !keep.has(file.slice(0, -'.sql'.length)))
-      rmSync(join(before, file));
-  }
-  return before;
-}
-
 const sql = (text: string, ...values: unknown[]) => db.$client.prepare(text).run(...values);
 /** The rows a query answers, read through the schema that says what the test expects of them. */
 const rows = <S extends z.ZodType>(schema: S, text: string, ...values: unknown[]): z.infer<S>[] =>
   z.array(schema).parse(db.$client.prepare(text).all(...values));
 
-const Journal = z.looseObject({ entries: z.array(z.looseObject({ tag: z.string() })) });
 const Profile = z.object({
   id: z.string(),
   model: z.string(),
@@ -186,7 +168,7 @@ function seed(): void {
 
 describe('the migration that renames stored model aliases', () => {
   beforeEach(() => {
-    migrateDatabase(db, migrationsBefore(MIGRATION));
+    migrateDatabase(db, migrationsBefore(dir, MIGRATION));
     seed();
     migrateDatabase(db);
   });

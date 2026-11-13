@@ -197,7 +197,7 @@ describe('a frame the window draws a screen in', () => {
       expect(heard.map((h) => h.kind)).toEqual(['ready']);
     });
     expect(screen.queryByText('A card of another project')).toBeNull();
-    expect(screen.getByText('Open 1')).toBeTruthy();
+    expect(screen.getByText('Open').parentElement?.textContent).toBe('Open1');
   });
 
   it('reads an Inbox with only another project’s cards as empty', async () => {

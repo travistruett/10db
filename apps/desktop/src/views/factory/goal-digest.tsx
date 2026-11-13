@@ -19,6 +19,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { useRetryWorkstream } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
 import { failureLine } from '../board/task-state';
+import { joinNames } from '../inbox/route-line';
 import { formatTokens } from './format-tokens';
 import { shortAgo } from './short-ago';
 import { StatusDot } from './status-dot';
@@ -192,6 +193,30 @@ export function NeedsYou({
             {retry.error.message}
           </Alert>
         ) : null}
+      </Stack>
+    </Zone>
+  );
+}
+
+/** Questions out with other people, apart from Needs you: nothing here waits on the builder. */
+export function WaitingOnOthers({ digest }: { readonly digest: GoalDigestDto }) {
+  if (digest.waitingOnSomeone.length === 0) return null;
+  return (
+    <Zone title="Waiting on others">
+      <Stack gap={4}>
+        {digest.waitingOnSomeone.map((card) => (
+          <Group key={card.inboxItemId} gap="xs" wrap="nowrap" justify="space-between">
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+              <StatusDot color="yellow" />
+              <Text size="sm" lineClamp={1}>
+                {`${joinNames(card.names)}: ${card.title}`}
+              </Text>
+            </Group>
+            <Text size="xs" c="dimmed" style={{ flex: 'none' }}>
+              {shortAgo(card.at)}
+            </Text>
+          </Group>
+        ))}
       </Stack>
     </Zone>
   );

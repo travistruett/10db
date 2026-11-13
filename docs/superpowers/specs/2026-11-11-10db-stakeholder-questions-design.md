@@ -1,6 +1,9 @@
 # 10db stakeholder questions: a question goes to the person who can answer it, in Slack, and the answer resumes the work
 
-**Status:** designed on 2026-11-11 overnight, not built. Written from the builder's request (quoted in §1), a map
+**Status:** slice 1 built (`decisions/2026-11-12-stakeholder-questions-run-on-the-inbox-card.md`); slices 2–4
+(§12) designed. The send lifecycle as built is
+`docs/superpowers/plans/2026-11-11-10db-stakeholder-questions-state-table.md`, and §15 lists what the build
+changed. Designed on 2026-11-11 overnight. Written from the builder's request (quoted in §1), a map
 of the code on `main` at 13d24b6, a Slack API research pass (sources in §9) and an independent design memo
 (Fable), then revised for two rounds of two reviews: a product review (Fable) and an engineering review against
 the code (Opus). The builder made the open calls on 2026-11-12; §14 records them, and a **(call)** mark points
@@ -110,7 +113,7 @@ The builder's request fixes S2, S3 and S5. The rest are this spec's **(call)**, 
   new judge decision, `question_route`, chooses who answers: one person per candidate, each described by their
   category and topic routes, plus "nobody fits". The lane's category and topic are evidence in its state. An
   answer at or above the floor routes the card, still under the person's send mode. One below it leaves the
-  card with the builder, with "Suggested: Sarah (64%)" filled into Ask Someone…. Off, no key, a timeout or an
+  card with the builder, with "Suggested: Sarah (64%)" filled into Ask Someone. Off, no key, a timeout or an
   error: the lane's tags decide, its topic first, then its category. It runs on the card, after the lane asked,
   so it behaves the same whatever account the lane runs on (§6.3).
 - **S13. Anyone in the conversation can answer; a recipient approves (call).** A bot DM holds only the
@@ -241,7 +244,7 @@ chose it:
    readers still work. Names are listed in that order everywhere ("Mark and Ana"). A tie never spans scopes: a
    goal route for Mark beats a project route for Ana outright. A tie of more than eight people (a group DM's
    limit) goes to the builder instead, with the note "9 people answer product questions here, more than a Slack
-   group DM holds. Use Ask Someone… to pick."
+   group DM holds. Use Ask Someone to pick."
 
 6. **Folding follows the rules' people.** Identical open asks fold into one card today. The recipients the rules
    give a new ask (`rule_assignees`, stored on the card, compared as a set) are part of the fold key. A question routed to Mark never
@@ -278,7 +281,7 @@ never runs inside a transaction.
 - **The answer.** A route at or above the floor routes the card to every person on it: `routedBy: 'judge'` and
   the confidence on the card, then the draft and the send mode, as for a rule. `nobody` at or above the floor
   keeps it with the builder. Anything below the floor keeps it with the builder and stores the top route's
-  people as a suggestion (`{ personIds, confidence }`), which Ask Someone… opens on.
+  people as a suggestion (`{ personIds, confidence }`), which Ask Someone opens on.
 - **The fallback** (the judge is off, has no key, times out or errs): the lane's topic, when it names one of the
   project's topic routes, routes to that route's people; else its category's project routes; else the builder.
   `routedBy: 'rule'`.
@@ -308,7 +311,7 @@ beside them. A topic is a short phrase the builder types ("billing, pricing, inv
 
 From most used to least:
 
-1. **On the card** (§10.2): **Ask Someone…** routes this one question to a person and offers "Always send
+1. **On the card** (§10.2): **Ask Someone** routes this one question to a person and offers "Always send
    product questions on this goal to Mark", which writes the route. The card then shows the message for the
    builder to send. The table fills itself from use.
 2. **On a goal**, in Factory's open goal under About this goal: "Questions go to: Mark (product, design)".
@@ -353,12 +356,12 @@ The spec says "retry and notify" but not how long the account stays active meanw
 *C.* Keep access for the whole billing period
 
 The work on this waits for your answer.
-↳ Reply in this thread with a letter or your own words.
+Reply with A, B, C, or your own words.
 ```
 
-- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "↳ Reply in
-  this thread with a letter or your own words." A reply in the thread is the path 10db is built around; a reply
-  at the top of the DM still works (§8.2).
+- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "Reply with A,
+  B, C, or your own words." It doesn't ask for the thread: a reply in the thread and one at the top of the DM
+  count the same (§8.2).
 
 - **Escaping.** Every field from the card is escaped for `mrkdwn` (`&`, `<`, `>`), every text object is sent
   `verbatim: true` and the post sets `unfurl_links: false` and `unfurl_media: false`. Agent text cannot ping
@@ -391,7 +394,7 @@ to, and waits when any of them has reached their daily limit; it counts once aga
 primary reads **Send to Mark and Ana**.
 
 The first send to anyone is always reviewed, whatever their mode. The limit counts new threads in the last 24
-hours: 10 a day by default, set per person in Settings › People, or turned off there **(call)**. The card past
+hours: 10 a day by default, set per person in Settings › People, or set to no limit there **(call)**. The card past
 it says "Mark has had 10 new questions today" and offers **Send Anyway**, which sends past the limit once. A
 draft records why it waits (`heldBy`: `review`, `first_send`, `limit` or `scan`), and the card's copy follows
 it: "Mark has had 10 new questions today" with Send Anyway for `limit`, "First message to Mark: check it before
@@ -409,7 +412,7 @@ conversation, and asking the builder to approve each turn would bring the relay 
 are templates filled with the card's already-sent text, letters and Slack names, never agent text, so they skip
 review. Names from Slack are escaped like card text.
 
-**Ask Someone…** only reroutes. The card becomes a routed card with the preview, and Send is the review, so a
+**Ask Someone** only reroutes. The card becomes a routed card with the preview, and Send is the review, so a
 message never leaves without the builder having seen it or the person's mode allowing it. A session still waiting
 on the card parks at that moment, so a stakeholder's words only ever reach a lane through the resumed prompt.
 
@@ -434,11 +437,12 @@ thread, message `ts`, permalink and cursor in one write (`moveSend`), and the DM
 | `closed`   | the builder answered or took it back, or the card was cancelled  |
 | `failed`   | Slack refused (`channel_not_found`, …); the card returns to the builder with Slack's error |
 
-- One card has at most one send. A card whose route changes before it is sent drops its draft.
+- One card has at most one live send (`draft`, `sending` or `sent`). After a Take Back or a failure, Ask
+  Someone or Send makes a new one. A card whose route changes before it is sent drops its draft.
 - The draft is written in the same transaction as the card, so a crash never leaves a routed card without one.
-- A daemon that starts with a send still `sending` looks in the DM's history for the bot's message with the
-  same text hash since the send began: found, it is `sent` with that `ts`; not found, it is posted again. A
-  question is never posted twice, and never lost.
+- A send still `sending`, at start or on the next good tick, is looked for in its conversation by the
+  `tendb_send` metadata every bot line carries: found, it is `sent` with that `ts`; not found, it is posted
+  again. A question is never posted twice, and never lost.
 
 ## 8. Waiting and the answer
 
@@ -474,8 +478,8 @@ they do for any parked card.
   again from that moment. The send stays `sent` and the thread stays watched; a later reply still answers it.
   This amends the goals spec's §9 escalation, which used `humanWaitMinutes`: minutes are the wrong scale for a
   stakeholder.
-- **The timers** are global settings in Settings › People: "Remind after" (default 4 hours, or off) and "Back to
-  you after" (default 8 hours). They are measured in wall-clock time from the send (or the last Keep Waiting),
+- **The timers** are global settings at the foot of Settings › People: "Remind them after" (default 4 hours, or
+  off) and "Bring it back to you after" (default 8 hours). They are measured in wall-clock time from the send (or the last Keep Waiting),
   read from the injected clock, and checked on every tick and on wake. One that came due while the Mac slept
   fires on wake, once; when both came due, the reminder is skipped and the card returns. Due-ness is worked out
   again inside the write that marks it, from the send's own `waitStartedAt`, `remindedAt` and `returnedAt`, so a
@@ -506,19 +510,17 @@ stopped on shutdown.
 - **Anyone else replied, or there are several recipients: complete when the conversation settles** (§8.5): a
   tick after a message names an option letter with nothing newer since, or 30 minutes with no new message
   **(call)**.
-- **A reply typed outside the thread,** at the top of the DM, answers the person's only open send when they
-  have exactly one; with several, it becomes one builder card ("Mark replied outside a thread") listing the open
-  questions, to attach it to one (or dismiss it). The watch reads the DM's history (`conversations.history`) from
-  the contact's own cursor, which advances as it reads, so the same message never raises a second card. The same
-  quiet rule applies there as in a thread. The first time a person replies at the top of the DM, 10db posts one
-  line in the question's thread: "Got it. Next time, replying in this thread keeps your answers with the right
-  question." A flag on the person's contact (`topLevelNudgedAt`) means it is never posted to them again; a reply
-  in a thread never gets it.
+- **A reply typed outside the thread,** at the top of the DM or group DM, joins the conversation of the
+  person's open send there, in `ts` order, and the same rules apply as in a thread. With several open sends,
+  the judge's `reply_match` (a choice over the person's open questions plus `unclear`, floor 0.8) picks one;
+  below the floor or with no key, 10db posts "Which one is this for? 1) … 2) …" listing each question by the
+  text it sent, and a reply with a number assigns it. What each message was assigned to is stored, so a
+  restart never assigns it again or asks twice. 10db never asks anyone to use the thread.
 - **Where a reply came from** is stored on the send's answer (`replyVia: 'thread' | 'top_level'`). Slice 1 shows
   it nowhere; it is there so the builder can see how people really reply before changing this rule (§14).
 - **A refused token** stops the watch and shows a 10db card ("Slack refused 10db's token. Reconnect it in
-  Settings › People."). Sends stay `sent`; their cards show in Open with that notice so the builder can answer
-  them; on reconnect the watch reads on from each send's cursor, so a reply written during the outage still
+  Settings › Integrations."). Sends stay `sent`; their cards show in Open with that notice so the builder can
+  answer them; on reconnect the watch reads on from each send's cursor, so a reply written during the outage still
   answers its card.
 - **Any connection but `connected` counts as an outage for Open:** `off`, `none` (the token was removed),
   `refused` and `unreachable` (three ticks in a row failed with `unreachable`, `timeout` or an HTTP 5xx; the next
@@ -611,13 +613,16 @@ conversation settles (§8.2), and then (written for one recipient, Mark; §8.6 s
    reply.
 4. **Mark approves** with a ✅ (`white_check_mark`, `heavy_check_mark` or `+1`) on the proposal, read from the
    message's `reactions`: Mark's user id must be in that reaction's `users`, and the bot's own id there (from the
-   pre-seeded ✅) is ignored. Or he approves with a reply whose whole text is "yes", "approve",
-   "approved", "ok" or "👍" (any case, trailing punctuation ignored). The card is answered as Mark: that option,
+   pre-seeded ✅) is ignored. Or he approves with a reply the judge's `approval_read` (does this reply approve
+   the proposal?, floor 0.8) reads as approval, so "Yes sir" approves. With no key, a loose list stands in:
+   yes, yep, yeah, sure, ok, okay, approve(d), sounds good, go ahead, do it, 👍 or ✅, any case, with
+   punctuation and trailing words such as "sir" or "thanks" ignored. The card is answered as Mark: that option,
    `readAs: 'approved'`, and the decision is recorded with `decidedBy: mark`, the others named in it ("with
    Priya") and the thread as its source.
 5. **Mark replies a letter** instead: that is his pick (§8.3). **Mark replies anything else, or someone else
-   replies:** the proposal is withdrawn (the send forgets it) and the conversation settles again. A ✅ from
-   anyone but Mark approves nothing.
+   replies before he approves:** the proposal is withdrawn (the send forgets it) and the conversation settles
+   again. Once Mark has approved, a participant who isn't a recipient can't undo it (Priya can't veto Mark).
+   A ✅ from anyone but Mark approves nothing.
 6. **Nobody approves:** the reminder and the return (§8.1) apply as to any send.
 
 **Nothing is posted twice.** The send stores what the conversation has already been answered with:
@@ -650,7 +655,9 @@ An own-words reply from Mark after a "which way" line gets the same quote of the
 - **Anyone's reply counts**, recipients and anyone they bring in (§8.4).
 - **A recipient's letter is their pick** once a tick passes with nothing newer from another recipient, unless
   another recipient has already named a different letter: the first pick records the decision as that
-  recipient's.
+  recipient's. Anything another recipient writes after the letter, a question included, leaves the
+  conversation to the judge's settle. Another recipient's approval, or the same letter, while one has approved
+  keeps the approval.
 - **The approval line tags every recipient:** "Sounds like **B** (Priya). @Mark @Ana, ✅ to approve or reply to
   change." The "which way" line does too. The first ✅ (or "yes") from any recipient, with nothing newer from the
   other recipients by the next tick, records the decision as that recipient's, crediting the others who spoke.
@@ -733,39 +740,68 @@ channel thread instead.
 ## 10. The UI
 
 The rule: **the builder makes a route where the question is, and the table is only for looking.** Three
-surfaces change a lot (the card, the Inbox's Waiting tab, Settings › People); three change by a line (the
+surfaces change a lot (the card, the Inbox's Waiting tab, Settings › Integrations and People); three change by a line (the
 task drawer, the Board card, Factory's goal). Sketches below; the visual mockups are linked from the plan.
 
-### 10.1 Settings › People (global)
+### 10.1 Settings › Integrations and Settings › People (global)
+
+Setting up Slack happens once, so it has its own section; People is only the people.
 
 ```
-┌ Settings ────────────────────────────────────────────────────────────────────────────────────┐
-│ People                                                                        [Add Person]   │
-│ Who answers questions besides you, and how 10db reaches them.                                │
+┌ Settings › Integrations ─────────────────────────────────────────────────────────────────────┐
+│ Integrations                                                                                 │
+│ The services 10db uses to reach the people who answer your questions.                        │
+│ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ # Slack                                                                             [⋯]  │ │
+│ │ Acme · posts as @10db · you're @travis                                                   │ │
+│ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Settings › People ───────────────────────────────────────────────────────────────────────────┐
+│ People                                                                                       │
+│ The people who answer your projects' questions, and how 10db reaches each one.               │
 │                                                                                              │
-│ ● Slack  Connected to Acme · as @10db · checked 2 min ago                [Manage]            │
-│                                                                                              │
-│ Name            Slack                      Sends                  Answers                    │
+│ Name                          How it's sent         Answers                     [Add Person] │
 │ ───────────────────────────────────────────────────────────────────────────────────────────  │
-│ You             —                          —                      everything else            │
-│ Mark Ellis      @mark · Acme               Review each            Renewals (goal) · product  │
-│ Dana Ruiz       @dana · Acme               Send without asking    Acme app · design          │
-│ Priya Shah      not in Slack               —                      —                          │
+│ You · Travis [Slack @travis]  —                     everything not routed              Edit  │
+│ Mark Ellis [Slack @mark]      Shown to you first    Renewals · product (a goal)  Edit Remove │
+│ Dana Ruiz [Slack @dana]       Sent on its own       Acme app · design            Edit Remove │
+│ Priya Shah [Not on Slack]     You pass it on        —                            Edit Remove │
+│                                                                                              │
+│ When someone hasn't answered                                                                 │
+│ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
+│ │ Remind them after                                                  [on] [ 4 ] hours      │ │
+│ │ Bring it back to you after                                              [ 8 ] hours      │ │
+│ │ Hours are real time: a timer that comes due while your Mac sleeps fires when it wakes.   │ │
+│ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Not connected:** the Slack line becomes a three-step guide in place: 1. **Copy Manifest** and **Open Slack
-  Apps ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A
-  refused token says why beside Connect.
-- **Add Person** is a modal: a searchable Select of the workspace's members (avatar, name, title, email), or
-  "Someone not in Slack" with just a name. Then the send mode (a `SegmentedControl`: Review Each · Send Without
-  Asking) and "New questions a day" (a `NumberInput`, default 10, with an Off switch), described under the
-  field: "Counts only a new question that starts a thread. Replies, follow-ups and the conversation in a thread
-  never count." Selecting a member fills the name.
-- A row opens the same modal to edit. "Answers" lists the person's routes, each a link to where it lives.
-- **Timers**, under the people table, apply to everyone: "Remind after" (default 4 hours, or off) and "Back to
-  you after" (default 8 hours), each a `NumberInput` in hours, with the line "Measured in real time; one that
-  comes due while your Mac sleeps fires when it wakes."
+- **Settings › Integrations** has one card per integration; Slack is the first, and a later integration is
+  another card. **Not connected**, the card is a three-step guide: 1. **Copy Manifest** and **Open Slack Apps
+  ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A refused
+  token says why beside Connect. **Connected**, the card is one line, and **Change Who You Are** and
+  **Disconnect** sit in its `⋯` menu, never as buttons; Disconnect asks first, since it stops every send and
+  read at once. **Unfinished** (connected, but the builder has not picked their own member), the card holds a
+  compact yellow callout, "Finish setup: pick yourself so messages carry your name", with the **Which one is
+  you?** Select and **That's Me**; every message carries that name, so nothing is sent until it is picked.
+  Once picked, the callout collapses into the line's "you're @travis".
+- **Settings › People** says what it is for in one line, and while Slack is not connected or its setup is
+  unfinished, a second line links to Integrations. **Add Person** sits on the table's header. The builder's row
+  comes first and reads "You · Travis"; it can change the pick and has no Remove. Each row shows how 10db
+  reaches the person as a small chip (`Slack @mark`, `Not on Slack`); "How it's sent" says what happens before
+  a message goes, and "Answers" lists the person's routes, each a link to where it lives (the builder's is
+  "everything not routed"). A row's Edit opens the same modal.
+- **Add Person** is a modal ordered who → how 10db asks → limit. It leads with one search, "Find someone in
+  Acme" (avatar, name, title, email), and under it a quiet link, "Not on Slack? Add them by name", which shows
+  a name field and one line: "10db can't message them. Their questions come to you, ready to copy, and you
+  answer for them." With Slack not connected the modal opens on the name. A Slack pick fills the name, which
+  stays editable. There is no handle field: 10db makes the handle from the name and adds a number when someone
+  has it already. For a Slack person, "Before 10db messages them" offers **Show me each message first** or
+  **Send on its own**, with "The first message is always shown to you." under it, then "Up to [10] new
+  questions a day" with **No limit** beside it and the hint "Replies in an existing thread don't count."
+- **When someone hasn't answered** is the last group on People and applies to everyone: "Remind them after"
+  (default 4 hours, or off) and "Bring it back to you after" (default 8 hours), each in hours, with the
+  real-time note inside the group.
 - Slice 2 adds "This week": questions sent and the median time to an answer.
 
 ### 10.2 The question card
@@ -776,6 +812,7 @@ A routed card in review mode opens on what Mark will get. Today's answer control
 ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ [Question] Renewals · For Mark in Slack                                                      │
 │ How long should a customer keep access while a failed renewal retries?                       │
+│ Product question on the goal Renewals → Mark · Change                                        │
 │                                                                                              │
 │ Mark will get                                                                     [Edit]     │
 │ ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
@@ -788,15 +825,14 @@ A routed card in review mode opens on what Mark will get. Today's answer control
 │ │ C. Keep access for the whole billing period                                              │ │
 │ │ ↳ Reply in this thread with a letter or your own words.                                  │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│ Product question on the goal Renewals → Mark · Change                                         │
-│ The task is parked until someone answers. Other work keeps running.                          │
-│                                                     [Answer Myself]   [Send to Mark  ⌘↵]    │
+│ The task is parked until someone answers…             [Answer Myself]   [Send to Mark  ⌘↵]   │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - The preview is drawn like a Slack message on the `bg_1` tone, not a screenshot: plain text, the letters
   bold. **Edit** turns it into an autosizing Textarea; Done returns to the preview.
-- The route line says why this person: "Product question on the goal Renewals → Mark". A triaged card says
+- The route line sits under the title, so who gets it and why reads before the message: "Product question on
+  the goal Renewals → Mark". The note that the task is parked sits left of the footer's buttons. A triaged card says
   "Billing topic → Sarah · chosen by Jev, 91%"; a tie says "Product question on Acme app → Mark and Ana", and
   the preview's heading and primary name both ("Mark and Ana will get", **Send to Mark and Ana**). **Change**
   opens the Ask Someone popover.
@@ -810,12 +846,13 @@ A routed card in review mode opens on what Mark will get. Today's answer control
   it before it goes to Mark." Send is disabled until the scan passes. A path-like warning is a dimmed line
   under the preview and doesn't disable Send.
 
-**Ask Someone…** sits in the footer of a question card that isn't routed, as a `default` button left of the
-primary. On a routed card the route line's **Change** opens the same popover, and there is no second button.
+**Ask Someone** sits in the footer of a question card that isn't routed, as a `default` button left of the
+primary. On a routed card, a failed one included, the route line's **Change** opens the same popover, and there
+is no second button. With nobody but the builder to ask, the popover says so and links to Settings › People.
 
 ```
                          ┌ Ask someone ──────────────────────────────────────┐
-                         │ [ Mark Ellis · @mark                          ▾ ] │
+                         │ [ Mark Ellis · Slack                          ▾ ] │
                          │ ☑ Always send [Product ✓] [Design] questions      │
                          │   on [ the goal Renewals ▾ ] to Mark              │
                          │      (this task · the goal Renewals · Acme app)   │
@@ -827,11 +864,12 @@ primary. On a routed card the route line's **Change** opens the same popover, an
 - The card's own category is ticked; the other stakeholder kinds (Product, Business, Design) are one click
   away, each with its hint as a tooltip, and each ticked one writes a route.
 - **A suggestion opens the popover on it.** A card triage left with the builder (§6.3) shows "Suggested: Sarah
-  (64%)" in the footer beside Ask Someone…, and the popover opens with Sarah picked and Always unticked.
+  (64%)" in the footer beside Ask Someone, and the popover opens with Sarah picked and Always unticked.
 - **Ask Mark** routes the card to Mark and closes the popover; the card then shows "Mark will get" and Send to
   Mark (or sends at once when Mark's mode allows it). Nothing leaves from the popover itself.
-- Choosing someone not in Slack makes the card's primary **Copy for Priya**, which copies the message and leaves
-  the card open for the builder to paste her answer.
+- Choosing someone not in Slack puts the message on the card under "Priya Shah isn't on Slack. Copy this to
+  them, then pick their answer below.", with **Copy for Priya Shah** beside that line; the footer keeps Send
+  answer as its one primary, and the card stays open for the builder to give her answer.
 
 ### 10.3 The Inbox's Waiting tab
 
@@ -841,21 +879,24 @@ leaves Open for a third tab between Open and Resolved.
 ```
  Inbox                                          [ Open  2 ] [ Waiting  3 ] [ Resolved ]
  ───────────────────────────────────────────────────────────────────────────────────────────────
- ● Mark Ellis   How long should a customer keep access while a…   Renewals   sent 3h ago   ↗  ⋯
- ● Mark Ellis   Should the receipt email show the card's last 4…  Renewals   sent 3h ago   ↗  ⋯
- ● Dana Ruiz    Which empty state reads best for the Waiting tab? 10db       sent 12m ago  ↗  ⋯
+ ● How long should a customer keep access while a failed renewal…    Renewals   Open in Slack  ⋯
+   With Mark Ellis · sent 3h ago
+ ● Which empty state reads best for the Waiting tab?                  10db       Open in Slack  ⋯
+   With Dana Ruiz with Priya · sent 12m ago · reminded 1h ago
 ```
 
-- One dense row per send: a yellow dot, the recipients ("Mark Ellis", or "Mark Ellis + Ana Ortiz"), "with
-  Priya" when someone was brought in, the question, the project, when it was sent ("reminded 1h ago" once the
-  reminder went), ↗ opens the conversation in Slack, ⋯ holds Answer Myself, Nudge (slice 2) and Take Back (the
-  card returns to Open, and the thread gets the closing line).
+- One row per send, with the question as its headline and one dimmed line under it: the recipients ("With
+  Mark Ellis", or "With Mark Ellis + Ana Ortiz"), "with Priya" when someone was brought in, when it was sent
+  and "reminded 1h ago" once the reminder went. Beside it are the project, **Open in Slack** and ⋯, which
+  holds Answer Myself, Nudge (slice 2) and Take Back. Take Back posts in the thread, so it asks first ("10db
+  tells them in the Slack thread that you have it"); the card then returns to Open. The returned card's Take
+  Back asks the same.
 - Selecting a row expands the card read-only: the message as sent, the conversation so far with each author, and
   an open proposal ("Proposed B, waiting for Mark's ✅").
 - The tab's count is a `CountBadge` in the neutral (gray) tone, since nothing in it needs the builder; Open's
   stays as it is. The sidebar's Inbox badge counts Open only.
 - An answered card moves to **Resolved** at once, which shows "Answered by Mark in Slack · 2h after asking", how
-  the reply was read ("Read as B", "In his own words", or "Approved B · with Priya"), the words and ↗.
+  the reply was read ("Read as B", "In their own words", or "Approved B · with Priya"), the words and ↗.
 - A question back after 8 hours, or one whose recipients disagree, leaves Waiting for Open (§8.1, §8.6).
 - This splits the Inbox's promise "every card waits on the builder" (DESIGN.md, and
   `decisions/2026-11-08-the-inbox-holds-what-needs-the-builder.md`): Open keeps it, Waiting is what the builder
@@ -898,7 +939,7 @@ leaves Open for a third tab between Open and Resolved.
 | People             | `Loader size="sm"`      | only You, and the Slack guide                                 | red `Alert` "Couldn't load people" with the message             |
 | Member picker      | the Select's loader     | "No members found. Is the app installed in Mark's workspace?" | Slack's error in words, beside the field                        |
 | Waiting tab        | with the Inbox          | "Nothing is out with anyone."                                 | with the Inbox                                                  |
-| Who Answers        | `Loader size="sm"`      | "Every question comes to you. Add a route, or use Ask Someone… on a card." | red `Alert` with the message                        |
+| Who Answers        | `Loader size="sm"`      | "Every question comes to you. Add a route, or use Ask Someone on a card." | red `Alert` with the message                        |
 | A send that failed | —                       | —                                                             | the card is back in Open with "Slack refused: channel_not_found. Mark may have left the workspace." |
 
 ## 11. Security
@@ -923,7 +964,7 @@ leaves Open for a third tab between Open and Resolved.
 ## 12. Slices
 
 1. **The Mark case** (the plan): the Slack connection, People with a Slack contact, the six categories, routes at
-   three scopes and topic routes, triage, ties asked together, Who Answers, Ask Someone…, the lane's briefing
+   three scopes and topic routes, triage, ties asked together, Who Answers, Ask Someone, the lane's briefing
    line, park at once, compose, scan, review and send, follow-ups in the thread, the reply watch, bringing
    someone in, agreeing an answer, answer as the person, the decision by the person, the closing lines, the 4 h
    reminder and the 8 h return, the Waiting tab, the one-line surfaces, Copy for someone without Slack, the
@@ -985,3 +1026,20 @@ until a pass page needs a stakeholder; reversing it is one rule in `assigneesFor
 
 **Before changing how top-level replies are read,** look at `replyVia` on recent sends: it records whether each
 answer came in a thread or at the top of the DM.
+
+## 15. What the build changed
+
+Slice 1 was built against this spec and the state table
+(`docs/superpowers/plans/2026-11-11-10db-stakeholder-questions-state-table.md`, whose rulings 1–35 each name a
+test row). The sections above now say what was built; the changes, in short:
+
+- **Replies count wherever people type** (§7.2, §8.2): no thread instruction, no top-level nudge and no
+  "replied outside a thread" card; `reply_match` or "Which one is this for?" chooses among several open sends.
+- **Approval is read by the judge** (§8.5): `approval_read`, with a loose word list as the no-key fallback.
+- **Recovery is by metadata** (§7.5): every bot line carries `tendb_send` metadata, and a send left `sending`
+  is looked for on the next good tick as well as at start.
+- **One live send per card** (§7.5): a new send after a Take Back or a failure.
+- **A non-recipient can't undo an approval** (§8.5), and a recipient's question after another's letter leaves
+  the conversation to the settle (§8.6).
+- **The builder picks their own Slack member** (§10.1), which gives every message its name.
+- **Migrations** 0063–0065 and protocol 8 (`0062` was taken first by another change).

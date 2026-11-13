@@ -98,6 +98,8 @@ export function sourceLabel(p: Pick<ProvenanceDto, 'sourceKind' | 'sourceRef' | 
       return 'Agent';
     case SourceKind.Daemon:
       return 'The app';
+    case SourceKind.SlackReply:
+      return 'Slack reply';
     case SourceKind.Builder: {
       if (typeof p.sourceRef['shapeId'] === 'string') return 'Plan conversation';
       const via = p.origin?.via;

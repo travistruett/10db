@@ -12,7 +12,11 @@
         "review_size",
         "shape_ready",
         "shape_record",
-        "shape_elsewhere"
+        "shape_elsewhere",
+        "question_route",
+        "thread_answer",
+        "reply_match",
+        "approval_read"
       ]
     },
     "model": {

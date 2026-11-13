@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "hold",
+              "warn"
+            ]
+          }
+        },
+        "required": [
+          "pattern",
+          "line",
+          "severity"
+        ]
+      }
+    }
+  },
+  "required": [
+    "text",
+    "hits"
+  ]
+}

@@ -140,6 +140,18 @@ describe('judge.choose with a System One model', () => {
     });
   });
 
+  it("sends an option's criteria as the choice criteria and logs them in the question", async () => {
+    const criteria = { review: 'The diff touches shared code', skip: 'A rename in one file' };
+    await build().choose({ ...request, criteria });
+    expect(seen[0]?.body).toMatchObject({
+      questions: { decision: { criteria } },
+    });
+    const [call] = logged();
+    expect(call?.question).toBe(
+      `${request.question}\nOptions:\n- review: The diff touches shared code\n- skip: A rename in one file`,
+    );
+  });
+
   it('logs the call with what was asked and the provisional outcome', async () => {
     const workstreamId = mintId('Workstream');
     const taskId = mintId('Task');
@@ -181,6 +193,17 @@ describe('judge.choose with a chat model', () => {
         decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
       }),
     );
+  });
+
+  it("puts an option's criteria in the prompt", async () => {
+    handler = () => json(chatBody('{"choice":"skip","confidence":0.9}'));
+    await build().choose({
+      ...request,
+      criteria: { review: 'The diff touches shared code', skip: 'A rename in one file' },
+    });
+    const messages = (seen[0]?.body['messages'] ?? []) as { content: string }[];
+    expect(messages[1]?.content).toContain('- review: The diff touches shared code');
+    expect(messages[1]?.content).toContain('- skip: A rename in one file');
   });
 
   it('asks chat completions for a JSON-schema answer', async () => {

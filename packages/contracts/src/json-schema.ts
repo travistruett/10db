@@ -184,6 +184,16 @@ import {
   ShapeRehearseResult,
   SmallProposalLimitDto,
 } from './shape-review';
+import {
+  AskSomeoneInput,
+  ComposePreviewDto,
+  QuestionRouteDto,
+  SendInput,
+  SlackConnectionDto,
+  SlackMemberDto,
+  SlackTokenInput,
+  StakeholderSendDto,
+} from './slack';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -194,6 +204,7 @@ import {
   PersonInput,
   RoutingRuleDto,
   RoutingRulesInput,
+  StakeholderTimersDto,
   TeamDto,
   TeamInput,
 } from './team';
@@ -340,6 +351,15 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'persona-patch': PersonaPatch,
   'routing-rule-dto': RoutingRuleDto,
   'routing-rules-input': RoutingRulesInput,
+  'stakeholder-timers-dto': StakeholderTimersDto,
+  'stakeholder-send-dto': StakeholderSendDto,
+  'send-input': SendInput,
+  'ask-someone-input': AskSomeoneInput,
+  'question-route-dto': QuestionRouteDto,
+  'slack-connection-dto': SlackConnectionDto,
+  'slack-member-dto': SlackMemberDto,
+  'slack-token-input': SlackTokenInput,
+  'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
   'team-dto': TeamDto,
   'team-input': TeamInput,

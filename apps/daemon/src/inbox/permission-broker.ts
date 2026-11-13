@@ -395,7 +395,7 @@ export function createPermissionBroker(
               o.label === PermissionChoice.Deny ? [serverOption(grant), o] : [o],
             ),
       recommendation: null,
-      category: QuestionCategory.Environment,
+      category: QuestionCategory.Access,
       urgency: Urgency.Normal,
       detail: {
         toolName: req.toolName,
@@ -468,7 +468,7 @@ export function createPermissionBroker(
           (o) => o.label !== PermissionChoice.AllowWorkstream,
         ),
         recommendation: file === null ? null : PermissionChoice.AllowProject,
-        category: QuestionCategory.Environment,
+        category: QuestionCategory.Access,
         urgency: Urgency.Normal,
         detail: { toolName: NETWORK_TOOL, summary: host },
         signal: ctx.signal,

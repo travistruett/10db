@@ -9,6 +9,7 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
+  findPersonByHandle,
   getHandoff,
   getInboxItem,
   getTask,
@@ -27,6 +28,12 @@ import {
   principleHit,
   workstreamAreas,
 } from '../knowledge';
+
+/** The name of a stakeholder who answered, from the handle stored on the answer; null for the builder. */
+function answerer(db: DbReader, handle: string | undefined): string | null {
+  if (handle === undefined) return null;
+  return findPersonByHandle(db, handle)?.name ?? handle;
+}
 
 /**
  * The task's search hits among the decisions, best first. A decision index the startup check could
@@ -80,6 +87,10 @@ export function buildContextPack(
           question: answered.title,
           answer: answered.answer.choice,
           note: answered.answer.note ?? null,
+          answeredBy: answerer(db, answered.answer.answeredBy),
+          via: answered.answer.via ?? 'inbox',
+          words: answered.answer.words ?? null,
+          conversation: answered.answer.conversation ?? [],
         }
       : null,
     knowledge: {
