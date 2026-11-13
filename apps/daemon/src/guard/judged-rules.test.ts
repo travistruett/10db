@@ -90,8 +90,26 @@ const SHELL_ROWS: readonly Row[] = [
   bash('rm -r of a variable', 'rm -r "$OUT"', 'deny', 'allow'),
   bash('rm -r with a character class', 'rm -r dist/[ab]', 'deny', 'allow'),
   bash('rm -r after cd', 'cd sub && rm -r build', 'deny', 'allow'),
-  bash('a publish under an allow rule', 'pnpm publish', 'deny', 'deny', COVERED),
-  bash('kubectl under an allow rule', 'kubectl apply -f k8s.yaml', 'deny', 'deny', COVERED),
+  // The builder's allow rule wins over the deploy rule, as in Claude Code.
+  bash('a publish under an allow rule', 'pnpm publish', 'allow', 'allow', COVERED),
+  bash('kubectl under an allow rule', 'kubectl apply -f k8s.yaml', 'allow', 'allow', COVERED),
+  bash(
+    'a deploy and a push under an allow rule',
+    'vercel deploy --prod && git push',
+    'deny',
+    'deny',
+    COVERED,
+  ),
+  bash(
+    'a deploy and a hazard under an allow rule',
+    'vercel deploy --prod && pnpm add x',
+    'deny',
+    'deny',
+    {
+      ...COVERED,
+      ...UNCLAIMED,
+    },
+  ),
   bash('a pipe into a shell under an allow rule', CURL_SH, 'deny', 'deny', COVERED),
   bash('a plain test run under an allow rule', 'pnpm test', 'allow', 'allow', COVERED),
   bash('a hazard piped into a shell', "echo 'pnpm add x' | sh", 'deny', 'ask', UNCLAIMED),
@@ -372,6 +390,29 @@ const TOOL_ROWS: readonly Row[] = [
     fileAccess: access,
   }),
 ];
+
+describe('a deploy under an allow rule', () => {
+  it.each(Object.values(JudgeKind))(
+    'the hook settles it under %s, so no classifier or card follows',
+    (judge) => {
+      const verdict = judgePreToolUse({
+        judge,
+        coveredByAllowRule: true,
+        toolName: 'Bash',
+        toolInput: { command: 'vercel deploy --prod' },
+        repoPath: repo.path,
+        areas: AREAS,
+        hazards: DEFAULT_HAZARDS,
+        claims: EVERY_HAZARD,
+        readOnly: false,
+        protectedPaths: [],
+      });
+      expect(verdict.decision === 'allow' ? verdict.settled : verdict.reason).toContain(
+        "The builder's allow rule covers this deploy",
+      );
+    },
+  );
+});
 
 describe('the tools a judge takes over', () => {
   it.each(

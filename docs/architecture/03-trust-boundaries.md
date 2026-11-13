@@ -179,8 +179,11 @@ without it):
   judge runs, `guard/judged-rules.ts` hands it deploys, unreadable shell (unread words, a hidden redirection,
   `env -S`), a pipe into a shell and an `rm -r` the guard can't judge, plus WebFetch, WebSearch and a Monitor
   socket (`ws`, which opens from Claude Code's own process like WebFetch) with the Web switch on, and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
-  under an allow rule that covers the call, and for any command whose text names git, gh, `.git` or `sudo`
-  (quotes and backslashes taken out first for `sudo`), so `sudo` behind `env -S` or a pipe into a shell is
+  under an allow rule that covers the call, but for a deploy, which the builder's allow rule lets run: the hook
+  settles it, so neither the classifier nor a card stands in its way, as an allow rule does in Claude Code
+  (`decisions/2026-11-12-what-the-builder-allows-runs-as-in-claude-code.md`). They stand
+  too for any command whose text names git, gh, `.git` or `sudo` (for `sudo`, read as the shell may join the
+  word: quotes taken out, ANSI-C words decoded, substitutions dropped), so `sudo` behind `env -S` or a pipe into a shell is
   refused as on the floor. A line that runs a job beside the session (an `&`, a coprocess, the Bash tool's
   background flag, a Monitor) keeps the unread-shell and pipe-into-shell refusals too, since a segment the guard
   can't read there may hide a loop with no end, whose card a judge would otherwise lose. The repo MCP

@@ -40,12 +40,14 @@ function judgeRuns(judge: JudgeKind): boolean {
 
 /**
  * Whether the guard applies `rule` to this call. It does on the `rules` floor, under an allow rule
- * (which settles a call before a judge sees it), and, for a rule about shell text, when the text
+ * (which settles a call before a judge sees it) but for a deploy, which the allow rule lets run, and, for a rule about shell text, when the text
  * names git, gh or `.git`: a push or a merge has no kernel bound, only closed credentials, so a
  * command that names one keeps every judged shell refusal. A command that names `sudo` keeps them
  * too, so a `sudo` in a segment the guard can't read is never handed to a judge.
  */
 export function judgedRuleApplies(rule: JudgedRule, ctx: JudgedContext): boolean {
+  // The builder's own allow rule wins over the deploy rule, as an allow rule does in Claude Code.
+  if (rule === JudgedRule.Deploy && ctx.coveredByAllowRule) return false;
   if (!judgeRuns(ctx.judge) || ctx.coveredByAllowRule) return true;
   switch (rule) {
     case JudgedRule.Deploy:

@@ -114,6 +114,14 @@ export type GuardVerdict =
   | { readonly decision: 'deny' | 'ask'; readonly reason: string };
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
+/**
+ * A deploy the builder's allow rule covers runs, as in Claude Code: the hook settles it, so no
+ * classifier (which `classifyAllShell` would otherwise hand it to) or card stands in its way.
+ */
+const COVERED_DEPLOY: GuardVerdict = {
+  decision: 'allow',
+  settled: "The builder's allow rule covers this deploy, so it runs, as in Claude Code.",
+};
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -624,6 +632,7 @@ function judgeShell(
   // Whether the shell may have changed directory by now, which `rm -r` needs to know. When the
   // order is not certain (a loop, a function), a `cd` anywhere may come before any segment.
   let afterCd = !ordered && changesDirectory(parse.segments);
+  let coveredDeploy = false;
   let previousSeparator = '';
   for (const { segment, words, hiddenByEnv, hiddenByRedirection } of segments) {
     const head = words[0] ?? '';
@@ -702,11 +711,11 @@ function judgeShell(
     }
     if (DIRECTORY_CHANGES.has(head)) afterCd = true;
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
-    if (
-      applies(JudgedRule.Deploy) &&
-      DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))
-    )
-      return deny('Deploy and publish commands are never run by agents.');
+    if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))) {
+      if (applies(JudgedRule.Deploy))
+        return deny('Deploy and publish commands are never run by agents.');
+      if (ctx.coveredByAllowRule) coveredDeploy = true;
+    }
     const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
@@ -721,7 +730,7 @@ function judgeShell(
       }
     }
   }
-  return ALLOW;
+  return coveredDeploy ? COVERED_DEPLOY : ALLOW;
 }
 
 /** Tools a read-only step may call besides Bash and the 10db MCP server's own tools. */
