@@ -81,6 +81,7 @@ function SetupSteps() {
 
 function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlackToken> }) {
   const [token, setToken] = useState('');
+  const [refusal, setRefusal] = useState<string | null>(null);
   return (
     <Group align="flex-start" gap="sm" wrap="nowrap">
       <PasswordInput
@@ -88,7 +89,7 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
         placeholder="xoxb-…"
         style={{ flex: 1 }}
         value={token}
-        error={setter.isError ? setter.error.message : undefined}
+        error={refusal ?? undefined}
         onChange={(event) => {
           setToken(event.currentTarget.value);
         }}
@@ -97,9 +98,17 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
         disabled={token.trim() === ''}
         loading={setter.isPending}
         onClick={() => {
+          setRefusal(null);
           setter.mutate(token.trim(), {
             onSuccess: () => {
               setToken('');
+            },
+            onError: (failure) => {
+              setRefusal(failure.message);
+            },
+            // The mutation's variables are the token; drop them whichever way it went.
+            onSettled: () => {
+              setter.reset();
             },
           });
         }}

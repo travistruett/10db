@@ -74,8 +74,8 @@ function serve(
     }),
     ...baseHandlers(),
   );
-  renderApp('/settings/integrations');
-  return { saved, tokens, removals };
+  const { queryClient } = renderApp('/settings/integrations');
+  return { saved, tokens, removals, queryClient };
 }
 
 afterEach(() => {
@@ -115,6 +115,37 @@ describe('Settings › Integrations: Slack', () => {
     expect(tokens).toEqual(['xoxb-abc']);
     expect(screen.queryByText(/posts as @10db/)).toBeNull();
   });
+
+  it.each([
+    ['accepted', {}],
+    ['refused', { tokenRefusal: 'Slack refused the token: invalid_auth' }],
+  ])(
+    'keeps no trace of the token in query state once Connect settles: %s',
+    async (_name, options) => {
+      const { queryClient } = serve(options);
+      const field = await screen.findByLabelText('Bot User OAuth Token');
+      fireEvent.change(field, { target: { value: 'xoxb-secret-token' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+      await waitFor(() => {
+        expect(
+          screen.queryByText(/posts as @10db/) ?? screen.queryByText(/Slack refused the token/),
+        ).toBeTruthy();
+      });
+      await waitFor(() => {
+        const held = queryClient
+          .getMutationCache()
+          .getAll()
+          .map((m) => JSON.stringify(m.state.variables ?? null));
+        expect(held.join('')).not.toContain('xoxb-secret-token');
+      });
+      // A refused token stays in the field to fix; an accepted one is gone with the field.
+      if ('tokenRefusal' in options)
+        expect(screen.getByLabelText('Bot User OAuth Token')).toHaveProperty(
+          'value',
+          'xoxb-secret-token',
+        );
+    },
+  );
 
   it('connected is one line, with Disconnect in the menu rather than a button', async () => {
     serve({ people: [bound], connection: connected });

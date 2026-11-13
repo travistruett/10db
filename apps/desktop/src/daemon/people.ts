@@ -89,6 +89,8 @@ export function useSetSlackToken() {
   return useMutation({
     mutationFn: async (token: string) =>
       readJson(await client.slack.token.$put({ json: { token } }), SlackConnectionDto),
+    // The variable is the bot token: nothing keeps it once the call settles.
+    gcTime: 0,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: SLACK_KEY }),
   });
 }
