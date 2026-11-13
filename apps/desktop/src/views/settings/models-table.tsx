@@ -39,14 +39,14 @@ function ModelCell({
           event.stopPropagation();
           onOpen();
         }}
-        style={{ minWidth: 0 }}
+        style={{ minWidth: 0, flexShrink: 0, maxWidth: 280 }}
       >
         <Text size="sm" fw={500} truncate>
           {row.name}
         </Text>
       </UnstyledButton>
       {row.status === ModelStatus.Current ? null : (
-        <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+        <Text size="xs" c="dimmed" truncate style={{ minWidth: 0 }}>
           {STATUS_LABEL[row.status]}
         </Text>
       )}
@@ -121,8 +121,8 @@ export function ModelsTable({
       title: 'Model',
       sortable: true,
       width: '100%',
-      // A zero max width lets the one wide column give way, so the table fits its container.
-      cellsStyle: () => ({ maxWidth: 0 }),
+      // Names stay readable; a table too wide for its frame scrolls inside it.
+      cellsStyle: () => ({ minWidth: 200 }),
       filtering: filter.query.trim() !== '',
       filter: <ModelSearchFilter filter={filter} onFilter={onFilter} />,
       render: (row) => (

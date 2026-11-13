@@ -4,7 +4,7 @@ import { ExternalLink } from '../board/pull-request-link';
 export function ArtificialAnalysisCredit() {
   return (
     <>
-      Scores:{' '}
+      Scores and speed:{' '}
       <ExternalLink size="xs" url="https://artificialanalysis.ai/" label="Artificial Analysis" />
     </>
   );

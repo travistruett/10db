@@ -2,7 +2,7 @@ import { mintId, ModelTier, type ModelSetting, type PatternDto } from '@10db/con
 import { describe, expect, it } from 'vitest';
 import { chooseModel, type ChooseInput } from './choose-model';
 import { strongerDefault } from './role-defaults';
-import { label, unscoredCatalogue } from './test-catalogue';
+import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 /**
  * Capable and Frontier together are what one Strongest tier was: every default, floor, Top of tier, override,
@@ -22,7 +22,6 @@ const profilesOf = (ladder: Ladder) => unscoredCatalogue({}, [...LADDERS[ladder]
 const AT_CAPABLE = { kind: 'tier', tier: ModelTier.Capable } satisfies ModelSetting;
 const AT_BALANCED = { kind: 'tier', tier: ModelTier.Balanced } satisfies ModelSetting;
 const TOP_OF_TIER = { kind: 'top_of_tier' } satisfies ModelSetting;
-const overrideOf = (model: string) => ({ capable: model, frontier: model });
 
 const patternFor = (setting: ModelSetting): PatternDto => ({
   id: mintId('Pattern'),
@@ -123,24 +122,135 @@ describe('four rungs keep the pick of the three tiers', () => {
     ).toBe(c.want);
   });
 
+  it('a security-tagged task under the seeded High-risk work pattern is floored, and Top of tier takes the same model', () => {
+    const seeded: PatternDto = {
+      ...patternFor(TOP_OF_TIER),
+      match: {
+        roles: [],
+        riskTags: ['security', 'auth', 'migration'],
+        areas: [],
+        retryOnly: false,
+      },
+    };
+    for (const [ladder, want] of [
+      ['one Capable and one Frontier', 'apex@xhigh'],
+      ['Capable empty', 'apex@xhigh'],
+      ['Frontier and Efficient only', 'apex@xhigh'],
+      ['Frontier empty', 'big@xhigh'],
+    ] as const)
+      expect(
+        choose(ladder, { patterns: [seeded], task: { ...security, modelSetting: null } }),
+      ).toBe(want);
+  });
+});
+
+/** Distinct models under the two keys, so a landing shows which key routing read. */
+const SPLIT = { capable: 'small', frontier: 'mid' };
+
+/** The model launched, which is the override's own name where it has no profile. */
+const launched = (ladder: Ladder, over: Partial<ChooseInput>): string => {
+  const choice = chooseModel({
+    def: { role: 'review', need: 40 },
+    persona: undefined,
+    task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
+    project: { id: mintId('Project'), budgetCeiling: null },
+    profiles: profilesOf(ladder),
+    roleSettings: [],
+    patterns: [],
+    tierOverrides: {},
+    stakes: { retry: false },
+    ...over,
+  });
+  return choice.profile ? label(choice.profile) : choice.model;
+};
+
+/** The ladder with its Frontier model measured, so a step can score into either rung. */
+const scoredLadder = () => [
+  ...testCatalogue(),
+  ...unscoredCatalogue({}, ['apex']).map((p, i) => ({
+    ...p,
+    scores: { intelligence: 60 + 2 * i },
+    costPerTaskUsd: 9 + i,
+  })),
+];
+
+describe('four rungs keep the account override of the strongest tier', () => {
   it.each([
-    { ladder: 'one Capable and one Frontier', want: 'apex@high' },
-    { ladder: 'Capable empty', want: 'apex@high' },
-    { ladder: 'Frontier empty', want: 'big@high' },
-  ] as const)('the override of the strongest tier on $ladder', (c) => {
-    const model = c.want.split('@')[0] ?? '';
-    expect(choose(c.ladder, { tierOverrides: overrideOf(model) })).toBe(c.want);
+    {
+      name: 'a Capable landing reads the Capable key',
+      ladder: 'one Capable and one Frontier',
+      want: 'small@high',
+    },
+    {
+      name: 'a Frontier landing reads the Frontier key',
+      ladder: 'Capable empty',
+      want: 'mid@high',
+    },
+    {
+      name: 'a Frontier landing whose override has no profile here is launched as named',
+      ladder: 'Frontier and Efficient only',
+      want: 'mid',
+    },
+  ] as const)('a default review: $name', ({ ladder, want }) => {
+    expect(launched(ladder, { tierOverrides: SPLIT })).toBe(want);
   });
 
-  it('an override of the strongest tier is used by a step that scores into either rung', () => {
-    const ladder = 'one Capable and one Frontier';
-    expect(choose(ladder, { tierOverrides: overrideOf('apex') })).toBe('apex@high');
+  it('a floored review lands on Frontier and reads the Frontier key', () => {
     expect(
-      choose(ladder, {
-        tierOverrides: overrideOf('big'),
-        roleSettings: [{ role: 'review', projectId: null, setting: AT_CAPABLE }],
+      launched('one Capable and one Frontier', {
+        tierOverrides: SPLIT,
+        task: { ...security, modelSetting: null },
       }),
-    ).toBe('big@high');
+    ).toBe('mid@xhigh');
+  });
+
+  it('Top of tier ignores the override and takes the dearest model', () => {
+    expect(
+      launched('one Capable and one Frontier', {
+        tierOverrides: { capable: 'big', frontier: 'apex' },
+        patterns: [patternFor(TOP_OF_TIER)],
+      }),
+    ).toBe('apex@high');
+  });
+
+  it.each([
+    { name: 'a scored step that lands in Capable', need: 48, want: 'small@high' },
+    { name: 'a scored step that lands in Frontier', need: 58, want: 'mid@high' },
+  ])('$name reads the key of its landing rung', ({ need, want }) => {
+    const choice = chooseModel({
+      def: { role: 'review', need },
+      persona: undefined,
+      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
+      project: { id: mintId('Project'), budgetCeiling: null },
+      profiles: scoredLadder(),
+      roleSettings: [],
+      patterns: [],
+      tierOverrides: SPLIT,
+      stakes: { retry: false },
+    });
+    expect(choice.profile ? label(choice.profile) : choice.model).toBe(want);
+  });
+
+  it.each([
+    { ladder: 'one Capable and one Frontier', want: 'small@high' },
+    { ladder: 'Capable empty', want: 'mid@high' },
+  ] as const)('a step started over in the refused model tier on $ladder', ({ ladder, want }) => {
+    expect(launched(ladder, { tierOverrides: SPLIT, startOverTier: ModelTier.Capable })).toBe(want);
+  });
+
+  it('a gateway override naming a model with no profile is launched as named, on either rung', () => {
+    expect(
+      launched('one Capable and one Frontier', { tierOverrides: { capable: 'gw-large' } }),
+    ).toBe('gw-large');
+    expect(launched('Capable empty', { tierOverrides: { capable: 'gw-large' } })).toBe('gw-large');
+  });
+
+  it('an unset Frontier override is the Capable one, as one override covered both', () => {
+    expect(launched('Capable empty', { tierOverrides: { capable: 'small' } })).toBe('small@high');
+    expect(
+      launched('Capable empty', { tierOverrides: { capable: 'small', frontier: 'mid' } }),
+    ).toBe('mid@high');
+    expect(launched('Capable empty', { tierOverrides: { frontier: 'mid' } })).toBe('mid@high');
   });
 });
 

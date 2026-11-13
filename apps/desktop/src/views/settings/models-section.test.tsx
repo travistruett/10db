@@ -292,6 +292,8 @@ describe('the Models page', () => {
     expect(within(drawer).getByText(/Capable tier/)).toBeTruthy();
     expect(within(drawer).getByText(/\$5\.00 in · \$25\.00 out · speed 40 tokens\/s/)).toBeTruthy();
     expect(within(drawer).getByRole('heading', { name: 'Offered by' })).toBeTruthy();
+    // The drawer shows AA scores and speed, so it carries the credit.
+    expect(within(drawer).getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
   });
 
   it('opens the drawer with Enter on a name', async () => {
@@ -363,6 +365,46 @@ describe('the Models page', () => {
     expect(link.parentElement?.textContent).toBe('Add an account to see what each role gets.');
     expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
+  });
+
+  it('shows the daemon’s message, not the add-an-account prompt, when the accounts cannot be read', async () => {
+    serve();
+    let healthy = false;
+    server.use(
+      http.get(daemonUrl('/accounts'), () =>
+        healthy
+          ? HttpResponse.json([SUBSCRIPTION, KEYED])
+          : HttpResponse.json({ error: 'internal', message: 'Accounts are down' }, { status: 500 }),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Accounts are down');
+    expect(screen.queryByText(/Add an account/)).toBeNull();
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+  });
+
+  it('shows the daemon’s message when the picks cannot be read, and Try Again reads them again', async () => {
+    serve();
+    let healthy = false;
+    server.use(
+      http.get(daemonUrl('/models/picks'), ({ request }) =>
+        healthy
+          ? HttpResponse.json(
+              rolePicksDto(
+                AccountId.parse(new URL(request.url).searchParams.get('account')),
+                PICKS,
+              ),
+            )
+          : HttpResponse.json({ error: 'internal', message: 'Picks are down' }, { status: 500 }),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Picks are down');
+    healthy = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('region', { name: 'Who each role gets' })).toBeTruthy();
   });
 
   it('shows the daemon’s message when the account’s models cannot be read, and Try Again reads them again', async () => {

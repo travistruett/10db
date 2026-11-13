@@ -149,6 +149,26 @@ export function ModelsSection() {
         <Text c="dimmed">Reading accounts…</Text>
       </Stack>
     );
+  if (accounts.isError)
+    return (
+      <Stack>
+        {header}
+        <Group gap="sm">
+          <Text c="red" role="alert">
+            {accounts.error.message}
+          </Text>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              void accounts.refetch();
+            }}
+          >
+            Try Again
+          </Button>
+        </Group>
+      </Stack>
+    );
   if (account === null)
     return (
       <Stack>
@@ -214,9 +234,20 @@ export function ModelsSection() {
     <Stack gap="lg">
       {header}
       {picks.isError ? (
-        <Text size="sm" c="red">
-          What each role gets could not be loaded.
-        </Text>
+        <Group gap="sm">
+          <Text size="sm" c="red" role="alert">
+            {picks.error.message}
+          </Text>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              void picks.refetch();
+            }}
+          >
+            Try Again
+          </Button>
+        </Group>
       ) : picks.data === undefined || settling ? (
         <Text size="sm" c="dimmed">
           Reading what each role gets…

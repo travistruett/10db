@@ -106,7 +106,7 @@ export function TierOverrides({
         </Text>
         <Text size="xs" c="dimmed">
           Automatic lets 10db choose the model for each tier. Pick one to run that tier on it
-          instead.
+          instead. Frontier model: leave blank to use the Capable model.
         </Text>
       </div>
       {models.data === undefined || hasList === undefined

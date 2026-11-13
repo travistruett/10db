@@ -9,9 +9,10 @@
 
 - **The names are the makers' own.** Anthropic's line is "lowest latency and price" (Haiku), "best combination of
   speed and intelligence" (Sonnet) and "most capable" (Opus, Fable); OpenAI's is "most efficient" (Luna), "balance
-  intelligence and cost" (Terra) and "most capable, flagship" (Sol, Astra). Efficient is Haiku and Luna, Balanced is
-  Sonnet and Terra, Capable is Opus and Sol, and Frontier is Fable and Astra. "Fast" goes: a tier was always a price
-  band, never a speed.
+  intelligence and cost" (Terra) and "most capable, flagship" (Sol, Astra). Rungs are price bands of each
+  maker's own ladder, so they match the makers' words on today's Claude prices (Haiku Efficient, Sonnet Balanced, Opus
+  Capable, Fable Frontier), while on today's models.dev GPT prices Sol is Balanced. "Fast" goes: a tier was always a
+  price band, never a speed.
 - **The cut is a share of the maker's top live output price** (`catalogue/tiers.ts`):
   - Frontier: at least 0.9 of the maker's top price, so two listings of one model at nearby prices stay together.
     A maker with one model has only a Frontier.

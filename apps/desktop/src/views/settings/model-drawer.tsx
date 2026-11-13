@@ -11,6 +11,7 @@ import { Fragment, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useModelOffers } from '../../daemon/model-queries';
 import { absoluteTime, fromNow } from '../../shell/relative';
+import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { formatCost, formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import { RightsizingChart } from './rightsizing-chart';
@@ -253,6 +254,9 @@ function DrawerBody({
           </Text>
         )}
         <Efforts row={row} />
+        <Text size="xs" c="dimmed">
+          <ArtificialAnalysisCredit />
+        </Text>
       </Stack>
       <Stack gap="xs">
         <Title order={4}>Offered by</Title>

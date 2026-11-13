@@ -2,9 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AccountSettings, WorkstreamStep } from '@10db/contracts';
 import { z } from 'zod';
 import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
 import { migrationsBefore } from './migrations-test-support';
+import { listPatterns, listRoleSettings } from './store/model-settings';
 
 const AT = '2026-11-13T12:00:00.000Z';
 const MIGRATION = '0067_four_model_rungs';
@@ -128,11 +130,22 @@ function seed(): void {
   // one on a real model with no setting, and one whose real model is named like a tier only by setting.
   const step = (model: string, setting: unknown, reason: string) => ({
     role: 'implement',
-    model,
+    personaId: null,
+    personaName: 'Implementer',
+    tools: 'edit',
     profileId: null,
+    model,
     effort: 'high',
+    need: 40,
     setting,
     reason,
+    overBudget: false,
+    pinned: false,
+    status: 'pending',
+    attempts: 0,
+    startedAt: null,
+    sessionFloor: 0,
+    result: null,
   });
   sql(
     `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts,
@@ -267,5 +280,33 @@ describe('the migration that turns three model tiers into four rungs', () => {
         { baseUrl: 'https://gw.example/api', tierOverrides: { capable: 'only', frontier: 'only' } },
       ],
     ]);
+  });
+
+  it('leaves every migrated row readable by the code that reads it', () => {
+    expect(listRoleSettings(db).map((r) => [r.role, r.setting])).toEqual(
+      expect.arrayContaining([
+        ['plan', { kind: 'tier', tier: 'capable' }],
+        ['qa', { kind: 'tier', tier: 'efficient' }],
+      ]),
+    );
+    expect(listPatterns(db).map((p) => p.setting)).toEqual([
+      { kind: 'tier', tier: 'efficient' },
+      { kind: 'top_of_tier' },
+      { kind: 'tier', tier: 'capable' },
+    ]);
+    const settings = rows(
+      z.object({ settings: json }),
+      'SELECT settings FROM accounts ORDER BY id',
+    );
+    expect(settings.map((r) => AccountSettings.safeParse(r.settings).success)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    const [stored] = rows(
+      z.object({ steps: json }),
+      "SELECT steps FROM workstreams WHERE id = 'wst_a'",
+    );
+    expect(WorkstreamStep.array().parse(stored?.steps)).toHaveLength(5);
   });
 });

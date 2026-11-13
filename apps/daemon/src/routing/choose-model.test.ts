@@ -575,7 +575,7 @@ describe('chooseModel: a role with no setting and no score', () => {
         }),
       ).reason,
     ).toBe(
-      `no frontier model is offered, so the capable tier: by role default: the top model of the capable tier, one effort up (floor: security-sensitive review)${UNSCORED}`,
+      `by role default: the top model of the capable tier, one effort up (floor: security-sensitive review)${UNSCORED}`,
     );
   });
 });
