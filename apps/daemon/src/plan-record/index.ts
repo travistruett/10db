@@ -1,5 +1,7 @@
 export { locateAnchor } from './anchors';
 export { backfillAttachmentRevisions } from './backfill';
+export { importBundle, planImportChanges } from './import';
+export { loadStoredRecord } from './lookup';
 export { inlineBundle, readBundleFile } from './read-bundle';
 export { appendRevision } from './revisions';
 export { findSection, indexSections, sectionText } from './sections';

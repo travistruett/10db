@@ -314,6 +314,11 @@ const contentOf = (e: {
     state: e.state,
   }) as Json;
 
+/** An entry's content as canonical JSON text: two entries with equal text are the same version. */
+export function shapeEntryContent(e: Parameters<typeof contentOf>[0]): string {
+  return JSON.stringify(contentOf(e));
+}
+
 function entryOf(row: EntryRow, version: number): ShapeEntryRow {
   return {
     ...row,
@@ -368,7 +373,7 @@ export function upsertShapeEntry(
   };
   if (held) {
     const version = versionsOf(ctx.tx, [held.id]).get(held.id) ?? 1;
-    if (JSON.stringify(contentOf(held)) === JSON.stringify(content))
+    if (shapeEntryContent(held) === JSON.stringify(content))
       return { row: entryOf(held, version), version, changed: false };
     ctx.tx
       .update(schema.shapeEntries)
