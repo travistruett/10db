@@ -1,3 +1,4 @@
+export { readAccountSecret, readAccountSecretAsync, type AccountSecret } from './account-secret';
 export {
   AA_KEY_ACCOUNT,
   execFileAsync,
