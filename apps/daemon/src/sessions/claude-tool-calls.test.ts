@@ -489,7 +489,7 @@ describe('createClaudeToolCalls', () => {
     let now = startedAt;
     const calls = createClaudeToolCalls({
       now: () => now,
-      before: () => UNREAD,
+      read: () => UNREAD,
     });
     return {
       calls,
@@ -554,6 +554,58 @@ describe('createClaudeToolCalls', () => {
     expect(
       calls.use({ id: 'toolu_2', name: 'Read', input: { file_path: 'a.ts' }, parentId: 'toolu_1' }),
     ).toMatchObject([{ call: { parentId: 'toolu_1' } }]);
+  });
+});
+
+describe('createClaudeToolCalls, a call that writes', () => {
+  const write = use('Write', { file_path: 'a.ts', content: 'new\n' });
+  const reads: string[] = [];
+  const tracker = () => {
+    reads.length = 0;
+    return createClaudeToolCalls({
+      now: () => startedAt,
+      read: (cwd, path) => {
+        reads.push(`${cwd}:${path}`);
+        return text('old\n');
+      },
+    });
+  };
+
+  it('waits for its before-text when the frame comes first, then shows the diff', () => {
+    const calls = tracker();
+    expect(calls.use(write)).toEqual([]);
+    const shown = calls.capture('toolu_1', 'Write', write.input, '/repo');
+    expect(shown).toMatchObject([
+      { call: { status: 'running', hunks: [{ before: 'old', after: 'new' }] } },
+    ]);
+    expect(calls.use(write)).toEqual([]);
+  });
+
+  it('shows the diff at once when the before-text came first', () => {
+    const calls = tracker();
+    expect(calls.capture('toolu_1', 'Write', write.input, '/repo')).toEqual([]);
+    expect(calls.use(write)).toMatchObject([
+      { call: { hunks: [{ before: 'old', after: 'new' }] } },
+    ]);
+  });
+
+  it('is mapped at its result, as the fail-safe shows it, when no before-text came', () => {
+    const calls = tracker();
+    calls.use(write);
+    expect(calls.result('toolu_1', { isError: false, content: 'ok' })).toMatchObject([
+      { call: { status: 'done', hunks: [{ before: '', after: 'new' }] } },
+    ]);
+  });
+
+  it('keeps no capture once its call ended or the session did', () => {
+    const calls = tracker();
+    calls.capture('toolu_1', 'Write', write.input, '/repo');
+    calls.result('toolu_1', { isError: true, content: 'denied' });
+    // The capture is gone: a later use of that id is mapped waiting again, not from a stale text.
+    expect(calls.use(write)).toEqual([]);
+    calls.capture('toolu_2', 'Write', write.input, '/repo');
+    calls.clear();
+    expect(calls.use(use('Write', write.input, 'toolu_2'))).toEqual([]);
   });
 });
 

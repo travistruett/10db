@@ -41,7 +41,7 @@ function mapping(streamed: readonly string[] = []) {
     stream,
     calls: createClaudeToolCalls({
       now: () => new Date('2026-11-12T10:00:00.000Z'),
-      before: () => ({ kind: 'unread' }),
+      read: () => ({ kind: 'unread' }),
     }),
   };
 }

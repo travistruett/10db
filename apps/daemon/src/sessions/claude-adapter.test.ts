@@ -3824,6 +3824,39 @@ describe('a lane streams its turn, and reports its tool calls and commands', () 
     });
   });
 
+  it('diffs a Write against the file as the hook found it when the hook comes after the frame', async () => {
+    const dir = tempDir('before-text-late');
+    try {
+      writeFileSync(join(dir.path, 'a.ts'), 'old\n');
+      const input = { file_path: 'a.ts', content: 'new\n' };
+      const { adapter } = adapterFor({
+        messages: [
+          initMessage(),
+          assistantMessage([toolUseBlock('Write', input)]),
+          toolResultMessage('toolu_1', 'ok'),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+        // The frame is mapped first; the hook's control request follows it, then the tool runs.
+        beforeMessage: {
+          2: async (options) => {
+            const answer = await askedAbout('toolu_1', 'Write', input, false, dir.path)(options);
+            writeFileSync(join(dir.path, 'a.ts'), 'new\n');
+            return answer;
+          },
+        },
+      });
+      const events = await collect(adapter.open(spec({ cwd: dir.path })).events);
+      expect(calls(events)[0]).toMatchObject({
+        kind: 'edit',
+        status: 'running',
+        change: 'update',
+        hunks: [{ before: 'old', after: 'new' }],
+      });
+    } finally {
+      dir.cleanup();
+    }
+  });
+
   it('diffs a Write against the file as the hook found it, before the tool wrote it', async () => {
     const dir = tempDir('before-text');
     try {

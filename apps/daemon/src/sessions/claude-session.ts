@@ -29,7 +29,7 @@ import {
 import { createChannel } from './channel';
 import { readCheckoutText } from './before-text';
 import { createClaudeStreamState } from './claude-stream';
-import { createBeforeTexts, createClaudeToolCalls, type ClaudeDenial } from './claude-tool-calls';
+import { createClaudeToolCalls, type ClaudeDenial } from './claude-tool-calls';
 import { judgeDenial } from './judge-denial';
 import {
   agentCommands,
@@ -547,20 +547,18 @@ function startSession(
   // What the session streams and the tool calls it makes, from each use to its result (§5.1, §5.2).
   const stream = createClaudeStreamState();
   // A written file's previous text is read in the hook, before the tool runs and writes it.
-  const beforeTexts = createBeforeTexts((cwd, path) =>
-    readCheckoutText(spec.cwd, resolve(cwd, path)),
-  );
   const toolCalls = createClaudeToolCalls({
     now: () => clock.now(),
-    before: (toolUseId) => beforeTexts.take(toolUseId),
+    read: (cwd, path) => readCheckoutText(spec.cwd, resolve(cwd, path)),
   });
   const beforeCall = (hookInput: PreToolUseHookInput): void => {
-    beforeTexts.capture(
+    for (const event of toolCalls.capture(
       hookInput.tool_use_id,
       hookInput.tool_name,
       hookInput.tool_input,
       hookInput.cwd,
-    );
+    ))
+      emit(event);
   };
   const abortController = new AbortController();
   const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
@@ -622,6 +620,7 @@ function startSession(
   const end = (reason: SessionEndReason, message: string | null): void => {
     if (ended) return;
     ended = true;
+    toolCalls.clear();
     resolvePreflight(false);
     resolveVerified(false);
     input.end();

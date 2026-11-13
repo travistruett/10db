@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { idUuid, mintId } from '@10db/contracts';
+import { idUuid, mintId, type ToolCallView } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
@@ -25,7 +25,7 @@ async function liveSession(spec: {
   readonly promptUuid?: string;
   readonly repo?: TempDir;
   readonly resume?: string;
-  readonly allowRead?: boolean;
+  readonly allowedTools?: readonly string[];
 }) {
   const login = await captureLoginEnv({ inherited: process.env });
   // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
@@ -88,7 +88,7 @@ async function liveSession(spec: {
       kind: 'lane',
       workstreamId: mintId('Workstream'),
       sequence: 1,
-      allowedTools: spec.allowRead === true ? ['Read'] : [],
+      allowedTools: spec.allowedTools ?? [],
     },
     cwd: repo.path,
     prompt: spec.prompt,
@@ -290,7 +290,7 @@ describe.skipIf(!live)('Claude adapter, live', () => {
         'Read one.txt, then two.txt, then three.txt with the Read tool, one call at a time, waiting for each result before the next call. Then reply with the three words they hold, in order.',
       promptUuid: prompt,
       repo,
-      allowRead: true,
+      allowedTools: ['Read'],
     });
     const consumed: string[] = [];
     let sent = false;
@@ -347,6 +347,29 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(providerSessionId).not.toBe('');
     expect(consumed).toContain(again);
   }, 180_000);
+  // Claude Code may write the assistant frame before the PreToolUse hook's control request. The card
+  // must still diff against the file as it was: a whole file shown as added means the capture lost.
+  it('shows a Write over an existing file as a diff of the changed line, not the whole file added', async () => {
+    const repo = createTempRepo();
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${String(i + 1)}`);
+    writeFileSync(join(repo.path, 'notes.txt'), `${lines.join('\n')}\n`);
+    const { handle, cleanup } = await liveSession({
+      prompt:
+        'Read notes.txt with the Read tool, then use the Write tool to write notes.txt again with every line the same except line 10, which becomes: ten. Do nothing else.',
+      repo,
+      allowedTools: ['Read', 'Write', 'Edit'],
+    });
+    const edits: ToolCallView[] = [];
+    for await (const event of handle.events) {
+      if (event.type === 'tool_call' && event.call.kind === 'edit') edits.push(event.call);
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+    cleanup();
+
+    // The call as first shown, the running view built when the frame was mapped.
+    expect(edits[0]).toMatchObject({ change: 'update', addedLines: 1, removedLines: 1 });
+  }, 180_000);
+
   // The one Claude core runs Plan's preflight too: the account check, the MCP registration and the
   // first message, against the real SDK.
   it('runs one Plan turn on the real claude, with no settings, plugin or project server', async () => {

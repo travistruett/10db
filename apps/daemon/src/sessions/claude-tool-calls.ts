@@ -45,7 +45,11 @@ const UNREAD: BeforeText = { kind: 'unread' };
 const Text = z.string();
 const Path = z.string().min(1);
 const BashInput = z.looseObject({ command: Text });
-const EditInput = z.looseObject({ file_path: Path, old_string: Text, new_string: Text });
+const EditInput = z.looseObject({
+  file_path: Path,
+  old_string: Text,
+  new_string: Text,
+});
 const MultiEditInput = z.looseObject({
   file_path: Path,
   edits: z.array(z.looseObject({ old_string: Text, new_string: Text })),
@@ -184,8 +188,8 @@ function untitled(
       if (!input.success) return other;
       const { file_path: path, old_string: old, new_string: next } = input.data;
       const read = before(path);
-      const line = lineOf(read.kind === 'text' ? read.text : null, old);
-      return editOf(common, path, EditChange.Update, hunksOfTexts(old, next, line));
+      const current = read.kind === 'text' ? read.text : null;
+      return editOf(common, path, EditChange.Update, hunksOfTexts(old, next, lineOf(current, old)));
     }
     case 'MultiEdit': {
       const input = MultiEditInput.safeParse(use.input);
@@ -396,10 +400,16 @@ export function claudePlanSteps(input: unknown): readonly PlanStep[] | null {
     : null;
 }
 
-/** The before-texts of calls about to write, read before the tool runs and taken once mapped. */
+/** The before-texts of calls about to write, read before the tool runs and taken once mapped or ended. */
 export interface BeforeTexts {
   capture(toolUseId: string, toolName: string, input: unknown, cwd: string): void;
   take(toolUseId: string): BeforeText;
+  /** Whether a capture is kept for the call. */
+  has(toolUseId: string): boolean;
+  /** Drops the call's capture, taken or not. */
+  discard(toolUseId: string): void;
+  /** Drops every capture. */
+  clear(): void;
 }
 
 export function createBeforeTexts(read: (cwd: string, path: string) => BeforeText): BeforeTexts {
@@ -420,12 +430,28 @@ export function createBeforeTexts(read: (cwd: string, path: string) => BeforeTex
       kept.delete(toolUseId);
       return text;
     },
+    has: (toolUseId) => kept.has(toolUseId),
+    discard(toolUseId) {
+      kept.delete(toolUseId);
+    },
+    clear() {
+      kept.clear();
+    },
   };
 }
 
 export interface ClaudeToolCalls {
-  /** `TodoWrite` gives its plan; any other tool its running call. A use seen before gives nothing. */
+  /**
+   * `TodoWrite` gives its plan; any other tool its running call. A use seen before gives nothing.
+   * A call that writes waits for its before-text (`capture`) or its result, whichever comes first,
+   * because Claude Code may send the frame before the hook that reads the file.
+   */
   use(use: ClaudeToolUse): SessionEvent[];
+  /**
+   * Reads the file a writing call is about to change, in the PreToolUse hook. Gives the call's
+   * running view when its use was already waiting for this.
+   */
+  capture(toolUseId: string, toolName: string, input: unknown, cwd: string): SessionEvent[];
   /** A kept call's final view; nothing for an id never seen or already final. */
   result(toolUseId: string, result: Omit<ClaudeToolResult, 'denial'>): SessionEvent[];
   /**
@@ -433,6 +459,8 @@ export interface ClaudeToolCalls {
    * once: its final view again, denied, since Claude Code may report a denial after the result.
    */
   deny(toolUseId: string, denial: ClaudeDenial): SessionEvent[];
+  /** The session ended: nothing is kept. */
+  clear(): void;
 }
 
 /** The denials kept for results still to come, and the final calls kept for a denial that follows. */
@@ -450,9 +478,13 @@ function remember<V>(map: Map<string, V>, key: string, value: V, kept: number): 
 /** One session's tool calls, from each use to its result. */
 export function createClaudeToolCalls(deps: {
   now(): Date;
-  before(toolUseId: string, path: string): BeforeText;
+  /** Reads the file a call is about to write, relative to the call's cwd. */
+  read(cwd: string, path: string): BeforeText;
 }): ClaudeToolCalls {
+  const texts = createBeforeTexts((cwd, path) => deps.read(cwd, path));
   const running = new Map<string, ToolCallView>();
+  /** Writing calls whose use came before their before-text, with when it came. */
+  const waiting = new Map<string, { readonly use: ClaudeToolUse; readonly startedAt: Date }>();
   const plans = new Set<string>();
   const denials = new Map<string, ClaudeDenial>();
   /** Each final call with when it ended, until a denial corrects it or it ages out. */
@@ -464,24 +496,47 @@ export function createClaudeToolCalls(deps: {
       readonly endedAt: Date;
     }
   >();
+  const begin = (use: ClaudeToolUse, startedAt: Date): ToolCallView => {
+    const call = claudeToolCall(use, { startedAt, before: () => texts.take(use.id) });
+    running.set(use.id, call);
+    return call;
+  };
+  const start = (use: ClaudeToolUse, startedAt: Date): SessionEvent[] => [
+    { type: 'tool_call', call: begin(use, startedAt) },
+  ];
   return {
     use(use) {
-      if (running.has(use.id) || plans.has(use.id)) return [];
+      if (running.has(use.id) || plans.has(use.id) || waiting.has(use.id)) return [];
       if (use.name === 'TodoWrite') {
         plans.add(use.id);
         const steps = claudePlanSteps(use.input);
         return steps === null ? [] : [{ type: 'plan_update', steps }];
       }
-      const call = claudeToolCall(use, {
-        startedAt: deps.now(),
-        before: (path) => deps.before(use.id, path),
-      });
-      running.set(use.id, call);
-      return [{ type: 'tool_call', call }];
+      const startedAt = deps.now();
+      if (
+        DIFFED.has(use.name) &&
+        FilePathInput.safeParse(use.input).success &&
+        !texts.has(use.id)
+      ) {
+        remember(waiting, use.id, { use, startedAt }, DENIALS_KEPT);
+        return [];
+      }
+      return start(use, startedAt);
+    },
+    capture(toolUseId, toolName, input, cwd) {
+      texts.capture(toolUseId, toolName, input, cwd);
+      const held = waiting.get(toolUseId);
+      if (held === undefined) return [];
+      waiting.delete(toolUseId);
+      return start(held.use, held.startedAt);
     },
     result(toolUseId, result) {
       plans.delete(toolUseId);
-      const call = running.get(toolUseId);
+      const held = waiting.get(toolUseId);
+      // The result came before any before-text: the call is mapped now, as the fail-safe shows it.
+      if (held !== undefined) waiting.delete(toolUseId);
+      const call = held === undefined ? running.get(toolUseId) : begin(held.use, held.startedAt);
+      texts.discard(toolUseId);
       const denial = denials.get(toolUseId) ?? null;
       denials.delete(toolUseId);
       if (call === undefined) return [];
@@ -503,6 +558,11 @@ export function createClaudeToolCalls(deps: {
           call: claudeToolResult(final.call, { ...final.result, denial }, final.endedAt),
         },
       ];
+    },
+    clear() {
+      running.clear();
+      waiting.clear();
+      texts.clear();
     },
   };
 }

@@ -178,7 +178,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
   // Each scripted tool call is mapped as Claude Code's would be, its before-text read as the session reads it.
   const toolCalls = createClaudeToolCalls({
     now: () => new Date(),
-    before: (_toolUseId, path) => readCheckoutText(spec.cwd, path),
+    read: (_cwd, path) => readCheckoutText(spec.cwd, path),
   });
   /** The running turn's result, as Claude Code reports it: what it took, then its completion. */
   const completeTurn = (
@@ -312,6 +312,8 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
       case 'tool': {
         const input = step.input;
         const toolUseId = `fake-tool-${String(index)}`;
+        // The hook reads the file before the tool runs; the scripted call does as its use is mapped.
+        toolCalls.capture(toolUseId, step.toolName, input, spec.cwd);
         for (const event of toolCalls.use({
           id: toolUseId,
           name: step.toolName,
