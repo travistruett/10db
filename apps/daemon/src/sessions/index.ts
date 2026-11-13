@@ -6,14 +6,10 @@ export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
 export { nativeJudge } from './native-judge';
 export { createRoutedAdapter } from './routed-adapter';
-export {
-  FAKE_ACCOUNT_EMAIL,
-  FakeAdapter,
-  FakeScriptBook,
-  loadFakeScriptBook,
-} from './fake-adapter';
-export { scriptedShapeBehaviour } from './fake-shape';
-export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
+export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
+export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
+export { scriptedShapeBehaviour } from './fake-plan-script';
+export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-session';
 export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from './account-check';
 export {
   AccountLoginError,
