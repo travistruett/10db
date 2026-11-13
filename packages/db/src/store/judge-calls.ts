@@ -1,13 +1,14 @@
 import {
   mintId,
   type JudgeCallDto,
+  type JudgeCallsPageDto,
   type JudgeCallId,
   type JudgeDecision,
   type JudgeOutcome,
   type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, count, desc, eq, lt, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -66,6 +67,45 @@ export function listJudgeCalls(db: DbReader, limit: number): JudgeCallDto[] {
     .orderBy(desc(schema.judgeCalls.createdAt), desc(schema.judgeCalls.id))
     .limit(limit)
     .all();
+}
+
+/** One page of the call log, newest first, with every call the filters match counted in `total`. */
+export function pageJudgeCalls(
+  db: DbReader,
+  q: {
+    readonly limit: number;
+    readonly offset: number;
+    readonly decision?: JudgeDecision | undefined;
+    readonly outcome?: JudgeOutcome | undefined;
+  },
+): JudgeCallsPageDto {
+  const filters: SQL[] = [];
+  if (q.decision !== undefined) filters.push(eq(schema.judgeCalls.decision, q.decision));
+  if (q.outcome !== undefined) filters.push(eq(schema.judgeCalls.outcome, q.outcome));
+  const where = filters.length > 0 ? and(...filters) : undefined;
+  const calls = db
+    .select({
+      id: schema.judgeCalls.id,
+      decision: schema.judgeCalls.decision,
+      model: schema.judgeCalls.model,
+      question: schema.judgeCalls.question,
+      answer: schema.judgeCalls.answer,
+      confidence: schema.judgeCalls.confidence,
+      outcome: schema.judgeCalls.outcome,
+      latencyMs: schema.judgeCalls.latencyMs,
+      costUsd: schema.judgeCalls.costUsd,
+      workstreamId: schema.judgeCalls.workstreamId,
+      taskId: schema.judgeCalls.taskId,
+      createdAt: schema.judgeCalls.createdAt,
+    })
+    .from(schema.judgeCalls)
+    .where(where)
+    .orderBy(desc(schema.judgeCalls.createdAt), desc(schema.judgeCalls.id))
+    .limit(q.limit)
+    .offset(q.offset)
+    .all();
+  const total = db.select({ n: count() }).from(schema.judgeCalls).where(where).get()?.n ?? 0;
+  return { calls, total };
 }
 
 /** Deletes calls made before `cutoff` (an ISO time) and answers how many. */

@@ -1,4 +1,4 @@
-import { JudgeOutcome } from '@10db/contracts';
+import { JudgeDecision, JudgeOutcome, type DecisionStatsDto } from '@10db/contracts';
 import { and, gte, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader } from './store';
@@ -15,7 +15,11 @@ export interface JudgeCallModelStat {
 }
 
 /** The outcomes of a call that got an answer; a fallback or a cut-short call has none. */
-const ANSWERED = [JudgeOutcome.Acted, JudgeOutcome.BelowFloor, JudgeOutcome.Shadow];
+const ANSWERED: readonly JudgeOutcome[] = [
+  JudgeOutcome.Acted,
+  JudgeOutcome.BelowFloor,
+  JudgeOutcome.Shadow,
+];
 
 function median(values: readonly number[]): number | null {
   const sorted = [...values].sort((a, b) => a - b);
@@ -36,7 +40,10 @@ export function judgeCallModelStats(db: DbReader, since: string): JudgeCallModel
     })
     .from(schema.judgeCalls)
     .where(
-      and(gte(schema.judgeCalls.createdAt, since), inArray(schema.judgeCalls.outcome, ANSWERED)),
+      and(
+        gte(schema.judgeCalls.createdAt, since),
+        inArray(schema.judgeCalls.outcome, [...ANSWERED]),
+      ),
     )
     .all();
   const byModel = new Map<string, typeof rows>();
@@ -53,4 +60,54 @@ export function judgeCallModelStats(db: DbReader, since: string): JudgeCallModel
         medianLatencyMs: median(calls.flatMap((c) => (c.latencyMs === null ? [] : [c.latencyMs]))),
       };
     });
+}
+
+/**
+ * What each decision's calls since `since` came to, for the decisions that have any. `calls` counts every call;
+ * a stopped call is counted apart from the fallbacks, since nothing failed. Cost sums every logged cost, and the
+ * median latency and the answers come from the calls that got an answer, so a timeout does not stretch them.
+ */
+export function judgeDecisionStats(db: DbReader, since: string): DecisionStatsDto[] {
+  const rows = db
+    .select({
+      decision: schema.judgeCalls.decision,
+      model: schema.judgeCalls.model,
+      outcome: schema.judgeCalls.outcome,
+      confidence: schema.judgeCalls.confidence,
+      latencyMs: schema.judgeCalls.latencyMs,
+      costUsd: schema.judgeCalls.costUsd,
+    })
+    .from(schema.judgeCalls)
+    .where(gte(schema.judgeCalls.createdAt, since))
+    .all();
+  return Object.values(JudgeDecision).flatMap((decision) => {
+    const own = rows.filter((r) => r.decision === decision);
+    if (own.length === 0) return [];
+    const count = (outcome: JudgeOutcome): number =>
+      own.filter((r) => r.outcome === outcome).length;
+    const answered = own.filter((r) => ANSWERED.includes(r.outcome));
+    return [
+      {
+        decision,
+        calls: own.length,
+        acted: count(JudgeOutcome.Acted),
+        belowFloor: count(JudgeOutcome.BelowFloor),
+        shadow: count(JudgeOutcome.Shadow),
+        stopped: count(JudgeOutcome.Stopped),
+        fallbacks: {
+          off: count(JudgeOutcome.FallbackOff),
+          no_key: count(JudgeOutcome.FallbackNoKey),
+          timeout: count(JudgeOutcome.FallbackTimeout),
+          error: count(JudgeOutcome.FallbackError),
+        },
+        costUsd: own.reduce((sum, r) => sum + (r.costUsd ?? 0), 0),
+        medianLatencyMs: median(
+          answered.flatMap((r) => (r.latencyMs === null ? [] : [r.latencyMs])),
+        ),
+        answers: answered.flatMap((r) =>
+          r.confidence === null ? [] : [{ model: r.model, confidence: r.confidence }],
+        ),
+      },
+    ];
+  });
 }

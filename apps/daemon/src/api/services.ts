@@ -61,7 +61,10 @@ import type {
   InboxItemId,
   InboxState,
   DecisionModelListDto,
+  DecisionStatsListDto,
   JudgeCallDto,
+  JudgeCallsPageDto,
+  JudgeCallsPageQuery,
   JudgeConfigPatch,
   JudgeStatusDto,
   JudgeTestResultDto,
@@ -288,6 +291,10 @@ export interface ApiServices extends PlanRecordServices {
   testAccount(id: AccountId): Promise<JudgeTestResultDto>;
   /** The most recent calls, newest first. */
   listJudgeCalls(limit: number): JudgeCallDto[];
+  /** One page of the call log, newest first, filtered; `total` counts every call the filters match. */
+  pageJudgeCalls(query: JudgeCallsPageQuery): JudgeCallsPageDto;
+  /** What each decision's calls of the last 30 days came to. */
+  judgeDecisionStats(): DecisionStatsListDto;
   /** OpenRouter's decision models; ConflictError with the judge off, UpstreamError when OpenRouter can't be read. */
   listDecisionModels(): Promise<DecisionModelListDto>;
   listProjects(): ProjectViewDto[];

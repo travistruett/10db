@@ -2160,6 +2160,18 @@ describe('judge routes', () => {
     },
     { route: 'GET /judge/calls', method: 'GET', path: '/judge/calls', service: 'listJudgeCalls' },
     {
+      route: 'GET /judge/calls/page',
+      method: 'GET',
+      path: '/judge/calls/page',
+      service: 'pageJudgeCalls',
+    },
+    {
+      route: 'GET /judge/decisions',
+      method: 'GET',
+      path: '/judge/decisions',
+      service: 'judgeDecisionStats',
+    },
+    {
       route: 'GET /judge/models',
       method: 'GET',
       path: '/judge/models',
@@ -2185,6 +2197,31 @@ describe('judge routes', () => {
     const res = await app().request(path, { ...json, method, body: JSON.stringify(body) });
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
+  });
+
+  it.each([
+    ['?decision=nope', '/judge/calls/page?decision=nope'],
+    ['?outcome=nope', '/judge/calls/page?outcome=nope'],
+    ['a negative offset', '/judge/calls/page?offset=-1'],
+  ])('answers 400 for the call page with %s without reaching a service', async (_name, path) => {
+    expect((await app().request(path, auth)).status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it('reads the page query, with the limit and the offset it is given', async () => {
+    const seen: unknown[] = [];
+    const services = stubServices({
+      pageJudgeCalls: (q) => {
+        seen.push(q);
+        return { calls: [], total: 0 };
+      },
+    });
+    const res = await app(services).request(
+      '/judge/calls/page?limit=500&offset=40&decision=review_size&outcome=acted',
+      auth,
+    );
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([{ limit: 100, offset: 40, decision: 'review_size', outcome: 'acted' }]);
   });
 
   it.each([

@@ -4,11 +4,15 @@ import {
   AccountCreatedDto,
   AccountDto,
   DecisionModelListDto,
+  DecisionStatsListDto,
+  JudgeCallsPageDto,
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
   JudgeStatusDto,
   JudgeTestResultDto,
   mintId,
+  type JudgeDecision,
+  type JudgeOutcome,
 } from '@10db/contracts';
 import { insertJudgeCall } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -573,6 +577,70 @@ describe('GET /judge/models', () => {
     const { raw } = await start({ judgeOff: true });
     expect((await raw('GET', '/judge/models')).status).toBe(409);
     expect(openRouterRequests).toEqual([]);
+  });
+});
+
+describe('the call log, paged, and the decision stats', () => {
+  function seed(d: RunningDaemon, calls: { decision: JudgeDecision; outcome: JudgeOutcome }[]) {
+    calls.forEach((c, i) => {
+      d.state.write((ctx) => {
+        insertJudgeCall(ctx, {
+          ...c,
+          model: 'liquid/d1',
+          state: 'SECRET TASK TEXT',
+          question: `q${String(i)}`,
+          answer: 'skip',
+          confidence: 0.8,
+          latencyMs: 100 * (i + 1),
+          costUsd: 0.001,
+          workstreamId: null,
+          taskId: null,
+        });
+      });
+    });
+  }
+  const mix: { decision: JudgeDecision; outcome: JudgeOutcome }[] = [
+    { decision: 'review_size', outcome: 'acted' },
+    { decision: 'shape_ready', outcome: 'below_floor' },
+    { decision: 'review_size', outcome: 'stopped' },
+    { decision: 'review_size', outcome: 'fallback_timeout' },
+    { decision: 'review_size', outcome: 'acted' },
+  ];
+
+  it('reads the seeded calls back filtered and paged, with the total of the filter', async () => {
+    const { api, daemon: d } = await start();
+    seed(d, mix);
+    const page = await api.get(
+      '/judge/calls/page?decision=review_size&limit=2&offset=1',
+      JudgeCallsPageDto,
+    );
+    expect(page.calls.map((c) => c.question)).toEqual(['q3', 'q2']);
+    expect(page.total).toBe(4);
+    expect(JSON.stringify(page)).not.toContain('SECRET TASK TEXT');
+    const acted = await api.get('/judge/calls/page?outcome=acted', JudgeCallsPageDto);
+    expect(acted.calls.map((c) => c.question)).toEqual(['q4', 'q0']);
+    expect(acted.total).toBe(2);
+  });
+
+  it('answers 400 for an unknown decision or outcome', async () => {
+    const { raw } = await start();
+    expect((await raw('GET', '/judge/calls/page?decision=nope')).status).toBe(400);
+    expect((await raw('GET', '/judge/calls/page?outcome=nope')).status).toBe(400);
+  });
+
+  it('counts a stopped call apart from the fallbacks', async () => {
+    const { api, daemon: d } = await start();
+    seed(d, mix);
+    const stats = await api.get('/judge/decisions', DecisionStatsListDto);
+    expect(stats.decisions.find((s) => s.decision === 'review_size')).toMatchObject({
+      calls: 4,
+      acted: 2,
+      stopped: 1,
+      fallbacks: { off: 0, no_key: 0, timeout: 1, error: 0 },
+    });
+    expect(stats.decisions.find((s) => s.decision === 'shape_ready')).toMatchObject({
+      belowFloor: 1,
+    });
   });
 });
 

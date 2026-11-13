@@ -15,8 +15,10 @@ import {
   getAccountRow,
   getJudgeConfig,
   judgeCallModelStats,
+  judgeDecisionStats,
   listJudgeCalls,
   listOpenRouterMeasures,
+  pageJudgeCalls,
   patchJudgeConfig,
 } from '@10db/db';
 import type { ApiServices } from '../api';
@@ -41,7 +43,13 @@ import {
 /** The judge's side of the HTTP API: its config, the account it runs on, the account test and the call log. */
 export type JudgeApiServices = Pick<
   ApiServices,
-  'judgeStatus' | 'patchJudge' | 'testAccount' | 'listJudgeCalls' | 'listDecisionModels'
+  | 'judgeStatus'
+  | 'patchJudge'
+  | 'testAccount'
+  | 'listJudgeCalls'
+  | 'pageJudgeCalls'
+  | 'judgeDecisionStats'
+  | 'listDecisionModels'
 >;
 
 /** The models a patch sets that differ from the ones saved, each once. */
@@ -181,6 +189,11 @@ export function createJudgeServices(deps: {
       return keychainConflict(() => deps.judge.test(id));
     },
     listJudgeCalls: (limit) => listJudgeCalls(deps.state.db, limit),
+    pageJudgeCalls: (query) => pageJudgeCalls(deps.state.db, query),
+    judgeDecisionStats() {
+      const since = new Date(deps.clock.now().getTime() - JUDGE_LOG_RETENTION_MS).toISOString();
+      return { since, decisions: judgeDecisionStats(deps.state.db, since) };
+    },
     async listDecisionModels() {
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
       try {
