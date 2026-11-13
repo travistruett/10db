@@ -17,6 +17,7 @@ import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  JudgeKind,
   mintId,
   PermissionChoice,
   Provider,
@@ -438,6 +439,8 @@ async function runLane(opts: {
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       preToolUse: (req) => {
         const verdict = judgePreToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
           toolName: req.toolName,
           toolInput: req.input,
           repoPath: opts.checkout,

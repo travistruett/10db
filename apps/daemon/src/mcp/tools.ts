@@ -17,6 +17,7 @@ import {
   REVIEW_ROLES,
   StepRole,
   ToolAccess,
+  JudgeKind,
   Urgency,
   WorkspaceMode,
   type McpToolInputs,
@@ -779,6 +780,8 @@ export function createToolHandlers(
           opId: input.opId,
           judge: (path) => {
             const verdict = judgeToolUse({
+              judge: JudgeKind.Rules,
+              coveredByAllowRule: false,
               toolName: 'Write',
               toolInput: { file_path: path },
               repoPath: checkout,
@@ -804,6 +807,8 @@ export function createToolHandlers(
       const claims = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
       for (const path of input.paths) {
         const verdict = judgeToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
           toolName: 'Write',
           toolInput: { file_path: path },
           repoPath: checkout,

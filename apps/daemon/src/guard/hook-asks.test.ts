@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
+import { ClaimKind, DEFAULT_HAZARDS, JudgeKind } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { judgePreToolUse, protectedPaths, type FileAccessJudge } from './index';
@@ -31,6 +31,8 @@ function pre(
   fileAccess?: FileAccessJudge,
 ) {
   return judgePreToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     toolName,
     toolInput,
     repoPath: repo.path,

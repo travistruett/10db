@@ -50,6 +50,7 @@ import {
   PassState,
   PassTurnEnding,
   PassTurnId,
+  JudgeKind,
   Provider,
   providerOf,
   TakeOutStep,
@@ -2461,7 +2462,10 @@ export function createRunner(opts: RunnerOptions): Runner {
               filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
-            webJudged,
+            // Rules until the lane's real judge is wired in; webOn stays what the native judge gave.
+            judge: JudgeKind.Rules,
+            coveredByAllowRule: false,
+            webOn: webJudged,
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },

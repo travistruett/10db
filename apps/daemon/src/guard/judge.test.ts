@@ -1,7 +1,7 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_HAZARDS, type ClaimKind, type Delivery } from '@10db/contracts';
+import { DEFAULT_HAZARDS, JudgeKind, type ClaimKind, type Delivery } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SANDBOXED, tempDir } from '../../test/fixtures';
 import {
@@ -76,6 +76,8 @@ function judge(
   readOnly = false,
 ) {
   return judgeToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     toolName,
     toolInput,
     repoPath: repo.path,
@@ -331,6 +333,8 @@ describe('file edits', () => {
     },
   ])('$name', ({ inPass, claims, path, decision, reason }) => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
       repoPath: repo.path,
@@ -789,6 +793,8 @@ describe.each([
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: own.path,
@@ -836,6 +842,8 @@ describe('a path decided by its collapsed reading', () => {
 
   it('denies an edit whose kernel reading is claimed but whose text is not', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: 'docs/lk/../x.ts' },
       repoPath: own.path,
@@ -870,6 +878,8 @@ describe('rm -r arguments beyond a plain path', () => {
   });
   const run = (command: string) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command },
       repoPath: own.path,
@@ -1385,6 +1395,8 @@ describe('protected paths reached through a link and ..', () => {
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repoDir(),
@@ -1557,6 +1569,8 @@ describe('classifyPath with dotfiles', () => {
 
   it('lets an area edit a dotfile once it claims the area', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: '.gitignore' },
       repoPath: repo.path,
@@ -1577,6 +1591,8 @@ describe('classifyPath with dotfiles', () => {
     'denies an edit of %s with the ** area claimed and no file-access judge',
     (path) => {
       const verdict = judgeToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
         toolName: 'Edit',
         toolInput: { file_path: path },
         repoPath: repo.path,
@@ -1831,6 +1847,8 @@ describe('read-only steps', () => {
 describe('delivery and gh', () => {
   const run = (command: string, delivery: Delivery) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command },
       repoPath: repo.path,
@@ -2177,6 +2195,8 @@ describe('delivery and gh', () => {
 
   it('tells an agent that 10db pushes, whatever the delivery', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command: 'git push origin feat/x' },
       repoPath: repo.path,
@@ -2217,6 +2237,8 @@ describe('file access judge', () => {
     toolInput: unknown,
   ) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repo.path,
@@ -2510,6 +2532,8 @@ describe('account isolation with a nested data directory', () => {
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repo.path,

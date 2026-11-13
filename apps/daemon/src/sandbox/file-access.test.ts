@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { JudgeKind } from '@10db/contracts';
 import { judgeToolUse, type FileAccessJudge } from '../guard';
 import {
   fileAccessJudge,
@@ -762,6 +763,8 @@ describe('a path in the worktrees folder outside the lane’s copy', () => {
 describe('fileAccessJudge in the guard', () => {
   const guard = (fileAccess: FileAccessJudge, toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: checkout,
@@ -810,6 +813,8 @@ describe('fileAccessJudge in the guard', () => {
     const secret = () => join(checkout, 'apps', 'daemon', '.env.example');
     const at = (fileAccess: FileAccessJudge, toolName: string, toolInput: unknown, cwd?: string) =>
       judgeToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
         toolName,
         toolInput,
         repoPath: checkout,
