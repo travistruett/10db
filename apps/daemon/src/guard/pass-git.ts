@@ -56,16 +56,9 @@ const PUSH: Options = {
   shortValues: '',
 };
 const GH_MERGE: Options = {
-  flags: new Set([
-    '--squash',
-    '--merge',
-    '--rebase',
-    '--delete-branch',
-    '--auto',
-    '--disable-auto',
-  ]),
+  flags: new Set(['--squash', '--merge', '--rebase', '--auto', '--disable-auto']),
   values: new Set(['--subject', '--body', '--match-head-commit']),
-  shortFlags: 'smrd',
+  shortFlags: 'smr',
   shortValues: 'tb',
 };
 
@@ -80,6 +73,8 @@ const WHY_REFUSED: Readonly<Record<string, string>> = {
   '--delete': 'it removes a branch on the remote',
   '-d': 'it removes a branch on the remote',
   '--prune': 'it removes branches on the remote',
+  '--delete-branch':
+    'it removes the branch and checks out the default one, and a pass stays on its branch',
   '--amend': 'it rewrites a commit that is already made',
   '--admin': 'it passes over the branch rules',
   '-R': 'it names another repository',

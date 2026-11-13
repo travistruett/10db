@@ -124,10 +124,13 @@ describe('passGitCall', () => {
       'gh pr merge 12 --squash',
       run(['gh', 'pr', 'merge', '12', '--squash']),
     ],
+    // Deleting the branch checks out the default branch, and a pass never switches branches.
+    ['a pull request merge that deletes the branch', 'gh pr merge 12 -d', REFUSE],
+    ['a pull request merge that deletes the branch, clustered', 'gh pr merge 12 -sd', REFUSE],
     [
-      'a pull request merge of the branch',
-      'gh pr merge --squash -d',
-      run(['gh', 'pr', 'merge', '--squash', '-d']),
+      'a pull request merge that deletes the branch, long',
+      'gh pr merge 12 --delete-branch',
+      REFUSE,
     ],
     [
       'a pull request merge with a subject',

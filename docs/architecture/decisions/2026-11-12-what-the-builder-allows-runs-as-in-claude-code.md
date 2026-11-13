@@ -35,12 +35,13 @@
    exit code. Nothing the agent wrote rides along: each call carries only options that read nothing outside the
    checkout (commit: `-m`/`--message`, `--no-edit`, `--allow-empty`, `-a`, `-q`, `--no-verify`, paths; merge:
    those for a merge and a branch name; push: `-u`, `-q`, `-v`, `-n`, `--no-verify`, `--follow-tags`; gh: the
-   merge method, `--delete-branch`, `--auto`, `--subject`, `--body`), a push names a remote the checkout's own
+   merge method, `--auto`, `--subject`, `--body`), a push names a remote the checkout's own
    `git remote` lists (checked when it runs, so a folder named like a remote is never the target), and every
    push destination is a plain branch name, `refs/heads/<name>`, `HEAD` or `@`. Still refused, with no card and a
    plain reason: a force push, `--mirror`, `--all`, a delete, a push to `main` or the base branch in any case (a
    push of the current branch is checked when it runs), `--amend`, a message, template or paths read from a file,
-   a merge strategy, `gh pr merge --admin`, a pull request named by URL or in another repository, git's own
+   a merge strategy, `gh pr merge --admin` or `--delete-branch` (it checks out the default branch, and a pass stays
+   on its branch), a pull request named by URL or in another repository, git's own
    options (`-C`, `-c`), and every other spelling (a wrapper, a variable, a substitution, a redirection, a second
    command). Lanes are unchanged: coordination still refuses git and gh writes there.
 
