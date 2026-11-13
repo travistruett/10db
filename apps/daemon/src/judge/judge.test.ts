@@ -232,7 +232,8 @@ describe('judge.choose with another decision model', () => {
         decision: {
           type: 'choice',
           instructions: request.question,
-          criteria: { review: null, skip: null },
+          // Some makers (Parallel, ScaleDown) refuse a null criterion: an option with none is described by its name.
+          criteria: { review: 'review', skip: 'skip' },
         },
       },
     });

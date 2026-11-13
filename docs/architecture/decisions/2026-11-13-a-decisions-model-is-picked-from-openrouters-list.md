@@ -13,7 +13,13 @@
   keeps TypeSafe's models (`typesafe/*`, `~typesafe/*`) on `/api/v1/systemone`, sends every other model the list
   names to `/api/alpha/decisions`, and sends a model the list leaves out to chat completions as before. With the list
   unreadable, a model is taken to be a decision model. An answer with neither a probability for its choice nor a
-  confidence can't be held to a floor, so it is a fallback.
+  confidence can't be held to a floor, so it is a fallback. On the decisions endpoint an option with no description
+  is described by its own name, because some makers refuse a null criterion.
+- **Checked live on 2026-11-13**, one choice call per maker family on the builder's key: TypeSafe, Perplexity,
+  Liquid, Cloudflare Clef, Google, Microsoft, OpenAI, HeyGen, Baseten, Nace, Respan, Upstage, Morph, Jared Palmer and
+  Together answered on `/api/alpha/decisions` with probabilities and a confidence. Parallel and ScaleDown answered
+  once each option had a string criterion. `cloudflare/clairic` answered 404 (extractions only). Chat completions
+  refuses a decision model ("is a decisions model and cannot be used with the chat/completions endpoint").
 - **The daemon reads the list.** `GET /judge/models` answers the decision models (id, maker, name, whether it is a
   `~...-latest` router, price per million input and output tokens, and why 10db can't call it, if it can't), read
   without a key from OpenRouter and kept for 6 hours; an old copy outlives a failed read. The UI never calls
@@ -35,7 +41,8 @@ that answers nothing 10db can read, which every decision then fell back from wit
 model at save time turns that silent failure into a refusal the builder sees.
 
 Turned down: moving TypeSafe to `/api/alpha/decisions` (the endpoint is alpha and may change; `systemone` is the one
-10db has run on); dropping chat completions (a config saved before keeps working); recording each decision's
+10db has run on); sending every decision model to `/systemone`, which answered `liquid/d1` too (OpenRouter documents
+it for TypeSafe's SDK and names `/api/alpha/decisions` for the rest); dropping chat completions (a config saved before keeps working); recording each decision's
 endpoint in its config (the list already says it, and a stale record would outlive a model moving).
 
 Provider parity: decisions run on an OpenRouter account on every kind of account a project uses, so the picker and

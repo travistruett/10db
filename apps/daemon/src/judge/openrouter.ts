@@ -150,8 +150,13 @@ async function askDecision(q: ModelQuestion, url: string): Promise<ModelAnswer> 
       [QUESTION_NAME]: {
         type: 'choice',
         instructions: q.question,
+        // System One takes a null criterion; some makers on the decisions endpoint (Parallel, ScaleDown) refuse one,
+        // so there an option with no description is described by its name.
         criteria: Object.fromEntries(
-          q.options.map((option) => [option, q.criteria?.[option] ?? null]),
+          q.options.map((option) => [
+            option,
+            q.criteria?.[option] ?? (q.api === ModelApi.Decisions ? option : null),
+          ]),
         ),
       },
     },
