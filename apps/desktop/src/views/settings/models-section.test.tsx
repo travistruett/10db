@@ -701,7 +701,7 @@ describe('the Models page', () => {
         model: `solo-${String(i)}`,
         name: `Solo ${String(i)}`,
         family: `solo-${String(i)}`,
-        availableOn: [SUBSCRIPTION.id],
+        availableOn: [SUBSCRIPTION.id, KEYED.id],
         intelligence: 90 - i,
       }),
     );
@@ -734,20 +734,53 @@ describe('the Models page', () => {
       });
     });
 
-    it('goes back to the first page when the Model filter changes', async () => {
+    it.each<[string, () => Promise<void>]>([
+      [
+        'the Model filter',
+        async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Filter Model' }));
+          fireEvent.change(await screen.findByRole('textbox', { name: 'Search models' }), {
+            target: { value: 'solo' },
+          });
+        },
+      ],
+      [
+        'the sort',
+        async () => {
+          fireEvent.click(
+            await screen.findByRole('button', { name: 'Sort by Intelligence, descending' }),
+          );
+        },
+      ],
+      [
+        'the account',
+        async () => {
+          await chooseAccount('Work key');
+        },
+      ],
+    ])('goes back to the first page when %s changes', async (_case, change) => {
       serve({ rows: many, forAccount: () => many });
       await renderWithDaemonAndRouter(<ModelsSection />);
       await screen.findByRole('button', { name: 'Open Solo 0' });
       fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
-      await screen.findByRole('button', { name: 'Open Solo 29' });
-      fireEvent.click(screen.getByRole('button', { name: 'Filter Model' }));
-      fireEvent.change(await screen.findByRole('textbox', { name: 'Search models' }), {
-        target: { value: 'solo' },
+      expect(await screen.findByText('26–30 of 30')).toBeTruthy();
+      await change();
+      expect(await screen.findByText('1–25 of 30')).toBeTruthy();
+    });
+
+    it('stays on a page that exists when a refresh shrinks the list', async () => {
+      let rows = many;
+      serve({ rows, forAccount: () => rows });
+      const { queryClient } = await renderWithDaemonAndRouter(<ModelsSection />);
+      await screen.findByRole('button', { name: 'Open Solo 0' });
+      fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+      expect(await screen.findByText('26–30 of 30')).toBeTruthy();
+      rows = many.slice(0, 20);
+      await act(async () => {
+        await queryClient.refetchQueries();
       });
-      await waitFor(() => {
-        expect(shownNames()[0]).toBe('Solo 0');
-      });
-      expect(screen.getByText('1–25 of 30')).toBeTruthy();
+      expect(await screen.findByText('1–20 of 20')).toBeTruthy();
+      expect(shownNames()).toHaveLength(20);
     });
 
     it('nests a family’s older versions under its current model, and opening them opens no drawer', async () => {
@@ -756,7 +789,9 @@ describe('the Models page', () => {
       await renderWithDaemonAndRouter(<ModelsSection />);
       await screen.findByRole('button', { name: 'Open Zed 2' });
       expect(shownNames()).toEqual(['Zed 2']);
-      fireEvent.click(within(rowOf('Zed 2')).getByRole('button', { name: '2 older' }));
+      fireEvent.click(
+        within(rowOf('Zed 2')).getByRole('button', { name: 'Show 2 older versions of Zed 2' }),
+      );
       await screen.findByRole('button', { name: 'Open Zed 1' });
       expect(shownNames()).toEqual(['Zed 2', 'Zed 1', 'Zed 0']);
       expect(screen.queryByRole('dialog')).toBeNull();
@@ -769,7 +804,9 @@ describe('the Models page', () => {
       serve({ rows, forAccount: () => rows });
       await renderWithDaemonAndRouter(<ModelsSection />);
       await screen.findByRole('button', { name: 'Open Zed 2' });
-      fireEvent.click(within(rowOf('Zed 2')).getByRole('button', { name: '1 older' }));
+      fireEvent.click(
+        within(rowOf('Zed 2')).getByRole('button', { name: 'Show 1 older version of Zed 2' }),
+      );
       await screen.findByRole('button', { name: 'Open Zed 1' });
       fireEvent.click(within(rowOf('Zed 1')).getByText('Superseded'));
       expect(await screen.findByRole('dialog', { name: 'Zed 1' })).toBeTruthy();
@@ -781,9 +818,20 @@ describe('the Models page', () => {
       serve({ rows, forAccount: () => rows });
       await renderWithDaemonAndRouter(<ModelsSection />);
       await screen.findByRole('button', { name: 'Open Alpha Max' });
-      fireEvent.click(within(rowOf('Alpha Max')).getByRole('button', { name: '1 older' }));
+      // Folded, the family's row says a role runs on a version under it.
+      expect(within(rowOf('Alpha Max')).getByText('Review, on an older version')).toBeTruthy();
+      fireEvent.click(
+        within(rowOf('Alpha Max')).getByRole('button', {
+          name: 'Show 1 older version of Alpha Max',
+        }),
+      );
       await screen.findByRole('button', { name: 'Open Alpha Fast' });
       expect(within(rowOf('Alpha Fast')).getByText('Review')).toBeTruthy();
+      expect(
+        within(rowOf('Alpha Max')).getByRole('button', {
+          name: 'Hide 1 older version of Alpha Max',
+        }),
+      ).toBeTruthy();
     });
   });
 });

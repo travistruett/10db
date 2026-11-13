@@ -44,6 +44,14 @@ describe('groupByFamily', () => {
       ],
     ],
     [
+      'families rank by their best member, so a cheap older version is never buried',
+      [row('x-1', { status: 'superseded' }), row('y-1', { family: 'family-y' }), row('x-2')],
+      [
+        ['x-2', ['x-1']],
+        ['y-1', []],
+      ],
+    ],
+    [
       'models with no family stand alone, never merged',
       [row('x', { family: null }), row('y', { family: null })],
       [

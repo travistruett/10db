@@ -25,7 +25,7 @@ import {
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
-import { usePaging } from '../knowledge/knowledge-paging';
+import { TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { ModelDrawer } from './model-drawer';
 import { groupByFamily } from './model-families';
 import { catalogueLine, costNote } from './model-format';
@@ -86,7 +86,7 @@ export function ModelsSection() {
   const [selected, setSelected] = useState<ModelRowDto | null>(null);
   const [opened, setOpened] = useState(false);
   // The list goes back to its first page whenever what it holds or its order changes.
-  const paging = usePaging(JSON.stringify([filter, sort, accountId]));
+  const paging = usePaging(JSON.stringify([filter, sort, accountId]), TABLE_PAGE_SIZES[0]);
 
   const header = (
     <Stack gap={4}>
@@ -232,10 +232,9 @@ export function ModelsSection() {
   const families = groupByFamily(
     sortModels(filterModels(everyModel, { ...filter, accountId }), sort),
   );
-  const shownFamilies = families.slice(
-    (paging.page - 1) * paging.pageSize,
-    paging.page * paging.pageSize,
-  );
+  // A refresh can shrink the list under the page; the page shown is never past the last one.
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
+  const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
   const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
   const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role, dots });
   const names = new Map(everyModel.map((r) => [r.model, r.name]));
@@ -316,7 +315,7 @@ export function ModelsSection() {
         ) : (
           <ModelsTable
             families={shownFamilies}
-            paging={{ ...paging, total: families.length }}
+            paging={{ ...paging, page, total: families.length }}
             filter={filter}
             onFilter={setFilter}
             sort={sort}

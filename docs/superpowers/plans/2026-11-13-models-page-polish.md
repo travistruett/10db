@@ -102,7 +102,7 @@ expansion and the pager Knowledge already uses.
   and `groupByFamily(sorted: readonly ModelRowDto[]): ModelFamily[]`. Families are keyed `${maker}/${family}`, or
   the model ID when either is null. Every Current model leads an entry (two current models of one family are two
   rows); a family's other versions go under its first Current model, or with none under its first row. Entries
-  keep their lead's place in the sort; `key` is the lead's model ID. Page size is Knowledge's (25).
+  take the place of their best-sorted row, lead or older; `key` is the lead's model ID. Page size is Knowledge's (25).
 
 - [ ] **Step 1:** Write `model-families.test.ts` as a named table: one family of three sorted by Intelligence →
       one group, lead the Current one; two families interleaved → order of first appearance; a Superseded row
@@ -117,13 +117,22 @@ expansion and the pager Knowledge already uses.
       "2 older" on its lead row, and clicking it reveals them without opening the drawer; clicking an older row
       opens the drawer on that model; an older row a role picks shows that role under Used by.
 - [ ] **Step 6:** Run them: FAIL.
-- [ ] **Step 7:** Render families in `ModelsTable`: records are the page's `ModelFamily` leads (`idAccessor` the
-      key); the Model cell shows an expand control ("N older", its own button that stops propagation) when
-      `older` is non-empty; `rowExpansion` renders the older rows in a nested `DataTable` with `noHeader` and the
-      same columns. Paging is client-side: `page` state in `ModelsSection`, reset to 1 when filter, sort or
-      account changes, and the shared pager props.
+- [ ] **Step 7:** Render families in `ModelsTable`: records are each page entry's lead, followed by its `older`
+      rows when the entry is open, all rows of the one table so the columns align (`idAccessor` the model ID); an
+      older row is indented. The lead's Model cell shows an "N older" toggle (its own button, `aria-expanded`, named
+      "Show/Hide N older versions of <name>", stops propagation) when `older` is non-empty; folded, its Used by
+      also names, dimmed, the roles that run on an older version. Paging is client-side with `usePaging` and
+      `pagerProps` from `shell/table-pager.ts` (moved there from Knowledge): reset to page 1 when filter, sort or
+      account changes, clamped to the last page, and the pager text counted from page, size and total.
 - [ ] **Step 8:** Run `pnpm --filter @10db/desktop exec vitest run src/views/settings src/views/knowledge`: PASS.
 - [ ] **Step 9:** Commit: `feat(desktop): the models list nests each family's older versions and pages 25 at a time`.
+
+**Value cards (Task 3):**
+
+- `protects=every current model stays a row, older versions nest under their family, and a family ranks by its best row; fails_when=grouping hides a current model, drops a filtered family or buries a cheap older version; why_new=no test grouped models; no_claim=that models.dev family names match how makers name families`
+- `protects=the list shows 25 entries a page, returns to page 1 when filter, sort or account changes, and never shows a page past the last; fails_when=the page outlives what the list holds; why_new=the models list had no paging; no_claim=paging for lists the daemon pages (Knowledge, Plan record), which their own tests cover`
+- `protects=the "N older" toggle opens no drawer, an older row does, and a folded family names the roles on its older versions; fails_when=the toggle's click reaches the row, or a pick hides under a fold; why_new=no row had a control of its own; no_claim=keyboard order beyond the native button`
+- `protects=the pager text counts entries from page, size and total, not rows drawn; fails_when=an open family or a short last page miscounts; why_new=Knowledge's tests covered only full pages; no_claim=Mantine's own page buttons`
 
 ### Task 4: Check it runs
 

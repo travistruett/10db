@@ -3,8 +3,7 @@ import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
 import { useState } from 'react';
-import { pagerProps, type TablePage } from '../../shell/table-pager';
-import { PAGE_SIZES } from '../knowledge/knowledge-paging';
+import { pagerProps, TABLE_PAGE_SIZES, type TablePage } from '../../shell/table-pager';
 import { withColumnHeader } from '../../shell/column-header';
 import { ModelSearchFilter, TierFilter } from './model-filters';
 import { formatCost, formatScore, NO_DATA } from './model-format';
@@ -72,6 +71,7 @@ function ModelCell({
       {older > 0 ? (
         <UnstyledButton
           aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} ${String(older)} older ${older === 1 ? 'version' : 'versions'} of ${row.name}`}
           onClick={(event) => {
             // Showing the older versions is not opening the model.
             event.stopPropagation();
@@ -179,8 +179,10 @@ export function ModelsTable({
               onOpen(row);
             }}
             onToggle={() => {
-              setExpanded((now) =>
-                now.includes(row.model) ? now.filter((m) => m !== row.model) : [...now, row.model],
+              setExpanded((shown) =>
+                shown.includes(row.model)
+                  ? shown.filter((m) => m !== row.model)
+                  : [...shown, row.model],
               );
             }}
           />
@@ -212,11 +214,27 @@ export function ModelsTable({
       accessor: 'usedBy',
       title: 'Used by',
       noWrap: true,
-      render: (row) => (
-        <Text size="xs" truncate maw={180} title={(usedBy.get(row.model) ?? []).join(', ')}>
-          {(usedBy.get(row.model) ?? []).join(', ')}
-        </Text>
-      ),
+      render: (row) => {
+        const own = (usedBy.get(row.model) ?? []).join(', ');
+        // Folded, a family's row also says which roles run on a version under it.
+        const hidden = expanded.includes(row.model)
+          ? ''
+          : (olderOf.get(row.model) ?? []).flatMap((r) => usedBy.get(r.model) ?? []).join(', ');
+        return (
+          <Group gap={6} wrap="nowrap" maw={220}>
+            {own === '' ? null : (
+              <Text size="xs" truncate title={own}>
+                {own}
+              </Text>
+            )}
+            {hidden === '' ? null : (
+              <Text size="xs" c="dimmed" truncate title={`${hidden}, on an older version`}>
+                {`${hidden}, on an older version`}
+              </Text>
+            )}
+          </Group>
+        );
+      },
     },
     numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun),
   ];
@@ -234,7 +252,7 @@ export function ModelsTable({
       verticalSpacing="sm"
       horizontalSpacing="md"
       highlightOnHover
-      {...pagerProps(paging, PAGE_SIZES)}
+      {...pagerProps(paging, TABLE_PAGE_SIZES)}
       {...(families.length === 0 ? { minHeight: 160 } : {})}
       emptyState={
         <Text c="dimmed" size="sm" ta="center">

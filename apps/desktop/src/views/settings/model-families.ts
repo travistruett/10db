@@ -13,8 +13,8 @@ const familyKey = (row: ModelRowDto): string =>
 
 /**
  * The sorted rows as the list's top-level entries. Every Current model leads an entry; a family's other versions
- * go under its first Current model in sorted order, or, with none, under its first row. Entries keep their lead's
- * place in the sort.
+ * go under its first Current model in sorted order, or, with none, under its first row. An entry takes the place
+ * of its best-placed row, lead or older, so a version that sorts high is never buried under a lead that sorts low.
  */
 export function groupByFamily(sorted: readonly ModelRowDto[]): ModelFamily[] {
   const families = new Map<string, ModelRowDto[]>();
@@ -32,5 +32,7 @@ export function groupByFamily(sorted: readonly ModelRowDto[]): ModelFamily[] {
     for (const lead of others) entries.push({ key: lead.model, lead, older: [] });
   }
   const place = new Map(sorted.map((row, i) => [row.model, i]));
-  return entries.sort((a, b) => (place.get(a.key) ?? 0) - (place.get(b.key) ?? 0));
+  const best = (f: ModelFamily): number =>
+    Math.min(...[f.lead, ...f.older].map((r) => place.get(r.model) ?? sorted.length));
+  return entries.sort((a, b) => best(a) - best(b));
 }

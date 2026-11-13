@@ -9,8 +9,7 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { usePlanRecordPage } from '../../../daemon/plan-record-queries';
-import type { TablePage } from '../../../shell/table-pager';
-import { usePaging } from '../../knowledge/knowledge-paging';
+import { usePaging, type TablePage } from '../../../shell/table-pager';
 import { ANY } from './record-filters';
 
 // One list of the Record a page at a time: the filters and search go to the daemon, and the page goes
@@ -48,7 +47,7 @@ export function useRecordPage<L extends PlanRecordList>(
 } {
   const [q] = useDebouncedValue(narrowing.q.trim(), 250);
   const asked = { ...narrowing, q };
-  const paging = usePaging(JSON.stringify(asked));
+  const paging = usePaging(JSON.stringify(asked), PLAN_RECORD_PAGE_SIZES[0]);
   // A filter's choices are the contract's own values, read back through it.
   const state = PlanRecordQuery.shape.state.safeParse(asked.state);
   const kind = PlanRecordQuery.shape.kind.safeParse(asked.kind);
