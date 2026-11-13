@@ -24,7 +24,6 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput,
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -36,6 +35,7 @@ import { AccountSelect } from './account-select';
 import { AddAccountModal } from './accounts/add-account-modal';
 import { cantRunDecisions } from './accounts/used-by';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
+import { DecisionModelPicker } from './decision-model-picker';
 import { useFocusTarget } from './focus-target';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
@@ -483,19 +483,11 @@ export function DecisionsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="Model" description="An OpenRouter model id.">
-          <TextInput
-            key={review.model}
-            aria-label="Model"
-            defaultValue={review.model}
-            disabled={disabled}
-            spellCheck={false}
-            onBlur={(event) => {
-              const model = event.currentTarget.value.trim();
-              if (model !== '' && model !== review.model)
-                patch.mutate({ decisions: { [REVIEW]: { model } } });
-            }}
-          />
+        <SettingRow
+          label="Model"
+          description="One of OpenRouter's decision models. 10db saves it once it answers a test decision."
+        >
+          <DecisionModelPicker decision={REVIEW} status={status.data} disabled={disabled} />
         </SettingRow>
         <SettingRow
           label="Confidence needed"

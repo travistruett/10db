@@ -2,7 +2,11 @@ import {
   AccountKind,
   ConflictError,
   InvalidError,
+  JudgeDecision,
+  UpstreamError,
   type AccountId,
+  type JudgeConfig,
+  type JudgeConfigPatch,
   type JudgeStatusDto,
 } from '@10db/contracts';
 import {
@@ -20,13 +24,23 @@ import {
   type Keychain,
 } from '../environment';
 import type { StateStore } from '../events';
-import type { JudgeService } from '../judge';
+import type { DecisionModelList, JudgeService } from '../judge';
 
 /** The judge's side of the HTTP API: its config, the account it runs on, the account test and the call log. */
 export type JudgeApiServices = Pick<
   ApiServices,
-  'judgeStatus' | 'patchJudge' | 'testAccount' | 'listJudgeCalls'
+  'judgeStatus' | 'patchJudge' | 'testAccount' | 'listJudgeCalls' | 'listDecisionModels'
 >;
+
+/** The models a patch sets that differ from the ones saved, each once. */
+function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
+  const models = new Set<string>();
+  for (const decision of Object.values(JudgeDecision)) {
+    const model = patch.decisions?.[decision]?.model;
+    if (model !== undefined && model !== config.decisions[decision].model) models.add(model);
+  }
+  return [...models];
+}
 
 /** A Keychain that refuses is a conflict the builder can act on, not a server fault. */
 async function keychainConflict<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -61,6 +75,8 @@ export function createJudgeServices(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
   readonly judge: Pick<JudgeService, 'test'>;
+  /** OpenRouter's decision models, for the picker. */
+  readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
   readonly off: boolean;
 }): JudgeApiServices {
@@ -88,6 +104,25 @@ export function createJudgeServices(deps: {
   return {
     judgeStatus: status,
     async patchJudge(patch) {
+      // A model is saved only once it has answered a test decision with the key decisions will run on, so a setting
+      // is never left naming a model 10db can't use.
+      const config = getJudgeConfig(deps.state.db);
+      const accountId = patch.accountId === undefined ? config.accountId : patch.accountId;
+      const models = newModels(config, patch);
+      if (deps.off && models.length > 0)
+        throw new ConflictError(
+          'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
+        );
+      for (const model of models) {
+        const result =
+          accountId === null
+            ? { ok: false as const, error: 'No OpenRouter key is set' }
+            : await keychainConflict(() => deps.judge.test(accountId, model));
+        if (!result.ok)
+          throw new InvalidError(
+            `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
+          );
+      }
       deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
       return status();
     },
@@ -99,5 +134,15 @@ export function createJudgeServices(deps: {
       return keychainConflict(() => deps.judge.test(id));
     },
     listJudgeCalls: (limit) => listJudgeCalls(deps.state.db, limit),
+    async listDecisionModels() {
+      if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
+      try {
+        return await deps.models.list();
+      } catch (error) {
+        throw new UpstreamError(
+          error instanceof Error ? error.message : "OpenRouter's model list could not be read",
+        );
+      }
+    },
   };
 }
