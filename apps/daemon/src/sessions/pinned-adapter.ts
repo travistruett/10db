@@ -1,6 +1,4 @@
 import { createUnavailableAdapter } from './unavailable-adapter';
-import type { AccountExpectation } from '../environment';
-import type { AgentCapabilities } from './capabilities';
 import type { AgentAdapter } from './types';
 
 /** Where an agent CLI stands now: a path to run, or the reason no session can start on it. */
@@ -16,7 +14,7 @@ export type AdapterSource =
 export function createPinnedAdapter(
   source: () => AdapterSource,
   build: (path: string) => AgentAdapter,
-  capabilities: (account: Pick<AccountExpectation, 'kind'>) => AgentCapabilities,
+  capabilities: AgentAdapter['capabilities'],
 ): AgentAdapter {
   let built: { readonly path: string; readonly adapter: AgentAdapter } | null = null;
   const current = (): AgentAdapter => {
@@ -26,7 +24,7 @@ export function createPinnedAdapter(
     return built.adapter;
   };
   return {
-    capabilities: (account) => capabilities(account),
+    capabilities: (account, model) => capabilities(account, model),
     complete: (spec) => current().complete(spec),
     open: (spec) => current().open(spec),
     probeAccount: (probe) => current().probeAccount(probe),

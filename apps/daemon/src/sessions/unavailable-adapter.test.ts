@@ -11,7 +11,7 @@ import { testPolicy } from '../../test/fixtures';
 describe('createUnavailableAdapter', () => {
   it('ends the session at once with the message', async () => {
     const adapter = createUnavailableAdapter('No session adapter is configured', (a) =>
-      claudeCapabilities(a.kind),
+      claudeCapabilities(a.kind, null),
     );
     const spec: LaneSessionSpec = {
       sessionId: mintId('Session'),

@@ -1,5 +1,4 @@
 import {
-  AccountKind,
   ImageFormat,
   isMetered,
   JudgeKind,
@@ -10,6 +9,7 @@ import {
   type AgentCapabilitiesDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
+import { autoModeRuns } from './auto-mode-models';
 
 /** What an agent can do on an account (sessions spec §5.3). */
 export type AgentCapabilities = AgentCapabilitiesDto;
@@ -17,10 +17,14 @@ export type AgentCapabilities = AgentCapabilitiesDto;
 const IMAGES = [ImageFormat.Png, ImageFormat.Jpeg, ImageFormat.Webp];
 
 /**
- * Claude Code: auto mode judges a call on the plan, the API and Bedrock; a gateway has no judge but
- * the guard's rules until 10db's judge exists (trust line §4, §12).
+ * Claude Code: auto mode judges a call where it runs on the kind and the model; elsewhere (a gateway,
+ * an older or unreadable model) the guard's rules are the judge until 10db's judge exists (trust line §4,
+ * §12).
  */
-export function claudeCapabilities(kind: SupportedAccountKind): AgentCapabilities {
+export function claudeCapabilities(
+  kind: SupportedAccountKind,
+  model: string | null,
+): AgentCapabilities {
   return {
     harness: Provider.Claude,
     label: 'Claude Code',
@@ -35,7 +39,7 @@ export function claudeCapabilities(kind: SupportedAccountKind): AgentCapabilitie
     modelSwitch: ModelSwitch.NextTurn,
     takeover: true,
     costUsd: isMetered(kind),
-    judge: kind === AccountKind.Gateway ? JudgeKind.Rules : JudgeKind.Native,
+    judge: autoModeRuns(kind, model) ? JudgeKind.Native : JudgeKind.Rules,
   };
 }
 
@@ -61,13 +65,16 @@ export const codexCapabilities: (kind: SupportedAccountKind) => AgentCapabilitie
 });
 
 const CAPABILITIES_BY_ADAPTER: Readonly<
-  Record<Provider, (kind: SupportedAccountKind) => AgentCapabilities>
+  Record<Provider, (kind: SupportedAccountKind, model: string | null) => AgentCapabilities>
 > = {
   [Provider.Claude]: claudeCapabilities,
-  [Provider.Codex]: codexCapabilities,
+  [Provider.Codex]: (kind) => codexCapabilities(kind),
 };
 
 /** The capabilities of whichever agent runs the kind: for a stand-in, such as the fake, that is both. */
-export function capabilitiesOf(kind: SupportedAccountKind): AgentCapabilities {
-  return CAPABILITIES_BY_ADAPTER[providerOf(kind)](kind);
+export function capabilitiesOf(
+  kind: SupportedAccountKind,
+  model: string | null,
+): AgentCapabilities {
+  return CAPABILITIES_BY_ADAPTER[providerOf(kind)](kind, model);
 }

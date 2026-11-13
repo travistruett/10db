@@ -37,14 +37,26 @@ describe('capabilities', () => {
     ['gateway', { ...CLAUDE, costUsd: true, judge: 'rules' }],
     ['codex_signin', { ...CODEX, judge: 'rules' }],
   ] as const)('%s runs on an agent that can do what spec §5.3 says', (kind, expected) => {
-    expect(capabilitiesOf(kind)).toEqual(expected);
-    expect(AgentCapabilitiesDto.parse(capabilitiesOf(kind))).toEqual(expected);
+    expect(capabilitiesOf(kind, 'claude-opus-5-5')).toEqual(expected);
+    expect(AgentCapabilitiesDto.parse(capabilitiesOf(kind, 'claude-opus-5-5'))).toEqual(expected);
+  });
+
+  it.each([
+    ['bedrock on claude-sonnet-4-6 has the rules judge', 'bedrock', 'claude-sonnet-4-6', 'rules'],
+    [
+      'claude_subscription with no model has the native judge',
+      'claude_subscription',
+      null,
+      'native',
+    ],
+  ] as const)('%s', (_name, kind, model, judge) => {
+    expect(capabilitiesOf(kind, model).judge).toBe(judge);
   });
 
   // Delivery rule 3 (spec §6.2): a message injected mid-turn counts as delivered only by a receipt.
   it.each(
     SUPPORTED_ACCOUNT_KINDS.flatMap((kind) => [
-      [`claude on ${kind}`, claudeCapabilities(kind)] as const,
+      [`claude on ${kind}`, claudeCapabilities(kind, null)] as const,
       [`codex on ${kind}`, codexCapabilities(kind)] as const,
     ]),
   )('%s: an adapter that injects reports receipts', (_name, caps) => {
@@ -53,11 +65,14 @@ describe('capabilities', () => {
 
   const ADAPTERS: readonly (readonly [string, AgentAdapter])[] = [
     ['the fake', new FakeAdapter({})],
-    ['an unavailable claude', createUnavailableAdapter('x', (a) => claudeCapabilities(a.kind))],
+    [
+      'an unavailable claude',
+      createUnavailableAdapter('x', (a, model) => claudeCapabilities(a.kind, model)),
+    ],
     [
       'the routed pair',
       createRoutedAdapter({
-        claude: createUnavailableAdapter('x', (a) => claudeCapabilities(a.kind)),
+        claude: createUnavailableAdapter('x', (a, model) => claudeCapabilities(a.kind, model)),
         codex: createUnavailableAdapter('x', (a) => codexCapabilities(a.kind)),
       }),
     ],

@@ -196,7 +196,7 @@ async function complete(
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
-    capabilities: (account) => claudeCapabilities(account.kind),
+    capabilities: (account, model) => claudeCapabilities(account.kind, model),
     open: (spec) =>
       onProfile(spec, {
         lane: (lane) =>

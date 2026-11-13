@@ -180,8 +180,8 @@ export class FakeAdapter implements AgentAdapter {
     for (const wake of waiters) wake();
   }
 
-  capabilities(account: Pick<AccountExpectation, 'kind'>): AgentCapabilities {
-    return capabilitiesOf(account.kind);
+  capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities {
+    return capabilitiesOf(account.kind, model);
   }
 
   /**

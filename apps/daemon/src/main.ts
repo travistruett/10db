@@ -142,7 +142,7 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
             pluginDir: resolveHarnessDir(),
             logger: logger.child({ component: 'claude' }),
           }),
-        (account) => claudeCapabilities(account.kind),
+        (account, model) => claudeCapabilities(account.kind, model),
       ),
       codex: createPinnedAdapter(
         () => sourceOf(AgentTool.Codex),

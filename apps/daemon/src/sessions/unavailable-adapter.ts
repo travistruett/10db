@@ -1,5 +1,3 @@
-import type { AccountExpectation } from '../environment';
-import type { AgentCapabilities } from './capabilities';
 import { createChannel } from './channel';
 import {
   AccountLoginError,
@@ -16,7 +14,7 @@ import {
  */
 export function createUnavailableAdapter(
   message: string,
-  capabilities: (account: Pick<AccountExpectation, 'kind'>) => AgentCapabilities,
+  capabilities: AgentAdapter['capabilities'],
 ): AgentAdapter {
   const ended = () => {
     const channel = createChannel<SessionEvent>();
@@ -25,7 +23,7 @@ export function createUnavailableAdapter(
     return channel;
   };
   return {
-    capabilities: (account) => capabilities(account),
+    capabilities: (account, model) => capabilities(account, model),
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
     startLogin: () => Promise.reject(new AccountLoginError(message)),
     complete: () => Promise.reject(new CompletionError(message)),
