@@ -187,6 +187,31 @@ describe('importBundle', () => {
     expect(counts()).toEqual(before);
   });
 
+  it('quotes cut across an emoji or ending in CRLF, imported three times, change nothing', () => {
+    const json = () => {
+      const out = fresh();
+      out['intent'] = [
+        {
+          key: 'i1',
+          quote: `${'a'.repeat(118)}\u{1F600} and on`,
+          speaker: 'b',
+          saidAt: '2026-11-12',
+        },
+        { key: 'i2', quote: 'First line\r\nsecond', speaker: 'b', saidAt: '2026-11-12' },
+      ];
+      return parseBundle(out);
+    };
+    const first = importInto(json());
+    expect(getShapeEntry(store.db, first.shapeId, 'i2')?.title).toBe('First line');
+    expect(getShapeEntry(store.db, first.shapeId, 'i1')?.title).toBe(
+      `${'a'.repeat(118)}\u{1F600}…`,
+    );
+    importInto(json());
+    const before = counts();
+    importInto(json());
+    expect(counts()).toEqual(before);
+  });
+
   it('a dry run writes nothing and answers what a real import then writes', () => {
     const bundle = parseBundle(fresh());
     const before = counts();

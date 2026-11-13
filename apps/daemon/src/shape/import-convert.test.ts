@@ -13,6 +13,7 @@ import {
   insertWorkstream,
   listShapeLinks,
   listShapeProposals,
+  patchTask,
   seedProject,
   type Store,
 } from '@10db/db';
@@ -126,6 +127,52 @@ describe('an imported Plan through Convert', () => {
     expect(getTask(store.db, t2).title).toBe('Revoke a device at once');
     const third = importInto(parseBundle(next));
     expect(third.changes.proposals).toMatchObject({ changeTasks: [], additions: [], added: [] });
+  });
+
+  it('a builder’s board edit is never proposed back, and the same bundle again writes nothing', () => {
+    const { shapeId } = importInto(parseBundle(unpinned()));
+    convertAll(shapeId);
+    const t1 = taskOf(shapeId, 't1');
+    store.write((ctx) => patchTask(ctx, t1, { title: 'Pair a device, my way' }));
+    const before = listShapeProposals(store.db, shapeId);
+    const again = importInto(parseBundle(unpinned()));
+    expect(again.changes.proposals).toMatchObject({ changeTasks: [], leftAlone: [] });
+    expect(listShapeProposals(store.db, shapeId)).toEqual(before);
+    expect(getTask(store.db, t1).title).toBe('Pair a device, my way');
+  });
+
+  it('a bundle change change_task cannot carry is named, once', () => {
+    const { shapeId } = importInto(parseBundle(unpinned()));
+    convertAll(shapeId);
+    const next = unpinned();
+    const [t1] = goalTasks(next, 0);
+    if (t1) {
+      t1['headline'] = 'Pairing, in a line';
+      t1['size'] = 'L';
+    }
+    const again = importInto(parseBundle(next));
+    expect(again.changes.proposals.changeTasks).toEqual([]);
+    expect(again.changes.proposals.leftAlone).toEqual([
+      { key: 't1', why: "t1's headline, size changed after Convert: edit the task on the board" },
+    ]);
+    expect(importInto(parseBundle(next)).changes.proposals.leftAlone).toEqual([]);
+  });
+
+  it('a second change before Convert keeps the first in the same change proposal', () => {
+    const { shapeId } = importInto(parseBundle(unpinned()));
+    convertAll(shapeId);
+    const t2 = taskOf(shapeId, 't2');
+    const next = unpinned();
+    const g1 = goalTasks(next, 0);
+    if (g1[1]) g1[1]['title'] = 'Revoke a device at once';
+    importInto(parseBundle(next));
+    if (g1[1]) g1[1]['description'] = 'Revoke it now.';
+    importInto(parseBundle(next));
+    const change = listShapeProposals(store.db, shapeId).find((r) => r.key === `change:${t2}`);
+    expect(change && ShapeProposalBody.change_task.parse(change.body)).toMatchObject({
+      title: 'Revoke a device at once',
+      description: 'Revoke it now.',
+    });
   });
 
   it('re-import after a task started leaves it alone and says why', () => {

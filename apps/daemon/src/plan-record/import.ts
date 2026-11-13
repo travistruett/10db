@@ -10,9 +10,11 @@ import {
   ShapeProposalBody,
   ShapeProposalState,
   ShapeState,
+  type BundleGoal,
   type BundleTask,
   type GoalId,
   type PlanBundle,
+  type PlanGoal,
   type PlanImportChanges,
   type PlanImportResult,
   type PlanRef,
@@ -47,6 +49,17 @@ import {
   type StoredPlan,
 } from './lookup';
 import { appendRevision } from './revisions';
+import {
+  bundleStatement,
+  changedFields,
+  parsedGoal,
+  restateAsTask,
+  restateInGoal,
+  statedAsTask,
+  statedInGoal,
+  type StatementField,
+  type TaskStatement,
+} from './task-statement';
 
 // Importing a bundle into one Plan. `planImportChanges` says what an import would add, change and
 // leave alone; a dry run answers it, and `importBundle` writes exactly it in the caller's transaction.
@@ -82,10 +95,10 @@ function translated(ref: PlanRef, numbering: Numbering): PlanRef {
 
 type EntryInput = Omit<NewShapeEntry, 'shapeId'>;
 
-/** The first line of a quote, cut at 120 characters. */
+/** The first line of a quote, cut at 120 code points so no surrogate pair is split. */
 function quoteTitle(quote: string): string {
-  const line = quote.split('\n')[0] ?? '';
-  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
+  const points = Array.from((quote.split('\n')[0] ?? '').replace(/\r$/, ''));
+  return points.length > 120 ? `${points.slice(0, 119).join('')}…` : points.join('');
 }
 
 function entryInputs(bundle: PlanBundle): EntryInput[] {
@@ -152,6 +165,8 @@ interface ProposalWrite {
 
 interface ProposalPlan {
   readonly writes: ProposalWrite[];
+  /** Converted proposals whose task statements a re-import brings up to the bundle; state kept. */
+  readonly restates: ProposalWrite[];
   readonly added: string[];
   readonly replaced: string[];
   readonly keptPinned: string[];
@@ -237,30 +252,33 @@ function proposalDrafts(bundle: PlanBundle, numbering: Numbering): Map<string, P
   return out;
 }
 
-const sameList = (a: readonly string[], b: readonly string[]): boolean =>
-  canonicalJson(a) === canonicalJson(b);
-
-/** What changed in a bundle task since Convert made it: the fields a `change_task` carries. */
-function taskChange(
-  task: BundleTask,
-  was: ConvertedTask,
-  numbering: Numbering,
-): { body: Record<string, unknown>; dependsOnMoved: boolean } {
-  const ref = task.planRef ? translated(task.planRef, numbering) : null;
-  const body: Record<string, unknown> = {};
-  if (task.title !== was.title) body['title'] = task.title;
-  if (task.description !== was.description) body['description'] = task.description;
-  if (task.criteria.length > 0 && !sameList(task.criteria, was.acceptanceCriteria))
-    body['acceptanceCriteria'] = task.criteria;
-  if (!sameList(task.areas, was.areas)) body['areas'] = task.areas;
-  // A pin needs a section, so a task without a planRef keeps no cites either.
-  if (ref !== null && canonicalJson(ref) !== canonicalJson(was.planRef)) body['planRef'] = ref;
-  if (ref !== null && !sameList(task.cites, was.cites)) body['cites'] = task.cites;
+/** A converted task with no stored statement, as the board holds it; the rest as the bundle says. */
+function boardStatement(was: ConvertedTask, now: TaskStatement): TaskStatement {
   return {
-    body,
-    dependsOnMoved: !sameList([...task.dependsOn].sort(), [...was.dependsOn].sort()),
+    ...now,
+    title: was.title,
+    description: was.description,
+    criteria: was.acceptanceCriteria,
+    areas: was.areas,
+    planRef: was.planRef,
+    cites: was.cites,
+    dependsOn: [...was.dependsOn].sort(),
   };
 }
+
+/** The `change_task` field each statement field is carried by; null for one it can't carry. */
+const CARRIED_AS: Record<StatementField, string | null> = {
+  title: 'title',
+  headline: null,
+  why: null,
+  description: 'description',
+  criteria: 'acceptanceCriteria',
+  areas: 'areas',
+  size: null,
+  planRef: 'planRef',
+  cites: 'cites',
+  dependsOn: null,
+};
 
 const WHY_CHANGED_AFTER_CONVERT: Partial<Record<ShapeProposalKind, string>> = {
   decision: 'changed after Convert: supersede it in Knowledge',
@@ -277,6 +295,7 @@ function planProposals(
 ): ProposalPlan {
   const plan: ProposalPlan = {
     writes: [],
+    restates: [],
     added: [],
     replaced: [],
     keptPinned: [],
@@ -284,65 +303,126 @@ function planProposals(
     additions: [],
     leftAlone: [],
   };
-  /** Writes `write` against what the Plan holds under its key; answers whether it wrote. */
-  const offer = (write: ProposalWrite, list: 'added' | 'changeTasks' | 'additions'): void => {
+  /** Writes `write` against what the Plan holds under its key; false when a pinned row kept it out. */
+  const offer = (write: ProposalWrite, list: 'added' | 'changeTasks' | 'additions'): boolean => {
     const held = stored?.proposals.get(write.key);
     if (held === undefined) {
       plan.writes.push(write);
       plan[list].push(write.key);
-      return;
+      return true;
     }
-    if (held.body === proposalBodyText(write.kind, write.body)) return;
+    if (held.body === proposalBodyText(write.kind, write.body)) return true;
     if (held.state === ShapeProposalState.Pending) {
-      if (held.pinned) plan.keptPinned.push(write.key);
-      else {
-        plan.writes.push(write);
-        plan[list === 'added' ? 'replaced' : list].push(write.key);
+      if (held.pinned) {
+        plan.keptPinned.push(write.key);
+        return false;
       }
-      return;
+      plan.writes.push(write);
+      plan[list === 'added' ? 'replaced' : list].push(write.key);
+      return true;
     }
-    if (write.kind === 'change_task' && held.state === ShapeProposalState.Accepted) {
-      // An earlier change was converted; this is a new one against the task as it is now.
+    if (write.kind === 'change_task') {
+      // An earlier change was converted or dropped; this is a new one since the last import.
       plan.writes.push(write);
       plan.changeTasks.push(write.key);
-      return;
+      return true;
     }
     if (held.state === ShapeProposalState.Accepted) {
       const why = WHY_CHANGED_AFTER_CONVERT[held.kind] ?? 'changed after Convert';
       plan.leftAlone.push({ key: write.key, why: `${write.key} ${why}` });
-      return;
+      return true;
     }
     plan.leftAlone.push({
       key: write.key,
       why: `${write.key} was dropped or replaced in Plan; propose it there again to bring it back`,
     });
+    return true;
   };
 
-  /** A bundle task Convert already made: its change, or why it is left alone. */
-  const converted = (task: BundleTask, was: ConvertedTask): void => {
-    const { body, dependsOnMoved } = taskChange(task, was, numbering);
-    const fields = Object.keys(body);
-    if (dependsOnMoved)
+  /** Goal proposals being restated, by goal key, so two tasks of one goal share one write. */
+  const restatedGoals = new Map<string, PlanGoal>();
+  /** Where the Plan states task `key`: in its goal's proposal, else in its own. */
+  const statedOf = (key: string, goalKey: string | null): TaskStatement | null => {
+    const goalBody = goalKey === null ? undefined : stored?.proposals.get(goalKey);
+    const inGoal = goalBody === undefined ? null : statedInGoal(goalBody.body, key);
+    if (inGoal !== null) return inGoal;
+    const own = stored?.proposals.get(key);
+    return own?.kind === 'task' ? statedAsTask(own.body) : null;
+  };
+  const restate = (task: BundleTask, now: TaskStatement, goal: BundleGoal | null): void => {
+    const goalBody = goal === null ? undefined : stored?.proposals.get(goal.key);
+    if (goal !== null && goalBody !== undefined && statedInGoal(goalBody.body, task.key) !== null) {
+      const body = restatedGoals.get(goal.key) ?? parsedGoal(goalBody.body);
+      if (body === null) return;
+      const inside = new Set(goal.tasks.map((t) => t.key));
+      restatedGoals.set(goal.key, restateInGoal(body, task.key, now, task.dependsOn, inside));
+      return;
+    }
+    const own = stored?.proposals.get(task.key);
+    if (own?.kind !== 'task') return;
+    const body = restateAsTask(own.body, now, task.dependsOn);
+    if (body !== null) plan.restates.push({ key: task.key, kind: 'task', body: asJson(body) });
+  };
+
+  /**
+   * A bundle task Convert already made, against what the last import stated for it: what changed
+   * goes to a `change_task` when it can, and the rest is named once in what was left alone.
+   */
+  const converted = (task: BundleTask, was: ConvertedTask, goal: BundleGoal | null): void => {
+    const now = bundleStatement(task, task.planRef ? translated(task.planRef, numbering) : null);
+    const stated = statedOf(task.key, goal?.key ?? null) ?? boardStatement(was, now);
+    const changed = changedFields(now, stated);
+    if (changed.length === 0) return;
+    const body: Record<string, unknown> = {};
+    const uncarried: StatementField[] = [];
+    for (const field of changed) {
+      const as = CARRIED_AS[field];
+      // An empty list or a dropped pin can't be set by a change, and cites need a pin to hang on.
+      const carriable =
+        as !== null &&
+        !(field === 'criteria' && now.criteria.length === 0) &&
+        !((field === 'planRef' || field === 'cites') && now.planRef === null);
+      if (carriable) body[as] = now[field];
+      else if (field !== 'dependsOn') uncarried.push(field);
+    }
+    if (changed.includes('dependsOn'))
       plan.leftAlone.push({
         key: task.key,
         why: `${task.key}'s dependencies changed after Convert: set them on the board`,
       });
-    if (fields.length === 0) return;
-    if (was.started) {
+    if (uncarried.length > 0)
+      plan.leftAlone.push({
+        key: task.key,
+        why: `${task.key}'s ${uncarried.join(', ')} changed after Convert: edit the task on the board`,
+      });
+    const fields = Object.keys(body);
+    let kept = true;
+    if (fields.length > 0 && was.started)
       plan.leftAlone.push({
         key: task.key,
         why: `${task.key} has started, so its change (${fields.join(', ')}) is left alone`,
       });
-      return;
+    else if (fields.length > 0) {
+      // A change still pending keeps what it carried; this import's differences are added to it.
+      const key = `change:${was.taskId}`;
+      const held = stored?.proposals.get(key);
+      const pending =
+        held?.state === ShapeProposalState.Pending && !held.pinned
+          ? ShapeProposalBody.change_task.safeParse(JSON.parse(held.body || 'null'))
+          : undefined;
+      const carried = pending?.success
+        ? { ...pending.data, sourceMessageIds: undefined, taskId: undefined }
+        : {};
+      kept = offer(
+        {
+          key,
+          kind: 'change_task',
+          body: asJson({ ...carried, ...body, taskId: was.taskId }),
+        },
+        'changeTasks',
+      );
     }
-    offer(
-      {
-        key: `change:${was.taskId}`,
-        kind: 'change_task',
-        body: asJson({ taskId: was.taskId, ...body }),
-      },
-      'changeTasks',
-    );
+    if (kept) restate(task, now, goal);
   };
 
   const drafts = proposalDrafts(bundle, numbering);
@@ -373,7 +453,7 @@ function planProposals(
       });
     for (const task of goal.tasks) {
       const was = stored?.converted.get(task.key);
-      if (was !== undefined) converted(task, was);
+      if (was !== undefined) converted(task, was, goal);
       else
         offer(
           {
@@ -394,7 +474,7 @@ function planProposals(
   for (const task of bundle.tasks) {
     const was = stored?.converted.get(task.key);
     const draft = drafts.get(task.key);
-    if (was !== undefined) converted(task, was);
+    if (was !== undefined) converted(task, was, null);
     else if (draft !== undefined) offer(draft, 'added');
   }
   for (const [, draft] of drafts)
@@ -405,6 +485,8 @@ function planProposals(
         key,
         why: `${key} is no longer in the bundle; remove it by hand if it should go`,
       });
+  for (const [key, body] of restatedGoals)
+    plan.restates.push({ key, kind: 'goal', body: asJson(body) });
   return plan;
 }
 
@@ -516,11 +598,10 @@ export function importBundle(
   const changes = planImportChanges(stored, bundle, bodies);
   if (canonicalJson(changes) !== canonicalJson(input.changes))
     throw new ConflictError('The Plan changed since this import was checked; import it again');
-  if (stored !== null && !writesSomething(changes))
-    return { dryRun: false, shapeId: stored.shapeId, created: false, changes };
-
   const numbering = numberingOf(stored, bundle);
   const proposalPlan = planProposals(stored, bundle, numbering);
+  if (stored !== null && !writesSomething(changes) && proposalPlan.restates.length === 0)
+    return { dryRun: false, shapeId: stored.shapeId, created: false, changes };
   const states =
     proposalPlan.writes.length > 0 ||
     bundle.goals.length + bundle.tasks.length + bundle.decisions.length + bundle.questions.length >
@@ -642,7 +723,15 @@ export function importBundle(
         sourceMessageIds: [],
       });
   }
-  if (proposalPlan.writes.length > 0) {
+  // A restated proposal keeps its state: it was converted, and only what it says catches up.
+  for (const write of proposalPlan.restates) {
+    const held = rows.get(write.key);
+    if (held)
+      patchShapeProposal(ctx, held.id, {
+        body: asJson(ShapeProposalBody[write.kind].parse(write.body)),
+      });
+  }
+  if (proposalPlan.writes.length + proposalPlan.restates.length > 0) {
     ctx.emit({
       type: EventType.PlanRecordChanged,
       entityType: 'shape',
