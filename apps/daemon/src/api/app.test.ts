@@ -1332,13 +1332,14 @@ describe('shape routes', () => {
     const goalId = mintId('Goal');
     const taskId = mintId('Task');
     const services = stubServices({
-      getGoalShape: (id) => ({ shapeId: id === goalId ? shapeId : null }),
-      getTaskShape: () => ({ shapeId: null }),
+      getGoalShape: (id) =>
+        id === goalId ? { shapeId, title: 'Remote host' } : { shapeId: null, title: null },
+      getTaskShape: () => ({ shapeId: null, title: null }),
     });
     const goal = await app(services).request(`/goals/${goalId}/shape`, auth);
-    expect(await goal.json()).toEqual({ shapeId });
+    expect(await goal.json()).toEqual({ shapeId, title: 'Remote host' });
     const task = await app(services).request(`/tasks/${taskId}/shape`, auth);
-    expect(await task.json()).toEqual({ shapeId: null });
+    expect(await task.json()).toEqual({ shapeId: null, title: null });
   });
 
   it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {

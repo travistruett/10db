@@ -1,0 +1,141 @@
+import {
+  PlanDocumentRevisionDto,
+  PlanExportResult,
+  PlanRecordDto,
+  PlanRecordPage,
+  TaskPlanContextDto,
+  type PlanRecordList,
+  type PlanRecordPageSize,
+  type PlanRecordQuery,
+  type ShapeAttachmentId,
+  type ShapeId,
+  type TaskId,
+} from '@10db/contracts';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { useRenderMode } from '../screens/render-context';
+import { readJson } from './client';
+import { useDaemon } from './provider';
+
+// A Plan's record. Every key is under `shapeKeys.all` (`['shapes']`), so `plan.record_changed`, whose
+// entity is the Plan, refetches it; a task's Plan context is under `['tasks']`, so its task's
+// `plan.anchor_checked` and its lane's events refetch it.
+
+export const planRecordKeys = {
+  record: (shapeId: ShapeId) => ['shapes', 'record', shapeId] as const,
+  revision: (shapeId: ShapeId, documentId: ShapeAttachmentId, number: number) =>
+    ['shapes', 'record', shapeId, 'revision', documentId, number] as const,
+  page: (shapeId: ShapeId, list: PlanRecordList, filters: PlanRecordFilters) =>
+    ['shapes', 'record', shapeId, 'page', list, filters] as const,
+  taskContext: (taskId: TaskId) => ['tasks', 'plan-context', taskId] as const,
+} as const;
+
+/** What a list is narrowed by and which page of it is shown; the daemon applies all of it. */
+export interface PlanRecordFilters {
+  readonly state?: NonNullable<PlanRecordQuery['state']>;
+  readonly kind?: NonNullable<PlanRecordQuery['kind']>;
+  readonly document?: string;
+  readonly q?: string;
+  readonly page: number;
+  readonly pageSize: PlanRecordPageSize;
+}
+
+/**
+ * The record: documents with every revision and their sections, and each list's count. A screen's
+ * frame never asks, since its token may not read the record and the refusal would fail the screen.
+ */
+export function usePlanRecord(shapeId: ShapeId | null) {
+  const { client } = useDaemon();
+  const frame = useRenderMode() !== null;
+  return useQuery({
+    queryKey: shapeId ? planRecordKeys.record(shapeId) : ['shapes', 'record', 'none'],
+    queryFn: async () =>
+      shapeId
+        ? readJson(
+            await client.shapes[':shapeId'].record.$get({ param: { shapeId } }),
+            PlanRecordDto,
+          )
+        : Promise.reject(new Error('Open a Plan first.')),
+    enabled: shapeId !== null && !frame,
+  });
+}
+
+/** One revision's text, as stored. A revision never changes, so it is read once. */
+export function usePlanRevision(
+  shapeId: ShapeId,
+  documentId: ShapeAttachmentId | null,
+  number: number | null,
+) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey:
+      documentId !== null && number !== null
+        ? planRecordKeys.revision(shapeId, documentId, number)
+        : ['shapes', 'record', shapeId, 'revision', 'none'],
+    queryFn: async () => {
+      if (documentId === null || number === null) throw new Error('Pick a document first.');
+      return readJson(
+        await client.shapes[':shapeId'].documents[':documentId'].revisions[':number'].$get({
+          param: { shapeId, documentId, number: String(number) },
+        }),
+        PlanDocumentRevisionDto,
+      );
+    },
+    enabled: documentId !== null && number !== null,
+    staleTime: Infinity,
+  });
+}
+
+/** One page of one list; the last page stays up while the next loads. */
+export function usePlanRecordPage(
+  shapeId: ShapeId,
+  list: PlanRecordList,
+  filters: PlanRecordFilters,
+) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: planRecordKeys.page(shapeId, list, filters),
+    queryFn: async () =>
+      readJson(
+        await client.shapes[':shapeId'].record[':list'].$get({
+          param: { shapeId, list },
+          query: {
+            ...(filters.state === undefined ? {} : { state: filters.state }),
+            ...(filters.kind === undefined ? {} : { kind: filters.kind }),
+            ...(filters.document === undefined ? {} : { document: filters.document }),
+            ...(filters.q === undefined || filters.q.trim() === '' ? {} : { q: filters.q }),
+            page: String(filters.page),
+            pageSize: String(filters.pageSize),
+          },
+        }),
+        PlanRecordPage,
+      ),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Writes the record as Markdown into a folder; the daemon's refusal is the error's message. */
+export function useExportPlan(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  return useMutation({
+    mutationFn: async (dir: string) =>
+      readJson(
+        await client.shapes[':shapeId'].export.$post({ param: { shapeId }, json: { dir } }),
+        PlanExportResult,
+      ),
+  });
+}
+
+/** The section a task is pinned to, the Plan block its lane got, and its anchor checks. */
+export function useTaskPlanContext(taskId: TaskId) {
+  const { client } = useDaemon();
+  const frame = useRenderMode() !== null;
+  return useQuery({
+    queryKey: planRecordKeys.taskContext(taskId),
+    queryFn: async () =>
+      readJson(
+        await client.tasks[':taskId']['plan-context'].$get({ param: { taskId } }),
+        TaskPlanContextDto,
+      ),
+    enabled: !frame,
+  });
+}

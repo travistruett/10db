@@ -14,6 +14,9 @@ import {
   shapeMessageDto,
   shapeViewDto,
 } from '../../test/shape-fixtures';
+import { planRecordDto, planRecordHandlers } from '../../test/plan-record-fixtures';
+
+const NO_COUNTS = { decisions: 0, evidence: 0, reviews: 0, questions: 0, tasks: 0 };
 
 // Shape spec §4: the screen, its states, and the loop from the keyboard.
 
@@ -320,6 +323,53 @@ describe('Shape: the conversation', () => {
     const next = await screen.findByRole('region', { name: 'Conversation' });
     await within(next).findByText('Fresh');
     expect(within(next).queryByText(/tokens/)).toBeNull();
+  });
+
+  it('offers the Record once the Plan holds a document, and opens it', async () => {
+    const held = shapeViewDto({ shape: shapeDto({ ...inProject, title: 'Remote host' }) });
+    const bare = shapeViewDto({ shape: shapeDto({ ...inProject, title: 'Fresh' }) });
+    serve(
+      ...conversations(held, bare),
+      http.get(daemonUrl('/shapes/:shapeId/record'), ({ params }) =>
+        HttpResponse.json(
+          params['shapeId'] === held.shape.id
+            ? planRecordDto({ shapeId: held.shape.id })
+            : planRecordDto({ shapeId: bare.shape.id, documents: [], counts: NO_COUNTS }),
+        ),
+      ),
+      ...planRecordHandlers(),
+    );
+    const { router } = open(bare);
+    const fresh = await screen.findByRole('region', { name: 'Conversation' });
+    await within(fresh).findByText('Fresh');
+    expect(within(fresh).queryByRole('button', { name: 'Record' })).toBeNull();
+    await act(() => router.navigate({ to: '/shape/$shapeId', params: { shapeId: held.shape.id } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Record' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${held.shape.id}/record`);
+    });
+    expect(await screen.findByRole('tab', { name: /Documents/ })).toBeTruthy();
+  });
+
+  it('an imported Plan hides Propose and says why', async () => {
+    const view = proposed([looseTaskProposal('density')], { round: 1 });
+    const imported = { ...view, shape: { ...view.shape, importedAt: '2026-11-12T08:00:00.000Z' } };
+    const proposes: string[] = [];
+    serve(
+      ...conversations(imported),
+      http.post(daemonUrl('/shapes/:shapeId/propose'), ({ params }) => {
+        proposes.push(String(params['shapeId']));
+        return HttpResponse.json({ status: 'started' }, { status: 202 });
+      }),
+    );
+    open(imported);
+    expect(
+      await screen.findByText('Imported 12 Nov 2026. Re-import to change its plan.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Propose/ })).toBeNull();
+    fireEvent.keyDown(document, { key: 'Enter', metaKey: true, shiftKey: true });
+    await act(() => Promise.resolve());
+    expect(proposes).toEqual([]);
   });
 
   it('presses Propose, and reads Propose Again once a round has passed', async () => {

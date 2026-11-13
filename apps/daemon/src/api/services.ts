@@ -1,4 +1,10 @@
 import type {
+  PlanDocumentRevisionDto,
+  PlanRecordDto,
+  PlanRecordList,
+  PlanRecordPage,
+  PlanRecordQuery,
+  TaskPlanContextDto,
   PlanExportInput,
   PlanExportResult,
   PlanImportInput,
@@ -116,6 +122,7 @@ import type {
   SelfUpdateStatusDto,
   OneWayPathsDto,
   SmallProposalLimitDto,
+  ShapeAttachmentId,
   ShapeConvertInput,
   ShapeConvertResult,
   ShapeDismissInput,
@@ -210,6 +217,18 @@ export interface PlanRecordServices {
   importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome>;
   /** Writes the record as Markdown into a folder outside every checkout; refusals are InvalidErrors. */
   exportPlan(shapeId: ShapeId, input: PlanExportInput): Promise<PlanExportResult>;
+  /** The record's documents with every revision, and how many rows each list holds. */
+  getPlanRecord(shapeId: ShapeId): PlanRecordDto;
+  /** One revision of a document, byte for byte; NotFoundError when there is none. */
+  getPlanRevision(
+    shapeId: ShapeId,
+    documentId: ShapeAttachmentId,
+    number: number,
+  ): PlanDocumentRevisionDto;
+  /** One page of a list, filtered and sorted here. */
+  getPlanRecordPage(shapeId: ShapeId, list: PlanRecordList, query: PlanRecordQuery): PlanRecordPage;
+  /** A task's pin, the Plan block its lane last got, and its newest anchor checks. */
+  getTaskPlanContext(taskId: TaskId): TaskPlanContextDto;
 }
 
 /** The setting that lets 10db install main's build by itself. */

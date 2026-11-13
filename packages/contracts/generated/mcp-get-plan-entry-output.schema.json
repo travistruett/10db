@@ -99,6 +99,11 @@
               "entryKey": {
                 "type": "string"
               },
+              "entryVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
               "anchorIndex": {
                 "type": "integer",
                 "minimum": 0,
@@ -150,6 +155,7 @@
             },
             "required": [
               "entryKey",
+              "entryVersion",
               "anchorIndex",
               "result",
               "line",

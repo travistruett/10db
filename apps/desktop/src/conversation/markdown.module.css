@@ -1,0 +1,10 @@
+.quote {
+  margin: 0;
+  padding-left: var(--mantine-spacing-sm);
+  border-left: 2px solid var(--mantine-color-default-border);
+  color: var(--mantine-color-dimmed);
+}
+
+.list li + li {
+  margin-top: 4px;
+}

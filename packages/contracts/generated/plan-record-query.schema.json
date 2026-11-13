@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "superseded",
+        "rejected",
+        "accepted",
+        "current",
+        "open",
+        "resolved",
+        "dismissed"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "intent",
+        "fact",
+        "experiment",
+        "name",
+        "finding",
+        "question"
+      ]
+    },
+    "document": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "q": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "page": {
+      "default": 1,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "pageSize": {
+      "default": 25,
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    }
+  },
+  "additionalProperties": false
+}

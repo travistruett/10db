@@ -1,8 +1,14 @@
-import { ShapeOrigin, type ShapeConvertedRow } from '@10db/contracts';
+import {
+  ShapeOrigin,
+  type ShapeConvertedRow,
+  type ShapeId,
+  type ShapeOfDto,
+} from '@10db/contracts';
 import {
   findShapeLinkOfGoal,
   findShapeLinkOfTask,
   getProject,
+  getShape,
   getShapeJevOptIn,
   questionCardRates,
   setShapeJevOptIn,
@@ -50,6 +56,10 @@ export function createShapeServices(deps: {
   readonly clock: Clock;
 }): ShapeApiServices {
   const { shape, state } = deps;
+  const shapeOf = (shapeId: ShapeId | undefined): ShapeOfDto =>
+    shapeId === undefined
+      ? { shapeId: null, title: null }
+      : { shapeId, title: getShape(state.db, shapeId).title };
   return {
     listShapes: (projectId) => shape.list(projectId),
     // A conversation with no title is named by its first message once there is one.
@@ -85,12 +95,8 @@ export function createShapeServices(deps: {
       shape.removeDraftGoal(goalId);
     },
     resumeShape: (id, event) => shape.resume(id, event),
-    getGoalShape: (goalId) => ({
-      shapeId: findShapeLinkOfGoal(state.db, goalId)?.shapeId ?? null,
-    }),
-    getTaskShape: (taskId) => ({
-      shapeId: findShapeLinkOfTask(state.db, taskId)?.shapeId ?? null,
-    }),
+    getGoalShape: (goalId) => shapeOf(findShapeLinkOfGoal(state.db, goalId)?.shapeId),
+    getTaskShape: (taskId) => shapeOf(findShapeLinkOfTask(state.db, taskId)?.shapeId),
     withdrawShapeDecision: (shapeId, decisionId, reason) => {
       shape.withdrawDecision(shapeId, decisionId, reason);
     },

@@ -16,3 +16,9 @@ indent_style = tab
 
 [*.md]
 trim_trailing_whitespace = false
+
+# The plan-record acceptance bundle keeps a CRLF line and trailing spaces byte for byte.
+[apps/daemon/test/fixtures/plan-bundle/*.md]
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = unset

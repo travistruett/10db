@@ -26,3 +26,5 @@ apps/desktop/src-tauri/tauri.conf.json
 docs/architecture/decisions.md
 # Lanes and gates can't read .env* files, templates included, so Prettier skips this one.
 apps/daemon/.env.example
+# The plan-record acceptance documents are imported and exported byte for byte, a CRLF line included.
+apps/daemon/test/fixtures/plan-bundle/*.md

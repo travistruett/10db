@@ -39,6 +39,13 @@ import {
 } from './plan-bundle';
 import { AnchorCheckDto, PlanAnchor, PlanContext, PlanRef, SectionIndexEntry } from './plan-record';
 import {
+  PlanDocumentRevisionDto,
+  PlanRecordDto,
+  PlanRecordPage,
+  PlanRecordQuery,
+  TaskPlanContextDto,
+} from './plan-record-view';
+import {
   PassCloseAnswerDto,
   PassCloseContinueDto,
   PassClosePreviewDto,
@@ -428,6 +435,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'section-index-entry': SectionIndexEntry,
   'anchor-check-dto': AnchorCheckDto,
   'plan-context': PlanContext,
+  'plan-record-dto': PlanRecordDto,
+  'plan-document-revision-dto': PlanDocumentRevisionDto,
+  'plan-record-query': PlanRecordQuery,
+  'plan-record-page': PlanRecordPage,
+  'task-plan-context-dto': TaskPlanContextDto,
   'task-file-dto': TaskFileDto,
   'task-message-dto': TaskMessageDto,
   'task-message-input': TaskMessageInput,

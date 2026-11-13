@@ -5,7 +5,6 @@ import {
   ShapeFindingState,
   ShapeProposalBody,
   ShapeProposalState,
-  type AnchorCheckDto,
   type PlanContext,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -21,10 +20,10 @@ import {
   listAnchorChecks,
   listShapeFindings,
   listShapeProposals,
-  type AnchorCheckRow,
   type DbReader,
 } from '@10db/db';
 import { CHARS_PER_TOKEN } from '../knowledge';
+import { anchorCheckDto } from './check-dto';
 import { planItemLine, type PlanItem } from './plan-lines';
 import { findSection, sectionText } from './sections';
 
@@ -72,17 +71,6 @@ const DROPPED_PROPOSAL: Partial<Record<ShapeProposalState, PlanItemDropped>> = {
   [ShapeProposalState.Rejected]: PlanItemDropped.Rejected,
   [ShapeProposalState.Superseded]: PlanItemDropped.Superseded,
 };
-
-const checkOf = (row: AnchorCheckRow): AnchorCheckDto => ({
-  entryKey: row.entryKey,
-  anchorIndex: row.anchorIndex,
-  result: row.result,
-  line: row.line,
-  checkedCommit: row.checkedCommit,
-  note: row.note,
-  workstreamId: row.workstreamId,
-  at: row.createdAt,
-});
 
 /** A fact's one line: its claim, what an experiment shows, or the cost in brief. */
 function factLine(body: PlanEntryBody['fact'] | PlanEntryBody['experiment']): string {
@@ -177,7 +165,9 @@ export function buildPlanContext(
             // A superseded fact's anchors are never checked, so none are carried as checked.
             checks: superseded
               ? []
-              : checks.filter((c) => c.entryKey === key && c.entryVersion === version).map(checkOf),
+              : checks
+                  .filter((c) => c.entryKey === key && c.entryVersion === version)
+                  .map(anchorCheckDto),
             dropped,
           },
         });
