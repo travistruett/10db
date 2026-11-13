@@ -94,6 +94,7 @@ function SectionLinks({
         key={s.key}
         label={s.label}
         active={s.key === current}
+        py={5}
         leftSection={<Icon size={16} stroke={1.5} />}
         renderRoot={(props) => (
           <Link {...props} to="/settings/$section" params={{ section: s.key }} />
@@ -115,8 +116,8 @@ function Subhead({
   const labelId = useId();
   if (subhead === null) return <SectionLinks sections={sections} current={current} />;
   return (
-    <Stack gap={2} role="group" aria-labelledby={labelId} mb="xs">
-      <Text id={labelId} size="xs" fw={600} c="dimmed" px="sm" pt="xs" pb={4}>
+    <Stack gap={2} role="group" aria-labelledby={labelId} mb={4}>
+      <Text id={labelId} size="xs" fw={600} c="dimmed" px="sm" pt={6} pb={2}>
         {subhead}
       </Text>
       <SectionLinks sections={sections} current={current} />

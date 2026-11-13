@@ -76,7 +76,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network hosts'),
   section(SettingsSectionKey.Overview, App, null, 'Overview'),
   section(SettingsSectionKey.Accounts, App, 'Models', 'Accounts'),
-  section(SettingsSectionKey.Models, App, 'Models', 'Models and benchmarks'),
+  section(SettingsSectionKey.Models, App, 'Models', 'All models'),
   section(SettingsSectionKey.Decisions, App, 'Models', 'Decisions'),
   section(
     SettingsSectionKey.PersonasAndFlows,
