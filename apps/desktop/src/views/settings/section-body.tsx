@@ -13,8 +13,9 @@ import { PlannedRemainder } from './planned-section';
 import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
-import { OneWayPathsSetting } from './one-way-paths-setting';
-import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
+import { OverviewSection } from './overview-section';
+import { PlanningSection } from './planning-section';
+import { ScopeLine } from './scope-line';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
@@ -22,7 +23,6 @@ import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsSectionKey } from './sections';
 import { RoleSettings } from './role-settings';
 import { SelfUpdateSection } from './self-update-section';
-import { ShapeJevSetting } from './shape-jev-setting';
 import { TrustSection } from './trust-section';
 
 function NoProject() {
@@ -46,13 +46,24 @@ export function SectionBody({
           {project ? (
             <>
               <ProjectGeneralForm key={project.id} project={project} />
-              <ShapeJevSetting key={`jev-${project.id}`} project={project} />
-              <OneWayPathsSetting key={`one-way-${project.id}`} project={project} />
-              <SmallProposalLimitSetting key={`small-proposals-${project.id}`} project={project} />
             </>
           ) : (
             <NoProject />
           )}
+        </>
+      );
+    case SettingsSectionKey.Overview:
+      return (
+        <>
+          {heading}
+          <OverviewSection />
+        </>
+      );
+    case SettingsSectionKey.Planning:
+      return (
+        <>
+          {heading}
+          {project ? <PlanningSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.BoardColumns:
@@ -101,6 +112,11 @@ export function SectionBody({
       return (
         <>
           {heading}
+          {project ? (
+            <ScopeLine>
+              {`For ${project.name} only. Anything set to As app follows All projects › Trust.`}
+            </ScopeLine>
+          ) : null}
           {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
@@ -108,6 +124,7 @@ export function SectionBody({
       return (
         <>
           {heading}
+          <ScopeLine>For every project. A project can override this in its own Trust.</ScopeLine>
           <TrustSection />
         </>
       );
@@ -159,6 +176,11 @@ export function SectionBody({
         <>
           {heading}
           {project ? (
+            <ScopeLine>
+              {`For ${project.name} only. Use global follows All projects › Models by role.`}
+            </ScopeLine>
+          ) : null}
+          {project ? (
             <>
               <RoleSettings key={`roles-${project.id}`} project={project} />
               <PatternsSection key={`patterns-${project.id}`} project={project} />
@@ -173,6 +195,9 @@ export function SectionBody({
       return (
         <>
           {heading}
+          <ScopeLine>
+            For every project. A project can override this in its own Models by role.
+          </ScopeLine>
           <RoleSettings project={null} />
           <PatternsSection project={null} />
           <PlannedRemainder section={section} />

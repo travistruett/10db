@@ -1,6 +1,8 @@
 export const SettingsSectionKey = {
+  Overview: 'overview',
   General: 'general',
   BoardColumns: 'board-columns',
+  Planning: 'planning',
   Areas: 'areas',
   NetworkHosts: 'network-hosts',
   Billing: 'billing',
@@ -20,151 +22,75 @@ export const SettingsSectionKey = {
 } as const;
 export type SettingsSectionKey = (typeof SettingsSectionKey)[keyof typeof SettingsSectionKey];
 
-export const SettingsGroup = { Project: 'project', Global: 'global' } as const;
-export type SettingsGroup = (typeof SettingsGroup)[keyof typeof SettingsGroup];
+/** Which half of Settings a section belongs to; the sidebar shows one half at a time. */
+export const SettingsScope = { Project: 'project', App: 'app' } as const;
+export type SettingsScope = (typeof SettingsScope)[keyof typeof SettingsScope];
 
 export interface SettingsSection {
   readonly key: SettingsSectionKey;
-  readonly group: SettingsGroup;
+  readonly scope: SettingsScope;
+  /** The dimmed label the sidebar groups the section under; null for a section that stands alone. */
+  readonly subhead: string | null;
   readonly label: string;
-  /** What is still to come in the section, and which plan fills it; null once nothing is left. */
+  /** What the section still lacks, as a line under its content; null once nothing is left. */
   readonly planned: string | null;
   /** Whether the section has content to open; the nav lists only these. A built section may still have a planned remainder. */
   readonly built: boolean;
 }
 
-export const GENERAL_SECTION: SettingsSection = {
-  key: SettingsSectionKey.General,
-  group: SettingsGroup.Project,
-  label: 'General',
-  planned: null,
-  built: true,
-};
+function section(
+  key: SettingsSectionKey,
+  scope: SettingsScope,
+  subhead: string | null,
+  label: string,
+  planned: string | null = null,
+): SettingsSection {
+  return { key, scope, subhead, label, planned, built: true };
+}
 
-/** Spec §10 Settings: per project, then app-wide. */
+export const GENERAL_SECTION: SettingsSection = section(
+  SettingsSectionKey.General,
+  SettingsScope.Project,
+  'Project',
+  'General',
+);
+
+const { Project, App } = SettingsScope;
+
+/** Project sections first, then app-wide ones; each scope in the order the sidebar lists it. */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   GENERAL_SECTION,
-  {
-    key: SettingsSectionKey.BoardColumns,
-    group: SettingsGroup.Project,
-    label: 'Board columns',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Areas,
-    group: SettingsGroup.Project,
-    label: 'Areas and hazards',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.NetworkHosts,
-    group: SettingsGroup.Project,
-    label: 'Network hosts',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Billing,
-    group: SettingsGroup.Project,
-    label: 'Billing',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.ProjectTrust,
-    group: SettingsGroup.Project,
-    label: 'Trust',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Team,
-    group: SettingsGroup.Project,
-    label: 'Team',
-    planned:
-      'Which persona runs each role in this project, and its human members. The team editor plan fills it.',
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.RoutingRules,
-    group: SettingsGroup.Project,
-    label: 'Who Answers',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.KeepAwake,
-    group: SettingsGroup.Global,
-    label: 'Keep-awake',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Updates,
-    group: SettingsGroup.Global,
-    label: 'Updates',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.LanePermissions,
-    group: SettingsGroup.Global,
-    label: 'Lane permissions',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Trust,
-    group: SettingsGroup.Global,
-    label: 'Trust',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Accounts,
-    group: SettingsGroup.Global,
-    label: 'Accounts',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Integrations,
-    group: SettingsGroup.Global,
-    label: 'Integrations',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.People,
-    group: SettingsGroup.Global,
-    label: 'People',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Decisions,
-    group: SettingsGroup.Global,
-    label: 'Decisions',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.Models,
-    group: SettingsGroup.Global,
-    label: 'Models and benchmarks',
-    planned: null,
-    built: true,
-  },
-  {
-    key: SettingsSectionKey.PersonasAndFlows,
-    group: SettingsGroup.Global,
-    label: 'Personas and flows',
-    planned:
-      'The personas, their instructions and pins, and the flows of steps. The team editor plan fills it.',
-    built: true,
-  },
+  section(SettingsSectionKey.BoardColumns, Project, 'Project', 'Board columns'),
+  section(SettingsSectionKey.Planning, Project, 'Planning', 'Planning'),
+  section(SettingsSectionKey.Areas, Project, 'Planning', 'Areas and hazards'),
+  section(SettingsSectionKey.RoutingRules, Project, 'Planning', 'Who Answers'),
+  section(SettingsSectionKey.Billing, Project, 'Agents', 'Billing'),
+  section(
+    SettingsSectionKey.Team,
+    Project,
+    'Agents',
+    'Models by role',
+    "Not built yet: which persona runs each role, and the project's human members.",
+  ),
+  section(SettingsSectionKey.ProjectTrust, Project, 'Agents', 'Trust'),
+  section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network hosts'),
+  section(SettingsSectionKey.Overview, App, null, 'Overview'),
+  section(SettingsSectionKey.Accounts, App, 'Models', 'Accounts'),
+  section(SettingsSectionKey.Models, App, 'Models', 'Models and benchmarks'),
+  section(SettingsSectionKey.Decisions, App, 'Models', 'Decisions'),
+  section(
+    SettingsSectionKey.PersonasAndFlows,
+    App,
+    'Models',
+    'Models by role',
+    'Not built yet: personas, their instructions and pins, and the flows of steps.',
+  ),
+  section(SettingsSectionKey.LanePermissions, App, 'Agents', 'Lane permissions'),
+  section(SettingsSectionKey.Trust, App, 'Agents', 'Trust'),
+  section(SettingsSectionKey.Integrations, App, 'Connections', 'Integrations'),
+  section(SettingsSectionKey.People, App, 'Connections', 'People'),
+  section(SettingsSectionKey.Updates, App, 'This Mac', 'Updates'),
+  section(SettingsSectionKey.KeepAwake, App, 'This Mac', 'Keep-awake'),
 ];
 
 const KEYS = new Set<string>(Object.values(SettingsSectionKey));
@@ -177,10 +103,10 @@ export function sectionByKey(key: SettingsSectionKey): SettingsSection {
   return SETTINGS_SECTIONS.find((s) => s.key === key) ?? GENERAL_SECTION;
 }
 
-/** Where the sidebar's app-wide Settings opens: the first global section with content. */
-export function firstGlobalSection(): SettingsSectionKey {
+/** Where the sidebar's app-wide Settings opens: the first app-wide section with content. */
+export function firstAppSection(): SettingsSectionKey {
   return (
-    SETTINGS_SECTIONS.find((s) => s.group === SettingsGroup.Global && s.built)?.key ??
+    SETTINGS_SECTIONS.find((s) => s.scope === SettingsScope.App && s.built)?.key ??
     SettingsSectionKey.General
   );
 }

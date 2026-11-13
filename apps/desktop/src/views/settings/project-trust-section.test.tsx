@@ -78,7 +78,7 @@ describe('Settings › project Trust', () => {
     });
   });
 
-  it('lists what comes along and what was left out, with reasons', async () => {
+  it('counts what comes along and what was left out, and lists each only once shown', async () => {
     serve({
       skills: ['careful', 'project:release'],
       plugins: ['p@m'],
@@ -88,9 +88,22 @@ describe('Settings › project Trust', () => {
     });
     renderApp('/settings/project-trust');
     const list = await screen.findByRole('region', { name: 'Comes along' });
-    expect(await within(list).findByText('careful')).toBeTruthy();
+    expect(await within(list).findByText('3 items')).toBeTruthy();
+    expect(within(list).getByText('1 item')).toBeTruthy();
+    expect(within(list).queryByText('careful')).toBeNull();
+    expect(within(list).queryByText('~/.claude/skills/lane')).toBeNull();
+
+    const comesAlong = within(list).getByRole('button', { name: 'Show Comes along' });
+    expect(comesAlong.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(comesAlong);
+    expect(within(list).getByText('careful')).toBeTruthy();
     expect(within(list).getByText('project:release')).toBeTruthy();
     expect(within(list).getByText('p@m')).toBeTruthy();
+    expect(
+      within(list).getByRole('button', { name: 'Hide Comes along' }).getAttribute('aria-expanded'),
+    ).toBe('true');
+
+    fireEvent.click(within(list).getByRole('button', { name: 'Show Left out' }));
     expect(within(list).getByText('~/.claude/skills/lane')).toBeTruthy();
     expect(within(list).getByText('it lies in, or holds, a folder a lane can write')).toBeTruthy();
   });

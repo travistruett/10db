@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { SMALL_PROPOSAL_LIMIT_LABEL } from './small-proposal-limit-setting';
 
-describe('Settings › General › Small proposals', () => {
+describe('Settings › Planning › Small proposals', () => {
   it('shows the saved limit and sends the edited one, zero included', async () => {
     const put: unknown[] = [];
     server.use(
@@ -20,7 +20,7 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
@@ -48,7 +48,7 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
@@ -92,7 +92,7 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', String(saved));

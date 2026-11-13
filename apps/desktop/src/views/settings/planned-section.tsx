@@ -5,7 +5,7 @@ import type { SettingsSection } from './sections';
 export function PlannedRemainder({ section }: { readonly section: SettingsSection }) {
   return (
     <Text size="sm" c="dimmed">
-      Still to come: {section.planned}
+      {section.planned}
     </Text>
   );
 }
