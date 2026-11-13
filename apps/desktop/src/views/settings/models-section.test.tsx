@@ -11,7 +11,8 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { benchmarkStatusDto } from '../../test/benchmark-fixtures';
+import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import {
   accountModelDto,
   catalogueStatusDto,
@@ -154,6 +155,7 @@ function serve(
     http.get(daemonUrl('/models/status'), () =>
       HttpResponse.json(opts.status ?? catalogueStatusDto()),
     ),
+    http.get(daemonUrl('/benchmarks/status'), () => HttpResponse.json(benchmarkStatusDto())),
     http.get(daemonUrl('/models/offers'), () => HttpResponse.json(opts.offers ?? [])),
     http.get(daemonUrl('/model-profiles'), () => HttpResponse.json(opts.profiles ?? [])),
     http.get(daemonUrl('/accounts'), () =>
@@ -162,6 +164,9 @@ function serve(
     ...baseHandlers(),
   );
 }
+
+/** The page inside a router, since its status line links to Integrations. */
+const renderModels = () => renderWithDaemonAndRouter(<ModelsSection />);
 
 /** The model names in the table, top to bottom. */
 const shownNames = () =>
@@ -185,9 +190,16 @@ afterEach(() => {
 });
 
 describe('the Models page', () => {
+  it('shows where the scores come from, beside the catalogue line', async () => {
+    serve();
+    await renderModels();
+    expect(await screen.findByText(/No Artificial Analysis key/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Add Key' })).toBeTruthy();
+  });
+
   it('lists a row per model with its tier, accounts, scores, prices and speed', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     const row = within(
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
@@ -201,7 +213,7 @@ describe('the Models page', () => {
 
   it('shows a dash where there is no data, never a zero', async () => {
     serve({ rows: [BLANK] });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
     // Intelligence, Cost per task, Input and Output.
@@ -210,7 +222,7 @@ describe('the Models page', () => {
 
   it('marks an Unknown model and a model first seen in the last seven days', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(within(rowOf('Alpha Max')).getByText('New')).toBeTruthy();
     expect(within(rowOf('Alpha Fast')).queryByText('New')).toBeNull();
@@ -219,7 +231,7 @@ describe('the Models page', () => {
 
   it('hides Speed until the Columns menu shows it, and keeps it shown', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(screen.queryByRole('columnheader', { name: /Speed/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
@@ -227,14 +239,14 @@ describe('the Models page', () => {
     expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
     expect(within(rowOf('Alpha Max')).getByText('40')).toBeTruthy();
     cleanup();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
   });
 
   it('expands a row to one line per effort without opening the drawer', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Show efforts of Alpha Max' }));
     const efforts = await screen.findByRole('table', { name: 'Efforts of Alpha Max' });
@@ -255,7 +267,7 @@ describe('the Models page', () => {
       efforts: [modelEffortDto({ effort: 'high', intelligence: 60, costPerTaskUsd: 2.75 })],
     });
     serve({ asked, forAccount: () => [dearer] });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(asked).toEqual([null]);
     fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
@@ -269,7 +281,7 @@ describe('the Models page', () => {
 
   describe('the Chart view', () => {
     const openChart = async () => {
-      renderWithDaemon(<ModelsSection />);
+      await renderModels();
       await screen.findByRole('button', { name: 'Open Alpha Max' });
       fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
     };
@@ -368,7 +380,7 @@ describe('the Models page', () => {
 
   it('keeps the toolbar and offers every account when one account’s models cannot be read', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     server.use(
       http.get(daemonUrl('/models'), ({ request }) =>
@@ -395,7 +407,7 @@ describe('the Models page', () => {
           : HttpResponse.json([FAST, STRONG, UNKNOWN, BLANK]),
       ),
     );
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Show every account' }));
@@ -405,7 +417,7 @@ describe('the Models page', () => {
 
   it('filters by tier from the Tier column, one tier or several', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tier' }));
     const tiers = await screen.findByRole('group', { name: 'Tier' });
@@ -420,7 +432,7 @@ describe('the Models page', () => {
 
   it('filters by account from the Available on column', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
     fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
@@ -430,7 +442,7 @@ describe('the Models page', () => {
 
   it('searches names and model IDs from the Model column, and says when nothing matches', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Model' }));
     const search = await screen.findByRole('textbox', { name: 'Search models' });
@@ -442,7 +454,7 @@ describe('the Models page', () => {
 
   it('sorts by a column, reverses on a second click, and keeps Unknown and blanks last', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     // The list opens by tier, strongest first; another column keeps that direction.
     fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence' }));
@@ -454,7 +466,7 @@ describe('the Models page', () => {
 
   it('opens the drawer from a click anywhere on a row', async () => {
     serve();
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(within(rowOf('Alpha Max')).getByText('Strongest'));
     expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
@@ -462,7 +474,7 @@ describe('the Models page', () => {
 
   it('says where the data came from and how old it is, and credits Artificial Analysis with a link', async () => {
     serve({ status: catalogueStatusDto({ fetchedAt: '2026-11-07T09:00:00.000Z', models: 40 }) });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     expect(await screen.findByText(/models\.dev, fetched 3 hours ago/)).toBeTruthy();
     const credit = screen.getByRole('link', { name: 'Artificial Analysis' });
     expect(credit.getAttribute('href')).toBe('https://artificialanalysis.ai/');
@@ -491,7 +503,7 @@ describe('the Models page', () => {
     },
   ])('$name', async ({ status, text }) => {
     serve({ status: catalogueStatusDto(status) });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     expect(await screen.findByText(text)).toBeTruthy();
   });
 
@@ -502,13 +514,13 @@ describe('the Models page', () => {
         HttpResponse.json({ error: 'boom' }, { status: 500 }),
       ),
     );
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     expect(await screen.findByText(/catalogue status could not be read/i)).toBeTruthy();
   });
 
   it('says there is no catalogue yet', async () => {
     serve({ status: catalogueStatusDto({ source: 'none', fetchedAt: null, models: 0 }), rows: [] });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     expect(await screen.findByText(/No catalogue yet/)).toBeTruthy();
   });
 
@@ -532,7 +544,7 @@ describe('the Models page', () => {
         return HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:58:00.000Z' }));
       }),
     );
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     expect(await screen.findByText(/fetched 3 hours ago/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
     await waitFor(() => {
@@ -555,7 +567,7 @@ describe('the Models page', () => {
         HttpResponse.json({ error: 'internal', message: 'The refresh broke' }, { status: 500 }),
       ),
     );
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
     expect((await screen.findByRole('alert')).textContent).toContain('The refresh broke');
@@ -570,7 +582,7 @@ describe('the Models page', () => {
       firstSeenAt: null,
     });
     serve({ rows: [dateless] });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     fireEvent.click(await screen.findByRole('button', { name: 'Open Delta Held' }));
     const drawer = await screen.findByRole('dialog', { name: 'Delta Held' });
     expect(within(rowOf('Delta Held')).queryByText('New')).toBeNull();
@@ -612,7 +624,7 @@ describe('the Models page', () => {
         }),
       ],
     });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('launch.alpha-max-v1')).toBeTruthy();
@@ -648,7 +660,7 @@ describe('the Models page', () => {
         }),
       ],
     });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     const badges = await within(drawer).findAllByText('Marked from an error’s wording');
@@ -667,7 +679,7 @@ describe('the Models page', () => {
     serve({
       offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'alpha-max', unusable: true })],
     });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('Refused by this account')).toBeTruthy();
@@ -686,7 +698,7 @@ describe('the Models page', () => {
       rows: [unconfirmed],
       offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'other' })],
     });
-    renderWithDaemon(<ModelsSection />);
+    await renderModels();
     fireEvent.click(await screen.findByRole('button', { name: 'Open gamma-new' }));
     const drawer = await screen.findByRole('dialog', { name: 'gamma-new' });
     expect(await within(drawer).findByText(/Work key has not listed its models yet/)).toBeTruthy();

@@ -13,6 +13,7 @@ import {
 import { columnChoices, ColumnsMenu, hiddenColumns, toggleColumn } from '../../shell/columns-menu';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
+import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
 import { ModelDrawer } from './model-drawer';
 import { catalogueLine, costNote } from './model-format';
 import {
@@ -78,6 +79,7 @@ export function ModelsSection() {
                 ? 'The catalogue status could not be read.'
                 : 'Reading the catalogue…'}
           </Text>
+          <ArtificialAnalysisStatusLine />
           {view === View.Table ? <ArtificialAnalysisCredit /> : null}
         </Stack>
         <Group gap="xs" wrap="nowrap">
