@@ -276,7 +276,36 @@ const TOOL_ROWS: readonly Row[] = [
   ),
   tool('a reviewed tool', REVIEWED_TOOL, {}, 'ask', 'allow'),
   tool('a tool nobody reviewed', 'FutureTool', {}, 'ask', 'ask'),
-  tool('Monitor with a socket', 'Monitor', { ...MONITOR, ...SOCKET }, 'ask', 'allow'),
+  // A socket opens from Claude Code's own process, outside the proxy, as WebFetch does: it goes to a
+  // judge only while the Web switch is on.
+  tool(
+    'Monitor with a socket, web on',
+    'Monitor',
+    { ...MONITOR, ...SOCKET },
+    'ask',
+    'allow',
+    WEB_ON,
+  ),
+  tool('Monitor with a socket, web off', 'Monitor', { ...MONITOR, ...SOCKET }, 'ask', 'ask', {
+    webOn: false,
+  }),
+  tool('Monitor with a socket, web unset', 'Monitor', { ...MONITOR, ...SOCKET }, 'ask', 'ask'),
+  tool(
+    'Monitor with a socket and a command, web on',
+    'Monitor',
+    { ...MONITOR, ...SOCKET, command: 'tail -f log' },
+    'ask',
+    'allow',
+    WEB_ON,
+  ),
+  tool(
+    'Monitor with a socket and a command, web off',
+    'Monitor',
+    { ...MONITOR, ...SOCKET, command: 'tail -f log' },
+    'ask',
+    'ask',
+    { webOn: false },
+  ),
   tool(
     'Monitor with a socket and a hazard',
     'Monitor',

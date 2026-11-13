@@ -177,8 +177,8 @@ without it):
   PreToolUse hook's `permission_mode` (`judgeForCall`): anything but `auto` is the floor for that call (live check
   G6: a model auto mode doesn't run reports `default`). On the floor the guard is today's whole guard. Where a
   judge runs, `guard/judged-rules.ts` hands it deploys, unreadable shell (unread words, a hidden redirection,
-  `env -S`), a pipe into a shell and an `rm -r` the guard can't judge, plus WebFetch and WebSearch with the Web
-  switch on and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
+  `env -S`), a pipe into a shell and an `rm -r` the guard can't judge, plus WebFetch, WebSearch and a Monitor
+  socket (`ws`, which opens from Claude Code's own process like WebFetch) with the Web switch on, and the tools `guard/reviewed-tools.ts` lists for the pinned Claude Code. Those refusals still stand
   under an allow rule that covers the call, and for any command whose text names git, gh or `.git`. The repo MCP
   tools and the MCP resource tools keep their card under every judge (live check G8 could not show the classifier
   judging an MCP call). A session on the floor says why in its task's thread, once (`trust/floor-notice.ts`).

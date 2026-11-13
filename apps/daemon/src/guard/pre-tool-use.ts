@@ -162,7 +162,9 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   if (input.toolName === 'Monitor') {
     const keys = Object.keys(ToolInputRecord.safeParse(input.toolInput).data ?? { '': 0 });
     if (!keys.every((key) => MONITOR_INPUT_KEYS.has(key))) {
-      if (!handedToJudge(JudgedRule.MonitorSocket)) {
+      // A socket reaches its host from Claude Code's own process, as WebFetch does, so it goes to a
+      // judge only while the Web switch is on.
+      if (input.webOn !== true || !handedToJudge(JudgedRule.MonitorSocket)) {
         return 'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.';
       }
       socketJudged = true;
