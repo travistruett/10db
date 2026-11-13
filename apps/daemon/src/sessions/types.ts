@@ -4,7 +4,7 @@ import type {
   ModelMarkBasis,
   SessionId,
   ShapeId,
-  SupportedAccountKind,
+  AgentAccountKind,
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
@@ -332,7 +332,7 @@ export type ShapeSessionHandle = SessionHandle;
 
 export interface AccountProbeSpec {
   /** The account's kind, which picks the agent that reports who it is. */
-  readonly kind: SupportedAccountKind;
+  readonly kind: AgentAccountKind;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
 }

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { idUuid, mintId } from '@10db/contracts';
+import { agentKind, idUuid, mintId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
@@ -71,7 +71,7 @@ async function liveSession(spec: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: defaultAccount.kind,
+    kind: agentKind(defaultAccount.kind),
     cwd: repo.path,
     env: launcher.probe(defaultAccount).env,
   });

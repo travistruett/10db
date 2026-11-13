@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isModelTier, ModelTier } from './catalogue';
+import { InvalidError } from './errors';
 import { AccountId, ProjectId } from './ids';
 import { isSignInUrl } from './sign-in-url';
 import { Provider } from './states';
@@ -14,6 +15,8 @@ export const AccountKind = {
   Gateway: 'gateway',
   OpenaiApiKey: 'openai_api_key',
   CodexSignin: 'codex_signin',
+  /** Runs 10db's own decisions, never an agent. */
+  OpenRouter: 'openrouter',
 } as const;
 export type AccountKind = ValueOf<typeof AccountKind>;
 
@@ -24,11 +27,38 @@ export const SUPPORTED_ACCOUNT_KINDS = [
   AccountKind.Bedrock,
   AccountKind.Gateway,
   AccountKind.CodexSignin,
+  AccountKind.OpenRouter,
 ] as const;
 export type SupportedAccountKind = (typeof SUPPORTED_ACCOUNT_KINDS)[number];
 
+/** The kinds a session can run on; an OpenRouter account only answers decisions. */
+export const AGENT_ACCOUNT_KINDS = [
+  AccountKind.ClaudeSubscription,
+  AccountKind.AnthropicApiKey,
+  AccountKind.Bedrock,
+  AccountKind.Gateway,
+  AccountKind.CodexSignin,
+] as const;
+export type AgentAccountKind = (typeof AGENT_ACCOUNT_KINDS)[number];
+
+export function runsAgents(kind: SupportedAccountKind): kind is AgentAccountKind {
+  return kind !== AccountKind.OpenRouter;
+}
+
+/** Why a project may not name an OpenRouter account as its account or backup. */
+export const OPENROUTER_CANT_RUN_AGENTS = "OpenRouter can't run agents yet";
+
+/**
+ * The kind of an account a project runs agents on. A project is never bound to an OpenRouter account
+ * (the store refuses it), so reaching one here is a broken invariant.
+ */
+export function agentKind(kind: SupportedAccountKind): AgentAccountKind {
+  if (!runsAgents(kind)) throw new InvalidError(OPENROUTER_CANT_RUN_AGENTS);
+  return kind;
+}
+
 /** The agent that runs a session on the kind. */
-export function providerOf(kind: SupportedAccountKind): Provider {
+export function providerOf(kind: AgentAccountKind): Provider {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
@@ -44,7 +74,9 @@ export function providerOf(kind: SupportedAccountKind): Provider {
 export const BRAINSTORM_REFUSED_ON_CHATGPT = "Brainstorm chat isn't available on a ChatGPT account";
 
 /** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
-export function signsInWithLogin(kind: SupportedAccountKind): boolean {
+export function signsInWithLogin(
+  kind: SupportedAccountKind,
+): kind is typeof AccountKind.ClaudeSubscription | typeof AccountKind.CodexSignin {
   return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;
 }
 
@@ -147,13 +179,21 @@ export const BedrockSettings = z.strictObject({
   /** The AWS profile the session uses; null means a bearer token from the Keychain. */
   awsProfile: AwsProfile.nullable(),
 });
+/** An OpenRouter account has a key and nothing else to set. */
+export const OpenRouterSettings = z.strictObject({});
 export const GatewaySettings = z.strictObject({ ...modelChoice, baseUrl: BaseUrl });
 export type SubscriptionSettings = z.infer<typeof SubscriptionSettings>;
 export type ApiKeySettings = z.infer<typeof ApiKeySettings>;
 export type BedrockSettings = z.infer<typeof BedrockSettings>;
 export type GatewaySettings = z.infer<typeof GatewaySettings>;
+export type OpenRouterSettings = z.infer<typeof OpenRouterSettings>;
 
-export const AccountSettings = z.union([BedrockSettings, GatewaySettings, SubscriptionSettings]);
+export const AccountSettings = z.union([
+  BedrockSettings,
+  GatewaySettings,
+  SubscriptionSettings,
+  OpenRouterSettings,
+]);
 export type AccountSettings = z.infer<typeof AccountSettings>;
 
 const SETTINGS_BY_KIND = {
@@ -162,6 +202,7 @@ const SETTINGS_BY_KIND = {
   [AccountKind.Bedrock]: BedrockSettings,
   [AccountKind.Gateway]: GatewaySettings,
   [AccountKind.CodexSignin]: SubscriptionSettings,
+  [AccountKind.OpenRouter]: OpenRouterSettings,
 } as const satisfies Record<SupportedAccountKind, z.ZodType>;
 
 /** Stored or submitted settings, checked against the account's own kind. */
@@ -177,6 +218,7 @@ export function needsSecret(kind: SupportedAccountKind, settings: AccountSetting
       return false;
     case AccountKind.AnthropicApiKey:
     case AccountKind.Gateway:
+    case AccountKind.OpenRouter:
       return true;
     case AccountKind.Bedrock:
       return 'awsProfile' in settings && settings.awsProfile === null;
@@ -236,10 +278,15 @@ export const AccountInput = z.discriminatedUnion(
       ...common,
       settings: SubscriptionSettings.default({}),
     }),
+    z.strictObject({
+      kind: z.literal(AccountKind.OpenRouter),
+      label: Label,
+      payer: Payer.default(''),
+    }),
   ],
   {
     error:
-      'Choose claude_subscription, anthropic_api_key, bedrock, gateway or codex_signin; openai_api_key is reserved until a Codex API-key adapter exists',
+      'Choose claude_subscription, anthropic_api_key, bedrock, gateway, codex_signin or openrouter; openai_api_key is reserved until a Codex API-key adapter exists',
   },
 );
 export type AccountInput = z.input<typeof AccountInput>;

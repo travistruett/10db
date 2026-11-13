@@ -6,11 +6,13 @@ import { Fragment } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useBenchmarkStatus } from '../../daemon/benchmark-queries';
 import { useGithubStatus } from '../../daemon/github-queries';
+import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useCatalogueStatus } from '../../daemon/model-queries';
 import { useSlackConnection } from '../../daemon/people';
-import { useSystemCheck } from '../../daemon/queries';
+import { useProjects, useSystemCheck } from '../../daemon/queries';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
 import { useNow } from '../../shell/relative';
+import { accountUsedBy } from './accounts/used-by';
 import { OverviewRowView } from './overview-row';
 import {
   accountState,
@@ -67,9 +69,13 @@ const MARK_OF_KIND: Readonly<Record<AccountDto['kind'], RowMark>> = {
   gateway: 'key',
   bedrock: 'aws',
   codex_signin: 'openai',
+  openrouter: 'key',
 };
 
-function accountRows(query: UseQueryResult<AccountDto[]>): OverviewRow[] {
+function accountRows(
+  query: UseQueryResult<AccountDto[]>,
+  usedBy: (account: AccountDto) => readonly string[],
+): OverviewRow[] {
   const link = { section: SettingsSectionKey.Accounts, focus: null };
   const shell = { group: OverviewGroup.Access, mark: 'key' as const, link };
   if (query.data === undefined)
@@ -82,7 +88,7 @@ function accountRows(query: UseQueryResult<AccountDto[]>): OverviewRow[] {
       name: account.label,
       mark: MARK_OF_KIND[account.kind],
       link: { section: SettingsSectionKey.Accounts, focus: account.id },
-      state: accountState(account),
+      state: accountState(account, usedBy(account)),
       retry: null,
     }));
 }
@@ -91,6 +97,8 @@ function accountRows(query: UseQueryResult<AccountDto[]>): OverviewRow[] {
 function useOverviewRows(): OverviewRow[] {
   const now = useNow();
   const accounts = useAccounts();
+  const projects = useProjects();
+  const judge = useJudgeStatus();
   const github = useGithubStatus();
   const slack = useSlackConnection();
   const benchmarks = useBenchmarkStatus();
@@ -120,7 +128,7 @@ function useOverviewRows(): OverviewRow[] {
           retry: null,
         }));
   return sortRows([
-    ...accountRows(accounts),
+    ...accountRows(accounts, (account) => accountUsedBy(account, projects.data ?? [], judge.data)),
     fromQuery(
       github,
       {

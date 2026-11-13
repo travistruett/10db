@@ -1,7 +1,14 @@
-import { isMetered, type AccountId, type AccountUsageDto, type UsageTotals } from '@10db/contracts';
+import {
+  AccountKind,
+  isMetered,
+  type AccountId,
+  type AccountUsageDto,
+  type UsageTotals,
+} from '@10db/contracts';
 import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
+import { getJudgeConfig } from './judge-config';
 import type { DbReader } from './store';
 
 /** A calendar month as ISO instants: `start` inclusive, `end` exclusive. The daemon computes it in local time. */
@@ -29,8 +36,42 @@ export function accountSpendUsd(db: DbReader, id: AccountId, window: UsageWindow
   return row?.total ?? 0;
 }
 
+/**
+ * An OpenRouter account runs no session, so its month is the dollars of the decisions made on it: the judge's call
+ * log, kept 30 days. A call records no account, so only the account decisions run on has a figure; any other is null.
+ */
+function decisionUsage(db: DbReader, id: AccountId, window: UsageWindow): AccountUsageDto {
+  const account = getAccountRow(db, id);
+  const runsDecisions = getJudgeConfig(db).accountId === id;
+  const spent = runsDecisions
+    ? db
+        .select({ total: sql<number | null>`sum(${schema.judgeCalls.costUsd})` })
+        .from(schema.judgeCalls)
+        .where(
+          and(
+            gte(schema.judgeCalls.createdAt, window.start),
+            lt(schema.judgeCalls.createdAt, window.end),
+          ),
+        )
+        .get()
+    : undefined;
+  return {
+    accountId: id,
+    month: window.month,
+    total: {
+      tokensIn: 0,
+      tokensOut: 0,
+      tokensCached: 0,
+      costUsd: runsDecisions ? (spent?.total ?? 0) : null,
+    },
+    monthlyCapUsd: account.monthlyCapUsd,
+    byProject: [],
+  };
+}
+
 export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): AccountUsageDto {
   const account = getAccountRow(db, id);
+  if (account.kind === AccountKind.OpenRouter) return decisionUsage(db, id, window);
   const metered = isMetered(account.kind);
   const rows = db
     .select({

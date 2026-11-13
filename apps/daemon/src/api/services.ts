@@ -56,7 +56,6 @@ import type {
   InboxState,
   JudgeCallDto,
   JudgeConfigPatch,
-  JudgeKeyInput,
   JudgeStatusDto,
   JudgeTestResultDto,
   KeepAwakeMode,
@@ -261,13 +260,11 @@ export interface TaskLookupServices {
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices extends PlanRecordServices {
-  /** The judge's status, key, connection test and call log. */
+  /** The judge's status, the account it runs on, and its call log. */
   judgeStatus(): Promise<JudgeStatusDto>;
   patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
-  /** Write-only: the key goes to the Keychain and is never answered, logged or stored elsewhere. */
-  setJudgeKey(input: JudgeKeyInput): Promise<JudgeStatusDto>;
-  removeJudgeKey(): Promise<JudgeStatusDto>;
-  testJudge(): Promise<JudgeTestResultDto>;
+  /** One tiny decision call with that OpenRouter account's own key. */
+  testAccount(id: AccountId): Promise<JudgeTestResultDto>;
   /** The most recent calls, newest first. */
   listJudgeCalls(limit: number): JudgeCallDto[];
   listProjects(): ProjectViewDto[];

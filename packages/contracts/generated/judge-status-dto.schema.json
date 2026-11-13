@@ -8,6 +8,18 @@
         "enabled": {
           "type": "boolean"
         },
+        "accountId": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "decisions": {
           "type": "object",
           "properties": {
@@ -233,8 +245,41 @@
         "decisions"
       ]
     },
-    "keySet": {
-      "type": "boolean"
+    "account": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "label": {
+              "type": "string"
+            },
+            "secretSet": {
+              "type": "boolean"
+            },
+            "secretState": {
+              "type": "string",
+              "enum": [
+                "set",
+                "missing",
+                "changed"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "label",
+            "secretSet",
+            "secretState"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "off": {
       "type": "boolean"
@@ -242,7 +287,7 @@
   },
   "required": [
     "config",
-    "keySet",
+    "account",
     "off"
   ]
 }

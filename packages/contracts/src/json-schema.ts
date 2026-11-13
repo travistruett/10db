@@ -80,13 +80,7 @@ import {
 } from './accounts';
 import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
 import { GithubSigninDto, GithubStatusDto } from './github';
-import {
-  JudgeCallDto,
-  JudgeConfigPatch,
-  JudgeKeyInput,
-  JudgeStatusDto,
-  JudgeTestResultDto,
-} from './judge';
+import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
@@ -313,7 +307,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'github-status-dto': GithubStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
-  'judge-key-input': JudgeKeyInput,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,
   'board-column-delete': BoardColumnDelete,

@@ -260,6 +260,32 @@ describe('SettingsView', () => {
     expect(names).toEqual(['Client keyAnthropic API key']);
   });
 
+  it.each(['Account', 'Backup account'])(
+    'lists an OpenRouter account in %s disabled, since it can’t run agents yet',
+    async (name) => {
+      const project = projectDto();
+      const router = accountDto({ label: 'Work key', kind: 'openrouter' });
+      server.use(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, router])),
+        ...baseHandlers(),
+      );
+      renderApp('/settings/areas');
+      fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+      const picker = await screen.findByRole('combobox', { name });
+      fireEvent.click(picker);
+      const listbox = screen
+        .getAllByRole('listbox', { hidden: true })
+        .find((l) => l.id === picker.getAttribute('aria-controls'));
+      const option = await within(listbox ?? document.body).findByRole('option', {
+        name: /Work key/,
+        hidden: true,
+      });
+      expect(option.getAttribute('data-combobox-disabled')).toBe('true');
+      expect(option.textContent).toContain("Can't run agents yet");
+    },
+  );
+
   it('shows the recorded fallback after 10db moved the project onto it', async () => {
     const client = accountDto({ label: 'Client key', kind: 'anthropic_api_key' });
     const project = projectDto({

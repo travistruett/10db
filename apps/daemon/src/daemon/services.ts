@@ -12,6 +12,7 @@ import {
   Delivery,
   TaskStatus,
   InvalidError,
+  agentKind,
   NotFoundError,
   providerOf,
   isDaemonAddress,
@@ -715,7 +716,7 @@ export function createServices(deps: {
       return {
         accountId,
         picks: rolePicks({
-          ...routingInputs(db, { accountId, provider: providerOf(account.kind) }),
+          ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
           personas: listPersonas(db),
         }),
       };

@@ -1,4 +1,4 @@
-import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type AgentAccountKind } from '@10db/contracts';
 import type { LanePermissionMode } from './types';
 
 /**
@@ -6,7 +6,7 @@ import type { LanePermissionMode } from './types';
  * Claude plan, the API and Bedrock (live check L2). A gateway was never checked, and Codex has no such
  * judge, so their web calls stay carded.
  */
-export function nativeJudge(kind: SupportedAccountKind, mode: LanePermissionMode | null): boolean {
+export function nativeJudge(kind: AgentAccountKind, mode: LanePermissionMode | null): boolean {
   if (mode !== 'auto') return false;
   switch (kind) {
     case AccountKind.ClaudeSubscription:

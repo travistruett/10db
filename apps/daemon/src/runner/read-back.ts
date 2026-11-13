@@ -1,5 +1,6 @@
 import {
   Provider,
+  agentKind,
   providerOf,
   type NextAction,
   type TaskId,
@@ -66,7 +67,8 @@ export async function readBackThread(
   const { action } = input;
   const thread = resumedSessionOf(action);
   const unchanged: ReadBack = { kind: 'read', action };
-  if (thread === null || providerOf(input.account.kind) !== Provider.Codex) return unchanged;
+  if (thread === null || providerOf(agentKind(input.account.kind)) !== Provider.Codex)
+    return unchanged;
   // Oldest first, so the first was written earliest.
   const inDoubt = listUndeliveredTaskMessages(deps.state.db, input.taskId).filter(
     (m) => m.pushUuids.length > 0,

@@ -1,9 +1,4 @@
-import {
-  providerOf,
-  SUPPORTED_ACCOUNT_KINDS,
-  type ProjectDto,
-  type SupportedAccountKind,
-} from '@10db/contracts';
+import { providerOf, runsAgents, type ProjectDto } from '@10db/contracts';
 import {
   getAccount,
   listAccountModels,
@@ -13,9 +8,6 @@ import {
   type DbReader,
 } from '@10db/db';
 import { offeredProfiles, type ChooseInput } from '../routing';
-
-const isSupported = (kind: string): kind is SupportedAccountKind =>
-  SUPPORTED_ACCOUNT_KINDS.some((supported) => supported === kind);
 
 /**
  * What choosing a model reads for a project: the profiles its account offers, with the builder's role
@@ -29,7 +21,7 @@ export function routingInputs(
   const account = getAccount(db, project.accountId);
   // The account decides which models a step can run on; the project's own provider only covers a kind
   // 10db can no longer run.
-  const provider = isSupported(account.kind) ? providerOf(account.kind) : project.provider;
+  const provider = runsAgents(account.kind) ? providerOf(account.kind) : project.provider;
   const accountModels = listAccountModels(db, account.id);
   return {
     profiles: offeredProfiles(listModelProfiles(db), accountModels, provider),

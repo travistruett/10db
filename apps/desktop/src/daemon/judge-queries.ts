@@ -1,5 +1,6 @@
 import {
   JudgeCallDto,
+  type AccountId,
   JudgeStatusDto,
   JudgeTestResultDto,
   type JudgeConfigPatch,
@@ -9,7 +10,7 @@ import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
-/** The daemon emits no event when the judge's config, key or calls change, so callers invalidate these themselves. */
+/** The daemon emits no event when the judge's config or calls change, so callers invalidate these themselves. */
 export const judgeKeys = {
   status: ['judge', 'status'],
   calls: ['judge', 'calls'],
@@ -58,12 +59,16 @@ export function usePatchJudge() {
   });
 }
 
-/** One tiny call on the review decision's model; a failed test is an answer, not an error. */
-export function useTestJudge() {
+/** One tiny call on the review decision's model with the account's own key; a failed test is an answer, not an error. */
+export function useTestAccount(id: AccountId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => readJson(await client.judge.test.$post(), JudgeTestResultDto),
+    mutationFn: async () =>
+      readJson(
+        await client.accounts[':accountId'].test.$post({ param: { accountId: id } }),
+        JudgeTestResultDto,
+      ),
     onSettled: () => queryClient.invalidateQueries({ queryKey: judgeKeys.calls }),
   });
 }

@@ -21,7 +21,10 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
   const [adding, setAdding] = useState(false);
   const rows = routeRows(rules.data ?? [], people.data ?? []);
   const judgeOn =
-    judge.data !== undefined && !judge.data.off && judge.data.keySet && judge.data.config.enabled;
+    judge.data !== undefined &&
+    !judge.data.off &&
+    judge.data.account?.secretState === 'set' &&
+    judge.data.config.enabled;
 
   const subjectWords = (scope: RouteScope, subject: string): string => {
     if (scope === RouteScope.Task)

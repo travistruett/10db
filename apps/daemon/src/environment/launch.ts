@@ -6,16 +6,20 @@ import {
   GatewaySettings,
   isModelTier,
   Provider,
+  OPENROUTER_CANT_RUN_AGENTS,
   providerOf,
+  runsAgents,
   SubscriptionSettings,
   type AccountId,
   type AccountModelDto,
+  type AgentAccountKind,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import { isAbsolute, join } from 'node:path';
 import type { AccountRow } from '@10db/db';
 import { CLAUDE_CODE_VERIFIED_ON } from './agent-pins';
-import { secretFingerprint, type Keychain } from './keychain';
+import { readAccountSecret } from './account-secret';
+import type { Keychain } from './keychain';
 import { stripBillingSwitches } from './session-env';
 
 /** The Claude Code version the account variables and `accountInfo()` fields were verified on: the pinned release. */
@@ -51,7 +55,7 @@ const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 export interface AccountExpectation {
   readonly accountId: AccountId;
   readonly label: string;
-  readonly kind: SupportedAccountKind;
+  readonly kind: AgentAccountKind;
   /** The email (subscription) or organization (keyed) Claude Code must report; null compares none. */
   readonly identity: string | null;
 }
@@ -149,7 +153,7 @@ export function signInCommandFor(account: {
  * CLAUDE_CONFIG_DIR for a Claude kind (default `~/.claude`). A Claude kind ignores CODEX_HOME.
  */
 export function sessionConfigDir(
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
   env: Readonly<Record<string, string>>,
   home: string,
 ): string {
@@ -161,7 +165,7 @@ export function sessionConfigDir(
 /** The login env minus what the kind takes from its account only. */
 function withoutVars(
   login: Readonly<Record<string, string>>,
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
 ): Record<string, string> {
   const dropped =
     kind === AccountKind.Bedrock
@@ -180,35 +184,49 @@ export function createLauncher(opts: {
   const projectEnv = (): Record<string, string> => stripBillingSwitches(opts.base);
 
   function secretOf(account: AccountRow): string {
-    const missing = new AccountLaunchError(
-      account.id,
-      AccountProblem.SecretMissing,
-      `Account "${account.label}" has no secret set through 10db`,
-    );
-    if (account.secretRef === null || account.secretFingerprint === null) throw missing;
-    const secret = opts.keychain.read(account.secretRef);
-    if (secret === null) throw missing;
-    if (secretFingerprint(secret) !== account.secretFingerprint)
+    const checked = readAccountSecret(account, opts.keychain);
+    switch (checked.state) {
+      case 'set':
+        return checked.secret;
+      case 'missing':
+        throw new AccountLaunchError(
+          account.id,
+          AccountProblem.SecretMissing,
+          `Account "${account.label}" has no secret set through 10db`,
+        );
+      case 'changed':
+        throw new AccountLaunchError(
+          account.id,
+          AccountProblem.SecretChanged,
+          `The Keychain secret of account "${account.label}" changed outside 10db`,
+        );
+    }
+  }
+
+  /** The kind of an account a session can run on; an OpenRouter account is refused before any secret is read. */
+  function agentKindOf(account: AccountRow): AgentAccountKind {
+    if (!runsAgents(account.kind))
       throw new AccountLaunchError(
         account.id,
-        AccountProblem.SecretChanged,
-        `The Keychain secret of account "${account.label}" changed outside 10db`,
+        AccountProblem.CannotBill,
+        `Account "${account.label}": ${OPENROUTER_CANT_RUN_AGENTS}`,
       );
-    return secret;
+    return account.kind;
   }
 
   function build(account: AccountRow): Record<string, string> {
+    const kind = agentKindOf(account);
     const login = projectEnv();
     const env: Record<string, string> = {
-      ...withoutVars(login, account.kind),
+      ...withoutVars(login, kind),
       [CLIENT_APP_VAR]: opts.clientApp,
     };
     // Every kind runs on its own directory, so a keyed session never meets the default account's saved login;
     // null is Claude Code's default directory, which only the default account uses.
     if (account.configDir !== null)
-      env[account.kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
+      env[kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
         account.configDir;
-    switch (account.kind) {
+    switch (kind) {
       case AccountKind.ClaudeSubscription: {
         SubscriptionSettings.parse(account.settings);
         return env;
@@ -242,7 +260,7 @@ export function createLauncher(opts: {
   const expectation = (account: AccountRow): AccountExpectation => ({
     accountId: account.id,
     label: account.label,
-    kind: account.kind,
+    kind: agentKindOf(account),
     identity: account.expectedIdentity,
   });
 

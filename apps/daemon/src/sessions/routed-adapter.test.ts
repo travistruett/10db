@@ -1,4 +1,4 @@
-import { AccountKind, mintId, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, mintId, type AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { createChannel } from './channel';
 import { createRoutedAdapter } from './routed-adapter';
@@ -70,7 +70,7 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
   };
 }
 
-const account = (kind: SupportedAccountKind) => ({
+const account = (kind: AgentAccountKind) => ({
   accountId: mintId('Account'),
   label: 'A',
   kind,
@@ -78,8 +78,8 @@ const account = (kind: SupportedAccountKind) => ({
 });
 
 /** Only the account matters to routing; the rest of a spec is the adapter's. */
-const asSession = (kind: SupportedAccountKind) => ({ account: account(kind) }) as SessionSpec; // routing reads only `account`
-const asShape = (kind: SupportedAccountKind) => ({ account: account(kind) }) as ShapeSessionSpec; // routing reads only `account`
+const asSession = (kind: AgentAccountKind) => ({ account: account(kind) }) as SessionSpec; // routing reads only `account`
+const asShape = (kind: AgentAccountKind) => ({ account: account(kind) }) as ShapeSessionSpec; // routing reads only `account`
 
 const CLAUDE_KINDS = [
   AccountKind.ClaudeSubscription,
@@ -97,7 +97,7 @@ const METHODS = [
   'readClientUuids',
 ] as const;
 
-async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Promise<void> {
+async function callAll(adapter: SessionAdapter, kind: AgentAccountKind): Promise<void> {
   adapter.start(asSession(kind));
   adapter.startShape(asShape(kind));
   await adapter.complete({ cwd: '/d', prompt: 'q', model: 'm', env: {}, account: account(kind) });

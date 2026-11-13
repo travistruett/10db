@@ -1,14 +1,24 @@
-import type { AccountId } from '@10db/contracts';
+import { AccountKind, type AccountDto } from '@10db/contracts';
 import { Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useAccountUsage } from '../../../daemon/account-queries';
 import { formatTokens, formatUsd, monthLabel } from './usage-text';
 
 /** The daemon's current month on one account, in total and per project. */
-export function UsageByProject({ accountId }: { readonly accountId: AccountId }) {
-  const usage = useAccountUsage(accountId);
+export function UsageByProject({ account }: { readonly account: AccountDto }) {
+  const usage = useAccountUsage(account.id);
   if (usage.isPending) return <Skeleton h={48} aria-label="Loading usage" />;
   if (usage.isError) return <Text c="dimmed">Usage unavailable</Text>;
   const { month, total, byProject } = usage.data;
+  // An OpenRouter account runs no session: its month is the dollars of the decisions made on it.
+  if (account.kind === AccountKind.OpenRouter)
+    return (
+      <Group justify="space-between">
+        <Text fw={500}>{monthLabel(month)}</Text>
+        <Text size="sm" c="dimmed">
+          {total.costUsd === null ? '—' : `${formatUsd(total.costUsd)} in decisions`}
+        </Text>
+      </Group>
+    );
   const metered = total.costUsd !== null;
   return (
     <Stack gap="xs">

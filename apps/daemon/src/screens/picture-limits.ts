@@ -104,6 +104,7 @@ export function pictureLimitsFor(kind: AccountKind): PictureLimits {
       return GATEWAY_LIMITS;
     case AccountKind.OpenaiApiKey:
     case AccountKind.CodexSignin:
+    case AccountKind.OpenRouter:
       return STRICTEST_LIMITS;
   }
 }

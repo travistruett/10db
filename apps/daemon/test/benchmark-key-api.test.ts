@@ -74,7 +74,8 @@ async function start(
     keychain,
     // The entry point reads the key from the Keychain unless the daemon was started with the switch off.
     aaKey: opts.benchmarksOff === true ? () => null : () => keychain.read(AA_KEY_ACCOUNT),
-    ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
+    // The judge reads its own Keychain items at start; with it off, every call counted here is the benchmarks'.
+    ...(opts.benchmarksOff === true ? { benchmarksOff: true, judgeOff: true } : {}),
     fetch: async (_input, init) => {
       aaRequests.push({ key: new Headers(init?.headers).get('x-api-key') });
       await aaGate;

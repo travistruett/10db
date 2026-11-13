@@ -1,10 +1,11 @@
-import { AccountId, Delivery, ToolName, type ProjectDto } from '@10db/contracts';
+import { AccountId, Delivery, runsAgents, ToolName, type ProjectDto } from '@10db/contracts';
 import { Stack, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useInspectFolder, useProposeAreas } from '../../daemon/folder-queries';
 import { useCreateProject, useSystemCheck } from '../../daemon/queries';
 import { AccountSelect } from '../settings/account-select';
+import { cantRunAgents } from '../settings/accounts/used-by';
 import {
   areasOf,
   draftProblems,
@@ -167,9 +168,11 @@ export function useProjectSetup(
   const block =
     inspection === null || !system.isSuccess ? null : pullRequestBlock({ ghLogin, inspection });
   const delivery = block !== null ? Delivery.Local : (deliveryChoice ?? Delivery.PullRequest);
+  // A project never runs on an OpenRouter account, so it neither defaults to one nor counts as a choice.
+  const agentAccounts = accounts.filter((a) => runsAgents(a.kind));
   const accountId =
-    accountChoice ?? accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null;
-  const chooseAccount = accounts.length > 1;
+    accountChoice ?? agentAccounts.find((a) => a.isDefault)?.id ?? agentAccounts[0]?.id ?? null;
+  const chooseAccount = agentAccounts.length > 1;
 
   // Null areas with a folder chosen means the proposal is still out: the builder need not wait for it.
   const areasReady = areas === null || (areas.length > 0 && draftProblems(areas).rows.size === 0);
@@ -230,6 +233,7 @@ export function useProjectSetup(
               label="Account"
               description="Whose Claude login runs this project's sessions"
               accounts={accounts}
+              isDisabled={cantRunAgents}
               value={accountId}
               allowDeselect={false}
               onChange={setAccountChoice}

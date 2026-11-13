@@ -1,4 +1,4 @@
-import { AccountKind, knownEfforts, providerOf, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, knownEfforts, providerOf, type AgentAccountKind } from '@10db/contracts';
 import type { NewAccountModel } from '@10db/db';
 import type { SeenModel } from '../sessions';
 import { BEDROCK, joinModel, RUNTIME_MAKER } from './join';
@@ -17,7 +17,7 @@ const pricesOf = (entry: CatalogueModel): Prices => ({
  * the maker's list price when the catalogue has the maker's own entry; Bedrock prices its own copy of the model.
  */
 function priceOf(
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
   entry: CatalogueModel | null,
   launchId: string,
   catalogue: Catalogue,
@@ -105,7 +105,7 @@ function bedrockAdditions(
  * lacks keeps the ID it was listed under, with no family and no price.
  */
 export function offerFromList(
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
   models: readonly SeenModel[],
   catalogue: Catalogue,
 ): NewAccountModel[] {

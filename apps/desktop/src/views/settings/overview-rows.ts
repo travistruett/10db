@@ -12,8 +12,8 @@ import {
 } from '@10db/contracts';
 import { shortAgo } from '../factory/short-ago';
 import { fromNow } from '../../shell/relative';
-import { ACCOUNT_KIND_LABEL } from './account-kind-label';
 import { AccountStatus, ACCOUNT_STATUS_LABEL, accountStatus } from './accounts/account-status';
+import { usedByText } from './accounts/used-by';
 import { ConnectionTone } from './connection-status';
 import type { SettingsSectionKey } from './sections';
 
@@ -69,12 +69,15 @@ const ready = (tone: ConnectionTone, label: string, detail: string | null = null
   detail,
 });
 
-/** An account's state is the badge Accounts shows: ready works, anything missing needs the builder. */
-export function accountState(account: AccountDto): RowState {
+/**
+ * An account's state is the badge Accounts shows: ready works, anything missing needs the builder. The dimmed
+ * second line says what uses it.
+ */
+export function accountState(account: AccountDto, usedBy: readonly string[]): RowState {
   const status = accountStatus(account);
-  const kind = ACCOUNT_KIND_LABEL[account.kind];
-  if (status === AccountStatus.Ready) return ready(ConnectionTone.Works, 'Ready', kind);
-  return ready(ConnectionTone.NeedsYou, ACCOUNT_STATUS_LABEL[status], kind);
+  const used = usedByText(usedBy);
+  if (status === AccountStatus.Ready) return ready(ConnectionTone.Works, 'Ready', used);
+  return ready(ConnectionTone.NeedsYou, ACCOUNT_STATUS_LABEL[status], used);
 }
 
 const GITHUB_WITHOUT =
