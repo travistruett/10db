@@ -6,15 +6,19 @@ import {
   ShapeState,
   TaskStatus,
   topicKeyFrom,
+  type ShapeId,
   type TaskId,
 } from '@10db/contracts';
 import {
   cancelTask,
+  findDocument,
   findRecords,
+  getAttachmentRevision,
   getDecision,
   getPrinciple,
   getShape,
   getTask,
+  getTaskContext,
   insertWorkstream,
   listGoalTasks,
   listInbox,
@@ -37,8 +41,10 @@ import {
 import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type ApiServices } from '../api';
+import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
 import { createKnowledgeServices } from '../daemon';
 import { createEventBus, createStateStore } from '../events';
+import { importBundle, loadStoredRecord, planImportChanges, validateBundle } from '../plan-record';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { dropProposal, editProposal, reconcileDraft, restoreProposal } from './rounds';
@@ -1558,5 +1564,179 @@ describe('landings (§10.4)', () => {
         landings: [landingOf(m, 'l3', ['x', 'a'], 'Third')],
       });
     }).toThrow(/a is already in a landing/);
+  });
+});
+
+describe('a Plan made from a bundle', () => {
+  /** Imports a bundle into the conversation's project and answers its Plan. */
+  function importInto(json: Record<string, unknown>): ShapeId {
+    const bundle = parseBundle(json);
+    const bodies = inlineBodies(bundle);
+    return write((ctx) => {
+      const stored = loadStoredRecord(ctx.tx, c.project.id, bundle.id);
+      const issues = validateBundle({
+        bundle,
+        bodies,
+        projectId: c.project.id,
+        areaNames: new Set(c.project.areas.map((a) => a.name)),
+        stored,
+      });
+      if (issues.length > 0) throw new Error(issues.map((i) => i.message).join('; '));
+      const changes = planImportChanges(stored, bundle, bodies);
+      return importBundle(ctx, { projectId: c.project.id, bundle, bodies, changes }).shapeId;
+    });
+  }
+  const pendingIds = (shapeId: ShapeId) =>
+    listShapeProposals(c.store.db, shapeId)
+      .filter((p) => p.state === ShapeProposalState.Pending)
+      .map((p) => p.id);
+  const convertPlan = (shapeId: ShapeId): ConvertOutcome =>
+    write((ctx) => convertProposals(ctx, shapeId, pendingIds(shapeId)));
+  const convertedPlan = (shapeId: ShapeId) => {
+    const out = convertPlan(shapeId);
+    if (!out.ok) throw new Error(out.errors.join('; '));
+    return out;
+  };
+  const taskOf = (shapeId: ShapeId, key: string): TaskId =>
+    must(listShapeLinks(c.store.db, shapeId).find((l) => l.key === key)?.taskId, `task ${key}`);
+  const revisionOf = (shapeId: ShapeId, doc: string, number: number) =>
+    must(
+      getAttachmentRevision(
+        c.store.db,
+        must(findDocument(c.store.db, shapeId, doc), doc).id,
+        number,
+      ),
+      `${doc} revision ${String(number)}`,
+    );
+  type Json = Record<string, unknown>;
+  const goalTasks = (json: Json, goal: number) =>
+    (json['goals'] as { tasks: Json[] }[])[goal]?.tasks ?? [];
+  /** Changes one proposal's body in place, as a reconcile would have stored it. */
+  const patchBody = (shapeId: ShapeId, key: string, change: (body: Json) => void) => {
+    const row = must(
+      listShapeProposals(c.store.db, shapeId).find((r) => r.key === key),
+      key,
+    );
+    const body = structuredClone(row.body) as Json;
+    change(body);
+    write((ctx) => {
+      patchShapeProposal(ctx, row.id, { body: body as never });
+    });
+  };
+
+  it('a goal task with a planRef gets its task_context', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    convertedPlan(shapeId);
+    expect(getTaskContext(c.store.db, taskOf(shapeId, 't1'))).toMatchObject({
+      shapeId,
+      revisionId: revisionOf(shapeId, 'p1', 1).id,
+      section: 'task-1',
+      shared: ['calls-made'],
+      cites: ['f1', 'd1', 'i1', 'n1', 'x1'],
+    });
+    expect(getTaskContext(c.store.db, taskOf(shapeId, 't3'))).toMatchObject({ section: 'task-3' });
+  });
+
+  it('a loose task with a planRef gets one', () => {
+    const json = bundleJson(c.project.id);
+    const [t4] = json['tasks'] as Json[];
+    if (t4) t4['planRef'] = { document: 'p1', revision: 1, section: 'calls-made' };
+    const shapeId = importInto(json);
+    convertedPlan(shapeId);
+    expect(getTaskContext(c.store.db, taskOf(shapeId, 't4'))).toMatchObject({
+      section: 'calls-made',
+      shared: [],
+    });
+  });
+
+  it('a planRef to a missing section refuses Convert and writes nothing', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    patchBody(shapeId, 'g1', (body) => {
+      const [t1] = body['tasks'] as Json[];
+      if (t1) t1['planRef'] = { document: 'p1', revision: 1, section: 'task-12', shared: [] };
+    });
+    const before = tasks().length;
+    const out = convertPlan(shapeId);
+    expect(out.ok ? [] : out.errors).toContain(
+      'Pair a device: its plan section p1#task-12 is not in revision 1 of p1',
+    );
+    expect(tasks()).toHaveLength(before);
+  });
+
+  it('a cite of an unknown key refuses Convert', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    patchBody(shapeId, 'g1', (body) => {
+      const [t1] = body['tasks'] as Json[];
+      if (t1) t1['cites'] = ['nope'];
+    });
+    const out = convertPlan(shapeId);
+    expect(out.ok ? [] : out.errors).toContain(
+      'Pair a device: it cites nope, which is no entry or decision of this Plan',
+    );
+  });
+
+  it('a change of planRef moves the task to the new revision', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    convertedPlan(shapeId);
+    const next = bundleJson(c.project.id);
+    const [p1] = next['documents'] as { revisions: Json[] }[];
+    const body = (p1?.revisions[0]?.['body'] as string | undefined) ?? '';
+    p1?.revisions.push({
+      number: 2,
+      body: `${body}## Task 4: More\n`,
+      at: '2026-11-13T08:00:00.000Z',
+    });
+    const [t1] = goalTasks(next, 0);
+    if (t1)
+      t1['planRef'] = { document: 'p1', revision: 2, section: 'task-1', shared: ['calls-made'] };
+    importInto(next);
+    const t1Id = taskOf(shapeId, 't1');
+    expect(listShapeProposals(c.store.db, shapeId).map((r) => r.key)).toContain(`change:${t1Id}`);
+    convertedPlan(shapeId);
+    expect(getTaskContext(c.store.db, t1Id)).toMatchObject({
+      revisionId: revisionOf(shapeId, 'p1', 2).id,
+      section: 'task-1',
+      cites: ['f1', 'd1', 'i1', 'n1', 'x1'],
+    });
+  });
+
+  it('an effort-only decision is accepted with no knowledge row and no link', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    convertedPlan(shapeId);
+    expect(searchDecisions(c.store.db, c.project.id, 'pairing', 5)).toEqual([]);
+    expect(listShapeLinks(c.store.db, shapeId).some((l) => l.key === 'd2')).toBe(false);
+    expect(listShapeProposals(c.store.db, shapeId).find((r) => r.key === 'd2')?.state).toBe(
+      ShapeProposalState.Accepted,
+    );
+  });
+
+  it('a lasting decision is found by search', () => {
+    const shapeId = importInto(bundleJson(c.project.id));
+    convertedPlan(shapeId);
+    const [hit] = searchDecisions(c.store.db, c.project.id, 'record', 5);
+    expect(hit?.choice).toBe('In the database');
+    const link = listShapeLinks(c.store.db, shapeId).find((l) => l.key === 'd1');
+    expect(link?.decisionId && getDecision(c.store.db, link.decisionId).sourceId).toBeTruthy();
+  });
+
+  it('a goal of 58 imported tasks converts', () => {
+    const json = bundleJson(c.project.id);
+    const goals = json['goals'] as Json[];
+    json['goals'] = goals.slice(0, 1);
+    json['tasks'] = [];
+    json['landings'] = [];
+    json['questions'] = [];
+    const [g1] = json['goals'] as Json[];
+    if (g1)
+      g1['tasks'] = Array.from({ length: 58 }, (_, i) => ({
+        key: `t${String(i + 1)}`,
+        title: `Task ${String(i + 1)}`,
+        criteria: ['Done'],
+        areas: ['api'],
+        ...(i > 0 ? { dependsOn: [`t${String(i)}`] } : {}),
+      }));
+    const shapeId = importInto(json);
+    convertedPlan(shapeId);
+    expect(listShapeLinks(c.store.db, shapeId).filter((l) => l.taskId !== null)).toHaveLength(58);
   });
 });
