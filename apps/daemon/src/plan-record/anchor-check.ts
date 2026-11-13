@@ -1,4 +1,10 @@
-import { AnchorResult, type PlanAnchor, type TaskId, type WorkstreamId } from '@10db/contracts';
+import {
+  AnchorResult,
+  PlanEntryState,
+  type PlanAnchor,
+  type TaskId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import {
   getShapeEntry,
   getTaskContext,
@@ -52,6 +58,8 @@ export async function checkTaskAnchors(
   for (const key of context.cites) {
     const entry = getShapeEntry(db, context.shapeId, key);
     if (entry === undefined || (entry.kind !== 'fact' && entry.kind !== 'experiment')) continue;
+    // A fact a re-import dropped no longer stands, so its anchors prove nothing to check.
+    if (entry.state === PlanEntryState.Superseded) continue;
     entry.anchors.forEach((anchor, index) => {
       if (!done.has(JSON.stringify([key, entry.version, index])))
         todo.push({ key, version: entry.version, index, anchor });

@@ -175,6 +175,7 @@ export const PlanSearchKind = {
   ...PlanEntryKind,
   Decision: 'decision',
   Question: 'question',
+  Finding: 'finding',
   Section: 'section',
 } as const;
 export type PlanSearchKind = (typeof PlanSearchKind)[keyof typeof PlanSearchKind];
@@ -350,6 +351,18 @@ export const McpToolOutputs = {
       for: z.string(),
       blocks: z.string().nullable(),
     }),
+    /** An imported review finding; `revision` is the record's number, as `get_plan_section` reads it. */
+    z.object({
+      kind: z.literal('finding'),
+      key: z.string(),
+      document: z.string().nullable(),
+      revision: z.int().min(1).nullable(),
+      section: z.string().nullable(),
+      reviewer: z.string(),
+      severity: z.string(),
+      text: z.string(),
+      state: z.string(),
+    }),
   ]),
   find_plan_entries: z.object({
     hits: z.array(
@@ -358,6 +371,8 @@ export const McpToolOutputs = {
         key: z.string(),
         title: z.string(),
         snippet: z.string(),
+        /** A section hit's revision, the latest, to pass to `get_plan_section`; null for the rest. */
+        revision: z.int().min(1).nullable(),
       }),
     ),
     empty: z.boolean(),

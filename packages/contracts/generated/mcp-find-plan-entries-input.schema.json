@@ -17,6 +17,7 @@
           "name",
           "decision",
           "question",
+          "finding",
           "section"
         ]
       }

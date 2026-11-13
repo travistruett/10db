@@ -1,4 +1,5 @@
 import {
+  AnchorResult,
   InvalidError,
   McpToolInputs,
   NotFoundError,
@@ -12,13 +13,17 @@ import {
   createTestStore,
   findDocument,
   getAttachmentRevision,
+  getShapeEntry,
+  insertAnchorChecks,
   insertGoal,
   insertPerson,
   insertShapeLink,
   insertTask,
   insertWorkstream,
   listShapeProposals,
+  patchWorkstream,
   seedProject,
+  upsertShapeEntry,
   upsertTaskContext,
   type Store,
 } from '@10db/db';
@@ -228,6 +233,91 @@ describe('the plan tools', () => {
     );
     const narrow = await a.find({ query: 'tailnet', kinds: ['section'] });
     expect(narrow.hits.every((h) => h.kind === 'section')).toBe(true);
+  });
+
+  it('a finding reads by its key and is found by its text, in its own Plan only', async () => {
+    importPlan('plan-b', (json) => {
+      const [finding] = json['findings'] as Json[];
+      json['findings'] = [{ ...finding, key: 'only-b-finding', text: 'Zebras in B' }];
+    });
+    const a = pinnedLane(importPlan('plan-a'));
+    await expect(a.entry({ key: 'p1-r1-1' })).resolves.toEqual({
+      kind: 'finding',
+      key: 'p1-r1-1',
+      document: 'p1',
+      revision: 1,
+      section: 'task-2',
+      reviewer: 'fable plan reviewer',
+      severity: 'blocking, security',
+      text: 'Revoked devices keep their session',
+      state: 'resolved',
+    });
+    await expect(a.entry({ key: 'only-b-finding' })).rejects.toThrow(NotFoundError);
+    const found = await a.find({ query: 'revoked session', kinds: ['finding'] });
+    expect(found.hits.map((h) => [h.kind, h.key])).toEqual([['finding', 'p1-r1-1']]);
+    await expect(a.find({ query: 'zebras' })).resolves.toEqual({ hits: [], empty: true });
+  });
+
+  it('a section hit names its revision, which get_plan_section reads', async () => {
+    const lane = pinnedLane(importPlan('plan-a', withRevision2));
+    const found = await lane.find({ query: 'again', kinds: ['section'] });
+    expect(found.hits.map((h) => [h.key, h.revision])).toEqual([['p1#task-1', 2]]);
+    await expect(lane.section({ ref: 'p1#task-1', revision: 2 })).resolves.toMatchObject({
+      text: '## Task 1: Pair a device, again\nRevision two.\n',
+    });
+  });
+
+  it('search reads an entry’s text, never its field names, and snips text, not JSON', async () => {
+    const lane = pinnedLane(importPlan('plan-a'));
+    await expect(lane.find({ query: 'definition' })).resolves.toEqual({ hits: [], empty: true });
+    const found = await lane.find({ query: 'Mac runs', kinds: ['name'] });
+    expect(found.hits).toEqual([
+      {
+        kind: 'name',
+        key: 'n1',
+        title: 'Host',
+        snippet: 'Host type The Mac 10db runs on daemon',
+        revision: null,
+      },
+    ]);
+  });
+
+  it('get_plan_entry leaves out checks of an earlier version and checks at an old base', async () => {
+    const shapeId = importPlan('plan-a');
+    const doc = findDocument(store.db, shapeId, 'p1');
+    const revision = doc && getAttachmentRevision(store.db, doc.id, 1);
+    const f1 = getShapeEntry(store.db, shapeId, 'f1');
+    if (!revision || !f1) throw new Error('no p1 revision 1 or f1');
+    const taskId = newTask('Pair a device');
+    const workstreamId = workstreamOf(taskId);
+    const [oldBase, base] = ['a'.repeat(40), 'b'.repeat(40)];
+    state.write((ctx) => {
+      upsertTaskContext(ctx, {
+        taskId,
+        shapeId,
+        revisionId: revision.id,
+        section: 'task-1',
+        shared: [],
+        cites: ['f1'],
+      });
+      const row = (entryVersion: number, checkedCommit: string, line: number) => ({
+        workstreamId,
+        entryKey: 'f1',
+        entryVersion,
+        anchorIndex: 0,
+        result: AnchorResult.Current,
+        line,
+        checkedCommit,
+        note: null,
+      });
+      insertAnchorChecks(ctx, taskId, [row(1, base, 1), row(2, oldBase, 2)]);
+      upsertShapeEntry(ctx, { ...f1, shapeId, body: { claim: 'The runner packs twice.' } });
+      insertAnchorChecks(ctx, taskId, [row(2, base, 3)]);
+      patchWorkstream(ctx, workstreamId, null, { baseHead: base });
+    });
+    const tools = createPlanToolHandlers(store.db, workstreamId);
+    const entry = await tools.get_plan_entry(McpToolInputs.get_plan_entry.parse({ key: 'f1' }));
+    expect('checks' in entry ? entry.checks.map((c) => c.line) : []).toEqual([3]);
   });
 
   it('a task with no Plan is told so', async () => {

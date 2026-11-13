@@ -61,13 +61,12 @@ function rankedForTask(db: DbReader, projectId: ProjectId, query: string): Decis
 export function buildContextPack(
   db: DbReader,
   workstream: WorkstreamDto,
+  budgetTokens: number = CONTEXT_PACK_BUDGET_TOKENS,
   opts: {
-    readonly budgetTokens?: number;
     /** The base the session reads; a first session's row has none until its session is written. */
     readonly base?: string;
   } = {},
 ): ContextPack {
-  const budgetTokens = opts.budgetTokens ?? CONTEXT_PACK_BUDGET_TOKENS;
   const task = getTask(db, workstream.taskId);
   const action = workstream.nextAction;
   const handoff =

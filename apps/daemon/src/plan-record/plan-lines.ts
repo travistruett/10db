@@ -1,4 +1,4 @@
-import type { AnchorCheckDto, PlanAnchor, PlanContext } from '@10db/contracts';
+import type { AnchorCheckDto, PlanAnchor, PlanContext, PlanItemDropped } from '@10db/contracts';
 
 // One brief line per Plan item, so what the budget counts is exactly what the lane reads. The brief's
 // block (`briefing/plan-context-text.ts`) is made of these lines.
@@ -44,21 +44,28 @@ function anchorsText(fact: PlanContext['facts'][number]): string {
     .join('; ');
 }
 
+/** ` (superseded)` or ` (rejected)` for an item that no longer stands, else nothing. */
+const droppedText = (dropped: PlanItemDropped | null): string =>
+  dropped === null ? '' : ` (${dropped})`;
+
 export function planItemLine(entry: PlanItem): string {
   switch (entry.group) {
     case 'decision': {
       const d = entry.item;
-      return `- ${d.key}: ${d.choice} — why: ${d.rationale} (${d.lasting ? 'lasting' : 'this effort'})`;
+      return `- ${d.key}: ${d.choice} — why: ${d.rationale} (${d.lasting ? 'lasting' : 'this effort'})${droppedText(d.dropped)}`;
     }
     case 'name':
-      return `- ${entry.item.name} — ${entry.item.definition}`;
+      return `- ${entry.item.name} — ${entry.item.definition}${droppedText(entry.item.dropped)}`;
     case 'fact': {
+      // A superseded fact's anchors were never checked, so they are left out of its line.
+      if (entry.item.dropped !== null)
+        return `- ${entry.item.key}: ${entry.item.line}${droppedText(entry.item.dropped)}`;
       const anchors = anchorsText(entry.item);
       return `- ${entry.item.key}: ${entry.item.line}${anchors === '' ? '' : ` — ${anchors}`}`;
     }
     case 'finding':
       return `- ${entry.item.severity}: ${entry.item.text}`;
     case 'intent':
-      return `- "${entry.item.quote}" — ${entry.item.speaker}`;
+      return `- "${entry.item.quote}" — ${entry.item.speaker}${droppedText(entry.item.dropped)}`;
   }
 }

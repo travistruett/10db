@@ -105,6 +105,21 @@
           },
           "lasting": {
             "type": "boolean"
+          },
+          "dropped": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "superseded",
+                  "rejected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -133,6 +148,21 @@
           },
           "definition": {
             "type": "string"
+          },
+          "dropped": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "superseded",
+                  "rejected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -298,6 +328,21 @@
                 "at"
               ]
             }
+          },
+          "dropped": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "superseded",
+                  "rejected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -350,6 +395,21 @@
           },
           "speaker": {
             "type": "string"
+          },
+          "dropped": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "superseded",
+                  "rejected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

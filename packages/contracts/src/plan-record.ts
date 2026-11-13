@@ -205,6 +205,13 @@ export const AnchorCheckDto = z.object({
 });
 export type AnchorCheckDto = z.infer<typeof AnchorCheckDto>;
 
+/** Why a cited item no longer stands: a re-import superseded it, or it was dropped or replaced. */
+export const PlanItemDropped = { Superseded: 'superseded', Rejected: 'rejected' } as const;
+export type PlanItemDropped = (typeof PlanItemDropped)[keyof typeof PlanItemDropped];
+
+/** Null for a cited item that stands; else why not, so the lane never reads it as live. */
+const Dropped = z.enum(PlanItemDropped).nullable().default(null);
+
 /** A section's text and its `doc#slug`. */
 const SectionText = z.object({ ref: z.string(), text: z.string() });
 
@@ -223,7 +230,13 @@ export const PlanContext = z.object({
   section: SectionText,
   shared: z.array(SectionText),
   decisions: z.array(
-    z.object({ key: z.string(), choice: z.string(), rationale: z.string(), lasting: z.boolean() }),
+    z.object({
+      key: z.string(),
+      choice: z.string(),
+      rationale: z.string(),
+      lasting: z.boolean(),
+      dropped: Dropped,
+    }),
   ),
   names: z.array(
     z.object({
@@ -231,6 +244,7 @@ export const PlanContext = z.object({
       version: z.int().min(1),
       name: z.string(),
       definition: z.string(),
+      dropped: Dropped,
     }),
   ),
   facts: z.array(
@@ -242,12 +256,19 @@ export const PlanContext = z.object({
       line: z.string(),
       anchors: z.array(PlanAnchor),
       checks: z.array(AnchorCheckDto),
+      dropped: Dropped,
     }),
   ),
   /** Severity is the reviewer's own words when the record has them, else the enum. */
   findings: z.array(z.object({ key: z.string(), severity: z.string(), text: z.string() })),
   intent: z.array(
-    z.object({ key: z.string(), version: z.int().min(1), quote: z.string(), speaker: z.string() }),
+    z.object({
+      key: z.string(),
+      version: z.int().min(1),
+      quote: z.string(),
+      speaker: z.string(),
+      dropped: Dropped,
+    }),
   ),
   notIncluded: z.array(z.string()),
   budget: z.int().min(0),

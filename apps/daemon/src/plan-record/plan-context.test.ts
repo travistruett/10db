@@ -1,5 +1,6 @@
 import {
   AnchorResult,
+  ShapeProposalState,
   type ProjectDto,
   type ShapeId,
   type TaskId,
@@ -16,6 +17,8 @@ import {
   insertPerson,
   insertTask,
   insertWorkstream,
+  listShapeProposals,
+  patchShapeProposal,
   patchWorkstream,
   seedProject,
   transitionWorkstream,
@@ -195,6 +198,22 @@ describe('buildPlanContext', () => {
     expect(buildPlanContext(store.db, workstream)?.findings).toEqual([
       { key: 'open-2', severity: 'blocking, security', text: 'Revoked devices keep their session' },
     ]);
+  });
+
+  it('a cited fact the re-import superseded and a dropped decision are marked as such', () => {
+    const shapeId = importJson(bundleJson(project.id));
+    const { workstream } = pinnedTask(shapeId, 'task-1', ['f1', 'd1']);
+    const next = bundleJson(project.id);
+    next['entries'] = (next['entries'] as Json[]).filter((e) => e['key'] !== 'f1');
+    importJson(next);
+    const d1 = listShapeProposals(store.db, shapeId).find((r) => r.key === 'd1');
+    if (!d1) throw new Error('no d1');
+    state.write((ctx) => {
+      patchShapeProposal(ctx, d1.id, { state: ShapeProposalState.Rejected });
+    });
+    const plan = buildPlanContext(store.db, workstream);
+    expect(plan?.facts).toMatchObject([{ key: 'f1', dropped: 'superseded' }]);
+    expect(plan?.decisions).toMatchObject([{ key: 'd1', dropped: 'rejected' }]);
   });
 
   it('an entry versioned after Convert is read at its current version', () => {

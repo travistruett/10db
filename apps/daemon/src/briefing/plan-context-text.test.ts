@@ -35,13 +35,27 @@ function plan(over: Partial<PlanContext> = {}): PlanContext {
     goal: { objective: 'A device pairs.', why: 'Nothing leaks' },
     section: { ref: 'p1#task-1', text: SECTION },
     shared: [{ ref: 'p1#calls-made', text: '## Calls made\nOne.\n' }],
-    decisions: [{ key: 'd1', choice: 'The database', rationale: 'Local only', lasting: true }],
-    names: [{ key: 'n1', version: 1, name: 'Host', definition: 'The Mac 10db runs on' }],
+    decisions: [
+      { key: 'd1', choice: 'The database', rationale: 'Local only', lasting: true, dropped: null },
+    ],
+    names: [
+      { key: 'n1', version: 1, name: 'Host', definition: 'The Mac 10db runs on', dropped: null },
+    ],
     facts: [
-      { key: 'f1', version: 1, kind: 'fact', line: 'Packs once', anchors: [CODE], checks: [] },
+      {
+        key: 'f1',
+        version: 1,
+        kind: 'fact',
+        line: 'Packs once',
+        anchors: [CODE],
+        checks: [],
+        dropped: null,
+      },
     ],
     findings: [{ key: 'p1-r1-1', severity: 'blocking, security', text: 'Revoked devices stay' }],
-    intent: [{ key: 'i1', version: 1, quote: 'Never in the repo.', speaker: 'builder' }],
+    intent: [
+      { key: 'i1', version: 1, quote: 'Never in the repo.', speaker: 'builder', dropped: null },
+    ],
     notIncluded: [],
     budget: 6000,
     used: 40,
@@ -53,7 +67,11 @@ const factWith = (
   checks: AnchorCheckDto[],
   anchors: PlanContext['facts'][number]['anchors'] = [CODE],
 ) =>
-  plan({ facts: [{ key: 'f1', version: 1, kind: 'fact', line: 'Packs once', anchors, checks }] });
+  plan({
+    facts: [
+      { key: 'f1', version: 1, kind: 'fact', line: 'Packs once', anchors, checks, dropped: null },
+    ],
+  });
 const factLine = (p: PlanContext) => renderPlanContext(p).find((l) => l.startsWith('- f1:'));
 
 describe('renderPlanContext', () => {
@@ -122,6 +140,35 @@ describe('renderPlanContext', () => {
     expect(yours).toBeGreaterThanOrEqual(0);
     expect(shared).toBeGreaterThan(yours);
     expect(lines.filter((l) => l === 'Shared section (p1#calls-made):')).toHaveLength(1);
+  });
+
+  it('a dropped item says so, and a superseded fact shows no anchor', () => {
+    const lines = renderPlanContext(
+      plan({
+        decisions: [
+          {
+            key: 'd1',
+            choice: 'The database',
+            rationale: 'Local',
+            lasting: true,
+            dropped: 'rejected',
+          },
+        ],
+        facts: [
+          {
+            key: 'f1',
+            version: 1,
+            kind: 'fact',
+            line: 'Packs once',
+            anchors: [CODE],
+            checks: [],
+            dropped: 'superseded',
+          },
+        ],
+      }),
+    );
+    expect(lines).toContain('- d1: The database — why: Local (lasting) (rejected)');
+    expect(lines).toContain('- f1: Packs once (superseded)');
   });
 
   it('renders every group in order', () => {

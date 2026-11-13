@@ -16,6 +16,7 @@
               "name",
               "decision",
               "question",
+              "finding",
               "section"
             ]
           },
@@ -27,13 +28,26 @@
           },
           "snippet": {
             "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "kind",
           "key",
           "title",
-          "snippet"
+          "snippet",
+          "revision"
         ]
       }
     },

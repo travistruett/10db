@@ -16,6 +16,7 @@ import {
   findShapeLinkOfTask,
   getAttachmentRevision,
   getAttachmentRevisionById,
+  getDocumentAttachment,
   getTask,
   getTaskContext,
   getWorkstream,
@@ -24,6 +25,7 @@ import {
   listAttachmentRevisions,
   listDocuments,
   listShapeEntries,
+  listShapeFindings,
   listShapeProposals,
   getShapeEntry,
   type DbReader,
@@ -41,9 +43,9 @@ export const PLAN_TOOL_DESCRIPTIONS: Record<PlanToolName, string> = {
   get_plan_section:
     "Read a section of your task's Plan, by doc#slug as your brief names it (a task's is task-N). Without revision you get the revision your task was made from.",
   get_plan_entry:
-    "Read a decision, fact, experiment, name, intent or question of your task's Plan by its key, such as one your brief lists under Not included.",
+    "Read a decision, fact, experiment, name, intent, question or review finding of your task's Plan by its key, such as one your brief lists under Not included.",
   find_plan_entries:
-    "Search your task's Plan: its entries, decisions, questions and section texts.",
+    "Search your task's Plan: its entries, decisions, questions, review findings and section texts. A section hit names its revision for get_plan_section.",
 };
 
 const NO_PLAN = 'This task has no Plan.';
@@ -63,6 +65,24 @@ function planOf(db: DbReader, workstreamId: WorkstreamId): ShapeId {
 
 const snippet = (text: string): string =>
   text.length > SNIPPET ? `${text.slice(0, SNIPPET - 1)}…` : text;
+
+/** The string values of an entry's stored body, in order, so a search never matches a field name. */
+function bodyText(body: unknown): string {
+  const out: string[] = [];
+  const stack: unknown[] = [body];
+  for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
+    if (typeof at === 'string') out.push(at);
+    else if (typeof at === 'number') out.push(String(at));
+    else if (Array.isArray(at)) {
+      const items: readonly unknown[] = at;
+      stack.push(...[...items].reverse());
+    } else if (typeof at === 'object' && at !== null) {
+      const values: readonly unknown[] = Object.values(at);
+      stack.push(...[...values].reverse());
+    }
+  }
+  return out.join(' ');
+}
 
 export function createPlanToolHandlers(
   db: DbReader,
@@ -155,6 +175,25 @@ export function createPlanToolHandlers(
           const q = ShapeProposalBody.question.parse(row.body);
           return { kind: 'question', key, text: q.text, for: q.for, blocks: q.blocks ?? null };
         }
+        const finding = listShapeFindings(db, shapeId).find((f) => f.bundleKey === key);
+        if (finding) {
+          const at =
+            finding.revisionId === null
+              ? undefined
+              : getAttachmentRevisionById(db, finding.revisionId);
+          const document = at ? getDocumentAttachment(db, at.attachmentId) : undefined;
+          return {
+            kind: 'finding',
+            key,
+            document: document ? (document.docKey ?? document.key) : null,
+            revision: at?.number ?? null,
+            section: finding.section,
+            reviewer: finding.reviewerName ?? finding.reviewer,
+            severity: finding.severityText ?? finding.severity ?? finding.kind,
+            text: finding.text,
+            state: finding.state,
+          };
+        }
         throw new NotFoundError('plan entry', key);
       }),
 
@@ -165,13 +204,14 @@ export function createPlanToolHandlers(
           kinds === undefined || kinds.includes(kind);
         const hits: Out<'find_plan_entries'>['hits'] = [];
         for (const e of listShapeEntries(db, shapeId)) {
-          const text = `${e.title} ${JSON.stringify(e.body)}`;
-          if (wanted(e.kind) && matchesSearch(text, query))
+          const body = bodyText(e.body);
+          if (wanted(e.kind) && matchesSearch(`${e.title} ${body}`, query))
             hits.push({
               kind: e.kind,
               key: e.key,
               title: e.title,
-              snippet: snippet(JSON.stringify(e.body)),
+              snippet: snippet(body),
+              revision: null,
             });
         }
         for (const row of listShapeProposals(db, shapeId)) {
@@ -184,6 +224,7 @@ export function createPlanToolHandlers(
                 key: row.key,
                 title: d.question,
                 snippet: snippet(d.choice),
+                revision: null,
               });
           } else if (row.kind === 'question' && wanted('question')) {
             const q = ShapeProposalBody.question.parse(row.body);
@@ -193,9 +234,20 @@ export function createPlanToolHandlers(
                 key: row.key,
                 title: q.text,
                 snippet: snippet(q.text),
+                revision: null,
               });
           }
         }
+        if (wanted('finding'))
+          for (const f of listShapeFindings(db, shapeId))
+            if (f.bundleKey !== null && matchesSearch(f.text, query))
+              hits.push({
+                kind: 'finding',
+                key: f.bundleKey,
+                title: f.text,
+                snippet: snippet(f.text),
+                revision: null,
+              });
         if (wanted('section'))
           for (const doc of listDocuments(db, shapeId)) {
             if (doc.kind === 'eval') continue;
@@ -210,6 +262,7 @@ export function createPlanToolHandlers(
                   key: `${doc.documentKey}#${section.slug}`,
                   title: section.title,
                   snippet: snippet(text),
+                  revision: latest?.number ?? null,
                 });
             }
           }

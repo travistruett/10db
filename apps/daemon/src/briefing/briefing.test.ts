@@ -1000,7 +1000,7 @@ describe('buildContextPack', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 5; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
     rule({ scope: 'project', projectId: project.id }, 'p', { statement: 'y'.repeat(100) });
-    const pack = buildContextPack(store.db, workstream, { budgetTokens: 200 });
+    const pack = buildContextPack(store.db, workstream, 200);
     expect(pack.knowledge.policies).toHaveLength(1);
     expect(pack.knowledge.decisions.length + pack.knowledge.dropped.decisions).toBe(5);
     expect(pack.knowledge.dropped.decisions).toBeGreaterThan(0);
@@ -1032,8 +1032,8 @@ describe('buildContextPack', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 3; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
     rule({ scope: 'project', projectId: project.id }, 'p');
-    expect(buildContextPack(store.db, workstream, { budgetTokens: 250 })).toEqual(
-      buildContextPack(store.db, workstream, { budgetTokens: 250 }),
+    expect(buildContextPack(store.db, workstream, 250)).toEqual(
+      buildContextPack(store.db, workstream, 250),
     );
   });
 
@@ -1790,11 +1790,25 @@ describe('the Plan context block', () => {
     goal: null,
     section: { ref: 'p1#task-1', text: '## Task 1: Pair\nPair it.\n' },
     shared: [],
-    decisions: [{ key: 'd1', choice: 'The database', rationale: 'Local only', lasting: false }],
+    decisions: [
+      { key: 'd1', choice: 'The database', rationale: 'Local only', lasting: false, dropped: null },
+    ],
     names: [],
-    facts: [{ key: 'f1', version: 2, kind: 'fact', line: 'Packs once', anchors: [], checks: [] }],
+    facts: [
+      {
+        key: 'f1',
+        version: 2,
+        kind: 'fact',
+        line: 'Packs once',
+        anchors: [],
+        checks: [],
+        dropped: null,
+      },
+    ],
     findings: [{ key: 'p1-r1-1', severity: 'high', text: 'Too big' }],
-    intent: [{ key: 'i1', version: 1, quote: 'Never in the repo.', speaker: 'builder' }],
+    intent: [
+      { key: 'i1', version: 1, quote: 'Never in the repo.', speaker: 'builder', dropped: null },
+    ],
     notIncluded: ['x1'],
     budget: 6000,
     used: 30,

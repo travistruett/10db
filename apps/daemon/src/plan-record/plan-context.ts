@@ -1,7 +1,10 @@
 import {
   PlanEntryBody,
+  PlanEntryState,
+  PlanItemDropped,
   ShapeFindingState,
   ShapeProposalBody,
+  ShapeProposalState,
   type AnchorCheckDto,
   type PlanContext,
   type WorkstreamDto,
@@ -64,6 +67,12 @@ export function packPlanItems(
   return { kept, notIncluded, used };
 }
 
+/** A decision proposal the builder dropped or a later plan replaced no longer stands. */
+const DROPPED_PROPOSAL: Partial<Record<ShapeProposalState, PlanItemDropped>> = {
+  [ShapeProposalState.Rejected]: PlanItemDropped.Rejected,
+  [ShapeProposalState.Superseded]: PlanItemDropped.Superseded,
+};
+
 const checkOf = (row: AnchorCheckRow): AnchorCheckDto => ({
   entryKey: row.entryKey,
   anchorIndex: row.anchorIndex,
@@ -111,7 +120,7 @@ export function buildPlanContext(
   const decisions = new Map(
     listShapeProposals(db, shape.id)
       .filter((r) => r.kind === 'decision')
-      .map((r) => [r.key, ShapeProposalBody.decision.parse(r.body)]),
+      .map((r) => [r.key, { record: ShapeProposalBody.decision.parse(r.body), state: r.state }]),
   );
 
   const items: PlanItem[] = [];
@@ -122,9 +131,10 @@ export function buildPlanContext(
         group: 'decision',
         item: {
           key,
-          choice: decision.choice,
-          rationale: decision.rationale,
-          lasting: decision.lasting,
+          choice: decision.record.choice,
+          rationale: decision.record.rationale,
+          lasting: decision.record.lasting,
+          dropped: DROPPED_PROPOSAL[decision.state] ?? null,
         },
       });
       continue;
@@ -132,12 +142,14 @@ export function buildPlanContext(
     const entry = getShapeEntry(db, shape.id, key);
     if (!entry) continue;
     const version = entry.version;
+    const superseded = entry.state === PlanEntryState.Superseded;
+    const dropped = superseded ? PlanItemDropped.Superseded : null;
     switch (entry.kind) {
       case 'intent': {
         const body = PlanEntryBody.intent.parse(entry.body);
         items.push({
           group: 'intent',
-          item: { key, version, quote: body.quote, speaker: body.speaker },
+          item: { key, version, quote: body.quote, speaker: body.speaker, dropped },
         });
         break;
       }
@@ -145,7 +157,7 @@ export function buildPlanContext(
         const body = PlanEntryBody.name.parse(entry.body);
         items.push({
           group: 'name',
-          item: { key, version, name: body.name, definition: body.definition },
+          item: { key, version, name: body.name, definition: body.definition, dropped },
         });
         break;
       }
@@ -162,22 +174,26 @@ export function buildPlanContext(
                 ? factLine(PlanEntryBody.fact.parse(entry.body))
                 : factLine(PlanEntryBody.experiment.parse(entry.body)),
             anchors: entry.anchors,
-            checks: checks
-              .filter((c) => c.entryKey === key && c.entryVersion === version)
-              .map(checkOf),
+            // A superseded fact's anchors are never checked, so none are carried as checked.
+            checks: superseded
+              ? []
+              : checks.filter((c) => c.entryKey === key && c.entryVersion === version).map(checkOf),
+            dropped,
           },
         });
         break;
     }
   }
+  // Only an imported finding has a key `get_plan_entry` can read it back by, if the budget leaves it out.
   for (const f of listShapeFindings(db, shape.id)) {
+    if (f.bundleKey === null) continue;
     if (f.state !== ShapeFindingState.Open || f.section !== context.section) continue;
     const at = f.revisionId === null ? undefined : getAttachmentRevisionById(db, f.revisionId);
     if (at?.attachmentId !== document.id) continue;
     items.push({
       group: 'finding',
       item: {
-        key: f.bundleKey ?? f.id,
+        key: f.bundleKey,
         severity: f.severityText ?? f.severity ?? f.kind,
         text: f.text,
       },

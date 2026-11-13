@@ -274,6 +274,15 @@ describe('checkTaskAnchors', () => {
     ]);
   });
 
+  it('a cited fact a re-import superseded is not checked', async () => {
+    const shapeId = importJson(bundleJson(project.id));
+    const { taskId, ws } = pinned(shapeId);
+    const next = bundleJson(project.id);
+    next['entries'] = (next['entries'] as Json[]).filter((e) => e['key'] !== 'f1');
+    importJson(next);
+    expect(await checkAt(taskId, ws, commit({ 'src/runner.ts': RUNNER }))).toBe(0);
+  });
+
   it('a task without a plan writes nothing', async () => {
     const taskId = state.write(
       (ctx) =>

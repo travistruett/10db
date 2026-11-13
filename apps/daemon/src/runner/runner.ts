@@ -1983,7 +1983,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
-    const contextPack = buildContextPack(db, getWorkstream(db, id), { base: baseHead });
+    const contextPack = buildContextPack(db, getWorkstream(db, id), undefined, {
+      base: baseHead,
+    });
     // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
     const evidenceId =
       action.kind === 'fix'
