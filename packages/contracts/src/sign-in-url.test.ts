@@ -8,6 +8,7 @@ const ACCEPTED = [
   'https://auth.openai.com/',
   'https://auth.openai.com:443/oauth/authorize',
   'HTTPS://AUTH.OPENAI.COM/x',
+  'https://github.com/login/device',
 ];
 const REFUSED = [
   { name: 'http', url: 'http://auth.openai.com/oauth/authorize' },
@@ -21,10 +22,22 @@ const REFUSED = [
   { name: 'a javascript address', url: 'javascript:alert(1)' },
   { name: 'text that is no address', url: 'not a url' },
   { name: 'an empty string', url: '' },
+  { name: 'github.com at another path', url: 'https://github.com/login/oauth/authorize' },
+  { name: 'the device path with a trailing slash', url: 'https://github.com/login/device/' },
+  { name: 'github.com at its root', url: 'https://github.com/' },
+  { name: 'a path that only starts like the device page', url: 'https://github.com/login/devices' },
+  { name: 'the device path on another host', url: 'https://evil.example/login/device' },
+  {
+    name: 'the device path on a github.com subdomain',
+    url: 'https://gist.github.com/login/device',
+  },
+  { name: 'the device page over http', url: 'http://github.com/login/device' },
+  { name: 'the device page with credentials', url: 'https://u:p@github.com/login/device' },
+  { name: 'the device page on another port', url: 'https://github.com:8443/login/device' },
 ];
 
 describe('isSignInUrl', () => {
-  it('names one host', () => {
+  it('names the agents sign-in host', () => {
     expect(SIGN_IN_HOSTS).toEqual(['auth.openai.com']);
   });
   it.each(ACCEPTED)('accepts %s', (url) => {

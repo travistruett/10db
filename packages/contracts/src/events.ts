@@ -7,6 +7,8 @@ export const EventType = {
   AccountResumed: 'account.resumed',
   /** An account's browser sign-in ended: it finished, failed, was cancelled or timed out. */
   AccountLoginEnded: 'account.login_ended',
+  /** A gh sign-in ended (`GithubLoginEndedData`); the gh login is the Mac's, so no entity owns it. */
+  GithubLoginEnded: 'github.login_ended',
   ProjectCreated: 'project.created',
   TaskCreated: 'task.created',
   TaskChanged: 'task.changed',

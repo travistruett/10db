@@ -69,6 +69,7 @@ import {
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import { GithubSigninDto, GithubStatusDto } from './github';
 import {
   JudgeCallDto,
   JudgeConfigPatch,
@@ -298,6 +299,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'aa-model-dto': AaModelDto,
   'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'github-signin-dto': GithubSigninDto,
+  'github-status-dto': GithubStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-key-input': JudgeKeyInput,

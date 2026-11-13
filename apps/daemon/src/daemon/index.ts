@@ -5,6 +5,7 @@ export {
   catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
 } from './options-from-env';
+export { createGithubServices } from './github-services';
 export { createKnowledgeServices } from './knowledge-services';
 export { createStakeholderApiServices } from './stakeholder-services';
 export { startDaemon, type RunningDaemon } from './start';

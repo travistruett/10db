@@ -4,7 +4,7 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { accountIdentityDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { projectDto } from '../../test/fixtures';
+import { daemonEvent, projectDto } from '../../test/fixtures';
 
 type Tool = Pick<ToolCheck, 'name' | 'path' | 'version'> & {
   readonly signedIn?: string | undefined;
@@ -93,10 +93,14 @@ function serve(
     http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
     ...baseHandlers(),
-    eventStream.addEventListener('connection', () => undefined),
+    eventStream.addEventListener('connection', ({ client }) => {
+      sockets.push(client);
+    }),
   );
   return served;
 }
+
+const sockets: { send(data: string): void }[] = [];
 
 const next = (name: string) => screen.getByRole('button', { name });
 
@@ -110,6 +114,7 @@ function card(name: 'Agents' | 'Tools'): HTMLElement {
 }
 
 beforeEach(() => {
+  sockets.length = 0;
   window.localStorage.clear();
 });
 
@@ -280,7 +285,7 @@ describe('FirstRun', () => {
       {
         name: 'signed out',
         gh: { ...GH, signedIn: undefined },
-        text: 'Not signed in. Run gh auth login in a terminal, then recheck.',
+        text: 'Not signed in.',
       },
       {
         name: 'missing',
@@ -295,6 +300,96 @@ describe('FirstRun', () => {
       await waitFor(() => {
         expect(next('Continue').hasAttribute('disabled')).toBe(false);
       });
+    });
+  });
+
+  describe('the gh row signs in inline', () => {
+    const SIGNED_OUT: Tool = { ...GH, signedIn: undefined };
+    const WAITING = {
+      state: 'signed_out',
+      login: null,
+      checkedAt: '2026-11-12T10:00:00.000Z',
+      signingIn: {
+        code: 'ABCD-1234',
+        url: 'https://github.com/login/device',
+        startedAt: '2026-11-12T10:00:00.000Z',
+      },
+    };
+
+    it('names no terminal command and offers Sign In', async () => {
+      serve({ tools: [CLAUDE, GIT, SIGNED_OUT] });
+      renderApp('/');
+      await toSetup();
+      const tools = card('Tools');
+      expect(await within(tools).findByRole('button', { name: 'Sign In' })).toBeTruthy();
+      expect(within(tools).queryByText(/gh auth login/)).toBeNull();
+    });
+
+    it('a signed-in gh and a missing gh offer no Sign In', async () => {
+      serve({ tools: [CLAUDE, GIT, GH] });
+      renderApp('/');
+      await toSetup();
+      await within(card('Tools')).findByText('gh 2.0.0, signed in as octocat');
+      expect(within(card('Tools')).queryByRole('button', { name: 'Sign In' })).toBeNull();
+    });
+
+    it('Sign In runs the daemon flow and shows the code', async () => {
+      const posted: string[] = [];
+      serve(
+        { tools: [CLAUDE, GIT, SIGNED_OUT] },
+        http.get(daemonUrl('/github'), () => HttpResponse.json({ ...WAITING, signingIn: null })),
+        http.post(daemonUrl('/github/signin'), () => {
+          posted.push('signin');
+          return HttpResponse.json({ code: 'ABCD-1234', url: 'https://github.com/login/device' });
+        }),
+      );
+      renderApp('/');
+      await toSetup();
+      fireEvent.click(await within(card('Tools')).findByRole('button', { name: 'Sign In' }));
+      await waitFor(() => {
+        expect(posted).toEqual(['signin']);
+      });
+    });
+
+    it('mounted while a sign-in runs shows the code and Cancel', async () => {
+      serve(
+        { tools: [CLAUDE, GIT, SIGNED_OUT] },
+        http.get(daemonUrl('/github'), () => HttpResponse.json(WAITING)),
+      );
+      renderApp('/');
+      await toSetup();
+      const tools = card('Tools');
+      expect(await within(tools).findByText('ABCD-1234')).toBeTruthy();
+      expect(within(tools).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    });
+
+    it('the end of a sign-in checks the tools again so the row reads signed in', async () => {
+      const served = serve(
+        { tools: [CLAUDE, GIT, SIGNED_OUT] },
+        http.get(daemonUrl('/github'), () => HttpResponse.json(WAITING)),
+      );
+      renderApp('/');
+      await toSetup();
+      await within(card('Tools')).findByText('ABCD-1234');
+      server.use(
+        http.get(daemonUrl('/system'), ({ request }) => {
+          served.systemRequests.push(new URL(request.url).searchParams.get('recheck'));
+          return HttpResponse.json(system([CLAUDE, GIT, GH]));
+        }),
+      );
+      sockets.at(-1)?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq: 50,
+            type: 'github.login_ended',
+            entityType: 'github',
+            entityId: 'login',
+            data: { ok: true, login: 'octocat', message: null, cancelled: false },
+          }),
+        ),
+      );
+      expect(await within(card('Tools')).findByText('gh 2.0.0, signed in as octocat')).toBeTruthy();
+      expect(served.systemRequests).toContain('1');
     });
   });
 
