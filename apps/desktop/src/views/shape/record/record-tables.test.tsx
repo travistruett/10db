@@ -186,6 +186,8 @@ describe('Reviews', () => {
     expect(row?.textContent).toContain('fable plan reviewer');
     expect(row?.textContent).toContain('blocking, security');
     expect(row?.textContent).toContain('partial: revoked-device column is a stub');
+    expect(row?.textContent).toContain('Added the column');
+    expect(row?.textContent).toContain('The column exists; nothing writes it yet.');
     expect(row?.textContent).toContain('Resolved');
   });
 

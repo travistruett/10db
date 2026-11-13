@@ -176,11 +176,14 @@ export function ReviewsTab({
       render: finding((row) => (
         <Stack gap={2}>
           {row.outcomeText === null ? null : <Text size="sm">{row.outcomeText}</Text>}
-          {(row.howDetail ?? row.how) ? (
-            <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-              {row.howDetail ?? row.how}
-            </Text>
-          ) : null}
+          {/* How it was closed, then the detail of it; either may be there without the other. */}
+          {[row.how, row.howDetail].map((line, i) =>
+            line === null || line === '' ? null : (
+              <Text key={i} size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
+                {line}
+              </Text>
+            ),
+          )}
         </Stack>
       )),
     },
