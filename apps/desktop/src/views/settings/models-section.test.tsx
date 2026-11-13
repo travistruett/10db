@@ -198,14 +198,16 @@ describe('the Models page', () => {
     expect(screen.getByRole('link', { name: 'Add Key' })).toBeTruthy();
   });
 
-  it('opens on the playbook, above the chart and the model list', async () => {
+  it('opens on the playbook and the kinds, above the chart and the model list', async () => {
     serve();
     await renderWithDaemonAndRouter(<ModelsSection />);
     const playbook = await screen.findByRole('region', { name: 'Playbook section' });
+    const kinds = await screen.findByRole('region', { name: 'Kinds' });
     const all = await screen.findByRole('heading', { name: 'All models' });
     const chart = screen.getByRole('heading', { name: 'Intelligence and cost' });
     for (const [first, second] of [
-      [playbook, chart],
+      [playbook, kinds],
+      [kinds, chart],
       [chart, all],
     ] as const)
       expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

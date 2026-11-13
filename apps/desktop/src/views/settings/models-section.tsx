@@ -38,6 +38,7 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { KindsSection } from './kinds-section';
 import { MoveReportNote } from './move-report-note';
 import { ModelsTable } from './models-table';
 import { PlaybookTable } from './playbook-table';
@@ -264,6 +265,7 @@ export function ModelsSection() {
           <PlaybookTable projectId={null} accountId={accountId} />
         </RaisedPanel>
       </Stack>
+      <KindsSection />
       <Stack gap="xs">
         <Group justify="space-between">
           <Title order={4} size="md" fw={600}>

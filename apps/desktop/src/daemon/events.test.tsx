@@ -342,6 +342,7 @@ describe('useEventStream', () => {
       'pattern',
       'persona',
       'playbook',
+      'kind',
     ]) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['models']]));
     }
@@ -349,6 +350,7 @@ describe('useEventStream', () => {
 
   it.each([
     { entity: 'playbook', key: ['playbook'] },
+    { entity: 'kind', key: ['kinds'] },
     { entity: 'persona', key: ['personas'] },
   ])('refetches the $entity lists the settings page reads when one changes', ({ entity, key }) => {
     expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([key]));

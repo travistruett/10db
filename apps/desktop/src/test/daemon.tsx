@@ -124,6 +124,7 @@ export function baseHandlers(
       HttpResponse.json(playbookDto()),
     ),
     http.get(daemonUrl('/playbook/move-report', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/kinds', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/personas', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/models/picks', base), ({ request }) =>
       HttpResponse.json(
