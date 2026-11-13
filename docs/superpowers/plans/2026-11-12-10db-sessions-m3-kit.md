@@ -520,7 +520,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 | other | title `propose_plan`, preview `x` | "Used propose_plan" · `x` | "Used propose_plan: x" |
 | other, a Plan line | title `propose_plan · 1 goal, 3 loose · passed`, harnessTool `10db.plan` | "Used propose_plan" · `1 goal, 3 loose · passed` | "Used propose_plan: 1 goal, 3 loose · passed" |
 | denied by 10db | `deniedBy: '10db'`, no refusal | meta "10db stopped this", dimmed | |
-| denied with a refusal | `deniedBy: '10db'`, `refusal: 'writes outside the checkout'` | meta "10db stopped this"; the name ends ", writes outside the checkout" | |
+| denied with a refusal | `deniedBy: '10db'`, `refusal: 'writes outside the checkout'` | meta "10db stopped this: writes outside the checkout" (UI spec §7.3); the name ends ", 10db stopped this: writes outside the checkout" | |
 | denied by builder | `deniedBy: 'builder'` | meta "You denied this", dimmed | |
 | denied by the judge | `deniedBy: 'judge'`, `limit` set, `soft: true`, `onAllow` given | meta "Held back: this would {limit}", dimmed, and an Allow This button that calls `onAllow` once | |
 | a hard deny by the judge | `deniedBy: 'judge'`, `soft: false`, `onAllow` given | meta "Held back at a limit", dimmed, no Allow This | |
@@ -547,7 +547,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
     their counts; "Show Full Diff" draws every hunk; `truncated` says "Cut at 1,500 changed lines", with "Open Full
     Patch" only with `loadFull`.
   - **Running:** the icon's place holds an 8 px blue dot (`data-status="running"`).
-  - **Denied with a refusal:** the row reads "10db stopped this", and opened it shows the refusal in words.
+  - **Denied with a refusal:** the row reads "10db stopped this: {reason}", and opened it shows the refusal in words.
   - **Subagent:** its nested rows render under it, indented, when opened.
   - **Group:** a `ToolGroupRow` of three reads names the group, and opened lists one call per line.
 

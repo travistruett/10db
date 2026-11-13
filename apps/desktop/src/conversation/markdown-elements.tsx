@@ -70,10 +70,19 @@ function NotShown({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/** Whether a link's confirm is open: a second click or Enter while it is asks nothing more. */
+let asking = false;
+
 function open(href: string): void {
-  openWebLink(href).catch((error: unknown) => {
-    console.warn('10db: the link did not open', error);
-  });
+  if (asking) return;
+  asking = true;
+  openWebLink(href)
+    .catch((error: unknown) => {
+      console.warn('10db: the link did not open', error);
+    })
+    .finally(() => {
+      asking = false;
+    });
 }
 
 /**
@@ -96,7 +105,8 @@ function Link({ href, children }: { readonly href: unknown; readonly children: R
         open(href);
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Enter') return;
+        // A held Enter repeats; only its first press opens.
+        if (event.key !== 'Enter' || event.repeat) return;
         event.preventDefault();
         open(href);
       }}

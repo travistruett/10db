@@ -9,6 +9,9 @@ const HIGHLIGHT_MAX_CHARS = 50_000;
 /** The longest line a highlighted fence may hold; one line past it draws the whole fence plain. */
 const HIGHLIGHT_MAX_LINE_CHARS = 2_000;
 
+/** The longest language label drawn whole; a longer one is cut with an ellipsis. */
+const LABEL_MAX_CHARS = 24;
+
 /** Whether `code` is small enough to highlight: under both limits. */
 function highlightable(code: string): boolean {
   if (code.length > HIGHLIGHT_MAX_CHARS) return false;
@@ -53,7 +56,7 @@ export function CodeBlock({
           right={40}
           style={{ pointerEvents: 'none' }}
         >
-          {name}
+          {name.length > LABEL_MAX_CHARS ? `${name.slice(0, LABEL_MAX_CHARS - 1)}…` : name}
         </Text>
       )}
     </Box>

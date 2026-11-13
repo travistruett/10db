@@ -245,6 +245,34 @@ describe('a link', () => {
     });
   });
 
+  it('ignores a held Enter, and asks once while a confirm is open', async () => {
+    const calls: string[] = [];
+    let answer: (open: boolean) => void = () => undefined;
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      // The native confirm stays open until the test answers it.
+      return new Promise<boolean>((resolve) => {
+        answer = resolve;
+      });
+    });
+    draw('[docs](https://ok.example/a)');
+    const link = screen.getByRole('link', { name: 'docs' });
+    fireEvent.keyDown(link, { key: 'Enter', repeat: true });
+    expect(calls).toEqual([]);
+    fireEvent.click(link);
+    fireEvent.click(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+    await vi.waitFor(() => {
+      expect(calls).toEqual(['open_web_link']);
+    });
+    answer(false);
+    await vi.waitFor(() => {
+      fireEvent.click(link);
+      expect(calls).toEqual(['open_web_link', 'open_web_link']);
+    });
+    answer(false);
+  });
+
   it('asks in a browser, naming the address host and not the link text, before it opens', async () => {
     const open = vi.spyOn(window, 'open');
     renderWithTheme(<LinkConfirmHost />);
