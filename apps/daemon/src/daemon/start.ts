@@ -80,6 +80,7 @@ import {
   type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import { createBenchmarkServices } from './benchmark-services';
 import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -158,7 +159,16 @@ import {
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
-import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
+import {
+  createGh,
+  createSystemGhExec,
+  resolveGh,
+  spawnGhLogin,
+  type Gh,
+  type GhLoginSpawn,
+  type GhTools,
+} from '../github';
+import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
@@ -354,6 +364,8 @@ export interface DaemonOptions {
   readonly tickMs?: number;
   /** The GitHub CLI wrapper; tests pass a fake. */
   readonly gh?: Gh;
+  /** Starts `gh auth login` for Sign In; tests pass a fake, so none signs in for real. */
+  readonly githubLoginSpawn?: GhLoginSpawn;
   /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
   readonly networkEnv?: () => Readonly<Record<string, string>>;
   readonly deliveryLimits?: Partial<DeliveryLimits>;
@@ -369,6 +381,8 @@ export interface DaemonOptions {
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
+  /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
+  readonly benchmarksOff?: boolean;
   readonly fetch?: typeof fetch;
   /**
    * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
@@ -488,7 +502,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
   // gh from the same prefixes; a missing one fails each gh call as not installed, as the system check says.
-  const ghBin = resolveGh();
+  let ghBin = resolveGh();
+  // Read on every call, so a gh installed after startup (found again on Check Again) is the one run.
+  const ghTools: GhTools = {
+    get gh() {
+      return ghBin;
+    },
+    git: gitBin,
+  };
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -1036,7 +1057,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const delivery: DeliveryContext = {
     state,
     git,
-    gh: opts.gh ?? createGh(createSystemGhExec({ gh: ghBin, git: gitBin })),
+    gh: opts.gh ?? createGh(createSystemGhExec(ghTools)),
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
@@ -1790,8 +1811,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  const github = createGithubServices({
+    clock,
+    spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
+    resolveGh: () => {
+      ghBin = resolveGh();
+      return ghBin;
+    },
+    readLogin: () =>
+      delivery.gh.authLogin({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+    env: () => delivery.networkEnv(),
+    emit: (data) => {
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.GithubLoginEnded,
+          entityType: 'github',
+          entityId: 'login',
+          data,
+        });
+      });
+    },
+  });
   const services = createServices({
     state,
+    github: {
+      githubStatus: github.githubStatus,
+      startGithubSignin: github.startGithubSignin,
+      cancelGithubSignin: github.cancelGithubSignin,
+    },
     clock,
     bus,
     runner: createdRunner,
@@ -1810,6 +1860,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : noSystemCheck(),
     agents: opts.agents ?? null,
     benchmarks,
+    benchmarkApi: createBenchmarkServices({
+      benchmarks,
+      keychain: judgeKeychain,
+      off: opts.benchmarksOff === true,
+    }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
@@ -1941,7 +1996,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (installer === null) {
       updateLogger.warn({}, 'gh is not installed, so the app cannot update itself');
     } else {
-      const ghExec = createSystemGhExec({ gh: ghBin, git: gitBin });
+      const ghExec = createSystemGhExec(ghTools);
       const ghCall = () => ({
         env: delivery.networkEnv(),
         timeoutMs: delivery.limits.networkTimeoutMs,
@@ -2165,6 +2220,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       createdScheduler.stop();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
       // before the database closes, so a slow stop does not eat the window the lanes need.
+      github.stop();
       const loginStopped = accountService.stop().catch((error: unknown) => {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });

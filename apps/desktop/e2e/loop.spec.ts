@@ -31,6 +31,11 @@ async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<voi
   if (view === 'Knowledge') await expect(page.getByLabel(/^Loading /)).toHaveCount(0);
 }
 
+/** Settings shows one scope at a time; the builder picks it in the sidebar's switch. */
+async function chooseScope(page: Page, scope: 'This project' | 'All projects'): Promise<void> {
+  await page.getByRole('radiogroup', { name: 'Settings scope' }).getByText(scope).click();
+}
+
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
   await page
     .getByRole('link', { name: new RegExp(`^(Back to )?${view}( \\d+ open cards?)?$`) })
@@ -268,7 +273,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // Settings: add a human column, and accounts work.
   await open(page, 'Settings');
-  await expectAccessible(page, 'settings, general, dark');
+  await expectAccessible(page, 'settings, overview, dark');
+  await chooseScope(page, 'This project');
   await page.getByRole('link', { name: /Board columns/ }).click();
   await page.getByLabel('New column').fill('Exploring');
   const addColumn = page.getByRole('button', { name: 'Add Column' });
@@ -283,6 +289,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // Accounts: the default account is Ready only because the loop above already ran a task; the first
   // session's probe recorded its identity (the fake adapter reports builder@example.com).
+  await chooseScope(page, 'All projects');
   await page.getByRole('link', { name: /Accounts/ }).click();
   const accounts = page.getByRole('table', { name: 'Accounts' });
   await expect(accounts.getByRole('row', { name: /Claude plan/ }).getByText('Ready')).toBeVisible();
@@ -347,9 +354,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page.keyboard.press('Escape');
   await expect(lightSheet).toBeHidden();
   await open(page, 'Settings');
+  await chooseScope(page, 'This project');
   await page.getByRole('link', { name: /Board columns/ }).click();
   await expect(page.getByRole('table', { name: 'Board columns' })).toBeVisible();
   await expectAccessible(page, 'settings, board columns, light');
+  await chooseScope(page, 'All projects');
   await page.getByRole('link', { name: /Accounts/ }).click();
   await expect(page.getByRole('table', { name: 'Accounts' })).toBeVisible();
   // Axe must not scan rows that are still loading.

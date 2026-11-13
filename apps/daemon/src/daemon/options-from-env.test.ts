@@ -41,6 +41,14 @@ describe('daemonOptionsFromEnv', () => {
   });
 
   it.each([
+    ['absent', {}, undefined],
+    ['on', { TENDB_BENCHMARKS: 'on' }, undefined],
+    ['off', { TENDB_BENCHMARKS: 'off' }, true],
+  ])('reports the benchmarks switch when TENDB_BENCHMARKS is %s', (_name, source, expected) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).benchmarksOff).toBe(expected);
+  });
+
+  it.each([
     [
       'the file the environment names',
       { TENDB_CATALOGUE_SNAPSHOT: '/x/catalogue.json' },

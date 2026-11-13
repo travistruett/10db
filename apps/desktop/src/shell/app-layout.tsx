@@ -38,7 +38,7 @@ import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
-import { firstGlobalSection, SettingsSectionKey } from '../views/settings/sections';
+import { firstAppSection, SettingsSectionKey } from '../views/settings/sections';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { useSelectedProject } from './selected-project';
 import { ShapeNav } from './shape-nav';
@@ -250,7 +250,7 @@ function FullLayout() {
                   <Link
                     {...props}
                     to="/settings/$section"
-                    params={{ section: firstGlobalSection() }}
+                    params={{ section: firstAppSection() }}
                   />
                 )}
               />

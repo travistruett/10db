@@ -68,13 +68,19 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import { GithubSigninDto, GithubStatusDto } from './github';
 import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
   ModelSettingsInput,
+  ModelEffortDto,
   ModelRowDto,
+  ModelPicksQuery,
+  ModelsQuery,
+  RolePickDto,
+  RolePicksDto,
   ModelSetting,
   ModelSettingsDto,
   PatternDto,
@@ -285,7 +291,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
+  'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'github-signin-dto': GithubSigninDto,
+  'github-status-dto': GithubStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-status-dto': JudgeStatusDto,
@@ -306,7 +315,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'area-proposal-result': AreaProposalResult,
   'account-model-dto': AccountModelDto,
   'catalogue-status-dto': CatalogueStatusDto,
+  'model-effort-dto': ModelEffortDto,
   'model-row-dto': ModelRowDto,
+  'models-query': ModelsQuery,
+  'model-picks-query': ModelPicksQuery,
+  'role-pick-dto': RolePickDto,
+  'role-picks-dto': RolePicksDto,
   'model-setting': ModelSetting,
   'pattern-dto': PatternDto,
   'pattern-match': PatternMatch,

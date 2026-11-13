@@ -1,4 +1,5 @@
 import type { AccountModelDto, ModelProfileDto, StepRole, WorkstreamStep } from '@10db/contracts';
+import { costOnAccount } from './cost-on-account';
 import type { Floor } from './floors';
 import { automatic } from './pools';
 import { ROLE_DEFAULT, strongerDefault } from './role-defaults';
@@ -17,7 +18,7 @@ export interface RouteInput {
   readonly shortfall: 'refuse' | 'strongest';
   /**
    * The account's own list. Where it prices a model, the ceiling is compared with the cost per task scaled to
-   * that price (`costOn`); without it, or for a model it prices at nothing, with the maker's figure.
+   * that price (`costOnAccount`); without it, or for a model it prices at nothing, with the maker's figure.
    */
   readonly accountModels?: readonly AccountModelDto[];
 }
@@ -45,25 +46,9 @@ function measured(profiles: readonly ModelProfileDto[]): ModelProfileDto[] {
   return profiles.filter((p) => score(p) !== null && p.costPerTaskUsd !== null);
 }
 
-/**
- * What a task costs on the account, for comparing with the budget ceiling. AA's cost per task is at the maker's
- * list price; an account that pays per token and prices its own copy of the model differently scales it by its
- * output price over the maker's. An account with no price of its own (a subscription, where a ceiling measures how
- * heavy a model is), a model the account does not list, or one with no maker price keeps the maker's figure.
- */
-function costOn(
-  p: ModelProfileDto,
-  accountModels: readonly AccountModelDto[] | undefined,
-): number | null {
-  if (p.costPerTaskUsd === null) return null;
-  const own = accountModels?.find((m) => m.model === p.model)?.outputPrice ?? null;
-  if (own === null || p.outputPrice === null || p.outputPrice === 0) return p.costPerTaskUsd;
-  return p.costPerTaskUsd * (own / p.outputPrice);
-}
-
 const preference =
   (accountModels?: readonly AccountModelDto[]) => (a: ModelProfileDto, b: ModelProfileDto) =>
-    (costOn(a, accountModels) ?? 0) - (costOn(b, accountModels) ?? 0) ||
+    (costOnAccount(a, accountModels) ?? 0) - (costOnAccount(b, accountModels) ?? 0) ||
     (b.outputTokensPerSecond ?? 0) - (a.outputTokensPerSecond ?? 0) ||
     (score(a) ?? 0) - (score(b) ?? 0);
 
@@ -71,12 +56,12 @@ const withinCeiling = (
   p: ModelProfileDto,
   ceiling: number | null,
   accountModels?: readonly AccountModelDto[],
-) => ceiling === null || (costOn(p, accountModels) ?? 0) <= ceiling;
+) => ceiling === null || (costOnAccount(p, accountModels) ?? 0) <= ceiling;
 const dollars = (n: number) => `$${String(n)}`;
 
 /** The cost a reason names beside the ceiling, when the account's price made it differ from the maker's figure. */
 const costNote = (p: ModelProfileDto, accountModels?: readonly AccountModelDto[]): string => {
-  const cost = costOn(p, accountModels);
+  const cost = costOnAccount(p, accountModels);
   return cost === null || cost === p.costPerTaskUsd
     ? ''
     : ` (${dollars(Number(cost.toPrecision(6)))} a task on this account)`;

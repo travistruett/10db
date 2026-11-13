@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { mintId, PersonInput, type PersonDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -132,8 +133,31 @@ describe('Settings › People: the list', () => {
       removeRefusal: 'Priya Shah answers questions; reroute them first.',
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Priya Shah' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Person' }));
     expect(await screen.findByText(/reroute them first/)).toBeTruthy();
     expect(screen.getByText('Priya Shah')).toBeTruthy();
+  });
+
+  it('asks before removing a person, says what happens to their questions, and Cancel keeps them', async () => {
+    serve({ people: [BUILDER_PERSON, personDto({ name: 'Priya Shah' })] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Priya Shah' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Remove Priya Shah?' });
+    expect(
+      within(dialog).getByText(
+        /Their Slack contact is deleted\. Questions already sent to them stay in the Waiting tab\./,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Remove Priya Shah?' })).toBeNull();
+    });
+    expect(screen.getByText('Priya Shah')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Priya Shah' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Person' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Priya Shah')).toBeNull();
+    });
   });
 
   it('keeps the timers in their own group, with the real-time note inside it', async () => {
@@ -234,6 +258,24 @@ describe('Settings › People: Add Person', () => {
         },
       ]);
     });
+  });
+
+  it('takes the daily limit in whole numbers only', async () => {
+    const { saved } = serve({ connection: connected });
+    const dialog = await openAddPerson();
+    await pickOption(within(dialog).getByLabelText('Find someone in Acme'), /Ana Ortiz/);
+    const limit = within(dialog).getByLabelText('New questions a day');
+    fireEvent.change(limit, { target: { value: '2.5' } });
+    expect(limit).toBeInstanceOf(HTMLInputElement);
+    if (limit instanceof HTMLInputElement) expect(limit.value).not.toContain('.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
+    await waitFor(() => {
+      expect(saved).toHaveLength(1);
+    });
+    const [person] = z
+      .array(z.object({ slack: z.object({ dailyLimit: z.number() }) }))
+      .parse(saved);
+    expect(Number.isInteger(person?.slack.dailyLimit)).toBe(true);
   });
 
   it('"Not on Slack? Add them by name" says what 10db does and saves no contact', async () => {

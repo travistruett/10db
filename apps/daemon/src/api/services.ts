@@ -16,6 +16,7 @@ import type {
   BatchDto,
   BatchId,
   BatchStartInput,
+  BenchmarkKeyInput,
   BenchmarkStatusDto,
   BoardColumnDelete,
   CatalogueStatusDto,
@@ -62,6 +63,7 @@ import type {
   ModelProfileDto,
   ModelSettingsInput,
   ModelRowDto,
+  RolePicksDto,
   ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
@@ -135,6 +137,8 @@ import type {
   PersonId,
   QuestionRouteDto,
   SendInput,
+  GithubSigninDto,
+  GithubStatusDto,
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
@@ -586,6 +590,15 @@ export interface ApiServices {
   updatePerson(id: PersonId, input: PersonInput): PersonDto;
   /** Removes a person; the builder, a goal's owner, a person on a criterion and a routed person stay. */
   removePerson(id: PersonId): void;
+  /**
+   * gh's login, probed when the last answer is older than a minute or `recheck` is set (which also
+   * looks for gh again), plus the code and page of a Sign In that waits for the builder.
+   */
+  githubStatus(recheck: boolean): Promise<GithubStatusDto>;
+  /** Runs `gh auth login --web`: 409 while one runs or gh is missing, 502 when gh prints no code. */
+  startGithubSignin(): Promise<GithubSigninDto>;
+  /** Stops the running sign-in; a no-op when none runs. */
+  cancelGithubSignin(): void;
   /** The Slack connection as the reply watch last found it. */
   slackStatus(): SlackConnectionDto;
   /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
@@ -607,8 +620,12 @@ export interface ApiServices {
   patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
-  benchmarkStatus(): BenchmarkStatusDto;
+  /** The sync's last outcome; whether a key is set is read from the Keychain now. */
+  benchmarkStatus(): Promise<BenchmarkStatusDto>;
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
+  /** Keeps the Artificial Analysis key in the Keychain and starts a sync with it; the status says it is running. */
+  setBenchmarkKey(input: BenchmarkKeyInput): Promise<BenchmarkStatusDto>;
+  removeBenchmarkKey(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
   /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */
@@ -617,8 +634,16 @@ export interface ApiServices {
   setGlobalModelSettings(input: ModelSettingsInput): ModelSettingsDto;
   /** As the global one for a project; a null setting hands the role back to the global setting. */
   setProjectModelSettings(projectId: ProjectId, input: ModelSettingsInput): ModelSettingsDto;
-  /** Every model any account can reach, one row each. */
-  listModels(): ModelRowDto[];
+  /**
+   * Every model any account can reach, one row each. With an account, a model it offers lists the efforts it
+   * offers, priced on it. Throws NotFoundError for an unknown or archived account.
+   */
+  listModels(accountId?: AccountId): ModelRowDto[];
+  /**
+   * What routing chooses for each role on an account at the role's starting need, for a task and a project with
+   * no settings of their own. Throws NotFoundError for an unknown or archived account.
+   */
+  modelPicks(accountId: AccountId): RolePicksDto;
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */

@@ -36,7 +36,7 @@ export interface ModelPickerProps {
  */
 export function ModelPicker({ view }: ModelPickerProps) {
   const choose = useChooseShapeModel();
-  const models = useModels();
+  const models = useModels(null);
   const { offered } = view.models;
   if (offered.length === 0) return null;
 

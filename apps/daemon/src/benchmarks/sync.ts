@@ -39,7 +39,7 @@ const STATUS_KEY = 'benchmarks.status';
 /** The models and efforts offered when scores were last asked for, so an unchanged offer asks for nothing. */
 const OFFERED_KEY = 'benchmarks.offered';
 /** Everything but the model count is recorded at sync time, so reading the status never touches the Keychain. */
-const StoredStatus = BenchmarkStatusDto.omit({ models: true });
+const StoredStatus = BenchmarkStatusDto.omit({ models: true, off: true, syncing: true });
 type StoredStatus = z.infer<typeof StoredStatus>;
 const NEVER: StoredStatus = {
   keyConfigured: false,
@@ -143,7 +143,12 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       return 0;
     }
   };
-  const status = (): BenchmarkStatusDto => ({ ...stored(), models: modelCount() });
+  const status = (): BenchmarkStatusDto => ({
+    ...stored(),
+    models: modelCount(),
+    off: false,
+    syncing: running !== null,
+  });
   /**
    * Records the outcome and re-arms the timer for it, so the timer and the status move together. A database
    * that can't be read or written leaves the status in memory only.
@@ -163,7 +168,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       );
     }
     rearm();
-    return { ...merged, models: modelCount() };
+    return { ...merged, models: modelCount(), off: false, syncing: false };
   };
 
   async function attempt(now: string): Promise<BenchmarkStatusDto> {
