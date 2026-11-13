@@ -8,6 +8,7 @@ import {
   useStakeholderTimers,
 } from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
+import { plainMessage } from './plain-message';
 import { copyPeople, joinNames, routeLine, StakeholderMode } from './route-line';
 import { TakeBackModal } from './take-back-modal';
 
@@ -68,7 +69,7 @@ export function ComposedMessage({
       {compose.isSuccess ? (
         <Paper bg="var(--mantine-color-default-hover)" p="sm" radius="md">
           <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-            {compose.data.text}
+            {plainMessage(compose.data.text)}
           </Text>
         </Paper>
       ) : null}
@@ -98,7 +99,7 @@ function CopyForPeople({
       disabled={!compose.isSuccess}
       onClick={() => {
         if (compose.isSuccess)
-          void navigator.clipboard.writeText(compose.data.text).then(() => {
+          void navigator.clipboard.writeText(plainMessage(compose.data.text)).then(() => {
             setCopied(true);
           });
       }}

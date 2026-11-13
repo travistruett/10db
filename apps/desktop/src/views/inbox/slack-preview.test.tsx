@@ -34,11 +34,11 @@ function card(send: Record<string, unknown>, over: Partial<InboxItemDto> = {}): 
   });
 }
 
-function serve(item: InboxItemDto) {
+function serve(item: InboxItemDto, builder = BUILDER_PERSON) {
   const posted: { path: string; body: unknown }[] = [];
   server.use(
     http.get(daemonUrl('/inbox'), () => HttpResponse.json([item])),
-    http.get(daemonUrl('/people'), () => HttpResponse.json([BUILDER_PERSON, mark, ana, priya])),
+    http.get(daemonUrl('/people'), () => HttpResponse.json([builder, mark, ana, priya])),
     http.post(daemonUrl('/inbox/:id/send'), async ({ request }) => {
       posted.push({ path: 'send', body: await request.json() });
       return HttpResponse.json(item.send);
@@ -218,6 +218,25 @@ describe('a card with a draft', () => {
     expect(line).toBeTruthy();
     expect(within(document.body).queryAllByRole('button', { name: /Ask Someone/ })).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy();
+  });
+});
+
+describe('a draft while the builder is not yet bound to Slack', () => {
+  it('shows the Integrations callout instead of a message from You', async () => {
+    const posted = serve(card({ text: "You's 10db build of *Demo* has a question for you." }), {
+      ...BUILDER_PERSON,
+      name: 'You',
+    });
+    expect(await screen.findByText(/Finish setting up Slack/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open Integrations' }).getAttribute('href')).toBe(
+      '/settings/integrations',
+    );
+    expect(screen.queryByText(/You's/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Send to Mark/ })).toBeNull();
+    // The builder can still answer it themselves.
+    expect(screen.getByRole('button', { name: 'Answer Myself' })).toBeTruthy();
+    key('Enter', { metaKey: true });
+    expect(posted).toEqual([]);
   });
 });
 

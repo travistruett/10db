@@ -38,7 +38,10 @@ function serve(
       return HttpResponse.json(current);
     }),
     http.get(daemonUrl('/inbox/:id/compose'), () =>
-      HttpResponse.json({ text: 'Travis asks Priya: how long?', hits: [] }),
+      HttpResponse.json({
+        text: "You's 10db build of *Demo* has a question for you.\n\n*How long?* &amp; more",
+        hits: [],
+      }),
     ),
     ...baseHandlers(),
   );
@@ -173,7 +176,13 @@ describe('a card asked of someone not in Slack', () => {
     });
     fireEvent.click(copy);
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith('Travis asks Priya: how long?');
+      expect(writeText).toHaveBeenCalledWith(
+        'My 10db build of Demo has a question for you.\n\nHow long? & more',
+      );
+    });
+    // The card shows the same words the builder pastes.
+    await waitFor(() => {
+      expect(screen.getByText(/My 10db build of Demo has a question for you/)).toBeTruthy();
     });
     expect(screen.getByRole('radio', { name: /Seven days/ })).toBeTruthy();
   });

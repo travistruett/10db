@@ -1,12 +1,17 @@
 import type { InboxItemDto, OutboundHit, PersonDto, StakeholderSendDto } from '@10db/contracts';
-import { Alert, Button, Group, Kbd, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { Alert, Anchor, Button, Group, Kbd, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSendInbox } from '../../daemon/people';
+import { SettingsSectionKey } from '../settings/sections';
 import { AskSomeone } from './ask-someone';
 import { joinNames, routeLine } from './route-line';
 import { sendFailureWords } from './send-failure';
 
 /** What a held pattern is, in words a builder knows. */
+/** The name a fresh install gives the builder. */
+const SEEDED_BUILDER_NAME = 'You';
+
 const PATTERN_WORDS: Readonly<Record<string, string>> = {
   private_key: 'a private key',
   aws_access_key: 'an AWS access key',
@@ -77,6 +82,8 @@ export function SlackPreview({
   readonly onAnswerMyself: () => void;
 }) {
   const sendInbox = useSendInbox();
+  // Until the builder is bound to their Slack member their name is the seeded one, and the message would say it.
+  const unbound = people.find((p) => p.isBuilder)?.name === SEEDED_BUILDER_NAME;
   const [edited, setEdited] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const names = joinNames(recipientNames(send));
@@ -117,6 +124,36 @@ export function SlackPreview({
       document.removeEventListener('keydown', onKey);
     };
   });
+
+  if (unbound)
+    return (
+      <Paper withBorder p="md" shadow="xs" data-inbox-selected>
+        <Stack gap="sm">
+          {header}
+          <Alert color="yellow" variant="light" title="Finish setting up Slack">
+            Pick which Slack member you are, so the message can say whose build is asking. Until
+            then it can't be sent.
+          </Alert>
+          <Group justify="space-between">
+            <Anchor
+              size="sm"
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.Integrations }}
+                />
+              )}
+            >
+              Open Integrations
+            </Anchor>
+            <Button variant="default" onClick={onAnswerMyself}>
+              Answer Myself
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+    );
 
   return (
     <Paper withBorder p="md" shadow="xs" data-inbox-selected>
