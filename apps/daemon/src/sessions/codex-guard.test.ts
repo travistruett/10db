@@ -257,6 +257,15 @@ describe('judgeHookCall', () => {
     ]);
   });
 
+  // A Codex hook can't change a call: a guard allow that rewrites one still lets Codex run what it sent.
+  it("allows a call the guard's allow rewrites, which Codex then runs as it sent it", async () => {
+    const spec: Spec = {
+      ...ALLOW_ALL,
+      preToolUse: () => ({ decision: 'allow', updatedInput: { command: 'echo safe' } }),
+    };
+    expect(await judgeHookCall(spec, bash('echo raw'), NEVER)).toEqual({ allow: true });
+  });
+
   it('allows an asked call that canUseTool allows, ignoring updatedInput', async () => {
     const spec: Spec = {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),

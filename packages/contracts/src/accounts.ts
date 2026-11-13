@@ -28,7 +28,7 @@ export const SUPPORTED_ACCOUNT_KINDS = [
 export type SupportedAccountKind = (typeof SUPPORTED_ACCOUNT_KINDS)[number];
 
 /** The adapter id of the agent that runs a session on each kind: a new kind is one row. */
-export const ADAPTER_OF_KIND = {
+const ADAPTER_OF_KIND = {
   [AccountKind.ClaudeSubscription]: Provider.Claude,
   [AccountKind.AnthropicApiKey]: Provider.Claude,
   [AccountKind.Bedrock]: Provider.Claude,

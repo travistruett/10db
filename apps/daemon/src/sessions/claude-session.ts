@@ -404,7 +404,7 @@ const PROFILE_RULES = {
     fillsResetsAt: true,
     /** A later init (after a compaction or restart) is skipped, so `started` comes once. */
     skipsLaterInit: true,
-    /** A resumed session has had its first reply, whatever this process has seen. */
+    /** Only the first reply this process sees can show the model was refused, a resumed session's too. */
     resumeHasReplied: false,
     /** An interrupt before the prompt went in leaves claude alone. */
     interruptsBeforePrompt: false,
@@ -423,6 +423,7 @@ const PROFILE_RULES = {
     fillsResetsAt: false,
     // `shape/service.ts` takes the new session id from a later `started`.
     skipsLaterInit: false,
+    // A resumed conversation has had its first reply, whatever this process has seen.
     resumeHasReplied: true,
     interruptsBeforePrompt: true,
     refusedLog: 'shape session refused',

@@ -16,8 +16,9 @@
   judge by account kind is reported; the trust line's T3 adds the model, and T5 adds 10db's judge. The tables
   are in `sessions/capabilities.ts`, per spec §5.3 of `docs/superpowers/specs/2026-11-11-10db-sessions-design.md`.
 - A capability says what the agent can do, not what 10db has wired yet. Takeover is built with Open in Terminal,
-  model switching between turns with the explore engine, and Codex's slash commands with streaming. Nothing reads
-  those three capabilities before their feature exists.
+  model switching between turns with the explore engine, Codex's slash commands with streaming, and Codex's
+  `plan` with the explore engine on Codex (Sessions M5b; until then `codex-adapter.ts` ends an explore session
+  at once). Nothing reads those four capabilities before their feature exists.
 - An adapter that injects a message into a running turn reports receipts. `capabilities.test.ts` checks it for
   every adapter and account kind.
 - `providerOf` is a table from account kind to adapter id (the `Provider` vocabulary). The routed adapter is a

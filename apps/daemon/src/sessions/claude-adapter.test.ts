@@ -833,6 +833,38 @@ describe('buildQueryOptions', () => {
     });
   });
 
+  // A lane's guard answers a plain GuardVerdict today; the seam takes a ShapeVerdict, so a rewrite
+  // would reach Claude Code and run in place of what the model wrote.
+  it("runs a lane call as the guard's allow rewrites it, when the verdict carries updatedInput", async () => {
+    const options = buildQueryOptions(
+      spec({
+        preToolUse: () => ({ decision: 'allow', updatedInput: { command: 'echo safe' } }),
+      }),
+      deps,
+    );
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    const output = await hook?.(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'echo raw' },
+        tool_use_id: 'toolu_2',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo',
+      },
+      'toolu_2',
+      { signal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: { command: 'echo safe' },
+      },
+    });
+  });
+
   it('runs the guard as a PreToolUse hook', async () => {
     const preToolUse = vi.fn(() => ({ decision: 'deny' as const, reason: 'outside your claims' }));
     const hook = buildQueryOptions(spec({ preToolUse }), deps).hooks?.PreToolUse?.[0]?.hooks[0];
