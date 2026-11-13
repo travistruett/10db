@@ -29,26 +29,32 @@ function servePlanning(judgeAccount: typeof ROUTER | null) {
 }
 
 describe('Settings › Planning › Send brainstorm messages to fast models', () => {
-  it('is disabled until an account runs decisions, and links to where one is picked', async () => {
-    servePlanning(null);
-    server.use(
-      // On, so the switch showing it means the setting has loaded and only the missing account holds it off.
-      http.get(daemonUrl('/projects/:projectId/shape-jev'), () =>
-        HttpResponse.json({ enabled: true }),
-      ),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/planning');
-    const toggle = await screen.findByRole('switch', { name: SHAPE_JEV_LABEL });
-    await waitFor(() => {
-      expect(toggle).toHaveProperty('checked', true);
-    });
-    expect(toggle).toHaveProperty('disabled', true);
-    expect(await screen.findByText('Pick an account for decisions first')).toBeTruthy();
-    const link = screen.getByRole('link', { name: 'Decisions' });
-    expect(link.getAttribute('href')).toBe('/settings/decisions?focus=runs-on');
-  });
+  it.each([
+    { name: 'off', enabled: false, disabled: true },
+    { name: 'on, so it can always be turned off', enabled: true, disabled: false },
+  ])(
+    'with no account for decisions and the switch $name, links to where one is picked',
+    async ({ enabled, disabled }) => {
+      servePlanning(null);
+      server.use(
+        http.get(daemonUrl('/projects/:projectId/shape-jev'), () => HttpResponse.json({ enabled })),
+        http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+        ...baseHandlers(),
+      );
+      renderApp('/settings/planning');
+      const toggle = await screen.findByRole('switch', { name: SHAPE_JEV_LABEL });
+      expect(await screen.findByText('Pick an account for decisions first')).toBeTruthy();
+      // The setting is loaded once the switch shows it; only the missing account can hold it off.
+      await waitFor(() => {
+        expect(toggle).toHaveProperty('checked', enabled);
+      });
+      await waitFor(() => {
+        expect(toggle).toHaveProperty('disabled', disabled);
+      });
+      const link = screen.getByRole('link', { name: 'Decisions' });
+      expect(link.getAttribute('href')).toBe('/settings/decisions?focus=runs-on');
+    },
+  );
 
   it('is off by default, names the account decisions run on, and sends the change', async () => {
     servePlanning(ROUTER);

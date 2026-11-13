@@ -21,7 +21,12 @@ interface Served {
 
 function serve(
   refusal?: { status: number; message: string },
-  opts: { judgeAccountId?: AccountId | null; secretRefusal?: string } = {},
+  opts: {
+    judgeAccountId?: AccountId | null;
+    /** False: the judge names an account the daemon no longer resolves, so its status has none. */
+    judgeAccountResolves?: boolean;
+    secretRefusal?: string;
+  } = {},
 ): Served {
   const posts: unknown[] = [];
   const after: string[] = [];
@@ -29,6 +34,10 @@ function serve(
   const judgeRequests = serveJudge({
     status: judgeStatusDto({
       config: { ...judgeStatusDto().config, accountId: opts.judgeAccountId ?? null },
+      account:
+        opts.judgeAccountId == null || opts.judgeAccountResolves === false
+          ? null
+          : { id: opts.judgeAccountId, label: 'Other', secretSet: true, secretState: 'set' },
     }),
     accounts: live,
   });
@@ -245,6 +254,49 @@ describe('AddAccountModal', () => {
       const drawer = await screen.findByRole('dialog', { name: /OpenRouter/ });
       expect(await within(drawer).findByText('No secret yet')).toBeTruthy();
       expect(served.posts).toHaveLength(1);
+    });
+
+    it('trims the key before sending it', async () => {
+      const served = serve();
+      const dialog = await openModal('OpenRouter key');
+      type(dialog, 'Label', 'OpenRouter');
+      fireEvent.change(within(dialog).getByLabelText('OpenRouter key', { selector: 'input' }), {
+        target: { value: `  ${KEY}\n` },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      await screen.findByRole('dialog', { name: /OpenRouter/ });
+      expect(served.after).toEqual([`PUT secret ${JSON.stringify({ secret: KEY })}`]);
+    });
+
+    it('defaults the box on when the account decisions name no longer resolves', async () => {
+      const gone = AccountId.parse(accountDto({ kind: 'openrouter' }).id);
+      serve(undefined, { judgeAccountId: gone, judgeAccountResolves: false });
+      const dialog = await openModal('OpenRouter key');
+      const run = within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' });
+      await waitFor(() => {
+        expect(run).toHaveProperty('checked', true);
+      });
+    });
+
+    it('says the key was saved when only switching decisions over failed', async () => {
+      serve();
+      server.use(
+        http.patch(daemonUrl('/judge'), () =>
+          HttpResponse.json({ message: 'Account is archived' }, { status: 400 }),
+        ),
+      );
+      const dialog = await openModal('OpenRouter key');
+      await waitFor(() => {
+        expect(
+          within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' }),
+        ).toHaveProperty('checked', true);
+      });
+      type(dialog, 'Label', 'OpenRouter');
+      typeKey(dialog);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      expect(
+        await within(dialog).findByText(/key was saved.*decisions weren.t switched.*archived/),
+      ).toBeTruthy();
     });
 
     it('clears the key field before the request answers', async () => {

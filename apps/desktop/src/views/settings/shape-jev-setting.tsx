@@ -31,7 +31,12 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
           <Switch
             aria-label={SHAPE_JEV_LABEL}
             checked={setting.data?.enabled ?? false}
-            disabled={setting.data === undefined || set.isPending || account === null}
+            // A switch that is on can always be turned off; only turning it on needs an account.
+            disabled={
+              setting.data === undefined ||
+              set.isPending ||
+              (account === null && !setting.data.enabled)
+            }
             onChange={(event) => {
               set.mutate(event.currentTarget.checked);
             }}

@@ -60,7 +60,7 @@ function AddAccountForm({
     null,
   );
   const isRouter = values.kind === AccountKind.OpenRouter;
-  const runsDecisions = runDecisions ?? judge.data?.config.accountId === null;
+  const runsDecisions = runDecisions ?? judge.data?.account === null;
 
   const submit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -83,7 +83,7 @@ function AddAccountForm({
       return;
     }
     const secret = isRouter
-      ? AccountSecretInput.safeParse({ secret: typeof entered === 'string' ? entered : '' })
+      ? AccountSecretInput.safeParse({ secret: typeof entered === 'string' ? entered.trim() : '' })
       : null;
     if (secret !== null && !secret.success) {
       setErrors({ [FORM_ERROR]: secret.error.issues[0]?.message ?? 'Enter the key' });
@@ -94,17 +94,23 @@ function AddAccountForm({
       const created = await create.mutateAsync(result.input);
       const id = created.account.id;
       if (secret?.success === true) {
+        let problem: string | null = null;
         try {
           await sendAccountSecret(client, id, secret.data);
-          if (runsDecisions) await patchJudge.mutateAsync({ accountId: id });
         } catch (error) {
-          setMade({
-            id,
-            problem: `The account was made, but its key wasn't saved: ${stepFailure(error)}`,
-          });
+          problem = `The account was made, but its key wasn't saved: ${stepFailure(error)}`;
+        }
+        if (problem === null && runsDecisions) {
+          try {
+            await patchJudge.mutateAsync({ accountId: id });
+          } catch (error) {
+            problem = `The account was made and its key was saved, but decisions weren't switched to it: ${stepFailure(error)}`;
+          }
+        }
+        await queryClient.invalidateQueries({ queryKey: accountKeys.all });
+        if (problem !== null) {
+          setMade({ id, problem });
           return;
-        } finally {
-          await queryClient.invalidateQueries({ queryKey: accountKeys.all });
         }
       }
       onClose();
