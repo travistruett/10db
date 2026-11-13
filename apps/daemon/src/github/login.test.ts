@@ -187,6 +187,17 @@ describe('starting (gh spawned, no code yet)', () => {
     world.children[0]?.exit(1);
     await refused;
   });
+  it("a last stderr line with no newline still counts as gh's message", async () => {
+    const world = setup();
+    const post = world.login.start();
+    const refused = expect(post).rejects.toMatchObject({
+      code: 'upstream',
+      message: 'gh: no newline',
+    });
+    world.children[0]?.print('stderr', 'gh: no newline');
+    world.children[0]?.exit(1);
+    await refused;
+  });
   it('DELETE kills gh and the POST answers 409 "Cancelled"', async () => {
     const world = setup();
     const post = world.login.start();
@@ -300,6 +311,45 @@ describe('waiting (the code is shown, the builder approves in the browser)', () 
     child.exit(143);
     world.clock.advance(KILL_GRACE_MS);
     expect(child.signals).toEqual(['SIGTERM']);
+  });
+  it('a gh that exits after stop announces nothing and rejects nothing', async () => {
+    const world = setup();
+    const child = await waiting(world);
+    world.login.stop();
+    child.exit(143);
+    await world.flush();
+    expect(world.ended).toEqual([]);
+  });
+  it('an announcement that throws does not become an unhandled rejection', async () => {
+    const world = setup();
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', record);
+    try {
+      const child = new FakeChild();
+      const login = createGithubLogin({
+        clock: world.clock,
+        spawn: () => child,
+        resolveGh: () => '/gh',
+        env: () => ({}),
+        readLogin: () => Promise.resolve('octocat'),
+        ended: () => {
+          throw new Error('the database is closed');
+        },
+      });
+      const post = login.start();
+      child.print('stderr', CODE_LINE + URL_LINE);
+      await post;
+      child.exit(0);
+      await world.flush();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(login.current()).toBeNull();
+    } finally {
+      process.off('unhandledRejection', record);
+    }
   });
   it('stop kills gh and announces nothing', async () => {
     const world = setup();
