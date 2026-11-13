@@ -25,13 +25,14 @@ const OfferList = z.array(AccountModelDto);
 const ProfileList = z.array(ModelProfileDto);
 
 /**
- * One row per model any account can reach. With an account, a model it offers lists its efforts, costed on it;
+ * One row per model any account can reach; `enabled` false waits for the account to be known. With an account, a model it offers lists its efforts, costed on it;
  * the previous rows stay up while another account's load.
  */
-export function useModels(accountId: AccountId | null) {
+export function useModels(accountId: AccountId | null, enabled = true) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: [...modelKeys.list, accountId],
+    enabled,
     queryFn: async () =>
       readJson(
         await client.models.$get({ query: accountId === null ? {} : { account: accountId } }),

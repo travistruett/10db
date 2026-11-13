@@ -58,12 +58,8 @@ describe('sorting the model list', () => {
   it.each([
     { column: ModelColumn.Name, up: ['m-blank', 'm-low', 'm-mid', 'm-top'] },
     { column: ModelColumn.Tier, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.AvailableOn, up: ['m-blank', 'm-low', 'm-top', 'm-mid'] },
     { column: ModelColumn.Intelligence, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
     { column: ModelColumn.CostPerTask, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.Speed, up: ['m-top', 'm-mid', 'm-low', 'm-blank'] },
-    { column: ModelColumn.InputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.OutputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
     { column: ModelColumn.StepsRun, up: ['m-blank', 'm-top', 'm-mid', 'm-low'] },
   ])('orders by $column, no data after the data, Unknown after everything', ({ column, up }) => {
     expect(order(column, SortDirection.Ascending)).toEqual([...up, 'm-unknown']);

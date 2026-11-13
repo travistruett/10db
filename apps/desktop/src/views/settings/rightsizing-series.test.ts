@@ -62,12 +62,18 @@ const drawn = (result: ReturnType<typeof build>) =>
     .sort();
 
 describe('rightsizingSeries points', () => {
-  it('draws one point per measured effort, in a series per tier', () => {
+  it('draws one point per measured effort, in one gray series and one blue series for the frontier', () => {
     const result = build();
-    expect(result.series.map((s) => [s.name, s.data.length])).toEqual([
-      ['Efficient', 2],
-      ['Balanced', 2],
-      ['Capable', 1],
+    expect(result.series.map((s) => [s.color, s.data.length])).toEqual([
+      ['gray.6', 1],
+      ['blue.6', 4],
+    ]);
+    const onFrontier = result.series[1]?.data.map((d) => result.points[d.id]);
+    expect(onFrontier?.map((p) => `${p?.model ?? '?'}@${p?.effort ?? '?'}`)).toEqual([
+      'small@low',
+      'mid@low',
+      'mid@high',
+      'big@high',
     ]);
     expect(result.omitted).toBe(0);
   });
@@ -78,24 +84,19 @@ describe('rightsizingSeries points', () => {
     expect(result.omitted).toBe(2);
   });
 
-  it('keeps a model with no tier in a series of its own', () => {
-    const noTier = row('plain', null, [effort('high', 33, 0.5)]);
-    expect(build({ rows: [noTier] }).series.map((s) => s.name)).toEqual(['No tier']);
-  });
-
-  it('draws only the frontier in Pareto only, and keeps the points the picks stand on', () => {
+  it('draws only the frontier in Frontier only, and keeps the points the picks stand on', () => {
     // small@high costs the same as mid@low and scores less; dom@high costs more than both and scores less.
     const dominated = row('dom', 'balanced', [effort('high', 25, 0.9)]);
     const rows = [small, mid, big, dominated];
-    const bare = build({ rows, dots: DotsMode.Pareto, picks: [] });
+    const bare = build({ rows, dots: DotsMode.Frontier, picks: [] });
     expect(drawn(bare)).toEqual(['big@high', 'mid@high', 'mid@low', 'small@low']);
-    expect(bare.pareto.map((p) => `${p.model}@${p.effort}`)).toEqual([
+    expect(bare.frontier.map((p) => `${p.model}@${p.effort}`)).toEqual([
       'small@low',
       'mid@low',
       'mid@high',
       'big@high',
     ]);
-    const picked = build({ rows, dots: DotsMode.Pareto, picks: [pickOf('qa', dominated, 0)] });
+    const picked = build({ rows, dots: DotsMode.Frontier, picks: [pickOf('qa', dominated, 0)] });
     expect(drawn(picked)).toEqual(['big@high', 'dom@high', 'mid@high', 'mid@low', 'small@low']);
     expect(picked.rings.map((r) => r.role)).toEqual(['qa']);
   });
@@ -116,24 +117,19 @@ describe('rightsizingSeries need lines', () => {
   });
 });
 
-describe('rightsizingSeries rings and area', () => {
+describe('rightsizingSeries rings', () => {
   it('rings the point each pick stands on, found by its profile', () => {
     const result = build();
     const plan = result.rings.find((r) => r.role === 'plan');
-    expect(plan).toMatchObject({ cost: 1, intelligence: 46, dimmed: false });
+    expect(plan).toMatchObject({ cost: 1, intelligence: 46 });
     expect(result.rings).toHaveLength(5);
     expect(result.notOnChart).toEqual([]);
   });
 
-  it('dims the other rings when a role is selected', () => {
+  it('rings only the selected role, and keeps the others out of notOnChart', () => {
     const result = build({ role: 'review' });
-    expect(result.rings.map((r) => [r.role, r.dimmed])).toEqual([
-      ['plan', true],
-      ['plan_review', true],
-      ['implement', true],
-      ['review', false],
-      ['qa', true],
-    ]);
+    expect(result.rings.map((r) => r.role)).toEqual(['review']);
+    expect(result.notOnChart).toEqual([]);
   });
 
   it('puts no ring on a point that is not drawn, and says so', () => {
@@ -146,26 +142,9 @@ describe('rightsizingSeries rings and area', () => {
     expect(result.notOnChart).toEqual(['plan', 'qa']);
   });
 
-  it('puts no ring on a point a filter hid', () => {
+  it('puts no ring on a point the rows leave out', () => {
     const result = build({ rows: [small, mid] });
     expect(result.notOnChart).toEqual(['plan_review', 'review']);
-  });
-
-  it('shades from the lowest need up to the dearest drawn pick', () => {
-    expect(build().area).toEqual({ need: 35, top: 100, cost: 2 });
-  });
-
-  it('takes the area from the drawn picks only', () => {
-    expect(build({ rows: [small, mid] }).area).toEqual({ need: 35, top: 100, cost: 1 });
-  });
-
-  it('shades from the selected role’s need to its pick’s cost', () => {
-    expect(build({ role: 'implement' }).area).toEqual({ need: 40, top: 100, cost: 1 });
-  });
-
-  it('shades nothing where no pick is drawn', () => {
-    expect(build({ rows: [], picks: PICKS }).area).toBeNull();
-    expect(build({ picks: [] }).area).toBeNull();
   });
 });
 

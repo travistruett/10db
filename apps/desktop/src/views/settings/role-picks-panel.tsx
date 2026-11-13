@@ -1,10 +1,22 @@
-import type { StepRole } from '@10db/contracts';
-import type { RolePickDto } from '@10db/contracts';
-import { Badge, Group, Stack, Text, UnstyledButton } from '@mantine/core';
-import { formatCost } from './model-format';
+import type { RolePickDto, StepRole } from '@10db/contracts';
+import { Box, Group, Stack, Text, Title, UnstyledButton } from '@mantine/core';
+import { DataTable, type DataTableColumn } from 'mantine-datatable';
+import { formatCost, NO_DATA } from './model-format';
 import { ROLES } from './role-labels';
 
-/** Who each role gets: the router's pick for every role, a row that selects the role on the chart. */
+/** The colour that marks a role's pick: its dot here, its ring on the chart and the Used by column. */
+export const PICK_COLOR = 'violet';
+
+interface RoleLine {
+  readonly role: StepRole;
+  readonly label: string;
+  readonly pick: RolePickDto;
+}
+
+/**
+ * Who each role gets: the router's pick for every role in a table. A row selects its role on the chart, and a
+ * second click clears it; the other rows dim while one is selected.
+ */
 export function RolePicksPanel({
   picks,
   names,
@@ -19,66 +31,101 @@ export function RolePicksPanel({
   readonly selected: StepRole | null;
   readonly onSelect: (role: StepRole | null) => void;
 }) {
+  const lines: RoleLine[] = ROLES.flatMap(({ role, label }) => {
+    const pick = picks.find((p) => p.role === role);
+    return pick === undefined ? [] : [{ role, label, pick }];
+  });
+  const columns: DataTableColumn<RoleLine>[] = [
+    {
+      accessor: 'role',
+      title: 'Role',
+      noWrap: true,
+      render: ({ role, label }) => (
+        // The row's own click selects the role; the button is the keyboard's way to it and carries its state.
+        <UnstyledButton aria-pressed={selected === role}>
+          <Group gap="xs" wrap="nowrap">
+            <Box
+              w={8}
+              h={8}
+              style={{
+                borderRadius: '50%',
+                background: `var(--mantine-color-${PICK_COLOR}-6)`,
+                flex: 'none',
+              }}
+            />
+            <Text size="sm" fw={500}>
+              {label}
+            </Text>
+          </Group>
+        </UnstyledButton>
+      ),
+    },
+    {
+      accessor: 'need',
+      title: 'Needs',
+      textAlign: 'right',
+      noWrap: true,
+      cellsStyle: () => ({ fontVariantNumeric: 'tabular-nums' }),
+      render: ({ pick }) => pick.need,
+    },
+    {
+      accessor: 'model',
+      title: 'Model and effort',
+      noWrap: true,
+      render: ({ pick }) =>
+        pick.model === null
+          ? 'Nothing chosen'
+          : `${names.get(pick.model) ?? pick.model}${pick.effort === null ? '' : ` · ${pick.effort}`}`,
+    },
+    {
+      accessor: 'cost',
+      title: 'Cost per task',
+      textAlign: 'right',
+      noWrap: true,
+      cellsStyle: () => ({ fontVariantNumeric: 'tabular-nums' }),
+      render: ({ pick }) => (pick.model === null ? NO_DATA : formatCost(pick.costPerTaskUsd)),
+    },
+    {
+      accessor: 'why',
+      title: 'Why',
+      render: ({ role, pick }) => (
+        <Stack gap={0}>
+          <Text size="xs" c="dimmed">
+            {pick.reason}
+          </Text>
+          {pick.model !== null && notOnChart.includes(role) ? (
+            <Text size="xs" c="dimmed">
+              Not on the chart
+            </Text>
+          ) : null}
+        </Stack>
+      ),
+    },
+  ];
   return (
     <Stack gap="xs" component="section" aria-label="Who each role gets">
-      <Text fw={500}>Who each role gets</Text>
-      {ROLES.map(({ role, label }) => {
-        const pick = picks.find((p) => p.role === role);
-        if (pick === undefined) return null;
-        const pressed = selected === role;
-        return (
-          <UnstyledButton
-            key={role}
-            aria-pressed={pressed}
-            onClick={() => {
-              onSelect(pressed ? null : role);
-            }}
-            p="xs"
-            style={{
-              border: '1px solid var(--mantine-color-default-border)',
-              borderRadius: 'var(--mantine-radius-sm)',
-              opacity: selected !== null && !pressed ? 0.5 : 1,
-              background: pressed ? 'var(--mantine-color-default-hover)' : undefined,
-            }}
-          >
-            <Group gap="md" wrap="nowrap" align="flex-start">
-              <Stack gap={0} w={90}>
-                <Text size="sm" fw={500}>
-                  {label}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  needs {pick.need}
-                </Text>
-              </Stack>
-              <Stack gap={2} style={{ flex: 1 }}>
-                <Group gap="xs">
-                  <Text size="sm">
-                    {pick.model === null ? 'Nothing chosen' : (names.get(pick.model) ?? pick.model)}
-                  </Text>
-                  {pick.effort === null ? null : <Text size="sm">{pick.effort}</Text>}
-                  {pick.model === null ? null : (
-                    <Text size="sm" c="dimmed">
-                      {formatCost(pick.costPerTaskUsd)} a task
-                    </Text>
-                  )}
-                  {pick.model !== null && notOnChart.includes(role) ? (
-                    <Badge size="sm" variant="light" color="gray">
-                      Not on the chart
-                    </Badge>
-                  ) : null}
-                </Group>
-                <Text size="xs" c="dimmed">
-                  {pick.reason}
-                </Text>
-              </Stack>
-            </Group>
-          </UnstyledButton>
-        );
-      })}
+      <Title order={4}>Who each role gets</Title>
+      <DataTable<RoleLine>
+        aria-label="Who each role gets, by role"
+        records={lines}
+        columns={columns}
+        idAccessor="role"
+        withTableBorder
+        borderRadius="md"
+        verticalSpacing="xs"
+        horizontalSpacing="md"
+        highlightOnHover
+        rowStyle={({ role }) => ({
+          cursor: 'pointer',
+          opacity: selected !== null && selected !== role ? 0.5 : 1,
+        })}
+        onRowClick={({ record }) => {
+          onSelect(selected === record.role ? null : record.role);
+        }}
+      />
       <Text size="xs" c="dimmed">
-        What a task with no risk tags gets on this account with no project settings: project role
-        settings, project patterns, risk floors and budget ceilings can change it. A Plan
-        conversation picks by the role&apos;s default effort, not by score.
+        Automatic choice for a task with no risk tags, on a project with no settings of its own.
+        Plan conversations pick by the role&apos;s default effort.
       </Text>
     </Stack>
   );
