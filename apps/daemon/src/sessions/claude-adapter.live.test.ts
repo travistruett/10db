@@ -216,6 +216,18 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     const billing = lines.find((l) => l['msg'] === 'claude session billing');
     expect(billing).toMatchObject({ apiKeySource: 'none', apiProvider: 'firstParty' });
     expect(billing?.['subscriptionType']).toBeTruthy();
+    // It streams: the first message's deltas are its text, and the session lists its commands.
+    const message = events.find((e) => e.type === 'message');
+    if (message?.type !== 'message') throw new Error('no message streamed');
+    const deltas = events.flatMap((e) =>
+      e.type === 'text_delta' && e.itemId === message.itemId ? [e.text] : [],
+    );
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(deltas.join('')).toBe(message.text);
+    const commands = events.find((e) => e.type === 'commands');
+    expect(commands?.type === 'commands' ? commands.commands.map((c) => c.name) : []).toContain(
+      'compact',
+    );
   }, 120_000);
 
   // Workbench spec §6.3: a builder message is delivered on the evidence a turn took it, the uuid an
@@ -282,7 +294,7 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     let sent = false;
     for await (const event of handle.events) {
       if (event.type === 'consumed') consumed.push(...event.uuids);
-      if (event.type === 'activity' && event.kind === 'tool' && !sent) {
+      if (event.type === 'tool_call' && !sent) {
         sent = true;
         handle.send(
           'When you are done with the files, also reply with the single word: blue',

@@ -6,6 +6,7 @@ export {
   type AgentCapabilities,
 } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
+export { CODEX_COMMANDS } from './codex-commands';
 export { patchPaths } from './codex-guard';
 export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';
@@ -22,13 +23,10 @@ export {
   CompletionError,
   ConversationUnreadError,
   AgentProfileKind,
-  PlanStepStatus,
   SessionEndReason,
 } from './types';
 export type {
   AccountLogin,
-  AgentCommand,
-  PlanStep,
   ConversationReadSpec,
   InterruptReceipt,
   LanePermissionMode,
@@ -70,5 +68,5 @@ export {
   REPO_CONFIG_MAX_BYTES,
   type RepoFileBytes,
 } from './repo-config-file';
-export { streamEventLogFields, type StreamEvent } from './stream-log';
+export { streamEventLogFields } from './stream-log';
 export { toolCallActivity, type ToolTarget } from './tool-target';

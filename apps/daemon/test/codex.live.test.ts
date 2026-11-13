@@ -44,6 +44,7 @@ import {
   type SetupInput,
 } from '../src/sandbox';
 import {
+  CODEX_COMMANDS,
   createCodexAdapter,
   guardSocketPath,
   patchPaths,
@@ -1099,12 +1100,26 @@ describe.skipIf(!live)(
 
     it('runs with the real toolchain: node and git status', async () => {
       writeFileSync(join(world.checkout, 'untracked.txt'), 'new\n');
-      const outputs = expectTurn(
-        await runSession(world, [
-          run('node -v; echo node=$?; git status --short; echo git=$?'),
-          { say: 'done' },
-        ]),
+      const session = await runSession(world, [
+        run('node -v; echo node=$?; git status --short; echo git=$?'),
+        { say: 'done' },
+      ]);
+      const outputs = expectTurn(session);
+      // It streams: the message's deltas are its text, the command runs from start to its exit, and
+      // the session lists the commands 10db sends as calls.
+      const message = session.events.find((e) => e.type === 'message');
+      if (message?.type !== 'message') throw new Error('no message streamed');
+      const deltas = session.events.flatMap((e) =>
+        e.type === 'text_delta' && e.itemId === message.itemId ? [e.text] : [],
       );
+      expect(deltas.length).toBeGreaterThan(0);
+      expect(deltas.join('')).toBe(message.text);
+      const command = session.events.flatMap((e) =>
+        e.type === 'tool_call' && e.call.kind === 'command' ? [e.call] : [],
+      );
+      expect(command[0]?.status).toBe('running');
+      expect(command.at(-1)).toMatchObject({ status: 'done', exitCode: 0 });
+      expect(session.events).toContainEqual({ type: 'commands', commands: CODEX_COMMANDS });
       expect(outputs[0]).toMatch(/v\d+\.\d+\.\d+/);
       expect(outputs[0]).toContain('node=0');
       expect(outputs[0]).toContain('?? untracked.txt');

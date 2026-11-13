@@ -16,7 +16,6 @@ import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
-import type { ToolTarget } from './tool-target';
 import type { DeniedCall, ReportedMode } from '../trust';
 
 export interface ToolRequest {
@@ -246,14 +245,8 @@ export type TurnResult = 'success' | 'max_turns' | 'error';
 
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
+  /** What the session is saying, for the live line; a tool call's activity comes from its `tool_call`. */
   | { readonly type: 'activity'; readonly kind: 'text'; readonly summary: string }
-  | {
-      readonly type: 'activity';
-      readonly kind: 'tool';
-      readonly summary: string;
-      /** What the call aims at and the files it writes. */
-      readonly tool: ToolTarget;
-    }
   /** Text the agent is writing; `offset` is the item's JS string length before this piece. */
   | {
       readonly type: 'text_delta';

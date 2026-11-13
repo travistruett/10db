@@ -7,7 +7,6 @@ import {
   resetsAtToDate,
   SUMMARY_CHARS,
   toHookOutput,
-  toolBrief,
   toPermissionResult,
   toSdkMcpServer,
   userMessage,
@@ -374,18 +373,6 @@ describe('resetsAtToDate', () => {
     [1_791_000_000_000, new Date(1_791_000_000_000)],
   ])('%s → %s', (value, expected) => {
     expect(resetsAtToDate(value)).toEqual(expected);
-  });
-});
-
-describe('toolBrief', () => {
-  it.each([
-    [{ command: 'git status' }, 'git status'],
-    [{ file_path: 'src/x.ts', content: '…' }, 'src/x.ts'],
-    [{ notebook_path: 'n.ipynb' }, 'n.ipynb'],
-    [{ pattern: 'TODO' }, '{"pattern":"TODO"}'],
-    ['plain', '"plain"'],
-  ])('%o → %s', (input, expected) => {
-    expect(toolBrief(input)).toBe(expected);
   });
 });
 

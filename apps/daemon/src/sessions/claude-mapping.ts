@@ -27,7 +27,6 @@ import { mapClaudeStreamEvent, unstreamedTextId, type ClaudeStreamState } from '
 import type { ClaudeToolCalls } from './claude-tool-calls';
 
 export const SUMMARY_CHARS = 200;
-const BRIEF_CHARS = 80;
 /** The most of a turn's last message a turn_complete event carries: what a step result may hold. */
 const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 /** Unix seconds stay below this until the year 33658; milliseconds are already above it. */
@@ -46,20 +45,6 @@ export function modelRefusalOf(
   if (!firstReply) return msg.error === MODEL_NOT_FOUND_ERROR ? ModelMarkBasis.Error : null;
   const text = msg.message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []));
   return modelRefusalBasis(msg.error, text.join('\n'), launched);
-}
-
-/** What a tool call is about, in a few words: the command, or the file it touches. */
-export function toolBrief(input: unknown): string {
-  if (typeof input === 'object' && input !== null) {
-    for (const key of ['command', 'file_path', 'notebook_path', 'path']) {
-      // The SDK types tool input as unknown; the value is checked to be a string before it is used.
-      const value: unknown = Reflect.get(input, key);
-      if (typeof value === 'string') return value.slice(0, BRIEF_CHARS);
-    }
-  }
-  // JSON.stringify returns undefined for undefined and functions, despite its declared type.
-  const json = JSON.stringify(input) as string | undefined;
-  return (json ?? '').slice(0, BRIEF_CHARS);
 }
 
 /** The SDK reports reset times as Unix seconds or milliseconds depending on the CLI build; accept both. */

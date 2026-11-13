@@ -2789,7 +2789,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           }
           case 'activity':
-            noteActivity(event.kind, event.summary, event.kind === 'tool' ? event.tool : null);
+            noteActivity('text', event.summary, null);
             break;
           case 'tool_call': {
             log.debug(streamEventLogFields(event), 'session stream event');
