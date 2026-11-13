@@ -168,3 +168,14 @@ export type KindInput = z.input<typeof KindInput>;
 /** What changes on a kind; its key never does, so a patch that names one is refused. */
 export const KindPatch = z.strictObject({ ...KindFields }).partial();
 export type KindPatch = z.infer<typeof KindPatch>;
+
+/**
+ * One setting the move to the playbook could not carry over: what it was, its value, and why it has no
+ * place in the playbook. The entries of the global scope are kept as an app setting; a project's go on a card.
+ */
+export const PlaybookMoveEntry = z.object({
+  setting: z.string().min(1),
+  value: z.string(),
+  why: z.string().min(1),
+});
+export type PlaybookMoveEntry = z.infer<typeof PlaybookMoveEntry>;

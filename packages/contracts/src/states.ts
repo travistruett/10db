@@ -26,6 +26,8 @@ export const InboxKind = {
   Flag: 'flag',
   /** A finished task in a project with no gate, waiting for the builder to approve or send it back. */
   Check: 'check',
+  /** What the move to the playbook could not carry over for a project; the builder reads it and dismisses it. */
+  PlaybookMoveReport: 'playbook_move_report',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 
