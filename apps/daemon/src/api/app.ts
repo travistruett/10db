@@ -29,6 +29,8 @@ import {
   FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
+  PlanExportInput,
+  PlanImportInput,
   GoalId,
   DevUiConnectionDto,
   HealthResponse,
@@ -106,6 +108,7 @@ import {
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type PlanImportError,
   type ScreenRenderRequest,
   type ShapeConvertError,
 } from '@10db/contracts';
@@ -738,6 +741,33 @@ export function createApp(deps: ApiDeps) {
         'x-content-type-options': 'nosniff',
       });
     })
+    // A planning effort as one Plan: 201 when it makes the Plan, 200 for an update or a dry run.
+    .post(
+      '/projects/:projectId/plans/import',
+      validator('json', (value): PlanImportInput => PlanImportInput.parse(value)),
+      async (c) => {
+        const outcome = await deps.services.importPlan(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        if (outcome.kind === 'imported')
+          return c.json(outcome.result, outcome.result.created ? 201 : 200);
+        if (outcome.kind === 'previewed') return c.json(outcome.preview, 200);
+        return c.json({ errors: outcome.errors } satisfies PlanImportError, 400);
+      },
+    )
+    // The record as Markdown, outside every checkout; a refused folder answers 400 naming why.
+    .post(
+      '/shapes/:shapeId/export',
+      validator('json', (value): PlanExportInput => PlanExportInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.exportPlan(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )

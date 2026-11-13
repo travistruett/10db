@@ -1,4 +1,5 @@
 import {
+  InvalidError,
   KnowledgeScope,
   PrincipleKind,
   PrincipleStatus,
@@ -13,6 +14,7 @@ import {
   type PlanChange,
   type PlanGoal,
   type PlanPrincipleRecord,
+  type PlanRef,
   type PlanRemoval,
   type PrincipleId,
   type ProjectId,
@@ -25,9 +27,13 @@ import {
 import {
   BUILDER_HANDLE,
   cancelTask,
+  findDocument,
+  getAttachmentRevision,
   getProject,
   getShape,
+  getShapeEntry,
   getTask,
+  getTaskContext,
   insertDecision,
   insertGoal,
   insertGoalTask,
@@ -44,10 +50,13 @@ import {
   patchShapeProposal,
   patchTask,
   upsertShapeAttachment,
+  upsertTaskContext,
+  type DbReader,
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
 import { proposePlacement } from '../placement';
+import { appendRevision } from '../plan-record';
 import { removedKeys } from './validate';
 import { buildPlanWorld, tasksInside } from './world';
 
@@ -134,6 +143,53 @@ function unfitForQuestion(row: ShapeProposalRow): string {
           ? 'was converted and then taken back (propose it again under the same key once its goal is converted)'
           : `is ${row.state}`;
   return `${gone}, so it cannot hold a question`;
+}
+
+/** The revision a task's plan section names in this Plan, or why it names none. */
+function pinnedRevision(
+  db: DbReader,
+  shapeId: ShapeId,
+  title: string,
+  ref: PlanRef,
+):
+  | { revisionId: NonNullable<ReturnType<typeof getAttachmentRevision>>['id'] }
+  | { problem: string } {
+  const document = findDocument(db, shapeId, ref.document);
+  const revision = document ? getAttachmentRevision(db, document.id, ref.revision) : undefined;
+  if (revision === undefined)
+    return {
+      problem: `${title}: its plan document ${ref.document} has no revision ${String(ref.revision)} here`,
+    };
+  const slugs = new Set(revision.sections.map((s) => s.slug));
+  const missing = [ref.section, ...ref.shared].find((slug) => !slugs.has(slug));
+  return missing === undefined
+    ? { revisionId: revision.id }
+    : {
+        problem: `${title}: its plan section ${ref.document}#${missing} is not in revision ${String(ref.revision)} of ${ref.document}`,
+      };
+}
+
+/**
+ * Why a task's cites can't be carried: each must be an entry or a decision proposal of the Plan that
+ * is still pending or was converted, not one dropped or replaced.
+ */
+function citeProblems(
+  db: DbReader,
+  shapeId: ShapeId,
+  rows: readonly ShapeProposalRow[],
+  title: string,
+  cites: readonly string[],
+): string[] {
+  const live: readonly ShapeProposalState[] = [
+    ShapeProposalState.Pending,
+    ShapeProposalState.Accepted,
+  ];
+  const decisions = new Set(
+    rows.filter((r) => r.kind === 'decision' && live.includes(r.state)).map((r) => r.key),
+  );
+  return cites
+    .filter((key) => !decisions.has(key) && getShapeEntry(db, shapeId, key) === undefined)
+    .map((key) => `${title}: it cites ${key}, which is no entry or decision of this Plan`);
 }
 
 /** Each effort in the order its dependencies need, or the keys of a cycle between efforts. */
@@ -251,6 +307,34 @@ export function convertProposals(
     }
   }
 
+  // Plan pins: each task's section must be in its revision here, and each cite in the Plan.
+  const pin = (title: string, planRef: PlanRef | undefined, cites: readonly string[]): void => {
+    if (planRef !== undefined) {
+      const found = pinnedRevision(ctx.tx, shapeId, title, planRef);
+      if ('problem' in found) errors.push(found.problem);
+    }
+    errors.push(...citeProblems(ctx.tx, shapeId, rows, title, cites));
+  };
+  for (const row of efforts) {
+    if (row.kind === 'goal')
+      for (const t of ShapeProposalBody.goal.parse(row.body).tasks)
+        pin(t.title, t.planRef, t.cites);
+    else {
+      const task = ShapeProposalBody.task.parse(row.body);
+      pin(task.title, task.planRef, task.cites);
+    }
+  }
+  for (const row of pending.filter((r) => r.kind === 'change_task')) {
+    const change = ShapeProposalBody.change_task.parse(row.body);
+    pin(row.key, change.planRef, change.cites ?? []);
+    if (
+      change.planRef === undefined &&
+      change.cites !== undefined &&
+      getTaskContext(ctx.tx, change.taskId) === undefined
+    )
+      errors.push(`${row.key}: its cites need a plan section, and the task has none`);
+  }
+
   // Landings: every task must be one Convert made or one it makes now, and not in a landing yet.
   for (const row of pending.filter((r) => r.kind === 'landing')) {
     const landing = ShapeProposalBody.landing.parse(row.body);
@@ -293,6 +377,10 @@ export function convertProposals(
       const problem =
         record.supersedes === undefined ? null : world.decisionProblem(record.supersedes);
       if (problem !== null) errors.push(`${row.key} supersedes ${problem}`);
+      if (!record.lasting && record.supersedes !== undefined)
+        errors.push(
+          `${row.key} is for this effort only, so it cannot supersede a decision in Knowledge; make it lasting or drop supersedes`,
+        );
     } else if (row.kind === 'principle') {
       const record = ShapeProposalBody.principle.parse(row.body);
       if (
@@ -361,6 +449,20 @@ export function convertProposals(
     }
   >();
 
+  /** Pins a task to its section; the checks above found the revision. */
+  const pinTask = (taskId: TaskId, planRef: PlanRef, cites: readonly string[]): void => {
+    const found = pinnedRevision(ctx.tx, shapeId, taskId, planRef);
+    if ('problem' in found) throw new InvalidError(found.problem);
+    upsertTaskContext(ctx, {
+      taskId,
+      shapeId,
+      revisionId: found.revisionId,
+      section: planRef.section,
+      shared: planRef.shared,
+      cites,
+    });
+  };
+
   for (const row of sorted.order) {
     if (row.kind === 'goal') {
       const goal = ShapeProposalBody.goal.parse(row.body);
@@ -391,15 +493,22 @@ export function convertProposals(
         // A diagram on a goal's task, kept by its key, follows the task as one on a task row does.
         linkShapeAttachments(ctx, shapeId, key, { taskId: id });
       }
+      for (const t of goal.tasks) {
+        const id = written.taskIds.get(t.key);
+        if (id !== undefined && t.planRef !== undefined) pinTask(id, t.planRef, t.cites);
+      }
       made.set(row.id, { goalId: written.goal.id, taskIds: ids });
       // The proposed eval is kept as an attachment on the goal, with the spec (§7).
-      if (goal.eval !== undefined)
-        upsertShapeAttachment(ctx, {
-          shapeId,
-          kind: 'eval',
-          key: row.key,
-          body: JSON.stringify(goal.eval, null, 2),
+      if (goal.eval !== undefined) {
+        const body = JSON.stringify(goal.eval, null, 2);
+        const evalId = upsertShapeAttachment(ctx, { shapeId, kind: 'eval', key: row.key, body });
+        appendRevision(ctx, evalId, body, {
+          note: null,
+          author: null,
+          bundleNumber: null,
+          authoredAt: null,
         });
+      }
       linkShapeAttachments(ctx, shapeId, row.key, { goalId: written.goal.id });
     } else {
       const task: Task = ShapeProposalBody.task.parse(row.body);
@@ -419,6 +528,7 @@ export function convertProposals(
           : insertGoalTask(ctx, project.id, task.goalId, input, placement);
       taskIds.set(row.key, written.id);
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, taskId: written.id });
+      if (task.planRef !== undefined) pinTask(written.id, task.planRef, task.cites);
       made.set(row.id, { taskIds: [written.id] });
       linkShapeAttachments(ctx, shapeId, row.key, { taskId: written.id });
     }
@@ -439,6 +549,11 @@ export function convertProposals(
 
   for (const row of pending.filter((r) => r.kind === 'decision')) {
     const record = ShapeProposalBody.decision.parse(row.body);
+    // A decision for this effort only stays in the Plan's record: accepted, never in Knowledge.
+    if (!record.lasting) {
+      made.set(row.id, { taskIds: [] });
+      continue;
+    }
     const id = insertDecision(ctx, {
       // A builder-wide decision belongs to no project.
       projectId: record.scope === 'you' ? null : project.id,
@@ -505,21 +620,37 @@ export function convertProposals(
     // Changed areas can now match the placement rule; the store moves the task only if it hasn't
     // started and the builder hasn't placed it, as for an edit through the task API.
     const before = change.areas === undefined ? undefined : getTask(ctx.tx, change.taskId);
-    patchTask(
-      ctx,
-      change.taskId,
-      {
-        ...(change.title === undefined ? {} : { title: change.title }),
-        ...(change.description === undefined ? {} : { description: change.description }),
-        ...(change.acceptanceCriteria === undefined
-          ? {}
-          : { acceptanceCriteria: change.acceptanceCriteria }),
-        ...(change.areas === undefined ? {} : { areas: change.areas }),
-      },
-      change.areas === undefined || before === undefined
-        ? undefined
-        : proposePlacement(project, { areas: change.areas, riskTags: before.riskTags }),
-    );
+    const fields = {
+      ...(change.title === undefined ? {} : { title: change.title }),
+      ...(change.description === undefined ? {} : { description: change.description }),
+      ...(change.acceptanceCriteria === undefined
+        ? {}
+        : { acceptanceCriteria: change.acceptanceCriteria }),
+      ...(change.areas === undefined ? {} : { areas: change.areas }),
+    };
+    // A change of only its plan pin leaves the task's own fields as they are.
+    if (Object.keys(fields).length > 0)
+      patchTask(
+        ctx,
+        change.taskId,
+        fields,
+        change.areas === undefined || before === undefined
+          ? undefined
+          : proposePlacement(project, { areas: change.areas, riskTags: before.riskTags }),
+      );
+    const held = getTaskContext(ctx.tx, change.taskId);
+    if (change.planRef !== undefined)
+      pinTask(change.taskId, change.planRef, change.cites ?? held?.cites ?? []);
+    // New cites alone keep the task's stored pin as it is; there is no ref to look up again.
+    else if (change.cites !== undefined && held !== undefined)
+      upsertTaskContext(ctx, {
+        taskId: change.taskId,
+        shapeId: held.shapeId,
+        revisionId: held.revisionId,
+        section: held.section,
+        shared: held.shared,
+        cites: change.cites,
+      });
     made.set(row.id, { taskIds: [change.taskId] });
   }
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {

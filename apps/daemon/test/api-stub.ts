@@ -22,6 +22,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     holdTask: none,
     runNext: none,
     adoptGoal: none,
+    importPlan: none,
+    exportPlan: none,
     getGoal: none,
     listFlows: () => [],
     listWorkstreams: () => [],

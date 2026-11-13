@@ -157,6 +157,29 @@ describe('PlanDraft', () => {
     expect(PlanDraft.safeParse({ additions: [loose] }).success).toBe(false);
   });
 
+  it('a decision stated before alternatives parses with lasting true and no alternatives', () => {
+    const stored = ShapeProposalBody.decision.parse(DRAFT.records[0]);
+    expect(stored).toMatchObject({ lasting: true, alternatives: [], anchors: [] });
+    expect(stored.quote).toBeUndefined();
+  });
+
+  it('a goal task with a planRef keeps it', () => {
+    const planRef = { document: 'p1', revision: 2, section: 'task-12', shared: ['calls-made'] };
+    const goal = DRAFT.goals[0];
+    const draft = PlanDraft.parse({
+      goals: [{ ...goal, tasks: [{ ...goal?.tasks[0], planRef, cites: ['f-runner-packs'] }] }],
+    });
+    expect(draft.goals[0]?.tasks[0]).toMatchObject({ planRef, cites: ['f-runner-packs'] });
+  });
+
+  it('a change of only planRef is a change', () => {
+    const change = {
+      taskId: mintId('Task'),
+      planRef: { document: 'p1', revision: 1, section: 'task-1' },
+    };
+    expect(PlanDraft.safeParse({ changes: [change] }).success).toBe(true);
+  });
+
   it('takes a goal eval', () => {
     const goal = {
       ...DRAFT.goals[0],
@@ -304,6 +327,12 @@ describe('the Shape MCP tool inputs', () => {
     expect(input('report_finding', { effortKey, finding: { kind: 'question', text: '' } })).toBe(
       false,
     );
+  });
+
+  it('report_finding refuses reviewer imported', () => {
+    const report = { effortKey: 'density', finding: { kind: 'question', text: 'Which?' } };
+    expect(input('report_finding', { ...report, reviewer: 'scope' })).toBe(true);
+    expect(input('report_finding', { ...report, reviewer: 'imported' })).toBe(false);
   });
 
   it.each([

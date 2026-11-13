@@ -1,6 +1,7 @@
 import {
   EventType,
   type ContextPack,
+  type TaskId,
   type DecisionId,
   type ProjectId,
   type SessionId,
@@ -16,9 +17,11 @@ import {
   latestHandoffForStep,
   listDecisions,
   listPrinciples,
+  markTaskContextPacked,
   searchDecisionIds,
   type DbReader,
   type EmitInput,
+  type WriteContext,
 } from '@10db/db';
 import {
   CONTEXT_PACK_BUDGET_TOKENS,
@@ -28,6 +31,8 @@ import {
   principleHit,
   workstreamAreas,
 } from '../knowledge';
+import { buildPlanContext } from '../plan-record';
+import { renderPlanContext } from './plan-context-text';
 
 /** The name of a stakeholder who answered, from the handle stored on the answer; null for the builder. */
 function answerer(db: DbReader, handle: string | undefined): string | null {
@@ -57,6 +62,10 @@ export function buildContextPack(
   db: DbReader,
   workstream: WorkstreamDto,
   budgetTokens: number = CONTEXT_PACK_BUDGET_TOKENS,
+  opts: {
+    /** The base the session reads; a first session's row has none until its session is written. */
+    readonly base?: string;
+  } = {},
 ): ContextPack {
   const task = getTask(db, workstream.taskId);
   const action = workstream.nextAction;
@@ -103,7 +112,25 @@ export function buildContextPack(
       droppedCount: k.dropped.policies + k.dropped.heuristics + k.dropped.decisions,
       empty: shown === 0,
     },
+    plan: buildPlanContext(db, workstream, opts.base === undefined ? {} : { base: opts.base }),
   };
+}
+
+/**
+ * Keeps the Plan block the brief carried, verbatim, on the task; the caller writes it with the
+ * `context.packed` it rides on.
+ */
+export function recordPlanPacked(
+  ctx: WriteContext,
+  taskId: TaskId,
+  workstreamId: WorkstreamId,
+  pack: ContextPack,
+): void {
+  if (pack.plan === null) return;
+  markTaskContextPacked(ctx, taskId, {
+    text: renderPlanContext(pack.plan).join('\n'),
+    workstreamId,
+  });
 }
 
 /** Why a pack was injected: a new conversation, a resumed one, or an emergency compaction (spec §9). */
@@ -130,6 +157,24 @@ export function contextPackedEvent(
       dropped: { ...k.dropped },
       principles: [...k.policies, ...k.heuristics].map((p) => p.id),
       decisions: k.decisions.map((d) => d.id),
+      plan:
+        pack.plan === null
+          ? null
+          : {
+              shapeId: pack.plan.shapeId,
+              revisionId: pack.plan.revisionId,
+              section: pack.plan.section.ref,
+              included: [
+                ...pack.plan.decisions.map((d) => ({ key: d.key, version: null })),
+                ...pack.plan.names.map((n) => ({ key: n.key, version: n.version })),
+                ...pack.plan.facts.map((f) => ({ key: f.key, version: f.version })),
+                ...pack.plan.intent.map((i) => ({ key: i.key, version: i.version })),
+              ],
+              findings: pack.plan.findings.map((f) => ({ key: f.key, state: 'open' })),
+              notIncluded: [...pack.plan.notIncluded],
+              budget: pack.plan.budget,
+              used: pack.plan.used,
+            },
     },
   };
 }

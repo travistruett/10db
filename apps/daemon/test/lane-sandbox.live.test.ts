@@ -1473,6 +1473,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
             droppedCount: 0,
             empty: true,
           },
+          plan: null,
         },
       });
       const run = await runLane({

@@ -6,7 +6,17 @@ import {
   ShapeToolInputs,
   type ShapeMessageDto,
 } from '@10db/contracts';
-import { getShape, listShapeMessages, listShapeProposals, patchShape } from '@10db/db';
+import {
+  findDocument,
+  getShape,
+  listAttachmentRevisions,
+  listShapeFindings,
+  listShapeMessages,
+  listShapeProposals,
+  patchShape,
+} from '@10db/db';
+import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
+import { importBundle, loadStoredRecord, planImportChanges } from '../plan-record';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { looseDraft, seedConversation, type ConversationFixture } from './conversation-fixture';
@@ -152,5 +162,102 @@ describe('the tool set', () => {
       tasks: [],
     });
     expect(transcript().map((m) => m.body)).toEqual(['similar_tasks · 0 tasks']);
+  });
+});
+
+describe('an imported Plan', () => {
+  /** Imports the fixture bundle into the conversation's project and answers its Plan's handlers. */
+  function imported() {
+    const bundle = parseBundle(bundleJson(c.project.id));
+    const bodies = inlineBodies(bundle);
+    const { shapeId } = state.write((ctx) =>
+      importBundle(ctx, {
+        projectId: c.project.id,
+        bundle,
+        bodies,
+        changes: planImportChanges(
+          loadStoredRecord(ctx.tx, c.project.id, bundle.id),
+          bundle,
+          bodies,
+        ),
+      }),
+    );
+    state.write((ctx) => {
+      patchShape(ctx, shapeId, { proposeUnlocked: true });
+    });
+    const handlers = createShapeToolHandlers(
+      {
+        state,
+        onProposal: (_shapeId, accepted) => {
+          proposals.push(accepted);
+        },
+      },
+      shapeId,
+    );
+    const lines = () =>
+      listShapeMessages(c.store.db, shapeId)
+        .filter((m) => m.kind === ShapeMessageKind.Tool)
+        .map((m) => m.body);
+    return { shapeId, handlers, lines };
+  }
+  const REFUSAL = /This Plan was imported\. Re-import to change it\./;
+
+  it('propose_plan on an imported Plan is refused and changes nothing', async () => {
+    const { shapeId, handlers, lines } = imported();
+    const before = listShapeProposals(c.store.db, shapeId);
+    const propose = handlers.propose_plan;
+    if (!propose) throw new Error('no propose_plan');
+    const m = c.say();
+    await expect(
+      propose(ShapeToolInputs.propose_plan.parse({ draft: looseDraft(m, 'a') })),
+    ).rejects.toThrow(REFUSAL);
+    expect(listShapeProposals(c.store.db, shapeId)).toEqual(before);
+    expect(proposals).toEqual([false]);
+    expect(lines()).toEqual(['propose_plan · refused']);
+  });
+
+  it('write_spec on an imported Plan is refused and adds no revision', async () => {
+    const { shapeId, handlers, lines } = imported();
+    const spec = findDocument(c.store.db, shapeId, 's1');
+    const before = spec ? listAttachmentRevisions(c.store.db, spec.id) : [];
+    const writeSpec = handlers.write_spec;
+    if (!writeSpec) throw new Error('no write_spec');
+    await expect(
+      writeSpec(ShapeToolInputs.write_spec.parse({ effortKey: 'g1', markdown: '# Model-written' })),
+    ).rejects.toThrow(REFUSAL);
+    expect(spec && listAttachmentRevisions(c.store.db, spec.id)).toEqual(before);
+    expect(lines()).toEqual(['write_spec · refused']);
+  });
+
+  it('resolve_finding on an imported finding is refused and leaves its state and how', async () => {
+    const { shapeId, handlers } = imported();
+    const [finding] = listShapeFindings(c.store.db, shapeId);
+    if (!finding) throw new Error('no imported finding');
+    const resolve = handlers.resolve_finding;
+    if (!resolve) throw new Error('no resolve_finding');
+    await expect(
+      resolve(ShapeToolInputs.resolve_finding.parse({ findingId: finding.id, how: 'Rewrote it' })),
+    ).rejects.toThrow(REFUSAL);
+    expect(listShapeFindings(c.store.db, shapeId)[0]).toMatchObject({
+      state: finding.state,
+      how: finding.how,
+    });
+  });
+
+  it('report_finding on an imported Plan still adds a finding', async () => {
+    const { shapeId, handlers } = imported();
+    const report = handlers.report_finding;
+    if (!report) throw new Error('no report_finding');
+    await report(
+      ShapeToolInputs.report_finding.parse({
+        effortKey: 'g1',
+        reviewer: 'scope',
+        finding: { kind: 'finding', severity: 'low', text: 'Name the port' },
+      }),
+    );
+    expect(listShapeFindings(c.store.db, shapeId).map((f) => [f.reviewer, f.text])).toEqual([
+      ['imported', 'Revoked devices keep their session'],
+      ['scope', 'Name the port'],
+    ]);
   });
 });

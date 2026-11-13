@@ -160,6 +160,7 @@ import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
+import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -209,6 +210,7 @@ import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
+import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
@@ -568,6 +570,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
+  backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
@@ -1831,6 +1835,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
+    planRecord: createPlanRecordServices({
+      state,
+      dataDir: opts.dataDir,
+      worktreeRoot,
+      sandboxRoots: allSandboxRoots,
+    }),
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,

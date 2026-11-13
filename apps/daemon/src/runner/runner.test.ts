@@ -39,7 +39,9 @@ import {
   activeClaims,
   countLanes,
   deleteAppSetting,
+  findDocument,
   getAccount,
+  getAttachmentRevision,
   getProject,
   getTask,
   getWorkstream,
@@ -70,6 +72,7 @@ import {
   transitionBatch,
   transitionWorkstream,
   updateInboxItem,
+  upsertTaskContext,
 } from '@10db/db';
 import { readSkillBody } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -134,6 +137,8 @@ import {
   waitFor,
 } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
+import { importBundle, planImportChanges } from '../plan-record';
 import { failedRepoCheck } from '../../test/fixtures';
 import { captureLogs } from '../../test/log-capture';
 
@@ -7684,5 +7689,86 @@ describe('the review size decision', () => {
     // Asked once, before the first review; the re-review after the rework is forced.
     expect(asked).toHaveLength(1);
     expect(engine.adapter.prompts).toHaveLength(4);
+  });
+});
+
+describe("a task's plan anchors at session start", () => {
+  /** The excerpt of the fixture's f1 anchor (`src/runner.ts:3`), three lines lower in the base. */
+  function commitMovedAnchor(): void {
+    const env = isolatedGitEnv();
+    mkdirSync(join(engine.repoPath, 'src'), { recursive: true });
+    writeFileSync(
+      join(engine.repoPath, 'src', 'runner.ts'),
+      ['a', 'b', 'c', '// runner', '', 'const pack = build();', 'emit(pack);', ''].join('\n'),
+    );
+    execFileSync('git', ['-C', engine.repoPath, 'add', '-A'], { env });
+    execFileSync('git', ['-C', engine.repoPath, 'commit', '-q', '-m', 'move the anchor'], { env });
+  }
+
+  /** Adds the task, pinned to p1#task-1 of the fixture Plan and citing f1. */
+  function pinnedTask(title: string) {
+    const bundle = parseBundle(bundleJson(engine.project.id));
+    const bodies = inlineBodies(bundle);
+    const added = engine.addTask(title);
+    engine.state.write((ctx) => {
+      const { shapeId } = importBundle(ctx, {
+        projectId: engine.project.id,
+        bundle,
+        bodies,
+        changes: planImportChanges(null, bundle, bodies),
+      });
+      const doc = findDocument(ctx.tx, shapeId, 'p1');
+      const revision = doc && getAttachmentRevision(ctx.tx, doc.id, 1);
+      if (!revision) throw new Error('no p1 revision');
+      upsertTaskContext(ctx, {
+        taskId: added.task.id,
+        shapeId,
+        revisionId: revision.id,
+        section: 'task-1',
+        shared: [],
+        cites: ['f1'],
+      });
+    });
+    return added;
+  }
+
+  it("a lane's first session checks its task's anchors before the pack, and its prompt shows the result", async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    commitMovedAnchor();
+    const { workstream } = pinnedTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.adapter.prompts.length > 0);
+    const prompt = engine.adapter.prompts[0]?.prompt ?? '';
+    expect(prompt).toContain('Anchor moved: src/runner.ts:3→6');
+    expect(prompt).not.toContain('checked at');
+    await engine.runner.cancel(workstream.id);
+  });
+
+  it('a stop during the anchor check starts no session', async () => {
+    const real = createGit();
+    let entered = false;
+    let release: () => void = () => undefined;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const git: Git = {
+      ...real,
+      fileAt: async (...args) => {
+        entered = true;
+        await waiting;
+        return real.fileAt(...args);
+      },
+    };
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { git });
+    commitMovedAnchor();
+    const { workstream } = pinnedTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => entered);
+    const cancelled = engine.runner.cancel(workstream.id);
+    release();
+    await cancelled;
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toEqual([]);
+    expect(ws(workstream.id).state).toBe('CANCELLED');
   });
 });
