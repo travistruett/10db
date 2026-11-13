@@ -112,6 +112,19 @@ describe('decisionModelNumbers', () => {
       },
     },
     {
+      name: 'a free model with answered calls that logged no cost still costs nothing, from your calls',
+      stat: stat({ costedCalls: 0, totalCostUsd: 0 }),
+      openRouterMs: null,
+      fallback: false,
+      free: true,
+      expected: {
+        costPerMillionUsd: 0,
+        costSource: 'your_calls',
+        secondsPerDecision: 0.4,
+        timeSource: 'your_calls',
+      },
+    },
+    {
       name: 'no calls: the price over your typical size, and OpenRouter’s latency',
       stat: undefined,
       openRouterMs: 900,
@@ -147,7 +160,8 @@ describe('decisionModelNumbers', () => {
         timeSource: 'your_calls',
       },
     },
-  ])('$name', ({ stat: s, openRouterMs, fallback, expected }) => {
-    expect(decisionModelNumbers(model, s, 300, openRouterMs, fallback)).toEqual(expected);
+  ])('$name', ({ stat: s, openRouterMs, fallback, expected, ...rest }) => {
+    const priced = 'free' in rest ? { inputUsdPerMillion: 0 } : model;
+    expect(decisionModelNumbers(priced, s, 300, openRouterMs, fallback)).toEqual(expected);
   });
 });

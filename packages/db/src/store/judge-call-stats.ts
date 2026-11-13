@@ -7,7 +7,7 @@ import type { DbReader } from './store';
 export interface JudgeCallModelStat {
   readonly model: string;
   readonly calls: number;
-  /** Calls that logged a cost; a model OpenRouter does not charge for logs none. */
+  /** Calls that logged a cost; a call on a model OpenRouter does not charge for may log none. */
   readonly costedCalls: number;
   readonly totalCostUsd: number;
   /** The median latency of the calls that logged one; null when none did. */

@@ -41,10 +41,13 @@ export function decisionModelNumbers(
   DecisionModelDto,
   'costPerMillionUsd' | 'costSource' | 'secondsPerDecision' | 'timeSource'
 > {
+  // A model OpenRouter does not charge for may log no cost at all; answered calls on it still say it costs nothing.
+  const freeWithCalls = stat !== undefined && stat.calls > 0 && model.inputUsdPerMillion === 0;
   const cost =
-    stat !== undefined && stat.costedCalls > 0
+    stat !== undefined && (stat.costedCalls > 0 || freeWithCalls)
       ? {
-          costPerMillionUsd: (stat.totalCostUsd / stat.costedCalls) * 1_000_000,
+          costPerMillionUsd:
+            stat.costedCalls > 0 ? (stat.totalCostUsd / stat.costedCalls) * 1_000_000 : 0,
           costSource: DecisionNumberSource.YourCalls,
         }
       : {

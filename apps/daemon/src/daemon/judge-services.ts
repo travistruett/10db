@@ -194,13 +194,16 @@ export function createJudgeServices(deps: {
     },
     async listDecisionModels() {
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
+      let list: DecisionModelListDto;
       try {
-        return withNumbers(await deps.models.list());
+        list = await deps.models.list();
       } catch (error) {
         throw new UpstreamError(
           error instanceof Error ? error.message : "OpenRouter's model list could not be read",
         );
       }
+      // Outside the try: a fault of our own database is not OpenRouter's.
+      return withNumbers(list);
     },
   };
 }
