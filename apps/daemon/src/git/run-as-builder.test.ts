@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { createTempRepo, createTempRepoWithOrigin, isolatedGitEnv } from '../../test/fixtures';
 import { passGitCall } from '../guard';
 import { runPassGit } from './run-as-builder';
+import { resolveGit } from './version';
 
 // A pass's commit, push or merge runs outside the sandbox once the builder allows it, so nothing a
 // lane could plant in the checkout (a repository of its own, a remote that is a path) may ride along.
@@ -22,15 +23,39 @@ function callOf(command: string) {
   return call;
 }
 
+// The daemon's own git, as `startDaemon` resolves it.
+let bins = { git: 'git', gh: 'gh' };
+beforeAll(async () => {
+  bins = { git: await resolveGit(), gh: 'gh' };
+});
+
 const runIn = (checkout: string, command: string, extraEnv: Record<string, string> = {}) =>
   runPassGit(callOf(command), {
     checkout,
     baseBranch: 'main',
     env: { ...env, ...extraEnv },
     signal,
+    bins,
   });
 
 describe('runPassGit', () => {
+  it('runs no filter or diff driver a .gitattributes in the checkout names', async () => {
+    const repo = createTempRepo();
+    try {
+      const marker = join(repo.path, '..', `filter-ran-${String(process.pid)}`);
+      // The builder's config names a driver; the attributes file a lane wrote selects it.
+      git(repo.path, 'config', 'filter.planted.clean', `sh -c 'touch "${marker}"; cat'`);
+      git(repo.path, 'config', 'diff.planted.textconv', `sh -c 'touch "${marker}"; cat'`);
+      writeFileSync(join(repo.path, '.gitattributes'), '* filter=planted diff=planted\n');
+      writeFileSync(join(repo.path, 'README.md'), '# changed\n');
+      const ran = await runIn(repo.path, 'git commit -am x');
+      expect(ran).toMatchObject({ exitCode: 0 });
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("commits in the checkout's own repository, whatever GIT_DIR the session carries", async () => {
     const repo = createTempRepo();
     const other = createTempRepo();

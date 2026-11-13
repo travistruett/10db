@@ -59,7 +59,7 @@ import {
   seedWorkstream,
 } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit, runPassGit, type Git } from '../git';
+import { createGit, resolveGit, runPassGit, type Git } from '../git';
 import { acceptProposal, proposePrinciple } from '../knowledge';
 import { silentLogger } from '../log';
 import {
@@ -3749,7 +3749,14 @@ describe('permission broker in a pass', () => {
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
         passGit: {
           baseBranch: 'main',
-          run: (call) => runPassGit(call, { checkout: repo, baseBranch: 'main', env, signal }),
+          run: async (call) =>
+            runPassGit(call, {
+              checkout: repo,
+              baseBranch: 'main',
+              env,
+              signal,
+              bins: { git: await resolveGit(), gh: 'gh' },
+            }),
         },
       },
     );

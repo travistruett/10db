@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isProtected, type PassGitCall } from '../guard';
+import { NO_ATTRIBUTES_CONFIG } from './git';
 
 /** What a command the builder allowed printed, and how it ended. */
 export interface BuilderRun {
@@ -71,7 +72,8 @@ function ownGitDir(checkout: string): { readonly root: string; readonly gitDir: 
  * their git config and credentials, and the checkout's own hooks, which a lane can't write in a
  * pass. It runs at the checkout's root with `GIT_DIR` and `GIT_WORK_TREE` set to the checkout's own,
  * so no repository a lane made inside it (with its own config and hooks) is the one that runs, and
- * with `core.fsmonitor` off. A push goes only to a remote the checkout lists, and a push of the
+ * with the daemon's own git hardening (no attributes from the tree, the worktree or a file, and
+ * `core.fsmonitor` off), through the daemon's own git and gh binaries. A push goes only to a remote the checkout lists, and a push of the
  * current branch only when that branch is neither `main` nor `baseBranch`. Prompts are off, and
  * `signal` ends it with its session.
  */
@@ -82,6 +84,8 @@ export async function runPassGit(
     readonly baseBranch: string;
     readonly env: Readonly<Record<string, string>>;
     readonly signal: AbortSignal;
+    /** The daemon's resolved git and gh (`resolveGit`, `resolveGh`). */
+    readonly bins: { readonly git: string; readonly gh: string | null };
   },
 ): Promise<BuilderRun | BuilderRefusal> {
   const place = ownGitDir(opts.checkout);
@@ -89,17 +93,31 @@ export async function runPassGit(
     return refused(
       "10db runs a pass's commit, push or merge only in a checkout whose .git is its own folder.",
     );
-  const env = {
+  // The daemon's own git hardening, as git config gh's git reads too: no attributes file and no
+  // fsmonitor, beside `GIT_ATTR_SOURCE` at the empty tree below.
+  const config = Object.entries({ ...NO_ATTRIBUTES_CONFIG, 'core.fsmonitor': 'false' });
+  const base = {
     ...Object.fromEntries(Object.entries(opts.env).filter(([name]) => !name.startsWith('GIT_'))),
     GIT_DIR: place.gitDir,
     GIT_WORK_TREE: place.root,
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: 'core.fsmonitor',
-    GIT_CONFIG_VALUE_0: 'false',
+    GIT_CONFIG_COUNT: String(config.length),
+    ...Object.fromEntries(
+      config.flatMap(([key, value], at) => [
+        [`GIT_CONFIG_KEY_${String(at)}`, key],
+        [`GIT_CONFIG_VALUE_${String(at)}`, value],
+      ]),
+    ),
     GIT_TERMINAL_PROMPT: '0',
     GH_PROMPT_DISABLED: '1',
   };
-  const git = (...args: string[]) => run(['git', ...args], place.root, env, opts.signal);
+  const bare = (env: Readonly<Record<string, string>>, ...args: string[]) =>
+    run([opts.bins.git, ...args], place.root, env, opts.signal);
+  // No attributes from the tree or the worktree either, so no filter or driver a lane named runs.
+  const empty = await bare(base, 'hash-object', '-t', 'tree', '--stdin');
+  if (empty.exitCode !== 0)
+    return refused("10db couldn't prepare git for this checkout, so it won't run the call.");
+  const env = { ...base, GIT_ATTR_SOURCE: empty.output.trim() };
+  const git = (...args: string[]) => bare(env, ...args);
   const common = await git('rev-parse', '--git-common-dir');
   const commonDir = common.output.trim();
   const commonReal = (() => {
@@ -131,5 +149,22 @@ export async function runPassGit(
         );
     }
   }
-  return run(call.argv, place.root, env, opts.signal);
+  // The daemon's own git and gh, never a program the session's PATH finds; gh's git is that git too.
+  const [program, ...args] = call.argv;
+  const binary = program === 'gh' ? opts.bins.gh : opts.bins.git;
+  if (binary === null)
+    return refused('gh is not installed where 10db looks for it, so 10db could not run this call.');
+  const path = opts.env['PATH'];
+  return run(
+    [binary, ...args],
+    place.root,
+    {
+      ...env,
+      PATH:
+        path === undefined
+          ? dirname(opts.bins.git)
+          : `${dirname(opts.bins.git)}${delimiter}${path}`,
+    },
+    opts.signal,
+  );
 }

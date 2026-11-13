@@ -62,7 +62,8 @@ import {
 } from '../src/environment';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createDeliveryJobs } from '../src/delivery';
-import { createGit } from '../src/git';
+import { createGit, resolveGit } from '../src/git';
+import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
 import type { Judge } from '../src/judge';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
@@ -317,6 +318,8 @@ export async function createTestEngine(
   // serve() on a TCP port always reports an AddressInfo once listening.
   const mcpUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
   const created = createRunner({
+    // The daemon's own git and gh, as `startDaemon` resolves them.
+    gitTools: { git: await resolveGit(), gh: resolveGh() },
     laneSandbox: null,
     protectedPaths: guarded,
     state,

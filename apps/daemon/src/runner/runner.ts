@@ -341,6 +341,8 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
 };
 
 export interface RunnerOptions {
+  /** The daemon's resolved git and gh, which run a pass's commit, push or merge the builder allowed. */
+  readonly gitTools: { readonly git: string; readonly gh: string | null };
   /** Paths no session tool or command may touch. */
   readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
@@ -2548,6 +2550,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                         baseBranch: project.baseBranch,
                         env: launch.env,
                         signal: abort.signal,
+                        bins: opts.gitTools,
                       }),
                   },
                 }
