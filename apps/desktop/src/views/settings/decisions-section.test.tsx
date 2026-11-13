@@ -289,6 +289,7 @@ describe('Settings › Decisions › Shape (spec §8, §9)', () => {
     expect(record.textContent).toContain('In shadow: 18 of 20 scored answers agreed (90%)');
     expect(record.textContent).toContain('Ready to show');
     const ready = screen.getByRole('group', { name: 'Enough to propose' });
+    expect(screen.getByText(/until the first Propose: have you said enough\?/)).toBeTruthy();
     expect(ready.textContent).toContain('1 of 2 scored answers agreed (50%)');
     const elsewhere = screen.getByRole('group', { name: 'Question for someone else?' });
     expect(elsewhere.textContent).toContain('No scored answers yet');

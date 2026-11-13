@@ -51,7 +51,7 @@ const SHAPE_LABEL: Readonly<Record<ShapeJudgeDecision, string>> = {
 };
 
 const SHAPE_QUESTION: Readonly<Record<ShapeJudgeDecision, string>> = {
-  [JudgeDecision.ShapeReady]: 'After each message, until the first Propose: has he said enough?',
+  [JudgeDecision.ShapeReady]: 'After each message, until the first Propose: have you said enough?',
   [JudgeDecision.ShapeRecord]: 'Does this message state a decision or principle worth recording?',
   [JudgeDecision.ShapeElsewhere]: 'Is this a question only someone else can answer?',
 };
