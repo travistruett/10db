@@ -656,6 +656,13 @@ describe('team, routing and benchmark routes', () => {
     },
     { name: 'GET /models', method: 'GET', path: '/models', body: undefined, service: 'listModels' },
     {
+      name: 'GET /models/picks',
+      method: 'GET',
+      path: `/models/picks?account=${mintId('Account')}`,
+      body: undefined,
+      service: 'modelPicks',
+    },
+    {
       name: 'GET /models/offers',
       method: 'GET',
       path: '/models/offers',

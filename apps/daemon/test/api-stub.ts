@@ -88,6 +88,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     setGlobalModelSettings: track('setGlobalModelSettings'),
     setProjectModelSettings: track('setProjectModelSettings'),
     listModels: track('listModels'),
+    modelPicks: track('modelPicks'),
     listAccountOffers: track('listAccountOffers'),
     catalogueStatus: track('catalogueStatus'),
     refreshModels: track('refreshModels'),
