@@ -111,6 +111,21 @@ describe('a conversation’s delivery', () => {
     expect(getItem(state.db, second).pushUuids).toEqual([idUuid(second), again]);
   });
 
+  it('pushes a message again later when the write that kept its uuid failed', () => {
+    const rec = recordingHandle();
+    const d = delivery(rec.handle);
+    const id = say('Hello');
+    store.db.$client.exec(
+      "CREATE TRIGGER refuse_push BEFORE UPDATE ON conversation_items BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    expect(() => {
+      d.push(getMessageRow(state.db, id));
+    }).toThrow('disk full');
+    store.db.$client.exec('DROP TRIGGER refuse_push');
+    d.pushUntaken();
+    expect(rec.sent.map((s) => s.uuid)).toEqual([idUuid(id)]);
+  });
+
   it('sends nothing while the owner has no conversation yet', () => {
     say('Waiting');
     const rec = recordingHandle();

@@ -87,12 +87,13 @@ export function createDelivery(deps: DeliveryDeps): Delivery {
       deps.messageText,
       randomUUID,
     );
-    sentUnder.set(out.uuid, message.id);
-    // Kept before the session is handed it: a restart then finds every uuid a turn could hold.
+    // Kept before the session is handed it: a restart then finds every uuid a turn could hold. The
+    // session counts it handed only once that write lands, so a failed one leaves it to send again.
     state.write((ctx) => {
       markItemPushedUnder(ctx, message.id, out.uuid);
       if (conversation !== null) markFilesInline(ctx, conversation, out.blocks, false);
     });
+    sentUnder.set(out.uuid, message.id);
     handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
   };
   return {
