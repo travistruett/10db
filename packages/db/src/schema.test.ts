@@ -88,7 +88,7 @@ function seedProjectAndWorkstreams() {
       .run();
     return id;
   };
-  return { projectId, ws1: ws(), ws2: ws() };
+  return { accountId, projectId, ws1: ws(), ws2: ws() };
 }
 
 function columnNames(table: string): unknown[] {
@@ -251,4 +251,67 @@ describe('schema', () => {
       expect(columns).not.toContain('updated_at');
     },
   );
+});
+
+describe('the conversation tables', () => {
+  function seedConversation() {
+    const { accountId, projectId } = seedProjectAndWorkstreams();
+    const id = mintId('Conversation');
+    const owner = { ownerKind: 'shape', ownerId: mintId('Shape') } as const;
+    const values = {
+      projectId,
+      ...owner,
+      profile: 'explore',
+      accountId,
+      state: 'idle_cold',
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    db.insert(schema.conversations)
+      .values({ id, ...values })
+      .run();
+    return { id, values, accountId };
+  }
+  const item = (conversationId: ReturnType<typeof mintId<'Conversation'>>, seq: number) => ({
+    id: mintId('ConversationItem'),
+    conversationId,
+    seq,
+    author: 'builder' as const,
+    kind: 'message' as const,
+    body: { text: 'hi' },
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  it('numbers items uniquely within a conversation', () => {
+    const { id } = seedConversation();
+    db.insert(schema.conversationItems).values(item(id, 1)).run();
+    expect(() => db.insert(schema.conversationItems).values(item(id, 1)).run()).toThrow(
+      /UNIQUE constraint failed/,
+    );
+  });
+
+  it('gives an owner one conversation', () => {
+    const { values } = seedConversation();
+    expect(() =>
+      db
+        .insert(schema.conversations)
+        .values({ id: mintId('Conversation'), ...values })
+        .run(),
+    ).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it('lets a session name its conversation, and still refuses a session with no owner', () => {
+    const { accountId } = seedConversation();
+    expect(columnNames('sessions')).toContain('conversation_id');
+    expect(() =>
+      db.$client
+        .prepare(
+          `INSERT INTO sessions (id, account_id, sequence, provider, model, effort, mode, mcp_token_hash,
+             started_at, input_tokens, output_tokens, created_at, updated_at)
+           VALUES (?, ?, 1, 'claude', 'm', 'medium', 'default', 'h', ?, 0, 0, ?, ?)`,
+        )
+        .run(mintId('Session'), accountId, now, now, now),
+    ).toThrow(/CHECK constraint failed: sessions_one_owner/);
+  });
 });

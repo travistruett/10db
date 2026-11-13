@@ -93,6 +93,7 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     ...fields,
     workstreamId: workstreamId ?? null,
     shapeId: shapeId ?? null,
+    conversationId: null,
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,

@@ -484,6 +484,13 @@
       "when": 1794583338261,
       "tag": "0068_first_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1794603885388,
+      "tag": "0069_conversation_tables",
+      "breakpoints": true
     }
   ]
 }
