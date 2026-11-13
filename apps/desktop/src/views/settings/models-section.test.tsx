@@ -214,8 +214,10 @@ describe('the Models page', () => {
     expect(screen.queryByRole('region', { name: 'Who each role gets' })).toBeNull();
     // Each rigor's row shows what it resolves to on the account, and a role the row does not run stays blank.
     const standard = within(playbook).getByRole('row', { name: /Standard/ });
-    expect(within(standard).getByText('Alpha Max · high')).toBeTruthy();
-    expect(within(standard).getAllByText('Auto, at least 40')).toHaveLength(2);
+    expect(within(standard).getByText('Alpha Max')).toBeTruthy();
+    // The effort and the setting share the second line, which wraps rather than truncates.
+    expect(within(standard).getAllByText('high · Auto, at least 40').length).toBeGreaterThan(0);
+    expect(within(standard).getAllByText(/Auto, at least 40$/)).toHaveLength(2);
     const light = within(playbook).getByRole('row', { name: /Light/ });
     expect(within(light).queryByRole('button', { name: /Light Review/ })).toBeNull();
   });
@@ -253,8 +255,10 @@ describe('the Models page', () => {
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
     expect(row.getByText('Capable')).toBeTruthy();
-    // Used by is plain text: violet marks a pick on the chart and in the roles table only.
-    expect(row.getByText('Plan, Build').getAttribute('style') ?? '').not.toContain('violet');
+    // Used by lists only the roles Standard runs (Build and Review), though the pick for Plan is also this model.
+    // It is plain text: violet marks a pick on the chart only.
+    expect(row.getByText('Build').getAttribute('style') ?? '').not.toContain('violet');
+    expect(row.queryByText(/Plan/)).toBeNull();
     for (const cell of ['60', '$2.50', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }
@@ -447,7 +451,7 @@ describe('the Models page', () => {
     healthy = true;
     fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
     expect(
-      await screen.findByRole('button', { name: /Standard Build: Alpha Max · high/ }),
+      await screen.findByRole('button', { name: /Standard Build: Alpha Max, high/ }),
     ).toBeTruthy();
   });
 

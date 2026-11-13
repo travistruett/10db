@@ -26,7 +26,10 @@ function resolvedLine(pick: RolePickDto | undefined, names: ReadonlyMap<string, 
   return `${names.get(pick.model) ?? pick.model}${pick.effort === null ? '' : ` · ${pick.effort}`}`;
 }
 
-/** The cell as the table shows it: the pick it resolves to, and under it the setting that made it. */
+/**
+ * The cell as the table shows it, on two lines that wrap: the model it resolves to, then its effort and the
+ * setting that made it.
+ */
 export function PlaybookCellButton({
   cell,
   pick,
@@ -40,20 +43,25 @@ export function PlaybookCellButton({
   readonly changedHere: boolean;
   readonly onClick: () => void;
 }) {
-  const resolved = resolvedLine(pick, names);
+  const model =
+    pick === undefined
+      ? 'Reading…'
+      : pick.model === null
+        ? 'Nothing chosen'
+        : (names.get(pick.model) ?? pick.model);
   const setting = settingSummary(cell.model.value ?? { kind: 'automatic' }, names);
+  const detail = `${pick?.effort == null ? '' : `${pick.effort} · `}${setting}${changedHere ? ' · set here' : ''}`;
   return (
     <UnstyledButton
-      aria-label={`${rigorLabel(cell.rigor)} ${roleLabel(cell)}: ${resolved}, ${setting}`}
+      aria-label={`${rigorLabel(cell.rigor)} ${roleLabel(cell)}: ${model}, ${detail}`}
       onClick={onClick}
       style={{ display: 'block', width: '100%' }}
     >
-      <Text size="sm" fw={500} {...(pick?.model === null ? { c: 'dimmed' } : {})} truncate>
-        {resolved}
+      <Text size="sm" fw={500} {...(pick?.model === null ? { c: 'dimmed' } : {})}>
+        {model}
       </Text>
-      <Text size="xs" c="dimmed" truncate>
-        {setting}
-        {changedHere ? ' · set here' : ''}
+      <Text size="xs" c="dimmed">
+        {detail}
       </Text>
     </UnstyledButton>
   );

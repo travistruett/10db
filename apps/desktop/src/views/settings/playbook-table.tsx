@@ -54,7 +54,7 @@ export function PlaybookTable({
     {
       accessor: 'rigor',
       title: 'Rigor',
-      noWrap: true,
+      width: 150,
       render: (row) => (
         <UnstyledButton
           aria-label={`${RIGOR_LABELS[row.rigor].label} steps`}
@@ -81,7 +81,6 @@ export function PlaybookTable({
     ...ROLES.map(({ role, label }): DataTableColumn<PlaybookRowDto> => ({
       accessor: role,
       title: label,
-      width: 190,
       render: (row) => {
         const cell = view.cells.find((c) => c.rigor === row.rigor && c.role === role);
         if (cell === undefined || !row.steps.value.includes(role)) return null;

@@ -115,11 +115,11 @@ describe('the playbook table', () => {
     serve();
     renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
     const review = await screen.findByRole('button', {
-      name: 'Standard Review: Mid A · high, Auto, at least 40',
+      name: 'Standard Review: Mid A, high · Auto, at least 40',
     });
     expect(review).toBeTruthy();
     expect(
-      screen.getByRole('button', { name: 'Light Build: Mid A · medium, Auto, at least 35' }),
+      screen.getByRole('button', { name: 'Light Build: Mid A, medium · Auto, at least 35' }),
     ).toBeTruthy();
     // Light runs Build only.
     expect(screen.queryByRole('button', { name: /^Light Review/ })).toBeNull();

@@ -22,6 +22,7 @@ import {
   useModels,
   useRefreshModels,
 } from '../../daemon/model-queries';
+import { usePlaybook } from '../../daemon/playbook-queries';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
@@ -80,6 +81,7 @@ export function ModelsSection() {
   // The chart's rings follow one rigor; Standard is the one most work gets.
   const [rigor, setRigor] = useState<Rigor>(Rigor.Standard);
   const picks = useModelPicks(accountId, rigor, null);
+  const playbook = usePlaybook(null);
   const offers = useModelOffers();
   const status = useCatalogueStatus();
   const refresh = useRefreshModels();
@@ -241,7 +243,11 @@ export function ModelsSection() {
   // A refresh can shrink the list under the page; the page shown is never past the last one.
   const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
   const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
-  const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
+  // Only the roles the rigor's row runs are ringed and counted as using a model.
+  const runs = playbook.data?.rows.find((r) => r.rigor === rigor)?.steps.value ?? null;
+  const drawnPicks = settling
+    ? []
+    : (picks.data?.picks ?? []).filter((p) => runs === null || runs.includes(p.role));
   const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role: null, dots });
   const usedBy = new Map<string, string[]>();
   for (const pick of drawnPicks)
@@ -261,9 +267,7 @@ export function ModelsSection() {
           {account.label}, and the setting behind it; open a cell to change it, a rigor to change
           its steps.
         </Text>
-        <RaisedPanel>
-          <PlaybookTable projectId={null} accountId={accountId} />
-        </RaisedPanel>
+        <PlaybookTable projectId={null} accountId={accountId} />
       </Stack>
       <KindsSection />
       <Stack gap="xs">

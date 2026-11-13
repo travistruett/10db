@@ -2,7 +2,6 @@ import { RIGORS, type ProjectDto, type Rigor } from '@10db/contracts';
 import { Select, Stack, Text, Title } from '@mantine/core';
 import { usePatchProject } from '../../daemon/queries';
 import { PlaybookTable } from './playbook-table';
-import { RaisedPanel } from './raised-panel';
 import { rigorLabel } from './rigor-labels';
 import { SettingRow, SettingsCard } from './setting-row';
 
@@ -47,9 +46,7 @@ export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
           Cells show what each step resolves to on this project&apos;s account. A field you set here
           applies to this project only; Use global follows All projects › Models.
         </Text>
-        <RaisedPanel>
-          <PlaybookTable projectId={project.id} accountId={project.accountId} />
-        </RaisedPanel>
+        <PlaybookTable projectId={project.id} accountId={project.accountId} />
       </Stack>
     </Stack>
   );
