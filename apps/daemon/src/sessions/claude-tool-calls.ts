@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { z } from 'zod';
 import { BEFORE_TEXT_MAX_BYTES, type BeforeText } from './before-text';
-import { EDIT_LINES_CAP, hunksOfTexts, type EditHunks } from './hunks';
+import { EDIT_LINES_CAP, hunksOfTexts, unifiedPatch, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep, type SessionEvent } from './types';
 
@@ -139,8 +139,24 @@ function replacedAll(
   return { before: text, after: parts.join(''), cut: false };
 }
 
+/** One stretch of text an edit changed, from which its whole patch can be made again. */
+interface Piece {
+  readonly before: string;
+  readonly after: string;
+  readonly firstLine: number;
+}
+
+/** An edit's hunks with the texts they were made from, so a cut edit's whole patch can be kept. */
+interface Diffed extends EditHunks {
+  readonly pieces: readonly Piece[];
+}
+
+function diffed(before: string, after: string, firstLine = 1): Diffed {
+  return { ...hunksOfTexts(before, after, firstLine), pieces: [{ before, after, firstLine }] };
+}
+
 /** Several edits' hunks as one: whole edits, in order, while their changed lines fit the cap. */
-function joined(parts: readonly EditHunks[]): EditHunks {
+function joined(parts: readonly Diffed[]): Diffed {
   const hunks: ToolCallHunk[] = [];
   let budget = EDIT_LINES_CAP;
   let full = false;
@@ -161,6 +177,7 @@ function joined(parts: readonly EditHunks[]): EditHunks {
     addedLines: parts.reduce((sum, p) => sum + p.addedLines, 0),
     removedLines: parts.reduce((sum, p) => sum + p.removedLines, 0),
     truncated,
+    pieces: parts.flatMap((p) => p.pieces),
   };
 }
 
@@ -178,12 +195,18 @@ type Common = Pick<
   | 'soft'
 >;
 
+/** Takes an edit's whole patch when its hunks were cut. */
+type KeepPatch = (patch: string) => void;
+
 function editOf(
   common: Common,
   path: string,
   change: EditChange,
-  edit: EditHunks,
+  edit: Diffed,
+  keep: KeepPatch,
 ): UntitledToolCall {
+  if (edit.truncated && edit.pieces.length > 0)
+    keep(edit.pieces.map((p) => unifiedPatch(p.before, p.after, p.firstLine)).join(''));
   return {
     ...common,
     kind: 'edit',
@@ -201,6 +224,7 @@ function untitled(
   use: ClaudeToolUse,
   common: Common,
   before: (path: string) => BeforeText,
+  keep: KeepPatch,
 ): UntitledToolCall {
   const other: UntitledToolCall = {
     ...common,
@@ -233,20 +257,27 @@ function untitled(
         // the one replacement shown is flagged as only part of the edit.
         if (current?.includes(old) === true) {
           const replaced = replacedAll(current, old, next, BEFORE_TEXT_MAX_BYTES);
-          const edit = hunksOfTexts(replaced.before, replaced.after);
+          const edit = diffed(replaced.before, replaced.after);
           return editOf(
             common,
             path,
             EditChange.Update,
             replaced.cut ? { ...edit, truncated: true } : edit,
+            keep,
           );
         }
-        return editOf(common, path, EditChange.Update, {
-          ...hunksOfTexts(old, next, lineOf(current, old)),
-          truncated: true,
-        });
+        return editOf(
+          common,
+          path,
+          EditChange.Update,
+          {
+            ...diffed(old, next, lineOf(current, old)),
+            truncated: true,
+          },
+          keep,
+        );
       }
-      return editOf(common, path, EditChange.Update, hunksOfTexts(old, next, lineOf(current, old)));
+      return editOf(common, path, EditChange.Update, diffed(old, next, lineOf(current, old)), keep);
     }
     case 'MultiEdit': {
       const input = MultiEditInput.safeParse(use.input);
@@ -258,16 +289,16 @@ function untitled(
         if (edit.replace_all === true && from !== '' && current?.includes(from) === true) {
           // Every occurrence changes, built only up to the before-text limit, as Edit's are.
           const replaced = replacedAll(current, from, to, BEFORE_TEXT_MAX_BYTES);
-          const part = hunksOfTexts(replaced.before, replaced.after);
+          const part = diffed(replaced.before, replaced.after);
           current = replaced.cut ? null : replaced.after;
           return replaced.cut ? { ...part, truncated: true } : part;
         }
-        const part = hunksOfTexts(from, to, lineOf(current, from));
+        const part = diffed(from, to, lineOf(current, from));
         if (current?.includes(from) === true && from !== '')
           current = current.replace(from, () => to);
         return part;
       });
-      return editOf(common, input.data.file_path, EditChange.Update, joined(parts));
+      return editOf(common, input.data.file_path, EditChange.Update, joined(parts), keep);
     }
     case 'Write': {
       const input = WriteInput.safeParse(use.input);
@@ -279,14 +310,16 @@ function untitled(
             common,
             input.data.file_path,
             EditChange.Add,
-            hunksOfTexts('', input.data.content),
+            diffed('', input.data.content),
+            keep,
           );
         case 'text':
           return editOf(
             common,
             input.data.file_path,
             EditChange.Update,
-            hunksOfTexts(read.text, input.data.content),
+            diffed(read.text, input.data.content),
+            keep,
           );
         case 'unread':
           // 10db won't read what was there, so the whole new file shows as added.
@@ -294,7 +327,8 @@ function untitled(
             common,
             input.data.file_path,
             EditChange.Update,
-            hunksOfTexts('', input.data.content),
+            diffed('', input.data.content),
+            keep,
           );
       }
       return other;
@@ -302,12 +336,19 @@ function untitled(
     case 'NotebookEdit': {
       const input = NotebookInput.safeParse(use.input);
       if (!input.success) return other;
-      return editOf(common, input.data.notebook_path, EditChange.Update, {
-        hunks: [],
-        addedLines: 0,
-        removedLines: 0,
-        truncated: false,
-      });
+      return editOf(
+        common,
+        input.data.notebook_path,
+        EditChange.Update,
+        {
+          hunks: [],
+          addedLines: 0,
+          removedLines: 0,
+          truncated: false,
+          pieces: [],
+        },
+        keep,
+      );
     }
     case 'Read': {
       const input = ReadInput.safeParse(use.input);
@@ -378,7 +419,12 @@ function untitled(
 /** A Claude Code tool use as a running call. Pure given `before`, and never throws. */
 export function claudeToolCall(
   use: ClaudeToolUse,
-  ctx: { readonly startedAt: Date; readonly before: (path: string) => BeforeText },
+  ctx: {
+    readonly startedAt: Date;
+    readonly before: (path: string) => BeforeText;
+    /** Takes an edit's whole patch when its hunks were cut. */
+    readonly patch?: (patch: string) => void;
+  },
 ): ToolCallView {
   const common: Common = {
     id: use.id,
@@ -392,7 +438,7 @@ export function claudeToolCall(
     limit: null,
     soft: null,
   };
-  return titled(untitled(use, common, ctx.before));
+  return titled(untitled(use, common, ctx.before, ctx.patch ?? (() => undefined)));
 }
 
 /** A result's text: the string, or its text blocks joined by newlines. */
@@ -556,6 +602,8 @@ export function createClaudeToolCalls(deps: {
   /** Writing calls whose use came before their before-text, with when it came. */
   const waiting = new Map<string, { readonly use: ClaudeToolUse; readonly startedAt: Date }>();
   const plans = new Set<string>();
+  /** The whole patch of each running edit whose hunks were cut. */
+  const patches = new Map<string, string>();
   const denials = new Map<string, ClaudeDenial>();
   /** Each final call with when it ended, until a denial corrects it or it ages out. */
   const finals = new Map<
@@ -567,7 +615,13 @@ export function createClaudeToolCalls(deps: {
     }
   >();
   const begin = (use: ClaudeToolUse, startedAt: Date): ToolCallView => {
-    const call = claudeToolCall(use, { startedAt, before: () => texts.take(use.id) });
+    const call = claudeToolCall(use, {
+      startedAt,
+      before: () => texts.take(use.id),
+      patch: (patch) => {
+        remember(patches, use.id, patch, DENIALS_KEPT);
+      },
+    });
     remember(running, use.id, call, DENIALS_KEPT);
     if (BackgroundInput.safeParse(use.input).success) background.add(use.id);
     return call;
@@ -613,9 +667,24 @@ export function createClaudeToolCalls(deps: {
       if (call === undefined) return [];
       running.delete(toolUseId);
       background.delete(toolUseId);
+      const patch = patches.get(toolUseId);
+      patches.delete(toolUseId);
       const endedAt = deps.now();
       if (denial === null) remember(finals, toolUseId, { call, result, endedAt }, DENIALS_KEPT);
-      return [{ type: 'tool_call', call: claudeToolResult(call, { ...result, denial }, endedAt) }];
+      const output = resultText(result.content);
+      const full = {
+        ...((call.kind === 'command' || call.kind === 'mcp') && output.length > OUTPUT_TAIL_CHARS
+          ? { output }
+          : {}),
+        ...(patch === undefined ? {} : { patch }),
+      };
+      return [
+        {
+          type: 'tool_call',
+          call: claudeToolResult(call, { ...result, denial }, endedAt),
+          ...(Object.keys(full).length === 0 ? {} : { full }),
+        },
+      ];
     },
     deny(toolUseId, denial) {
       const final = finals.get(toolUseId);
@@ -635,6 +704,7 @@ export function createClaudeToolCalls(deps: {
       for (const id of [...running.keys()]) {
         if (background.has(id)) continue;
         running.delete(id);
+        patches.delete(id);
         texts.discard(id);
       }
       for (const id of waiting.keys()) texts.discard(id);
@@ -642,6 +712,7 @@ export function createClaudeToolCalls(deps: {
     },
     clear() {
       running.clear();
+      patches.clear();
       background.clear();
       waiting.clear();
       texts.clear();

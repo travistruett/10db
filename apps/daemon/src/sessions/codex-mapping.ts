@@ -15,7 +15,7 @@ import {
   TurnStarted,
   type RateLimitSnapshot,
 } from './codex-protocol';
-import { codexPlanSteps, codexToolCalls, withCommandOutput } from './codex-tool-calls';
+import { codexFullOf, codexPlanSteps, codexToolCalls, withCommandOutput } from './codex-tool-calls';
 import type { SessionEvent } from './types';
 
 export type RateLimitEvent = Extract<SessionEvent, { type: 'rate_limit' }>;
@@ -309,7 +309,13 @@ export function mapCodexNotification(
             : [{ type: 'message' as const, itemId: message.data.id, text: message.data.text }]),
         ];
       const calls = finalCalls(parsed.data.item, parsed.data.completedAtMs ?? null, state);
-      return [...taken, ...calls.map((call) => ({ type: 'tool_call' as const, call }))];
+      return [
+        ...taken,
+        ...calls.map((call) => {
+          const full = codexFullOf(parsed.data.item, call);
+          return { type: 'tool_call' as const, call, ...(full === null ? {} : { full }) };
+        }),
+      ];
     }
     case 'thread/tokenUsage/updated': {
       const parsed = TokenUsageUpdated.safeParse(n.params);

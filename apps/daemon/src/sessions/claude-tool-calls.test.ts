@@ -586,6 +586,31 @@ describe('createClaudeToolCalls', () => {
     expect(calls.result('toolu_1', { isError: false, content: 'a' })).toEqual([]);
   });
 
+  it('keeps a result longer than the tail whole, beside the tail, and a short one only in the view', () => {
+    const { calls } = tracker();
+    calls.use(use('Bash', { command: 'cat big' }));
+    const long = 'x'.repeat(5_904) + 'y'.repeat(OUTPUT_TAIL_CHARS);
+    const [done] = calls.result('toolu_1', { isError: false, content: long });
+    expect(done).toMatchObject({
+      full: { output: long },
+      call: { outputTail: 'y'.repeat(OUTPUT_TAIL_CHARS) },
+    });
+    calls.use(use('Bash', { command: 'ls' }, 'toolu_2'));
+    const [short] = calls.result('toolu_2', { isError: false, content: 'a.ts' });
+    expect(short).not.toHaveProperty('full');
+  });
+
+  it('keeps an edit past the line cap whole as its patch', () => {
+    const calls = createClaudeToolCalls({ now: () => startedAt, read: () => ABSENT });
+    const content = Array.from({ length: 1_600 }, (_, i) => `line ${String(i)}`).join('\n') + '\n';
+    calls.capture('toolu_1', 'Write', { file_path: 'big.ts', content }, '/repo');
+    calls.use(use('Write', { file_path: 'big.ts', content }));
+    const [done] = calls.result('toolu_1', { isError: false, content: 'written' });
+    expect(done).toMatchObject({ call: { truncated: true } });
+    const patch = done?.type === 'tool_call' ? (done.full?.patch ?? '') : '';
+    expect(patch.split('\n').filter((l) => l.startsWith('+'))).toHaveLength(1_600);
+  });
+
   it('a result for an id never seen gives nothing', () => {
     expect(tracker().calls.result('toolu_9', { isError: false, content: 'x' })).toEqual([]);
   });

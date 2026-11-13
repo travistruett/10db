@@ -285,7 +285,13 @@ export type SessionEvent =
    * A tool call as it starts, changes and finishes, each time whole. `appended` is the output this
    * update added, when it came from a stream of output.
    */
-  | { readonly type: 'tool_call'; readonly call: ToolCallView; readonly appended?: string }
+  | {
+      readonly type: 'tool_call';
+      readonly call: ToolCallView;
+      readonly appended?: string;
+      /** On a finished call, what its view cut off: the whole output, or the edit's whole patch. */
+      readonly full?: ToolCallFull;
+    }
   /** The slash commands the session offers, replacing the last list. */
   | { readonly type: 'commands'; readonly commands: readonly AgentCommand[] }
   /** The agent's plan for its turn, replacing the last one. */
@@ -366,6 +372,14 @@ export type SessionEvent =
  * queue is 10db's own: the messages its session has not yet handed over.
  */
 export type InterruptReceipt = { readonly stillQueued: readonly string[] } | null;
+
+/** What a finished call's view left out, kept on disk for the card to expand. */
+export interface ToolCallFull {
+  /** A command's whole output, or an MCP call's whole result, when it is longer than the tail. */
+  readonly output?: string;
+  /** An edit's whole unified patch, when its hunks were cut. */
+  readonly patch?: string;
+}
 
 export interface SessionHandle {
   /** Ends with exactly one `ended` event. */
