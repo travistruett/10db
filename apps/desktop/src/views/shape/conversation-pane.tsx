@@ -5,9 +5,10 @@ import {
   type ShapeViewDto,
 } from '@10db/contracts';
 import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
-import { Link } from '@tanstack/react-router';
+import { IconBooks, IconPlus } from '@tabler/icons-react';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
+import { usePlanRecord } from '../../daemon/plan-record-queries';
 import {
   useCreateShape,
   useProposeShape,
@@ -51,6 +52,11 @@ export function ConversationPane({
   why,
 }: ConversationPaneProps) {
   const late = useLate(shapeId);
+  const navigate = useNavigate();
+  // The Record is offered once the Plan holds something to read there: a document or an entry.
+  const record = usePlanRecord(shapeId).data;
+  const hasRecord =
+    record !== undefined && (record.documents.length > 0 || record.counts.evidence > 0);
   const create = useCreateShape(projectId);
   const send = useSendShapeMessage();
   const propose = useProposeShape();
@@ -206,6 +212,18 @@ export function ConversationPane({
         {shapeId === null ? null : (
           <Group gap="xs" wrap="nowrap" align="flex-start">
             {view === undefined ? null : <ModelPicker view={view} />}
+            {hasRecord ? (
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<IconBooks size={14} stroke={1.5} />}
+                onClick={() => {
+                  void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
+                }}
+              >
+                Record
+              </Button>
+            ) : null}
             <Button
               component={Link}
               to="/shape"

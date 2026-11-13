@@ -117,6 +117,7 @@ function decisionRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
     if (row.kind !== 'decision' || !proposalShown(row, query.state)) return [];
     const d = ShapeProposalBody.decision.parse(row.body);
     const out: PlanDecisionRow = {
+      id: row.id,
       key: row.key,
       question: d.question,
       choice: d.choice,
@@ -269,6 +270,7 @@ function questionRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
     const q = ShapeProposalBody.question.parse(row.body);
     return [
       {
+        id: row.id,
         key: row.key,
         source: 'question',
         text: q.text,
@@ -287,6 +289,7 @@ function questionRows(db: DbReader, shapeId: ShapeId, query: PlanRecordQuery): P
     if (d.decidedAt !== undefined) return [];
     return [
       {
+        id: row.id,
         key: row.key,
         source: 'decision',
         text: d.question,

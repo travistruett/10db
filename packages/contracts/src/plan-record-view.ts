@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DecisionId, ShapeFindingId, ShapeId, TaskId, WorkstreamId } from './ids';
+import { DecisionId, ShapeFindingId, ShapeId, ShapeProposalId, TaskId, WorkstreamId } from './ids';
 import { BundleOrigin } from './plan-bundle';
 import {
   AnchorCheckDto,
@@ -123,6 +123,8 @@ export const PlanRecordQuery = z.strictObject({
 export type PlanRecordQuery = z.output<typeof PlanRecordQuery>;
 
 export const PlanDecisionRow = z.object({
+  /** The proposal row; a key re-imported over a replaced row has one row per import. */
+  id: ShapeProposalId,
   key: z.string(),
   question: z.string(),
   choice: z.string(),
@@ -198,6 +200,7 @@ export type PlanReviewGroup = z.infer<typeof PlanReviewGroup>;
 
 /** A question the record holds open: a question proposal, or a decision not yet decided. */
 export const PlanQuestionRow = z.object({
+  id: ShapeProposalId,
   key: z.string(),
   source: z.enum(['question', 'decision']),
   text: z.string(),

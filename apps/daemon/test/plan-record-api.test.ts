@@ -192,7 +192,7 @@ describe('a Plan record through the daemon', () => {
     const projectId = await seed();
     const shapeId = await importJson(projectId, bundleJson(projectId));
     const questions = await page(shapeId, 'questions');
-    expect(questions.rows).toEqual([
+    expect(questions.rows).toMatchObject([
       {
         key: 'q1',
         source: 'question',

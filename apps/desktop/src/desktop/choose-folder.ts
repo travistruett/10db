@@ -7,6 +7,6 @@ export function canChooseFolder(): boolean {
 }
 
 /** Opens the native folder panel; the picked path, or null when the builder cancels. */
-export function chooseFolder(): Promise<string | null> {
-  return open({ directory: true, title: 'Choose a git checkout' });
+export function chooseFolder(title = 'Choose a git checkout'): Promise<string | null> {
+  return open({ directory: true, title });
 }
