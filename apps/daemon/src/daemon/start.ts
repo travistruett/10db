@@ -272,7 +272,13 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { moveToPlaybook, planConversationModel, routingInputs, seedTeam } from '../team';
+import {
+  conversationRun,
+  moveToPlaybook,
+  planConversationModel,
+  routingInputs,
+  seedTeam,
+} from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -1402,19 +1408,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = planConversationModel(db, project, effort);
-      if (profile === undefined)
-        throw new InvalidError(`${row.label} offers no model for planning`);
-      // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
-      // stopped offering since gives way to the role's.
-      const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
-      const modelId = chosen !== null && offered.includes(chosen) ? chosen : profile.model;
+      const run = conversationRun(db, project, chosen, effort);
+      if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
+      // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
+      // account has stopped offering gives way to the Plan cell's model.
+      const modelId = run.model;
       const session = launcher.session(row, modelId, listAccountModels(db, row.id));
       return {
         cwd: project.repoPath,
         model: session.model,
         modelId,
-        effort: profile.effort,
+        effort: run.effort,
         agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,

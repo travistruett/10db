@@ -1,5 +1,6 @@
 import {
   BoardStatus,
+  Rigor,
   TaskStatus,
   type BatchDto,
   type TaskDto,
@@ -8,6 +9,7 @@ import {
 } from '@10db/contracts';
 import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { ciResult } from './ci-line';
+import { RIGOR_LABEL } from './rigor-labels';
 import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -55,6 +57,14 @@ function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
     const finished = peer?.status === TaskStatus.Done || peer?.boardStatus === BoardStatus.Done;
     return peer && !finished ? [peer.title] : [];
   });
+}
+
+/** A kind's key as a title: "db-migration" is "Db Migration". */
+function kindTitle(key: string): string {
+  return key
+    .split('-')
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(' ');
 }
 
 /** What the card shows besides its title, as a sentence a screen reader can speak. */
@@ -166,6 +176,24 @@ function indicatorsOf(
     task.status === TaskStatus.Cancelled
       ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }
       : null,
+    // The default rigor is the baseline every card has; one the builder set, or a kind raised, is worth saying.
+    task.rigor !== null || task.effectiveRigor !== Rigor.Standard
+      ? {
+          kind: 'rigor',
+          label: RIGOR_LABEL[task.effectiveRigor],
+          color: 'gray',
+          tooltip:
+            task.rigor === null
+              ? 'Rigor, from the project and the task’s kinds'
+              : 'Rigor the builder set',
+        }
+      : null,
+    ...task.kinds.map((k) => ({
+      kind: `kind-${k.key}`,
+      label: kindTitle(k.key),
+      color: 'gray',
+      tooltip: k.source === 'builder' ? 'Kind set by the builder' : 'Kind an agent gave the task',
+    })),
   ].filter((indicator) => indicator !== null);
 }
 

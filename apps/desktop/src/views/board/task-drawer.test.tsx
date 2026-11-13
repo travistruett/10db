@@ -14,7 +14,8 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { kindDto } from '../../test/playbook-fixtures';
 import { modelRowDto } from '../../test/model-fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
@@ -23,11 +24,7 @@ import { failureLine } from './task-state';
 const peers = new Map();
 
 function serve(...overrides: Parameters<typeof server.use>) {
-  server.use(
-    ...overrides,
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-    ...baseHandlers(),
-  );
+  server.use(...overrides, ...baseHandlers());
 }
 
 interface Opts {
@@ -365,12 +362,12 @@ describe('TaskDrawer', () => {
     expect(within(await dialog()).queryByTestId('waits-on')).toBeNull();
   });
 
-  it('saves the five fields', async () => {
-    const flow = flowDto({ name: 'quick' });
+  it('saves the title, description, criteria, kinds, rigor and effort', async () => {
+    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: TaskPatch[] = [];
     const task = taskDto();
     server.use(
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([flow])),
+      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
       http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
         patched.push((await request.json()) as TaskPatch);
         return HttpResponse.json(task);
@@ -382,12 +379,12 @@ describe('TaskDrawer', () => {
     await edit('Description', ' Some words ');
     await edit('Acceptance criteria', ' first \n\n second ');
     const d = await dialog();
-    fireEvent.click(within(d).getByRole('combobox', { name: 'Flow' }));
-    fireEvent.click(await screen.findByRole('option', { name: /Quick/, hidden: true }));
-    fireEvent.click(within(d).getByLabelText('Risks'));
-    fireEvent.click(
-      await screen.findByRole('option', { name: 'Database migration', hidden: true }),
-    );
+    fireEvent.click(within(d).getByLabelText('Kinds'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Security', hidden: true }));
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Rigor' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Critical', hidden: true }));
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Effort' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'high', hidden: true }));
     fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => {
@@ -397,12 +394,33 @@ describe('TaskDrawer', () => {
       title: 'New title',
       description: 'Some words',
       acceptanceCriteria: ['first', 'second'],
-      flowId: flow.id,
-      riskTags: [RiskTag.Migration],
+      rigor: 'critical',
+      kinds: [{ key: 'security', source: 'builder' }],
+      effortPin: 'high',
     });
     await waitFor(() => {
       expect(closed()).toBe(1);
     });
+  });
+
+  it('turns off the rigors below the kinds’ floor and names the kind', async () => {
+    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
+    server.use(
+      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
+      ...baseHandlers(),
+    );
+    open({ task: { kinds: [{ key: 'security', source: 'agent' }] } });
+    const d = await openTab('Edit');
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Rigor' }));
+    // The kinds arrive after the drawer opens; the option names the kind once they have.
+    const light = await screen.findByRole('option', {
+      name: /^Light.*Security needs/,
+      hidden: true,
+    });
+    expect(light.textContent).toBe('Light (Security needs Careful or more)');
+    expect(light.getAttribute('data-combobox-disabled')).toBe('true');
+    const careful = await screen.findByRole('option', { name: 'Careful', hidden: true });
+    expect(careful.getAttribute('data-combobox-disabled')).toBeNull();
   });
 
   it('shows the headline and why, and saves them trimmed when changed', async () => {

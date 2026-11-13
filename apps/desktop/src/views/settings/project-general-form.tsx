@@ -24,7 +24,6 @@ import {
   type GeneralErrors,
   type GeneralValues,
 } from './general-values';
-import { FlowSelect } from '../board/flow-select';
 import { PicturesStatus } from './pictures-status';
 import { ScreensMatrixField } from './screens-matrix-field';
 import { SettingRow, SettingsCard } from './setting-row';
@@ -49,7 +48,6 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.humanWaitMinutes === seed.humanWaitMinutes
         ? next.humanWaitMinutes
         : current.humanWaitMinutes,
-    flowId: current.flowId === seed.flowId ? next.flowId : current.flowId,
     budgetCeiling:
       current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
     delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
@@ -538,20 +536,6 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </Group>
         <Collapse expanded={advanced}>
           <SettingsCard>
-            <SettingRow
-              label="Flow"
-              description="The default steps a task goes through. A task can choose its own."
-            >
-              <FlowSelect
-                aria-label="Flow"
-                placeholder="Standard"
-                clearable
-                value={values.flowId}
-                onChange={(flowId) => {
-                  set({ flowId });
-                }}
-              />
-            </SettingRow>
             <SettingRow
               label="Firm reminder"
               description="If a session hasn't handed off by this much memory, it is told again, firmly."

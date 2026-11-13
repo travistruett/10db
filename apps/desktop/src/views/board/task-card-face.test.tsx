@@ -264,3 +264,23 @@ describe('TaskCard face: indicators', () => {
     expect(screen.getByTestId('indicator-row').textContent).toContain('Cancelled');
   });
 });
+
+describe('TaskCard face: rigor and kinds', () => {
+  it('shows the rigor a builder set and each kind as small labelled badges', () => {
+    card({
+      task: taskDto({
+        rigor: 'careful',
+        effectiveRigor: 'careful',
+        kinds: [{ key: 'db-migration', source: 'agent' }],
+      }),
+    });
+    expect(screen.getByTestId('indicator-rigor').textContent).toBe('Careful');
+    expect(screen.getByTestId('indicator-kind-db-migration').textContent).toBe('Db Migration');
+  });
+
+  it('says nothing for a task at the default rigor with no kinds', () => {
+    card({});
+    expect(screen.queryByTestId('indicator-rigor')).toBeNull();
+    expect(screen.queryByTestId('indicator-row')).toBeNull();
+  });
+});

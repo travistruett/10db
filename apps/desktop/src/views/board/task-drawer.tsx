@@ -5,16 +5,17 @@ import {
   PASS_FOLDER_WAIT_NOTICE_KEY,
   reviewRounds,
   SYSTEM_COLUMN_LABEL,
-  RiskTag,
   TaskStatus,
   type AccountId,
   type BatchDto,
-  type FlowId,
+  type Effort,
   type ModelSetting,
   type Notice,
+  type Rigor,
   type ShapeId,
   type TaskDto,
   type TaskId,
+  type TaskKind,
   type WorkstreamDto,
 } from '@10db/contracts';
 import {
@@ -59,7 +60,6 @@ import { closeNote } from './batch/close-note';
 import { CopyTaskId } from './copy-task-id';
 import { BatchPanel } from './batch-panel';
 import { ciLine, ciStatus } from './ci-line';
-import { FlowSelect } from './flow-select';
 import {
   draftOf,
   landingChanged,
@@ -79,7 +79,7 @@ import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
-import { RISK_LABEL } from './risk-labels';
+import { EffortPinSelect, KindsSelect, RigorSelect } from './task-fields';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import { HeadlineField, WhyField } from './task-words-fields';
@@ -96,9 +96,6 @@ import {
 } from './task-state';
 
 type DrawerTab = 'overview' | 'reviews' | 'edit';
-
-const RISKS: readonly RiskTag[] = Object.values(RiskTag);
-const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
 
 export interface TaskDrawerProps {
   readonly task: TaskDto;
@@ -184,8 +181,12 @@ export function TaskDrawer({
   const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
-  const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
-  const [risks, setRisks] = useState<RiskTag[]>([...task.riskTags]);
+  const [rigor, setRigor] = useState<Rigor | null>(task.rigor);
+  const [kinds, setKinds] = useState<TaskKind[]>([...task.kinds]);
+  const [effortPin, setEffortPin] = useState<Effort | null>(task.effortPin);
+  const kindsChanged =
+    kinds.length !== task.kinds.length ||
+    kinds.some((k) => !task.kinds.some((t) => t.key === k.key && t.source === k.source));
   const [modelSetting, setModelSetting] = useState<ModelSetting | null>(task.modelSetting);
   const modelSettingChanged = !sameSetting(modelSetting, task.modelSetting);
   // Areas are the claims the lane takes when it starts, so they change only before then.
@@ -217,9 +218,9 @@ export function TaskDrawer({
     why !== task.why ||
     description !== task.description ||
     criteria !== initialCriteria ||
-    flowId !== task.flowId ||
-    risks.length !== task.riskTags.length ||
-    risks.some((r) => !task.riskTags.includes(r)) ||
+    rigor !== task.rigor ||
+    kindsChanged ||
+    effortPin !== task.effortPin ||
     modelSettingChanged ||
     areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
@@ -263,8 +264,9 @@ export function TaskDrawer({
           title: title.trim(),
           description: description.trim(),
           acceptanceCriteria: lines,
-          flowId,
-          riskTags: risks,
+          ...(rigor !== task.rigor ? { rigor } : {}),
+          ...(kindsChanged ? { kinds } : {}),
+          ...(effortPin !== task.effortPin ? { effortPin } : {}),
           ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
           ...(modelSettingChanged ? { modelSetting } : {}),
@@ -506,22 +508,20 @@ export function TaskDrawer({
                   setCriteria(e.currentTarget.value);
                 }}
               />
-              <FlowSelect
-                label="Flow"
-                description="The steps this task goes through."
-                placeholder="Project default"
-                clearable
-                value={flowId}
-                onChange={setFlowId}
-              />
-              <MultiSelect
-                label="Risks"
-                description="Security, sign-in or migration work gets a review of the plan before any code."
-                data={RISKS.map((r) => ({ value: r, label: RISK_LABEL[r] }))}
-                value={risks}
-                onChange={(values) => {
-                  setRisks(values.filter(isRisk));
+              <KindsSelect
+                label="Kinds"
+                description="What the work touches. A kind can raise the rigor and add steps."
+                value={kinds}
+                onChange={(next) => {
+                  setKinds(next);
                 }}
+              />
+              <RigorSelect
+                label="Rigor"
+                description="How much process the task gets."
+                value={rigor}
+                kindKeys={kinds.map((k) => k.key)}
+                onChange={setRigor}
               />
               {accountId === undefined ? null : (
                 <ModelSettingSelect
@@ -533,6 +533,12 @@ export function TaskDrawer({
                   onChange={setModelSetting}
                 />
               )}
+              <EffortPinSelect
+                label="Effort"
+                description="The effort every step runs at. Automatic leaves it to the playbook."
+                value={effortPin}
+                onChange={setEffortPin}
+              />
               {pullRequestBase === undefined ? null : landingEditable ? (
                 <LandingField
                   baseBranch={pullRequestBase}
