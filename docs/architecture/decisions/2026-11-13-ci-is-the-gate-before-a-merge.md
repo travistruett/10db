@@ -30,13 +30,18 @@ anyway.
 It repeated it on a different platform, though: the test shards and e2e run on Linux, where the daemon's Seatbelt
 tests skip and some tests take another branch (`openInRoot` reads `/proc/self/fd` there, and uses
 `O_NOFOLLOW_ANY` only on macOS). With this decision the `desktop` job also runs the daemon's tests that differ on
-macOS: every `test/*.seatbelt.test.ts`, `src/sandbox`, `src/sessions/open-in-root.test.ts`,
+macOS: every `test/*.seatbelt.test.ts` but `gate-toolchains`, `src/sandbox`, `src/sessions/open-in-root.test.ts`,
 `src/guard/judge.test.ts`, `src/git/lane-writable.test.ts`, `src/keep-awake`,
-`src/session-setup/builder-skills.test.ts` and `src/environment/pinned-install.test.ts`, about 15 seconds. Two
-macOS-only checks run in no CI job: `tests/repo/src/install-app.test.ts`, which `make check-changed` runs on the
-Mac for a change that reaches the repo tests (`scripts/install-app.sh` does), and e2e in WebKit, which only
-`make gate` runs. CI's e2e runs in the Playwright image on Linux. Losing the WebKit run on every change is
-accepted; a WebKit-only failure shows when the app is run.
+`src/session-setup/builder-skills.test.ts` and `src/environment/pinned-install.test.ts`, about 15 seconds.
+
+Three macOS-only checks run in no CI job:
+
+- `test/gate-toolchains.seatbelt.test.ts` needs the builder's own mise and Xcode, which a runner lacks;
+  `make check-changed` runs it on the Mac with the daemon's tests.
+- `tests/repo/src/install-app.test.ts`: `make check-changed` runs it on the Mac for a change that reaches the
+  repo tests (`scripts/install-app.sh` does).
+- e2e in WebKit, which only `make gate` runs. CI's e2e runs in the Playwright image on Linux. Losing the WebKit
+  run on every change is accepted; a WebKit-only failure shows when the app is run.
 
 The repeat was slow and less reliable than CI. Several Claude Code sessions share one 10-core Mac; on 2026-11-13
 its load average was 44. A local gate on 2026-10-28 took 3.3 minutes; one on 2026-11-10 took about 19, 14.5 of
