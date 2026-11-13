@@ -226,7 +226,38 @@ describe('ModelRowDto', () => {
       stepsRun: 0,
       firstSeenAt: '2026-11-06T12:00:00.000Z',
     };
-    expect(ModelRowDto.parse(row)).toEqual(row);
+    expect(ModelRowDto.parse(row)).toMatchObject(row);
+  });
+
+  it('reads a row from before the sources existed with null scores and no sources', () => {
+    const row = ModelRowDto.parse({
+      model: 'mystery-1',
+      name: 'Mystery 1',
+      maker: null,
+      family: null,
+      tier: null,
+      status: 'unknown',
+      availableOn: [],
+      providers: [],
+      inputPrice: null,
+      outputPrice: null,
+      intelligence: 40,
+      costPerTaskUsd: null,
+      outputTokensPerSecond: null,
+      efforts: [],
+      stepsRun: 0,
+      firstSeenAt: null,
+    });
+    expect(row.coding).toBeNull();
+    expect(row.agentic).toBeNull();
+    expect(row.speedProvider).toBeNull();
+    expect(row.sources).toEqual({
+      intelligence: null,
+      coding: null,
+      agentic: null,
+      costPerTask: null,
+      speed: null,
+    });
   });
 
   it('accepts a model with no first-seen time: it has no profile to date it by', () => {

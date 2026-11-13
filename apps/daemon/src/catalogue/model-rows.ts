@@ -6,9 +6,11 @@ import {
   type AccountDto,
   type AccountId,
   type AccountModelDto,
+  ModelSource,
   type ModelEffortDto,
   type ModelProfileDto,
   type ModelRowDto,
+  type ModelSources,
   type Provider,
 } from '@10db/contracts';
 import { costOnAccount, offeredProfiles } from '../routing';
@@ -63,9 +65,29 @@ function listEfforts(
     intelligence: p.scores.intelligence,
     costPerTaskUsd: cost,
     outputTokensPerSecond: p.outputTokensPerSecond,
+    coding: null,
+    agentic: null,
+    sources: aaSources(p.scores.intelligence, cost, p.outputTokensPerSecond),
+    speedProvider: null,
     stepsRun: p.stepsRun,
     firstPassSteps: p.firstPassSteps,
   }));
+}
+
+/** Every figure 10db holds today comes from Artificial Analysis, so a non-null one names it. */
+function aaSources(
+  intelligence: number | null,
+  costPerTask: number | null,
+  speed: number | null,
+): ModelSources {
+  const aa = (value: number | null): ModelSource | null => (value === null ? null : ModelSource.Aa);
+  return {
+    intelligence: aa(intelligence),
+    coding: null,
+    agentic: null,
+    costPerTask: aa(costPerTask),
+    speed: aa(speed),
+  };
 }
 
 /**
@@ -169,6 +191,10 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     );
     const first = efforts[0];
 
+    const rowSpeed =
+      first?.outputTokensPerSecond ??
+      profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
+      null;
     rows.push({
       model,
       name: entry?.name ?? model,
@@ -182,10 +208,11 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       outputPrice: described?.outputPrice ?? null,
       intelligence: first?.intelligence ?? null,
       costPerTaskUsd: first?.costPerTaskUsd ?? null,
-      outputTokensPerSecond:
-        first?.outputTokensPerSecond ??
-        profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
-        null,
+      outputTokensPerSecond: rowSpeed,
+      coding: null,
+      agentic: null,
+      sources: aaSources(first?.intelligence ?? null, first?.costPerTaskUsd ?? null, rowSpeed),
+      speedProvider: null,
       efforts,
       stepsRun: profiles.reduce((sum, p) => sum + p.stepsRun, 0),
       firstSeenAt: firstSeen(profiles),

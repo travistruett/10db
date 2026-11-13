@@ -117,6 +117,17 @@ describe('buildModelRows', () => {
         intelligence: 40,
         costPerTaskUsd: null,
         outputTokensPerSecond: 60,
+        coding: null,
+        agentic: null,
+        speedProvider: null,
+        // Artificial Analysis is the only source until the others are joined in.
+        sources: {
+          intelligence: 'aa',
+          coding: null,
+          agentic: null,
+          costPerTask: null,
+          speed: 'aa',
+        },
         efforts: [
           expect.objectContaining({ effort: 'high', intelligence: 40 }),
           expect.objectContaining({ effort: 'low', intelligence: 30 }),

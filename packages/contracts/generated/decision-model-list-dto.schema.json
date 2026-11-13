@@ -32,6 +32,64 @@
               "string",
               "null"
             ]
+          },
+          "costPerMillionUsd": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secondsPerDecision": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costSource": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "your_calls",
+                  "openrouter_price",
+                  "openrouter",
+                  "assumed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeSource": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "your_calls",
+                  "openrouter_price",
+                  "openrouter",
+                  "assumed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

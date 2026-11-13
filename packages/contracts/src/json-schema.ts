@@ -85,10 +85,23 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import {
+  AaModelDto,
+  BenchmarkKeyInput,
+  BenchmarkStatusDto,
+  OpenRouterSyncStatusDto,
+} from './benchmarks';
 import { GithubSigninDto, GithubStatusDto } from './github';
 import { DecisionModelListDto } from './decision-models';
-import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
+import { DecisionStatsListDto } from './decision-stats';
+import {
+  JudgeCallDto,
+  JudgeCallsPageDto,
+  JudgeCallsPageQuery,
+  JudgeConfigPatch,
+  JudgeStatusDto,
+  JudgeTestResultDto,
+} from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
@@ -320,7 +333,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'github-signin-dto': GithubSigninDto,
   'github-status-dto': GithubStatusDto,
   'decision-model-list-dto': DecisionModelListDto,
+  'decision-stats-list-dto': DecisionStatsListDto,
   'judge-call-dto': JudgeCallDto,
+  'judge-calls-page-dto': JudgeCallsPageDto,
+  'judge-calls-page-query': JudgeCallsPageQuery,
+  'openrouter-sync-status-dto': OpenRouterSyncStatusDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,

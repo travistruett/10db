@@ -24,6 +24,10 @@ describe('decisionModelsFrom', () => {
         inputUsdPerMillion: 0.02,
         outputUsdPerMillion: 0,
         cantCall: null,
+        costPerMillionUsd: null,
+        secondsPerDecision: null,
+        costSource: null,
+        timeSource: null,
       },
     ]);
   });

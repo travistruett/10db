@@ -1,6 +1,7 @@
 import {
   BenchmarkStatusDto,
   ModelStatus,
+  noOpenRouterSync,
   type AaModelDto,
   type ModelProfileDto,
 } from '@10db/contracts';
@@ -39,7 +40,12 @@ const STATUS_KEY = 'benchmarks.status';
 /** The models and efforts offered when scores were last asked for, so an unchanged offer asks for nothing. */
 const OFFERED_KEY = 'benchmarks.offered';
 /** Everything but the model count is recorded at sync time, so reading the status never touches the Keychain. */
-const StoredStatus = BenchmarkStatusDto.omit({ models: true, off: true, syncing: true });
+const StoredStatus = BenchmarkStatusDto.omit({
+  models: true,
+  off: true,
+  syncing: true,
+  openRouter: true,
+});
 type StoredStatus = z.infer<typeof StoredStatus>;
 const NEVER: StoredStatus = {
   keyConfigured: false,
@@ -148,6 +154,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     models: modelCount(),
     off: false,
     syncing: running !== null,
+    openRouter: noOpenRouterSync(),
   });
   /**
    * Records the outcome and re-arms the timer for it, so the timer and the status move together. A database
@@ -168,7 +175,13 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       );
     }
     rearm();
-    return { ...merged, models: modelCount(), off: false, syncing: false };
+    return {
+      ...merged,
+      models: modelCount(),
+      off: false,
+      syncing: false,
+      openRouter: noOpenRouterSync(),
+    };
   };
 
   async function attempt(now: string): Promise<BenchmarkStatusDto> {

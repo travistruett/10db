@@ -68,6 +68,10 @@ export function decisionModelsFrom(body: unknown): DecisionModelDto[] {
       inputUsdPerMillion: perMillion(entry.pricing.prompt),
       outputUsdPerMillion: perMillion(entry.pricing.completion),
       cantCall: cantCall(entry),
+      costPerMillionUsd: null,
+      secondsPerDecision: null,
+      costSource: null,
+      timeSource: null,
     });
   }
   return models.sort(byMakerLatestName);

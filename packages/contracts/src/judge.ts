@@ -157,3 +157,24 @@ export const JudgeCallDto = z.object({
   createdAt: z.iso.datetime(),
 });
 export type JudgeCallDto = z.infer<typeof JudgeCallDto>;
+
+/** `GET /judge/calls/page`: 1 to 100 calls (a larger number is read as 100, a non-number as 20), newest first. */
+export const JudgeCallsPageQuery = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .catch(20)
+    .transform((n) => Math.min(n, 100)),
+  offset: z.coerce.number().int().min(0).default(0),
+  decision: z.enum(JudgeDecision).optional(),
+  outcome: z.enum(JudgeOutcome).optional(),
+});
+export type JudgeCallsPageQuery = z.infer<typeof JudgeCallsPageQuery>;
+
+export const JudgeCallsPageDto = z.object({
+  calls: z.array(JudgeCallDto),
+  /** Every call the filters match, not just this page. */
+  total: z.int().min(0),
+});
+export type JudgeCallsPageDto = z.infer<typeof JudgeCallsPageDto>;
