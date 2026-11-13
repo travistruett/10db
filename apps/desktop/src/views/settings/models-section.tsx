@@ -37,6 +37,7 @@ import {
   type ModelSort,
 } from './model-order';
 import { ModelsTable } from './models-table';
+import { RaisedPanel } from './raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
@@ -279,11 +280,13 @@ export function ModelsSection() {
             }}
           />
         </Group>
-        <RightsizingChart
-          result={result}
-          costLabel={`Cost per task (USD, log scale). ${note}`}
-          height={300}
-        />
+        <RaisedPanel>
+          <RightsizingChart
+            result={result}
+            costLabel={`Cost per task (USD, log scale). ${note}`}
+            height={300}
+          />
+        </RaisedPanel>
         <Text size="xs" c="dimmed">
           Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account.
           {result.omitted > 0

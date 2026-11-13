@@ -174,6 +174,7 @@ export function ModelsTable({
       columns={columns}
       idAccessor={(row) => row.model}
       withTableBorder
+      backgroundColor="var(--tendb-color-panel)"
       borderRadius="md"
       verticalSpacing="sm"
       horizontalSpacing="md"

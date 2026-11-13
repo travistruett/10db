@@ -116,6 +116,7 @@ export function RolePicksPanel({
         columns={columns}
         idAccessor="role"
         withTableBorder
+        backgroundColor="var(--tendb-color-panel)"
         borderRadius="md"
         verticalSpacing="xs"
         horizontalSpacing="md"
