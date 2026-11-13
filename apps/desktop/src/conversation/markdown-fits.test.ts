@@ -22,6 +22,27 @@ describe('markdownFits', () => {
     ['emphasis runs in inline code are code', `\`${'*a '.repeat(1000)}\``, true],
     ['a deep indent in a fence is code', ['```', `${' '.repeat(400)}x`, '```'].join('\n'), true],
     ['thematic breaks', '***\n\n- - -\n\n___', true],
+    [
+      'a tight checklist of lone tildes',
+      Array.from({ length: 60 }, (_, n) => `- [ ] T${String(n)} (P1, ~2h / ~10m) the step`).join(
+        '\n',
+      ),
+      true,
+    ],
+    [
+      'a table of lone stars',
+      [
+        '| glob | holds |',
+        '| --- | --- |',
+        ...Array.from({ length: 60 }, () => '| *.md | docs |'),
+      ].join('\n'),
+      true,
+    ],
+    [
+      'headings of lone underscores',
+      Array.from({ length: 60 }, () => '## _draft x').join('\n'),
+      true,
+    ],
     ['the longest document drawn', 'a'.repeat(MARKDOWN_MAX_LENGTH), true],
     ['one character longer', 'a'.repeat(MARKDOWN_MAX_LENGTH + 1), false],
   ])('%s', (_, text, fits) => {

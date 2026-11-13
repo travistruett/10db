@@ -3,7 +3,7 @@
 // or runs for seconds first, and one longer than MARKDOWN_MAX_LENGTH holds the window while it draws.
 // This scan reads each line once and never recurses.
 
-/** The longest text drawn as markdown, in UTF-16 code units: three times the longest plan seen. */
+/** The longest text drawn as markdown, in UTF-16 code units; a longer one shows whole as plain text. */
 export const MARKDOWN_MAX_LENGTH = 512 * 1024;
 
 /** The deepest nesting drawn: block quotes and lists, plus emphasis left open, on any line. */
@@ -13,6 +13,8 @@ export const MARKDOWN_MAX_DEPTH = 32;
 const CONTAINER = /^[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))/;
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 const EMPHASIS = new Set(['*', '_', '~']);
+/** A table row or an ATX heading: a block of its own, which emphasis can't run into. */
+const OWN_BLOCK = /^[ \t]*(?:\||#{1,6}(?:[ \t]|$))/;
 const isSpace = (c: string | undefined): boolean => c === undefined || /\s/.test(c);
 
 /** Columns of leading white space, a tab to the next multiple of four. */
@@ -82,6 +84,9 @@ export function markdownFits(text: string): boolean {
       open = 0;
       continue;
     }
+    // A list item, a quote, a table row or a heading starts a new block, and emphasis never crosses
+    // from one block into the next.
+    if (markers > 0 || OWN_BLOCK.test(rest)) open = 0;
     // An indented list marker nests one level for every two columns before it.
     const containers = markers === 0 ? 0 : markers + Math.floor(indentOf(line) / 2);
     const emphasis = emphasisAfter(rest, open);
