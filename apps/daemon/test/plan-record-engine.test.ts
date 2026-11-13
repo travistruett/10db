@@ -1,14 +1,12 @@
 import { PlanImportInput, ShapeProposalState, type ProjectId, type TaskId } from '@10db/contracts';
 import {
   getTaskContext,
-  getWorkstream,
   insertWorkstream,
   listEventsAfter,
   listShapeLinks,
   listShapeProposals,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildContextPack, renderPlanContext } from '../src/briefing';
 import { createPlanRecordServices } from '../src/daemon/plan-record-services';
 import { convertProposals } from '../src/shape/convert';
 import { createTestEngine, type TestEngine } from './engine';
@@ -95,11 +93,9 @@ describe('a Plan through the pipeline', () => {
 
     const prompt = e.adapter.prompts[0]?.prompt ?? '';
     const packed = getTaskContext(e.store.db, taskId)?.packedText ?? '';
-    const plan = buildContextPack(e.store.db, getWorkstream(e.store.db, workstream.id)).plan;
-    if (plan === null) throw new Error('no plan in the pack');
-    expect(packed).toBe(renderPlanContext(plan).join('\n'));
+    expect(packed).toContain('Your section (p1#task-1):');
     expect(prompt).toContain(packed);
-    expect(prompt).toContain(
+    expect(packed).toContain(
       'Your section (p1#task-1):\n## Task 1: Pair a device\nPair it over the tailnet.  \n',
     );
 

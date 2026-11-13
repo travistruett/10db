@@ -34,8 +34,8 @@ import {
   quoteSlackAnswer,
   recordPlanPacked,
   renderHandoff,
-  renderPlanContext,
 } from './index';
+import { renderPlanContext } from './plan-context-text';
 
 const task = {
   title: 'Add the badge',
