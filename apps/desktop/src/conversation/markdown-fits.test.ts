@@ -23,26 +23,42 @@ describe('markdownFits', () => {
     ['a deep indent in a fence is code', ['```', `${' '.repeat(400)}x`, '```'].join('\n'), true],
     ['thematic breaks', '***\n\n- - -\n\n___', true],
     [
+      'emphasis nested across quote lines past the limit',
+      [
+        ...Array.from({ length: 40 }, () => '> *a'),
+        ...Array.from({ length: 40 }, () => '> a*'),
+      ].join('\n'),
+      false,
+    ],
+    [
+      'emphasis nested across pipe and list lines past the limit',
+      [
+        ...Array.from({ length: 20 }, () => '| *a'),
+        ...Array.from({ length: 20 }, () => '2. _a'),
+        'x',
+        ...Array.from({ length: 20 }, () => '| a*'),
+        ...Array.from({ length: 20 }, () => 'a_'),
+      ].join('\n'),
+      false,
+    ],
+    [
+      'openers with no closer nest nothing',
+      Array.from({ length: 200 }, () => '> *a ~b _c').join('\n'),
+      true,
+    ],
+    [
+      'a blank line closes what a paragraph left open',
+      ['*a '.repeat(30), '', ' a*'.repeat(30)].join('\n'),
+      true,
+    ],
+    ['a code span hides its emphasis', `\`\`${'*a '.repeat(100)}\`\` ${' a*'.repeat(100)}`, true],
+    ['an unclosed backtick hides nothing', `\` ${'*a '.repeat(100)}${' a*'.repeat(100)}`, false],
+    [
       'a tight checklist of lone tildes',
       Array.from({ length: 60 }, (_, n) => `- [ ] T${String(n)} (P1, ~2h / ~10m) the step`).join(
         '\n',
       ),
       true,
-    ],
-    [
-      'emphasis opened across quote lines past the limit',
-      Array.from({ length: 40 }, () => '> *a').join('\n'),
-      false,
-    ],
-    [
-      'emphasis opened across pipe lines that are no table',
-      Array.from({ length: 40 }, () => '| *a').join('\n'),
-      false,
-    ],
-    [
-      'a thematic break is no table delimiter',
-      ['x', '---', ...Array.from({ length: 40 }, () => '| *a')].join('\n'),
-      false,
     ],
     [
       'a table of lone stars',
