@@ -215,6 +215,7 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
+import { LiveSystemsDto } from './trust-policy';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
@@ -274,6 +275,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'self-update-wait-input': SelfUpdateWaitInput,
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,
+  'live-systems-dto': LiveSystemsDto,
   'trust-overrides': TrustOverrides,
   'trust-settings-dto': TrustSettingsDto,
   'project-trust-dto': ProjectTrustDto,

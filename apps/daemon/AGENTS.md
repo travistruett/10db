@@ -55,7 +55,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `judge`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
+`clock`, `log`, `events`, `judge`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
 `delivery`, `accounts` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -72,6 +72,8 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   hooks and `allowed-tools` run as in Claude Code (live checks L3b and L3c: the guard doesn't judge a hook's
   rewrite again, and `allowed-tools` skips the card, never a guard deny); a plugin hook starts in its wrapper's
   folder.
+- `trust/` builds each session's `TrustPolicy` (`@10db/contracts`): the four limits, whose prose lives in one
+  place (`trust/limits.ts`), the environment the judge reads them in, and the coordination lines of its surface.
 - `sandbox/` opens a session's setup read-only (`setup-reads.ts`: `setupReadRefusal` judges each real path,
   `collapseReads` keeps the profile small; `setup-dir.ts`: `keepSetup` and `createSetupDir`, one
   `10db-setup-<hex>` dir per session in the files root, removed with its sandbox and swept by `stale-files.ts`;
