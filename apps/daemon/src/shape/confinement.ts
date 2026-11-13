@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { join } from 'node:path';
-import { ShapeToolName } from '@10db/contracts';
+import { JudgeKind, ShapeToolName } from '@10db/contracts';
 import { z } from 'zod';
 import {
   isOverLongPath,
@@ -154,6 +154,8 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   const command = stringField(call.toolInput, 'command');
   if (command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
   const verdict = judgePreToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     toolName: call.toolName,
     toolInput: call.toolInput,
     repoPath: access.checkout,

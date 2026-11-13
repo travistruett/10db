@@ -13,7 +13,7 @@ import {
   type TaskMessageRow,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { tempDir, type TempDir, testPolicy } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { pictureLimitsFor } from '../screens';
@@ -22,7 +22,7 @@ import {
   type FakeScriptBook,
   type InterruptReceipt,
   type SessionHandle,
-  type SessionSpec,
+  type LaneSessionSpec,
 } from '../sessions';
 import { createLaneMessages, outgoingMessage } from './lane-messages';
 import { threadInlineBytes } from './thread-pictures';
@@ -69,10 +69,10 @@ const say = (body: string, pictures = 0): TaskMessageRow => {
 };
 
 function startSession(adapter: FakeAdapter): SessionHandle {
-  const spec: SessionSpec = {
+  const spec: LaneSessionSpec = {
     sessionId: mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    policy: testPolicy(),
+    profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',
     model: 'claude-sonnet-5-5',
@@ -86,12 +86,12 @@ function startSession(adapter: FakeAdapter): SessionHandle {
       identity: null,
     },
     projectMcpServers: {},
-    allowedTools: [],
+    sandbox: null,
     mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'allow' }),
   };
-  return adapter.start(spec);
+  return adapter.open(spec);
 }
 
 const undelivered = () => listUndeliveredTaskMessages(state.db, taskId).map((m) => m.body);

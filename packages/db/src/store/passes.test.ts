@@ -40,14 +40,18 @@ import {
   getWorkstreamRow,
   insertBatch,
   insertPass,
+  insertSystemNotice,
   insertTask,
   insertWorkstream,
   joinPass,
+  offerAllowThis,
+  offerToAgent,
   leavePass,
   listPassCheckPids,
   listPassDirt,
   listLivePasses,
   listPassTasks,
+  listTaskThread,
   listUnfinishedAbandons,
   passHoldingFolder,
   passHoldingTask,
@@ -463,6 +467,25 @@ describe('leaving a pass', () => {
     const lanes = countLanes(store.db);
     expect(lanes.byPass.get(pass.id)).toBeUndefined();
     expect(lanes.byProject.get(project.id)).toBe(1);
+  });
+
+  it("drops the task's Allow this offers, so a go-ahead never reaches a later session", () => {
+    const t = task();
+    store.write((ctx) => insertPass(ctx, passInput([t])));
+    const { allowed, offered } = store.write((ctx) => {
+      const allowed = insertSystemNotice(ctx, t, 'Auto mode stopped this Bash call.');
+      offerAllowThis(ctx, allowed.id, 'I approve this exact Bash call.');
+      const offered = insertSystemNotice(ctx, t, 'The check failed.');
+      offerToAgent(ctx, offered.id, 'Fix the check.');
+      return { allowed, offered };
+    }).value;
+    store.write((ctx) => {
+      leavePass(ctx, t);
+    });
+    expect(listTaskThread(store.db, t).map((m) => [m.id, m.sendable, m.allowThis])).toEqual([
+      [allowed.id, false, false],
+      [offered.id, true, false],
+    ]);
   });
 
   it("keeps a taken-out task's saved work and the commit it was kept on, says so on the task, and clears them", () => {

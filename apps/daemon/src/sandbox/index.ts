@@ -6,7 +6,6 @@ export {
   SYSTEM_READS,
   type LaneProfileInput,
 } from './profile';
-export { autoModeRules } from './auto-mode-rules';
 export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
@@ -50,6 +49,7 @@ export {
   expandHome,
   fileAccessJudge,
   isOutsideCopy,
+  isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
@@ -78,3 +78,4 @@ export { singleQuoted } from './posix-quote';
 export type { SetupInput } from './setup-input';
 export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
+export { writeSecretRead } from './secret-reads';

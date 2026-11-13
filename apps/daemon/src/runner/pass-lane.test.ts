@@ -15,6 +15,7 @@ import {
   type PassDto,
   type TaskDto,
   type TaskMessageId,
+  type ToolCallView,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -45,6 +46,7 @@ import {
   endPassTurn,
   listTaskThread,
   leavePass,
+  offeredText,
   listWorkstreams,
   openPassTurn,
   patchAccount,
@@ -342,6 +344,72 @@ describe('a pass task turn by turn', () => {
   });
 });
 
+describe("auto mode's denial in a pass", () => {
+  const denial = (summary: string, by: 'classifier' | 'safety_check' = 'classifier'): FakeStep => ({
+    do: 'judge_denied',
+    toolName: 'Bash',
+    summary,
+    reason: 'The classifier judged this action dangerous',
+    by,
+  });
+  /** The page's notices that report a denial. */
+  const denials = (task: TaskDto) =>
+    listTaskThread(engine.store.db, task.id).filter((m) => m.body.startsWith('Auto mode stopped'));
+
+  it.each([
+    {
+      name: 'a classifier denial is a notice with Allow this, and the go-ahead it sends names the call',
+      step: denial('npx vercel deploy --prod --yes'),
+      offered: true,
+      shows: 'npx vercel deploy --prod --yes',
+    },
+    {
+      name: "a safety check's denial is a notice with no Allow this",
+      step: denial('rm -rf $(cat list)', 'safety_check'),
+      offered: false,
+      shows: 'only you can run it, in a terminal',
+    },
+    {
+      name: 'a denial too long to approve in one message has no Allow this',
+      step: denial(`echo ${'a'.repeat(4000)}`),
+      offered: false,
+      shows: '(cut)',
+    },
+  ])('$name', async ({ step, offered, shows }) => {
+    const summary = step.do === 'judge_denied' ? step.summary : '';
+    const { task, pass, id } = await openPage([
+      [{ do: 'consume' }, step, { do: 'turn_complete', text: 'Stopped.' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    const [notice, ...others] = denials(task);
+    expect(others).toEqual([]);
+    expect(notice).toMatchObject({ author: 'system', kind: 'notice', allowThis: offered });
+    expect(notice?.body).toContain(shows);
+    // Allow this is Send to Agent's offer, whose text is the go-ahead for exactly this call.
+    expect(notice === undefined ? null : offeredText(engine.store.db, notice.id)).toBe(
+      offered
+        ? `I approve this exact Bash call. Run it again as it was:\n\n\`\`\`\n${summary}\n\`\`\``
+        : null,
+    );
+    expect(getPass(engine.store.db, pass.id).state).toBe('OPEN');
+  });
+});
+
+describe('the policy a pass session runs under', () => {
+  it('is the pass policy, with the builder in it', async () => {
+    const specs: { policy: { surface: string; attended: boolean } }[] = [];
+    const { id } = await openPage([turn('one\n', 'Done.')], 'Make the form tidy', () => {
+      engine.adapter.seen = (spec) => {
+        specs.push(spec);
+        return {};
+      };
+    });
+    await waitFor(() => specs[0]);
+    expect(specs[0]?.policy).toMatchObject({ surface: 'pass', attended: true });
+    await waitFor(isWaiting.bind(null, id));
+  });
+});
+
 describe("a working turn's live line", () => {
   it('names the tool and the file it aims at, and counts the files the turn wrote, not those it read', async () => {
     const form = 'src/settings/form.tsx';
@@ -376,6 +444,70 @@ describe("a working turn's live line", () => {
       [PAGE_FILE],
       [PAGE_FILE],
       [PAGE_FILE, form],
+    ]);
+  });
+
+  it('names the tool and counts the files written from tool calls alone, once per call', async () => {
+    const at = '2026-11-12T00:00:00.000Z';
+    const common = {
+      startedAt: at,
+      parentId: null,
+      refusal: null,
+      deniedBy: null,
+      limit: null,
+      soft: null,
+    } as const;
+    const edit = (status: 'running' | 'done'): ToolCallView => ({
+      ...common,
+      kind: 'edit',
+      id: 'fc_1:0',
+      harnessTool: 'apply_patch',
+      status,
+      title: PAGE_FILE,
+      durationMs: status === 'done' ? 5 : null,
+      path: PAGE_FILE,
+      change: 'update',
+      movePath: null,
+      hunks: [],
+      addedLines: 1,
+      removedLines: 0,
+      truncated: false,
+    });
+    const command: ToolCallView = {
+      ...common,
+      kind: 'command',
+      id: 'cmd_1',
+      harnessTool: 'command',
+      status: 'running',
+      title: 'pnpm test',
+      durationMs: null,
+      command: 'pnpm test',
+      cwd: null,
+      outputTail: '',
+      outputBytes: 0,
+      exitCode: null,
+    };
+    const { pass, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool_call', call: edit('running') },
+        { do: 'tool_call', call: edit('done') },
+        { do: 'tool_call', call: command },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+
+    const activity = await waitFor(() => {
+      const now = passView(engine.store.db, pass.id).pages[0]?.turn?.activity;
+      return now?.tool === 'command' ? now : undefined;
+    });
+    expect(activity).toMatchObject({ tool: 'command', target: 'pnpm', filesTouched: [PAGE_FILE] });
+    const rows = listEventsAfter(engine.store.db, 0, 1000).filter(
+      (e) => e.type === 'session.activity' && e.data['workstreamId'] === id,
+    );
+    expect(rows.map((e) => SessionActivityData.parse(e.data).tool)).toEqual([
+      { name: 'apply_patch', target: PAGE_FILE },
+      { name: 'command', target: 'pnpm' },
     ]);
   });
 });

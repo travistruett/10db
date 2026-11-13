@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import type { ProjectDto } from '@10db/contracts';
+import { DeniedBy, type ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules } from '@10db/db';
 import { allCheckouts } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -202,6 +202,7 @@ export function createShapePreparer(deps: {
           Promise.resolve({
             behavior: 'deny',
             message: 'This session has no sandbox to run it in.',
+            by: DeniedBy.TenDb,
           }),
         trackProcesses: () => undefined,
         release: () => Promise.resolve(),

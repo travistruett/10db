@@ -8,7 +8,7 @@ import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import {
   AccountProbeError,
   CompletionError,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
   type SessionHandle,
 } from './types';
@@ -41,7 +41,7 @@ const SIGNED_IN = {
   },
 };
 
-function adapterOn(server: FakeAppServer, clock: ManualClock = new ManualClock()): SessionAdapter {
+function adapterOn(server: FakeAppServer, clock: ManualClock = new ManualClock()): AgentAdapter {
   return createCodexAdapter({
     codexPath: '/opt/codex',
     logger: silentLogger,
@@ -222,8 +222,8 @@ describe('the rest of the adapter', () => {
   });
 
   it('ends a Shape conversation at once, saying brainstorm chat is not available on a ChatGPT account', async () => {
-    // The spec is never read: the conversation ends before it starts.
-    const handle = adapterOn(fakeAppServer({})).startShape({} as never);
+    // Only the profile is read: the conversation ends before it starts.
+    const handle = adapterOn(fakeAppServer({})).open({ profile: { kind: 'explore' } } as never);
     const [ended] = await events(handle);
     expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
     expect(JSON.stringify(ended)).toContain('ChatGPT');

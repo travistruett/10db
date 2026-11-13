@@ -75,16 +75,15 @@ const PassDirtTrailers = z.object({
  * Config on every daemon git call beside `DAEMON_GIT_CONFIG`: no attributes file, git's own checks on
  * paths that would be `.git` on HFS+ or NTFS, and no submodule recursion.
  */
-const NO_ATTRIBUTES: readonly string[] = [
-  '-c',
-  'core.attributesFile=/dev/null',
-  '-c',
-  'core.protectHFS=true',
-  '-c',
-  'core.protectNTFS=true',
-  '-c',
-  'submodule.recurse=false',
-];
+export const NO_ATTRIBUTES_CONFIG: Readonly<Record<string, string>> = {
+  'core.attributesFile': '/dev/null',
+  'core.protectHFS': 'true',
+  'core.protectNTFS': 'true',
+  'submodule.recurse': 'false',
+};
+const NO_ATTRIBUTES: readonly string[] = Object.entries(NO_ATTRIBUTES_CONFIG).flatMap(
+  ([key, value]) => ['-c', `${key}=${value}`],
+);
 
 /** `removeWorktree` was asked to remove a path that is not a worktree 10db made. */
 export class WorktreeNotOursError extends Error {

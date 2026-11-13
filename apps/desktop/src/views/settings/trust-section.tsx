@@ -1,8 +1,14 @@
-import type { InstalledPluginDto, TrustSwitches } from '@10db/contracts';
-import { Alert, Button, Group, Stack, Switch, Text } from '@mantine/core';
+import {
+  JudgeKind,
+  type AccountJudgeDto,
+  type InstalledPluginDto,
+  type TrustSwitches,
+} from '@10db/contracts';
+import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from '@mantine/core';
+import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
-import { TRUST_ROWS } from './trust-rows';
+import { JUDGE_LABELS, NATIVE_JUDGE_NOTE, TRUST_ROWS } from './trust-rows';
 
 /** A row's description with the note on each agent under it. */
 export function TrustRowText({
@@ -47,6 +53,75 @@ function PluginText({
 /** The plugin switches without `id`'s, so it follows Claude Code again. */
 function without(plugins: Readonly<Record<string, boolean>>, id: string): Record<string, boolean> {
   return Object.fromEntries(Object.entries(plugins).filter(([key]) => key !== id));
+}
+
+/** What a judge row adds under its model: the fallback a native judge has, or why the rules judge. */
+function judgeNote(row: AccountJudgeDto): string | null {
+  switch (row.judge) {
+    case JudgeKind.Native:
+      return NATIVE_JUDGE_NOTE;
+    case JudgeKind.Rules:
+      return row.why;
+    case JudgeKind.Tendb:
+      return null;
+  }
+}
+
+/** Who judges a new task's calls on each account, on the model it would run; read-only. */
+function JudgeList({ judges }: { readonly judges: readonly AccountJudgeDto[] }) {
+  const headingId = useId();
+  return (
+    <Stack gap="xs" role="region" aria-labelledby={headingId}>
+      <Title order={5} id={headingId}>
+        Judge
+      </Title>
+      <Text size="sm" c="dimmed">
+        What decides a new task's routine calls on each account, on the model it would run.
+      </Text>
+      <Paper withBorder radius="md" component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+        {judges.map((row, i) => (
+          <Fragment key={row.accountId}>
+            {i > 0 ? <Divider component="li" aria-hidden /> : null}
+            <JudgeRow row={row} />
+          </Fragment>
+        ))}
+      </Paper>
+    </Stack>
+  );
+}
+
+function JudgeRow({ row }: { readonly row: AccountJudgeDto }) {
+  const labelId = useId();
+  const note = judgeNote(row);
+  return (
+    <Group
+      component="li"
+      aria-labelledby={labelId}
+      justify="space-between"
+      align="flex-start"
+      wrap="nowrap"
+      gap="md"
+      px="md"
+      py="sm"
+    >
+      <Stack gap={2} miw={0}>
+        <Text size="sm" fw={500} id={labelId}>
+          {row.label}
+        </Text>
+        <Text size="sm" c="dimmed">
+          {row.model ?? 'No model offered'}
+        </Text>
+        {note === null ? null : (
+          <Text size="xs" c="dimmed">
+            {note}
+          </Text>
+        )}
+      </Stack>
+      <Text size="sm" ta="right">
+        {JUDGE_LABELS[row.judge]}
+      </Text>
+    </Group>
+  );
 }
 
 /** Settings › Trust: what comes along into every session, app-wide, and the builder's plugins. */
@@ -127,6 +202,7 @@ export function TrustSection() {
               </SettingRow>
             ))}
       </SettingsCard>
+      {trust.data === undefined ? null : <JudgeList judges={trust.data.judges} />}
     </Stack>
   );
 }

@@ -90,14 +90,6 @@ describe('wrapPlugin', () => {
   // would reach an entry spelled another way.
   it.each<[string, () => void, string]>([
     [
-      'a Hooks folder holding hooks.json',
-      () => {
-        rmSync(join(plugin, 'hooks'), { recursive: true });
-        write(join(plugin, 'Hooks/hooks.json'), hooksJson('npx thing'));
-      },
-      'hooks/hooks.json',
-    ],
-    [
       'a .MCP.json',
       () => {
         rmSync(join(plugin, '.mcp.json'));
@@ -117,7 +109,67 @@ describe('wrapPlugin', () => {
     arrange();
     wrapPlugin(plugin, into, []);
     expect(existsSync(join(into, unwanted))).toBe(false);
-    expect(readdirSync(into).sort()).toEqual(['.claude-plugin', 'agents', 'commands', 'skills']);
+    expect(readdirSync(into).sort()).toEqual([
+      '.claude-plugin',
+      'agents',
+      'commands',
+      'hooks',
+      'skills',
+    ]);
+  });
+
+  it('re-emits hooks.json with each command started in the wrapper’s folder, and links the scripts', () => {
+    wrapPlugin(plugin, into, []);
+    const emitted: unknown = JSON.parse(readFileSync(join(into, 'hooks/hooks.json'), 'utf8'));
+    expect(emitted).toEqual({
+      description: 'h',
+      hooks: {
+        SessionStart: [
+          {
+            matcher: 'startup',
+            hooks: [
+              { type: 'command', command: `cd '${into}' && npx thing`, timeout: 5 },
+              { type: 'prompt', prompt: 'say hi' },
+            ],
+          },
+        ],
+      },
+    });
+    expect(readlinkSync(join(into, 'hooks/run.sh'))).toBe(join(plugin, 'hooks/run.sh'));
+  });
+
+  // Only where the disk folds case does Claude Code read `Hooks/` as `hooks/`.
+  it.skipIf(process.platform !== 'darwin')(
+    're-emits a Hooks folder spelled in another case under hooks, once',
+    () => {
+      rmSync(join(plugin, 'hooks'), { recursive: true });
+      write(join(plugin, 'Hooks/Hooks.json'), hooksJson('npx thing'));
+      wrapPlugin(plugin, into, []);
+      expect(readdirSync(into).filter((entry) => entry.toLowerCase() === 'hooks')).toEqual([
+        'hooks',
+      ]);
+      expect(readFileSync(join(into, 'hooks/hooks.json'), 'utf8')).toContain(
+        JSON.stringify(`cd '${into}' && npx thing`),
+      );
+    },
+  );
+
+  it.skipIf(process.platform === 'darwin' || process.platform === 'win32')(
+    'leaves a Hooks folder spelled in another case out where the disk keeps case',
+    () => {
+      rmSync(join(plugin, 'hooks'), { recursive: true });
+      write(join(plugin, 'Hooks/Hooks.json'), hooksJson('npx thing'));
+      wrapPlugin(plugin, into, []);
+      expect(readdirSync(into).filter((entry) => entry.toLowerCase() === 'hooks')).toEqual([]);
+    },
+  );
+
+  it('lists a hooks.json it cannot read as left out', () => {
+    write(join(plugin, 'hooks/hooks.json'), '{"hooks": 3}');
+    expect(wrapPlugin(plugin, into, []).leftOut).toContainEqual({
+      what: "p's hooks",
+      why: 'its hooks.json is not a shape 10db reads',
+    });
   });
 
   it('names the wrapper by its folder, the plugin id’s name, whatever the manifest says', () => {
@@ -134,21 +186,10 @@ describe('wrapPlugin', () => {
     expect(readFileSync(join(into, '.claude-plugin/plugin.json'), 'utf8')).not.toContain('evil');
     expect(leftOut).toEqual([
       {
-        what: 'p: commands in its manifest',
+        what: 'p: hooks, commands in its manifest',
         why: 'the wrapper lays out only the default folders',
       },
-      { what: "p's hooks", why: "plugin hooks don't run in 10db sessions yet" },
     ]);
-  });
-
-  it('writes no hooks dir and lists the plugin’s hooks as left out', () => {
-    const { leftOut } = wrapPlugin(plugin, into, []);
-    expect(existsSync(join(into, 'hooks'))).toBe(false);
-    expect(readFileSync(join(into, '.claude-plugin/plugin.json'), 'utf8')).not.toContain('hooks');
-    expect(leftOut).toContainEqual({
-      what: "p's hooks",
-      why: "plugin hooks don't run in 10db sessions yet",
-    });
   });
 
   it('lists no hooks for a plugin that has none', () => {
@@ -163,34 +204,19 @@ describe('wrapPlugin', () => {
     return { changes, leftOut: wrapPlugin(plugin, into, changes?.rewrites ?? []).leftOut };
   };
 
-  // Research L3c: a skill's or command's hook and grant act outside 10db's guard and broker, an agent's
-  // MCP servers would start servers 10db never launched.
+  // An agent's MCP servers would start servers 10db never launched, until Your MCP servers (T6).
   it.each<[string, string, string, string]>([
-    ['a skill’s hooks', 'skills/x/SKILL.md', 'hooks:\n  PreToolUse: []\n', 'hooks left out'],
     [
-      'a skill’s allowed-tools',
-      'skills/x/SKILL.md',
-      'allowed-tools: Bash\n',
-      'pre-approved tools left out',
-    ],
-    ['a command’s hooks', 'commands/c.md', 'hooks: {}\n', 'hooks left out'],
-    [
-      'a nested command’s allowed-tools',
-      'commands/sub/d.md',
-      'allowed-tools: [Bash]\n',
-      'pre-approved tools left out',
-    ],
-    [
-      'an agent’s hooks and mcpServers',
+      'an agent’s mcpServers',
       'agents/a.md',
-      'hooks: {}\nmcpServers:\n  s: {command: evil}\n',
-      'hooks left out, MCP servers left out',
+      'mcpServers:\n  s: {command: evil}\n',
+      'MCP servers arrive with Your MCP servers (T6)',
     ],
     [
-      'an agent’s allowedTools',
-      'agents/a.md',
-      'allowedTools: Bash\n',
-      'pre-approved tools left out',
+      'a nested agent’s mcp_servers',
+      'agents/sub/b.md',
+      'mcp_servers: {}\n',
+      'MCP servers arrive with Your MCP servers (T6)',
     ],
   ])('re-emits %s without it, keeping every other key and the body', (_name, file, keys, note) => {
     write(join(plugin, file), `---\nname: n\n${keys}description: d\n---\nBody !\`ls\`\n`);
@@ -207,6 +233,19 @@ describe('wrapPlugin', () => {
     expect(lstatSync(join(into, file, '..')).isSymbolicLink()).toBe(false);
   });
 
+  // The builder installed the plugin: its definitions' hooks and pre-approved tools run as in Claude Code.
+  it.each<[string, string, string]>([
+    ['a skill’s hooks', 'skills/x/SKILL.md', 'hooks:\n  PreToolUse: []\n'],
+    ['a skill’s allowed-tools', 'skills/x/SKILL.md', 'allowed-tools: Bash\n'],
+    ['a command’s hooks', 'commands/c.md', 'hooks: {}\n'],
+    ['an agent’s allowedTools', 'agents/a.md', 'allowedTools: Bash\n'],
+  ])('links %s as written', (_name, file, keys) => {
+    write(join(plugin, file), `---\nname: n\n${keys}---\nBody\n`);
+    const { changes } = wrap();
+    expect(changes).toEqual({ rewrites: [], notes: [] });
+    expect(readFileSync(join(into, file), 'utf8')).toBe(`---\nname: n\n${keys}---\nBody\n`);
+  });
+
   it('links a folder whose definitions hold none of it', () => {
     write(
       join(plugin, 'skills/x/SKILL.md'),
@@ -218,13 +257,13 @@ describe('wrapPlugin', () => {
   });
 
   it('leaves out a definition whose frontmatter it cannot read when its text could name a stripped key', () => {
-    write(join(plugin, 'agents/a.md'), '---\nname: a\nhooks: [unclosed\n---\nBody\n');
+    write(join(plugin, 'agents/a.md'), '---\nname: a\nmcpServers: [unclosed\n---\nBody\n');
     write(join(plugin, 'agents/b.md'), '---\nname: b\n---\nBody\n');
     const { changes } = wrap();
     expect(changes?.notes).toEqual([
       {
         where: 'agents/a.md',
-        why: 'left out: its frontmatter is not YAML 10db reads, and it may hold hooks or pre-approved tools',
+        why: 'left out: its frontmatter is not YAML 10db reads, and it may hold MCP servers',
       },
     ]);
     expect(existsSync(join(into, 'agents/a.md'))).toBe(false);
@@ -232,7 +271,7 @@ describe('wrapPlugin', () => {
   });
 
   it('re-emits a definition under each path a folder link reaches it by', () => {
-    write(join(plugin, 'shared/x.md'), '---\nname: x\nhooks: {}\n---\nBody\n');
+    write(join(plugin, 'shared/x.md'), '---\nname: x\nmcpServers: {}\n---\nBody\n');
     mkdirSync(join(plugin, 'commands/one'), { recursive: true });
     symlinkSync(join(plugin, 'shared'), join(plugin, 'commands/one/a'));
     symlinkSync(join(plugin, 'shared'), join(plugin, 'commands/b'));
@@ -242,7 +281,7 @@ describe('wrapPlugin', () => {
   });
 
   it('leaves the plugin out when its definition folders nest past what 10db walks', () => {
-    write(join(plugin, `commands/${'d/'.repeat(12)}x.md`), '---\nhooks: {}\n---\nBody\n');
+    write(join(plugin, `commands/${'d/'.repeat(12)}x.md`), '---\nmcpServers: {}\n---\nBody\n');
     expect(pluginChanges(plugin, carriedEntries(plugin))).toBeNull();
   });
 

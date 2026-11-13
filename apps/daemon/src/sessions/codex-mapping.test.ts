@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { SessionEvent } from './types';
 import {
   createTurnState,
   hasKnownShape,
@@ -7,10 +8,41 @@ import {
   rateLimitEvents,
 } from './codex-mapping';
 
-const itemCompleted = (item: Record<string, unknown>) => ({
+const AT = Date.parse('2026-11-12T10:00:00.000Z');
+
+const itemCompleted = (item: Record<string, unknown>, completedAtMs = AT + 500) => ({
   method: 'item/completed',
-  params: { threadId: 'thr-1', turnId: 'turn-1', item },
+  params: { threadId: 'thr-1', turnId: 'turn-1', item, completedAtMs },
 });
+const itemStarted = (item: Record<string, unknown>, startedAtMs = AT) => ({
+  method: 'item/started',
+  params: { threadId: 'thr-1', turnId: 'turn-1', item, startedAtMs },
+});
+const delta = (method: string, itemId: string, text: string, summaryIndex?: number) => ({
+  method,
+  params: {
+    threadId: 'thr-1',
+    turnId: 'turn-1',
+    itemId,
+    delta: text,
+    ...(summaryIndex === undefined ? {} : { summaryIndex }),
+  },
+});
+const lsCommand = (over: Record<string, unknown> = {}) => ({
+  type: 'commandExecution',
+  id: 'cmd_1',
+  command: 'ls',
+  cwd: '/repo',
+  status: 'inProgress',
+  commandActions: [{ type: 'unknown', command: 'ls' }],
+  aggregatedOutput: null,
+  exitCode: null,
+  durationMs: null,
+  ...over,
+});
+/** The tool calls among a list of events, by id and status. */
+const callsIn = (events: readonly SessionEvent[]) =>
+  events.flatMap((e) => (e.type === 'tool_call' ? [e.call] : []));
 
 interface Counts {
   input: number;
@@ -56,42 +88,6 @@ const turnCompleted = (turn: Record<string, unknown>) => ({
 
 describe('mapCodexNotification', () => {
   it.each([
-    [
-      'a command',
-      itemCompleted({ type: 'commandExecution', command: 'ls' }),
-      [
-        {
-          type: 'activity',
-          kind: 'tool',
-          summary: 'ls',
-          tool: { name: 'command', target: 'ls', written: [] },
-        },
-      ],
-    ],
-    [
-      'a patch',
-      itemCompleted({ type: 'fileChange', changes: [{ path: '/c/a.ts' }, { path: '/c/b.ts' }] }),
-      [
-        {
-          type: 'activity',
-          kind: 'tool',
-          summary: '/c/a.ts',
-          tool: { name: 'apply_patch', target: '/c/a.ts', written: ['/c/a.ts', '/c/b.ts'] },
-        },
-      ],
-    ],
-    [
-      'an MCP call',
-      itemCompleted({ type: 'mcpToolCall', server: '10db', tool: 'commit' }),
-      [
-        {
-          type: 'activity',
-          kind: 'tool',
-          summary: '10db.commit',
-          tool: { name: '10db.commit', target: null, written: [] },
-        },
-      ],
-    ],
     [
       'a message',
       itemCompleted({ type: 'agentMessage', text: 'hi' }),
@@ -173,6 +169,136 @@ describe('mapCodexNotification', () => {
     ['an unread method', { method: 'turn/diff/updated', params: 3 }, true],
   ])('says whether %s has the shape 10db reads', (_name, notification, expected) => {
     expect(hasKnownShape(notification)).toBe(expected);
+  });
+
+  it.each<[string, Record<string, unknown>, Record<string, unknown>[]]>([
+    [
+      'a command',
+      lsCommand({ status: 'completed', exitCode: 0, aggregatedOutput: 'a.ts\n' }),
+      [{ id: 'cmd_1', kind: 'command', status: 'done', outputTail: 'a.ts\n' }],
+    ],
+    [
+      'a patch, one edit per file',
+      {
+        type: 'fileChange',
+        id: 'fc_1',
+        status: 'completed',
+        changes: [
+          { path: '/c/a.ts', kind: { type: 'add' }, diff: 'a\n' },
+          { path: '/c/b.ts', kind: { type: 'delete' }, diff: 'b\n' },
+        ],
+      },
+      [
+        { id: 'fc_1:0', kind: 'edit', path: '/c/a.ts', change: 'add' },
+        { id: 'fc_1:1', kind: 'edit', path: '/c/b.ts', change: 'delete' },
+      ],
+    ],
+    [
+      'an MCP call',
+      {
+        type: 'mcpToolCall',
+        id: 'mcp_1',
+        server: '10db',
+        tool: 'commit',
+        status: 'completed',
+        arguments: {},
+        result: { content: [] },
+        error: null,
+      },
+      [{ id: 'mcp_1', kind: 'mcp', harnessTool: '10db.commit', status: 'done' }],
+    ],
+  ])('maps a completed %s to its final tool calls and no activity', (_name, item, calls) => {
+    const events = mapCodexNotification(itemCompleted(item), createTurnState());
+    expect(events.filter((e) => e.type === 'activity')).toEqual([]);
+    expect(callsIn(events)).toMatchObject(calls);
+  });
+
+  it("follows a command's whole life: running, each piece of output, then done", () => {
+    const state = createTurnState();
+    const events = [
+      turnStarted,
+      itemStarted(lsCommand()),
+      delta('item/commandExecution/outputDelta', 'cmd_1', 'a.ts\n'),
+      delta('item/commandExecution/outputDelta', 'cmd_1', 'b.ts\n'),
+      itemCompleted(lsCommand({ status: 'completed', exitCode: 0 })),
+    ].flatMap((n) => mapCodexNotification(n, state));
+    expect(callsIn(events).map((c) => c.status)).toEqual(['running', 'running', 'running', 'done']);
+    expect(
+      events.flatMap((e) =>
+        e.type === 'tool_call' && e.appended !== undefined ? [e.appended] : [],
+      ),
+    ).toEqual(['a.ts\n', 'b.ts\n']);
+    // Codex gave no aggregated output, so the call keeps what it streamed.
+    expect(callsIn(events).at(-1)).toMatchObject({
+      outputTail: 'a.ts\nb.ts\n',
+      startedAt: '2026-11-12T10:00:00.000Z',
+      durationMs: 500,
+    });
+  });
+
+  it('offsets message deltas by JS length, then gives the message whole', () => {
+    const state = createTurnState();
+    const events = [
+      turnStarted,
+      delta('item/agentMessage/delta', 'msg_1', 'é'),
+      delta('item/agentMessage/delta', 'msg_1', '😀x'),
+      itemCompleted({ type: 'agentMessage', id: 'msg_1', text: 'é😀x' }),
+    ].flatMap((n) => mapCodexNotification(n, state));
+    expect(events.filter((e) => e.type === 'text_delta' || e.type === 'message')).toEqual([
+      { type: 'text_delta', itemId: 'msg_1', offset: 0, text: 'é' },
+      { type: 'text_delta', itemId: 'msg_1', offset: 1, text: '😀x' },
+      { type: 'message', itemId: 'msg_1', text: 'é😀x' },
+    ]);
+  });
+
+  it('starts a later reasoning summary part on a new paragraph', () => {
+    const state = createTurnState();
+    const events = [
+      turnStarted,
+      delta('item/reasoning/summaryTextDelta', 'r_1', 'First', 0),
+      delta('item/reasoning/summaryTextDelta', 'r_1', 'Second', 1),
+      delta('item/reasoning/summaryTextDelta', 'r_1', ' part', 1),
+    ].flatMap((n) => mapCodexNotification(n, state));
+    expect(events).toEqual([
+      { type: 'reasoning_delta', itemId: 'r_1', offset: 0, text: 'First' },
+      { type: 'reasoning_delta', itemId: 'r_1', offset: 5, text: '\n\nSecond' },
+      { type: 'reasoning_delta', itemId: 'r_1', offset: 13, text: ' part' },
+    ]);
+  });
+
+  it("gives the turn's plan as steps", () => {
+    expect(
+      mapCodexNotification(
+        {
+          method: 'turn/plan/updated',
+          params: {
+            threadId: 'thr-1',
+            turnId: 'turn-1',
+            explanation: null,
+            plan: [{ step: 'Read', status: 'inProgress' }],
+          },
+        },
+        createTurnState(),
+      ),
+    ).toEqual([{ type: 'plan_update', steps: [{ text: 'Read', status: 'in_progress' }] }]);
+  });
+
+  it('gives one final call for a tool item that completed with no start seen', () => {
+    const state = createTurnState();
+    mapCodexNotification(turnStarted, state);
+    expect(
+      callsIn(
+        mapCodexNotification(itemCompleted(lsCommand({ status: 'completed', exitCode: 0 })), state),
+      ),
+    ).toMatchObject([{ id: 'cmd_1', status: 'done' }]);
+  });
+
+  it('gives nothing for output of an item it never saw', () => {
+    const state = createTurnState();
+    mapCodexNotification(turnStarted, state);
+    expect(
+      mapCodexNotification(delta('item/commandExecution/outputDelta', 'cmd_9', 'x'), state),
+    ).toEqual([]);
   });
 
   it('ends a turn with the totals above the baseline and the last message', () => {
@@ -300,10 +426,8 @@ describe('mapCodexNotification', () => {
         itemCompleted(userMessage(U2)),
         itemCompleted({ type: 'commandExecution', command: 'ls' }),
       ],
-      [
-        { type: 'consumed', uuids: [U1, U2] },
-        expect.objectContaining({ type: 'activity', kind: 'tool', summary: 'ls' }),
-      ],
+      // A command with no id is no call 10db can follow, so only its consumption shows.
+      [{ type: 'consumed', uuids: [U1, U2] }],
     ],
     [
       'a compaction after the message: not a model answer',

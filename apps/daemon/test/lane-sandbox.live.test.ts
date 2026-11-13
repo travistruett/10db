@@ -17,6 +17,7 @@ import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  JudgeKind,
   mintId,
   PermissionChoice,
   Provider,
@@ -61,7 +62,7 @@ import {
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { bashWrites } from './bash-writes';
-import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
+import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
@@ -411,10 +412,20 @@ async function runLane(opts: {
       },
     );
     let providerSessionId: string | null = null;
-    const handle = adapter.start({
+    const handle = adapter.open({
       sessionId: mintId('Session'),
-      workstreamId: run.workstreamId,
-      sequence: 1,
+      policy: testPolicy(),
+      profile: {
+        kind: 'lane',
+        workstreamId: run.workstreamId,
+        sequence: 1,
+        allowedTools: [
+          ...allowedToolsFor(run.project, ToolAccess.Edit, {
+            sandboxed: { checkout: opts.checkout },
+          }),
+          ...(opts.extraAllowedTools ?? []),
+        ],
+      },
       cwd: opts.checkout,
       prompt: opts.prompt,
       model: launch.model,
@@ -425,16 +436,12 @@ async function runLane(opts: {
       projectMcpServers: lane.mcpServers,
       sandbox: lane.spec,
       setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
-      allowedTools: [
-        ...allowedToolsFor(run.project, ToolAccess.Edit, {
-          sandboxed: { checkout: opts.checkout },
-        }),
-        ...(opts.extraAllowedTools ?? []),
-      ],
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       preToolUse: (req) => {
         const verdict = judgePreToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
           toolName: req.toolName,
           toolInput: req.input,
           repoPath: opts.checkout,
@@ -517,7 +524,7 @@ function report(name: string, run: LaneRun, canaries: readonly Canary[]): void {
     guardVerdicts: run.guardVerdicts,
     brokerCalls: run.brokerCalls,
     cards: run.cards.map((c) => ({ title: c.title, body: c.body, detail: c.detail })),
-    events: run.events.filter((e) => e.type !== 'activity' || e.kind === 'text'),
+    events: run.events,
     permissionModes: run.permissionModes,
     profile: run.profile,
   };

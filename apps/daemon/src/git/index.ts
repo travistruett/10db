@@ -46,3 +46,10 @@ export {
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
 } from './worktree-list';
+export {
+  builderCommandLine,
+  createPassGitSession,
+  runPassGit,
+  type BuilderRefusal,
+  type BuilderRun,
+} from './run-as-builder';

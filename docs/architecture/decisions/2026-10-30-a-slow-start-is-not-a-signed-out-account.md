@@ -5,11 +5,11 @@
 
 ## Decision
 
-- **The wait.** A session start waits 30 s for Claude Code to report its account (`BILLING_PREFLIGHT_MS` in
-  `sessions/claude-adapter.ts`), up from 15 s. The identity probe (`probeAccount`), which does not run at
+- **The wait.** A session start waits 30 s for Claude Code to report its account (the first of `START_WAITS_MS` in
+  `sessions/claude-session.ts`), up from 15 s. The identity probe (`probeAccount`), which does not run at
   lane priority, keeps its 15 s.
 - **The retry.** When a start gets no account (no answer in time, or `accountInfo()` rejected), the adapter
-  closes that Claude Code and starts the session again, once (`START_ATTEMPTS = 2`, `startWithRetry`). The
+  closes that Claude Code and starts the session again, up to three starts that wait 30, 60 and 120 s (`START_ATTEMPTS = START_WAITS_MS.length`, the retry loop in `sessions/claude-session.ts`). The
   first start emits no `ended` event, so the runner sees one session; a message sent meanwhile goes to the
   second start, and a stop in between ends the session as stopped without a second start. Only the second
   start's silence is refused: a subscription account reads as signed out and is paused, any other kind

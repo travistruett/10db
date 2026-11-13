@@ -4,6 +4,7 @@ import { createTestStore, seedAccount, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
+import { FakeAdapter } from '../sessions';
 import { createTrustServices } from './trust-services';
 
 let root: TempDir;
@@ -65,6 +66,7 @@ describe('the Comes along preview', () => {
         builderHome: home,
         laneWritableRoots: [],
         laneSandbox: null,
+        adapter: new FakeAdapter({}),
         log: { warn: () => undefined },
       });
       expect((await trust.projectTrust(project.id)).preview.plugins).toEqual(plugins);

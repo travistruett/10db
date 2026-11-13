@@ -161,11 +161,12 @@ Each is marked **(call)** where it is made.
     whole new text as added, `truncated`.
 23. **`deniedBy` gains `judge`, and the view gains `limit` and `soft`** (spec §5.2, trust line §5). A call the
     session's judge denied is `judge`.
-    - **Soft:** a denial by one of the policy's soft-deny lines. Each line T3 writes names its limit (trust line
-      §3), so the denial's reason maps to a `LimitName` by that name, through a pure table in
-      `sessions/judge-denial.ts`. `soft: true`; the builder's go-ahead clears it, so the row offers Allow This.
-    - **Hard:** one of auto mode's `$defaults` hard denies, or a reason that names no limit. `soft: false`,
-      `limit: null`. No Allow This, so a go-ahead never loops.
+    - **Soft:** every classifier denial in an attended session (the orchestrator's ruling, by the builder's parity
+      rule: T3 offers Allow this on each one, as Claude Code lets the user approve what auto mode blocked). A
+      reason that names a limit maps to a `LimitName` by that name, through `sessions/judge-denial.ts`; one that
+      names none has `limit: null`. Against a hard deny the go-ahead is denied again, and the notice says so.
+    - **Hard:** a lane's denial (no one is in it to clear one) and one of Claude Code's own safety checks.
+      `soft: false`. No Allow This.
     - The event that carries an auto-mode denial is the one T3's plan records. Task 7's row is written from it once
       T3 has merged; if T3 records none, `deniedBy` stays `10db` for these calls and a follow-up task joins them.
     - 10db's own judge (T5) sets all three later. Codex leaves them null, as in call 21.

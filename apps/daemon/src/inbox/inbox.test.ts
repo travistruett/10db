@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -61,9 +70,15 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  FAKE_SRT,
+  isolatedGitEnv,
+  seedWorkstream,
+} from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit, type Git } from '../git';
+import { createGit, resolveGit, runPassGit, type Git } from '../git';
 import { acceptProposal, proposePrinciple } from '../knowledge';
 import { silentLogger } from '../log';
 import {
@@ -73,7 +88,13 @@ import {
   removeNetworkHost,
   storableRule,
 } from '../permissions';
-import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
+import {
+  createGateSandbox,
+  protectedReads,
+  SYSTEM_DOC_ROOTS,
+  type FileAccessContext,
+} from '../sandbox';
+import type { ToolDecision } from '../sessions';
 import {
   createInboxService,
   createPermissionBroker,
@@ -2113,7 +2134,8 @@ describe('permission broker in a sandboxed lane', () => {
     const pending = sandboxed(ws)(request('Bash', { command: 'yes > /dev/null &' }));
     inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'no CPU load, please' });
     const decision = await pending;
-    expect(decision.behavior).toBe('deny');
+    // The builder answered Deny: the refusal is theirs.
+    expect(decision).toMatchObject({ behavior: 'deny', by: 'builder' });
     const message = decision.behavior === 'deny' ? decision.message : '';
     expect(message).toContain('yes > /dev/null &');
     expect(message).toContain('no CPU load, please');
@@ -2859,6 +2881,7 @@ describe('permission broker in a sandboxed lane', () => {
         behavior: 'deny',
         message:
           '10db asked the builder about example.com. Retry after the card is answered, or work without it.',
+        by: '10db',
       });
     }
     const card = onlyOpenCard();
@@ -3224,6 +3247,65 @@ describe('permission broker in a sandboxed lane', () => {
     }
   });
 
+  // Claude Code's deny rule on the secret stays, since its Grep honours only that: the Read the
+  // builder allows reads a copy in the session's own reads folder, and a denied one copies nothing.
+  it("serves an allowed Read of the checkout's .env from a copy, and copies nothing when denied", async () => {
+    const ws = seedWorkstream(base);
+    const env = join(fileAccess.checkout, '.env');
+    writeFileSync(env, 'TOKEN=abc\n');
+    const reads = join(root, 'reads');
+    mkdirSync(reads);
+    const decide = createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: controller.signal,
+        sandbox: {
+          fileAccess: { ...fileAccess, secretFiles: [env], secretsOnCard: [env] },
+          hazards: DEFAULT_HAZARDS,
+          secretReadsDir: reads,
+        },
+      },
+    );
+    const denied = decide(request('Read', { file_path: env }));
+    await settle();
+    expect(onlyOpenCard().body).toBe(env);
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    expect((await denied).behavior).toBe('deny');
+    expect(readdirSync(reads)).toEqual([]);
+
+    const allowed = decide(request('Read', { file_path: env, limit: 10 }));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+    const decision = await allowed;
+    const served = decision.behavior === 'allow' ? decision.updatedInput : undefined;
+    const [copy, ...more] = readdirSync(reads);
+    expect(more).toEqual([]);
+    expect(served).toEqual({ file_path: join(reads, copy ?? ''), limit: 10 });
+    expect(readFileSync(join(reads, copy ?? ''), 'utf8')).toBe('TOKEN=abc\n');
+  });
+
+  // A Read the hook settles waits on its card inside the hook: when Claude Code cancels the hook
+  // the card goes too, so no answer is left on a call that is gone.
+  it('withdraws the card of a call that waits in the hook when the hook is cancelled', async () => {
+    const ws = seedWorkstream(base);
+    const hook = new AbortController();
+    const decision = sandboxed(ws)({
+      ...request('Read', { file_path: join(fileAccess.home, 'notes.txt') }),
+      signal: hook.signal,
+      cardGoesWithCall: true,
+    });
+    await settle();
+    const card = onlyOpenCard();
+    hook.abort();
+    expect((await decision).behavior).toBe('deny');
+    expect(openCards()).toEqual([]);
+    expect(getInboxItem(state.db, card.id).state).not.toBe('OPEN');
+  });
+
   it('still cards a read under the home directory outside the copy, and a write to the manual pages', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
@@ -3261,6 +3343,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(decision).toEqual({
         behavior: 'deny',
         message: '.claude.json is a protected path; 10db never lets a lane read it.',
+        by: '10db',
       });
     });
 
@@ -3364,6 +3447,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(decision).toEqual({
         behavior: 'deny',
         message: expect.stringContaining(`The copy is ${fileAccess.checkout}`) as string,
+        by: '10db',
       });
       expect(openCards()).toEqual([]);
     },
@@ -3409,6 +3493,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(await sandboxed(ws)(request(toolName, input))).toEqual({
         behavior: 'deny',
         message: "10db could not judge this call's path.",
+        by: '10db',
       });
       expect(openCards()).toEqual([]);
     },
@@ -4121,5 +4206,199 @@ describe('a card 10db closes because its cause is gone', () => {
     inbox.answer(card.id, { choice: 'dismiss' });
     const again = inbox.resolve(card.id, 'Alpha started');
     expect(again.detail).toEqual({});
+  });
+});
+
+describe('permission broker in a pass', () => {
+  /** Where the gate's sandbox, with srt's stand-in, keeps its files. */
+  let roots: string;
+  beforeEach(() => {
+    roots = realpathSync(mkdtempSync('/tmp/sbi-'));
+    for (const dir of ['home', 't', 'r', 'l']) mkdirSync(join(roots, dir));
+  });
+  afterEach(() => {
+    rmSync(roots, { recursive: true, force: true });
+  });
+
+  /** A pass's broker over a real repository, running what the builder allows as the runner does. */
+  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string) {
+    const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' };
+    const home = join(roots, 'home');
+    const gitDirs = createGit();
+    const gate = createGateSandbox({
+      home,
+      dataDir: join(home, 'data'),
+      loginConfigDir: null,
+      tmpRoot: join(roots, 't'),
+      filesRoot: join(roots, 'r'),
+      codexLaneTempRoot: join(roots, 'l'),
+      gitDirs: (path) => gitDirs.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      log: silentLogger,
+    });
+    const signal = new AbortController().signal;
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), encoding: 'utf8' });
+    const decide = createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        signal,
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        passGit: {
+          baseBranch: 'main',
+          run: async (call) =>
+            runPassGit(call, {
+              checkout: repo,
+              baseBranch: 'main',
+              env,
+              signal,
+              bins: { git: await resolveGit(), gh: 'gh' },
+              sandbox: {
+                gate,
+                input: {
+                  project: { repoPath: repo, sandboxLoopback: false, sandboxDocker: false },
+                  env,
+                  rules: [],
+                  checkouts: [repo],
+                },
+                home,
+              },
+            }),
+        },
+      },
+    );
+    return { decide, git };
+  }
+  const bash = (command: string) => ({
+    toolName: 'Bash',
+    input: { command, description: 'x' },
+    toolUseId: 't1',
+    escalated: false,
+    signal: new AbortController().signal,
+  });
+  const card = (): InboxItemDto => {
+    const [item, ...rest] = listInbox(state.db, { states: ['OPEN'] });
+    if (!item || rest.length > 0) throw new Error('expected exactly one open card');
+    return item;
+  };
+  const replayed = (decision: ToolDecision): string =>
+    decision.behavior === 'allow' ? String(decision.updatedInput?.['command']) : decision.message;
+
+  it('cards a commit once and, allowed, runs it as the builder and replays what it printed', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, repo.path);
+      writeFileSync(join(repo.path, 'page.ts'), 'export {};\n');
+      git('add', 'page.ts');
+      const decision = decide(bash("git commit -m 'Add the page'"));
+      const item = card();
+      expect(item.title).toBe('Allow git commit?');
+      expect(item.body).toContain("inside the sandbox, where the repository's hooks run too");
+      expect(item.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+      inbox.answer(item.id, { choice: 'allow_once' });
+      const allowed = await decision;
+      const result = replayed(allowed);
+      // An agent whose hook can't replay the call (Codex) is told what ran instead.
+      const ran = allowed.behavior === 'allow' ? allowed.ranForBuilder : undefined;
+      expect(ran).toMatchObject({ command: "git commit -m 'Add the page'", exitCode: 0 });
+      expect(ran?.output).toContain('Add the page');
+      expect(git('log', '-1', '--format=%s').trim()).toBe('Add the page');
+      expect(result).toMatch(/^printf '%s' '.*Add the page.*'; exit 0$/s);
+      expect(execFileSync('/bin/sh', ['-c', result], { encoding: 'utf8' })).toContain(
+        'Add the page',
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  // The card shows the words 10db runs, never the line as written: a comment there is not run.
+  it('cards the words the call runs, not a comment on its line', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide } = passBroker(ws, repo.path);
+      const decision = decide(bash("git commit -am 'Add it' # hooks are off"));
+      const item = card();
+      expect(item.body.split('\n\n')[0]).toBe("git commit -am 'Add it'");
+      expect(item.detail).toMatchObject({ summary: "git commit -am 'Add it'" });
+      inbox.answer(item.id, { choice: 'deny' });
+      await decision;
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('a denied card runs nothing', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, repo.path);
+      const before = git('rev-parse', 'HEAD');
+      const decision = decide(bash('git commit --allow-empty -m x'));
+      inbox.answer(card().id, { choice: 'deny' });
+      expect((await decision).behavior).toBe('deny');
+      expect(git('rev-parse', 'HEAD')).toBe(before);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('a push of the current branch on main is refused after the card, and pushes nothing', async () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, remote.repo.path);
+      git('commit', '--allow-empty', '-q', '-m', 'local');
+      const decision = decide(bash('git push origin HEAD'));
+      inbox.answer(card().id, { choice: 'allow_once' });
+      const result = await decision;
+      expect(result).toMatchObject({ behavior: 'deny', by: '10db' });
+      expect(replayed(result)).toContain('a push of main stays refused in a pass');
+      expect(git('rev-parse', 'origin/main')).not.toBe(git('rev-parse', 'HEAD'));
+    } finally {
+      remote.cleanup();
+    }
+  });
+
+  it('a push of a branch of its own runs, and origin holds it', async () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, remote.repo.path);
+      git('switch', '-q', '-c', 'feat/page');
+      git('commit', '--allow-empty', '-q', '-m', 'page');
+      const decision = decide(bash('git push -u origin feat/page'));
+      expect(card().body).toContain("runs none of the repository's hooks for it");
+      inbox.answer(card().id, { choice: 'allow_once' });
+      expect(replayed(await decision)).toMatch(/; exit 0$/);
+      expect(
+        execFileSync('git', ['-C', remote.origin.path, 'rev-parse', 'feat/page'], {
+          env: isolatedGitEnv(),
+          encoding: 'utf8',
+        }),
+      ).toBe(git('rev-parse', 'HEAD'));
+    } finally {
+      remote.cleanup();
+    }
+  });
+
+  it('a force push is refused with no card', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide } = passBroker(ws, repo.path);
+      expect(await decide(bash('git push --force origin feat/page'))).toMatchObject({
+        behavior: 'deny',
+      });
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    } finally {
+      repo.cleanup();
+    }
   });
 });

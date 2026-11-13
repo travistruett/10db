@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  TrustSurface,
   ClaimKind,
   ConflictError,
   currentStep,
@@ -50,6 +51,7 @@ import {
   PassState,
   PassTurnEnding,
   PassTurnId,
+  JudgeKind,
   Provider,
   agentKind,
   providerOf,
@@ -58,6 +60,18 @@ import {
   type TaskId,
   type TaskDto,
 } from '@10db/contracts';
+import {
+  buildTrustPolicy,
+  deniedNoticeText,
+  FloorReason,
+  floorNoticeText,
+  floorReason,
+  goAheadText,
+  judgeForCall,
+  offersAllowThis,
+  projectLiveSystems,
+  startingJudge,
+} from '../trust';
 import {
   activeClaims,
   clearLease,
@@ -84,6 +98,8 @@ import {
   insertSession,
   insertSource,
   insertSystemNotice,
+  listTaskThread,
+  offerAllowThis,
   deleteSignOffWait,
   lastTakeOut,
   listAccountModels,
@@ -177,7 +193,7 @@ import {
   type Launcher,
   type SessionLaunch,
 } from '../environment';
-import type { Git } from '../git';
+import { createPassGitSession, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
@@ -201,6 +217,7 @@ import {
 import {
   allowedToolsFor,
   laneAutoMode,
+  matchesAllowedTool,
   storableRule,
   trustSwitchesFor,
   warnInvalidTrust,
@@ -218,17 +235,20 @@ import {
   fileAccessJudge,
   SandboxProfileError,
   SandboxTempDirError,
+  type GateSandbox,
   type LaneSandbox,
   type LaneSession,
 } from '../sandbox';
 import {
-  nativeJudge,
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
+  streamEventLogFields,
+  toolCallActivity,
   type LanePermissionMode,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionHandle,
+  type ToolTarget,
   type TurnResult,
 } from '../sessions';
 import {
@@ -328,10 +348,12 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
 };
 
 export interface RunnerOptions {
+  /** The daemon's resolved git and gh, which run a pass's commit, push or merge the builder allowed. */
+  readonly gitTools: { readonly git: string; readonly gh: string | null };
   /** Paths no session tool or command may touch. */
   readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly inbox: InboxService;
   /** Told when a step finds no model profile for its account, so the scheduler leaves that account's work alone. */
   readonly modelWait?: Pick<ModelListWait, 'hold'>;
@@ -378,6 +400,11 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * The gate's sandbox, where a pass's commit or merge the builder allowed runs so its hooks are
+   * contained; absent or null, 10db runs no such commit or merge.
+   */
+  readonly gateSandbox?: GateSandbox | null;
   /**
    * Where a ChatGPT lane's temp dir is made (`codexLaneTempRoot` of the home, as the daemon made it
    * private), apart from Claude lanes' and outside `/private/tmp`, which Codex opens to every lane.
@@ -2110,6 +2137,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           mcpServers: mcpServers.stdio,
           provider,
           taskFiles: taskFilesDir(opts.dataDir, task.id),
+          // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
+          attended: pass !== null,
           ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
@@ -2149,8 +2178,55 @@ export function createRunner(opts: RunnerOptions): Runner {
             })
           ? 'auto'
           : 'default';
-    // Where auto mode judges the web, WebSearch and WebFetch go to its classifier instead of a card.
-    const webJudged = switches.web && nativeJudge(agentKind(account.kind), lanePermissionMode);
+    const policy = buildTrustPolicy({
+      surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
+      projectName: project.name,
+      checkout,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(db, project.id, (stored) => {
+        opts.logger.warn(
+          { stored },
+          'the stored live systems are not a list 10db reads, so it reads none',
+        );
+      }),
+      switches,
+    });
+    // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
+    // starts on 10db's rules.
+    const capability = opts.adapter.capabilities(launch.expect, launch.model);
+    const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto');
+    const judged = sessionJudge !== JudgeKind.Rules;
+    const startFloor =
+      laneSession === null
+        ? null
+        : floorReason({
+            kind: agentKind(account.kind),
+            model: launch.model,
+            autoMode: lanePermissionMode === 'auto',
+          });
+    // The allow list the session runs with, which the guard also reads: an allow rule settles a call
+    // before a judge sees it.
+    const allowedTools = allowedToolsFor(
+      project,
+      step.tools,
+      laneSession ? { sandboxed: { checkout } } : {},
+    );
+    opts.logger.info(
+      {
+        workstreamId: id,
+        surface: policy.surface,
+        judge: sessionJudge,
+        environment: policy.environment,
+      },
+      'trust policy',
+    );
+    /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
+    const sayFloor = (ctx: WriteContext, reason: FloorReason): void => {
+      const text = floorNoticeText(reason, launch.model);
+      if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
+      insertSystemNotice(ctx, task.id, text);
+    };
+    let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -2223,7 +2299,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
-      webJudged,
+      judged,
+      webJudged: judged && switches.web,
       setupLine:
         laneSession === null
           ? null
@@ -2457,10 +2534,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
-      handle = opts.adapter.start({
+      handle = opts.adapter.open({
         sessionId: session.id,
-        workstreamId: id,
-        sequence: session.sequence,
+        policy,
         cwd: checkout,
         prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
         ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
@@ -2480,15 +2556,23 @@ export function createRunner(opts: RunnerOptions): Runner {
               },
             }
           : {}),
-        ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
-        allowedTools: allowedToolsFor(
-          project,
-          step.tools,
-          laneSession ? { sandboxed: { checkout } } : {},
-        ),
+        profile: {
+          kind: 'lane',
+          workstreamId: id,
+          sequence: session.sequence,
+          allowedTools,
+          ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
+        },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-        preToolUse: (req) =>
-          judgePreToolUse({
+        preToolUse: (req) => {
+          const judge = judgeForCall(sessionJudge, req.reportedMode ?? null);
+          if (judged && judge === JudgeKind.Rules && !saidLeftAutoMode) {
+            saidLeftAutoMode = true;
+            opts.state.write((ctx) => {
+              sayFloor(ctx, FloorReason.LeftAutoMode);
+            });
+          }
+          return judgePreToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -2500,15 +2584,20 @@ export function createRunner(opts: RunnerOptions): Runner {
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
             // Every page of the pass is a page here: another task's is never written.
-            ...(pass ? { inPass: { pages: passPageAreas(db, pass.id) } } : {}),
+            ...(pass
+              ? { inPass: { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch } }
+              : {}),
             ownSession: {
               configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
               filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
-            webJudged,
-          }),
+            judge,
+            coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
+            webOn: switches.web,
+          });
+        },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
@@ -2520,7 +2609,48 @@ export function createRunner(opts: RunnerOptions): Runner {
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
             ...(laneSession
-              ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
+              ? {
+                  sandbox: {
+                    fileAccess: laneSession.fileAccess,
+                    hazards: project.hazards,
+                    ...(laneSession.secretReadsDir === null
+                      ? {}
+                      : { secretReadsDir: laneSession.secretReadsDir }),
+                  },
+                }
+              : {}),
+            ...(pass
+              ? {
+                  passGit: {
+                    baseBranch: project.baseBranch,
+                    // One per session: a call that moved HEAD holds the next until it is back.
+                    run: createPassGitSession(() => {
+                      // The project env: the login shell's, never the account's credentials.
+                      const env = opts.launcher.projectEnv();
+                      const gate = opts.gateSandbox ?? null;
+                      return {
+                        checkout,
+                        baseBranch: project.baseBranch,
+                        env,
+                        signal: abort.signal,
+                        bins: opts.gitTools,
+                        sandbox:
+                          gate === null
+                            ? null
+                            : {
+                                gate,
+                                input: {
+                                  project: projectAtCheckout(project, checkout),
+                                  env,
+                                  rules: listPermissionRules(db, project.id, id),
+                                  checkouts: allCheckouts(db),
+                                },
+                                home: opts.builderHome,
+                              },
+                      };
+                    }),
+                  },
+                }
               : {}),
           },
         ),
@@ -2651,6 +2781,47 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     ctl.requestHandoff = requestHandoff;
 
+    /** Ids of the tool calls the live line has named, so each is named once; the newest are kept. */
+    const seenCalls = new Set<string>();
+    const SEEN_CALLS_KEPT = 1_024;
+    /** The session is working: the live line names what it does, and a page's turn its files so far. */
+    const noteActivity = (
+      kind: 'text' | 'tool',
+      summary: string,
+      tool: ToolTarget | null,
+    ): void => {
+      // The session is working again (Claude Code woke it, or an answer did): it is not idle.
+      stopWaitingOnBackground();
+      disarmIdleClose(ctl);
+      opts.state.write((ctx) => {
+        patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
+        // A page's working turn carries the files it has written so far (Workbench spec §4.3).
+        const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
+        const data: SessionActivityData = {
+          workstreamId: id,
+          kind,
+          summary: summary.slice(0, 500),
+          tool: tool === null ? null : { name: tool.name, target: tool.target },
+          turn:
+            turn === undefined
+              ? null
+              : {
+                  id: turn.id,
+                  filesTouched: filesTouched(
+                    turnFilesSoFar(ctx.tx, turn),
+                    tool?.written ?? [],
+                    checkout,
+                  ),
+                },
+        };
+        ctx.emit({
+          type: EventType.SessionActivity,
+          entityType: 'session',
+          entityId: session.id,
+          data,
+        });
+      });
+    };
     let outcome: Outcome;
     try {
       for await (const event of handle.events) {
@@ -2671,6 +2842,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 noticed = true;
                 insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
               }
+              if (startFloor !== null) sayFloor(ctx, startFloor);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')
@@ -2688,6 +2860,24 @@ export function createRunner(opts: RunnerOptions): Runner {
               } else if (current === S.HandingOff && !st.handoffRequested) {
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
               }
+            });
+            break;
+          }
+          case 'judge_denied': {
+            const denied = event.call;
+            // A lane has no thread to show it on; the lane's recorded skips are where it will show.
+            if (!pass) {
+              log.info(
+                { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },
+                'auto mode denied a call',
+              );
+              break;
+            }
+            // The notice and its offer are one write, so a notice never shows a button with no offer.
+            const offers = offersAllowThis(denied);
+            opts.state.write((ctx) => {
+              const notice = insertSystemNotice(ctx, task.id, deniedNoticeText(denied, offers));
+              if (offers) offerAllowThis(ctx, notice.id, goAheadText(denied));
             });
             break;
           }
@@ -2717,41 +2907,29 @@ export function createRunner(opts: RunnerOptions): Runner {
             handle.send(readOnly ? BACKGROUND_DONE_NUDGE_READ_ONLY : BACKGROUND_DONE_NUDGE);
             break;
           }
-          case 'activity': {
-            // The session is working again (Claude Code woke it, or an answer did): it is not idle.
-            stopWaitingOnBackground();
-            disarmIdleClose(ctl);
-            const tool = event.kind === 'tool' ? event.tool : null;
-            opts.state.write((ctx) => {
-              patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
-              // A page's working turn carries the files it has written so far (Workbench spec §4.3).
-              const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
-              const data: SessionActivityData = {
-                workstreamId: id,
-                kind: event.kind,
-                summary: event.summary.slice(0, 500),
-                tool: tool === null ? null : { name: tool.name, target: tool.target },
-                turn:
-                  turn === undefined
-                    ? null
-                    : {
-                        id: turn.id,
-                        filesTouched: filesTouched(
-                          turnFilesSoFar(ctx.tx, turn),
-                          tool?.written ?? [],
-                          checkout,
-                        ),
-                      },
-              };
-              ctx.emit({
-                type: EventType.SessionActivity,
-                entityType: 'session',
-                entityId: session.id,
-                data,
-              });
-            });
+          case 'activity':
+            noteActivity('text', event.summary, null);
+            break;
+          case 'tool_call': {
+            log.debug(streamEventLogFields(event), 'session stream event');
+            // A call is the live line's once, when first seen: a Codex command reports each piece of output.
+            if (seenCalls.has(event.call.id)) break;
+            seenCalls.add(event.call.id);
+            if (seenCalls.size > SEEN_CALLS_KEPT) {
+              const oldest = seenCalls.values().next();
+              if (oldest.done !== true) seenCalls.delete(oldest.value);
+            }
+            const { summary, tool } = toolCallActivity(event.call);
+            noteActivity('tool', summary, tool);
             break;
           }
+          case 'text_delta':
+          case 'reasoning_delta':
+          case 'message':
+          case 'commands':
+          case 'plan_update':
+            log.debug(streamEventLogFields(event), 'session stream event');
+            break;
           case 'context': {
             st.contextPct = event.percentage;
             if (st.awaitingBriefingBaseline) {

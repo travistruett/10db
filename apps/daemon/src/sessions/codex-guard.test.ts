@@ -15,9 +15,9 @@ import {
   type GuardSocket,
   type HookInput,
 } from './codex-guard';
-import type { SessionSpec } from './types';
+import type { LaneSessionSpec } from './types';
 
-type Spec = Pick<SessionSpec, 'preToolUse' | 'canUseTool'>;
+type Spec = Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>;
 
 const ALLOW_ALL: Spec = {
   preToolUse: () => ({ decision: 'allow' }),
@@ -236,7 +236,7 @@ describe('judgeHookCall', () => {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
       canUseTool: (req) => {
         seen.push({ ...req, signal: undefined });
-        return Promise.resolve({ behavior: 'deny', message: 'card said no' });
+        return Promise.resolve({ behavior: 'deny', message: 'card said no', by: 'builder' });
       },
     };
     const hook: HookInput = { ...bash('make'), tool_use_id: 'call-1', cwd: '/work' };
@@ -257,6 +257,15 @@ describe('judgeHookCall', () => {
     ]);
   });
 
+  // A Codex hook can't change a call: a guard allow that rewrites one still lets Codex run what it sent.
+  it("allows a call the guard's allow rewrites, which Codex then runs as it sent it", async () => {
+    const spec: Spec = {
+      ...ALLOW_ALL,
+      preToolUse: () => ({ decision: 'allow', updatedInput: { command: 'echo safe' } }),
+    };
+    expect(await judgeHookCall(spec, bash('echo raw'), NEVER)).toEqual({ allow: true });
+  });
+
   it('allows an asked call that canUseTool allows, ignoring updatedInput', async () => {
     const spec: Spec = {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
@@ -265,10 +274,32 @@ describe('judgeHookCall', () => {
     expect(await judgeHookCall(spec, bash('make'), NEVER)).toEqual({ allow: true });
   });
 
+  // Codex would run its own copy of a call 10db already ran for the builder, so the hook refuses it
+  // with what ran: the agent reads the result instead of retrying.
+  it('answers a call 10db ran for the builder with what it ran, how it ended and what it printed', async () => {
+    const spec: Spec = {
+      preToolUse: () => ({ decision: 'ask', reason: 'a commit' }),
+      canUseTool: () =>
+        Promise.resolve({
+          behavior: 'allow',
+          updatedInput: { command: "printf '%s' 'done'; exit 1" },
+          ranForBuilder: { command: 'git commit -m x', exitCode: 1, output: 'nothing to commit\n' },
+        }),
+    };
+    const answer = await judgeHookCall(spec, bash("git commit -m x # it's ready"), NEVER);
+    expect(answer).toEqual({
+      allow: false,
+      reason:
+        '10db ran this for the builder: git commit -m x\nIt ended with exit code 1 and printed:\nnothing to commit\n',
+      interrupt: false,
+    });
+  });
+
   it('refuses and asks to interrupt when canUseTool says interrupt', async () => {
     const spec: Spec = {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true, by: '10db' }),
     };
     expect(await judgeHookCall(spec, bash('make'), NEVER)).toEqual({
       allow: false,
@@ -444,7 +475,7 @@ describe.skipIf(SANDBOXED || !existsSync('/usr/bin/curl'))(
         canUseTool: (req) =>
           new Promise((done) => {
             req.signal.addEventListener('abort', () => {
-              done({ behavior: 'deny', message: 'session ended' });
+              done({ behavior: 'deny', message: 'session ended', by: '10db' });
             });
             waiting();
           }),

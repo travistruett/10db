@@ -1,6 +1,8 @@
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import type { SeenAccount } from './account-check';
+import { codexCapabilities } from './capabilities';
+import { onProfile } from './agent-profile';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
@@ -21,10 +23,9 @@ import {
   CompletionError,
   SessionEndReason,
   type AccountProbeSpec,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
   type SessionHandle,
-  type ShapeSessionHandle,
 } from './types';
 
 export interface CodexAdapterOptions {
@@ -103,16 +104,18 @@ async function probeAccount(
 }
 
 /** Runs sessions on the builder's installed Codex over `codex app-server` (the ChatGPT-plan design). */
-export function createCodexAdapter(opts: CodexAdapterOptions): SessionAdapter {
+export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
   const homes = codexHomes();
   return {
+    capabilities: (account) => codexCapabilities(account.kind),
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
-    start: (spec) => startCodexSession(spec, { ...opts, homes }),
+    open: (spec) =>
+      onProfile(spec, {
+        lane: (lane) => startCodexSession(lane, { ...opts, homes }),
+        explore: () => endedAtOnce(NO_BRAINSTORM),
+      }),
     readClientUuids: (spec) => readThreadClientUuids(spec, { ...opts, homes }),
-    startShape(): ShapeSessionHandle {
-      return endedAtOnce(NO_BRAINSTORM);
-    },
   };
 }

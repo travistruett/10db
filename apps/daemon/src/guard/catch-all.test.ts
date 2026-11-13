@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_HAZARDS, type AreaDef } from '@10db/contracts';
+import { DEFAULT_HAZARDS, JudgeKind, type AreaDef } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { classifyPath, judgeToolUse, protectedPaths } from './index';
@@ -136,6 +136,8 @@ describe('the guard in a project with a catch-all area', () => {
 
   const edit = (path: string, held: string[]) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: join(repo.path, path) },
       repoPath: repo.path,

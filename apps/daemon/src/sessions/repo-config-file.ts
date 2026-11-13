@@ -1,4 +1,6 @@
-import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { join } from 'node:path';
+import { LinkInPathError, openInRoot } from './open-in-root';
 
 /** A committed config file larger than this is not a config; it is refused unread. */
 export const REPO_CONFIG_MAX_BYTES = 256 * 1024;
@@ -44,6 +46,45 @@ export function readRepoFileBytes(path: string, maxBytes: number): RepoFileBytes
     if (code === 'ELOOP') throw new RepoConfigFileError('it must be a regular file, not a link');
     throw new RepoConfigFileError(code ?? 'error');
   }
+  return readOpened(fd, maxBytes);
+}
+
+/**
+ * `readRepoFileBytes` for `relative` under a checkout's real path, opened by `openInRoot`: a link
+ * anywhere on the way is refused at the open itself, so a folder a lane swaps for a link and back
+ * between checks by path is never read through.
+ */
+export function readRepoFileBytesIn(
+  realRoot: string,
+  relative: string,
+  maxBytes: number,
+): RepoFileBytes | null {
+  let fd: number;
+  try {
+    fd = openInRoot(realRoot, relative);
+  } catch (error) {
+    if (error instanceof LinkInPathError)
+      // Only the wording turns on which part is the link; the open refused either way.
+      throw new RepoConfigFileError(
+        isLink(join(realRoot, relative)) ? 'it must be a regular file, not a link' : error.message,
+      );
+    const code = errorCode(error);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw new RepoConfigFileError(code ?? 'error');
+  }
+  return readOpened(fd, maxBytes);
+}
+
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Reads a descriptor whole, if it is a regular file of at most `maxBytes`, and closes it. */
+function readOpened(fd: number, maxBytes: number): RepoFileBytes {
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile())

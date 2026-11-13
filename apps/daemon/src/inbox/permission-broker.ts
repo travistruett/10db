@@ -1,4 +1,5 @@
 import {
+  DeniedBy,
   PermissionChoice,
   MCP_TOOL_GRANT_DETAIL,
   QuestionCategory,
@@ -17,14 +18,16 @@ import {
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import type { Git } from '../git';
+import { builderCommandLine, type BuilderRefusal, type BuilderRun, type Git } from '../git';
 import {
   firstUnread,
   hazardHit,
+  passGitCall,
   runsInBackground,
   startsEndlessBackgroundLoop,
   stringField,
   unreadableHazard,
+  type PassGitCall,
 } from '../guard';
 import type { Logger } from '../log';
 import {
@@ -40,13 +43,16 @@ import {
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import {
+  isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
+  singleQuoted,
   writeAccess,
+  writeSecretRead,
   type FileAccessContext,
 } from '../sandbox';
-import type { ToolDecision, ToolRequest } from '../sessions';
+import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
 
@@ -92,6 +98,21 @@ type BrokerContext = BrokerOwner & {
      * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
      */
     readonly commandsAsk?: boolean;
+    /**
+     * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
+     * Claude Code's deny rule on the secret stays, so the Read runs on a copy there instead.
+     */
+    readonly secretReadsDir?: string;
+  };
+  /**
+   * Present for a pass: a plain commit, push or merge (`passGitCall`) gets a card the builder may
+   * allow once, as in Claude Code. Once allowed, 10db runs it outside the sandbox with their git and
+   * credentials, and the call replays what it printed and how it ended.
+   */
+  readonly passGit?: {
+    readonly baseBranch: string;
+    /** Runs the allowed call as the builder (`runPassGit`), or says why 10db still won't. */
+    run(call: Extract<PassGitCall, { kind: 'run' }>): Promise<BuilderRun | BuilderRefusal>;
   };
 };
 
@@ -161,6 +182,15 @@ const HOST_CARD_BODY =
 const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
 
+/** What allowing a pass's commit, push or merge does: a commit's hooks run contained, a push runs none. */
+function passGitCardBody(call: Extract<PassGitCall, { kind: 'run' }>): string {
+  const pushes = call.argv[0] === 'gh' || call.argv[1] === 'push';
+  const how = pushes
+    ? "10db runs it outside the sandbox with your git and your credentials, and runs none of the repository's hooks for it (its pre-push hook included)"
+    : "10db runs it with your git identity inside the sandbox, where the repository's hooks run too but can write only the checkout and its history, and no credential of yours reaches them";
+  return `Allowing it runs this call once: ${how}. The agent sees what it printed. A force push and a push to main or the base branch stay refused.`;
+}
+
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
 
@@ -188,6 +218,7 @@ const NetworkInput = z.looseObject({ host: z.string().min(1) });
 const UNJUDGED_PATH: ToolDecision = {
   behavior: 'deny',
   message: "10db could not judge this call's path.",
+  by: DeniedBy.TenDb,
 };
 
 /** What the broker asks about once a sandboxed call needs a person: the card's text and the real paths it names. */
@@ -280,14 +311,19 @@ export function createPermissionBroker(
    * A conversation that stops waiting withdraws its card: no lane resumes on a late answer, and the
    * next session asks again. A lane's card stays for its parked workstream.
    */
+  /** Whether a call's card goes with the call: a conversation's, and one that waits in a hook. */
+  const cardGoesWith = (req: ToolRequest): boolean =>
+    ctx.workstreamId === null || req.cardGoesWithCall === true;
+
   async function waitOrWithdraw(
     item: InboxItemDto,
     answer: Promise<InboxAnswer>,
+    withCall = ctx.workstreamId === null,
   ): Promise<InboxAnswer> {
     try {
       return await wait(item, answer);
     } catch (error) {
-      if (error instanceof ParkedError && ctx.workstreamId === null) deps.inbox.withdraw(item.id);
+      if (error instanceof ParkedError && withCall) deps.inbox.withdraw(item.id);
       throw error;
     }
   }
@@ -298,6 +334,7 @@ export function createPermissionBroker(
       return {
         behavior: 'deny',
         message: 'AskUserQuestion input was not understood; use ask_human instead.',
+        by: DeniedBy.TenDb,
       };
     }
     const answers: Record<string, string> = {};
@@ -410,11 +447,12 @@ export function createPermissionBroker(
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
       // A conversation's card goes with its call: Claude Code cancels the call when the turn is stopped.
-      ...(ctx.workstreamId === null ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
+      // So does one that waits in the PreToolUse hook, which Claude Code may cancel.
+      ...(cardGoesWith(req) ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
       // The escalation is only in the detail, so without this an escalated and an ordinary ask would share a card.
       escalated: req.escalated,
     });
-    const result = await waitOrWithdraw(item, answer);
+    const result = await waitOrWithdraw(item, answer, cardGoesWith(req));
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
       recordAllowedWrite(item.id, req, ask);
@@ -423,6 +461,8 @@ export function createPermissionBroker(
     return {
       behavior: 'deny',
       message: denialMessage(req.toolName, summary, result.note),
+      // The builder answered the card with Deny: the one refusal that is theirs.
+      by: DeniedBy.Builder,
     };
   }
 
@@ -436,6 +476,7 @@ export function createPermissionBroker(
       return {
         behavior: 'deny',
         message: 'The network request named no host, so 10db refused it.',
+        by: DeniedBy.TenDb,
       };
     }
     const host = parsed.data.host.toLowerCase();
@@ -493,6 +534,7 @@ export function createPermissionBroker(
     return {
       behavior: 'deny',
       message: `10db asked the builder about ${host}. Retry after the card is answered, or work without it.`,
+      by: DeniedBy.TenDb,
     };
   }
 
@@ -572,16 +614,25 @@ export function createPermissionBroker(
           return {
             behavior: 'deny',
             message: `${path} is a protected path; 10db never lets a lane read it.`,
+            by: DeniedBy.TenDb,
           };
         }
         if (access === 'outside-copy') {
           // Never right, so never a card: the lane's paths come from its own copy.
-          return { behavior: 'deny', message: outsideCopyRefusal(path, sandbox.fileAccess) };
+          return {
+            behavior: 'deny',
+            message: outsideCopyRefusal(path, sandbox.fileAccess),
+            by: DeniedBy.TenDb,
+          };
         }
         if (access === 'ask') asking.push(realPath);
       }
     } catch {
-      return { behavior: 'deny', message: `${req.toolName} could not be judged; 10db refuses it.` };
+      return {
+        behavior: 'deny',
+        message: `${req.toolName} could not be judged; 10db refuses it.`,
+        by: DeniedBy.TenDb,
+      };
     }
     const [first] = asking;
     if (first === undefined && !req.escalated) return { behavior: 'allow' };
@@ -611,8 +662,67 @@ export function createPermissionBroker(
     return 'behavior' in verdict;
   }
 
+  /**
+   * A pass's commit, push or merge: one card, allowed once or denied. The call then runs as the
+   * builder would run it (`runPassGit`, which checks the remote and the current branch first), and
+   * the agent's Bash call prints what it printed and ends as it ended.
+   */
+  async function runPassGit(
+    req: ToolRequest,
+    command: string,
+    call: Extract<PassGitCall, { kind: 'run' }>,
+    passGit: NonNullable<BrokerContext['passGit']>,
+  ): Promise<ToolDecision> {
+    // The words 10db runs: a comment or spacing on the line as written runs nothing.
+    const line = builderCommandLine(call.argv);
+    const { item, answer } = deps.inbox.ask({
+      projectId: ctx.projectId,
+      ...owner,
+      sessionId: ctx.sessionId,
+      kind: 'permission',
+      title: `Allow ${call.argv.slice(0, call.argv[0] === 'gh' ? 3 : 2).join(' ')}?`,
+      body: `${line}\n\n${passGitCardBody(call)}`,
+      options: ONCE_OPTIONS,
+      recommendation: null,
+      category: QuestionCategory.Access,
+      urgency: Urgency.Normal,
+      detail: { toolName: req.toolName, summary: line },
+      signal: ctx.signal,
+      escalated: req.escalated,
+    });
+    const result = await waitOrWithdraw(item, answer);
+    if (!ALLOWING.includes(result.choice)) {
+      return {
+        behavior: 'deny',
+        message: denialMessage(req.toolName, command, result.note),
+        by: DeniedBy.Builder,
+      };
+    }
+    const ran = await passGit.run(call);
+    if ('refused' in ran) return { behavior: 'deny', message: ran.refused, by: DeniedBy.TenDb };
+    return {
+      behavior: 'allow',
+      updatedInput: {
+        ...req.input,
+        command: `printf '%s' ${singleQuoted(ran.output)}; exit ${String(ran.exitCode)}`,
+      },
+      ranForBuilder: {
+        command: builderCommandLine(call.argv),
+        exitCode: ran.exitCode,
+        output: ran.output,
+      },
+    };
+  }
+
   async function decide(req: ToolRequest): Promise<ToolDecision> {
     if (req.toolName === 'AskUserQuestion') return askQuestions(req);
+    if (req.toolName === 'Bash' && ctx.passGit !== undefined) {
+      const command = stringField(req.input, 'command');
+      const call = command === null ? null : passGitCall(command, ctx.passGit.baseBranch);
+      if (call?.kind === 'run') return runPassGit(req, command ?? '', call, ctx.passGit);
+      if (call?.kind === 'refuse')
+        return { behavior: 'deny', message: call.reason, by: DeniedBy.TenDb };
+    }
     const { sandbox } = ctx;
     if (sandbox === undefined) return askPermission(req);
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);
@@ -622,7 +732,47 @@ export function createPermissionBroker(
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);
     if (verdict === null) return askPermission(req);
-    return isDecision(verdict) ? verdict : askPermission(req, verdict);
+    if (isDecision(verdict)) return verdict;
+    const decision = await askPermission(req, verdict);
+    return req.toolName === 'Read' ? servedSecretRead(req, decision, verdict, sandbox) : decision;
+  }
+
+  /**
+   * An allowed Read of the checkout's secret, pointed at a copy in the session's reads folder:
+   * Claude Code's deny rule on the secret stays, since its Grep and Glob honour only that.
+   */
+  function servedSecretRead(
+    req: ToolRequest,
+    decision: ToolDecision,
+    ask: Ask,
+    sandbox: NonNullable<BrokerContext['sandbox']>,
+  ): ToolDecision {
+    const [real] = ask.realPaths ?? [];
+    if (
+      decision.behavior !== 'allow' ||
+      real === undefined ||
+      !isSecretOnCard(real, sandbox.fileAccess)
+    )
+      return decision;
+    const refuse = (why: string): ToolDecision => ({
+      behavior: 'deny',
+      message: `${real} was allowed, but ${why}, so 10db did not read it.`,
+      by: DeniedBy.TenDb,
+    });
+    if (sandbox.secretReadsDir === undefined) return refuse('this session has no place to read it');
+    const text = readCheckoutText(sandbox.fileAccess.checkout, real);
+    if (text.kind !== 'text') return refuse('it is not one plain file inside the checkout');
+    try {
+      return {
+        behavior: 'allow',
+        updatedInput: {
+          ...req.input,
+          file_path: writeSecretRead(sandbox.secretReadsDir, text.text),
+        },
+      };
+    } catch {
+      return refuse('its copy could not be written');
+    }
   }
 
   return async (req) => {
@@ -630,7 +780,12 @@ export function createPermissionBroker(
       return await decide(req);
     } catch (error) {
       if (error instanceof ParkedError) {
-        return { behavior: 'deny', message: 'Parked until the builder answers.', interrupt: true };
+        return {
+          behavior: 'deny',
+          message: 'Parked until the builder answers.',
+          interrupt: true,
+          by: DeniedBy.TenDb,
+        };
       }
       throw error;
     }

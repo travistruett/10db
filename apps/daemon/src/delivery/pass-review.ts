@@ -31,7 +31,7 @@ import {
 } from '@10db/db';
 import { passReviewPrompt } from '../briefing';
 import { classifyPath } from '../guard';
-import type { SessionAdapter } from '../sessions';
+import type { AgentAdapter } from '../sessions';
 import { resolveStepPlan } from '../team';
 import type { DeliveryContext } from './context';
 import {
@@ -60,11 +60,11 @@ const FINDING_NOTICE = 'finding:';
 export const REVIEW_CUT_NOTICE = 'review-cut';
 
 /** One question to the model, as the adapter takes it. */
-type CompletionAsk = Parameters<SessionAdapter['complete']>[0];
+type CompletionAsk = Parameters<AgentAdapter['complete']>[0];
 
 /** What the review needs that delivery does not own: the model, and where it asks. */
 export interface PassReviewDeps {
-  readonly adapter: Pick<SessionAdapter, 'complete'>;
+  readonly adapter: Pick<AgentAdapter, 'complete'>;
   /** The launch of `model` on the account: what the question runs as (the launcher's `session`). */
   launch(
     accountId: AccountId,
