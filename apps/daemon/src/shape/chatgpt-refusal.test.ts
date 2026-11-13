@@ -4,7 +4,7 @@ import {
   InvalidError,
   ShapeOrigin,
   StartShapeInput,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
@@ -62,7 +62,7 @@ describe('a conversation on a ChatGPT account', () => {
     expect(f.adapter.shapeSessions).toHaveLength(0);
   });
 
-  it.each<SupportedAccountKind>([AccountKind.ClaudeSubscription, AccountKind.Bedrock])(
+  it.each<AgentAccountKind>([AccountKind.ClaudeSubscription, AccountKind.Bedrock])(
     'is not refused on a %s account',
     (accountKind) => {
       f = createServiceFixture({ accountKind, models: () => MODELS });

@@ -74,7 +74,9 @@ export function providerOf(kind: AgentAccountKind): Provider {
 export const BRAINSTORM_REFUSED_ON_CHATGPT = "Brainstorm chat isn't available on a ChatGPT account";
 
 /** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
-export function signsInWithLogin(kind: SupportedAccountKind): boolean {
+export function signsInWithLogin(
+  kind: SupportedAccountKind,
+): kind is typeof AccountKind.ClaudeSubscription | typeof AccountKind.CodexSignin {
   return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;
 }
 

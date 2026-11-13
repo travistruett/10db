@@ -1,4 +1,4 @@
-import type { AccountId, SupportedAccountKind } from '@10db/contracts';
+import type { AccountId, AgentAccountKind } from '@10db/contracts';
 import { replaceAccountModels } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -15,7 +15,7 @@ export interface AccountLists {
    * account: a signed-out process still answers a listing, so an unchecked list proves nothing. It never throws.
    */
   record(
-    account: { readonly id: AccountId; readonly kind: SupportedAccountKind },
+    account: { readonly id: AccountId; readonly kind: AgentAccountKind },
     seen: SeenAccount,
   ): void;
   /**

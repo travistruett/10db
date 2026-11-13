@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import { agentKind, isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
 import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
@@ -31,7 +31,7 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
     const account = getAccountRow(deps.db, id);
     // The tier's model on this account, by the tier's default and never by score, so naming is never refused.
     const choice = chooseModel({
-      ...routingInputs(deps.db, { accountId: id, provider: providerOf(account.kind) }),
+      ...routingInputs(deps.db, { accountId: id, provider: providerOf(agentKind(account.kind)) }),
       def: { role: StepRole.Plan, need: 0 },
       persona: undefined,
       task: {

@@ -6,7 +6,7 @@ import {
   Provider,
   type AccountId,
   type AccountInput,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import {
   applyAaMeasurement,
@@ -72,7 +72,7 @@ afterEach(() => {
   close();
 });
 
-const inputFor = (kind: SupportedAccountKind, label: string): AccountInput => {
+const inputFor = (kind: AgentAccountKind, label: string): AccountInput => {
   switch (kind) {
     case AccountKind.Bedrock:
       return { kind, label, settings: { region: 'us-east-1', awsProfile: null } };
@@ -85,7 +85,7 @@ const inputFor = (kind: SupportedAccountKind, label: string): AccountInput => {
   }
 };
 
-const account = (kind: SupportedAccountKind, label: string): AccountId =>
+const account = (kind: AgentAccountKind, label: string): AccountId =>
   seedAccount(store, inputFor(kind, label)).id;
 
 const seen = (id: string, resolvedId: string | null, efforts: Effort[] = EFFORTS): SeenModel => ({
@@ -95,7 +95,7 @@ const seen = (id: string, resolvedId: string | null, efforts: Effort[] = EFFORTS
 });
 
 /** The account's list as a successful read stored it. */
-function list(id: AccountId, kind: SupportedAccountKind, models: SeenModel[]): void {
+function list(id: AccountId, kind: AgentAccountKind, models: SeenModel[]): void {
   store.write((ctx) => {
     replaceAccountModels(ctx, id, offerFromList(kind, models, catalogue));
   });
@@ -257,7 +257,7 @@ describe('reconcileProfiles', () => {
     );
   });
 
-  it.each<[string, SupportedAccountKind, string, string | null]>([
+  it.each<[string, AgentAccountKind, string, string | null]>([
     ['a Bedrock entry of another maker', AccountKind.Bedrock, 'openai.gpt-6.1-sol', null],
     ['a Bedrock entry with no maker', AccountKind.Bedrock, 'meta.llama3-70b-instruct-v1:0', null],
     ['an exact ID of another maker on a gateway', AccountKind.Gateway, 'gpt-6-astra', null],

@@ -1,4 +1,4 @@
-import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type AgentAccountKind } from '@10db/contracts';
 import { SHAPE_AGENT_MODELS } from './confinement';
 
 /**
@@ -7,7 +7,7 @@ import { SHAPE_AGENT_MODELS } from './confinement';
  * resolve to older models than the account lists, and a ChatGPT account has no Agent tool, so an agent there
  * runs on the session's model.
  */
-export function shapeAgentModels(kind: SupportedAccountKind): readonly string[] {
+export function shapeAgentModels(kind: AgentAccountKind): readonly string[] {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:

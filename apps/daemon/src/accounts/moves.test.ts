@@ -45,6 +45,7 @@ import {
   type AccountRuntime,
   type MoveBack,
 } from './index';
+import { moveTargets } from './moves';
 import { movedCard, recordedCard, refusedCard, usageHighCard } from './cards';
 import type { PauseRequest } from './pauses';
 
@@ -162,6 +163,17 @@ const limitCard = () => cardAbout(AccountPauseReason.UsageLimit);
 const backCard = () => cardAbout(MOVE_BACK_CARD);
 /** The second plan has no confirmed identity yet, so the option says what it needs. */
 const CONTINUE = 'Continue on Second plan (needs sign-in)';
+
+describe('where a project can move', () => {
+  it('never offers an OpenRouter account, which runs no agent', () => {
+    const project = seedProject(store);
+    const second = seedAccount(store, { kind: 'anthropic_api_key', label: 'Spare key' });
+    seedAccount(store, { kind: 'openrouter', label: 'OpenRouter' });
+    const targets = moveTargets(store.db, project, () => false);
+    expect(targets.map((a) => a.id)).toContain(second.id);
+    expect(targets.map((a) => a.kind)).not.toContain('openrouter');
+  });
+});
 
 describe('moving a project', () => {
   it('offers to continue on each account the project could move to, and moves it when one is chosen', () => {
