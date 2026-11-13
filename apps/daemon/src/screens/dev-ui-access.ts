@@ -47,6 +47,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/model-settings',
   '/judge',
   '/judge/calls',
+  '/judge/calls/page',
+  '/judge/decisions',
   '/judge/models',
   '/benchmarks/status',
   '/benchmarks/models',

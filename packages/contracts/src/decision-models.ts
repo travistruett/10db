@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DecisionNumberSource } from './model-sources';
 
 /** One of OpenRouter's decision models, as Settings › Decisions offers it. */
 export const DecisionModelDto = z.object({
@@ -16,6 +17,12 @@ export const DecisionModelDto = z.object({
   outputUsdPerMillion: z.number().nonnegative(),
   /** Why 10db can't call it yet, in the builder's words; null when it can. */
   cantCall: z.string().nullable(),
+  /** US dollars per million decisions; null when nothing measures it. */
+  costPerMillionUsd: z.number().nonnegative().nullable().default(null),
+  /** Seconds a decision takes; null when nothing measures it. */
+  secondsPerDecision: z.number().nonnegative().nullable().default(null),
+  costSource: z.enum(DecisionNumberSource).nullable().default(null),
+  timeSource: z.enum(DecisionNumberSource).nullable().default(null),
 });
 export type DecisionModelDto = z.infer<typeof DecisionModelDto>;
 

@@ -5,12 +5,18 @@ import {
   CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
+  JudgeStatusDto,
   mintId,
   ModelRowDto,
   RolePicksDto,
   type Effort,
 } from '@10db/contracts';
-import { findModelProfile, listAccountModels, replaceAccountModels } from '@10db/db';
+import {
+  findModelProfile,
+  listAccountModels,
+  replaceAccountModels,
+  replaceEndpointStats,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -39,7 +45,7 @@ afterEach(async () => {
 /** A daemon whose one account lists the models given, against the committed catalogue fixture. */
 async function start(
   models: { id: string; resolvedId: string }[],
-  opts: { catalogueSync?: boolean; offline?: { value: boolean } } = {},
+  opts: { catalogueSync?: boolean; offline?: { value: boolean }; openRouterSync?: boolean } = {},
 ) {
   const adapter = new FakeAdapter({});
   adapter.probeSeen = {
@@ -54,6 +60,7 @@ async function start(
     logLevel: 'warn',
     ...QUIET,
     catalogueSync: opts.catalogueSync ?? true,
+    ...(opts.openRouterSync === undefined ? {} : { openRouterSync: opts.openRouterSync }),
     fetch: () => {
       fetches += 1;
       if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
@@ -71,6 +78,65 @@ async function start(
 }
 
 describe('the model list over HTTP', () => {
+  /** A daemon with a Bedrock account that offers Opus and OpenRouter's speeds for it already stored. */
+  async function withBedrockSpeeds() {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
+      openRouterSync: true,
+    });
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'bedrock',
+      label: 'Bedrock',
+      settings: { region: 'us-west-2', awsProfile: 'dev' },
+    });
+    running.state.write((ctx) => {
+      replaceAccountModels(ctx, account.id, [
+        {
+          model: 'claude-opus-5-5',
+          family: 'claude-opus',
+          launchId: 'us.anthropic.claude-opus-5-5',
+          efforts: ['high'],
+          inputPrice: null,
+          outputPrice: null,
+        },
+      ]);
+      replaceEndpointStats(
+        ctx,
+        'anthropic/claude-opus-5.5',
+        [
+          { provider: 'Amazon Bedrock', tokensPerSecond: 77, latencyMs: 150 },
+          { provider: 'Anthropic', tokensPerSecond: 44, latencyMs: 100 },
+        ],
+        new Date().toISOString(),
+      );
+    });
+    return { api, account };
+  }
+
+  it("shows OpenRouter's speed on the provider of the asked Bedrock account, once an OpenRouter account is picked for decisions", async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const { account: openRouter } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    });
+    await api.patch('/judge', JudgeStatusDto, { accountId: openRouter.id });
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: 77,
+      speedProvider: 'Amazon Bedrock',
+      sources: { speed: 'openrouter' },
+    });
+  });
+
+  it('shows none of OpenRouter’s numbers while no OpenRouter account is picked for decisions', async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: null,
+      speedProvider: null,
+      sources: { speed: null },
+    });
+  });
+
   it('answers one row per model, merging its efforts, and none for the seeded aliases', async () => {
     const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
     const rows = await api.get('/models', z.array(ModelRowDto));

@@ -5,10 +5,12 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
+  AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
   InboxItemId,
+  noOpenRouterSync,
   PROTOCOL_VERSION,
   Provider,
   RoutedBy,
@@ -40,7 +42,10 @@ import {
   getAccountRow,
   listModelProfiles,
   listAccountModels,
+  listAccounts,
   getAppSetting,
+  findAccountRow,
+  getJudgeConfig,
   getProject,
   listPermissionRules,
   listProjects,
@@ -70,7 +75,12 @@ import {
   type AccountLimits,
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
-import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import {
+  createBenchmarkSync,
+  createOpenRouterSync,
+  type BenchmarkSync,
+  type OpenRouterSync,
+} from '../benchmarks';
 import {
   createAccountLists,
   createCatalogueSync,
@@ -405,6 +415,12 @@ export interface DaemonOptions {
   readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
+  /**
+   * Read OpenRouter's scores and per-provider speed with the decisions account's key. Off unless given, so a
+   * test never reaches the network; the entry point turns it on unless a kill switch is set. Never runs with
+   * `judgeOff` or `benchmarksOff`.
+   */
+  readonly openRouterSync?: boolean;
   /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
   readonly listeners?: ListenerReader;
   /** Whether a loopback address answers, for the Workbench setup's app address; one GET unless given. */
@@ -654,15 +670,53 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
+  const readJudgeKey = createJudgeKeyReader({
+    state,
+    keychain: judgeKeychain,
+    off: opts.judgeOff === true,
+  });
   const judge = createJudge({
     state,
     clock,
     fetch: opts.fetch ?? fetch,
     decisionModelIds: () => decisionModels.ids(),
-    readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
+    readKey: readJudgeKey,
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  // OpenRouter's scores and speeds are read with the decisions account's key, and never under either kill switch.
+  const openRouterSync: OpenRouterSync | null =
+    opts.openRouterSync === true && opts.judgeOff !== true && opts.benchmarksOff !== true
+      ? createOpenRouterSync({
+          state,
+          clock,
+          fetch: opts.fetch ?? fetch,
+          readKey: () => readJudgeKey(getJudgeConfig(state.db).accountId),
+          offered: () => {
+            const live = new Set(
+              listAccounts(state.db)
+                .filter((a) => !a.archived)
+                .map((a) => a.id),
+            );
+            return new Set(
+              listAccountModels(state.db)
+                .filter((m) => !m.unusable && live.has(m.accountId))
+                .map((m) => m.model),
+            );
+          },
+          catalogue: () => catalogue.catalogue(),
+          decisionModelIds: async () => {
+            try {
+              return (await decisionModels.list()).models
+                .filter((m) => m.cantCall === null)
+                .map((m) => m.id);
+            } catch {
+              return [];
+            }
+          },
+          logger: logger.child({ component: 'benchmarks' }),
+        })
+      : null;
   // With the judge off no Keychain item is read, `openrouter-api-key` included.
   if (opts.judgeOff !== true)
     await moveOpenRouterKey({
@@ -670,6 +724,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keychain: judgeKeychain,
       logger: logger.child({ component: 'judge' }),
     });
+  // After the key move, so the first run sees the account a key left in the old item became.
+  openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,
@@ -1877,10 +1933,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       benchmarks,
       keychain: judgeKeychain,
       off: opts.benchmarksOff === true,
+      openRouter: () =>
+        openRouterSync?.status() ?? {
+          ...noOpenRouterSync(),
+          off: opts.judgeOff === true || opts.benchmarksOff === true,
+        },
     }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
+    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
+    openRouterOn: () => {
+      if (openRouterSync === null) return false;
+      const accountId = getJudgeConfig(state.db).accountId;
+      const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
+      return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
+    },
     trust: createTrustServices({
       state,
       builderHome,
@@ -1895,6 +1963,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       judge,
       models: decisionModels,
       off: opts.judgeOff === true,
+      onAccountChanged: () => {
+        void openRouterSync?.poke();
+      },
+      clock,
     }),
     stakeholders: createStakeholderApiServices({
       state,
@@ -2273,6 +2345,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
+      openRouterSync?.stop();
+      await openRouterSync?.idle();
       catalogue.stop();
       await listRefresh.stop();
       accountPauses.stop();

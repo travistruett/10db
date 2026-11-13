@@ -5,6 +5,7 @@ import {
   JudgeDecision,
   UpstreamError,
   type AccountId,
+  type DecisionModelListDto,
   type JudgeConfig,
   type JudgeConfigPatch,
   type JudgeStatusDto,
@@ -13,10 +14,16 @@ import {
   findAccountRow,
   getAccountRow,
   getJudgeConfig,
+  judgeCallModelStats,
+  judgeDecisionStats,
   listJudgeCalls,
+  listOpenRouterMeasures,
+  pageJudgeCalls,
   patchJudgeConfig,
 } from '@10db/db';
 import type { ApiServices } from '../api';
+import { openRouterLatencyMs } from '../catalogue';
+import type { Clock } from '../clock';
 import {
   KeychainError,
   readAccountSecretAsync,
@@ -24,12 +31,24 @@ import {
   type Keychain,
 } from '../environment';
 import type { StateStore } from '../events';
-import type { DecisionModelList, JudgeService } from '../judge';
+import {
+  decisionModelNumbers,
+  JUDGE_LOG_RETENTION_MS,
+  typicalDecisionTokens,
+  type DecisionModelList,
+  type JudgeService,
+} from '../judge';
 
 /** The judge's side of the HTTP API: its config, the account it runs on, the account test and the call log. */
 export type JudgeApiServices = Pick<
   ApiServices,
-  'judgeStatus' | 'patchJudge' | 'testAccount' | 'listJudgeCalls' | 'listDecisionModels'
+  | 'judgeStatus'
+  | 'patchJudge'
+  | 'testAccount'
+  | 'listJudgeCalls'
+  | 'pageJudgeCalls'
+  | 'judgeDecisionStats'
+  | 'listDecisionModels'
 >;
 
 /** The models a patch sets that differ from the ones saved, each once. */
@@ -79,6 +98,10 @@ export function createJudgeServices(deps: {
   readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
   readonly off: boolean;
+  /** Called after a patch changed the account decisions run on, so a sync can read with the new key. */
+  readonly onAccountChanged?: () => void;
+  /** The time the 30-day window of the builder's own calls and the age of OpenRouter's latencies are judged by. */
+  readonly clock: Clock;
 }): JudgeApiServices {
   const status = async (): Promise<JudgeStatusDto> => {
     const config = getJudgeConfig(deps.state.db);
@@ -99,6 +122,35 @@ export function createJudgeServices(deps: {
         secretState: secret.state,
       },
       off: deps.off,
+    };
+  };
+  /** A new list with each model's cost and time added; the list held is never changed. */
+  const withNumbers = (list: DecisionModelListDto): DecisionModelListDto => {
+    const now = deps.clock.now();
+    const stats = judgeCallModelStats(
+      deps.state.db,
+      new Date(now.getTime() - JUDGE_LOG_RETENTION_MS).toISOString(),
+    );
+    const priceOf = (model: string): number | null =>
+      list.models.find((m) => m.id === model)?.inputUsdPerMillion ?? null;
+    const typical = typicalDecisionTokens(stats, priceOf);
+    const byModel = new Map(stats.map((s) => [s.model, s]));
+    const measures = listOpenRouterMeasures(deps.state.db);
+    return {
+      ...list,
+      models: list.models.map((model) => ({
+        ...model,
+        ...decisionModelNumbers(
+          model,
+          byModel.get(model.id),
+          typical.tokens,
+          openRouterLatencyMs(
+            measures.filter((m) => m.id === model.id),
+            now,
+          ),
+          typical.assumed,
+        ),
+      })),
     };
   };
   return {
@@ -124,6 +176,7 @@ export function createJudgeServices(deps: {
           );
       }
       deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
+      if (accountId !== config.accountId) deps.onAccountChanged?.();
       return status();
     },
     testAccount(id) {
@@ -134,15 +187,23 @@ export function createJudgeServices(deps: {
       return keychainConflict(() => deps.judge.test(id));
     },
     listJudgeCalls: (limit) => listJudgeCalls(deps.state.db, limit),
+    pageJudgeCalls: (query) => pageJudgeCalls(deps.state.db, query),
+    judgeDecisionStats() {
+      const since = new Date(deps.clock.now().getTime() - JUDGE_LOG_RETENTION_MS).toISOString();
+      return { since, decisions: judgeDecisionStats(deps.state.db, since) };
+    },
     async listDecisionModels() {
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
+      let list: DecisionModelListDto;
       try {
-        return await deps.models.list();
+        list = await deps.models.list();
       } catch (error) {
         throw new UpstreamError(
           error instanceof Error ? error.message : "OpenRouter's model list could not be read",
         );
       }
+      // Outside the try: a fault of our own database is not OpenRouter's.
+      return withNumbers(list);
     },
   };
 }

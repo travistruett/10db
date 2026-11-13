@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AccountId, ModelProfileId, PatternId, ProjectId } from './ids';
+import { ModelSources, noModelSources } from './model-sources';
 import { Effort, RiskTag, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
@@ -173,6 +174,14 @@ export const ModelEffortDto = z.object({
   /** At the maker's list price, or scaled to the account the list was asked for. */
   costPerTaskUsd: z.number().min(0).nullable(),
   outputTokensPerSecond: z.number().nullable(),
+  /** Coding index score; null when no source has one. */
+  coding: z.number().nullable().default(null),
+  /** Agentic index score; null when no source has one. */
+  agentic: z.number().nullable().default(null),
+  /** Where each figure above comes from. */
+  sources: ModelSources.default(noModelSources),
+  /** The provider the speed was measured on; null when unknown. */
+  speedProvider: z.string().nullable().default(null),
   stepsRun: z.int().min(0),
   firstPassSteps: z.int().min(0),
 });
@@ -201,6 +210,14 @@ export const ModelRowDto = z.object({
   /** The cost of the effort the Intelligence comes from, at the maker's price or the account's asked for. */
   costPerTaskUsd: z.number().min(0).nullable(),
   outputTokensPerSecond: z.number().nullable(),
+  /** Coding index score; null when no source has one. */
+  coding: z.number().nullable().default(null),
+  /** Agentic index score; null when no source has one. */
+  agentic: z.number().nullable().default(null),
+  /** Where each figure above comes from. */
+  sources: ModelSources.default(noModelSources),
+  /** The provider the speed was measured on; null when unknown. */
+  speedProvider: z.string().nullable().default(null),
   /** One per effort 10db can run, strongest first; the row's figures are the first one's. */
   efforts: z.array(ModelEffortDto),
   /** Steps 10db has run on this model. */

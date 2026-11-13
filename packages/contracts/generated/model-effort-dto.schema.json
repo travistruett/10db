@@ -39,6 +39,121 @@
         "null"
       ]
     },
+    "coding": {
+      "default": null,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "agentic": {
+      "default": null,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "sources": {
+      "default": {
+        "intelligence": null,
+        "coding": null,
+        "agentic": null,
+        "costPerTask": null,
+        "speed": null
+      },
+      "type": "object",
+      "properties": {
+        "intelligence": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "aa",
+                "aa_via_openrouter",
+                "openrouter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coding": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "aa",
+                "aa_via_openrouter",
+                "openrouter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agentic": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "aa",
+                "aa_via_openrouter",
+                "openrouter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costPerTask": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "aa",
+                "aa_via_openrouter",
+                "openrouter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "aa",
+                "aa_via_openrouter",
+                "openrouter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "intelligence",
+        "coding",
+        "agentic",
+        "costPerTask",
+        "speed"
+      ]
+    },
+    "speedProvider": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "stepsRun": {
       "type": "integer",
       "minimum": 0,
