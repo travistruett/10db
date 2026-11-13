@@ -4,6 +4,13 @@
 
 export { heldInlineBytes } from './block-pictures';
 export { createDelivery } from './delivery';
+export {
+  ExploreEffect,
+  reduceExplore,
+  type ExploreEvent,
+  type ExploreFacts,
+  type ExploreOutcome,
+} from './explore-state';
 export { outgoingMessage, type DeliverableMessage, type OutgoingMessage } from './delivery-rules';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
 export { keepBuilderMessage, removeKeptFiles, type PastedFile } from './intake';
