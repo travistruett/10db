@@ -32,6 +32,12 @@ const ALLOWED: readonly Allowed[] = [
     reason:
       'the aliases Claude Code’s own Agent tool takes: they are its vocabulary, not a model 10db chose',
   },
+  {
+    file: 'apps/daemon/src/trust/auto-mode-models.ts',
+    names: ['opus', 'fable', 'sonnet', 'haiku'],
+    reason:
+      'the model families and aliases Claude Code’s auto mode is available on: its vocabulary, read from an ID, not a model 10db chose',
+  },
 ];
 
 function namesIn(file: string): Set<string> {

@@ -62,13 +62,14 @@ import { captureLogs } from './log-capture';
  * The Bedrock half runs only with TENDB_LIVE_BEDROCK=1 and the Bedrock account's variables set
  * (CLAUDE_CODE_USE_BEDROCK, AWS_REGION, AWS_BEARER_TOKEN_BEDROCK, CLAUDE_CONFIG_DIR).
  */
-const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
-const bedrockLive = live && process.env['TENDB_LIVE_BEDROCK'] === '1';
+const liveEnv = loadEnv(process.env);
+const live = liveEnv.TENDB_LIVE_CLAUDE === '1';
+const bedrockLive = live && liveEnv.TENDB_LIVE_BEDROCK === '1';
 
 /** Where each row's observations are also appended, when set: vitest hides console output. */
 function note(text: string): void {
   console.info(text);
-  const file = process.env['TENDB_LIVE_REPORT'];
+  const file = liveEnv.TENDB_LIVE_REPORT;
   if (file !== undefined) appendFileSync(file, `${text}\n`);
 }
 
