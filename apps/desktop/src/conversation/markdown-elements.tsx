@@ -87,6 +87,8 @@ function Link({ href, children }: { readonly href: unknown; readonly children: R
     <Anchor
       role="link"
       tabIndex={0}
+      // Underlined, so a link in a sentence never relies on color alone (WCAG 1.4.1).
+      underline="always"
       title={href}
       style={{ cursor: 'pointer' }}
       onClick={(event) => {
