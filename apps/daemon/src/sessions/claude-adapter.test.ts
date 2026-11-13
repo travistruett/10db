@@ -849,10 +849,12 @@ describe('buildQueryOptions', () => {
       'toolu_1',
       { signal: new AbortController().signal },
     );
+    // A hook input with no permission_mode is a call outside auto mode.
     expect(preToolUse).toHaveBeenCalledWith({
       toolName: 'Write',
       input: { file_path: '/elsewhere/x' },
       cwd: '/repo',
+      reportedMode: 'other',
     });
     expect(output).toEqual({
       hookSpecificOutput: {
@@ -2852,6 +2854,42 @@ describe('a Plan session through the adapter', () => {
       'claude session refused',
     ];
     expect(logs.lines().filter((l) => laneLines.includes(String(l['msg'])))).toEqual([]);
+  });
+});
+
+describe('the mode Claude Code reports with a call', () => {
+  /** Runs the lane's PreToolUse hook as Claude Code would, with what it reports as its mode. */
+  async function judged(permissionMode: string | undefined) {
+    const preToolUse = vi.fn<LaneSessionSpec['preToolUse']>(() => ({ decision: 'allow' }));
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox, preToolUse }), deps);
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error('the adapter passed no PreToolUse hook');
+    await hook(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+        tool_use_id: 'toolu_1',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo',
+        ...(permissionMode === undefined ? {} : { permission_mode: permissionMode }),
+      },
+      'toolu_1',
+      { signal: new AbortController().signal },
+    );
+    return preToolUse.mock.calls[0]?.[0];
+  }
+
+  it.each([
+    ['a PreToolUse in auto mode reaches preToolUse as auto', 'auto', 'auto'],
+    ['a PreToolUse in default mode reaches it as other', 'default', 'other'],
+    ['a PreToolUse with no permission_mode reaches it as other', undefined, 'other'],
+  ] as const)('%s', async (_name, permissionMode, reported) => {
+    expect(await judged(permissionMode)).toMatchObject({
+      toolName: 'Bash',
+      reportedMode: reported,
+    });
   });
 });
 

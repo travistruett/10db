@@ -15,6 +15,7 @@ import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
 import type { ToolTarget } from './tool-target';
+import type { ReportedMode } from '../trust';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -165,6 +166,11 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
   /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
   readonly cwd?: string | undefined;
+  /**
+   * The permission mode the agent reported with this call: Claude Code's `auto`, or anything else.
+   * Absent where the agent reports none (Codex, the fake, a Plan session until it runs in auto mode).
+   */
+  readonly reportedMode?: ReportedMode;
 }
 
 /** A tool call that has run, as a Shape session's PostToolUse hook sees it, with what it returned. */

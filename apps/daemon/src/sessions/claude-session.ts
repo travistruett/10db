@@ -33,6 +33,7 @@ import {
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
+import { ReportedMode } from '../trust';
 import { renderClaudeAutoMode } from './claude-auto-mode';
 import { claudeQueryOptions } from './claude-query-options';
 import {
@@ -224,6 +225,9 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
                 toolName: hookInput.tool_name,
                 input: hookInput.tool_input,
                 cwd: hookInput.cwd,
+                // Each call carries the mode Claude Code reports with it; none is not auto mode.
+                reportedMode:
+                  hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
               }),
             ),
         }),
