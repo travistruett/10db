@@ -37,7 +37,9 @@ import {
   listShapeQuestions,
   listShapes,
   markShapeLinksSizeTold,
+  patchProject,
   patchShape,
+  seedAccount,
   seedProject,
   shapeConversation,
   shapeTokens,
@@ -197,6 +199,13 @@ describe('the Shape tables', () => {
       model: 'claude-opus-5-5',
       providerSessionId: 'sdk-9',
     });
+  });
+
+  it('moves a conversation to the account its project moves to', () => {
+    const { value: shape } = newShape();
+    const other = seedAccount(store, { kind: 'claude_subscription', label: 'Company B' });
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: other.id }));
+    expect(shapeConversation(store.db, shape.id).accountId).toBe(other.id);
   });
 
   it('keeps the model the builder chose for a conversation, and forgets it for the default', () => {
