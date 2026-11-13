@@ -9,7 +9,7 @@ import {
   type AgentCapabilitiesDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
-import { autoModeRuns } from './auto-mode-models';
+import { autoModeRuns } from '../trust';
 
 /** What an agent can do on an account (sessions spec §5.3). */
 export type AgentCapabilities = AgentCapabilitiesDto;

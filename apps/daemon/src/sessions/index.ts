@@ -1,4 +1,3 @@
-export { autoModeRuns } from './auto-mode-models';
 export { createClaudeAdapter } from './claude-adapter';
 export {
   capabilitiesOf,

@@ -1,5 +1,5 @@
 import { AccountKind, type SupportedAccountKind } from '@10db/contracts';
-import { autoModeRuns } from '../sessions';
+import { autoModeRuns } from './auto-mode-models';
 
 type ValueOf<T> = T[keyof T];
 
