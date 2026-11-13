@@ -18,7 +18,7 @@ export const DecisionStatsDto = z.object({
   }),
   costUsd: z.number().min(0),
   medianLatencyMs: z.number().nullable(),
-  /** The models that answered, with the confidence of each answer. */
+  /** The models that answered, with the confidence of each answer, oldest call first. */
   answers: z.array(z.object({ model: z.string(), confidence: z.number() })),
 });
 export type DecisionStatsDto = z.infer<typeof DecisionStatsDto>;

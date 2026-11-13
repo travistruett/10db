@@ -111,6 +111,14 @@ describe('judgeDecisionStats', () => {
     ]);
   });
 
+  it('lists the answers oldest call first, whatever order they were logged in', () => {
+    log({ outcome: 'acted', confidence: 0.1 }, new Date('2026-11-01T12:00:00.000Z'));
+    log({ outcome: 'acted', confidence: 0.2 }, new Date('2026-11-01T11:00:00.000Z'));
+    log({ outcome: 'acted', confidence: 0.3 }, new Date('2026-11-01T13:00:00.000Z'));
+    const [stats] = judgeDecisionStats(store.db, '2026-10-01T00:00:00.000Z');
+    expect(stats?.answers.map((a) => a.confidence)).toEqual([0.2, 0.1, 0.3]);
+  });
+
   it('leaves out a decision with no calls since the time asked', () => {
     log({ outcome: 'acted' }, new Date('2026-09-01T00:00:00.000Z'));
     expect(judgeDecisionStats(store.db, '2026-10-01T00:00:00.000Z')).toEqual([]);

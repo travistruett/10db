@@ -48,25 +48,7 @@ export function recordJudgeOutcome(
 
 /** The most recent calls, newest first. The state sent is left out: it is task text and a diff. */
 export function listJudgeCalls(db: DbReader, limit: number): JudgeCallDto[] {
-  return db
-    .select({
-      id: schema.judgeCalls.id,
-      decision: schema.judgeCalls.decision,
-      model: schema.judgeCalls.model,
-      question: schema.judgeCalls.question,
-      answer: schema.judgeCalls.answer,
-      confidence: schema.judgeCalls.confidence,
-      outcome: schema.judgeCalls.outcome,
-      latencyMs: schema.judgeCalls.latencyMs,
-      costUsd: schema.judgeCalls.costUsd,
-      workstreamId: schema.judgeCalls.workstreamId,
-      taskId: schema.judgeCalls.taskId,
-      createdAt: schema.judgeCalls.createdAt,
-    })
-    .from(schema.judgeCalls)
-    .orderBy(desc(schema.judgeCalls.createdAt), desc(schema.judgeCalls.id))
-    .limit(limit)
-    .all();
+  return pageJudgeCalls(db, { limit, offset: 0 }).calls;
 }
 
 /** One page of the call log, newest first, with every call the filters match counted in `total`. */

@@ -1,5 +1,5 @@
 import { JudgeDecision, JudgeOutcome, type DecisionStatsDto } from '@10db/contracts';
-import { and, gte, inArray } from 'drizzle-orm';
+import { and, asc, gte, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader } from './store';
 
@@ -47,7 +47,11 @@ export function judgeCallModelStats(db: DbReader, since: string): JudgeCallModel
     )
     .all();
   const byModel = new Map<string, typeof rows>();
-  for (const row of rows) byModel.set(row.model, [...(byModel.get(row.model) ?? []), row]);
+  for (const row of rows) {
+    const own = byModel.get(row.model);
+    if (own) own.push(row);
+    else byModel.set(row.model, [row]);
+  }
   return [...byModel.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([model, calls]) => {
@@ -79,6 +83,7 @@ export function judgeDecisionStats(db: DbReader, since: string): DecisionStatsDt
     })
     .from(schema.judgeCalls)
     .where(gte(schema.judgeCalls.createdAt, since))
+    .orderBy(asc(schema.judgeCalls.createdAt), asc(schema.judgeCalls.id))
     .all();
   return Object.values(JudgeDecision).flatMap((decision) => {
     const own = rows.filter((r) => r.decision === decision);

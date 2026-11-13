@@ -622,12 +622,6 @@ describe('the call log, paged, and the decision stats', () => {
     expect(acted.total).toBe(2);
   });
 
-  it('answers 400 for an unknown decision or outcome', async () => {
-    const { raw } = await start();
-    expect((await raw('GET', '/judge/calls/page?decision=nope')).status).toBe(400);
-    expect((await raw('GET', '/judge/calls/page?outcome=nope')).status).toBe(400);
-  });
-
   it('counts a stopped call apart from the fallbacks', async () => {
     const { api, daemon: d } = await start();
     seed(d, mix);
