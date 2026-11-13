@@ -3,6 +3,7 @@ import {
   EventType,
   InvalidError,
   NotFoundError,
+  OPENROUTER_CANT_RUN_AGENTS,
   mintId,
   type AccountId,
   type ProjectDto,
@@ -471,5 +472,62 @@ describe('fallback accounts', () => {
     expect(() => store.write((ctx) => archiveAccount(ctx, fallback.id))).toThrow(
       /fallback of "demo"/,
     );
+  });
+});
+
+describe('OpenRouter accounts', () => {
+  const openRouter = (label = 'OpenRouter') => seedAccount(store, { kind: 'openrouter', label });
+
+  it('keeps its key at account:<id>, with no directory, lanes or cap', () => {
+    const account = openRouter();
+    expect(account).toMatchObject({ kind: 'openrouter', settings: {}, monthlyCapUsd: null });
+    expect(getAccountRow(store.db, account.id)).toMatchObject({
+      configDir: null,
+      laneCap: 0,
+      monthlyCapUsd: null,
+      secretRef: accountSecretRef(account.id),
+    });
+  });
+
+  it('takes no lane cap, and no monthly cap', () => {
+    const account = openRouter();
+    for (const patch of [{ laneCap: 3 }, { monthlyCapUsd: 5 }]) {
+      expect(() => store.write((ctx) => patchAccount(ctx, account.id, patch))).toThrow(
+        InvalidError,
+      );
+    }
+  });
+
+  it.each<{ name: string; bind: (id: AccountId, project: ProjectDto) => void }>([
+    {
+      name: 'a project created on it',
+      bind: (id) => {
+        seedProject(store, { accountId: id });
+      },
+    },
+    {
+      name: 'a project moved to it',
+      bind: (id, project) => store.write((ctx) => patchProject(ctx, project.id, { accountId: id })),
+    },
+    {
+      name: 'a project created with it as the backup',
+      bind: (id) => {
+        seedProject(store, { fallbackAccountId: id });
+      },
+    },
+    {
+      name: 'a project given it as the backup',
+      bind: (id, project) =>
+        store.write((ctx) => patchProject(ctx, project.id, { fallbackAccountId: id })),
+    },
+  ])('refuses $name', ({ bind }) => {
+    const project = seedProject(store);
+    const account = openRouter();
+    expect(() => {
+      bind(account.id, project);
+    }).toThrow(OPENROUTER_CANT_RUN_AGENTS);
+    expect(() => {
+      bind(account.id, project);
+    }).toThrow(InvalidError);
   });
 });

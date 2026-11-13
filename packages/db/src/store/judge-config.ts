@@ -1,9 +1,12 @@
 import {
+  AccountKind,
   DEFAULT_JUDGE_CONFIG,
+  InvalidError,
   JudgeConfig,
   type JudgeConfigPatch,
   JudgeDecision,
 } from '@10db/contracts';
+import { findAccountRow } from './accounts';
 import { getAppSetting, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 
@@ -26,7 +29,19 @@ export function patchJudgeConfig(ctx: WriteContext, patch: JudgeConfigPatch): Ju
   );
   // Both inputs were parsed by the contract's schemas, so the merge is a JudgeConfig; parsing again
   // is what guarantees it.
-  const next = JudgeConfig.parse({ enabled: patch.enabled ?? current.enabled, decisions });
+  const accountId = patch.accountId === undefined ? current.accountId : patch.accountId;
+  if (accountId !== null && accountId !== current.accountId) {
+    const account = findAccountRow(ctx.tx, accountId);
+    if (!account) throw new InvalidError('Decisions run on an account that exists');
+    if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+    if (account.kind !== AccountKind.OpenRouter)
+      throw new InvalidError(`Decisions run on an OpenRouter account, not "${account.label}"`);
+  }
+  const next = JudgeConfig.parse({
+    enabled: patch.enabled ?? current.enabled,
+    accountId,
+    decisions,
+  });
   setAppSetting(ctx, JUDGE_SETTING_KEY, next);
   return next;
 }
