@@ -57,6 +57,11 @@ const RUNTIME_SCHEMAS = [
   'v2/ThreadTokenUsageUpdatedNotification',
   'v2/ItemCompletedNotification',
   'v2/ThreadTurnsListResponse',
+  'v2/ItemStartedNotification',
+  'v2/AgentMessageDeltaNotification',
+  'v2/ReasoningSummaryTextDeltaNotification',
+  'v2/CommandExecutionOutputDeltaNotification',
+  'v2/TurnPlanUpdatedNotification',
 ] as const;
 
 /** The pre-commit hygiene check refuses a file over 1 MB. */

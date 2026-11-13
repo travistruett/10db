@@ -143,10 +143,52 @@ export const TokenUsageUpdated = z.looseObject({
   }),
 });
 
+const Item = z.looseObject({ type: z.string(), id: z.string().optional() });
+
 export const ItemCompleted = z.looseObject({
   threadId: z.string(),
   turnId: z.string(),
-  item: z.looseObject({ type: z.string(), id: z.string().optional() }),
+  item: Item,
+  completedAtMs: z.number().optional(),
+});
+
+export const ItemStarted = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  item: Item,
+  startedAtMs: z.number(),
+});
+
+/** A piece of the agent message an item is writing. */
+export const AgentMessageDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+});
+
+/** A piece of a reasoning summary; each summary part has its own index. */
+export const ReasoningSummaryDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+  summaryIndex: z.number(),
+});
+
+/** A piece of a running command's output. */
+export const CommandOutputDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+});
+
+/** The turn's plan, whole each time; a status is a string, so a new one still parses. */
+export const TurnPlanUpdated = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  plan: z.array(z.looseObject({ step: z.string(), status: z.string() })),
 });
 
 export const TurnStarted = z.looseObject({ threadId: z.string(), turn: Turn });

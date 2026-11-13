@@ -1,0 +1,4087 @@
+[
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "text": "x",
+          "type": "text"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "text": "x",
+          "type": "text"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "content": [
+        {
+          "text": "x",
+          "type": "text"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "auto",
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "low",
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "high",
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "original",
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": null,
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "auto",
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "low",
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "high",
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": "original",
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "image",
+          "detail": null,
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localImage",
+          "detail": "auto"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localImage",
+          "detail": "low"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localImage",
+          "detail": "high"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localImage",
+          "detail": "original"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localImage",
+          "detail": null
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "audio",
+          "url": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "type": "audio",
+          "fileId": "x"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "path": "x",
+          "type": "localAudio"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "name": "x",
+          "path": "x",
+          "type": "skill"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "name": "x",
+          "path": "x",
+          "type": "mention"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "content": [
+        {
+          "text": "x",
+          "type": "text"
+        }
+      ],
+      "id": "x",
+      "type": "userMessage",
+      "clientId": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "fragments": [
+        {
+          "hookRunId": "x",
+          "text": "x"
+        }
+      ],
+      "id": "x",
+      "type": "hookPrompt"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "fragments": [
+        {
+          "hookRunId": "x",
+          "text": "x"
+        }
+      ],
+      "id": "x",
+      "type": "hookPrompt"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "fragments": [
+        {
+          "hookRunId": "x",
+          "text": "x"
+        }
+      ],
+      "id": "x",
+      "type": "hookPrompt"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": null,
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": null,
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "partial_answer",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "final_answer",
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": null,
+      "questions": [
+        {
+          "title": "x",
+          "options": [
+            "x"
+          ]
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": [
+        {
+          "title": "x",
+          "options": null
+        }
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "agentMessage",
+      "delivery": "async",
+      "memoryCitation": {
+        "entries": [
+          {
+            "lineEnd": 0,
+            "lineStart": 0,
+            "note": "x",
+            "path": "x"
+          }
+        ],
+        "threadIds": [
+          "x"
+        ]
+      },
+      "phase": "commentary",
+      "questions": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": "x",
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": "x",
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "name": "x",
+      "output": "x",
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "text": "x",
+          "type": "input_text"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "image_url": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "low",
+          "image_url": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "high",
+          "image_url": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "original",
+          "image_url": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": null,
+          "image_url": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "file_id": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "low",
+          "file_id": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "high",
+          "file_id": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": "original",
+          "file_id": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "type": "input_image",
+          "detail": null,
+          "file_id": "x"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "audio_url": "x",
+          "type": "input_audio"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": [
+        {
+          "encrypted_content": "x",
+          "type": "encrypted_content"
+        }
+      ],
+      "type": "functionCallOutput",
+      "namespace": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "name": "x",
+      "output": "x",
+      "type": "functionCallOutput",
+      "namespace": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "plan"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "text": "x",
+      "type": "plan"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "text": "x",
+      "type": "plan"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "type": "reasoning"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "type": "reasoning"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "type": "reasoning"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "listFiles",
+          "path": "x"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "listFiles",
+          "path": null
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "search",
+          "path": "x",
+          "query": "x"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "search",
+          "path": null,
+          "query": "x"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "search",
+          "path": "x",
+          "query": null
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "type": "unknown"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "completed",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "failed",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "declined",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": null,
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": null,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": null,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": null,
+      "processId": "x",
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": null,
+      "scriptPath": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "command": "x",
+      "commandActions": [
+        {
+          "command": "x",
+          "name": "x",
+          "path": "x",
+          "type": "read"
+        }
+      ],
+      "cwd": "x",
+      "id": "x",
+      "status": "inProgress",
+      "type": "commandExecution",
+      "aggregatedOutput": "x",
+      "durationMs": 0,
+      "exitCode": 0,
+      "pluginId": "x",
+      "processId": "x",
+      "scriptPath": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "delete"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "update",
+            "move_path": "x"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "update",
+            "move_path": null
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "inProgress",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "completed",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "failed",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "changes": [
+        {
+          "diff": "x",
+          "kind": {
+            "type": "add"
+          },
+          "path": "x"
+        }
+      ],
+      "id": "x",
+      "status": "declined",
+      "type": "fileChange"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "completed",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "failed",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": null,
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": null,
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": null,
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": null
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": null,
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": null,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": null,
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": null,
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "fullscreen",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": null,
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": null,
+      "readOnlyHint": false,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": null,
+      "result": {
+        "content": [
+          null
+        ]
+      }
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "server": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "mcpToolCall",
+      "appContext": {
+        "connectorId": "x",
+        "actionName": "x",
+        "appName": "x",
+        "linkId": "x",
+        "resourceUri": "x"
+      },
+      "durationMs": 0,
+      "error": {
+        "message": "x"
+      },
+      "mcpAppResourceUri": "x",
+      "mcpAppUi": {
+        "preferredModelDisplayMode": "inline",
+        "resourceUri": "x"
+      },
+      "pluginId": "x",
+      "readOnlyHint": false,
+      "result": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "completed",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "failed",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "imageUrl": "x",
+          "type": "inputImage"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "audioUrl": "x",
+          "type": "inputAudio"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": null,
+      "durationMs": 0,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": null,
+      "namespace": "x",
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": null,
+      "success": false
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "arguments": null,
+      "id": "x",
+      "status": "inProgress",
+      "tool": "x",
+      "type": "dynamicToolCall",
+      "contentItems": [
+        {
+          "text": "x",
+          "type": "inputText"
+        }
+      ],
+      "durationMs": 0,
+      "namespace": "x",
+      "success": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "completed",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "failed",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "interrupted",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "sendInput",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "resumeAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "wait",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "closeAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "sendMessage",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "followupTask",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "interruptAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "listAgents",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": null,
+      "prompt": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": null,
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentsStates": {},
+      "id": "x",
+      "receiverThreadIds": [
+        "x"
+      ],
+      "senderThreadId": "x",
+      "status": "inProgress",
+      "tool": "spawnAgent",
+      "type": "collabAgentToolCall",
+      "model": "x",
+      "prompt": "x",
+      "reasoningEffort": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "started",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "started",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "started",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "interacted",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "interrupted",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "completed",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "started",
+      "type": "subAgentActivity",
+      "model": null,
+      "reasoningEffort": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "agentPath": "x",
+      "agentThreadId": "x",
+      "id": "x",
+      "kind": "started",
+      "type": "subAgentActivity",
+      "model": "x",
+      "reasoningEffort": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": [
+          "x"
+        ],
+        "query": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": [
+          "x"
+        ],
+        "query": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": [
+          "x"
+        ],
+        "query": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": null,
+        "query": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": [
+          "x"
+        ],
+        "query": null
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "openPage",
+        "url": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "openPage",
+        "url": null
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "findInPage",
+        "pattern": "x",
+        "url": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "findInPage",
+        "pattern": null,
+        "url": "x"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "findInPage",
+        "pattern": "x",
+        "url": null
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "other"
+      },
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": null,
+      "results": [
+        null
+      ]
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "query": "x",
+      "type": "webSearch",
+      "action": {
+        "type": "search",
+        "queries": [
+          "x"
+        ],
+        "query": "x"
+      },
+      "results": null
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "path": "x",
+      "type": "imageView"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "path": "x",
+      "type": "imageView"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "path": "x",
+      "type": "imageView"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "durationMs": 0,
+      "id": "x",
+      "type": "sleep"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "durationMs": 0,
+      "id": "x",
+      "type": "sleep"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "durationMs": 0,
+      "id": "x",
+      "type": "sleep"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": null
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": null,
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": null,
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": null,
+      "savedPath": "x",
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": null,
+      "transparentBackground": false,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": null,
+      "fileId": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": null
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": null,
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": null,
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": null,
+      "savedPath": "x",
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": null,
+      "transparentBackground": false,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "status": "x",
+      "type": "imageGeneration",
+      "failure": {
+        "limitId": "x",
+        "type": "usageLimitExceeded",
+        "resetsAt": 0
+      },
+      "generationId": "x",
+      "revisedPrompt": "x",
+      "savedPath": "x",
+      "transparentBackground": null,
+      "result": "x"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "review": "x",
+      "type": "enteredReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "review": "x",
+      "type": "enteredReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "review": "x",
+      "type": "enteredReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "review": "x",
+      "type": "exitedReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "review": "x",
+      "type": "exitedReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "review": "x",
+      "type": "exitedReviewMode"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": 0,
+      "id": "x",
+      "type": "contextCompaction"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": null,
+      "startedAtMs": 0,
+      "id": "x",
+      "type": "contextCompaction"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  },
+  {
+    "item": {
+      "completedAtMs": 0,
+      "startedAtMs": null,
+      "id": "x",
+      "type": "contextCompaction"
+    },
+    "startedAtMs": 0,
+    "threadId": "x",
+    "turnId": "x"
+  }
+]

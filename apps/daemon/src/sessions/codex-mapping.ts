@@ -1,17 +1,22 @@
-import { MAX_STEP_SUMMARY } from '@10db/contracts';
+import { MAX_STEP_SUMMARY, type ToolCallView } from '@10db/contracts';
 import { z } from 'zod';
 import { contextEvent } from './context-event';
 import {
+  AgentMessageDelta,
+  CommandOutputDelta,
   ItemCompleted,
+  ItemStarted,
   MODEL_ITEMS,
   RateLimitsUpdated,
+  ReasoningSummaryDelta,
   TokenUsageUpdated,
   TurnCompleted,
+  TurnPlanUpdated,
   TurnStarted,
   type RateLimitSnapshot,
 } from './codex-protocol';
+import { codexPlanSteps, codexToolCalls, withCommandOutput } from './codex-tool-calls';
 import type { SessionEvent } from './types';
-import { codexCommandTarget, codexPatchTarget } from './tool-target';
 
 export type RateLimitEvent = Extract<SessionEvent, { type: 'rate_limit' }>;
 
@@ -39,6 +44,12 @@ export interface CodexTurnState {
    * yet: not taken until one does, or the turn completes.
    */
   recorded: string[];
+  /** Each agent message's length so far, which the next delta's offset is. */
+  texts: Map<string, number>;
+  /** Each reasoning item's length so far and the summary part it is in. */
+  reasoning: Map<string, { length: number; summaryIndex: number }>;
+  /** The calls of each tool item that started, until it completes. */
+  calls: Map<string, readonly ToolCallView[]>;
 }
 
 interface TokenCounts {
@@ -56,6 +67,9 @@ export function createTurnState(): CodexTurnState {
     baselineFixed: false,
     lastLimit: null,
     recorded: [],
+    texts: new Map(),
+    reasoning: new Map(),
+    calls: new Map(),
   };
 }
 
@@ -90,17 +104,16 @@ export function rateLimitEvents(snapshot: RateLimitSnapshotValue): readonly Rate
   );
 }
 
-const CommandItem = z.looseObject({ type: z.literal('commandExecution'), command: z.string() });
-const PatchItem = z.looseObject({
-  type: z.literal('fileChange'),
-  changes: z.array(z.looseObject({ path: z.string() })),
+const MessageItem = z.looseObject({
+  type: z.literal('agentMessage'),
+  id: z.string().min(1).optional(),
+  text: z.string(),
 });
-const McpItem = z.looseObject({
-  type: z.literal('mcpToolCall'),
-  server: z.string(),
-  tool: z.string(),
+/** The output a command item finished with; null when Codex kept none, and the streamed tail stands. */
+const CommandOutput = z.looseObject({
+  type: z.literal('commandExecution'),
+  aggregatedOutput: z.string().nullable().optional(),
 });
-const MessageItem = z.looseObject({ type: z.literal('agentMessage'), text: z.string() });
 /**
  * A user message the thread recorded in a turn, under the client uuid it was sent with
  * (`clientUserMessageId`). It is taken once the model answers after it, as Claude Code's first
@@ -116,43 +129,46 @@ function takenNow(state: CodexTurnState): SessionEvent[] {
   return [{ type: 'consumed', uuids }];
 }
 
-/** The activity an item stands for, or null for one 10db does not show. */
-function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent | null {
-  const command = CommandItem.safeParse(item);
-  if (command.success)
-    return {
-      type: 'activity',
-      kind: 'tool',
-      summary: command.data.command.slice(0, SUMMARY_CHARS),
-      tool: codexCommandTarget(command.data.command),
-    };
-  const patch = PatchItem.safeParse(item);
-  if (patch.success)
-    return {
-      type: 'activity',
-      kind: 'tool',
-      summary: (patch.data.changes[0]?.path ?? 'apply_patch').slice(0, SUMMARY_CHARS),
-      tool: codexPatchTarget(patch.data.changes.map((c) => c.path)),
-    };
-  const mcp = McpItem.safeParse(item);
-  if (mcp.success)
-    return {
-      type: 'activity',
-      kind: 'tool',
-      summary: `${mcp.data.server}.${mcp.data.tool}`.slice(0, SUMMARY_CHARS),
-      tool: { name: `${mcp.data.server}.${mcp.data.tool}`, target: null, written: [] },
-    };
-  const message = MessageItem.safeParse(item);
-  if (message.success)
-    return { type: 'activity', kind: 'text', summary: message.data.text.slice(0, SUMMARY_CHARS) };
-  return null;
+/** A tool item's final calls: its id kept, its start the one first seen, its streamed output kept when Codex kept none. */
+function finalCalls(
+  item: z.infer<typeof ItemCompleted>['item'],
+  completedAtMs: number | null,
+  state: CodexTurnState,
+): readonly ToolCallView[] {
+  const id = item.id ?? '';
+  const seen = id === '' ? undefined : state.calls.get(id);
+  state.calls.delete(id);
+  const recordedStart = z.number().safeParse(Reflect.get(item, 'startedAtMs'));
+  const startedAtMs =
+    seen?.[0] !== undefined
+      ? Date.parse(seen[0].startedAt)
+      : recordedStart.success
+        ? recordedStart.data
+        : (completedAtMs ?? 0);
+  const finals = codexToolCalls(item, {
+    startedAtMs,
+    completedAtMs: completedAtMs ?? startedAtMs,
+  });
+  const output = CommandOutput.safeParse(item);
+  const keptNone = output.success && (output.data.aggregatedOutput ?? null) === null;
+  return finals.map((call, index) => {
+    const streamed = seen?.[index];
+    return keptNone && call.kind === 'command' && streamed?.kind === 'command'
+      ? { ...call, outputTail: streamed.outputTail, outputBytes: streamed.outputBytes }
+      : call;
+  });
 }
 
 /** The method each schema below reads; a method not here maps to nothing. */
 const SHAPES = {
   'turn/started': TurnStarted,
   'turn/completed': TurnCompleted,
+  'item/started': ItemStarted,
   'item/completed': ItemCompleted,
+  'item/agentMessage/delta': AgentMessageDelta,
+  'item/reasoning/summaryTextDelta': ReasoningSummaryDelta,
+  'item/commandExecution/outputDelta': CommandOutputDelta,
+  'turn/plan/updated': TurnPlanUpdated,
   'thread/tokenUsage/updated': TokenUsageUpdated,
   'account/rateLimits/updated': RateLimitsUpdated,
 } as const;
@@ -185,7 +201,58 @@ export function mapCodexNotification(
       state.lastText = '';
       state.baselineFixed = true;
       state.recorded = [];
+      state.texts.clear();
+      state.reasoning.clear();
+      state.calls.clear();
       return [];
+    }
+    case 'item/started': {
+      const parsed = ItemStarted.safeParse(n.params);
+      if (!parsed.success) return [];
+      const { item, startedAtMs } = parsed.data;
+      if (item.id === undefined || item.id === '') return [];
+      const calls = codexToolCalls(item, { startedAtMs, completedAtMs: null });
+      if (calls.length === 0) return [];
+      state.calls.set(item.id, calls);
+      return calls.map((call) => ({ type: 'tool_call', call }));
+    }
+    case 'item/agentMessage/delta': {
+      const parsed = AgentMessageDelta.safeParse(n.params);
+      if (!parsed.success || parsed.data.delta === '') return [];
+      const { itemId, delta } = parsed.data;
+      const offset = state.texts.get(itemId) ?? 0;
+      state.texts.set(itemId, offset + delta.length);
+      return [{ type: 'text_delta', itemId, offset, text: delta }];
+    }
+    case 'item/reasoning/summaryTextDelta': {
+      const parsed = ReasoningSummaryDelta.safeParse(n.params);
+      if (!parsed.success || parsed.data.delta === '') return [];
+      const { itemId, delta, summaryIndex } = parsed.data;
+      const seen = state.reasoning.get(itemId) ?? { length: 0, summaryIndex };
+      // A new summary part starts a paragraph, so the item's text stays one sequence (call 13).
+      const text = summaryIndex > seen.summaryIndex && seen.length > 0 ? `\n\n${delta}` : delta;
+      state.reasoning.set(itemId, {
+        length: seen.length + text.length,
+        summaryIndex: Math.max(seen.summaryIndex, summaryIndex),
+      });
+      return [{ type: 'reasoning_delta', itemId, offset: seen.length, text }];
+    }
+    case 'item/commandExecution/outputDelta': {
+      const parsed = CommandOutputDelta.safeParse(n.params);
+      if (!parsed.success) return [];
+      const { itemId, delta } = parsed.data;
+      const calls = state.calls.get(itemId);
+      if (calls === undefined) return [];
+      const next = calls.map((call) => withCommandOutput(call, delta));
+      state.calls.set(itemId, next);
+      return next.flatMap((call) =>
+        call.kind === 'command' ? [{ type: 'tool_call', call, appended: delta } as const] : [],
+      );
+    }
+    case 'turn/plan/updated': {
+      const parsed = TurnPlanUpdated.safeParse(n.params);
+      if (!parsed.success) return [];
+      return [{ type: 'plan_update', steps: codexPlanSteps(parsed.data.plan) }];
     }
     case 'turn/completed': {
       const parsed = TurnCompleted.safeParse(n.params);
@@ -216,7 +283,10 @@ export function mapCodexNotification(
       const parsed = ItemCompleted.safeParse(n.params);
       if (!parsed.success) return [];
       const message = MessageItem.safeParse(parsed.data.item);
-      if (message.success) state.lastText = message.data.text;
+      if (message.success) {
+        state.lastText = message.data.text;
+        if (message.data.id !== undefined) state.texts.delete(message.data.id);
+      }
       // Codex 0.154 reports a compaction only as this item, never as `thread/compacted`.
       if (parsed.data.item.type === 'contextCompaction')
         return [{ type: 'compacted', trigger: 'auto' }];
@@ -226,8 +296,20 @@ export function mapCodexNotification(
         return [];
       }
       const taken = MODEL_ITEMS.has(parsed.data.item.type) ? takenNow(state) : [];
-      const activity = itemActivity(parsed.data.item);
-      return activity === null ? taken : [...taken, activity];
+      if (message.success)
+        return [
+          ...taken,
+          {
+            type: 'activity',
+            kind: 'text',
+            summary: message.data.text.slice(0, SUMMARY_CHARS),
+          },
+          ...(message.data.id === undefined
+            ? []
+            : [{ type: 'message' as const, itemId: message.data.id, text: message.data.text }]),
+        ];
+      const calls = finalCalls(parsed.data.item, parsed.data.completedAtMs ?? null, state);
+      return [...taken, ...calls.map((call) => ({ type: 'tool_call' as const, call }))];
     }
     case 'thread/tokenUsage/updated': {
       const parsed = TokenUsageUpdated.safeParse(n.params);
