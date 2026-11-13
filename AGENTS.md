@@ -56,6 +56,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
   Until the first published release the migration baseline is regenerated instead of extended
   (`packages/db/AGENTS.md`).
+- **Briefs, not documents.** Every spec, plan and end-of-run report opens with a brief of one screen
+  for the builder: what changes for them, what it buys, what could go wrong and how we'd know, the
+  calls they might disagree with, and what is needed from them (usually nothing). The rest is for
+  agents. The builder approves by replying to the brief; with nothing needed from them, work goes ahead.
 - Done means `make gate` printed `GATE PASS`. Docs are part of done. An agent in a 10db lane leaves
   the gate to 10db, which runs it after each implement step: it runs only the checks for what it changed (the
   changed packages' tests, typecheck and lint, or the failing step's command) and never the full gate.
