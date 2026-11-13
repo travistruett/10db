@@ -1,5 +1,5 @@
-import { AccountKind, ConflictError, InvalidError } from '@10db/contracts';
-import { getShape } from '@10db/db';
+import { AccountKind, ConflictError, InvalidError, type Effort } from '@10db/contracts';
+import { getShape, schema } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
@@ -44,6 +44,22 @@ describe('a conversation’s model', () => {
     expect(must(second, 'second').spec.model).toBe('claude-sonnet-5-5');
     expect(must(second, 'second').spec.resumeProviderSessionId).toBe('fake-shape-1');
   });
+
+  it.each([null, 'low'] as const)(
+    'launches on the conversation’s own effort, which is %s',
+    async (effort) => {
+      const launched: (Effort | null)[] = [];
+      f = createServiceFixture({ onLaunch: (_model, e) => launched.push(e) });
+      const shapeId = f.c.shape.id;
+      f.c.store.write((ctx) => {
+        // The fixture holds one conversation.
+        ctx.tx.update(schema.shapes).set({ effort }).run();
+      });
+      f.service.send(shapeId, 'First');
+      await f.service.settled(shapeId);
+      expect(launched).toEqual([effort]);
+    },
+  );
 
   it('goes back to the plan role’s when the pick is cleared', () => {
     f = createServiceFixture({ models: () => MODELS });

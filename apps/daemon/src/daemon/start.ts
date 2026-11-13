@@ -14,9 +14,6 @@ import {
   RoutedBy,
   agentKind,
   providerOf,
-  Rigor,
-  StepRole,
-  type Effort,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -218,7 +215,7 @@ import {
 } from '../pictures';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { chooseModel, offeredModels, resolveSteps } from '../routing';
+import { offeredModels } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
@@ -275,7 +272,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { moveToPlaybook, playbookInputs, routingInputs, seedTeam } from '../team';
+import { moveToPlaybook, planConversationModel, routingInputs, seedTeam } from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -1348,34 +1345,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
-  // The model a Plan conversation runs on: what the Careful Plan cell chooses (the project's, then the global
-  // one, then the default), by its fallback rung and never by score, so a conversation is never refused for
-  // want of one. The conversation's own effort, when the builder chose one, fixes the effort. Undefined when
-  // the account offers nothing to run it on.
-  const planModel = (
-    project: ProjectDto,
-    effort: Effort | null = null,
-  ): { model: string; effort: Effort } | undefined => {
-    const plan = resolveSteps({
-      rigor: Rigor.Careful,
-      taskKinds: [],
-      ...playbookInputs(db, project.id),
-    }).find((step) => step.role === StepRole.Plan);
-    const choice = chooseModel({
-      ...routingInputs(db, project),
-      def: { role: StepRole.Plan, need: plan?.need ?? 0 },
-      requirements: plan?.requirements ?? [{ kind: 'automatic' }],
-      effort: plan?.effort ?? null,
-      fallback: plan?.fallback ?? null,
-      pinned: false,
-      task: { modelSetting: null, effortPin: effort },
-      project,
-      byScore: false,
-    });
-    return choice.profile === null && choice.model === choice.tier
-      ? undefined
-      : { model: choice.model, effort: choice.effort };
-  };
   const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,
@@ -1424,16 +1393,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const project = getProject(db, projectId);
       const inputs = routingInputs(db, project);
       return {
-        default: planModel(project)?.model ?? null,
+        default: planConversationModel(db, project, null)?.model ?? null,
         offered: offeredModels(inputs.profiles),
       };
     },
-    launch(projectId, chosen) {
+    launch(projectId, chosen, effort) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = planModel(project);
+      const profile = planConversationModel(db, project, effort);
       if (profile === undefined)
         throw new InvalidError(`${row.label} offers no model for planning`);
       // The builder's pick runs at the plan role's effort, while the account still offers it; one it has

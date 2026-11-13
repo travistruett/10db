@@ -1,5 +1,6 @@
 export { proposeCandidates } from './candidates';
 export { moveToPlaybook, type MoveReport } from './move-to-playbook';
+export { planConversationModel } from './plan-conversation';
 export { playbookInputs, routingInputs } from './routing-inputs';
 export { seedTeam } from './seed';
 export {

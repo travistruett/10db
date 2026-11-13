@@ -8,6 +8,7 @@ import {
   providerOf,
   type DaemonEvent,
   type AgentAccountKind,
+  type Effort,
 } from '@10db/contracts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -55,7 +56,7 @@ export function createServiceFixture(
     /** What the account launches a model with, when that is not the model's own ID. */
     launchId?: (model: string) => string;
     /** Told the model each launch is resolved for: the conversation's choice, or null. */
-    onLaunch?: (model: string | null) => void;
+    onLaunch?: (model: string | null, effort: Effort | null) => void;
     /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
     limitsFor?: (kind: AccountKind) => PictureLimits;
     /** The kind of the account the project launches on; a Claude plan by default. */
@@ -90,8 +91,8 @@ export function createServiceFixture(
       ...(opts.screens === undefined ? {} : { screens: opts.screens }),
       brainstormRefusal: () =>
         providerOf(launched.kind) === Provider.Codex ? BRAINSTORM_REFUSED_ON_CHATGPT : null,
-      launch: (_projectId, chosen) => {
-        opts.onLaunch?.(chosen);
+      launch: (_projectId, chosen, effort) => {
+        opts.onLaunch?.(chosen, effort);
         return launchFor(chosen);
       },
     });

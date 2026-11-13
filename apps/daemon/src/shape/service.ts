@@ -234,9 +234,10 @@ export interface ShapeServiceDeps {
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
-   * role's; throws when its account can't start a session.
+   * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
+   * start a session.
    */
-  launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   /**
    * Why a project's account can't run a conversation, or null. Reads the project and its account row
    * only, so asking costs no Keychain read.
@@ -634,7 +635,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const launchLimits = (shapeId: ShapeId): PictureLimits => {
     try {
       const shape = getShape(state.db, shapeId);
-      return limitsFor(deps.launch(shape.projectId, shape.model).account.kind);
+      return limitsFor(deps.launch(shape.projectId, shape.model, shape.effort).account.kind);
     } catch {
       return STRICTEST_LIMITS;
     }
@@ -975,7 +976,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     intake: Intake,
   ): Promise<void> => {
     const shape = getShape(state.db, shapeId);
-    const launch = deps.launch(shape.projectId, shape.model);
+    const launch = deps.launch(shape.projectId, shape.model, shape.effort);
     // Only this conversation's files: another conversation's, in the same project or not, stay unread.
     const fileAccess: ShapeAccess = {
       ...launch.access,
