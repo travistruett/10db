@@ -55,6 +55,7 @@ const ROWS: readonly (readonly [string, string, readonly string[]])[] = [
     lines('## The `fileAt` rule **(call)**', '## _Emphasis_ and snake_case'),
     ['the-fileat-rule-call', 'emphasis-and-snake_case'],
   ],
+  ['a body starting with a BOM indexes its first heading', '\uFEFF# One\n## Two', ['one', 'two']],
 ];
 
 describe('indexSections', () => {
@@ -95,6 +96,17 @@ describe('indexSections', () => {
     expect(task1 && sectionText(body, task1)).toBe(
       lines('## Task 1: One', '#### Step 1', 'do', ''),
     );
+  });
+
+  it('a leading BOM stays in the first section, which starts at 0', () => {
+    const body = '\uFEFF# One\nfirst\n# Two\n';
+    const index = indexSections(body);
+    expect(index.map((s) => [s.slug, s.title, s.start])).toEqual([
+      ['one', 'One', 0],
+      ['two', 'Two', 13],
+    ]);
+    const one = findSection(index, 'one');
+    expect(one && sectionText(body, one)).toBe('\uFEFF# One\nfirst\n');
   });
 
   it('CRLF bodies keep their \\r in section text', () => {

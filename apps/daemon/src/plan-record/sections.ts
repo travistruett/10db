@@ -59,7 +59,9 @@ function headingsOf(body: string): Heading[] {
   for (const raw of body.split('\n')) {
     const start = offset;
     offset += raw.length + 1;
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    // A leading byte order mark is kept in the body and the first section, but never hides a heading.
+    const unmarked = start === 0 && raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
+    const line = unmarked.endsWith('\r') ? unmarked.slice(0, -1) : unmarked;
     if (fence !== null) {
       const close = new RegExp(
         `^ {0,3}${fence.char === '`' ? '`' : '~'}{${String(fence.length)},}[ \\t]*$`,
