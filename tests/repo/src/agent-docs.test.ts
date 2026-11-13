@@ -60,6 +60,20 @@ describe('agent instruction files', () => {
   it('sets the Codex project doc limit high enough for the AGENTS.md chain', () => {
     expect(readRepoFile('.codex/config.toml')).toMatch(/^project_doc_max_bytes = 131072$/m);
   });
+
+  // Codex joins the AGENTS.md files from the root down to its working directory and cuts the text at
+  // project_doc_max_bytes, so a chain past it loses its end without a word.
+  it('keeps every AGENTS.md chain within the Codex project doc limit', () => {
+    const limit = Number(
+      /^project_doc_max_bytes = (\d+)$/m.exec(readRepoFile('.codex/config.toml'))?.[1],
+    );
+    const docs = repoFiles().filter((path) => basename(path) === 'AGENTS.md');
+    const chainBytes = (path: string): number =>
+      docs
+        .filter((doc) => doc === 'AGENTS.md' || path.startsWith(doc.slice(0, -'AGENTS.md'.length)))
+        .reduce((sum, doc) => sum + Buffer.byteLength(readRepoFile(doc)), 0);
+    expect(docs.filter((path) => chainBytes(path) > limit)).toEqual([]);
+  });
 });
 
 describe('subagents', () => {
