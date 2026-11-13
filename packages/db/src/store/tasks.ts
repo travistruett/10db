@@ -37,10 +37,10 @@ import {
   type ProjectId,
   type ProposalId,
   Rigor,
-  type RiskTag,
   type TaskConfig,
   type TaskDto,
   type TaskId,
+  type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
@@ -380,8 +380,8 @@ export function insertTaskFromProposal(
     readonly title: string;
     readonly description: string;
     readonly parkInIcebox?: boolean;
-    /** The risk tags the lane declared when it proposed the task; none when left out. */
-    readonly riskTags?: readonly RiskTag[];
+    /** The kinds the lane declared when it proposed the task, each a kind that exists; none when left out. */
+    readonly kinds?: readonly TaskKind[];
   },
   placement?: Placement,
 ): TaskDto {
@@ -395,7 +395,8 @@ export function insertTaskFromProposal(
     acceptanceCriteria: [],
     areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
-    riskTags: [...(input.riskTags ?? [])],
+    riskTags: [],
+    kinds: checkTaskKinds(ctx.tx, input.kinds ?? []),
     flowId: null,
     proposalId: input.proposalId,
   });

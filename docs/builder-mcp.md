@@ -37,7 +37,7 @@ Any other client that starts stdio servers (Claude Desktop, say) takes the same 
 }
 ```
 
-Start a new session in the client; the tools are `list_projects`, `list_flows`, `list_tasks`, `create_task`,
+Start a new session in the client; the tools are `list_projects`, `list_kinds`, `list_tasks`, `create_task`,
 `edit_task`, `remove_task`, `start_task`, `move_task`, `run_next`, `list_inbox`, `start_shape`, `search_knowledge`,
 `save_decision`, `save_principle`, `supersede_knowledge`, `retire_knowledge`, `withdraw_knowledge` and
 `list_proposals`.
@@ -61,19 +61,19 @@ The bridge reads no other 10db variable.
 
 ## What the tools do
 
-| Tool            | Does                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default flow and delivery.                          |
-| `list_flows`    | Flows, with ids.                                                                                                                           |
-| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                       |
-| `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, risk tags, flow and landing; returns its id.         |
-| `edit_task`     | Changes a task's title, headline, why, description, criteria, risk tags, flow, areas or landing (areas and landing only before it starts). |
-| `remove_task`   | Removes a task that has not started.                                                                                                       |
-| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                   |
-| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                           |
-| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                           |
-| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                  |
-| `start_shape`   | Moves a brainstorm into Shape: a conversation whose first message is your summary, with inline text files (256 KB in all, never paths).    |
+| Tool            | Does                                                                                                                                                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default flow and delivery.                                                                |
+| `list_kinds`    | The kinds a task can have, each with its key, its lowest rigor and what it changes (review, own copy, Inbox).                                                                    |
+| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                                             |
+| `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, rigor, kinds, flow and landing; returns its id. A rigor below a kind's minimum is refused. |
+| `edit_task`     | Changes a task's title, headline, why, description, criteria, rigor, kinds, flow, areas or landing (areas and landing only before it starts).                                    |
+| `remove_task`   | Removes a task that has not started.                                                                                                                                             |
+| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                                                         |
+| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                                                                 |
+| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                                                                 |
+| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                                                        |
+| `start_shape`   | Moves a brainstorm into Shape: a conversation whose first message is your summary, with inline text files (256 KB in all, never paths).                                          |
 
 The knowledge tools are in [Decisions and principles](#decisions-and-principles).
 

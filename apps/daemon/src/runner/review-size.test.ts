@@ -2,7 +2,7 @@ import {
   DEFAULT_HAZARDS,
   mintId,
   type HazardDef,
-  type RiskTag,
+  type KindDto,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
@@ -26,17 +26,31 @@ const verdict: NonNullable<WorkstreamStep['result']> = {
 describe('reviewSizeRule', () => {
   const rows: {
     name: string;
-    tags?: RiskTag[];
+    kinds?: Pick<KindDto, 'alwaysReviewed'>[];
     files: ReturnType<typeof files>;
     step?: StepFacts;
     hazards?: HazardDef[];
     want: 'review' | 'ask';
   }[] = [
     { name: 'a small plain change is asked about', files: files(3), want: 'ask' },
-    { name: 'security forces review', tags: ['security'], files: files(1), want: 'review' },
-    { name: 'auth forces review', tags: ['auth'], files: files(1), want: 'review' },
-    { name: 'migration forces review', tags: ['migration'], files: files(1), want: 'review' },
-    { name: 'dependency forces review', tags: ['dependency'], files: files(1), want: 'review' },
+    {
+      name: 'a kind that is always reviewed forces review',
+      kinds: [{ alwaysReviewed: true }],
+      files: files(1),
+      want: 'review',
+    },
+    {
+      name: 'one always-reviewed kind among others forces review',
+      kinds: [{ alwaysReviewed: false }, { alwaysReviewed: true }],
+      files: files(1),
+      want: 'review',
+    },
+    {
+      name: 'kinds that are not always reviewed leave the change asked about',
+      kinds: [{ alwaysReviewed: false }],
+      files: files(1),
+      want: 'ask',
+    },
     {
       name: 'a pinned step forces review',
       files: files(1),
@@ -123,10 +137,10 @@ describe('reviewSizeRule', () => {
       want: 'ask',
     },
   ];
-  it.each(rows)('$name', ({ tags, files: changed, step, want, hazards }) => {
+  it.each(rows)('$name', ({ kinds, files: changed, step, want, hazards }) => {
     expect(
       reviewSizeRule(
-        { riskTags: tags ?? [] },
+        { kinds: kinds ?? [] },
         { files: changed },
         step ?? open,
         hazards ?? DEFAULT_HAZARDS,

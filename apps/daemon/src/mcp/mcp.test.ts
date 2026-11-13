@@ -18,6 +18,7 @@ import {
   insertBatch,
   insertDecision,
   insertEvidence,
+  insertKind,
   insertPrinciple,
   insertSession,
   insertShape,
@@ -152,6 +153,11 @@ beforeEach(async () => {
   base = test.store;
   const bus = createEventBus();
   state = createStateStore(test.store, bus);
+  // The kinds a proposal names are the builder's: the ones seeded for the words risk tags used to be.
+  state.write((ctx) => {
+    for (const key of ['security', 'auth', 'migration', 'dependency'])
+      insertKind(ctx, { key, label: key, toInbox: true });
+  });
   cancelled = [];
   inbox = createInboxService({
     state,
@@ -536,7 +542,7 @@ describe('MCP tools', () => {
     const openCards = () => listInbox(state.db, { states: ['OPEN'] });
     const small = { kind: 'new_task', title: 'Reword the criterion', body: 'It is unclear.' };
 
-    it('files a small proposal with no risk tag to the Icebox, with no card, naming the lane’s task', async () => {
+    it('files a small proposal with no kind that asks for a card to the Icebox, with no card, naming the lane’s task', async () => {
       const s = await seedSession();
       const { json } = await s.call('propose', { opId: 'op-prop-0001', ...small });
       const filed = listTasks(state.db, s.project.id).find((t) => t.title === small.title);
@@ -554,7 +560,8 @@ describe('MCP tools', () => {
     });
 
     it.each([
-      ['a risk tag', { riskTags: ['dependency'] }],
+      ['a kind that asks for a card', { kinds: ['dependency'] }],
+      ['an older risk tag', { riskTags: ['dependency'] }],
       ['a risk named in its text', { title: 'Bump the zod dependency' }],
       ['joining a running batch', { joinsRunningBatch: true }],
       ['a size over the limit', { body: 'x'.repeat(1300) }],
@@ -572,7 +579,8 @@ describe('MCP tools', () => {
     });
 
     it.each([
-      ['a risk tag', { riskTags: ['dependency'] }, 'it carries the dependency risk tag'],
+      ['a kind', { kinds: ['dependency'] }, 'it carries the dependency kind'],
+      ['an older risk tag', { riskTags: ['dependency'] }, 'it carries the dependency kind'],
       [
         'a risk named in its text',
         { title: 'Bump the zod dependency' },
@@ -587,20 +595,40 @@ describe('MCP tools', () => {
       expect(openCards()[0]?.body).toContain(`Raised as a card because ${reason}`);
     });
 
-    it('keeps the declared risk tags on the card, and the task filed from it carries them', async () => {
+    it.each([
+      ['kinds', { kinds: ['security', 'auth'] }],
+      ['older risk tags', { riskTags: ['security', 'auth'] }],
+      ['both, once each', { kinds: ['security'], riskTags: ['security', 'auth'] }],
+    ])(
+      'keeps the declared %s on the card, and the task filed from it has them',
+      async (_n, over) => {
+        const s = await seedSession();
+        await s.call('propose', { opId: 'op-prop-0006', ...small, ...over });
+        const card = openCards()[0];
+        if (!card) throw new Error('no card opened');
+        expect(card.body).toContain(small.body);
+        expect(card.detail).toMatchObject({ kinds: ['security', 'auth'] });
+        inbox.answer(card.id, { choice: 'accept' });
+        expect(
+          listTasks(state.db, s.project.id).find((t) => t.title === small.title),
+        ).toMatchObject({
+          kinds: [
+            { key: 'security', source: 'agent' },
+            { key: 'auth', source: 'agent' },
+          ],
+        });
+      },
+    );
+
+    it('ignores a declared key no kind has, and files a small proposal of kinds that ask for no card', async () => {
       const s = await seedSession();
-      await s.call('propose', {
-        opId: 'op-prop-0006',
-        ...small,
-        riskTags: ['security', 'auth'],
+      state.write((ctx) => {
+        insertKind(ctx, { key: 'ui', label: 'UI' });
       });
-      const card = openCards()[0];
-      if (!card) throw new Error('no card opened');
-      expect(card.body).toContain(small.body);
-      expect(card.detail).toMatchObject({ riskTags: ['security', 'auth'] });
-      inbox.answer(card.id, { choice: 'accept' });
+      await s.call('propose', { opId: 'op-prop-0009', ...small, kinds: ['ui', 'nonsense'] });
+      expect(openCards()).toEqual([]);
       expect(listTasks(state.db, s.project.id).find((t) => t.title === small.title)).toMatchObject({
-        riskTags: ['security', 'auth'],
+        kinds: [{ key: 'ui', source: 'agent' }],
       });
     });
 
@@ -617,7 +645,7 @@ describe('MCP tools', () => {
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
-        /\n\nRaised as a card because it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
+        /\n\nRaised as a card because it carries the security kind, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
       );
     });
 
@@ -632,7 +660,7 @@ describe('MCP tools', () => {
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
-        /\n\nRaised as a card because it carries the security risk tag, and it is not a new task, and it names the auth risk\.$/,
+        /\n\nRaised as a card because it carries the security kind, and it is not a new task, and it names the auth risk\.$/,
       );
     });
 
@@ -3177,7 +3205,7 @@ describe('principle proposals', () => {
     expect(searchPrinciples(base.db, s.project.id, 'pull', 5)).toEqual([]);
   });
 
-  it('names every declared risk tag on a principle proposal’s card, after the card’s own text', async () => {
+  it('names every declared kind on a principle proposal’s card, after the card’s own text', async () => {
     const s = await seedSession();
     await s.call('propose', {
       opId: 'op-propose-p5',
@@ -3190,11 +3218,11 @@ describe('principle proposals', () => {
     const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
     expect(card?.body).toContain('Never write a token to a log');
     expect(card?.body).toMatch(
-      /One reached the logs last week\.\n\nRaised as a card because it carries the security and auth risk tags\.$/,
+      /One reached the logs last week\.\n\nRaised as a card because it carries the security and auth kinds\.$/,
     );
   });
 
-  it('adds no reason to a principle proposal’s card when it declares no risk tag', async () => {
+  it('adds no reason to a principle proposal’s card when it declares no kind', async () => {
     const s = await seedSession();
     await s.call('propose', {
       opId: 'op-propose-p6',

@@ -12,6 +12,7 @@ import {
   InboxKind,
   RoutedBy,
   isModelTier,
+  kindsOfTask,
   JudgeCallId,
   JudgeDecision,
   JudgeOutcome,
@@ -110,6 +111,7 @@ import {
   listPermissionRules,
   listSessions,
   listEvidence,
+  listKinds,
   listTaskFileRows,
   listUndeliveredTaskMessages,
   markSessionStarted,
@@ -1288,7 +1290,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
       return null;
     }
-    if (reviewSizeRule(task, changes, review, getProject(db, row.projectId).hazards) === 'review')
+    if (
+      reviewSizeRule(
+        { kinds: kindsOfTask(task.kinds, listKinds(db)) },
+        changes,
+        review,
+        getProject(db, row.projectId).hazards,
+      ) === 'review'
+    )
       return null;
     const answer = await opts.judge.choose({
       decision: JudgeDecision.ReviewSize,
@@ -1396,7 +1405,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             result &&
             shipsAtRetryLimit({
               role: step.role,
-              riskTags: getTask(db, row.taskId).riskTags,
+              kinds: kindsOfTask(getTask(db, row.taskId).kinds, listKinds(db)),
               evidence: listEvidence(db, id),
             })
           ) {

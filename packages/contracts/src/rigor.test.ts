@@ -5,6 +5,8 @@ import {
   effectiveRigor,
   KindInput,
   KindOrderInput,
+  kindsMatchingRiskTags,
+  kindsOfTask,
   KindPatch,
   ModelPicksQuery,
   PlaybookInput,
@@ -12,9 +14,11 @@ import {
   RIGORS,
   RigorBelowKindError,
   refuseRigorBelowKinds,
+  withKindsNamed,
   rigorAtLeast,
   type TaskKind,
 } from './rigor';
+import type { RiskTag } from './states';
 
 describe('rigorAtLeast', () => {
   it.each(
@@ -290,5 +294,74 @@ describe('refuseRigorBelowKinds', () => {
       expect(call).toThrow(
         expect.objectContaining({ name: 'RigorBelowKindError', kindKey: refused }),
       );
+  });
+});
+
+describe('kindsOfTask and withKindsNamed', () => {
+  const known = [{ key: 'security' }, { key: 'auth' }, { key: 'ui' }];
+
+  it('finds the rows a task names, in the builder’s order, and skips a deleted kind', () => {
+    const taskKinds = [{ key: 'ui' }, { key: 'gone' }, { key: 'security' }];
+    expect(kindsOfTask(taskKinds, known)).toEqual([{ key: 'security' }, { key: 'ui' }]);
+  });
+
+  it.each([
+    { name: 'adds a known key', have: [], keys: ['auth'], want: ['auth:agent'] },
+    {
+      name: 'keeps what the task has and its source',
+      have: [['ui', 'builder']],
+      keys: ['ui', 'auth'],
+      want: ['ui:builder', 'auth:agent'],
+    },
+    { name: 'drops a key no kind has', have: [], keys: ['gone', 'ui'], want: ['ui:agent'] },
+    { name: 'adds a key given twice once', have: [], keys: ['ui', 'ui'], want: ['ui:agent'] },
+  ] as { name: string; have: [string, TaskKind['source']][]; keys: string[]; want: string[] }[])(
+    'withKindsNamed $name',
+    ({ have, keys, want }) => {
+      const taskKinds: TaskKind[] = have.map(([key, source]) => ({ key, source }));
+      const result = withKindsNamed(taskKinds, keys, known, 'agent');
+      expect(result.map((k) => `${k.key}:${k.source}`)).toEqual(want);
+    },
+  );
+});
+
+describe('kindsMatchingRiskTags', () => {
+  const known = ['security', 'auth', 'migration', 'dependency', 'ui'].map((key) => ({ key }));
+  const own = (...pairs: [string, TaskKind['source']][]): TaskKind[] =>
+    pairs.map(([key, source]) => ({ key, source }));
+  const names = (kinds: readonly TaskKind[]) => kinds.map((k) => `${k.key}:${k.source}`);
+
+  it.each([
+    {
+      name: 'sets the risky kinds to the tags',
+      have: [],
+      tags: ['migration'],
+      want: ['migration:builder'],
+    },
+    {
+      name: 'swaps a risky kind for another tag',
+      have: [['migration', 'agent']],
+      tags: ['dependency'],
+      want: ['dependency:builder'],
+    },
+    { name: 'clears the risky kinds with no tags', have: [['auth', 'agent']], tags: [], want: [] },
+    {
+      name: 'keeps a kind that is not risky and one a tag keeps',
+      have: [
+        ['ui', 'agent'],
+        ['auth', 'agent'],
+      ],
+      tags: ['auth'],
+      want: ['ui:agent', 'auth:agent'],
+    },
+  ] as { name: string; have: [string, TaskKind['source']][]; tags: RiskTag[]; want: string[] }[])(
+    '$name',
+    ({ have, tags, want }) => {
+      expect(names(kindsMatchingRiskTags(own(...have), tags, known, 'builder'))).toEqual(want);
+    },
+  );
+
+  it('adds nothing for a tag whose kind the builder deleted', () => {
+    expect(kindsMatchingRiskTags([], ['migration'], [{ key: 'ui' }], 'builder')).toEqual([]);
   });
 });

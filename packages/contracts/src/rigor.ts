@@ -3,7 +3,7 @@ import { ModelSetting } from './catalogue';
 import { DomainError } from './errors';
 import { AccountId, KindId, PersonaId } from './ids';
 import { HyphenatedKey } from './keys';
-import { Effort, StepRole } from './states';
+import { Effort, RiskTag, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
 
@@ -243,4 +243,53 @@ export function refuseRigorBelowKinds(input: {
       holder = { key: kind.key, label: kind.label, minimum };
   }
   if (holder !== null) throw new RigorBelowKindError(holder, holder.minimum, input.rigor);
+}
+
+/**
+ * The kinds a task has, as the rows that name them, in the builder's order of kinds. A key no kind has
+ * (its kind was deleted) means nothing, so it is left out.
+ */
+export function kindsOfTask<K extends { readonly key: string }>(
+  taskKinds: readonly { readonly key: string }[],
+  kinds: readonly K[],
+): K[] {
+  const keys = new Set(taskKinds.map((k) => k.key));
+  return kinds.filter((k) => keys.has(k.key));
+}
+
+/**
+ * The task's kinds with each of `keys` added that some known kind has and the task lacks, given by `source`.
+ * Keys no kind has are dropped, so what comes back is always storable.
+ */
+export function withKindsNamed(
+  taskKinds: readonly TaskKind[],
+  keys: readonly string[],
+  known: readonly { readonly key: string }[],
+  source: TaskKindSource,
+): TaskKind[] {
+  const have = new Set(taskKinds.map((k) => k.key));
+  const exists = new Set(known.map((k) => k.key));
+  const added: TaskKind[] = [];
+  for (const key of keys) {
+    if (have.has(key) || !exists.has(key)) continue;
+    have.add(key);
+    added.push({ key, source });
+  }
+  return [...taskKinds, ...added];
+}
+
+/**
+ * The task's kinds after an edit that still names risk tags, the older name of the security, auth,
+ * migration and dependency kinds: those four kinds are set to match `riskTags`, every other kind stays as it
+ * is. A tag whose kind does not exist adds nothing.
+ */
+export function kindsMatchingRiskTags(
+  taskKinds: readonly TaskKind[],
+  riskTags: readonly RiskTag[],
+  known: readonly { readonly key: string }[],
+  source: TaskKindSource,
+): TaskKind[] {
+  const risky = new Set<string>(Object.values(RiskTag));
+  const kept = taskKinds.filter((k) => !risky.has(k.key) || riskTags.some((tag) => tag === k.key));
+  return withKindsNamed(kept, riskTags, known, source);
 }

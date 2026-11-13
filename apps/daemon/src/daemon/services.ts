@@ -16,7 +16,11 @@ import {
   NotFoundError,
   providerOf,
   isDaemonAddress,
+  kindsMatchingRiskTags,
+  kindsOfTask,
   refuseRigorBelowKinds,
+  TaskKindSource,
+  withKindsNamed,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
@@ -362,18 +366,22 @@ export function createServices(deps: {
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
-        refuseRigorBelowKinds({
-          rigor: input.rigor ?? null,
-          taskKinds: input.kinds ?? [],
-          kinds: listKinds(ctx.tx),
-        });
+        const known = listKinds(ctx.tx);
+        // Risk tags are the older name of four kinds: a form that still sends them gets those kinds too.
+        const kinds = withKindsNamed(
+          input.kinds ?? [],
+          input.riskTags ?? [],
+          known,
+          TaskKindSource.Builder,
+        );
+        refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
         return insertTask(
           ctx,
           projectId,
-          input,
+          { ...input, kinds },
           proposePlacement(getProject(ctx.tx, projectId), {
             areas: input.areas,
-            riskTags: input.riskTags ?? [],
+            kinds: kindsOfTask(kinds, known),
             workspaceMode: input.workspaceMode,
           }),
         );
@@ -811,23 +819,35 @@ export function createServices(deps: {
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
         deps.starter.refuseIfJoining(id);
-      // The areas or risk tags can now match the placement rule. The store moves the task to a separate
+      // The areas or kinds can now match the placement rule. The store moves the task to a separate
       // copy only if it hasn't started and the builder hasn't placed it.
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
+        const known = listKinds(ctx.tx);
+        // Risk tags are the older name of four kinds: an edit that still sends them sets those kinds.
+        const kinds =
+          patch.riskTags === undefined
+            ? (patch.kinds ?? task.kinds)
+            : kindsMatchingRiskTags(
+                patch.kinds ?? task.kinds,
+                patch.riskTags,
+                known,
+                TaskKindSource.Builder,
+              );
         // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
-        if (patch.rigor !== undefined || patch.kinds !== undefined)
+        if (patch.rigor !== undefined || patch.kinds !== undefined || patch.riskTags !== undefined)
           refuseRigorBelowKinds({
             rigor: patch.rigor === undefined ? task.rigor : patch.rigor,
-            taskKinds: patch.kinds ?? task.kinds,
-            kinds: listKinds(ctx.tx),
+            taskKinds: kinds,
+            kinds: known,
           });
+        // The areas or kinds can now match the placement rule, so it is asked again.
         const proposed =
           patch.areas === undefined && patch.riskTags === undefined && patch.kinds === undefined
             ? undefined
             : proposePlacement(getProject(ctx.tx, task.projectId), {
                 areas: patch.areas ?? task.areas,
-                riskTags: patch.riskTags ?? task.riskTags,
+                kinds: kindsOfTask(kinds, known),
               });
         // A join still pending has not written yet, so the move would collide with it.
         // The same holds for any move the rule makes: a task the builder placed never moves, and one with
@@ -839,7 +859,12 @@ export function createServices(deps: {
           (task.placementReason !== null || proposed.reason !== null)
         )
           deps.starter.refuseIfJoining(id);
-        return patchTask(ctx, id, patch, proposed);
+        return patchTask(
+          ctx,
+          id,
+          patch.kinds === undefined && patch.riskTags === undefined ? patch : { ...patch, kinds },
+          proposed,
+        );
       });
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

@@ -89,8 +89,8 @@ describe('the builder tools', () => {
       'create_task',
       'edit_task',
       'import_plan',
-      'list_flows',
       'list_inbox',
+      'list_kinds',
       'list_projects',
       'list_proposals',
       'list_tasks',
@@ -365,7 +365,7 @@ describe('the drafting guidance', () => {
     expect(BUILDER_INSTRUCTIONS).toContain(phrase);
   });
 
-  it.each(['outcome', 'seen or measured', 'dependsOn', 'riskTags', 'omit flowId'])(
+  it.each(['outcome', 'seen or measured', 'dependsOn', 'list_kinds', 'omit flowId'])(
     'create_task says %j',
     (phrase) => {
       expect(create()).toContain(phrase);
