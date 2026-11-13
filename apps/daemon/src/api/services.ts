@@ -1,4 +1,6 @@
 import type {
+  PlanExportInput,
+  PlanExportResult,
   PlanImportInput,
   PlanImportIssue,
   PlanImportPreview,
@@ -206,6 +208,8 @@ export type PlanImportOutcome =
 export interface PlanRecordServices {
   /** Reads, checks and imports a bundle into one Plan, all or nothing; a dry run writes nothing. */
   importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome>;
+  /** Writes the record as Markdown into a folder outside every checkout; refusals are InvalidErrors. */
+  exportPlan(shapeId: ShapeId, input: PlanExportInput): Promise<PlanExportResult>;
 }
 
 /** The setting that lets 10db install main's build by itself. */

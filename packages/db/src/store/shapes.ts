@@ -1,9 +1,9 @@
 import {
+  BundleOrigin,
   EventType,
   mintId,
   NotFoundError,
   ShapeState,
-  type BundleOrigin,
   type ProjectId,
   type ShapeDto,
   type ShapeId,
@@ -89,6 +89,16 @@ export function getShapeByBundle(
     .where(and(eq(schema.shapes.projectId, projectId), eq(schema.shapes.bundleId, bundleId)))
     .get();
   return row ? toShapeDto(row) : undefined;
+}
+
+/** Where an imported Plan's bundle was made; null for a conversation. */
+export function getShapeBundleOrigin(db: DbReader, id: ShapeId): BundleOrigin | null {
+  const row = db
+    .select({ bundleOrigin: schema.shapes.bundleOrigin })
+    .from(schema.shapes)
+    .where(eq(schema.shapes.id, id))
+    .get();
+  return row?.bundleOrigin == null ? null : BundleOrigin.parse(row.bundleOrigin);
 }
 
 export function getShape(db: DbReader, id: ShapeId): ShapeDto {

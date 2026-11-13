@@ -29,6 +29,7 @@ import {
   FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
+  PlanExportInput,
   PlanImportInput,
   GoalId,
   DevUiConnectionDto,
@@ -754,6 +755,18 @@ export function createApp(deps: ApiDeps) {
         if (outcome.kind === 'previewed') return c.json(outcome.preview, 200);
         return c.json({ errors: outcome.errors } satisfies PlanImportError, 400);
       },
+    )
+    // The record as Markdown, outside every checkout; a refused folder answers 400 naming why.
+    .post(
+      '/shapes/:shapeId/export',
+      validator('json', (value): PlanExportInput => PlanExportInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.exportPlan(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json'),
+          ),
+        ),
     )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),

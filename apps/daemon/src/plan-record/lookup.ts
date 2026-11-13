@@ -1,4 +1,5 @@
 import {
+  PlanEntryBody,
   ShapeProposalBody,
   TaskStatus,
   type GoalId,
@@ -9,6 +10,7 @@ import {
   type ShapeFindingKind,
   type ShapeFindingSeverity,
   type ShapeFindingState,
+  type ShapeId,
   type ShapeProposalKind,
   type ShapeProposalState,
   type ShapeState,
@@ -17,9 +19,12 @@ import {
 import {
   getAttachmentRevisionById,
   getDocumentAttachment,
+  getShape,
+  getShapeBundleOrigin,
   getShapeByBundle,
   getTask,
   getTaskContext,
+  latestAnchorChecksOfTask,
   latestWorkstreamOf,
   listAttachmentRevisions,
   listDocuments,
@@ -32,6 +37,7 @@ import {
   type ShapeAttachmentRow,
   type ShapeProposalRow,
 } from '@10db/db';
+import type { PlanRecordForExport } from './export-layout';
 import type { RecordKeyKind, StoredRecord } from './validate-bundle';
 
 // What a Plan imported from a bundle holds now, read once so a re-import is judged against it.
@@ -289,5 +295,120 @@ export function loadStoredRecord(
     proposals,
     converted,
     goals,
+  };
+}
+
+/** A Plan's whole record as an export reads it: latest revisions, entries, decisions, findings, questions. */
+export function readRecordForExport(db: DbReader, shapeId: ShapeId): PlanRecordForExport {
+  const shape = getShape(db, shapeId);
+  const documents = listDocuments(db, shapeId).flatMap((doc) => {
+    const revisions = listAttachmentRevisions(db, doc.id);
+    const latest = revisions.at(-1);
+    return doc.kind === 'eval'
+      ? []
+      : [
+          {
+            key: doc.documentKey,
+            kind: doc.kind,
+            title: doc.title ?? doc.documentKey,
+            revision: latest?.number ?? 1,
+            body: doc.body,
+          },
+        ];
+  });
+  const docKeyOfAttachment = new Map(listDocuments(db, shapeId).map((d) => [d.id, d.documentKey]));
+
+  // The latest check of each cited anchor, per task of the Plan that has one.
+  const checks = new Map<string, PlanRecordForExport['entries'][number]['checks'][number][]>();
+  for (const link of listShapeLinks(db, shapeId)) {
+    if (link.taskId === null) continue;
+    const title = getTask(db, link.taskId).title;
+    for (const row of latestAnchorChecksOfTask(db, link.taskId)) {
+      const list = checks.get(row.entryKey) ?? [];
+      list.push({
+        task: title,
+        result: row.result,
+        line: row.line,
+        checkedCommit: row.checkedCommit,
+        note: row.note,
+      });
+      checks.set(row.entryKey, list);
+    }
+  }
+
+  const intent: PlanRecordForExport['intent'][number][] = [];
+  const entries: PlanRecordForExport['entries'][number][] = [];
+  for (const e of listShapeEntries(db, shapeId)) {
+    const body = PlanEntryBody[e.kind].parse(e.body);
+    if (e.kind === 'intent' && 'quote' in body) intent.push({ key: e.key, ...body });
+    else if (e.kind !== 'intent' && !('quote' in body))
+      entries.push({
+        key: e.key,
+        kind: e.kind,
+        title: e.title,
+        version: e.version,
+        state: e.state,
+        body,
+        anchors: e.anchors,
+        checks: checks.get(e.key) ?? [],
+      });
+  }
+
+  const decisions: PlanRecordForExport['decisions'][number][] = [];
+  const questions: PlanRecordForExport['questions'][number][] = [];
+  for (const row of listShapeProposals(db, shapeId)) {
+    if (row.kind === 'decision') {
+      const d = ShapeProposalBody.decision.parse(row.body);
+      decisions.push({
+        key: row.key,
+        question: d.question,
+        choice: d.choice,
+        rationale: d.rationale,
+        alternatives: d.alternatives,
+        quote: d.quote ?? null,
+        lasting: d.lasting,
+        decidedAt: d.decidedAt ?? null,
+        state: row.state,
+      });
+    } else if (row.kind === 'question') {
+      const q = ShapeProposalBody.question.parse(row.body);
+      questions.push({
+        key: row.key,
+        text: q.text,
+        for: q.for,
+        blocks: q.blocks ?? null,
+        state: row.state,
+      });
+    }
+  }
+
+  const findings = listShapeFindings(db, shapeId).map((f) => {
+    const revision =
+      f.revisionId === null ? undefined : getAttachmentRevisionById(db, f.revisionId);
+    return {
+      document:
+        revision === undefined
+          ? f.effortKey
+          : (docKeyOfAttachment.get(revision.attachmentId) ?? f.effortKey),
+      revision: revision?.number ?? null,
+      round: f.round,
+      reviewer: f.reviewerName ?? f.reviewer,
+      severity: f.severityText ?? f.severity,
+      text: f.text,
+      state: f.state,
+      outcome: f.outcomeText,
+      how: f.howDetail ?? f.how,
+    };
+  });
+
+  return {
+    title: shape.title,
+    origin: getShapeBundleOrigin(db, shapeId),
+    documents,
+    intent,
+    entries,
+    decisions,
+    findings,
+    questions,
   };
 }

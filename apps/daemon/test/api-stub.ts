@@ -23,6 +23,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     runNext: none,
     adoptGoal: none,
     importPlan: none,
+    exportPlan: none,
     getGoal: none,
     listFlows: () => [],
     listWorkstreams: () => [],

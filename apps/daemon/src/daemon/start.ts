@@ -1835,7 +1835,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
-    planRecord: createPlanRecordServices({ state, dataDir: opts.dataDir }),
+    planRecord: createPlanRecordServices({
+      state,
+      dataDir: opts.dataDir,
+      worktreeRoot,
+      sandboxRoots: allSandboxRoots,
+    }),
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,

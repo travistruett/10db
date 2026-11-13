@@ -1,8 +1,9 @@
-import type { PlanImportInput, ProjectId } from '@10db/contracts';
-import { getProject } from '@10db/db';
+import type { PlanExportInput, PlanImportInput, ProjectId, ShapeId } from '@10db/contracts';
+import { getProject, getShape, listProjects } from '@10db/db';
 import type { PlanImportOutcome, PlanRecordServices } from '../api';
 import type { StateStore } from '../events';
 import {
+  exportPlan,
   importBundle,
   inlineBundle,
   loadStoredRecord,
@@ -15,10 +16,29 @@ import {
 
 export function createPlanRecordServices(deps: {
   readonly state: StateStore;
-  /** 10db's data dir, which a bundle may not be read from. */
+  /** 10db's data dir, which a bundle may not be read from and an export may not write into. */
   readonly dataDir: string;
+  /** Where worktrees are made, and the sandbox's roots: an export never writes there either. */
+  readonly worktreeRoot: string;
+  readonly sandboxRoots: readonly string[];
 }): PlanRecordServices {
   return {
+    async exportPlan(shapeId: ShapeId, input: PlanExportInput) {
+      getShape(deps.state.db, shapeId);
+      return await exportPlan(
+        {
+          shapeId,
+          dir: input.dir,
+          forbidden: {
+            checkouts: listProjects(deps.state.db).map((p) => p.repoPath),
+            worktreeRoot: deps.worktreeRoot,
+            dataDir: deps.dataDir,
+            sandboxRoots: deps.sandboxRoots,
+          },
+        },
+        deps.state.db,
+      );
+    },
     async importPlan(projectId: ProjectId, input: PlanImportInput): Promise<PlanImportOutcome> {
       const read =
         'bundlePath' in input
