@@ -88,6 +88,12 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A conversation stored an item; `data` names its id, seq and kind. */
+  ConversationItemAdded: 'conversation.item_added',
+  /** A stored item changed in place (a plan, a marker resolved, a card's call); `data.id`. */
+  ConversationItemUpdated: 'conversation.item_updated',
+  /** An explore conversation moved to another §6.7 state; `data.state`. */
+  ConversationState: 'conversation.state',
   /** A Plan's record gained or changed documents, entries, findings or proposals; `data.what` says which. */
   PlanRecordChanged: 'plan.record_changed',
   /** A task's cited anchors were checked against its workstream's base; `data.counts` per result. */

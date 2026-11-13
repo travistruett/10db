@@ -9,6 +9,7 @@ export * from './card-resolution';
 export * from './catalogue';
 export * from './command-runners';
 export * from './conversation';
+export * from './conversation-dto';
 export * from './entities';
 export * from './errors';
 export * from './events';

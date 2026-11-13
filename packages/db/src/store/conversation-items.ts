@@ -4,6 +4,7 @@ import {
   InvalidError,
   mintId,
   NotFoundError,
+  noticeText,
   parseItemBody,
   type ConversationId,
   type ConversationItemId,
@@ -133,7 +134,9 @@ export function deleteItem(ctx: WriteContext, id: ConversationItemId): void {
 /** A message-like item's text; throws `InvalidError` for an item of another kind. */
 function messageText(row: ConversationItemRow): string {
   if (!isMessageKind(row.kind)) throw new InvalidError(`${row.id} is a ${row.kind}, not a message`);
-  return parseItemBody(row.kind, row.body).text;
+  return row.kind === ConversationItemKind.Notice
+    ? noticeText(parseItemBody(row.kind, row.body))
+    : parseItemBody(row.kind, row.body).text;
 }
 
 function withFiles(db: DbReader, rows: readonly ConversationItemRow[]): ConversationMessageRow[] {

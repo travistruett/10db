@@ -72,13 +72,26 @@ export type ShapeEventKind = ValueOf<typeof ShapeEventKind>;
 
 const TextBody = z.object({ text: z.string() });
 
+/** A notice that the conversation's model changed: the model's display name and its id. */
+export const ModelChangeNotice = z.object({
+  kind: z.literal('model_change'),
+  label: z.string(),
+  model: z.string(),
+});
+export type ModelChangeNotice = z.infer<typeof ModelChangeNotice>;
+
+/** What a notice reads as text: its own, or the model change in words. */
+export function noticeText(body: { text: string } | ModelChangeNotice): string {
+  return 'text' in body ? body.text : `Now on ${body.label} · ${body.model}`;
+}
+
 /** Each item kind's body, as it is stored in `conversation_items.body`. */
 export const ConversationItemBody = {
   message: TextBody,
   agent_message: TextBody,
   reasoning: TextBody,
   tool_call: ToolCallView,
-  notice: TextBody,
+  notice: z.union([TextBody, ModelChangeNotice]),
   digest: TextBody,
   card: z.object({ inboxItemId: InboxItemId }),
   plan: z.object({
@@ -86,7 +99,14 @@ export const ConversationItemBody = {
       z.object({ text: z.string(), status: z.enum(['pending', 'in_progress', 'completed']) }),
     ),
   }),
-  shape_event: z.object({ kind: z.enum(ShapeEventKind), text: z.string() }),
+  shape_event: z.object({
+    kind: z.enum(ShapeEventKind),
+    text: z.string(),
+    /** What the press asks the session to do: a Propose or Rehearse is a turn starter (queued). */
+    prompt: z.string().optional(),
+    /** The tasks a Rehearse turn rehearses, each with the hash it was proposed at. */
+    rehearsing: z.array(z.object({ taskKey: z.string(), hash: z.string() })).optional(),
+  }),
   turn_marker: z.object({ marker: z.enum(TurnMarker), resolvedAt: Timestamp.nullable() }),
 } as const satisfies Record<ConversationItemKind, z.ZodType>;
 export type ConversationItemBody = {

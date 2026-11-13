@@ -1,6 +1,7 @@
 import {
   ConversationItemAuthor,
   ConversationItemKind,
+  noticeText,
   parseItemBody,
   ShapeMessageAuthor,
   ShapeMessageKind,
@@ -128,6 +129,7 @@ export function shapeMessageOf(
         body: parseItemBody(item.kind, item.body).text,
       };
     case ConversationItemKind.Notice:
+      return { author, kind: item.kind, body: noticeText(parseItemBody(item.kind, item.body)) };
     case ConversationItemKind.Digest:
       return { author, kind: item.kind, body: parseItemBody(item.kind, item.body).text };
     case ConversationItemKind.ToolCall: {
@@ -173,7 +175,7 @@ export function taskMessageOf(
       return {
         author: item.author,
         kind: item.kind,
-        body: parseItemBody(item.kind, item.body).text,
+        body: noticeText(parseItemBody(item.kind, item.body)),
       };
     case ConversationItemKind.AgentMessage:
       return {

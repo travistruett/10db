@@ -8,6 +8,15 @@ import {
 } from './task-screens';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
+  ConversationDeltaFrame,
+  ConversationDto,
+  ConversationFullDto,
+  ConversationItemDto,
+  ConversationItemsPage,
+  ConversationLiveDto,
+  PostConversationMessage,
+} from './conversation-dto';
+import {
   PassAbandonedDto,
   PassCheckDetail,
   PassDto,
@@ -271,6 +280,13 @@ const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
   'agent-capabilities-dto': AgentCapabilitiesDto,
+  'conversation-delta-frame': ConversationDeltaFrame,
+  'conversation-dto': ConversationDto,
+  'conversation-full-dto': ConversationFullDto,
+  'conversation-item-dto': ConversationItemDto,
+  'conversation-items-page': ConversationItemsPage,
+  'conversation-live-dto': ConversationLiveDto,
+  'post-conversation-message': PostConversationMessage,
   'account-created-dto': AccountCreatedDto,
   'account-dto': AccountDto,
   'account-identity-dto': AccountIdentityDto,
