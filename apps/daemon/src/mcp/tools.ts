@@ -103,6 +103,7 @@ import {
   type ClaimResult,
   type SharedGrant,
 } from './claim-wait';
+import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
 
@@ -165,6 +166,7 @@ const CATEGORY_LIST = Object.values(QuestionCategory)
   .join('; ');
 
 export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+  ...PLAN_TOOL_DESCRIPTIONS,
   get_context:
     'Your context pack: the task, acceptance criteria, your claims, the latest handoff, any answer waiting for you, and relevant decisions.',
   find_knowledge:
@@ -354,6 +356,7 @@ export function createToolHandlers(
   }
 
   return {
+    ...createPlanToolHandlers(db, workstreamId),
     get_context: () => {
       const pack = buildContextPack(db, getWorkstream(db, workstreamId));
       return Promise.resolve({ ...pack, pendingAnswer: quoteSlackAnswer(pack.pendingAnswer) });

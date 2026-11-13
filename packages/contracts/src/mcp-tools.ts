@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InboxOption, Title } from './entities';
+import { BriefKey } from './goals';
 import { HandoffDto, HandoffInput } from './handoff';
 import {
   ClaimId,
@@ -14,7 +15,14 @@ import {
   WorkstreamId,
 } from './ids';
 import { PrincipleDraft } from './knowledge';
-import { PlanContext } from './plan-record';
+import {
+  AnchorCheckDto,
+  PlanAlternative,
+  PlanAnchor,
+  PlanContext,
+  PlanEntryKind,
+  PlanEntryState,
+} from './plan-record';
 import {
   ClaimKind,
   KnowledgeScope,
@@ -40,7 +48,16 @@ const OpId = z
  */
 export const REPORTED_ROUTES_MAX = 4;
 
+/** The lane's read-only tools over its task's Plan: they answer only from that Plan. */
+export const PlanToolName = {
+  GetPlanSection: 'get_plan_section',
+  GetPlanEntry: 'get_plan_entry',
+  FindPlanEntries: 'find_plan_entries',
+} as const;
+export type PlanToolName = (typeof PlanToolName)[keyof typeof PlanToolName];
+
 export const McpToolName = {
+  ...PlanToolName,
   GetContext: 'get_context',
   FindKnowledge: 'find_knowledge',
   AskHuman: 'ask_human',
@@ -153,7 +170,41 @@ export const RemainingWorkInput = z.object({
 });
 export type RemainingWorkInput = z.infer<typeof RemainingWorkInput>;
 
+/** What `find_plan_entries` may search. */
+export const PlanSearchKind = {
+  ...PlanEntryKind,
+  Decision: 'decision',
+  Question: 'question',
+  Section: 'section',
+} as const;
+export type PlanSearchKind = (typeof PlanSearchKind)[keyof typeof PlanSearchKind];
+
+/** A record entry of the task's Plan, at its current version, with this lane's checks of its anchors. */
+const PlanEntryOutput = z.object({
+  kind: z.enum(PlanEntryKind),
+  key: z.string(),
+  title: z.string(),
+  version: z.int().min(1),
+  body: z.json(),
+  anchors: z.array(PlanAnchor),
+  checks: z.array(AnchorCheckDto),
+  sources: z.array(z.string()),
+  verified: z.boolean(),
+  checkedAt: z.string().nullable(),
+  state: z.enum(PlanEntryState),
+});
+
 export const McpToolInputs = {
+  get_plan_section: z.object({
+    ref: z.string().min(1).describe('doc#slug, as your brief names it; a task section is task-N'),
+    revision: z.int().min(1).optional(),
+  }),
+  get_plan_entry: z.object({ key: BriefKey }),
+  find_plan_entries: z.object({
+    query: z.string().min(1),
+    kinds: z.array(z.enum(PlanSearchKind)).optional(),
+    limit: z.int().min(1).max(50).default(20),
+  }),
   get_context: z.object({}),
   find_knowledge: z.object({
     query: z.string().min(1),
@@ -272,6 +323,45 @@ export const McpToolInputs = {
 } as const satisfies Record<McpToolName, z.ZodType>;
 
 export const McpToolOutputs = {
+  get_plan_section: z.object({
+    ref: z.string(),
+    document: z.string(),
+    revision: z.int().min(1),
+    title: z.string(),
+    text: z.string(),
+  }),
+  get_plan_entry: z.union([
+    PlanEntryOutput,
+    z.object({
+      kind: z.literal('decision'),
+      key: z.string(),
+      question: z.string(),
+      choice: z.string(),
+      rationale: z.string(),
+      alternatives: z.array(PlanAlternative),
+      quote: z.string().nullable(),
+      lasting: z.boolean(),
+      state: z.string(),
+    }),
+    z.object({
+      kind: z.literal('question'),
+      key: z.string(),
+      text: z.string(),
+      for: z.string(),
+      blocks: z.string().nullable(),
+    }),
+  ]),
+  find_plan_entries: z.object({
+    hits: z.array(
+      z.object({
+        kind: z.enum(PlanSearchKind),
+        key: z.string(),
+        title: z.string(),
+        snippet: z.string(),
+      }),
+    ),
+    empty: z.boolean(),
+  }),
   get_context: ContextPack,
   find_knowledge: z.object({
     results: z.array(KnowledgeHit),
