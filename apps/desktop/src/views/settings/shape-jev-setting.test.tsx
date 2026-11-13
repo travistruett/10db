@@ -43,7 +43,7 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
       );
       renderApp('/settings/planning');
       const toggle = await screen.findByRole('switch', { name: SHAPE_JEV_LABEL });
-      expect(await screen.findByText('Pick an account for decisions first')).toBeTruthy();
+      expect(await screen.findByText('Pick an account for decisions first.')).toBeTruthy();
       // The setting is loaded once the switch shows it; only the missing account can hold it off.
       await waitFor(() => {
         expect(toggle).toHaveProperty('checked', enabled);
@@ -51,7 +51,7 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
       await waitFor(() => {
         expect(toggle).toHaveProperty('disabled', disabled);
       });
-      const link = screen.getByRole('link', { name: 'Decisions' });
+      const link = screen.getByRole('link', { name: 'Open Decisions' });
       expect(link.getAttribute('href')).toBe('/settings/decisions?focus=runs-on');
     },
   );

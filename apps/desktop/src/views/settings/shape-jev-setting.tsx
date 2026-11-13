@@ -43,7 +43,7 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
           />
           {judge.data !== undefined && account === null ? (
             <Text size="xs" c="dimmed">
-              Pick an account for decisions first{' '}
+              Pick an account for decisions first.{' '}
               <Anchor
                 size="xs"
                 renderRoot={(props) => (
@@ -55,7 +55,7 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
                   />
                 )}
               >
-                Decisions
+                Open Decisions
               </Anchor>
             </Text>
           ) : null}
