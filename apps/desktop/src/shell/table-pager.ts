@@ -32,8 +32,12 @@ export function pagerProps(
     recordsPerPageOptions: [...sizes],
     onRecordsPerPageChange: paging.onPageSize,
     recordsPerPageLabel: 'Per page',
-    paginationText: ({ from, to, totalRecords }) =>
-      `${String(from)}–${String(to)} of ${String(totalRecords)}`,
+    // Counted from the page, not the rows drawn, so rows a page opens under its records don't move it.
+    paginationText: () => {
+      const from = (paging.page - 1) * paging.pageSize + 1;
+      const to = Math.min(paging.page * paging.pageSize, paging.total);
+      return `${String(from)}–${String(to)} of ${String(paging.total)}`;
+    },
     getPaginationControlProps: (control) => ({ 'aria-label': PAGER_CONTROLS[control] }),
     getPaginationItemProps: (page) => ({ 'aria-label': `Page ${String(page)}` }),
   };

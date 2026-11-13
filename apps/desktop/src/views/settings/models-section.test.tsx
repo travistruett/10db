@@ -760,6 +760,8 @@ describe('the Models page', () => {
       await screen.findByRole('button', { name: 'Open Zed 1' });
       expect(shownNames()).toEqual(['Zed 2', 'Zed 1', 'Zed 0']);
       expect(screen.queryByRole('dialog')).toBeNull();
+      // The pager counts families, not the rows an open family adds.
+      expect(screen.getByText('1–1 of 1')).toBeTruthy();
     });
 
     it('opens the drawer on an older version from its row', async () => {

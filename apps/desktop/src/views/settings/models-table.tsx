@@ -179,8 +179,8 @@ export function ModelsTable({
               onOpen(row);
             }}
             onToggle={() => {
-              setExpanded(
-                open ? expanded.filter((m) => m !== row.model) : [...expanded, row.model],
+              setExpanded((now) =>
+                now.includes(row.model) ? now.filter((m) => m !== row.model) : [...now, row.model],
               );
             }}
           />
@@ -223,7 +223,9 @@ export function ModelsTable({
   return (
     <DataTable<ModelRowDto>
       aria-label="Models"
-      records={families.map((f) => f.lead)}
+      records={families.flatMap((f) =>
+        expanded.includes(f.lead.model) ? [f.lead, ...f.older] : [f.lead],
+      )}
       columns={columns}
       idAccessor={(row) => row.model}
       withTableBorder
@@ -233,27 +235,6 @@ export function ModelsTable({
       horizontalSpacing="md"
       highlightOnHover
       {...pagerProps(paging, PAGE_SIZES)}
-      rowExpansion={{
-        trigger: 'never',
-        allowMultiple: true,
-        expanded: { recordIds: [...expanded] },
-        content: ({ record }) => (
-          <DataTable<ModelRowDto>
-            aria-label={`Older versions of ${record.name}`}
-            noHeader
-            records={[...(olderOf.get(record.model) ?? [])]}
-            columns={columns}
-            idAccessor={(row) => row.model}
-            backgroundColor="var(--tendb-color-panel)"
-            verticalSpacing="sm"
-            horizontalSpacing="md"
-            highlightOnHover
-            onRowClick={({ record: older }) => {
-              onOpen(older);
-            }}
-          />
-        ),
-      }}
       {...(families.length === 0 ? { minHeight: 160 } : {})}
       emptyState={
         <Text c="dimmed" size="sm" ta="center">
