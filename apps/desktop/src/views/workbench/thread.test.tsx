@@ -166,11 +166,17 @@ describe('Thread', () => {
     );
     renderWithDaemon(<Thread page={page} turns={[]} canSend />);
     const thread = await screen.findByRole('list', { name: 'Thread' });
+    // Each picture loads on its own, so both are waited for before their order is read.
     await screen.findByRole('img', { name: 'Settings before, 1440 by 900' });
+    await screen.findByRole('img', {
+      name: 'Settings after sign-off, from an earlier task of this goal, 1440 by 900',
+    });
     const first = thread.children[0] as HTMLElement;
     expect(within(first).getByText('Earlier in this goal')).toBeTruthy();
     expect(
-      (await within(first).findAllByRole('img')).map((img) => img.getAttribute('alt')),
+      within(first)
+        .getAllByRole('img')
+        .map((img) => img.getAttribute('alt')),
     ).toEqual([
       'Settings after sign-off, from an earlier task of this goal, 1440 by 900',
       'Settings before, 1440 by 900',

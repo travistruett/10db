@@ -16,7 +16,7 @@ gate:
 check:
 	@bash scripts/check.sh
 
-## check-changed: format, lint, typecheck, tests and drift of the packages the diff touches and their dependents; 10db runs it after each implement step. The full gate still runs before the push.
+## check-changed: format, lint, typecheck, tests and drift of the packages the diff touches and their dependents; 10db runs it after each implement step, and a lane's gate command before the push. A contributor runs it before a push; CI is the gate.
 check-changed:
 	@node scripts/check-changed.mjs
 
