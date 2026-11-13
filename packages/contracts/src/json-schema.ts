@@ -68,7 +68,7 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
 import {
   JudgeCallDto,
   JudgeConfigPatch,
@@ -291,6 +291,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
+  'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,

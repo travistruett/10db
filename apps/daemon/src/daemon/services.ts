@@ -101,6 +101,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import type { BenchmarkApiServices } from './benchmark-services';
 import { buildModelRows, type CatalogueSync } from '../catalogue';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -179,6 +180,8 @@ export function createServices(deps: {
   /** The pinned Claude Code and Codex, read for each request; null where none are managed. */
   readonly agents: AgentTools | null;
   readonly benchmarks: BenchmarkSync;
+  /** The sync's status and the Artificial Analysis key. */
+  readonly benchmarkApi: BenchmarkApiServices;
   /** The model catalogue in use, for the model list's names and runnability. */
   readonly catalogue: Pick<CatalogueSync, 'status' | 'catalogue'>;
   /** Fetches the catalogue and reads every account's list; a call during a run joins it. */
@@ -675,8 +678,7 @@ export function createServices(deps: {
       getProject(db, projectId);
       await deps.preview.restart(projectId);
     },
-    benchmarkStatus: () => deps.benchmarks.status(),
-    syncBenchmarks: () => deps.benchmarks.sync(),
+    ...deps.benchmarkApi,
     listAaModels: () => listAaModels(db),
     listModels: () =>
       buildModelRows({
