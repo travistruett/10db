@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
+  AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
@@ -42,6 +43,7 @@ import {
   listModelProfiles,
   listAccountModels,
   getAppSetting,
+  findAccountRow,
   getJudgeConfig,
   getProject,
   listPermissionRules,
@@ -1933,6 +1935,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
+    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
+    openRouterOn: () => {
+      if (openRouterSync === null) return false;
+      const accountId = getJudgeConfig(state.db).accountId;
+      const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
+      return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
+    },
     trust: createTrustServices({
       state,
       builderHome,

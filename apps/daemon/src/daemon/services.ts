@@ -208,6 +208,8 @@ export function createServices(deps: {
   readonly refreshModels: (opts: { readonly force: boolean }) => Promise<void>;
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
+  /** Whether OpenRouter's measures may show: an OpenRouter account is picked for decisions and no kill switch is on. */
+  readonly openRouterOn: () => boolean;
   readonly judge: JudgeApiServices;
   /** gh's login and the Sign In that changes it. */
   readonly github: GithubApiServices;
@@ -719,7 +721,10 @@ export function createServices(deps: {
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
-        openRouter: groupMeasuresByModel(listOpenRouterMeasures(db), deps.catalogue.catalogue()),
+        openRouter: groupMeasuresByModel(
+          deps.openRouterOn() ? listOpenRouterMeasures(db) : [],
+          deps.catalogue.catalogue(),
+        ),
         now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),

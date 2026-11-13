@@ -5,6 +5,7 @@ import {
   CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
+  JudgeStatusDto,
   mintId,
   ModelRowDto,
   RolePicksDto,
@@ -44,7 +45,7 @@ afterEach(async () => {
 /** A daemon whose one account lists the models given, against the committed catalogue fixture. */
 async function start(
   models: { id: string; resolvedId: string }[],
-  opts: { catalogueSync?: boolean; offline?: { value: boolean } } = {},
+  opts: { catalogueSync?: boolean; offline?: { value: boolean }; openRouterSync?: boolean } = {},
 ) {
   const adapter = new FakeAdapter({});
   adapter.probeSeen = {
@@ -59,6 +60,7 @@ async function start(
     logLevel: 'warn',
     ...QUIET,
     catalogueSync: opts.catalogueSync ?? true,
+    ...(opts.openRouterSync === undefined ? {} : { openRouterSync: opts.openRouterSync }),
     fetch: () => {
       fetches += 1;
       if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
@@ -76,8 +78,11 @@ async function start(
 }
 
 describe('the model list over HTTP', () => {
-  it("shows OpenRouter's speed on the provider of the asked Bedrock account, naming its source", async () => {
-    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+  /** A daemon with a Bedrock account that offers Opus and OpenRouter's speeds for it already stored. */
+  async function withBedrockSpeeds() {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
+      openRouterSync: true,
+    });
     const { account } = await api.post('/accounts', AccountCreatedDto, {
       kind: 'bedrock',
       label: 'Bedrock',
@@ -104,11 +109,31 @@ describe('the model list over HTTP', () => {
         new Date().toISOString(),
       );
     });
+    return { api, account };
+  }
+
+  it("shows OpenRouter's speed on the provider of the asked Bedrock account, once an OpenRouter account is picked for decisions", async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const { account: openRouter } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    });
+    await api.patch('/judge', JudgeStatusDto, { accountId: openRouter.id });
     const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
     expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
       outputTokensPerSecond: 77,
       speedProvider: 'Amazon Bedrock',
       sources: { speed: 'openrouter' },
+    });
+  });
+
+  it('shows none of OpenRouter’s numbers while no OpenRouter account is picked for decisions', async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: null,
+      speedProvider: null,
+      sources: { speed: null },
     });
   });
 
