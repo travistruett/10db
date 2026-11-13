@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, PlanBundle } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -139,6 +139,21 @@ describe('readBundleFile', () => {
     expect(await refused(writeBundle([{ number: 1, bodyPath: 'p1.md', at: AT }]))).toMatch(
       /bundle's folder/,
     );
+  });
+
+  it('a bodyPath that is a hard link of a file elsewhere is refused', async () => {
+    writeFileSync(join(dataDir, 'secret.md'), 'secret');
+    linkSync(join(dataDir, 'secret.md'), join(folder, 'p1.md'));
+    expect(await refused(writeBundle([{ number: 1, bodyPath: 'p1.md', at: AT }]))).toMatch(
+      /hard link/,
+    );
+  });
+
+  it('a bundle that is a hard link is refused', async () => {
+    const inside = writeBundle([{ number: 1, body: 'x', at: AT }], dataDir);
+    const link = join(folder, 'linked.json');
+    linkSync(inside, link);
+    expect(await refused(link)).toMatch(/hard link/);
   });
 
   it('a bodyPath to a FIFO is refused without blocking', async () => {

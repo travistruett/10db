@@ -36,14 +36,16 @@ function realOrNull(path: string): string | null {
 }
 
 /**
- * Opens a real path without following a last link and without blocking on a FIFO, and reads at most
+ * Opens a real path without following a last link and without blocking on a FIFO, refuses a file with
+ * more than one hard link, and reads at most
  * `budget + 1` bytes. Answers the bytes, or why it can't.
  */
 async function readCapped(
   realPath: string,
   budget: number,
 ): Promise<
-  { ok: true; bytes: Buffer } | { ok: false; why: 'not_file' | 'too_big' | 'unreadable' }
+  | { ok: true; bytes: Buffer }
+  | { ok: false; why: 'not_file' | 'hard_link' | 'too_big' | 'unreadable' }
 > {
   let handle;
   try {
@@ -54,6 +56,8 @@ async function readCapped(
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) return { ok: false, why: 'not_file' };
+    // A hard link's real path is its own, so another name of it could be any file on the volume.
+    if (stat.nlink > 1) return { ok: false, why: 'hard_link' };
     if (stat.size > budget) return { ok: false, why: 'too_big' };
     const buffer = Buffer.alloc(Math.min(stat.size, budget) + 1);
     let filled = 0;
@@ -81,6 +85,7 @@ function decode(bytes: Buffer): string | null {
 
 const WHY = {
   not_file: 'is not a regular file',
+  hard_link: 'has another hard link, so where it lies cannot be told; copy it instead',
   too_big: 'takes the bundle past 16 MiB',
   unreadable: 'could not be read',
 } as const;
