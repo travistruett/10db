@@ -16,10 +16,7 @@ export function ghRow(gh: ToolCheck | undefined): SetupRow {
   if (gh.path === null)
     return { mark: 'warn', detail: 'Not found. Needed only for pull requests.' };
   if (gh.signedIn === null) {
-    return {
-      mark: 'warn',
-      detail: 'Not signed in. Run gh auth login in a terminal, then recheck.',
-    };
+    return { mark: 'warn', detail: 'Not signed in.' };
   }
   return { mark: 'ok', detail: `${gh.version ?? gh.path}, signed in as ${gh.signedIn}` };
 }

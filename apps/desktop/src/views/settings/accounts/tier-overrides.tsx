@@ -87,7 +87,7 @@ export function TierOverrides({
   /** What is wrong with the overrides, shown on each field whose ID is too long. */
   readonly error: string | undefined;
 }) {
-  const models = useModels();
+  const models = useModels(null);
   const offers = useModelOffers();
   const set = (tier: ModelTier, model: string) => {
     onChange({ ...values, tierOverrides: { ...values.tierOverrides, [tier]: model } });

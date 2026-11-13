@@ -214,7 +214,9 @@ describe('ModelRowDto', () => {
       inputPrice: null,
       outputPrice: null,
       intelligence: null,
+      costPerTaskUsd: null,
       outputTokensPerSecond: null,
+      efforts: [],
       stepsRun: 0,
       firstSeenAt: '2026-11-06T12:00:00.000Z',
     };

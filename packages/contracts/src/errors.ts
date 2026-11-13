@@ -1,6 +1,6 @@
 import type { WorkstreamId } from './ids';
 
-export type DomainErrorCode = 'not_found' | 'conflict' | 'invalid';
+export type DomainErrorCode = 'not_found' | 'conflict' | 'invalid' | 'upstream';
 
 /** An error the API maps to an HTTP status; its message is safe to show the builder. */
 export class DomainError extends Error {
@@ -31,6 +31,14 @@ export class InvalidError extends DomainError {
   override readonly name = 'InvalidError';
   constructor(message: string) {
     super('invalid', message);
+  }
+}
+
+/** A program or service 10db called failed; the API answers 502 with a message safe to show. */
+export class UpstreamError extends DomainError {
+  override readonly name = 'UpstreamError';
+  constructor(message: string) {
+    super('upstream', message);
   }
 }
 

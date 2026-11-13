@@ -1,11 +1,14 @@
 import type { AccountId, ProjectDto } from '@10db/contracts';
 import { Box, Button, Group, Image, Stack, Stepper, Text, Title } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import appIcon from '../../../app-icon.svg';
 import { AccountDrawer } from '../settings/accounts/account-drawer';
 import { AddAccountModal } from '../settings/accounts/add-account-modal';
 import { useProjectSetup } from '../project-setup/project-setup';
+import { useGithubLoginEnd } from '../../daemon/github-queries';
+import { useRecheckSystem } from '../../daemon/queries';
+import { GithubSignIn } from '../settings/integrations/github-sign-in';
 import { SetupItem, SetupSection } from './setup-check';
 import { useSetupCheck } from './use-setup-check';
 
@@ -17,6 +20,20 @@ const ADD_PROJECT = 2;
 const DRAG_STRIP_HEIGHT = 48;
 const RAIL_WIDTH = 290;
 const CONTENT_PADDING = 48;
+
+/** The gh row's Sign In: the same flow as Settings › Integrations, and the tools are checked again when it ends. */
+function GhSignIn() {
+  const end = useGithubLoginEnd();
+  const { mutate: recheck } = useRecheckSystem();
+  useEffect(() => {
+    if (end?.ok === true) recheck();
+  }, [end, recheck]);
+  return (
+    <Box mt="xs">
+      <GithubSignIn label="Sign In" filled={false} />
+    </Box>
+  );
+}
 
 function Welcome() {
   return (
@@ -64,7 +81,9 @@ function CheckYourSetup({ check }: { readonly check: ReturnType<typeof useSetupC
         rechecking={check.rechecking.tools}
       >
         <SetupItem name="git" row={check.git} />
-        <SetupItem name="GitHub CLI" row={check.gh} />
+        <SetupItem name="GitHub CLI" row={check.gh}>
+          {check.ghSignedOut ? <GhSignIn /> : null}
+        </SetupItem>
       </SetupSection>
       <AddAccountModal
         opened={adding}

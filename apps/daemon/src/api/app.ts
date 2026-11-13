@@ -1,4 +1,6 @@
 import {
+  GithubSigninDto,
+  GithubStatusDto,
   AccountId,
   AccountInput,
   AccountPatch,
@@ -38,6 +40,8 @@ import {
   JudgeConfigPatch,
   BenchmarkKeyInput,
   JudgeKeyInput,
+  ModelPicksQuery,
+  ModelsQuery,
   KeepAwakeInput,
   LanePermissionsDto,
   TrustOverrides,
@@ -167,7 +171,7 @@ export interface ApiDeps {
   onUnexpectedError(error: unknown): void;
 }
 
-const STATUS = { not_found: 404, conflict: 409, invalid: 400 } as const;
+const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 const STREAM_PATH = '/events/stream';
 
@@ -1108,6 +1112,23 @@ export function createApp(deps: ApiDeps) {
       deps.services.removePerson(PersonId.parse(c.req.param('personId')));
       return c.json({});
     })
+    .get(
+      '/github',
+      validator('query', (query): { recheck?: '1' | undefined } => SystemQuery.parse(query)),
+      async (c) =>
+        c.json(
+          GithubStatusDto.parse(
+            await deps.services.githubStatus(c.req.valid('query').recheck === '1'),
+          ),
+        ),
+    )
+    .post('/github/signin', async (c) =>
+      c.json(GithubSigninDto.parse(await deps.services.startGithubSignin())),
+    )
+    .delete('/github/signin', (c) => {
+      deps.services.cancelGithubSignin();
+      return c.body(null, 204);
+    })
     .get('/slack', (c) => c.json(deps.services.slackStatus()))
     .put(
       '/slack/token',
@@ -1233,7 +1254,16 @@ export function createApp(deps: ApiDeps) {
     .delete('/benchmarks/key', async (c) => c.json(await deps.services.removeBenchmarkKey()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
-    .get('/models', (c) => c.json(deps.services.listModels()))
+    .get(
+      '/models',
+      validator('query', (query) => ModelsQuery.parse(query)),
+      (c) => c.json(deps.services.listModels(c.req.valid('query').account)),
+    )
+    .get(
+      '/models/picks',
+      validator('query', (query) => ModelPicksQuery.parse(query)),
+      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
+    )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))
     .post('/models/refresh', async (c) => c.json(await deps.services.refreshModels()))

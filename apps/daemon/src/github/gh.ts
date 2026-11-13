@@ -285,6 +285,26 @@ const notInstalled = (): GhError =>
   );
 
 /**
+ * The environment every gh the daemon runs gets: the login environment without a hook's `GIT_DIR` or
+ * anything that steers Xcode's shim, prompts off, the daemon's own git first on PATH and its own git
+ * config.
+ */
+export function ghEnvironment(
+  tools: Pick<GhTools, 'git'>,
+  login: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const given = Object.fromEntries(
+    Object.entries(withoutGitRepoEnv(login)).filter(([name]) => !XCODE_SELECTORS.includes(name)),
+  );
+  const loginPath = given['PATH'];
+  return withDaemonGitConfig({
+    ...given,
+    ...NO_PROMPTS,
+    PATH: loginPath ? `${dirname(tools.git)}${delimiter}${loginPath}` : dirname(tools.git),
+  });
+}
+
+/**
  * Runs `tools.gh` in an empty directory of its own, so it finds no repository and runs no git in a
  * checkout; every call names its repository with `-R`. Any git it does run is the daemon's own, first
  * on its PATH, with the daemon's own config, no hook's `GIT_DIR` and nothing that steers Xcode's shim.
@@ -301,17 +321,7 @@ export function createSystemGhExec(tools: GhTools): GhExec {
       const done = (): void => {
         rmSync(cwd, { recursive: true, force: true });
       };
-      const given = Object.fromEntries(
-        Object.entries(withoutGitRepoEnv(call.env)).filter(
-          ([name]) => !XCODE_SELECTORS.includes(name),
-        ),
-      );
-      const loginPath = given['PATH'];
-      const env = withDaemonGitConfig({
-        ...given,
-        ...NO_PROMPTS,
-        PATH: loginPath ? `${dirname(tools.git)}${delimiter}${loginPath}` : dirname(tools.git),
-      });
+      const env = ghEnvironment(tools, call.env);
       execFile(
         gh,
         [...args],
