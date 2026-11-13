@@ -880,8 +880,11 @@ G4 failed, ship the notice with no offer: skip `offerAllowThis`, the route and t
 
 **Interfaces:**
 
-- `DeniedCall.summary` is the whole call, never cut: a Bash or Monitor `command`, a WebFetch `url`, a WebSearch
-  `query`, an edit's `file_path`, else the tool name and its input as JSON. `reason` is `decision_reason ?? message`.
+- `DeniedCall.summary` is the whole call, never cut: a Bash or Monitor `command`, a WebFetch `url` or a WebSearch
+  `query` when no other key of the input changes what the call does (a Bash `description` or `timeout`, a
+  Monitor's `description` or `timeout_ms`, a WebFetch `prompt`), else the tool name and its whole input as JSON.
+  An edit is always its whole input (path and content, both strings, its edits or its new source), so Allow this
+  approves the content it saw and the cut rule measures it. `reason` is `decision_reason ?? message`.
   `by` is `classifier` or `safety_check`. `limit` is `limitOfDenial(reason)`, null when it names none (L2: the usual
   case). An id the hook never saw gives `summary` = the tool name alone.
 - `ALLOW_THIS_MAX_CHARS = 4000`. Allow this is offered when `by` is `classifier`, the summary came from the hook's

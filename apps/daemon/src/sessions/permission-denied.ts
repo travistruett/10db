@@ -29,30 +29,35 @@ const asText = (value: unknown): string | null =>
   typeof value === 'string' && value !== '' ? value : null;
 
 /**
- * The whole call, never cut: a command, a url, a query, an edit's file, else the tool and its input
- * as JSON. A go-ahead names exactly this, so it is the agent's request as it ran.
+ * The one input key a tool's summary shows, and the keys beside it that change nothing the call does
+ * (a label, a timeout, what to read out of a fetched page). A tool not listed, an edit among them, is
+ * always its whole input: an edit's go-ahead approves its content, as Claude Code's prompt shows it.
+ */
+const SHOWN: Readonly<
+  Record<string, { readonly key: string; readonly labels: readonly string[] }>
+> = {
+  Bash: { key: 'command', labels: ['description', 'timeout'] },
+  Monitor: { key: 'command', labels: ['description', 'timeout_ms'] },
+  WebFetch: { key: 'url', labels: ['prompt'] },
+  WebSearch: { key: 'query', labels: [] },
+};
+
+/**
+ * The whole call, never cut: a command, a url or a query alone when nothing else in the input changes
+ * what it does, else the tool and its whole input as JSON. A go-ahead names exactly this, so it is the
+ * agent's request as it ran, and Allow this's length rule measures all of it.
  */
 export function summaryOfCall(call: HookCall): string {
-  const { toolName } = call;
   // The hook's input is the model's own JSON: parsed here, where it is read.
   const parsed = z.record(z.string(), z.unknown()).safeParse(call.input);
   const input = parsed.success ? parsed.data : {};
-  switch (toolName) {
-    case 'Bash':
-    case 'Monitor':
-      return asText(input['command']) ?? asJson(call);
-    case 'WebFetch':
-      return asText(input['url']) ?? asJson(call);
-    case 'WebSearch':
-      return asText(input['query']) ?? asJson(call);
-    case 'Edit':
-    case 'MultiEdit':
-    case 'Write':
-    case 'NotebookEdit':
-      return asText(input['file_path']) ?? asJson(call);
-    default:
-      return asJson(call);
-  }
+  const shown = Object.hasOwn(SHOWN, call.toolName) ? SHOWN[call.toolName] : undefined;
+  if (shown === undefined) return asJson(call);
+  const text = asText(input[shown.key]);
+  const others = Object.keys(input).filter(
+    (key) => key !== shown.key && !shown.labels.includes(key),
+  );
+  return text !== null && others.length === 0 ? text : asJson(call);
 }
 
 function asJson({ toolName, input }: HookCall): string {
