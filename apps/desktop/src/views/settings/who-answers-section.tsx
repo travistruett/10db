@@ -36,12 +36,11 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
       <Group justify="space-between" align="flex-start">
         <Stack gap={2}>
           <Text size="sm" c="dimmed">
-            Questions a lane asks go to the first match, most specific first. When nothing above
-            matches,{' '}
+            A question goes to the first route that matches, most specific first. When none does,{' '}
             {judgeOn
-              ? "Jev picks among the project's categories and topics."
-              : "Without Jev, the lane's own category and topic decide."}{' '}
-            Everything else is yours.
+              ? "Jev picks from the project's categories and topics."
+              : "the lane's own category and topic decide."}{' '}
+            Anything left comes to you.
           </Text>
         </Stack>
         <Button
@@ -59,8 +58,9 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
         </Alert>
       ) : null}
       {rules.isSuccess && rows.length === 0 ? (
-        <Text c="dimmed">
-          Every question comes to you. Add a route, or use Ask Someone… on a card.
+        <Text size="sm" c="dimmed">
+          No routes yet, so every question comes to you. Add one here, or use Ask Someone on a
+          question card.
         </Text>
       ) : null}
       {rules.isSuccess && rows.length > 0 ? (
@@ -101,7 +101,7 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
             <Table.Tr>
               <Table.Td />
               <Table.Td />
-              <Table.Td c="dimmed">Everything else</Table.Td>
+              <Table.Td c="dimmed">Everything not routed</Table.Td>
               <Table.Td c="dimmed">You</Table.Td>
               <Table.Td />
             </Table.Tr>

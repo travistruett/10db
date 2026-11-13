@@ -65,7 +65,7 @@ describe('Settings › Who Answers', () => {
     serve([]);
     expect(
       await screen.findByText(
-        /Every question comes to you\. Add a route, or use Ask Someone… on a card\./,
+        /No routes yet, so every question comes to you\. Add one here, or use Ask Someone on a\s+question card\./,
       ),
     ).toBeTruthy();
   });
@@ -91,17 +91,17 @@ describe('Settings › Who Answers', () => {
       'AreasrcEngineeringMark Ellis',
       'ProjectProductMark Ellis, Ana Ortiz',
       'Topicbilling, pricingSarah Kim',
-      'Everything elseYou',
+      'Everything not routedYou',
     ]);
     expect(
-      screen.getByText(/Questions a lane asks go to the first match, most specific first/),
+      screen.getByText(/A question goes to the first route that matches, most specific first/),
     ).toBeTruthy();
   });
 
   it('explains the fallback when the judge is off', async () => {
     serve([], { judgeOff: true });
     expect(
-      await screen.findByText(/Without Jev, the lane's own category and topic decide\./),
+      await screen.findByText(/When none does, the lane's own category and topic decide\./),
     ).toBeTruthy();
   });
 
