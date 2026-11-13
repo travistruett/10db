@@ -136,11 +136,47 @@ export function hunksOfTexts(before: string, after: string, firstLine = 1): Edit
   return { ...shown, removedLines: splitLines(before).length };
 }
 
-/** The hunks of a unified diff, with or without its file headers; null when it holds no hunk or doesn't parse. */
-export function hunksOfPatch(patch: string): EditHunks | null {
+/** A line of a unified diff's file header, which no hunk holds. */
+const FILE_HEADER =
+  /^(diff |index |--- |\+\+\+ |Index: |={3,}$|new file mode |deleted file mode |old mode |new mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to )/;
+
+/**
+ * Whether every line of the patch is a file header or a line of one of `raws`, in order. A parser
+ * skips what it doesn't read (lines before the first hunk, lines after a blank one past a hunk), so
+ * hunks that leave a line out would show a change the text doesn't stop at.
+ */
+function accountsForEveryLine(patch: string, raws: readonly RawHunk[]): boolean {
+  const lines = splitLines(patch);
+  let hunk = 0;
+  for (let at = 0; at < lines.length;) {
+    const line = lines[at] ?? '';
+    if (line.startsWith('@@ ')) {
+      const raw = raws[hunk];
+      if (raw === undefined) return false;
+      hunk += 1;
+      at += 1 + raw.lines.length;
+    } else if (FILE_HEADER.test(line)) at += 1;
+    else return false;
+  }
+  return hunk === raws.length;
+}
+
+/** Whether the text starts as a unified diff does: a file header or a hunk header. */
+export function startsAsPatch(text: string): boolean {
+  const first = splitLines(text)[0] ?? '';
+  return first.startsWith('--- ') || first.startsWith('@@ ');
+}
+
+/**
+ * The hunks of a unified diff, with or without its file headers; null when it holds no hunk or doesn't
+ * parse. When its hunks leave a line of it out, the hunks are marked `truncated`, and `whole` is false.
+ */
+export function hunksOfPatch(patch: string): (EditHunks & { readonly whole: boolean }) | null {
   try {
     const raws = parsePatch(patch).flatMap((file) => file.hunks);
-    return raws.length === 0 ? null : capped(raws, false);
+    if (raws.length === 0) return null;
+    const whole = accountsForEveryLine(patch, raws);
+    return { ...capped(raws, !whole), whole };
   } catch {
     return null;
   }

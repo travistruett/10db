@@ -6,7 +6,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { z } from 'zod';
-import { hunksOfPatch, hunksOfTexts, type EditHunks } from './hunks';
+import { hunksOfPatch, hunksOfTexts, startsAsPatch, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep } from './types';
 
@@ -165,18 +165,24 @@ function common(
   };
 }
 
-/** A change's hunks: its unified diff, else its text as added or removed; an update with neither has none. */
+/**
+ * A change's hunks. An add or a delete is its text as added or removed, unless the text starts as a
+ * unified diff and its hunks hold every line of it: a file whose text only holds a hunk header is
+ * shown whole. An update is its unified diff, truncated where its hunks leave a line out; one with
+ * no diff has none.
+ */
 function changeHunks(diff: string, change: EditChange): EditHunks {
   const parsed = hunksOfPatch(diff);
-  if (parsed !== null) return parsed;
+  const patch = (): EditHunks | null =>
+    parsed !== null && parsed.whole && startsAsPatch(diff) ? parsed : null;
   switch (change) {
     case EditChange.Add:
-      return hunksOfTexts('', diff);
+      return patch() ?? hunksOfTexts('', diff);
     case EditChange.Delete:
-      return hunksOfTexts(diff, '');
+      return patch() ?? hunksOfTexts(diff, '');
     case EditChange.Update:
     case EditChange.Move:
-      return { hunks: [], addedLines: 0, removedLines: 0, truncated: false };
+      return parsed ?? { hunks: [], addedLines: 0, removedLines: 0, truncated: false };
   }
 }
 
