@@ -4,8 +4,15 @@ import type { ReactNode } from 'react';
 // A reviewer's or a decision's words are plain text, but they quote code in backticks as markdown
 // does; each code span is drawn as code, as the documents draw it, and the rest stays text.
 
+/**
+ * The longest text read for code spans. A run with no closer is searched to the end, so a long text of
+ * unmatched runs costs more than linear time; past this it stays plain, which loses nothing.
+ */
+export const CODE_SPANS_MAX_LENGTH = 64 * 1024;
+
 /** The text cut into plain runs and code spans, each span without its backticks. */
 export function codeSpans(text: string): { readonly code: boolean; readonly text: string }[] {
+  if (text.length > CODE_SPANS_MAX_LENGTH) return [{ code: false, text }];
   const out: { code: boolean; text: string }[] = [];
   let plain = 0;
   let i = 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codeSpans } from './code-spans';
+import { CODE_SPANS_MAX_LENGTH, codeSpans } from './code-spans';
 
 // Code spans read as markdown reads them: a run of backticks closes at the next run of as many.
 
@@ -21,5 +21,10 @@ describe('codeSpans', () => {
     ['a longer run does not close a shorter one', '`a``b`', [[true, 'a``b']]],
   ])('%s', (_, text, parts) => {
     expect(codeSpans(text).map((p) => [p.code, p.text])).toEqual(parts);
+  });
+
+  it('a text past the limit stays whole and plain', () => {
+    const text = `\`a\` ${'x'.repeat(CODE_SPANS_MAX_LENGTH)}`;
+    expect(codeSpans(text)).toEqual([{ code: false, text }]);
   });
 });
