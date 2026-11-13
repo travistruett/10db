@@ -206,8 +206,12 @@ describe('Allow this', () => {
 
     const res = await send(taskId, notice.id);
 
+    // Leaving the pass took the offer with it, so the notice offers nothing to send.
     expect(res.status).toBe(409);
-    expect(await res.text()).toContain('That go-ahead can only go to a page of an open pass');
+    expect(await res.text()).toContain('That notice offers nothing to send to the agent');
+    expect(listTaskThread(daemon.state.db, taskId).find((m) => m.id === notice.id)).toMatchObject({
+      allowThis: false,
+    });
     expect(builderMessages(taskId)).toEqual([]);
   });
 
