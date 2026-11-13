@@ -135,6 +135,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   PackReason,
+  recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
@@ -1973,7 +1974,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
-    const contextPack = buildContextPack(db, getWorkstream(db, id));
+    const contextPack = buildContextPack(db, getWorkstream(db, id), { base: baseHead });
     // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
     const evidenceId =
       action.kind === 'fix'
@@ -2305,6 +2306,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         // A fresh session holds no picture an earlier one was sent.
         if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
+        recordPlanPacked(ctx, task.id, id, contextPack);
         ctx.emit(
           contextPackedEvent(
             s.id,
@@ -2802,6 +2804,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 signedReason: 'Context ran out before a handoff (10db)',
                 sourceId,
               });
+              recordPlanPacked(ctx, row.taskId, id, pack);
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
             handle.send(

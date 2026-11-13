@@ -6,6 +6,10 @@
       "type": "string",
       "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
+    "revisionId": {
+      "type": "string",
+      "pattern": "^sar_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
     "title": {
       "type": "string"
     },
@@ -375,6 +379,7 @@
   },
   "required": [
     "shapeId",
+    "revisionId",
     "title",
     "document",
     "goal",

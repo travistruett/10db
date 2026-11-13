@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BriefKey } from './goals';
-import { ShapeId, WorkstreamId } from './ids';
+import { ShapeAttachmentRevisionId, ShapeId, WorkstreamId } from './ids';
 
 // A Plan's record: the documents, entries and anchors a planning effort keeps on its Plan, and what a
 // lane's brief carries of it. The bundle that imports a record is in `plan-bundle.ts`.
@@ -210,6 +210,8 @@ const SectionText = z.object({ ref: z.string(), text: z.string() });
  */
 export const PlanContext = z.object({
   shapeId: ShapeId,
+  /** The revision the task is pinned to. */
+  revisionId: ShapeAttachmentRevisionId,
   title: z.string(),
   document: z.object({ key: z.string(), title: z.string(), revision: z.int().min(1) }),
   goal: z.object({ objective: z.string(), why: z.string() }).nullable(),

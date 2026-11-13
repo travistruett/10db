@@ -3,6 +3,11 @@ import { mintId, Provider } from '@10db/contracts';
 import {
   acquireClaims,
   createTestStore,
+  getTaskContext,
+  insertAttachmentRevision,
+  insertDocumentAttachment,
+  insertShape,
+  upsertTaskContext,
   insertDecision,
   insertPrinciple,
   insertSource,
@@ -18,14 +23,18 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  contextPackedEvent,
   denialsForLane,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
   HANDOFF_NUDGE_ACCOUNT,
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
+  PackReason,
   quoteSlackAnswer,
+  recordPlanPacked,
   renderHandoff,
+  renderPlanContext,
 } from './index';
 
 const task = {
@@ -991,7 +1000,7 @@ describe('buildContextPack', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 5; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
     rule({ scope: 'project', projectId: project.id }, 'p', { statement: 'y'.repeat(100) });
-    const pack = buildContextPack(store.db, workstream, 200);
+    const pack = buildContextPack(store.db, workstream, { budgetTokens: 200 });
     expect(pack.knowledge.policies).toHaveLength(1);
     expect(pack.knowledge.decisions.length + pack.knowledge.dropped.decisions).toBe(5);
     expect(pack.knowledge.dropped.decisions).toBeGreaterThan(0);
@@ -1023,8 +1032,8 @@ describe('buildContextPack', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 3; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
     rule({ scope: 'project', projectId: project.id }, 'p');
-    expect(buildContextPack(store.db, workstream, 250)).toEqual(
-      buildContextPack(store.db, workstream, 250),
+    expect(buildContextPack(store.db, workstream, { budgetTokens: 250 })).toEqual(
+      buildContextPack(store.db, workstream, { budgetTokens: 250 }),
     );
   });
 
@@ -1769,5 +1778,142 @@ describe('the gate in a brief', () => {
     });
     expect(brief).toContain('rerun only the check that failed');
     expect(brief).toContain('FAIL badge.test.ts');
+  });
+});
+
+describe('the Plan context block', () => {
+  const planOf = (): NonNullable<ContextPack['plan']> => ({
+    shapeId: mintId('Shape'),
+    revisionId: mintId('ShapeAttachmentRevision'),
+    title: 'Remote host',
+    document: { key: 'p1', title: 'P1', revision: 1 },
+    goal: null,
+    section: { ref: 'p1#task-1', text: '## Task 1: Pair\nPair it.\n' },
+    shared: [],
+    decisions: [{ key: 'd1', choice: 'The database', rationale: 'Local only', lasting: false }],
+    names: [],
+    facts: [{ key: 'f1', version: 2, kind: 'fact', line: 'Packs once', anchors: [], checks: [] }],
+    findings: [{ key: 'p1-r1-1', severity: 'high', text: 'Too big' }],
+    intent: [{ key: 'i1', version: 1, quote: 'Never in the repo.', speaker: 'builder' }],
+    notIncluded: ['x1'],
+    budget: 6000,
+    used: 30,
+  });
+  const packWithPlan = (): ContextPack => ({ ...emptyPack, plan: planOf() });
+
+  it('a lane prompt carries the plan block after the criteria and before the claims', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      contextPack: packWithPlan(),
+      action: { kind: 'start' },
+    });
+    const criteria = prompt.indexOf('- Has a test');
+    const block = prompt.indexOf('Plan context (from Plan "Remote host", revision 1 of P1):');
+    const claims = prompt.indexOf('Your claims:');
+    expect(criteria).toBeGreaterThan(0);
+    expect(block).toBeGreaterThan(criteria);
+    expect(claims).toBeGreaterThan(block);
+    expect(prompt).toContain(renderPlanContext(planOf()).join('\n'));
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).not.toContain(
+      'Plan context',
+    );
+  });
+
+  it('compaction re-injection carries it', () => {
+    const text = compactionReinjection(packWithPlan());
+    expect(text).toContain(renderPlanContext(planOf()).join('\n'));
+    expect(text.indexOf('Plan context')).toBeLessThan(text.indexOf('Your claims:'));
+  });
+
+  it('context.packed names the included keys with versions, the findings with their state and the dropped ones', () => {
+    const pack = packWithPlan();
+    const event = contextPackedEvent(
+      mintId('Session'),
+      mintId('Workstream'),
+      pack,
+      PackReason.Start,
+    );
+    expect(event.data?.['plan']).toEqual({
+      shapeId: pack.plan?.shapeId,
+      revisionId: pack.plan?.revisionId,
+      section: 'p1#task-1',
+      included: [
+        { key: 'd1', version: null },
+        { key: 'f1', version: 2 },
+        { key: 'i1', version: 1 },
+      ],
+      findings: [{ key: 'p1-r1-1', state: 'open' }],
+      notIncluded: ['x1'],
+      budget: 6000,
+      used: 30,
+    });
+    const none = contextPackedEvent(
+      mintId('Session'),
+      mintId('Workstream'),
+      emptyPack,
+      PackReason.Start,
+    );
+    expect(none.data?.['plan']).toBeNull();
+  });
+
+  it('the packed text is stored in the same write as context.packed', () => {
+    const { store: s, close: done } = createTestStore();
+    try {
+      const { task, workstream } = seedWorkstream(s);
+      const revisionId = s.write((ctx) => {
+        const shape = insertShape(ctx, task.projectId, {
+          title: 'Remote host',
+          origin: 'claude_code',
+        });
+        const doc = insertDocumentAttachment(ctx, {
+          shapeId: shape.id,
+          kind: 'plan',
+          key: 'p1',
+          docKey: 'p1',
+          title: 'P1',
+          body: '',
+        });
+        const rev = insertAttachmentRevision(ctx, {
+          attachmentId: doc.id,
+          body: '## Task 1: Pair\n',
+          sha256: 'x',
+          sections: [],
+          note: null,
+          author: null,
+          bundleNumber: 1,
+          authoredAt: null,
+        }).row.id;
+        upsertTaskContext(ctx, {
+          taskId: task.id,
+          shapeId: shape.id,
+          revisionId: rev,
+          section: 'task-1',
+          shared: [],
+          cites: [],
+        });
+        return rev;
+      }).value;
+      expect(revisionId).toBeDefined();
+      const pack = packWithPlan();
+      expect(() =>
+        s.write((ctx) => {
+          recordPlanPacked(ctx, task.id, workstream.id, pack);
+          ctx.emit(contextPackedEvent(mintId('Session'), workstream.id, pack, PackReason.Start));
+          throw new Error('the session insert failed');
+        }),
+      ).toThrow('the session insert failed');
+      expect(getTaskContext(s.db, task.id)?.packedText).toBeNull();
+      const wrote = s.write((ctx) => {
+        recordPlanPacked(ctx, task.id, workstream.id, pack);
+        ctx.emit(contextPackedEvent(mintId('Session'), workstream.id, pack, PackReason.Start));
+      });
+      expect(wrote.events.map((e) => e.type)).toEqual(['context.packed']);
+      expect(getTaskContext(s.db, task.id)).toMatchObject({
+        packedText: renderPlanContext(pack.plan ?? planOf()).join('\n'),
+        packedWorkstreamId: workstream.id,
+      });
+    } finally {
+      done();
+    }
   });
 });
