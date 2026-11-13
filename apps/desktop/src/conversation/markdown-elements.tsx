@@ -2,6 +2,7 @@ import { Anchor, Code, List, Table, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { Components, ExtraProps } from 'streamdown';
 import { openWebLink } from '../desktop/tauri';
+import { CodeBlock } from './code-block';
 import classes from './markdown.module.css';
 
 // One Mantine element per markdown tag. A link never navigates the window: a click asks the
@@ -28,6 +29,36 @@ function Heading(props: {
       {props.children}
     </Title>
   );
+}
+
+type HastNode = NonNullable<ExtraProps['node']>['children'][number];
+
+/** The text under `node`, read with a stack, so a deep tree never recurses. */
+function textOf(node: HastNode): string {
+  let text = '';
+  const stack: HastNode[] = [node];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    if (next.type === 'text') text += next.value;
+    else if (next.type === 'element')
+      for (let i = next.children.length - 1; i >= 0; i -= 1) {
+        const child = next.children[i];
+        if (child !== undefined) stack.push(child);
+      }
+  }
+  return text;
+}
+
+/** A fence's code and the language its `language-…` class names, or null. */
+function fenceOf(pre: ExtraProps['node']): { code: string; language: string | null } {
+  const code = pre?.children.find((c) => c.type === 'element' && c.tagName === 'code');
+  if (code?.type !== 'element')
+    return { code: pre === undefined ? '' : textOf(pre), language: null };
+  const classes = [code.properties.className].flat();
+  const language = classes
+    .map((c) => (typeof c === 'string' && c.startsWith('language-') ? c.slice(9) : null))
+    .find((l) => l !== null);
+  // A fence's text ends in the newline before its closing backticks.
+  return { code: textOf(code).replace(/\n$/, ''), language: language ?? null };
 }
 
 /** A line in place of an image, which is never drawn. */
@@ -121,11 +152,7 @@ export const MARKDOWN_ELEMENTS: Components = {
   ),
   li: ({ children }) => <List.Item>{children}</List.Item>,
   inlineCode: ({ children }) => <Code>{children}</Code>,
-  pre: ({ children }) => (
-    <Code block my={6}>
-      {children}
-    </Code>
-  ),
+  pre: ({ node }) => <CodeBlock {...fenceOf(node)} />,
   code: ({ children }) => <code>{children}</code>,
   a: ({ href, children }) => <Link href={href}>{children}</Link>,
   // 10db's safety step marks the line it puts in place of an image.

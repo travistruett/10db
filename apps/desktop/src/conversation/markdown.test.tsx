@@ -152,7 +152,8 @@ describe('hostile markdown', () => {
       MERMAID,
       (c) => {
         expect(c.querySelector('pre')?.textContent).toContain('graph TD; A-->B');
-        expect(c.querySelectorAll('svg')).toHaveLength(0);
+        // The only drawing is the Copy control's icon; a Mermaid diagram would be an svg too.
+        expect(c.querySelectorAll('svg:not(button svg)')).toHaveLength(0);
       },
     ],
   ])('%s', (_, input, also) => {
@@ -195,6 +196,13 @@ describe('markdown elements', () => {
     const c = draw('Here:\n```ts\nconst a =');
     expect(c.querySelector('pre code')?.textContent).toContain('const a =');
     expect(text(c)).not.toContain('```');
+  });
+
+  it('draws a fence as a code block named by its language', () => {
+    const c = draw('```ts\nconst a = 1;\n```');
+    expect(c.querySelector('pre code')?.textContent).toBe('const a = 1;');
+    expect(screen.getByText('ts')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy();
   });
 });
 

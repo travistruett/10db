@@ -9,6 +9,7 @@ import {
   SystemCheckDto,
   TaskScreensDto,
 } from '@10db/contracts';
+import { CodeHighlightAdapterProvider } from '@mantine/code-highlight';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -22,6 +23,7 @@ import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler 
 import { setupServer } from 'msw/node';
 import type { ReactElement, ReactNode } from 'react';
 import { App } from '../app';
+import { shikiAdapter } from '../conversation/shiki';
 import type { ConnectionResolver, DaemonConnection } from '../daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
@@ -248,14 +250,16 @@ export function renderWithDaemon(
       cssVariablesResolver={cssVariablesResolver}
       defaultColorScheme="dark"
     >
-      <QueryClientProvider client={queryClient}>
-        <DaemonProvider
-          resolve={opts.resolve ?? resolveTest}
-          {...(opts.intervals ? { intervals: opts.intervals } : {})}
-        >
-          {children}
-        </DaemonProvider>
-      </QueryClientProvider>
+      <CodeHighlightAdapterProvider adapter={shikiAdapter}>
+        <QueryClientProvider client={queryClient}>
+          <DaemonProvider
+            resolve={opts.resolve ?? resolveTest}
+            {...(opts.intervals ? { intervals: opts.intervals } : {})}
+          >
+            {children}
+          </DaemonProvider>
+        </QueryClientProvider>
+      </CodeHighlightAdapterProvider>
     </MantineProvider>
   );
   const { rerender } = render(ui, { wrapper });
