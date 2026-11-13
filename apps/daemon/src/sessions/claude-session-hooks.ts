@@ -11,6 +11,12 @@ import { toHookOutput, toPermissionResult } from './claude-mapping';
 import type { ClaudeDenial } from './claude-tool-calls';
 import type { AgentSessionCore, ToolDecision, ToolRequest } from './types';
 
+/**
+ * How long Claude Code waits on 10db's PreToolUse hook, in seconds: a call the hook settles waits
+ * there on the builder's card, so Claude Code's own default would cancel it while the card is open.
+ */
+export const CLAUDE_HOOK_TIMEOUT_SECONDS = 15_000;
+
 export const BILLING_UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
 
@@ -249,6 +255,7 @@ export function preToolUseHook(hook: {
     });
   };
   return {
+    timeout: CLAUDE_HOOK_TIMEOUT_SECONDS,
     hooks: [
       async (hookInput, _toolUseId, { signal }) => {
         if (hookInput.hook_event_name !== 'PreToolUse') return {};

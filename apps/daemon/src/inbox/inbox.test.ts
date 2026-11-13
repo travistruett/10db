@@ -3288,6 +3288,24 @@ describe('permission broker in a sandboxed lane', () => {
     expect(readFileSync(join(reads, copy ?? ''), 'utf8')).toBe('TOKEN=abc\n');
   });
 
+  // A Read the hook settles waits on its card inside the hook: when Claude Code cancels the hook
+  // the card goes too, so no answer is left on a call that is gone.
+  it('withdraws the card of a call that waits in the hook when the hook is cancelled', async () => {
+    const ws = seedWorkstream(base);
+    const hook = new AbortController();
+    const decision = sandboxed(ws)({
+      ...request('Read', { file_path: join(fileAccess.home, 'notes.txt') }),
+      signal: hook.signal,
+      cardGoesWithCall: true,
+    });
+    await settle();
+    const card = onlyOpenCard();
+    hook.abort();
+    expect((await decision).behavior).toBe('deny');
+    expect(openCards()).toEqual([]);
+    expect(getInboxItem(state.db, card.id).state).not.toBe('OPEN');
+  });
+
   it('still cards a read under the home directory outside the copy, and a write to the manual pages', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);

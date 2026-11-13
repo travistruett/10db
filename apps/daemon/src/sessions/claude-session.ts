@@ -250,6 +250,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
                   escalated: false,
                   signal,
                   cwd: hookInput.cwd,
+                  cardGoesWithCall: true,
                 })
               : null,
           judge: (hookInput) => {

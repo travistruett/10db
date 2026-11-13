@@ -38,6 +38,11 @@ export interface ToolRequest {
    * MCP tool offers "every tool of this server" over the ones listed here. Absent where the adapter has none.
    */
   readonly listedTools?: readonly string[];
+  /**
+   * The call waits on its card inside the PreToolUse hook, which Claude Code cancels at its timeout
+   * or with the turn: the card is withdrawn with `signal` then, in a lane too.
+   */
+  readonly cardGoesWithCall?: boolean;
 }
 
 export type ToolDecision =

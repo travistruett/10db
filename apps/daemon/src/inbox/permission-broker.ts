@@ -311,14 +311,19 @@ export function createPermissionBroker(
    * A conversation that stops waiting withdraws its card: no lane resumes on a late answer, and the
    * next session asks again. A lane's card stays for its parked workstream.
    */
+  /** Whether a call's card goes with the call: a conversation's, and one that waits in a hook. */
+  const cardGoesWith = (req: ToolRequest): boolean =>
+    ctx.workstreamId === null || req.cardGoesWithCall === true;
+
   async function waitOrWithdraw(
     item: InboxItemDto,
     answer: Promise<InboxAnswer>,
+    withCall = ctx.workstreamId === null,
   ): Promise<InboxAnswer> {
     try {
       return await wait(item, answer);
     } catch (error) {
-      if (error instanceof ParkedError && ctx.workstreamId === null) deps.inbox.withdraw(item.id);
+      if (error instanceof ParkedError && withCall) deps.inbox.withdraw(item.id);
       throw error;
     }
   }
@@ -442,11 +447,12 @@ export function createPermissionBroker(
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
       // A conversation's card goes with its call: Claude Code cancels the call when the turn is stopped.
-      ...(ctx.workstreamId === null ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
+      // So does one that waits in the PreToolUse hook, which Claude Code may cancel.
+      ...(cardGoesWith(req) ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
       // The escalation is only in the detail, so without this an escalated and an ordinary ask would share a card.
       escalated: req.escalated,
     });
-    const result = await waitOrWithdraw(item, answer);
+    const result = await waitOrWithdraw(item, answer, cardGoesWith(req));
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
       recordAllowedWrite(item.id, req, ask);

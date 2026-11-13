@@ -46,6 +46,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
+import { CLAUDE_HOOK_TIMEOUT_SECONDS } from './claude-session-hooks';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
 import type { LaneSandboxSpec } from '../sandbox';
@@ -797,8 +798,12 @@ describe('buildQueryOptions', () => {
         toolUseId: 'toolu_r',
         cwd: '/repo/apps',
         escalated: false,
+        // The card waits in the hook, so it goes when Claude Code cancels the hook.
+        cardGoesWithCall: true,
       }),
     );
+    // Long enough for the builder to answer: Claude Code's own default would cancel the hook first.
+    expect(options.hooks?.PreToolUse?.[0]?.timeout).toBe(CLAUDE_HOOK_TIMEOUT_SECONDS);
     // A denial is told once, as the broker's: the builder's Deny stays the builder's.
     expect(denied).toEqual(decision.behavior === 'deny' ? [['toolu_r', 'builder']] : []);
   });
