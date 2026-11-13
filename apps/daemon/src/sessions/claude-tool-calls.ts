@@ -53,7 +53,9 @@ const EditInput = z.looseObject({
 });
 const MultiEditInput = z.looseObject({
   file_path: Path,
-  edits: z.array(z.looseObject({ old_string: Text, new_string: Text })),
+  edits: z.array(
+    z.looseObject({ old_string: Text, new_string: Text, replace_all: z.boolean().optional() }),
+  ),
 });
 const WriteInput = z.looseObject({ file_path: Path, content: Text });
 const NotebookInput = z.looseObject({ notebook_path: Path });
@@ -252,13 +254,17 @@ function untitled(
       const read = before(input.data.file_path);
       let current = read.kind === 'text' ? read.text : null;
       const parts = input.data.edits.map((edit) => {
-        const part = hunksOfTexts(
-          edit.old_string,
-          edit.new_string,
-          lineOf(current, edit.old_string),
-        );
-        if (current?.includes(edit.old_string) === true && edit.old_string !== '')
-          current = current.replace(edit.old_string, () => edit.new_string);
+        const { old_string: from, new_string: to } = edit;
+        if (edit.replace_all === true && from !== '' && current?.includes(from) === true) {
+          // Every occurrence changes, built only up to the before-text limit, as Edit's are.
+          const replaced = replacedAll(current, from, to, BEFORE_TEXT_MAX_BYTES);
+          const part = hunksOfTexts(replaced.before, replaced.after);
+          current = replaced.cut ? null : replaced.after;
+          return replaced.cut ? { ...part, truncated: true } : part;
+        }
+        const part = hunksOfTexts(from, to, lineOf(current, from));
+        if (current?.includes(from) === true && from !== '')
+          current = current.replace(from, () => to);
         return part;
       });
       return editOf(common, input.data.file_path, EditChange.Update, joined(parts));

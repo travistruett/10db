@@ -408,6 +408,37 @@ describe('claudeToolCall, Edit with replace_all', () => {
   });
 });
 
+describe('claudeToolCall, MultiEdit with an edit that replaces all', () => {
+  it.each<{ name: string; before: string; next: string; shown: object; capped?: true }>([
+    {
+      name: 'shows every replacement of that edit',
+      before: 'a\nb\na\nc\n',
+      next: 'X',
+      shown: { addedLines: 2, removedLines: 2, truncated: false },
+    },
+    {
+      name: 'builds a growing replacement only up to the before-text limit, and says it is cut',
+      before: 'a'.repeat(2_000),
+      next: 'X'.repeat(1_000),
+      shown: { truncated: true },
+      capped: true,
+    },
+  ])('$name', ({ before, next, shown, capped }) => {
+    const view = claudeToolCall(
+      use('MultiEdit', {
+        file_path: 'a.ts',
+        edits: [{ old_string: 'a', new_string: next, replace_all: true }],
+      }),
+      { startedAt, before: () => text(before) },
+    );
+    expect(view).toMatchObject({ kind: 'edit', ...shown });
+    if (capped && view.kind === 'edit')
+      expect(view.hunks.reduce((sum, h) => sum + h.after.length, 0)).toBeLessThanOrEqual(
+        BEFORE_TEXT_MAX_BYTES,
+      );
+  });
+});
+
 describe('claudeToolResult', () => {
   it.each<{
     name: string;
