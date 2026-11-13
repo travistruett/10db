@@ -2,46 +2,64 @@ import { describe, expect, it } from 'vitest';
 import {
   isSettingsSectionKey,
   SETTINGS_SECTIONS,
-  SettingsGroup,
+  SettingsScope,
+  firstAppSection,
   SettingsSectionKey,
 } from './sections';
 
+const PLANNING_REMAINDER =
+  "Not built yet: which persona runs each role, and the project's human members.";
+
 describe('settings sections', () => {
-  it('lists every key once, project sections first', () => {
-    expect(SETTINGS_SECTIONS.map((s) => s.key)).toEqual([
-      'general',
-      'board-columns',
-      'areas',
-      'network-hosts',
-      'billing',
-      'project-trust',
-      'team',
-      'routing-rules',
-      'keep-awake',
-      'updates',
-      'lane-permissions',
-      'trust',
-      'accounts',
-      'integrations',
-      'people',
-      'decisions',
-      'models',
-      'personas-and-flows',
+  it('lists every section once, in the order and under the subheads the sidebar shows', () => {
+    expect(SETTINGS_SECTIONS.map((s) => [s.scope, s.subhead, s.key, s.label])).toEqual([
+      ['project', 'Project', 'general', 'General'],
+      ['project', 'Project', 'board-columns', 'Board columns'],
+      ['project', 'Planning', 'planning', 'Planning'],
+      ['project', 'Planning', 'areas', 'Areas and hazards'],
+      ['project', 'Planning', 'routing-rules', 'Who Answers'],
+      ['project', 'Agents', 'billing', 'Billing'],
+      ['project', 'Agents', 'team', 'Models by role'],
+      ['project', 'Agents', 'project-trust', 'Trust'],
+      ['project', 'Agents', 'network-hosts', 'Network hosts'],
+      ['app', null, 'overview', 'Overview'],
+      ['app', 'Models', 'accounts', 'Accounts'],
+      ['app', 'Models', 'models', 'Models and scores'],
+      ['app', 'Models', 'decisions', 'Decisions'],
+      ['app', 'Models', 'personas-and-flows', 'Models by role'],
+      ['app', 'Agents', 'lane-permissions', 'Lane permissions'],
+      ['app', 'Agents', 'trust', 'Trust'],
+      ['app', 'Connections', 'integrations', 'Integrations'],
+      ['app', 'Connections', 'people', 'People'],
+      ['app', 'This Mac', 'updates', 'Updates'],
+      ['app', 'This Mac', 'keep-awake', 'Keep-awake'],
     ]);
     expect(new Set(SETTINGS_SECTIONS.map((s) => s.key)).size).toBe(
       Object.values(SettingsSectionKey).length,
     );
   });
 
-  it('names its groups project and global', () => {
-    expect(SettingsGroup).toEqual({ Project: 'project', Global: 'global' });
+  it('names its scopes project and app', () => {
+    expect(SettingsScope).toEqual({ Project: 'project', App: 'app' });
   });
 
-  it('keeps the update switch among the app-wide sections', () => {
-    expect(SETTINGS_SECTIONS.find((s) => s.key === 'updates')?.group).toBe(SettingsGroup.Global);
+  it("opens the sidebar's app-wide Settings on Overview", () => {
+    expect(firstAppSection()).toBe(SettingsSectionKey.Overview);
   });
 
   it.each([
+    { key: 'team', planned: PLANNING_REMAINDER },
+    {
+      key: 'personas-and-flows',
+      planned: 'Not built yet: personas, their instructions and pins, and the flows of steps.',
+    },
+  ])('says what $key still lacks, with no plan named', ({ key, planned }) => {
+    expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned).toBe(planned);
+  });
+
+  it.each([
+    { key: 'overview', planned: false },
+    { key: 'planning', planned: false },
     { key: 'general', planned: false },
     { key: 'board-columns', planned: false },
     { key: 'areas', planned: false },

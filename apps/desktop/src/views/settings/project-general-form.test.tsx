@@ -106,7 +106,7 @@ const rows: readonly Row[] = [
     label: 'Screenshot matrix',
     line: 'Each page is pictured in each viewport and theme: at most 4 pictures a route.',
     change: () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add viewport' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Add Viewport' }));
       type('Viewport 2 width', '390');
       type('Viewport 2 height', '844');
     },
@@ -421,7 +421,7 @@ describe('ProjectGeneralForm', () => {
     );
     renderApp('/settings/general');
     await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Add viewport' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Viewport' }));
     type('Viewport 3 width', '768');
     type('Viewport 3 height', '1024');
     save();

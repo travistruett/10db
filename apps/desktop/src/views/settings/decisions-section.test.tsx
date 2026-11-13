@@ -1,7 +1,9 @@
-import { mintId } from '@10db/contracts';
+import { mintId, type AccountDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { renderApp } from '../../test/daemon';
+import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
+import { daemonUrl, renderApp, server } from '../../test/daemon';
 import {
   judgeCallDto,
   judgeStatusDto,
@@ -9,10 +11,14 @@ import {
   shapeMeasuresDto,
 } from '../../test/judge-fixtures';
 
-const PASTED = 'sk-or-pasted-value-never-echoed';
-
 function open(options: Parameters<typeof serveJudge>[0] = {}) {
   const sent = serveJudge(options);
+  // The accounts the judge can resolve are the ones Accounts lists, besides the default plan.
+  server.use(
+    http.get(daemonUrl('/accounts'), () =>
+      HttpResponse.json([DEFAULT_ACCOUNT, ...(options.accounts ?? [])]),
+    ),
+  );
   const app = renderApp('/settings/decisions');
   return { sent, ...app };
 }
@@ -25,71 +31,92 @@ describe('Settings › Decisions', () => {
     expect(link.getAttribute('href')).toBe('/knowledge');
   });
 
-  it('says the key is not set', async () => {
-    open();
-    expect(await screen.findByText('Not set')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Set Key' })).toHaveProperty('disabled', false);
-    expect(screen.getByRole('button', { name: 'Remove Key' })).toHaveProperty('disabled', true);
-  });
+  describe('Runs on', () => {
+    const router = (label: string, secretSet = true) =>
+      accountDto({ kind: 'openrouter', label, secretSet });
+    const status = (account: AccountDto, secretState: 'set' | 'missing' | 'changed' = 'set') =>
+      judgeStatusDto({
+        config: { ...judgeStatusDto().config, accountId: account.id },
+        account: {
+          id: account.id,
+          label: account.label,
+          secretSet: secretState === 'set',
+          secretState,
+        },
+      });
 
-  it('says the key is set, never showing it', async () => {
-    open({ status: judgeStatusDto({ keySet: true }) });
-    expect(await screen.findByText('Set')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Replace Key' })).toHaveProperty('disabled', false);
-  });
-
-  it('sends the key, clears the field and never renders or caches it', async () => {
-    const { sent, queryClient } = open();
-    const field = await screen.findByLabelText('OpenRouter key');
-    expect(field).toHaveProperty('type', 'password');
-    fireEvent.change(field, { target: { value: PASTED } });
-    fireEvent.click(screen.getByRole('button', { name: 'Set Key' }));
-    expect(await screen.findByText('Set')).toBeTruthy();
-    expect(sent).toContainEqual({ method: 'PUT', path: '/judge/key', body: { key: PASTED } });
-    expect(screen.getByLabelText('OpenRouter key')).toHaveProperty('value', '');
-    expect(document.body.innerHTML).not.toContain(PASTED);
-    expect(
-      JSON.stringify(
-        queryClient
-          .getQueryCache()
-          .getAll()
-          .map((q) => q.state),
-      ),
-    ).not.toContain(PASTED);
-    expect(
-      JSON.stringify(
-        queryClient
-          .getMutationCache()
-          .getAll()
-          .map((m) => m.state),
-      ),
-    ).not.toContain(PASTED);
-  });
-
-  it('removes the key', async () => {
-    const { sent } = open({ status: judgeStatusDto({ keySet: true }) });
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove Key' }));
-    expect(await screen.findByText('Not set')).toBeTruthy();
-    expect(sent).toContainEqual({ method: 'DELETE', path: '/judge/key', body: null });
-  });
-
-  it('shows the model and latency of a passing test', async () => {
-    const { sent } = open({
-      status: judgeStatusDto({ keySet: true }),
-      test: { ok: true, model: 'typesafe/jev-1.13', latencyMs: 412, costUsd: 0.0001 },
+    it('asks for an OpenRouter account when there is none, and opens Add Account on that kind', async () => {
+      open();
+      expect(await screen.findByText('No account can run decisions yet.')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Add OpenRouter Account' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Add Account' });
+      expect(within(dialog).getByRole('combobox', { name: 'Kind' })).toHaveProperty(
+        'value',
+        'OpenRouter key',
+      );
+      expect(within(dialog).getByLabelText('OpenRouter key', { selector: 'input' })).toBeTruthy();
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Test Connection' }));
-    expect(await screen.findByText(/typesafe\/jev-1\.13.*412 ms/)).toBeTruthy();
-    expect(sent).toContainEqual({ method: 'POST', path: '/judge/test', body: null });
-  });
 
-  it('shows the error of a failed test', async () => {
-    open({
-      status: judgeStatusDto({ keySet: true }),
-      test: { ok: false, error: 'OpenRouter refused the key.' },
+    it('says the accounts could not be read, instead of asking for an account', async () => {
+      open();
+      server.use(
+        http.get(daemonUrl('/accounts'), () =>
+          HttpResponse.json({ message: 'down' }, { status: 500 }),
+        ),
+      );
+      expect(await screen.findByText(/Accounts could not be loaded/)).toBeTruthy();
+      expect(screen.queryByText('No account can run decisions yet.')).toBeNull();
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Test Connection' }));
-    expect(await screen.findByText('OpenRouter refused the key.')).toBeTruthy();
+
+    it('shows the account decisions run on with its key set, and no key row or Test', async () => {
+      const work = router('Work key');
+      open({ status: status(work), accounts: [work] });
+      const select = await screen.findByRole('combobox', { name: 'Runs on' });
+      await waitFor(() => {
+        expect(select).toHaveProperty('value', 'Work key');
+      });
+      expect(screen.getByText('Key set')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'View account' }).getAttribute('href')).toBe(
+        `/settings/accounts?focus=${work.id}`,
+      );
+      expect(screen.getByTestId('connection-dot').getAttribute('data-color')).toBe('teal');
+      expect(screen.queryByRole('button', { name: /Set Key|Replace Key|Remove Key/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Test Connection' })).toBeNull();
+    });
+
+    it.each([
+      { name: 'missing', secretState: 'missing', text: 'No key' },
+      { name: 'changed outside 10db', secretState: 'changed', text: 'Key changed outside 10db' },
+    ] as const)('says the key is $name and links to the account', async ({ secretState, text }) => {
+      const work = router('Work key', false);
+      open({ status: status(work, secretState), accounts: [work] });
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(screen.getByTestId('connection-dot').getAttribute('data-color')).toBe('yellow');
+      expect(
+        screen.getByRole('link', { name: 'Set the key again in Accounts' }).getAttribute('href'),
+      ).toBe(`/settings/accounts?focus=${work.id}`);
+    });
+
+    it('lists the other kinds disabled with their reason and sends the OpenRouter account picked', async () => {
+      const work = router('Work key');
+      const spare = router('Spare');
+      const { sent } = open({ status: status(work), accounts: [work, spare] });
+      const select = await screen.findByRole('combobox', { name: 'Runs on' });
+      fireEvent.click(select);
+      const plan = await screen.findByRole('option', { name: /Claude plan/, hidden: true });
+      expect(
+        plan.getAttribute('aria-disabled') ?? plan.getAttribute('data-combobox-disabled'),
+      ).toBeTruthy();
+      expect(within(plan).getByText('Decisions run on OpenRouter for now')).toBeTruthy();
+      fireEvent.click(await screen.findByRole('option', { name: /Spare/, hidden: true }));
+      await waitFor(() => {
+        expect(sent).toContainEqual({
+          method: 'PATCH',
+          path: '/judge',
+          body: { accountId: spare.id },
+        });
+      });
+    });
   });
 
   it('sends the master switch and the per-decision switch as patches', async () => {
@@ -141,18 +168,16 @@ describe('Settings › Decisions', () => {
   });
 
   it('says the daemon runs with the judge off and disables the controls', async () => {
-    open({ status: judgeStatusDto({ off: true, keySet: true }) });
+    open({ status: judgeStatusDto({ off: true }) });
     expect(await screen.findByText(/TENDB_JUDGE=off/)).toBeTruthy();
+    // Adding the account is still possible: it is what a later start without the switch will use.
+    expect(await screen.findByRole('button', { name: 'Add OpenRouter Account' })).toHaveProperty(
+      'disabled',
+      false,
+    );
     expect(
       screen.getByRole('switch', { name: 'Use fast models for routine decisions' }),
     ).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Test Connection' })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    expect(screen.getByRole('button', { name: 'Replace Key' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Remove Key' })).toHaveProperty('disabled', true);
-    expect(screen.getByLabelText('OpenRouter key')).toHaveProperty('disabled', true);
   });
 
   it('lists recent calls with their outcome and a link to the task', async () => {
@@ -264,6 +289,7 @@ describe('Settings › Decisions › Shape (spec §8, §9)', () => {
     expect(record.textContent).toContain('In shadow: 18 of 20 scored answers agreed (90%)');
     expect(record.textContent).toContain('Ready to show');
     const ready = screen.getByRole('group', { name: 'Enough to propose' });
+    expect(screen.getByText(/until the first Propose: have you said enough\?/)).toBeTruthy();
     expect(ready.textContent).toContain('1 of 2 scored answers agreed (50%)');
     const elsewhere = screen.getByRole('group', { name: 'Question for someone else?' });
     expect(elsewhere.textContent).toContain('No scored answers yet');

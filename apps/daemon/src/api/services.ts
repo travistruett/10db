@@ -28,6 +28,7 @@ import type {
   BatchDto,
   BatchId,
   BatchStartInput,
+  BenchmarkKeyInput,
   BenchmarkStatusDto,
   BoardColumnDelete,
   CatalogueStatusDto,
@@ -61,7 +62,6 @@ import type {
   InboxState,
   JudgeCallDto,
   JudgeConfigPatch,
-  JudgeKeyInput,
   JudgeStatusDto,
   JudgeTestResultDto,
   KeepAwakeMode,
@@ -150,6 +150,8 @@ import type {
   PersonId,
   QuestionRouteDto,
   SendInput,
+  GithubSigninDto,
+  GithubStatusDto,
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
@@ -277,13 +279,11 @@ export interface TaskLookupServices {
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices extends PlanRecordServices {
-  /** The judge's status, key, connection test and call log. */
+  /** The judge's status, the account it runs on, and its call log. */
   judgeStatus(): Promise<JudgeStatusDto>;
   patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
-  /** Write-only: the key goes to the Keychain and is never answered, logged or stored elsewhere. */
-  setJudgeKey(input: JudgeKeyInput): Promise<JudgeStatusDto>;
-  removeJudgeKey(): Promise<JudgeStatusDto>;
-  testJudge(): Promise<JudgeTestResultDto>;
+  /** One tiny decision call with that OpenRouter account's own key. */
+  testAccount(id: AccountId): Promise<JudgeTestResultDto>;
   /** The most recent calls, newest first. */
   listJudgeCalls(limit: number): JudgeCallDto[];
   listProjects(): ProjectViewDto[];
@@ -629,6 +629,15 @@ export interface ApiServices extends PlanRecordServices {
   updatePerson(id: PersonId, input: PersonInput): PersonDto;
   /** Removes a person; the builder, a goal's owner, a person on a criterion and a routed person stay. */
   removePerson(id: PersonId): void;
+  /**
+   * gh's login, probed when the last answer is older than a minute or `recheck` is set (which also
+   * looks for gh again), plus the code and page of a Sign In that waits for the builder.
+   */
+  githubStatus(recheck: boolean): Promise<GithubStatusDto>;
+  /** Runs `gh auth login --web`: 409 while one runs or gh is missing, 502 when gh prints no code. */
+  startGithubSignin(): Promise<GithubSigninDto>;
+  /** Stops the running sign-in; a no-op when none runs. */
+  cancelGithubSignin(): void;
   /** The Slack connection as the reply watch last found it. */
   slackStatus(): SlackConnectionDto;
   /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
@@ -650,8 +659,12 @@ export interface ApiServices extends PlanRecordServices {
   patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
-  benchmarkStatus(): BenchmarkStatusDto;
+  /** The sync's last outcome; whether a key is set is read from the Keychain now. */
+  benchmarkStatus(): Promise<BenchmarkStatusDto>;
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
+  /** Keeps the Artificial Analysis key in the Keychain and starts a sync with it; the status says it is running. */
+  setBenchmarkKey(input: BenchmarkKeyInput): Promise<BenchmarkStatusDto>;
+  removeBenchmarkKey(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
   /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */

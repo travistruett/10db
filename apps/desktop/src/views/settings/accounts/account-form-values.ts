@@ -68,10 +68,15 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
       };
     case AccountKind.Gateway:
       return { ...choice, baseUrl: values.baseUrl.trim() };
+    case AccountKind.OpenRouter:
+      return {};
   }
 }
 
 function inputOf(values: AccountFormValues): Record<string, unknown> {
+  // An OpenRouter account holds a key and nothing else: no lanes, cap, identity or settings.
+  if (values.kind === AccountKind.OpenRouter)
+    return { kind: values.kind, label: values.label, payer: values.payer };
   const cap = values.monthlyCapUsd.trim();
   const organization = values.organization.trim();
   return {
@@ -181,12 +186,12 @@ export function toAccountPatch(account: AccountDto, values: AccountFormValues): 
   const checked = toAccountInput(values);
   if (!checked.ok) return checked;
   const input = checked.input;
-  const settings = parseAccountSettings(account.kind, input.settings);
+  const settings = 'settings' in input ? parseAccountSettings(account.kind, input.settings) : {};
   const monthlyCap = 'monthlyCapUsd' in input ? input.monthlyCapUsd : null;
   const changes = {
     ...(input.label !== account.label ? { label: input.label } : {}),
     ...(input.payer !== account.payer ? { payer: input.payer } : {}),
-    ...(input.laneCap !== account.laneCap ? { laneCap: input.laneCap } : {}),
+    ...('laneCap' in input && input.laneCap !== account.laneCap ? { laneCap: input.laneCap } : {}),
     ...(isMetered(account.kind) && monthlyCap !== account.monthlyCapUsd
       ? { monthlyCapUsd: monthlyCap }
       : {}),

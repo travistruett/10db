@@ -175,7 +175,7 @@ must be ready to run, and a metered one needs a monthly cap, because nobody appr
 
 ## Model data from Artificial Analysis
 
-10db can route each step on [Artificial Analysis](https://artificialanalysis.ai) benchmark scores, using your own free API key. Add it with `security add-generic-password -U -s 10db -a artificial-analysis-api-key -w`, which prompts for the key (`-U` replaces an existing item, so re-running it updates the key). Run it in a terminal that can prompt. Then restart 10db so it syncs; otherwise the next scheduled sync is up to 24 hours away (a sync button comes later). The data is fetched to your machine only, and is not covered by this repository's license. Source: Artificial Analysis (artificialanalysis.ai).
+10db can route each step on [Artificial Analysis](https://artificialanalysis.ai) benchmark scores, using your own free API key. Paste it in Settings › Integrations › Artificial Analysis; 10db keeps it in your login Keychain and syncs at once. Replace or remove it there too, and Sync Now fetches again; otherwise the sync runs daily. The data is fetched to your machine only, and is not covered by this repository's license. Source: Artificial Analysis (artificialanalysis.ai).
 
 ## License
 

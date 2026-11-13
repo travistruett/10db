@@ -1,9 +1,9 @@
-import { AccountKind, SUPPORTED_ACCOUNT_KINDS, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, AGENT_ACCOUNT_KINDS, type AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { nativeJudge } from './native-judge';
 import type { LanePermissionMode } from './types';
 
-const JUDGED: ReadonlySet<SupportedAccountKind> = new Set([
+const JUDGED: ReadonlySet<AgentAccountKind> = new Set([
   AccountKind.ClaudeSubscription,
   AccountKind.AnthropicApiKey,
   AccountKind.Bedrock,
@@ -11,7 +11,7 @@ const JUDGED: ReadonlySet<SupportedAccountKind> = new Set([
 
 describe('nativeJudge', () => {
   it.each(
-    SUPPORTED_ACCOUNT_KINDS.flatMap((kind) =>
+    AGENT_ACCOUNT_KINDS.flatMap((kind) =>
       (['auto', 'default', null] as const).map(
         (mode) => [kind, mode, JUDGED.has(kind) && mode === 'auto'] as const,
       ),

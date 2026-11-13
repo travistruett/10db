@@ -108,6 +108,11 @@ describe('createGh', () => {
       kind: 'unreachable',
     },
     {
+      name: 'a token GitHub rejected (gh 2.83.2 words it Bad credentials)',
+      answer: { exitCode: 1, stderr: 'gh: Bad credentials (HTTP 401)' },
+      expected: null,
+    },
+    {
       name: 'a rate limit GitHub answered with',
       answer: { exitCode: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)' },
       kind: 'failed',

@@ -4,15 +4,31 @@ import {
   JudgeCallDto,
   JudgeConfig,
   JudgeConfigPatch,
-  JudgeKeyInput,
   JudgeTestResultDto,
   mintId,
 } from './index';
+
+describe('judge account', () => {
+  it('defaults to no account, and a stored config without one reads null', () => {
+    expect(DEFAULT_JUDGE_CONFIG.accountId).toBeNull();
+    expect(
+      JudgeConfig.parse({ enabled: true, decisions: DEFAULT_JUDGE_CONFIG.decisions }).accountId,
+    ).toBeNull();
+  });
+
+  it('lets a patch set or clear the account', () => {
+    const id = mintId('Account');
+    expect(JudgeConfigPatch.parse({ accountId: id })).toEqual({ accountId: id });
+    expect(JudgeConfigPatch.parse({ accountId: null })).toEqual({ accountId: null });
+    expect(() => JudgeConfigPatch.parse({ accountId: 'nope' })).toThrow();
+  });
+});
 
 describe('judge config', () => {
   it('has the defaults the design names', () => {
     expect(DEFAULT_JUDGE_CONFIG).toEqual({
       enabled: true,
+      accountId: null,
       decisions: {
         review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
@@ -90,21 +106,6 @@ describe('judge config patch', () => {
     ['an unknown field', { enabled: true, extra: 1 }],
   ])('rejects %s', (_name, patch) => {
     expect(JudgeConfigPatch.safeParse(patch).success).toBe(false);
-  });
-});
-
-describe('judge key input', () => {
-  it('trims the key', () => {
-    expect(JudgeKeyInput.parse({ key: '  sk-or-v1-abc  ' })).toEqual({ key: 'sk-or-v1-abc' });
-  });
-
-  it.each([
-    ['empty', ''],
-    ['blank', '   '],
-    ['holding a space', 'sk or'],
-    ['holding a quote', 'sk"or'],
-  ])('rejects a key that is %s', (_name, key) => {
-    expect(JudgeKeyInput.safeParse({ key }).success).toBe(false);
   });
 });
 

@@ -101,8 +101,9 @@ describe('Settings › Who Answers', () => {
   it('explains the fallback when the judge is off', async () => {
     serve([], { judgeOff: true });
     expect(
-      await screen.findByText(/When none does, the lane's own category and topic decide\./),
+      await screen.findByText(/^Without Jev, the lane's own category and topic decide\./),
     ).toBeTruthy();
+    expect(screen.queryByText(/Jev picks/)).toBeNull();
   });
 
   it("Remove drops the row's rules and keeps the rest", async () => {

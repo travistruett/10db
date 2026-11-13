@@ -84,9 +84,10 @@ test('routes a question to someone outside Slack from its card, and the table sh
   seedQuestion(project);
   await claudeIsInstalled(page);
 
-  // Settings › Integrations: with Slack off on this daemon, the Slack card is its setup steps.
+  // Settings › Integrations: this daemon runs with Slack and the benchmarks off, and each card says so.
   await page.goto('/settings/integrations');
-  await expect(page.getByRole('button', { name: 'Copy Manifest' })).toBeVisible();
+  await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
+  await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
   await expectAccessible(page, 'integrations, dark');
 
   // Settings › People: add Priya, who is not in Slack. With Slack off the modal opens on a name.

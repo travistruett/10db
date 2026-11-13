@@ -1,6 +1,7 @@
 import {
   providerOf,
   Effort,
+  runsAgents,
   ModelStatus,
   type AccountDto,
   type AccountId,
@@ -86,7 +87,10 @@ function firstSeen(profiles: readonly ModelProfileDto[]): string | null {
  */
 export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
   const { catalogue } = input;
-  const live = new Map(input.accounts.filter((a) => !a.archived).map((a) => [a.id, a]));
+  // An OpenRouter account offers no agent model, so it never counts as a place to run one.
+  const live = new Map(
+    input.accounts.filter((a) => !a.archived && runsAgents(a.kind)).map((a) => [a.id, a]),
+  );
   const offers = input.offers.filter((o) => live.has(o.accountId));
   const listing = new Set(offers.map((o) => o.accountId));
   const withoutList = [...live.values()].filter((a) => !listing.has(a.id));
@@ -101,7 +105,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const described = profiles.find((p) => p.maker !== null) ?? null;
     const providerOfAccount = (id: AccountId): Provider | null => {
       const account = live.get(id);
-      return account === undefined ? null : providerOf(account.kind);
+      return account === undefined || !runsAgents(account.kind) ? null : providerOf(account.kind);
     };
 
     // An account with no list is assumed to run its maker's models that are not retired.
@@ -114,7 +118,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       described.maker === RUNTIME_MAKER[described.provider] &&
       assumedEntry !== null &&
       !assumedEntry.deprecated
-        ? withoutList.filter((a) => providerOf(a.kind) === described.provider)
+        ? withoutList.filter((a) => runsAgents(a.kind) && providerOf(a.kind) === described.provider)
         : [];
 
     const profileStatus = profiles.find((p) => p.status !== null)?.status ?? null;
@@ -149,7 +153,8 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const accountOffers = account
       ? input.offers.filter((o) => o.accountId === account.id)
       : undefined;
-    const accountProvider = account ? providerOf(account.kind) : undefined;
+    const accountProvider =
+      account && runsAgents(account.kind) ? providerOf(account.kind) : undefined;
     const offeredToAccount =
       accountOffers !== undefined &&
       (accountOffers.length === 0

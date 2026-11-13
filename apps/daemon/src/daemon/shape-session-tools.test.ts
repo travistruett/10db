@@ -6,7 +6,7 @@ import {
   ShapeOrigin,
   type ProjectId,
   type ShapeId,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { createTestStore, insertShape, listInbox, recordMcpApproval, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -146,7 +146,7 @@ const launchEnv = (): Record<string, string> => ({
 
 const inputFor = (
   owner: { projectId: ProjectId; shapeId: ShapeId },
-  accountKind: SupportedAccountKind = AccountKind.AnthropicApiKey,
+  accountKind: AgentAccountKind = AccountKind.AnthropicApiKey,
   env: Record<string, string> = launchEnv(),
 ) => ({
   ...owner,
@@ -327,7 +327,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
 
 describe('the config dir a Plan session’s sandbox is given', () => {
   // Where the account keeps its login, by its kind, as a lane's session reads it (`sessionConfigDir`).
-  it.each<[string, SupportedAccountKind, string]>([
+  it.each<[string, AgentAccountKind, string]>([
     ['a Claude kind', AccountKind.ClaudeSubscription, '/accounts/claude'],
     ['a Codex kind', AccountKind.CodexSignin, '/accounts/codex'],
   ])('follows the account of %s', async (_name, kind, expected) => {

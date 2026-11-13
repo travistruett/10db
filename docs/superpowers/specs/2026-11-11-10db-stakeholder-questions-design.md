@@ -776,8 +776,10 @@ Setting up Slack happens once, so it has its own section; People is only the peo
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Settings › Integrations** has one card per integration; Slack is the first, and a later integration is
-  another card. **Not connected**, the card is a three-step guide: 1. **Copy Manifest** and **Open Slack Apps
+- **Settings › Integrations** has one card per integration, in a fixed order: GitHub, Slack, Artificial Analysis
+  (`2026-11-12-10db-settings-explicit-design.md` §7). Every card has the same four parts: a header with the
+  service and its state, a line on what it is for, its actions, and a dimmed line on what stops without it.
+  Slack's card has three states. **Not connected**, the card is a three-step guide: 1. **Copy Manifest** and **Open Slack Apps
   ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A refused
   token says why beside Connect. **Connected**, the card is one line, and **Change Who You Are** and
   **Disconnect** sit in its `⋯` menu, never as buttons; Disconnect asks first, since it stops every send and

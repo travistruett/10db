@@ -5,7 +5,7 @@ import {
   signsInWithLogin,
   type AccountRefusal,
   type Effort,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { SignInState } from './sign-in-check';
@@ -50,7 +50,7 @@ export function seenFrom(info: {
   };
 }
 
-const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
+const NEEDS: Readonly<Record<AgentAccountKind, string>> = {
   [AccountKind.ClaudeSubscription]: 'a Claude subscription',
   [AccountKind.AnthropicApiKey]: 'an Anthropic API key',
   [AccountKind.Bedrock]: 'Bedrock',
@@ -59,7 +59,7 @@ const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
 };
 
 /** The tool a kind's sessions run on, and its own sign-in status command, so a card names the right one. */
-const TOOL: Readonly<Record<SupportedAccountKind, { name: string; status: string }>> = {
+const TOOL: Readonly<Record<AgentAccountKind, { name: string; status: string }>> = {
   [AccountKind.ClaudeSubscription]: { name: 'Claude Code', status: 'claude auth status' },
   [AccountKind.AnthropicApiKey]: { name: 'Claude Code', status: 'claude auth status' },
   [AccountKind.Bedrock]: { name: 'Claude Code', status: 'claude auth status' },
@@ -83,7 +83,7 @@ function described(seen: SeenAccount): string {
  * Whether Claude Code bills the credential the kind needs. Only values a real session has shown are
  * accepted (spike 12 for the gateway), so a renamed variable fails loudly instead of billing someone else.
  */
-function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolean {
+function credentialsMatch(kind: AgentAccountKind, seen: SeenAccount): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
       // A plan's name is never compared; a gateway also looks first-party, so its token source rules it out.
@@ -117,7 +117,7 @@ function chatgptIdentity(seen: SeenAccount): string | undefined {
 }
 
 /** What a login account is confirmed as: a ChatGPT plan's email and workspace, a subscription's email. */
-export function loginIdentity(kind: SupportedAccountKind, seen: SeenAccount): string | undefined {
+export function loginIdentity(kind: AgentAccountKind, seen: SeenAccount): string | undefined {
   return kind === AccountKind.CodexSignin ? chatgptIdentity(seen) : seen.email;
 }
 
@@ -220,7 +220,7 @@ function oneLine(raw: string): string {
 export function noAccountWhy(
   waitMs: number | readonly number[],
   printed: readonly string[],
-  kind: SupportedAccountKind,
+  kind: AgentAccountKind,
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
   const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];

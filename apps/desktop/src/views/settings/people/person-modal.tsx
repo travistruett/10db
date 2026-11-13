@@ -202,6 +202,7 @@ function PersonForm({
                 w={80}
                 min={1}
                 max={100}
+                allowDecimal={false}
                 disabled={form.dailyLimit === null}
                 value={form.dailyLimit ?? DEFAULT_DAILY_LIMIT}
                 onChange={(value) => {

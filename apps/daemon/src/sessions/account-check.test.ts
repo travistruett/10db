@@ -1,4 +1,4 @@
-import { mintId, type AccountProblem, type SupportedAccountKind } from '@10db/contracts';
+import { mintId, type AccountProblem, type AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import type { AccountExpectation } from '../environment';
 import {
@@ -22,10 +22,7 @@ const NONE: SeenAccount = {
   apiKeySource: undefined,
   apiProvider: undefined,
 };
-const expect_ = (
-  kind: SupportedAccountKind,
-  identity: string | null = null,
-): AccountExpectation => ({
+const expect_ = (kind: AgentAccountKind, identity: string | null = null): AccountExpectation => ({
   accountId: mintId('Account'),
   label: 'Company A',
   kind,
@@ -265,7 +262,7 @@ describe('modelMatches', () => {
 });
 
 describe('missingAccountRefusal', () => {
-  it.each<[SupportedAccountKind, AccountProblem | null]>([
+  it.each<[AgentAccountKind, AccountProblem | null]>([
     ['claude_subscription', 'signed_out'],
     ['codex_signin', 'signed_out'],
     ['anthropic_api_key', null],

@@ -27,6 +27,7 @@ import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
+import { githubStatusDto } from './github-fixtures';
 import { projectViewDto } from './fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
 
@@ -71,6 +72,8 @@ export function baseHandlers(
     }),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
+    // Settings › Integrations reads gh's login; signed in, no Sign In running.
+    http.get(daemonUrl('/github', base), () => HttpResponse.json(githubStatusDto())),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),

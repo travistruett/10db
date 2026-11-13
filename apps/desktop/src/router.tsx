@@ -16,6 +16,7 @@ import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { recordSearch } from './views/shape/record/record-tabs';
 import { RecordView } from './views/shape/record/record-view';
 import { ShapeView } from './views/shape/shape-view';
+import { settingsSearch } from './views/settings/focus-target';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
 import { workbenchSearch } from './views/workbench/workbench-search';
@@ -220,6 +221,8 @@ const settingsIndexRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings/$section',
+  // `focus` names the card to scroll to and focus, so a link from elsewhere lands on it.
+  validateSearch: settingsSearch,
   beforeLoad: ({ params }) => {
     if (!isSettingsSectionKey(params.section))
       // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.

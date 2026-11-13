@@ -862,10 +862,15 @@ describe('gh unavailable', () => {
     expect(polls()).toBe(1);
     const card = h.only(h.cards());
     expect(card.projectId).toBe(h.project.id);
-    expect(card.body).toContain('gh auth login');
+    expect(card.body).toContain('Settings › Integrations');
     expect(card.body).toContain('unknown');
     // No link: the desktop's Open on GitHub would open one pull request, which says nothing about gh.
-    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl, ghCheck: true });
+    expect(card.detail).toEqual({
+      batchId: a.id,
+      prUrl: a.prUrl,
+      ghCheck: true,
+      openIntegrations: 'github',
+    });
 
     await round(w);
     expect(polls()).toBe(2);
@@ -933,9 +938,10 @@ describe('gh unavailable', () => {
     const card = h.only(h.cards());
     expect(card.id).toBe(first.id);
     expect(card.title).toBe('Pull request status unknown: gh is signed out');
-    expect(card.body).toContain('gh auth login');
+    expect(card.body).toContain('Settings › Integrations');
     expect(card.body).not.toContain('gave no answer');
-    expect(card.detail).toEqual(first.detail);
+    // The rewrite keeps the batch's keys and adds the link to the sign-in card.
+    expect(card.detail).toEqual({ ...first.detail, openIntegrations: 'github' });
 
     const writes = () =>
       listEventsAfter(h.store.db, 0, 10_000).filter(

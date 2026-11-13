@@ -1,4 +1,4 @@
-import { mintId, type AccountProblem, type SupportedAccountKind } from '@10db/contracts';
+import { mintId, type AccountProblem, type AgentAccountKind } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
@@ -233,6 +233,31 @@ describe('a session launch', () => {
     expect(String(thrown)).not.toContain('sk-ant');
   });
 
+  it('refuses an OpenRouter account without reading the Keychain, session and probe alike', () => {
+    let reads = 0;
+    const memory = createMemoryKeychain({ 'account:o': SECRET });
+    const watching = createLauncher({
+      base: BASE,
+      clientApp: '10db/0.1.0',
+      keychain: {
+        ...memory,
+        read: (name) => {
+          reads += 1;
+          return memory.read(name);
+        },
+      },
+    });
+    const row = keyed({ kind: 'openrouter', secretRef: 'account:o', configDir: null, laneCap: 0 });
+    for (const launch of [
+      () => watching.session(row, 'claude-sonnet-5-5', []),
+      () => watching.probe(row),
+    ])
+      expect(launch).toThrow(
+        expect.objectContaining({ name: 'AccountLaunchError', accountId: row.id }) as Error,
+      );
+    expect(reads).toBe(0);
+  });
+
   it('builds a probe like a session, without a model', () => {
     const row = account({ expectedIdentity: null });
     const probe = launcher().probe(row);
@@ -281,7 +306,7 @@ describe('a ChatGPT sign-in launch', () => {
 });
 
 describe('sessionConfigDir', () => {
-  it.each<{ name: string; kind: SupportedAccountKind; env: Record<string, string>; dir: string }>([
+  it.each<{ name: string; kind: AgentAccountKind; env: Record<string, string>; dir: string }>([
     {
       name: 'CODEX_HOME for a ChatGPT sign-in',
       kind: 'codex_signin',

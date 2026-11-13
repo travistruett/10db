@@ -21,6 +21,7 @@ export * from './hazard-assessment';
 export * from './human-touch';
 export { DevUiConnectionDto, HealthResponse } from './health';
 export * from './ids';
+export * from './github';
 export * from './judge';
 export * from './knowledge';
 export * from './knowledge-api';

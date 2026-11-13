@@ -4,7 +4,9 @@
 the accounts plan (`docs/superpowers/plans/2026-10-22-10db-09-accounts.md`) found and Travis accepted, the
 default account's "Claude plan" label, and moving a project between accounts with work in flight. Amended on 2026-10-25: the lane sandbox
 (`2026-10-25-10db-lane-sandbox-design.md`) replaces the guard as what keeps a session from other accounts'
-credentials (§1, §3 "Practical isolation", §8).
+credentials (§1, §3 "Practical isolation", §8). Amended on 2026-11-12: the `openrouter` kind, what each
+account can do and what uses it (`2026-11-12-10db-settings-explicit-design.md` §6;
+`decisions/2026-11-12-settings-sort-by-what-the-credential-is.md`).
 **Extends:** `2026-10-13-10db-factory-loop-design.md`. It replaces that spec's per-project **billing mode**
 (§6 "Environment", §4 `projects`) and its **per-provider concurrency cap** (§5.2 point 7) with accounts.
 **Builds on:** M2a (plan 06), which is still in review: model profiles, AA scores and the router.
@@ -99,7 +101,13 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
 
 - `id` (`acc_…`)
 - `kind`: `claude_subscription`, `anthropic_api_key`, `bedrock` or `gateway`. `openai_api_key` and
-  `codex_signin` are reserved and refused until the Codex adapter exists.
+  `codex_signin` are reserved and refused until the Codex adapter exists. The `openrouter` kind (added
+  2026-11-12) is model access that cannot run agents yet: a label, a payer and a key stored as the account's own
+  Keychain item with the usual fingerprint, and no config directory, lane cap, monthly cap or tier overrides.
+  The judge runs on one such account (`judge.accountId`), a project's account and fallback never name it
+  ("OpenRouter can't run agents yet"), and it is never a move target, a probe, a profile or a routing input.
+  `GET /accounts/:id/identity` answers 400 for it, and `POST /accounts/:id/test` makes the one tiny call
+  Decisions makes.
 - `label`
 - `payer`: free text
 - `expectedIdentity`: the email for a subscription. For API-key and Bedrock accounts it is the organization
@@ -225,7 +233,10 @@ Every body is parsed by zod.
 **Settings (M2b).** An Accounts screen lists each account with its kind, its verified identity, and this
 month's usage against its cap. It shows the sign-in steps for subscriptions. Project settings get an account
 picker, a fallback picker and a "Hand off at" field (the project's usage threshold, 50–99%, which applies
-only on a Claude subscription account). Every picker shows an account's identity beside its label.
+only on a Claude subscription account). Every picker shows an account's identity beside its label. Each account row and drawer also say what uses it
+("Used by": the projects whose account or backup it is, and "decisions" when the judge runs on it) and, when it
+applies, what it can't do yet: Billing's pickers list an OpenRouter account disabled with that reason, and
+Decisions' "Runs on" lists every other account disabled with "Decisions run on OpenRouter for now".
 
 ## 8. Testing
 

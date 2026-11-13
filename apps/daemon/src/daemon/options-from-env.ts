@@ -12,6 +12,7 @@ export type EnvDaemonOptions = Pick<
   | 'worktreeRoot'
   | 'limits'
   | 'judgeOff'
+  | 'benchmarksOff'
   | 'slack'
   | 'catalogueSync'
   | 'pictures'
@@ -50,6 +51,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_GATE_SLOTS === undefined ? {} : { limits: { gateSlots: env.TENDB_GATE_SLOTS } }),
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(env.TENDB_JUDGE === 'off' ? { judgeOff: true } : {}),
+    ...(env.TENDB_BENCHMARKS === 'off' ? { benchmarksOff: true } : {}),
     slack: slackOnFromEnv(env),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },

@@ -9,6 +9,8 @@ export interface SetupCheck {
   readonly claude: ClaudeRow;
   readonly git: SetupRow;
   readonly gh: SetupRow;
+  /** gh is installed but signed out: the row offers Sign In. */
+  readonly ghSignedOut: boolean;
   /** Claude Code and git are both found; gh is optional. */
   readonly canContinue: boolean;
   /** The login the default account runs tasks as, once Claude Code has said. */
@@ -73,6 +75,7 @@ export function useSetupCheck(entered: boolean): SetupCheck {
     claude,
     git: toolsFailure === null ? gitRow(gitTool) : { mark: 'bad', detail: toolsFailure },
     gh: toolsFailure === null ? ghRow(ghTool) : { mark: 'bad', detail: toolsFailure },
+    ghSignedOut: toolsFailure === null && ghTool?.path != null && ghTool.signedIn === null,
     canContinue: claudeFound && gitTool?.path != null,
     runsAs: claude.runsAs,
     recheckAgents: () => {

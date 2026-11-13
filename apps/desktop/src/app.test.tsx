@@ -73,7 +73,7 @@ describe('App shell', () => {
 
   it.each([
     ['Project Settings', '/settings/general'],
-    ['Settings', '/settings/keep-awake'],
+    ['Settings', '/settings/overview'],
   ])('opens %s at %s', async (link, path) => {
     server.use(...baseHandlers());
     const { router } = renderApp('/factory');

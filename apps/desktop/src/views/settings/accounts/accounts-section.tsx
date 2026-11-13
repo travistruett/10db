@@ -1,4 +1,4 @@
-import type { AccountDto, AccountId } from '@10db/contracts';
+import { AccountKind, runsAgents, type AccountDto, type AccountId } from '@10db/contracts';
 import {
   Accordion,
   Alert,
@@ -13,22 +13,29 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
+import { useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
+import { useJudgeStatus } from '../../../daemon/judge-queries';
+import { useProjects } from '../../../daemon/queries';
 import { CountBadge } from '../../../shell/count-badge';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
 import { AccountPause } from './account-pause';
 import { AddAccountModal } from './add-account-modal';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
+import { settingsSearch } from '../focus-target';
+import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
+import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
 
-/** Waiting on a human is yellow; green, the done colour, marks an account that can run. */
-const STATUS_COLOR: Readonly<Record<AccountStatus, string>> = {
-  [AccountStatus.Ready]: 'green',
-  [AccountStatus.NeedsSignIn]: 'yellow',
-  [AccountStatus.NeedsSecret]: 'yellow',
-  [AccountStatus.Archived]: 'gray',
+/** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
+const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
+  [AccountStatus.Ready]: ConnectionTone.Works,
+  [AccountStatus.NeedsSignIn]: ConnectionTone.NeedsYou,
+  [AccountStatus.NeedsSecret]: ConnectionTone.NeedsYou,
+  [AccountStatus.Archived]: ConnectionTone.Off,
 };
 
 function UsageCell({ account }: { readonly account: AccountDto }) {
@@ -41,6 +48,9 @@ function UsageCell({ account }: { readonly account: AccountDto }) {
       </Text>
     );
   const { total, monthlyCapUsd } = usage.data;
+  // An OpenRouter account runs no session: its month is its decisions' dollars, or a dash when none are its own.
+  if (account.kind === AccountKind.OpenRouter)
+    return <Text size="sm">{total.costUsd === null ? '—' : formatUsd(total.costUsd)}</Text>;
   if (total.costUsd === null)
     return <Text size="sm">{formatTokens(total.tokensIn + total.tokensOut)} tokens</Text>;
   const share = capShare(usage.data);
@@ -63,9 +73,11 @@ function UsageCell({ account }: { readonly account: AccountDto }) {
 
 function AccountRow({
   account,
+  usedBy,
   onOpen,
 }: {
   readonly account: AccountDto;
+  readonly usedBy: readonly string[];
   readonly onOpen: (account: AccountDto) => void;
 }) {
   const status = accountStatus(account);
@@ -74,6 +86,7 @@ function AccountRow({
       <Table.Td>
         <Stack gap={4}>
           <Group gap="xs" wrap="nowrap">
+            <RowMarkIcon mark={MARK_OF_KIND[account.kind]} />
             <UnstyledButton
               aria-label={`Open ${account.label}`}
               onClick={() => {
@@ -90,19 +103,25 @@ function AccountRow({
               </Badge>
             ) : null}
           </Group>
+          {runsAgents(account.kind) ? (
+            <Text size="xs" c="dimmed">
+              {account.expectedIdentity ?? 'No identity yet'}
+            </Text>
+          ) : null}
           <Text size="xs" c="dimmed">
-            {account.expectedIdentity ?? 'No identity yet'}
+            {usedByText(usedBy)}
+            {runsAgents(account.kind) ? '' : ` · ${CANT_RUN_AGENTS}`}
           </Text>
-          {account.archived ? null : <AccountPause account={account} />}
+          {account.archived || !runsAgents(account.kind) ? null : (
+            <AccountPause account={account} />
+          )}
         </Stack>
       </Table.Td>
       <Table.Td>
         <Text size="sm">{ACCOUNT_KIND_LABEL[account.kind]}</Text>
       </Table.Td>
       <Table.Td>
-        <Badge size="sm" variant="light" color={STATUS_COLOR[status]}>
-          {ACCOUNT_STATUS_LABEL[status]}
-        </Badge>
+        <ConnectionStatus tone={STATUS_TONE[status]} label={ACCOUNT_STATUS_LABEL[status]} />
       </Table.Td>
       <Table.Td ta="right">
         <UsageCell account={account} />
@@ -148,6 +167,14 @@ export function AccountsSection() {
   // Mantine has nothing to return focus to.
   const returnToAdd = useRef(false);
   const accounts = useAccounts();
+  const projects = useProjects();
+  const judge = useJudgeStatus();
+  // `?focus=<account id>` opens that account's drawer, so a link from another page lands on it.
+  const focus = settingsSearch(useSearch({ strict: false })).focus;
+  const named = focus === undefined ? undefined : accounts.data?.find((a) => a.id === focus);
+  // Closing the drawer the address opened must not open it again, so the closed account is remembered.
+  const [dismissed, setDismissed] = useState<AccountId | null>(null);
+  const focusOpen = named !== undefined && dismissed !== named.id;
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
   // A failed background refetch also sets isError while the last list is still here; that must not
   // replace the table, the open drawer and an edit in progress.
@@ -190,6 +217,7 @@ export function AccountsSection() {
             <AccountRow
               key={a.id}
               account={a}
+              usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
               onOpen={(account) => {
                 returnToAdd.current = false;
                 setSelected(account.id);
@@ -212,10 +240,11 @@ export function AccountsSection() {
         }}
       />
       <AccountDrawer
-        accountId={selected}
-        opened={opened}
+        accountId={selected ?? (focusOpen ? named.id : null)}
+        opened={opened || focusOpen}
         onClose={() => {
           setOpened(false);
+          if (named !== undefined) setDismissed(named.id);
         }}
         onArchived={() => {
           // The row that opened the drawer moves to Archived, so Mantine has nothing to return focus to.

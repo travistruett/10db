@@ -16,7 +16,7 @@ export function PicturesStatus({ projectId }: { readonly projectId: ProjectId })
   if (status.data === undefined) return null;
   const { browser, signIn } = status.data;
   return (
-    <Stack gap={2}>
+    <Stack gap={2} px="md" py="sm">
       <Text size="sm" c={browser.state === BrowserState.Refused ? 'red' : 'dimmed'}>
         {`Browser for pictures: ${BROWSER_WORDS[browser.state]}`}
       </Text>

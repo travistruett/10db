@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  agentKind,
   AccountCardDetail,
   accountDisplayName,
   AccountInput,
@@ -13,13 +14,16 @@ import {
   mintId,
   Month,
   needsSecret,
+  OPENROUTER_CANT_RUN_AGENTS,
   parseAccountSettings,
   ProjectPatch,
   providerOf,
+  runsAgents,
   signsInWithLogin,
   USAGE_HANDOFF_AT,
   USAGE_HANDOFF_MAX,
   USAGE_HANDOFF_MIN,
+  type AgentAccountKind,
   type Provider,
   type SupportedAccountKind,
 } from './index';
@@ -182,8 +186,51 @@ describe('AccountInput', () => {
   });
 });
 
+describe('OpenRouter accounts', () => {
+  it.each<[SupportedAccountKind, boolean]>([
+    ['claude_subscription', true],
+    ['anthropic_api_key', true],
+    ['bedrock', true],
+    ['gateway', true],
+    ['codex_signin', true],
+    ['openrouter', false],
+  ])('%s runs agents: %s', (kind, runs) => {
+    expect(runsAgents(kind)).toBe(runs);
+  });
+
+  it('holds a key, is not metered, and takes no settings', () => {
+    expect(needsSecret('openrouter', parseAccountSettings('openrouter', {}))).toBe(true);
+    expect(isMetered(AccountKind.OpenRouter)).toBe(false);
+    expect(() => parseAccountSettings('openrouter', { tierOverrides: {} })).toThrow(z.ZodError);
+  });
+
+  it('parses a label and payer, and rejects any other field', () => {
+    expect(AccountInput.parse({ kind: 'openrouter', label: 'OpenRouter', payer: 'Me' })).toEqual({
+      kind: 'openrouter',
+      label: 'OpenRouter',
+      payer: 'Me',
+    });
+    for (const extra of [{ laneCap: 2 }, { monthlyCapUsd: 5 }, { settings: {} }]) {
+      expect(() => AccountInput.parse({ kind: 'openrouter', label: 'O', ...extra })).toThrow(
+        z.ZodError,
+      );
+    }
+  });
+
+  it('names the refusal a project binding gets', () => {
+    expect(OPENROUTER_CANT_RUN_AGENTS).toBe("OpenRouter can't run agents yet");
+  });
+});
+
+describe('agentKind', () => {
+  it('answers an agent kind as itself, and refuses OpenRouter', () => {
+    expect(agentKind('bedrock')).toBe('bedrock');
+    expect(() => agentKind('openrouter')).toThrow(OPENROUTER_CANT_RUN_AGENTS);
+  });
+});
+
 describe('account kinds', () => {
-  it.each<[SupportedAccountKind, Provider]>([
+  it.each<[AgentAccountKind, Provider]>([
     ['claude_subscription', 'claude'],
     ['anthropic_api_key', 'claude'],
     ['bedrock', 'claude'],

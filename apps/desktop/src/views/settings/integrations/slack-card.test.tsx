@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { benchmarkStatusDto } from '../../../test/benchmark-fixtures';
 import { pickOption } from '../../../test/combobox';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
 import {
@@ -27,16 +28,18 @@ function serve(
     readonly people?: PersonDto[];
     readonly connection?: Record<string, unknown>;
     readonly tokenRefusal?: string;
+    readonly path?: string;
   } = {},
 ) {
   let people = options.people ?? [unbound];
-  let connection = slackConnection(options.connection);
+  let connection = slackConnection({ state: 'none', ...options.connection });
   const saved: unknown[] = [];
   const tokens: string[] = [];
   const removals: string[] = [];
   server.use(
     http.get(daemonUrl('/people'), () => HttpResponse.json(people)),
     http.get(daemonUrl('/slack'), () => HttpResponse.json(connection)),
+    http.get(daemonUrl('/benchmarks/status'), () => HttpResponse.json(benchmarkStatusDto())),
     http.get(daemonUrl('/slack/members'), () =>
       HttpResponse.json([
         slackMember(),
@@ -74,7 +77,7 @@ function serve(
     }),
     ...baseHandlers(),
   );
-  const { queryClient } = renderApp('/settings/integrations');
+  const { queryClient } = renderApp(options.path ?? '/settings/integrations');
   return { saved, tokens, removals, queryClient };
 }
 
@@ -83,6 +86,44 @@ afterEach(() => {
 });
 
 describe('Settings › Integrations: Slack', () => {
+  it('lays out the card: what it is for, and what stops without it', async () => {
+    serve();
+    const slack = within(await screen.findByRole('group', { name: 'Slack' }));
+    expect(
+      slack.getByText('Asks the people who answer your questions, and reads their replies.'),
+    ).toBeTruthy();
+    expect(
+      slack.getByText(
+        'Without it: Questions for other people stay in your Inbox; nothing is sent.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    ['not connected', { state: 'none' }, 'Not connected'],
+    ['refused', { state: 'refused' }, 'Token refused'],
+    ['unreachable', { state: 'unreachable' }, "Can't be reached"],
+  ])('says in the header that Slack is %s', async (_name, connection, label) => {
+    serve({ connection });
+    const slack = within(await screen.findByRole('group', { name: 'Slack' }));
+    expect(await slack.findByText(label)).toBeTruthy();
+  });
+
+  it('started with TENDB_SLACK=off, says so and offers no setup', async () => {
+    serve({ connection: { state: 'off' } });
+    const slack = within(await screen.findByRole('group', { name: 'Slack' }));
+    expect(await slack.findByText('Off: 10db was started with TENDB_SLACK=off')).toBeTruthy();
+    expect(slack.queryByLabelText('Bot User OAuth Token')).toBeNull();
+    expect(slack.queryByRole('button')).toBeNull();
+  });
+
+  it("a link with ?focus=slack moves keyboard focus to the card's first control", async () => {
+    serve({ path: '/settings/integrations?focus=slack' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Copy Manifest' }));
+    });
+  });
+
   it('not connected shows the three steps, and Copy Manifest copies the manifest', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });

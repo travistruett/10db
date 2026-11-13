@@ -26,7 +26,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
-import { defaultAccountId, getAccountRow } from './accounts';
+import { defaultAccountId, getAccountRow, refuseOpenRouterForAgents } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
@@ -38,6 +38,7 @@ function accountFor(ctx: WriteContext, named: AccountId | undefined): AccountId 
   if (!id) throw new InvalidError('There is no account to bind the project to; create one first');
   const account = getAccountRow(ctx.tx, id);
   if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+  refuseOpenRouterForAgents(ctx.tx, id);
   return id;
 }
 
@@ -55,6 +56,7 @@ function checkFallback(
     throw new InvalidError("A project's fallback is another account than its own");
   const fallback = getAccountRow(ctx.tx, fallbackId);
   if (fallback.archived) throw new InvalidError(`Account "${fallback.label}" is archived`);
+  refuseOpenRouterForAgents(ctx.tx, fallbackId);
   if (isMetered(fallback.kind) && fallback.monthlyCapUsd === null)
     throw new InvalidError(
       `Set a monthly cap on "${fallback.label}" before making it a fallback: 10db moves work onto it without asking`,
@@ -214,6 +216,7 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     // Work in flight moves too: each lane's next session runs on the new account.
     const account = getAccountRow(ctx.tx, changes.accountId);
     if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+    refuseOpenRouterForAgents(ctx.tx, changes.accountId);
   }
   ctx.tx
     .update(schema.projects)

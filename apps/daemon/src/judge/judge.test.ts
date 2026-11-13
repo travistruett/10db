@@ -1,5 +1,11 @@
-import { mintId } from '@10db/contracts';
-import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
+import { mintId, type AccountId } from '@10db/contracts';
+import {
+  createTestStore,
+  listJudgeCalls,
+  patchJudgeConfig,
+  seedAccount,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -49,6 +55,7 @@ let clock: ManualClock;
 let seen: Seen[];
 let handler: Handler;
 let keyReads: number;
+let keyAsked: (AccountId | null)[];
 let key: string | null;
 let keyError: Error | null;
 let keyHangs: boolean;
@@ -70,8 +77,9 @@ function build(options: { off?: boolean } = {}) {
       seen.push(entry);
       return handler(entry, init?.signal ?? undefined);
     },
-    readKey: () => {
+    readKey: (accountId) => {
       keyReads += 1;
+      keyAsked.push(accountId);
       if (keyError) return Promise.reject(keyError);
       if (keyHangs) return new Promise<string | null>(() => undefined);
       return Promise.resolve(key);
@@ -96,6 +104,7 @@ beforeEach(() => {
   clock = new ManualClock();
   seen = [];
   keyReads = 0;
+  keyAsked = [];
   key = KEY;
   keyError = null;
   keyHangs = false;
@@ -436,13 +445,30 @@ describe('the key never leaves the judge', () => {
   });
 });
 
+describe('the account a decision reads its key from', () => {
+  it('asks for the key of the account decisions run on, and for none when no account is picked', async () => {
+    await build().choose(request);
+    expect(keyAsked).toEqual([null]);
+    const account = seedAccount(store, { kind: 'openrouter', label: 'OpenRouter' });
+    store.write((ctx) => patchJudgeConfig(ctx, { accountId: account.id }));
+    await build().choose(request);
+    expect(keyAsked).toEqual([null, account.id]);
+  });
+
+  it('tests the account it is given, not the one decisions run on', async () => {
+    const other = mintId('Account');
+    expect((await build().test(other)).ok).toBe(true);
+    expect(keyAsked).toEqual([other]);
+  });
+});
+
 describe('judge.test', () => {
   it('reports the model, latency and cost of a tiny call, and logs nothing', async () => {
     handler = () => {
       clock.advance(180);
       return json(systemOneBody({ review: 0.1, skip: 0.9 }));
     };
-    expect(await build().test()).toEqual({
+    expect(await build().test(mintId('Account'))).toEqual({
       ok: true,
       model: 'typesafe/jev-1.13-20260917',
       latencyMs: 180,
@@ -462,7 +488,7 @@ describe('judge.test', () => {
       /key/i,
     ],
   ])('says why when %s', async (_name, make, error) => {
-    const result = await make().test();
+    const result = await make().test(mintId('Account'));
     expect(result).toMatchObject({ ok: false });
     expect(!result.ok && result.error).toMatch(error);
     expect(seen).toEqual([]);
@@ -470,12 +496,12 @@ describe('judge.test', () => {
 
   it('says what OpenRouter answered when the call fails', async () => {
     handler = () => json({ error: { message: 'No auth credentials found' } }, 401);
-    const result = await build().test();
+    const result = await build().test(mintId('Account'));
     expect(!result.ok && result.error).toMatch(/401/);
   });
 
   it('still tests with the decision switched off', async () => {
     store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { enabled: false } } }));
-    expect((await build().test()).ok).toBe(true);
+    expect((await build().test(mintId('Account'))).ok).toBe(true);
   });
 });
