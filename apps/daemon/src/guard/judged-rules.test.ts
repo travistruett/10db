@@ -2,7 +2,8 @@ import { homedir } from 'node:os';
 import { ClaimKind, DEFAULT_HAZARDS, JudgeKind } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
-import { judgePreToolUse, protectedPaths, type GuardVerdict } from './index';
+import { judgePreToolUse, protectedPaths, type FileAccessJudge, type GuardVerdict } from './index';
+import { CLAUDE_TOOLS_REVIEWED } from './reviewed-tools';
 
 const repo = tempDir('judged-rules-repo');
 const data = tempDir('judged-rules-data');
@@ -28,10 +29,11 @@ interface Row {
 const AREAS = [{ name: 'repo', globs: ['**'] }];
 const AREA_CLAIM = [{ kind: ClaimKind.Area, name: 'repo' }];
 // Hazard commands and their unread forms are asked about under every judge unless claimed, so the
-// rows about a judge's shell rules claim every hazard; the hazard rows claim none.
+// rows about a judge's rules claim every hazard (a harness file needs its claim too); the hazard
+// rows claim none.
 const EVERY_HAZARD = [
   ...AREA_CLAIM,
-  ...DEFAULT_HAZARDS.filter((hazard) => hazard.commands.length > 0).map((hazard) => ({
+  ...DEFAULT_HAZARDS.map((hazard) => ({
     kind: ClaimKind.Hazard,
     name: hazard.name,
   })),
@@ -209,6 +211,97 @@ const ROWS: readonly Row[] = [...SHELL_ROWS, ...MATRIX_ROWS, ...OTHER_ROWS];
 describe('the guard under each judge', () => {
   it.each(
     ROWS.flatMap((row) =>
+      Object.values(JudgeKind).map((judge) => ({
+        judge,
+        row,
+        label: `${row.name} (${judge})`,
+        expected: judge === JudgeKind.Rules ? row.rules : row.judged,
+      })),
+    ),
+  )('$label -> $expected', ({ judge, row, expected }) => {
+    expect(judgeAs(judge, row)).toBe(expected);
+  });
+});
+
+const [REVIEWED_TOOL = 'no reviewed tool'] = CLAUDE_TOOLS_REVIEWED.tools;
+const MONITOR = { description: 'watch', timeout_ms: 60_000 };
+const SOCKET = { ws: { url: 'wss://example.net/' } };
+const WEB_ON = { webOn: true };
+
+const access: FileAccessJudge = {
+  read: () => 'ok',
+  write: () => 'ok',
+  readAsk: (_tool, input) => (JSON.stringify(input).includes('outside') ? 'outside' : null),
+  writeAsk: (path) => (path.includes('.claude/settings.json') ? 'a Claude Code config path' : null),
+};
+
+const tool = (
+  name: string,
+  toolName: string,
+  input: unknown,
+  rules: Answer,
+  judged: Answer,
+  extra?: Partial<GuardCall>,
+): Row => ({ name, tool: toolName, input, rules, judged, ...(extra ? { extra } : {}) });
+
+// The tools whose card a judge replaces. MCP calls stay on the floor's card under every judge until
+// a live check shows the classifier judging them.
+const TOOL_ROWS: readonly Row[] = [
+  tool(
+    'WebFetch, web on',
+    'WebFetch',
+    { url: 'https://example.net/', prompt: 'x' },
+    'ask',
+    'allow',
+    WEB_ON,
+  ),
+  tool('WebSearch, web on', 'WebSearch', { query: 'x' }, 'ask', 'allow', WEB_ON),
+  tool(
+    'WebFetch, web off',
+    'WebFetch',
+    { url: 'https://example.net/', prompt: 'x' },
+    'ask',
+    'ask',
+    {
+      webOn: false,
+    },
+  ),
+  tool('a repo MCP tool', 'mcp__repo__run', {}, 'ask', 'ask'),
+  tool(
+    'an MCP resource read',
+    'ReadMcpResourceTool',
+    { server: 'repo', uri: 'x://y' },
+    'ask',
+    'ask',
+  ),
+  tool('a reviewed tool', REVIEWED_TOOL, {}, 'ask', 'allow'),
+  tool('a tool nobody reviewed', 'FutureTool', {}, 'ask', 'ask'),
+  tool('Monitor with a socket', 'Monitor', { ...MONITOR, ...SOCKET }, 'ask', 'allow'),
+  tool(
+    'Monitor with a socket and a hazard',
+    'Monitor',
+    { ...MONITOR, ...SOCKET, command: 'SUB=add; pnpm $SUB x' },
+    'ask',
+    'ask',
+    UNCLAIMED,
+  ),
+  tool("10db's own tool", 'mcp__10db__complete_step', {}, 'allow', 'allow'),
+  tool(
+    'a write to .claude/settings.json',
+    'Write',
+    { file_path: `${repo.path}/.claude/settings.json`, content: '{}' },
+    'ask',
+    'ask',
+    { fileAccess: access },
+  ),
+  tool('a read outside the read list', 'Read', { file_path: '/outside/x' }, 'ask', 'ask', {
+    fileAccess: access,
+  }),
+];
+
+describe('the tools a judge takes over', () => {
+  it.each(
+    TOOL_ROWS.flatMap((row) =>
       Object.values(JudgeKind).map((judge) => ({
         judge,
         row,
