@@ -42,6 +42,7 @@ import {
   getAccountRow,
   listModelProfiles,
   listAccountModels,
+  listAccounts,
   getAppSetting,
   findAccountRow,
   getJudgeConfig,
@@ -691,12 +692,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           clock,
           fetch: opts.fetch ?? fetch,
           readKey: () => readJudgeKey(getJudgeConfig(state.db).accountId),
-          offered: () =>
-            new Set(
+          offered: () => {
+            const live = new Set(
+              listAccounts(state.db)
+                .filter((a) => !a.archived)
+                .map((a) => a.id),
+            );
+            return new Set(
               listAccountModels(state.db)
-                .filter((m) => !m.unusable)
+                .filter((m) => !m.unusable && live.has(m.accountId))
                 .map((m) => m.model),
-            ),
+            );
+          },
           catalogue: () => catalogue.catalogue(),
           decisionModelIds: async () => {
             try {
