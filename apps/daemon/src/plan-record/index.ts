@@ -1,3 +1,4 @@
+export { checkTaskAnchors } from './anchor-check';
 export { locateAnchor } from './anchors';
 export { backfillAttachmentRevisions } from './backfill';
 export { exportPlan } from './export';

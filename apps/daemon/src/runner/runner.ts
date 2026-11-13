@@ -285,6 +285,7 @@ import {
 } from './next-action';
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
+import { checkTaskAnchors } from '../plan-record';
 import { threadInlineBytes } from './thread-pictures';
 
 /**
@@ -1931,6 +1932,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
+    // The task's cited plan anchors are checked against this base before the pack reads them; a
+    // failure leaves them "not checked yet" in the brief and never stops the session.
+    await checkTaskAnchors(
+      { git: opts.git, state: opts.state },
+      { workstreamId: id, taskId: task.id, repo: checkout, rev: baseHead },
+    ).catch((error: unknown) => {
+      opts.logger.warn({ workstreamId: id, err: error }, 'the plan anchor check failed');
+    });
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
