@@ -20,7 +20,8 @@
 
 **Changes you'll see** (the agreed design, listed so none is silent)
 
-- Quick-flow tasks become Light: builds need at least 35 (40 today). Standard reviews need at least 40 (48).
+- Quick-flow tasks become Light: builds need at least 35 (40 today). Standard reviews need at least 40 (48), so
+  they move from Opus at medium effort to Sonnet at high effort today.
 - Full-flow tasks become Careful: they always plan; QA and Plan Review stop running (they ran only for more than
   3 criteria, or security/auth/migration tags). Migration tasks still get Plan Review (the kind adds it).
 - A task tagged security, auth or migration is at least Careful, so a quick security fix now gets a Plan step;
@@ -29,6 +30,8 @@
   (40 today).
 - Security and auth reviews, and migration reviews and plan reviews, run on Frontier at high effort. Migration
   builds move from the top model at low effort (Fable today) to the top of Capable at high effort (Opus today).
+  Security and auth builds move from Sonnet at high effort to the top of Capable at high effort (Opus today),
+  and security, auth and migration plans to Capable at high effort (spec §6.1).
 - Without scores (no Artificial Analysis key), every Careful step runs one effort up.
 - A cell naming one model is never stepped up on a retry; today only a persona pin held a step.
 - Plan conversations follow the Careful Plan cell, so a moved persona pin on the planner now applies to them.
