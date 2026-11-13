@@ -27,7 +27,7 @@ export const OpenRouterSyncStatusDto = z.object({
   lastSuccessAt: z.iso.datetime().nullable(),
   outcome: z.enum(['ok', 'no_key', 'unauthorized', 'rate_limited', 'failed']).nullable(),
   message: z.string().nullable(),
-  /** The daemon was started with `TENDB_BENCHMARKS=off`: it reads no key and calls no one. */
+  /** Either kill switch is on (`TENDB_JUDGE=off` or `TENDB_BENCHMARKS=off`). */
   off: z.boolean(),
 });
 export type OpenRouterSyncStatusDto = z.infer<typeof OpenRouterSyncStatusDto>;

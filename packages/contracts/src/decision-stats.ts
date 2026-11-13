@@ -23,7 +23,7 @@ export const DecisionStatsDto = z.object({
 });
 export type DecisionStatsDto = z.infer<typeof DecisionStatsDto>;
 
-/** `GET /judge/stats`: one entry per decision, counted from `since`. */
+/** `GET /judge/decisions`: one entry per decision, counted from `since`. */
 export const DecisionStatsListDto = z.object({
   since: z.iso.datetime(),
   decisions: z.array(DecisionStatsDto),
