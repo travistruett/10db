@@ -271,6 +271,35 @@ describe('validateBundle', () => {
     );
   });
 
+  it('refuses a new revision numbered below the highest stored one, naming the next number', () => {
+    const r3 = `${P1}three\n`;
+    const bundle = valid();
+    one(bundle, 'documents')['revisions'] = [
+      { number: 1, body: P1, at: AT },
+      { number: 2, body: `${P1}two\n`, at: AT },
+      { number: 3, body: r3, at: AT },
+    ];
+    const stored = storedOf({
+      documents: new Map([
+        [
+          'p1',
+          {
+            kind: 'plan',
+            effort: null,
+            revisions: new Map([
+              [1, sha256Of(P1)],
+              [3, sha256Of(r3)],
+            ]),
+          },
+        ],
+        ['s1', { kind: 'spec', effort: 'g1', revisions: new Map([[1, sha256Of('# Spec\n')]]) }],
+      ]),
+    });
+    expect(issues(bundle, stored)).toEqual([
+      'Document p1, revision 2: revision 2 of p1 is below its stored revision 3; add it as revision 4',
+    ]);
+  });
+
   it('refuses a document whose kind changed on re-import', () => {
     const bundle = valid();
     one(bundle, 'documents')['kind'] = 'guide';

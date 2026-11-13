@@ -159,7 +159,8 @@ export function validateBundle(input: {
     if (was && was.kind !== document.kind)
       say(`${at}, kind`, `A document keeps its kind: ${document.key} is stored as ${was.kind}`);
     if (was) {
-      const next = Math.max(...was.revisions.keys(), ...numbers) + 1;
+      const highest = Math.max(0, ...was.revisions.keys());
+      const next = Math.max(highest, ...numbers) + 1;
       for (const revision of document.revisions) {
         const hash = was.revisions.get(revision.number);
         const body = bodies.get(`${document.key}#${String(revision.number)}`);
@@ -167,6 +168,12 @@ export function validateBundle(input: {
           say(
             `${at}, revision ${String(revision.number)}`,
             `revision ${String(revision.number)} of ${document.key} changed; add it as revision ${String(next)}`,
+          );
+        // A new revision becomes the latest, so it must come after every one stored.
+        if (hash === undefined && revision.number < highest)
+          say(
+            `${at}, revision ${String(revision.number)}`,
+            `revision ${String(revision.number)} of ${document.key} is below its stored revision ${String(highest)}; add it as revision ${String(next)}`,
           );
       }
     }
