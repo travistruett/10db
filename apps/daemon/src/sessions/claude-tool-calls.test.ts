@@ -1,6 +1,6 @@
 import { LimitName, OUTPUT_TAIL_CHARS, type ToolCallView } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import type { BeforeText } from './before-text';
+import { BEFORE_TEXT_MAX_BYTES, type BeforeText } from './before-text';
 import {
   claudePlanSteps,
   claudeToolCall,
@@ -391,6 +391,20 @@ describe('claudeToolCall, Edit with replace_all', () => {
   ])('$name', ({ before, shown }) => {
     const view = claudeToolCall(use('Edit', input), { startedAt, before: () => before });
     expect(view).toMatchObject({ kind: 'edit', ...shown });
+  });
+
+  it('builds a replacement that would outgrow the before-text limit only up to it, and says it is cut', () => {
+    // 2,000 one-character matches each grown to 1,000 characters would build 2,000,000.
+    const growing = { ...input, new_string: 'X'.repeat(1_000) };
+    const view = claudeToolCall(use('Edit', growing), {
+      startedAt,
+      before: () => text('a'.repeat(2_000)),
+    });
+    if (view.kind !== 'edit') throw new Error(`expected an edit, got ${view.kind}`);
+    const shown = view.hunks.reduce((sum, hunk) => sum + hunk.after.length, 0);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThanOrEqual(BEFORE_TEXT_MAX_BYTES);
+    expect(view.truncated).toBe(true);
   });
 });
 

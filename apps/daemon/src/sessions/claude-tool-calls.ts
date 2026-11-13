@@ -9,7 +9,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { z } from 'zod';
-import type { BeforeText } from './before-text';
+import { BEFORE_TEXT_MAX_BYTES, type BeforeText } from './before-text';
 import { EDIT_LINES_CAP, hunksOfTexts, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep, type SessionEvent } from './types';
@@ -99,6 +99,42 @@ function lineOf(text: string | null, needle: string): number {
   let line = 1;
   for (let i = 0; i < at; i += 1) if (text.charCodeAt(i) === 10) line += 1;
   return line;
+}
+
+/**
+ * `text` with every `old` replaced by `next`, built to at most `max` characters, since an agent's short
+ * match and long replacement can multiply a file many times over. Cut short, `before` is only the part of
+ * `text` that `after` was built from.
+ */
+function replacedAll(
+  text: string,
+  old: string,
+  next: string,
+  max: number,
+): { readonly before: string; readonly after: string; readonly cut: boolean } {
+  const parts: string[] = [];
+  let length = 0;
+  let from = 0;
+  for (let at = text.indexOf(old); at >= 0; at = text.indexOf(old, from)) {
+    const piece = `${text.slice(from, at)}${next}`;
+    const room = max - length;
+    if (piece.length > room) {
+      parts.push(piece.slice(0, room));
+      const covered = room <= at - from ? from + room : at + old.length;
+      return { before: text.slice(0, covered), after: parts.join(''), cut: true };
+    }
+    parts.push(piece);
+    length += piece.length;
+    from = at + old.length;
+  }
+  const rest = text.slice(from);
+  const room = max - length;
+  if (rest.length > room) {
+    parts.push(rest.slice(0, room));
+    return { before: text.slice(0, from + room), after: parts.join(''), cut: true };
+  }
+  parts.push(rest);
+  return { before: text, after: parts.join(''), cut: false };
 }
 
 /** Several edits' hunks as one: whole edits, in order, while their changed lines fit the cap. */
@@ -193,16 +229,16 @@ function untitled(
       if (input.data.replace_all === true && old !== '') {
         // Every occurrence changes: the whole file is diffed when its text is known, and without it
         // the one replacement shown is flagged as only part of the edit.
-        if (current?.includes(old) === true)
+        if (current?.includes(old) === true) {
+          const replaced = replacedAll(current, old, next, BEFORE_TEXT_MAX_BYTES);
+          const edit = hunksOfTexts(replaced.before, replaced.after);
           return editOf(
             common,
             path,
             EditChange.Update,
-            hunksOfTexts(
-              current,
-              current.replaceAll(old, () => next),
-            ),
+            replaced.cut ? { ...edit, truncated: true } : edit,
           );
+        }
         return editOf(common, path, EditChange.Update, {
           ...hunksOfTexts(old, next, lineOf(current, old)),
           truncated: true,
