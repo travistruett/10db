@@ -15,12 +15,15 @@ let data: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
 let aaRequests: { key: string | null }[];
 let aaStatus: number;
+/** While set, an AA request waits for it, so a sync can be held open. */
+let aaGate: Promise<void> | null;
 
 beforeEach(() => {
   data = tempDir('benchmark key api');
   daemon = null;
   aaRequests = [];
   aaStatus = 200;
+  aaGate = null;
 });
 afterEach(async () => {
   await daemon?.stop();
@@ -72,8 +75,9 @@ async function start(
     // The entry point reads the key from the Keychain unless the daemon was started with the switch off.
     aaKey: opts.benchmarksOff === true ? () => null : () => keychain.read(AA_KEY_ACCOUNT),
     ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
-    fetch: (_input, init) => {
+    fetch: async (_input, init) => {
       aaRequests.push({ key: new Headers(init?.headers).get('x-api-key') });
+      await aaGate;
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -155,6 +159,23 @@ describe('PUT /benchmarks/key', () => {
   });
 });
 
+describe('PUT /benchmarks/key during a running sync', () => {
+  it('checks the new key with a sync of its own, after the one that read the old key', async () => {
+    const { api, security } = await start();
+    let release: () => void = () => undefined;
+    aaGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    await api.put('/benchmarks/key', BenchmarkStatusDto, { key: 'aa-old-key-not-a-secret' });
+    await waitForAsync(() => Promise.resolve(aaRequests.length > 0 ? true : undefined));
+    await api.put('/benchmarks/key', BenchmarkStatusDto, { key: KEY });
+    expect(security.items.get(AA_KEY_ACCOUNT)).toBe(KEY);
+    release();
+    await waitForAsync(() => Promise.resolve(aaRequests.length >= 2 ? true : undefined));
+    expect(aaRequests.map((r) => r.key)).toEqual(['aa-old-key-not-a-secret', KEY]);
+  });
+});
+
 describe('DELETE /benchmarks/key', () => {
   it('removes the Keychain item and answers a status with no key', async () => {
     const { api, raw, security } = await start();
@@ -163,6 +184,25 @@ describe('DELETE /benchmarks/key', () => {
     expect(res.status).toBe(200);
     expect(BenchmarkStatusDto.parse(await res.json())).toMatchObject({ keyConfigured: false });
     expect(security.items.has(AA_KEY_ACCOUNT)).toBe(false);
+  });
+
+  it('clears a refused key from the status, so nothing is left asking for a new one', async () => {
+    aaStatus = 401;
+    const { api, raw } = await start();
+    await api.put('/benchmarks/key', BenchmarkStatusDto, { key: KEY });
+    await waitForAsync(async () =>
+      (await api.get('/benchmarks/status', BenchmarkStatusDto)).outcome === 'unauthorized'
+        ? true
+        : undefined,
+    );
+    const requests = aaRequests.length;
+    await raw('DELETE', '/benchmarks/key');
+    await waitForAsync(async () =>
+      (await api.get('/benchmarks/status', BenchmarkStatusDto)).outcome === 'no_key'
+        ? true
+        : undefined,
+    );
+    expect(aaRequests.length).toBe(requests);
   });
 
   it('is refused 409 with TENDB_BENCHMARKS=off, and never touches the Keychain', async () => {

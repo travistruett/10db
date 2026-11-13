@@ -41,6 +41,12 @@ export function createBenchmarkServices(deps: {
   const refuseWhenOff = (): void => {
     if (deps.off) throw new ConflictError('Started with TENDB_BENCHMARKS=off');
   };
+  /** A sync already running read the key before the change, so one after it checks the new state. */
+  const syncAfterKeyChange = (): void => {
+    const running = deps.benchmarks.status().syncing;
+    const started = deps.benchmarks.sync();
+    if (running) void started.then(() => deps.benchmarks.sync());
+  };
   return {
     benchmarkStatus: () => withLiveKey(deps.benchmarks.status()),
     async syncBenchmarks() {
@@ -52,7 +58,8 @@ export function createBenchmarkServices(deps: {
         deps.keychain.write(AA_KEY_ACCOUNT, input.key);
       });
       // The sync checks the key with AA and never rejects; the status says it is running and the card follows it.
-      void deps.benchmarks.sync();
+      // A sync already running read the key before this one, so the new key is checked by a sync after it.
+      syncAfterKeyChange();
       return withLiveKey(deps.benchmarks.status());
     },
     async removeBenchmarkKey() {
@@ -60,6 +67,8 @@ export function createBenchmarkServices(deps: {
       await keychainConflict(() => {
         deps.keychain.remove(AA_KEY_ACCOUNT);
       });
+      // With no key a sync records that and asks no one, which clears an earlier refusal from the status.
+      syncAfterKeyChange();
       return withLiveKey(deps.benchmarks.status());
     },
   };
