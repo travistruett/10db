@@ -1,6 +1,10 @@
 import { ChatToolName, JudgeKind } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { ManualClock } from '../clock';
+import { createEventBus, createStateStore } from '../events';
+import { createJudge, type Judge } from '../judge';
+import { silentLogger } from '../log';
 import { EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { ExploreSessionSpec } from '../sessions';
 import type { ShapePrepared } from '../shape';
@@ -65,8 +69,9 @@ afterEach(async () => {
 async function firstSpec(
   judge: JudgeKind,
   model: string | null = null,
+  tendb?: (w: Pick<ChatWorld, 'store'>) => Judge,
 ): Promise<ExploreSessionSpec> {
-  w = chatWorld({ prepare: prepared, judge });
+  w = chatWorld({ prepare: prepared, judge, ...(tendb === undefined ? {} : { tendb }) });
   const chat =
     model === null ? w.open() : w.chat.create({ projectId: w.project.id, model, tabPosition: 0 });
   w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });
@@ -99,9 +104,9 @@ describe("a chat's session", () => {
       expect(profile.allowedTools).toContain(`mcp__10db__${name}`);
   });
 
+  // A tendb chat starts on its judge only when 10db's judge is ready: "a chat's judge" below.
   it.each([
     { judge: JudgeKind.Native, web: 'allow' },
-    { judge: JudgeKind.Tendb, web: 'deny' },
     { judge: JudgeKind.Rules, web: 'deny' },
   ])(
     'on a $judge judge it names its judge, and the hook answers the web $web',
@@ -138,5 +143,64 @@ describe("a chat's session", () => {
     expect(
       spec.preToolUse({ toolName: 'mcp__10db__create_task', input: { title: 'x' } }).decision,
     ).toBe('allow');
+  });
+});
+
+// Trust line §5: a chat is judged as Plan is: 10db's judge where it is the account's and ready, else the rules.
+describe("a chat's judge", () => {
+  /** 10db's judge with a key, answering every call with `choice`. */
+  const tendbAnswering =
+    (choice: string) =>
+    ({ store }: Pick<ChatWorld, 'store'>): Judge =>
+      createJudge({
+        state: createStateStore(store, createEventBus()),
+        clock: new ManualClock(),
+        fetch: () =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                id: 'gen-1',
+                model: 'typesafe/jev-1.13-20260917',
+                provider: 'TypeSafe',
+                answers: {
+                  decision: {
+                    type: 'choice',
+                    choice,
+                    confidence: 0.95,
+                    probabilities: { [choice]: 0.95 },
+                  },
+                },
+                usage: { input_tokens: 300, output_tokens: 10, cost: 0.00002 },
+              }),
+              { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+          ),
+        readKey: () => Promise.resolve('router-key-0123'),
+        decisionModelIds: () => new Set(['typesafe/jev-1.13']),
+        off: false,
+        logger: silentLogger,
+      });
+
+  it("starts on the rules when the account's judge is 10db's and it isn't ready", async () => {
+    const spec = await firstSpec(JudgeKind.Tendb);
+    expect(spec.profile.judge).toBe('rules');
+    expect(spec.judgeCall).toBeUndefined();
+    expect(spec.preToolUse({ toolName: 'WebSearch', input: { query: 'x' } }).decision).toBe('deny');
+  });
+
+  it("is judged by 10db's judge when it is ready: a deploy it stops at a limit asks the builder", async () => {
+    const spec = await firstSpec(JudgeKind.Tendb, null, tendbAnswering('writes_live'));
+    expect(spec.profile.judge).toBe('tendb');
+    const judgeCall = spec.judgeCall;
+    if (judgeCall === undefined) throw new Error('the chat has no session judge');
+    const verdict = await judgeCall({
+      toolName: 'Bash',
+      input: { command: 'vercel deploy --prod' },
+      cwd: '/repo',
+      toolUseId: 'toolu_1',
+      signal: new AbortController().signal,
+      hunk: null,
+    });
+    expect(verdict.decision).toBe('ask');
   });
 });

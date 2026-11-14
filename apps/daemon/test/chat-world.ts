@@ -21,6 +21,7 @@ import {
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
 import { createInboxService, type InboxService } from '../src/inbox';
+import type { Judge } from '../src/judge';
 import { silentLogger } from '../src/log';
 import { mintSessionToken } from '../src/mcp';
 import { FakeAdapter } from '../src/sessions';
@@ -50,7 +51,12 @@ export interface ChatWorld {
 }
 
 export function chatWorld(
-  opts: { readonly prepare?: ChatHooksDeps['prepare']; readonly judge?: JudgeKind } = {},
+  opts: {
+    readonly prepare?: ChatHooksDeps['prepare'];
+    readonly judge?: JudgeKind;
+    /** 10db's judge, made over the world's store; absent, a `tendb` chat is on the rules. */
+    readonly tendb?: (world: { readonly store: Store }) => Judge;
+  } = {},
 ): ChatWorld {
   const { store, close } = createTestStore();
   const project = seedProject(store, { name: 'alpha' });
@@ -106,6 +112,8 @@ export function chatWorld(
       ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,
+      clock,
+      ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
   const chat = createChatService({

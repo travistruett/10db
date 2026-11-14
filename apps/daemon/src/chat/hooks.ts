@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { JudgeKind } from '@10db/contracts';
 import {
   ChatToolName,
+  JudgeDecision,
+  JudgeKind,
   ConversationId,
   ConversationItemKind,
   DeniedBy,
@@ -30,13 +31,22 @@ import {
   type PictureLimits,
 } from '../conversation';
 import { storedModelNames } from '../catalogue';
+import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import { createHookJudge, createLimitNotes } from '../inbox';
+import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
-import type { ExploreProfile } from '../sessions';
+import type { ExploreProfile, ShapeToolRequest } from '../sessions';
 import type { ShapeAccess, ShapeLaunch, ShapePrepared, ShapePrepareInput } from '../shape';
-import { buildTrustPolicy, projectGrantLines, projectLiveSystems } from '../trust';
+import {
+  buildTrustPolicy,
+  judgeForCall,
+  projectGrantLines,
+  projectLiveSystems,
+  startingJudge,
+} from '../trust';
 import { judgeChatCall } from './confinement';
 import type { ChatLiveSessions } from './live-sessions';
 import { CHAT_SYSTEM_PROMPT } from './prompt';
@@ -96,6 +106,9 @@ export interface ChatHooksDeps {
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
+  /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
+  readonly judge?: Judge;
+  readonly clock: Clock;
   /** Where the chat's tools find the session that calls them. */
   readonly live: ChatLiveSessions;
 }
@@ -119,6 +132,15 @@ function deliverable(state: StateStore, item: ConversationItemRow): DeliverableM
     files: listItemFiles(state.db, [item.id]),
   };
 }
+
+/** A call as the chat's confinement reads it. */
+const chatCallOf = (req: Omit<ShapeToolRequest, 'toolUseId'>) => ({
+  toolName: req.toolName,
+  input: req.input,
+  agentId: req.agentId,
+  agentType: req.agentType,
+  cwd: req.cwd,
+});
 
 export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   const { state, log } = deps;
@@ -149,7 +171,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       chatOf(conv);
       const launch = deps.launch(conv.projectId, conv.model);
       const limits = deps.limitsFor(launch.account.kind);
-      const judge = deps.judgeOf(launch.account.kind, launch.modelId);
+      // A chat asks for its agent's judge, as Plan does; 10db's judge where it is the account's and ready.
+      const tendbReady = (await deps.judge?.ready(JudgeDecision.CrossesLimit)) ?? false;
+      const judge = startingJudge(
+        deps.judgeOf(launch.account.kind, launch.modelId),
+        true,
+        tendbReady,
+      );
+      const limitNotes = createLimitNotes();
       const project = getProject(state.db, conv.projectId);
       const ending = new AbortController();
       const ready =
@@ -164,6 +193,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               resumeProviderSessionId: start.resume,
               signal: ending.signal,
               observer: start.observer,
+              limits: limitNotes,
             });
       deps.live.open(conv.id, {
         sessionId: start.sessionId,
@@ -256,17 +286,48 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
               : ready.canUseTool(req),
+          // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
           preToolUse: (req) =>
-            judgeChatCall(
-              {
-                toolName: req.toolName,
-                input: req.input,
-                agentId: req.agentId,
-                agentType: req.agentType,
-                cwd: req.cwd,
-              },
-              access,
-            ),
+            judgeChatCall(chatCallOf(req), {
+              ...access,
+              judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+            }),
+          ...(deps.judge === undefined || judge === JudgeKind.Rules
+            ? {}
+            : {
+                judgeCall: createHookJudge(
+                  { judge: deps.judge, state, logger: log },
+                  {
+                    projectId: project.id,
+                    workstreamId: null,
+                    taskId: null,
+                    // A chat writes nothing, so its edits never reach the fast path's write rule.
+                    fastPath: {
+                      checkout: launch.cwd,
+                      tmpDir: launch.cwd,
+                      secretFiles: access.secretFiles ?? [],
+                      preExisting: [],
+                    },
+                    policy,
+                    allowLines: () => projectGrantLines(state.db, project.id),
+                    judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+                    // A chat's allow list holds none of the project's allowed commands.
+                    coveredByBuilderRule: () => false,
+                    floorVerdict: (req) => {
+                      const floor = judgeChatCall(chatCallOf(req), {
+                        ...access,
+                        judge: JudgeKind.Rules,
+                      });
+                      // A rewrite of the call is the guard's; its decision is what the floor gives.
+                      return 'updatedInput' in floor ? { decision: 'allow' } : floor;
+                    },
+                    skips: null,
+                    limits: limitNotes,
+                    onFloor: () => undefined,
+                    clock: deps.clock,
+                  },
+                ),
+              }),
         },
         limits,
         expiresAt: ready?.credentialsExpireAt ?? null,

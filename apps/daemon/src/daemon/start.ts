@@ -1623,6 +1623,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
+      clock,
+      judge,
     }),
   );
   const conversationFiles = createConversationFiles({
