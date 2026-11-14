@@ -294,6 +294,8 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
       readonly attended?: boolean;
       readonly dockerOn?: boolean;
       readonly approvedKeys?: readonly string[];
+      /** The deploy in this call was approved by its key, as the runner reads it. */
+      readonly deployApproved?: boolean;
     } = {},
   ) {
     const judge = opts.judge ?? JudgeKind.Rules;
@@ -315,13 +317,14 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
       }),
       attended: opts.attended ?? false,
       dockerOn: opts.dockerOn ?? false,
+      deployApproved: opts.deployApproved ?? false,
     });
     if (opts.attended === true) return { verdict, skip: null };
     return answerUnattended({
       verdict,
       judge,
       callKey: 'k',
-      approvedKeys: opts.approvedKeys ?? [],
+      approvedKeys: opts.approvedKeys ?? (opts.deployApproved === true ? ['k'] : []),
       path: null,
       toolName: 'Bash',
     });
@@ -337,11 +340,26 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
     });
   });
 
-  it('a deploy on rules with its key approved is allowed', () => {
-    expect(run('vercel deploy --prod', { approvedKeys: ['k'] })).toEqual({
+  it('an approved deploy alone is allowed', () => {
+    expect(run('vercel deploy --prod', { deployApproved: true })).toEqual({
       verdict: { decision: 'allow' },
       skip: null,
     });
+  });
+
+  it.each([
+    ['beside an unclaimed hazard command', 'vercel deploy --prod && pnpm add left-pad', null],
+    [
+      'inside a nested script, then a refused segment',
+      "sh -c 'echo hi; vercel deploy --prod'; git push",
+      null,
+    ],
+    ['beside a git push', 'vercel deploy --prod && git push', null],
+    ['beside a docker call while Docker is off', 'vercel deploy --prod && docker ps', 'docker_off'],
+  ] as const)('an approved deploy %s is still refused, for the rest', (_name, command, skipped) => {
+    const answer = run(command, { deployApproved: true });
+    expect(answer.verdict.decision).toBe('deny');
+    expect(answer.skip?.kind ?? null).toBe(skipped);
   });
 
   it('a deploy on native passes as T3 left it', () => {
@@ -382,11 +400,5 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
 
   it('docker ps attended is not refused by the guard', () => {
     expect(run('docker ps', { attended: true }).verdict.decision).not.toBe('deny');
-  });
-
-  it('a deploy beside a git push on rules is refused for the push', () => {
-    const answer = run('vercel deploy --prod && git push');
-    expect(answer.skip).toBeNull();
-    expect(answer.verdict.decision).toBe('deny');
   });
 });

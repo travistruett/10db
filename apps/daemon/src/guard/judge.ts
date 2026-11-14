@@ -104,6 +104,11 @@ export interface GuardInput {
   readonly attended?: boolean;
   /** The project's Docker switch is on: an unattended lane's docker call is not refused here. */
   readonly dockerOn?: boolean;
+  /**
+   * The builder approved this exact call, skipped as a deploy in an earlier run (Run these now): the
+   * floor's deploy refusal is lifted, and nothing else is.
+   */
+  readonly deployApproved?: boolean;
 }
 
 /**
@@ -655,8 +660,6 @@ function judgeShell(
   // order is not certain (a loop, a function), a `cd` anywhere may come before any segment.
   let afterCd = !ordered && changesDirectory(parse.segments);
   let coveredDeploy = false;
-  // The floor's deploy refusal is listed as a skip unattended; any other refusal in the line wins.
-  let deployRefusal: GuardVerdict | null = null;
   let previousSeparator = '';
   for (const { segment, words, hiddenByEnv, hiddenByRedirection } of segments) {
     const head = words[0] ?? '';
@@ -736,14 +739,14 @@ function judgeShell(
     if (DIRECTORY_CHANGES.has(head)) afterCd = true;
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))) {
-      if (applies(JudgedRule.Deploy)) {
-        deployRefusal ??= {
+      // A deploy the builder approved by its exact call lifts this refusal alone: every other
+      // check of this segment, the rest of the line and the hook's own still run.
+      if (applies(JudgedRule.Deploy) && input.deployApproved !== true)
+        return {
           decision: 'deny',
           reason: 'Deploy and publish commands are never run by agents.',
           rule: JudgedRule.Deploy,
         };
-        continue;
-      }
       if (ctx.coveredByAllowRule) coveredDeploy = true;
     }
     const line = words.join(' ');
@@ -760,7 +763,6 @@ function judgeShell(
       }
     }
   }
-  if (deployRefusal !== null) return deployRefusal;
   return coveredDeploy ? COVERED_DEPLOY : ALLOW;
 }
 

@@ -188,7 +188,7 @@ const skipped = (skip: UnattendedSkip): UnattendedAnswer => ({
 });
 
 /**
- * A refusal an unattended lane lists: the floor's deploy (call 8; one approved by its key runs),
+ * A refusal an unattended lane lists: the floor's deploy (call 8),
  * Docker while it is off (call 7) and a closed secret. Every other refusal stands as it is.
  */
 function refusalAnswer(
@@ -197,9 +197,9 @@ function refusalAnswer(
 ): UnattendedAnswer {
   if (verdict.rule === undefined) return { verdict, skip: null };
   switch (verdict.rule) {
+    // An approved deploy never reaches here: the guard lifts its refusal alone (`deployApproved`).
     case 'deploy':
       if (judgeRuns(input.judge)) return { verdict, skip: null };
-      if (input.approvedKeys.includes(input.callKey)) return { verdict: BARE_ALLOW, skip: null };
       return skipped({
         kind: SkipKind.Deploy,
         limit: LimitName.WritesLive,
