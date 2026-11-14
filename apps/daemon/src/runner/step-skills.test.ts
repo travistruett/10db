@@ -5,7 +5,7 @@ import { stepSkills } from './step-skills';
 describe('stepSkills', () => {
   it.each<{
     name: string;
-    persona: readonly SkillName[] | null;
+    persona: readonly string[] | null;
     kinds: readonly (readonly SkillName[])[];
     skills: readonly SkillName[];
   }>([
@@ -36,6 +36,12 @@ describe('stepSkills', () => {
         ['handoff', 'brainstorming'],
       ],
       skills: ['planning', 'handoff', 'brainstorming'],
+    },
+    {
+      name: 'a persona skill the harness does not ship is dropped',
+      persona: ['test-first', 'nonsense'],
+      kinds: [],
+      skills: ['test-first'],
     },
     { name: 'a kind with none', persona: ['planning'], kinds: [[]], skills: ['planning'] },
   ])('$name', ({ persona, kinds, skills }) => {
