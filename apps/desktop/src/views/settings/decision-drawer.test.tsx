@@ -50,14 +50,14 @@ function Harness({
   shadow,
   statsFailed = false,
 }: {
-  readonly decision?: JudgeDecision;
+  readonly decision?: AskedDecision;
   readonly stats?: DecisionStatsDto;
   readonly shadow?: ShadowAgreementDto;
   /** The stats could not be read: the page passes no entry and says so. */
   readonly statsFailed?: boolean;
 }) {
   const status = useJudgeStatus();
-  const [open, setOpen] = useState<JudgeDecision | null>(decision);
+  const [open, setOpen] = useState<AskedDecision | null>(decision);
   if (status.data === undefined) return null;
   return (
     <DecisionDrawer

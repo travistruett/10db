@@ -126,10 +126,11 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
 };
 
 /** The groups that hold at least one of `configured`, in the page's order, each with its decisions. */
-export function groupedDecisions(
-  configured: readonly JudgeDecision[],
-): readonly { readonly group: DecisionGroup; readonly decisions: readonly JudgeDecision[] }[] {
-  const inOrder = Object.values(JudgeDecision).filter((d) => configured.includes(d));
+export function groupedDecisions<D extends JudgeDecision>(
+  configured: readonly D[],
+): readonly { readonly group: DecisionGroup; readonly decisions: readonly D[] }[] {
+  const order: readonly JudgeDecision[] = Object.values(JudgeDecision);
+  const inOrder = [...configured].sort((a, b) => order.indexOf(a) - order.indexOf(b));
   return DECISION_GROUP_ORDER.flatMap((group) => {
     const decisions = inOrder.filter((d) => DECISIONS[d].group === group);
     return decisions.length > 0 ? [{ group, decisions }] : [];

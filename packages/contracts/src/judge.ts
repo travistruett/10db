@@ -92,6 +92,11 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   },
 };
 
+/** Whether 10db still asks this decision, so it has a config; a retired one only labels logged calls. */
+export function isAskedDecision(decision: JudgeDecision): decision is AskedDecision {
+  return decision in DEFAULT_JUDGE_CONFIG.decisions;
+}
+
 export const JudgeStatusDto = z.object({
   config: JudgeConfig,
   /** The account decisions run on, or null when none is picked or the one picked no longer resolves. */
