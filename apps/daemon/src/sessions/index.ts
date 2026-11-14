@@ -36,6 +36,7 @@ export type {
   SessionHandle,
   SessionMcpServer,
   ShapeImage,
+  JudgedCallRequest,
   ShapeToolRequest,
   ShapeVerdict,
   ToolCallFull,

@@ -49,6 +49,7 @@ import { AccountProbeError } from './index';
 import { CLAUDE_HOOK_TIMEOUT_SECONDS } from './claude-session-hooks';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
+import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec } from '../sandbox';
 import {
   CompletionError,
@@ -3008,6 +3009,113 @@ describe('the mode Claude Code reports with a call', () => {
       toolName: 'Bash',
       reportedMode: reported,
     });
+  });
+});
+
+describe('the session judge', () => {
+  /** Runs a lane's PreToolUse hook on one call, with the guard's and the session judge's answers given. */
+  async function hookCall(
+    guard: GuardVerdict,
+    judgeCall: LaneSessionSpec['judgeCall'] | undefined,
+    canUseTool?: LaneSessionSpec['canUseTool'],
+  ) {
+    const options = buildQueryOptions(
+      spec({
+        sandbox: laneSandbox,
+        preToolUse: () => guard,
+        ...(judgeCall === undefined ? {} : { judgeCall }),
+        ...(canUseTool === undefined ? {} : { canUseTool }),
+      }),
+      deps,
+    );
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error('the adapter passed no PreToolUse hook');
+    const output = await hook(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'vercel deploy --prod' },
+        tool_use_id: 'toolu_9',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo/sub',
+        permission_mode: 'default',
+      },
+      'toolu_9',
+      { signal: new AbortController().signal },
+    );
+    return { output, options };
+  }
+
+  it('a bare allow goes to judgeCall and its deny stands', async () => {
+    const judgeCall = vi.fn<NonNullable<LaneSessionSpec['judgeCall']>>(() =>
+      Promise.resolve({ decision: 'deny', reason: 'a deploy' }),
+    );
+    const { output } = await hookCall({ decision: 'allow' }, judgeCall);
+    expect(output).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: 'a deploy' },
+    });
+    expect(judgeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'Bash',
+        input: { command: 'vercel deploy --prod' },
+        cwd: '/repo/sub',
+        toolUseId: 'toolu_9',
+        hunk: null,
+        reportedMode: 'other',
+      }),
+    );
+  });
+
+  it('a settled allow never reaches judgeCall', async () => {
+    const judgeCall = vi.fn<NonNullable<LaneSessionSpec['judgeCall']>>();
+    const { output } = await hookCall({ decision: 'allow', settled: 'reads only' }, judgeCall);
+    expect(output).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(judgeCall).not.toHaveBeenCalled();
+  });
+
+  it('a guard deny never reaches judgeCall', async () => {
+    const judgeCall = vi.fn<NonNullable<LaneSessionSpec['judgeCall']>>();
+    const { output } = await hookCall({ decision: 'deny', reason: 'no' }, judgeCall);
+    expect(output).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
+    expect(judgeCall).not.toHaveBeenCalled();
+  });
+
+  it("judgeCall's ask reaches canUseTool with the same tool use id", async () => {
+    const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    const { output, options } = await hookCall(
+      { decision: 'allow' },
+      () => Promise.resolve({ decision: 'ask', reason: "10db's judge asks the builder" }),
+      canUseTool,
+    );
+    expect(output).toMatchObject({ hookSpecificOutput: { permissionDecision: 'ask' } });
+    await options.canUseTool?.(
+      'Bash',
+      { command: 'vercel deploy --prod' },
+      { signal: new AbortController().signal, toolUseID: 'toolu_9', requestId: 'req_9' },
+    );
+    expect(canUseTool).toHaveBeenCalledWith(
+      expect.objectContaining({ toolUseId: 'toolu_9', cwd: '/repo/sub' }),
+    );
+  });
+
+  it("a judgeCall that throws denies, naming 10db's guard", async () => {
+    const { output } = await hookCall({ decision: 'allow' }, () =>
+      Promise.reject(new Error('judge down')),
+    );
+    expect(output).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: "10db's guard failed: judge down",
+      },
+    });
+  });
+
+  it("no judgeCall leaves today's answer", async () => {
+    const { output } = await hookCall({ decision: 'allow' }, undefined);
+    expect(output).toEqual({});
   });
 });
 

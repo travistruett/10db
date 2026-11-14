@@ -17,7 +17,7 @@ import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
-import type { DeniedCall, ReportedMode } from '../trust';
+import type { DeniedCall, PatchHunk, ReportedMode } from '../trust';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -139,6 +139,11 @@ export interface AgentSessionCore {
    * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.
    */
   preToolUse(req: ShapeToolRequest): ShapeVerdict;
+  /**
+   * The session's judge, for a call `preToolUse` left open (a bare `allow`): 10db's judge on a `tendb` session.
+   * Its answer replaces the guard's; one that throws denies. Absent, the guard's answer stands.
+   */
+  readonly judgeCall?: (req: JudgedCallRequest) => Promise<GuardVerdict>;
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
@@ -183,6 +188,16 @@ export interface ExploreProfile {
 export type LaneSessionSpec = AgentSessionCore & { readonly profile: LaneProfile };
 export type ExploreSessionSpec = AgentSessionCore & { readonly profile: ExploreProfile };
 export type AgentSessionSpec = LaneSessionSpec | ExploreSessionSpec;
+
+/**
+ * A call the session judge sees: the hook's call, its tool use id (null where the agent named none), the
+ * hook's signal, and the `apply_patch` hunk a Codex edit came from.
+ */
+export type JudgedCallRequest = Omit<ShapeToolRequest, 'toolUseId'> & {
+  readonly toolUseId: string | null;
+  readonly signal: AbortSignal;
+  readonly hunk: PatchHunk | null;
+};
 
 /** A tool call as a Shape session's PreToolUse hook sees it; `agentId` is set only inside a subagent. */
 export interface ShapeToolRequest {
