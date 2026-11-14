@@ -122,26 +122,39 @@ export function createSizingService(deps: SizingDeps): SizingService {
     call: () => Promise<JudgeAnswer>,
   ): Promise<JudgeAnswer | null> {
     if (calling >= MAX_CALLS_AT_ONCE) {
+      // A waiter woken with true takes over the slot of the call that ended, so the count never dips.
       const run = await new Promise<boolean>((resolve) => {
         waiters.push({ signal, go: resolve });
       });
       if (!run) return null;
-    } else if (stopped || signal.aborted) return null;
-    calling += 1;
+    } else {
+      if (stopped || signal.aborted) return null;
+      calling += 1;
+    }
     try {
       return await call();
     } finally {
-      calling -= 1;
-      for (;;) {
-        const next = waiters.shift();
-        if (next === undefined) break;
-        if (next.signal.aborted || stopped) {
-          next.go(false);
-          continue;
-        }
-        next.go(true);
-        break;
+      handOnSlot();
+    }
+  }
+
+  /**
+   * A call ended: its slot goes straight to the first waiter still wanted, so no call starting in between can
+   * take it as well, or is freed when none waits.
+   */
+  function handOnSlot(): void {
+    for (;;) {
+      const next = waiters.shift();
+      if (next === undefined) {
+        calling -= 1;
+        return;
       }
+      if (next.signal.aborted || stopped) {
+        next.go(false);
+        continue;
+      }
+      next.go(true);
+      return;
     }
   }
 
