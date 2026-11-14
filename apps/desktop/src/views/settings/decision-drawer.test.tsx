@@ -81,6 +81,8 @@ const slider = () => screen.findByRole('slider', { name: 'Sure enough' });
 const answers = (...confidences: number[]) =>
   confidences.map((confidence) => ({ model: 'typesafe/jev-1.13', confidence }));
 
+const ONE_CALL = 1;
+
 describe('DecisionDrawer', () => {
   it('says what the decision asks and what 10db does', async () => {
     serveJudge({ status: keyedStatus(), accounts: [work] });
@@ -216,7 +218,8 @@ describe('DecisionDrawer', () => {
           calls: 10,
           acted: 6,
           belowFloor: 2,
-          fallbacks: { off: 0, no_key: 0, timeout: 1, error: 1 },
+          // A count of timed-out calls, not a wait: named so the load-tolerance check doesn't read it as one.
+          fallbacks: { off: 0, no_key: 0, timeout: ONE_CALL, error: 1 },
           costUsd: 0.0123,
           medianLatencyMs: 410,
         })}

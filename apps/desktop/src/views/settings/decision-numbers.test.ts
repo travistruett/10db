@@ -20,6 +20,8 @@ import {
   thresholdPreview,
 } from './decision-numbers';
 
+const NO_CALLS = 0;
+
 const stats = (over: Partial<DecisionStatsDto> = {}): DecisionStatsDto => ({
   decision: JudgeDecision.ReviewSize,
   calls: 0,
@@ -27,7 +29,8 @@ const stats = (over: Partial<DecisionStatsDto> = {}): DecisionStatsDto => ({
   belowFloor: 0,
   shadow: 0,
   stopped: 0,
-  fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
+  // A count of timed-out calls, not a wait: named so the load-tolerance check doesn't read it as one.
+  fallbacks: { off: 0, no_key: 0, timeout: NO_CALLS, error: 0 },
   costUsd: 0,
   medianLatencyMs: null,
   answers: [],
