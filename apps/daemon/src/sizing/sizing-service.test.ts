@@ -31,6 +31,8 @@ let state: StateStore;
 let clock: ManualClock;
 let projectId: ReturnType<typeof seedProject>['id'];
 let service: SizingService | null;
+/** What the starter says of a task whose join into a batch is pending; null for none. */
+let joining: string | null;
 let account: ReturnType<typeof seedAccount> | null;
 const offJudge: Judge = {
   off: true,
@@ -43,6 +45,7 @@ beforeEach(() => {
   bus = createEventBus();
   state = createStateStore(store, bus);
   service = null;
+  joining = null;
   account = null;
   store.write((ctx) => {
     insertKind(ctx, {
@@ -67,7 +70,7 @@ function start(judge: Judge = offJudge): SizingService {
     judge,
     clock,
     log: silentLogger,
-    joiningProblem: () => null,
+    joiningProblem: () => joining,
   });
   return service;
 }
@@ -322,34 +325,94 @@ describe('judge sizing', () => {
     });
   });
 
-  it('asks the judge for at most four tasks at a time, in creation order', async () => {
-    const release = new Map<TaskId, () => void>();
+  /** A judge whose every call waits to be let go one at a time, in the order they were made. */
+  function oneByOne() {
+    const waiting: (() => void)[] = [];
     const judge = scriptedJudge(
       state,
-      (req) =>
+      () =>
         new Promise<ScriptedAnswer>((resolve) => {
-          const id = req.taskId;
-          if (id === undefined) return;
-          const was = release.get(id);
-          release.set(id, () => {
-            was?.();
+          waiting.push(() => {
             resolve({ choice: 'light', confidence: 0.9 });
           });
         }),
     );
+    return { judge, waiting };
+  }
+
+  it('makes at most four judge calls at once across all tasks, in creation order', async () => {
+    const { judge, waiting } = oneByOne();
     const sizer = start(judge);
-    const tasks = [1, 2, 3, 4, 5].map((n) => create({ title: `Task ${String(n)}` }));
-    const askedTasks = () => new Set(judge.requests.map((r) => r.taskId));
+    const tasks = [1, 2, 3].map((n) => create({ title: `Task ${String(n)}` }));
     await vi.waitFor(() => {
-      expect(askedTasks().size).toBe(4);
+      expect(judge.requests).toHaveLength(4);
     });
-    expect(askedTasks().has(tasks[4]?.id)).toBe(false);
-    release.get(tasks[0]?.id ?? mintId('Task'))?.();
+    // Three calls for the first task and the first of the second: nothing more is asked yet.
+    expect(judge.requests.map((r) => r.taskId)).toEqual([
+      tasks[0]?.id,
+      tasks[0]?.id,
+      tasks[0]?.id,
+      tasks[1]?.id,
+    ]);
+    waiting.shift()?.();
     await vi.waitFor(() => {
-      expect(askedTasks().has(tasks[4]?.id)).toBe(true);
+      expect(judge.requests).toHaveLength(5);
     });
-    for (const fn of release.values()) fn();
+    await vi.waitFor(() => {
+      for (const fn of waiting.splice(0)) fn();
+      expect(judge.requests).toHaveLength(9);
+    });
     await sizer.settled(tasks.map((t) => t.id));
+  });
+
+  it('stopping cuts the calls not yet made, logging none for them', async () => {
+    const { judge, waiting } = oneByOne();
+    const sizer = start(judge);
+    const tasks = [1, 2, 3].map((n) => create({ title: `Task ${String(n)}` }));
+    await vi.waitFor(() => {
+      expect(judge.requests).toHaveLength(4);
+    });
+    sizer.stop();
+    for (const fn of waiting) fn();
+    await vi.waitFor(() => {
+      expect(listJudgeCalls(store.db, 50)).toHaveLength(4);
+    });
+    await sizer.settled(tasks.map((t) => t.id));
+    expect(judge.requests).toHaveLength(4);
+    expect(listJudgeCalls(store.db, 50)).toHaveLength(4);
+  });
+
+  it('keeps the judge’s kinds through an edit until the new answer lands', async () => {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let second = false;
+    const judge = scriptedJudge(state, async (req) => {
+      if (req.decision === JudgeDecision.TaskRigor) return careful;
+      if (second) await gate;
+      return { choice: req.question.includes('(docs)') ? 'yes' : 'no', confidence: 0.9 };
+    });
+    const sizer = start(judge);
+    const task = create();
+    await sizer.settled([task.id]);
+    expect(getTask(store.db, task.id).kinds).toEqual([{ key: 'docs', source: 'judge' }]);
+    second = true;
+    edit(task.id, { title: 'Alpha, again' });
+    expect(getTask(store.db, task.id).kinds).toEqual([{ key: 'docs', source: 'judge' }]);
+    release();
+    await sizer.settled([task.id]);
+    expect(getTask(store.db, task.id).kinds).toEqual([{ key: 'docs', source: 'judge' }]);
+  });
+
+  it('drops the judge’s kinds on an edit once when the judge is off', async () => {
+    const judge = scriptedJudge(state, answering(careful, { docs: 'yes' }));
+    const sizer = start(judge);
+    const task = create();
+    await sizer.settled([task.id]);
+    state.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));
+    edit(task.id, { title: 'Alpha, again' });
+    expect(getTask(store.db, task.id)).toMatchObject({ kinds: [], sizedByRules: true });
   });
 });
 
@@ -388,6 +451,13 @@ describe('a judge answer for text or pins that have since changed', () => {
       name: 'the builder took a kind off',
       during: (id: TaskId) =>
         store.db.$client.prepare('UPDATE tasks SET kinds_off = ? WHERE id = ?').run('["docs"]', id),
+      then: { rigor: null, kinds: [] },
+    },
+    {
+      name: 'the task began joining a batch',
+      during: () => {
+        joining = 'is joining a batch';
+      },
       then: { rigor: null, kinds: [] },
     },
     {
@@ -434,6 +504,17 @@ describe('a judge answer for text or pins that have since changed', () => {
       kinds: [],
     });
     expect(sizing(task.id)?.sizedFor).toBe(sizingFingerprint(getTask(store.db, task.id)));
+  });
+
+  it('leaves a task that is joining a batch to the rules’ answer it had: no rules, no judge', async () => {
+    joining = 'is joining a batch';
+    const judge = scriptedJudge(state, answering(careful));
+    const sizer = start(judge);
+    const task = create({ areas: ['migrations'] });
+    await sizer.settled([task.id]);
+    expect(judge.requests).toHaveLength(0);
+    expect(sizedFor(task.id)).toBeNull();
+    expect(getTask(store.db, task.id).kinds).toEqual([]);
   });
 
   it('does not ask again for a change that is not an edit of the text', async () => {

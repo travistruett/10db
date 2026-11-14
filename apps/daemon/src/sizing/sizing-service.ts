@@ -33,8 +33,8 @@ import { sizingFingerprint } from './fingerprint';
 import { kindRequest, readKind, readRigor, rigorRequest, sizingState } from './judge-sizing';
 import { sizeByRules } from './rules';
 
-/** Judge calls run for this many tasks at a time; the rest wait their turn, oldest first. */
-const MAX_TASKS_AT_ONCE = 4;
+/** At most this many judge calls are in flight at once, across all tasks; the rest wait their turn, oldest first. */
+const MAX_CALLS_AT_ONCE = 4;
 /** The start-up sweep asks the judge only about tasks made this recently; older ones get the rules. */
 const SWEEP_JUDGES_WITHIN_MS = 24 * 60 * 60 * 1000;
 /** How long a start waits for sizing still in flight before it goes on with the rules' answer. */
@@ -66,12 +66,11 @@ export interface SizingService {
   stop(): void;
 }
 
-/** One task's judge calls: queued, then running, then applied. */
+/** One task's judge calls: asked through the call limiter, then applied. */
 interface Job {
   readonly taskId: TaskId;
   readonly fingerprint: string;
   readonly controller: AbortController;
-  started: boolean;
   readonly done: Promise<void>;
   finish(): void;
 }
@@ -95,12 +94,57 @@ const pinsOf = (task: TaskSizingState): string =>
     [...task.kindsOff].sort(),
   ]);
 
-/** Whether a task can be sized at all: open, never started and not a Workbench page. */
-function sizable(task: TaskSizingState): boolean {
-  return task.status === TaskStatus.Open && !task.started && task.passId === null;
-}
-
 export function createSizingService(deps: SizingDeps): SizingService {
+  /**
+   * Whether a task can be sized at all: open, never started, not a Workbench page, and not joining a batch.
+   * A join writes its workstreams after its git and gh calls, so a task that is joining has started: its plan
+   * is already fixed.
+   */
+  function sizable(task: TaskSizingState, taskId: TaskId): boolean {
+    return (
+      task.status === TaskStatus.Open &&
+      !task.started &&
+      task.passId === null &&
+      deps.joiningProblem(taskId) === null
+    );
+  }
+
+  let stopped = false;
+  let calling = 0;
+  const waiters: { readonly signal: AbortSignal; go(run: boolean): void }[] = [];
+
+  /**
+   * Makes one judge call when fewer than four are in flight, else after the ones ahead of it. Null when the
+   * call was never made: its task's text changed while it waited, or the service stopped.
+   */
+  async function limited(
+    signal: AbortSignal,
+    call: () => Promise<JudgeAnswer>,
+  ): Promise<JudgeAnswer | null> {
+    if (calling >= MAX_CALLS_AT_ONCE) {
+      const run = await new Promise<boolean>((resolve) => {
+        waiters.push({ signal, go: resolve });
+      });
+      if (!run) return null;
+    } else if (stopped || signal.aborted) return null;
+    calling += 1;
+    try {
+      return await call();
+    } finally {
+      calling -= 1;
+      for (;;) {
+        const next = waiters.shift();
+        if (next === undefined) break;
+        if (next.signal.aborted || stopped) {
+          next.go(false);
+          continue;
+        }
+        next.go(true);
+        break;
+      }
+    }
+  }
+
   /**
    * Where the task works once its kinds are `kinds`: the placement rule's answer, which a pending join
    * into a batch can't take, so a move the rule would make then is left for later.
@@ -125,11 +169,20 @@ export function createSizingService(deps: SizingDeps): SizingService {
    */
   function sizeByRulesNow(taskId: TaskId): string | null {
     const task = readTaskSizing(deps.state.db, taskId);
-    if (task === null || !sizable(task)) return null;
+    if (task === null || !sizable(task, taskId)) return null;
     const fingerprint = sizingFingerprint(task);
     if (fingerprint === task.sizedFor) return null;
+    // The judge's kinds stay until its new answer lands, so the placement rule doesn't flip back and forth;
+    // with no judge to answer, the rules decide and they go.
+    const keep = judgeAvailable()
+      ? task.kinds.filter((k) => k.source === TaskKindSource.Judge)
+      : [];
     const applied = deps.state.write((ctx) => {
-      const sizing = sizeByRules({ task, kinds: listKinds(ctx.tx) });
+      const sizing = sizeByRules({
+        task,
+        kinds: listKinds(ctx.tx),
+        judged: { kinds: keep },
+      });
       return (
         applyTaskSizing(
           ctx,
@@ -138,7 +191,14 @@ export function createSizingService(deps: SizingDeps): SizingService {
             fingerprint,
             kinds: sizing.kinds,
             clearJudged: true,
-            sizingCalls: { rigor: null, kinds: {} },
+            sizingCalls: {
+              rigor: null,
+              kinds: Object.fromEntries(
+                Object.entries(task.sizingCalls.kinds).filter(([key]) =>
+                  keep.some((k) => k.key === key),
+                ),
+              ),
+            },
           },
           placementFor(ctx.tx),
         ) !== null
@@ -148,8 +208,6 @@ export function createSizingService(deps: SizingDeps): SizingService {
   }
 
   const inflight = new Map<TaskId, Job>();
-  const queue: Job[] = [];
-  let running = 0;
 
   /** Whether the judge can be asked at all: on, with an account, and a decision to ask. */
   function judgeAvailable(): boolean {
@@ -161,7 +219,12 @@ export function createSizingService(deps: SizingDeps): SizingService {
   /** Asks the judge about the task as it stands and applies the answers in one write. */
   async function judgeTask(job: Job): Promise<void> {
     const asked = readTaskSizing(deps.state.db, job.taskId);
-    if (asked === null || !sizable(asked) || sizingFingerprint(asked) !== job.fingerprint) return;
+    if (
+      asked === null ||
+      !sizable(asked, job.taskId) ||
+      sizingFingerprint(asked) !== job.fingerprint
+    )
+      return;
     const config = getJudgeConfig(deps.state.db);
     const known = listKinds(deps.state.db);
     const implied = new Set(
@@ -187,8 +250,12 @@ export function createSizingService(deps: SizingDeps): SizingService {
       signal: job.controller.signal,
     };
     const [rigorAnswer, ...kindAnswers] = await Promise.all([
-      askRigor ? deps.judge.choose(rigorRequest(text)) : Promise.resolve(null),
-      ...askKinds.map((kind) => deps.judge.choose(kindRequest(kind, text))),
+      askRigor
+        ? limited(job.controller.signal, () => deps.judge.choose(rigorRequest(text)))
+        : Promise.resolve(null),
+      ...askKinds.map((kind) =>
+        limited(job.controller.signal, () => deps.judge.choose(kindRequest(kind, text))),
+      ),
     ]);
 
     deps.state.write((ctx) => {
@@ -197,7 +264,7 @@ export function createSizingService(deps: SizingDeps): SizingService {
       // else and they are for a task that is no longer the one asked about.
       if (
         now === null ||
-        !sizable(now) ||
+        !sizable(now, job.taskId) ||
         sizingFingerprint(now) !== job.fingerprint ||
         pinsOf(now) !== pinsOf(asked)
       ) {
@@ -213,9 +280,9 @@ export function createSizingService(deps: SizingDeps): SizingService {
       const judged: TaskKind[] = [];
       const calls: Record<string, JudgeCallId> = {};
       askKinds.forEach((kind, i) => {
-        const answer: JudgeAnswer | undefined = kindAnswers[i];
+        const answer: JudgeAnswer | null | undefined = kindAnswers[i];
         const read =
-          answer === undefined
+          answer === undefined || answer === null
             ? null
             : readKind(answer, config.decisions[JudgeDecision.TaskKinds].floor);
         if (read === null) return;
@@ -246,51 +313,23 @@ export function createSizingService(deps: SizingDeps): SizingService {
     });
   }
 
-  function pump(): void {
-    while (running < MAX_TASKS_AT_ONCE) {
-      const job = queue.shift();
-      if (job === undefined) return;
-      job.started = true;
-      running += 1;
-      judgeTask(job)
-        .catch((error: unknown) => {
-          deps.log.error({ err: error, taskId: job.taskId }, 'could not size a task by the judge');
-        })
-        .finally(() => {
-          running -= 1;
-          if (inflight.get(job.taskId) === job) inflight.delete(job.taskId);
-          job.finish();
-          pump();
-        });
-    }
-  }
-
-  /** Queues the judge for a task whose rules have just run; an older call for older text is cut short. */
+  /** Starts the judge for a task whose rules have just run; an older call for older text is cut short. */
   function enqueue(taskId: TaskId, fingerprint: string): void {
-    const older = inflight.get(taskId);
-    if (older !== undefined) {
-      older.controller.abort();
-      const at = queue.indexOf(older);
-      if (at >= 0) {
-        queue.splice(at, 1);
-        older.finish();
-      }
-    }
+    inflight.get(taskId)?.controller.abort();
     let finish = (): void => undefined;
     const done = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const job: Job = {
-      taskId,
-      fingerprint,
-      controller: new AbortController(),
-      started: false,
-      done,
-      finish,
-    };
+    const job: Job = { taskId, fingerprint, controller: new AbortController(), done, finish };
     inflight.set(taskId, job);
-    queue.push(job);
-    pump();
+    judgeTask(job)
+      .catch((error: unknown) => {
+        deps.log.error({ err: error, taskId }, 'could not size a task by the judge');
+      })
+      .finally(() => {
+        if (inflight.get(taskId) === job) inflight.delete(taskId);
+        job.finish();
+      });
   }
 
   const unsubscribe = deps.bus.subscribe((event) => {
@@ -331,7 +370,10 @@ export function createSizingService(deps: SizingDeps): SizingService {
     },
     stop() {
       unsubscribe();
+      stopped = true;
       for (const job of inflight.values()) job.controller.abort();
+      // Calls still waiting for a turn are never made.
+      for (const waiter of waiters.splice(0)) waiter.go(false);
     },
   };
 }

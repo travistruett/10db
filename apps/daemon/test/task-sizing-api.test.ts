@@ -21,15 +21,22 @@ let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
 /** Each question OpenRouter was asked, held until a test lets it answer. */
 let held: { readonly rigor: boolean; answer(): void }[];
+/** Once set, a question is answered as it arrives: at most four are asked at once, so the rest follow. */
+let answering: boolean;
+const answerAll = (): void => {
+  answering = true;
+  for (const call of held) call.answer();
+};
 
 beforeEach(() => {
   data = tempDir('task sizing');
   repo = createTempRepo();
   daemon = null;
   held = [];
+  answering = false;
 });
 afterEach(async () => {
-  for (const call of held) call.answer();
+  answerAll();
   await daemon?.stop();
   repo.cleanup();
   data.cleanup();
@@ -52,7 +59,7 @@ async function start(sizingWaitMs: number) {
     fetch: (_url, init) =>
       new Promise<Response>((resolve) => {
         const rigor = typeof init?.body === 'string' && init.body.includes('"careful"');
-        held.push({
+        const call = {
           rigor,
           answer: () => {
             const choice = rigor ? 'critical' : 'no';
@@ -71,7 +78,9 @@ async function start(sizingWaitMs: number) {
               }),
             );
           },
-        });
+        };
+        held.push(call);
+        if (answering) call.answer();
       }),
   });
   const api = apiClient(daemon.url, daemon.token);
@@ -94,9 +103,9 @@ async function start(sizingWaitMs: number) {
     acceptanceCriteria: ['x'],
     areas: ['src'],
   });
-  // One question for the rigor and one for each kind the rules did not settle: all of them are held.
-  const questions = (await api.get('/kinds', z.array(KindDto))).length + 1;
-  await waitForAsync(() => Promise.resolve(held.length === questions));
+  // One question for the rigor and one per kind, at most four in flight: the first four are held.
+  expect((await api.get('/kinds', z.array(KindDto))).length).toBeGreaterThan(3);
+  await waitForAsync(() => Promise.resolve(held.length === 4));
   return { api, project, task };
 }
 
@@ -112,7 +121,7 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
     const starting = api.post(`/tasks/${task.id}/start`, WorkstreamDto);
     // The start is parked on the sizing: nothing has answered, so nothing has started.
     expect(await taskOf(api, project.id, task.id)).toMatchObject({ workstreamId: null });
-    for (const call of held) call.answer();
+    answerAll();
     const run = await starting;
     expect(await taskOf(api, project.id, task.id)).toMatchObject({
       workstreamId: run.id,
@@ -129,7 +138,7 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
       rigor: null,
       sizedByRules: true,
     });
-    for (const call of held) call.answer();
+    answerAll();
     await waitForAsync(async () => (await callsOf(api)).calls[0]?.outcome === 'stopped');
     expect(await taskOf(api, project.id, task.id)).toMatchObject({ rigor: null });
   });
@@ -138,7 +147,7 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
 describe('a daemon start', () => {
   it('sizes the tasks made while it was down', async () => {
     const { api, project, task } = await start(50);
-    for (const call of held) call.answer();
+    answerAll();
     await waitForAsync(async () => (await taskOf(api, project.id, task.id))?.rigor === 'critical');
     // As if the task had been made by a daemon that never sized it.
     daemon?.state.db.$client
