@@ -39,7 +39,7 @@ import {
 import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true);
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the

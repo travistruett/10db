@@ -494,6 +494,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       ...(deps.prepare === undefined ? {} : { prepare: deps.prepare }),
       limitsFor,
       judgeOf: (kind, model) => deps.adapter.capabilities({ kind }, model).judge,
+      subagentsOf: (kind, model) => deps.adapter.capabilities({ kind }, model).subagents,
       ...(deps.judge === undefined ? {} : { judge: deps.judge }),
       clock: deps.clock,
       contextLimitPct: deps.contextLimitPct ?? CONTEXT_LIMIT_PCT,

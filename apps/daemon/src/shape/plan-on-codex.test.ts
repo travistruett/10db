@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe('Plan on a ChatGPT account', () => {
-  it('starts, takes a message, a model choice and Propose, on an explore session', async () => {
+  it('starts, takes a message, a model choice and Propose, on an explore session with no agents', async () => {
     f = createServiceFixture({ accountKind: AccountKind.CodexSignin, models: () => MODELS });
     // The project's own account is the ChatGPT plan, which the engine reads the capabilities of.
     f.c.store.db
@@ -46,7 +46,10 @@ describe('Plan on a ChatGPT account', () => {
     await f.service.settled(shapeId);
     expect(f.service.propose(shapeId)).toMatchObject({ status: 'started' });
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
-    expect(spec.profile.kind).toBe('explore');
+    // Codex has no Agent tool: the session gets no agents, and its prompt asks for none.
+    expect(spec.profile.agents).toEqual({});
+    expect(spec.profile.systemPrompt).not.toContain('Agent call');
+    expect(spec.profile.systemPrompt).toContain('need a Claude account');
     const conversation = f.engine.view(shapeConversation(f.c.store.db, shapeId).id);
     expect(conversation.capabilities).toMatchObject({ label: 'Codex', subagents: false });
   });

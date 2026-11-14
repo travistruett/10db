@@ -136,6 +136,8 @@ export interface ShapeOwnerDeps {
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
+  /** Whether the agent on an account kind and model runs Plan's agents (`capabilities.subagents`). */
+  readonly subagentsOf: (kind: AgentAccountKind, model: string) => boolean;
   /** 10db's judge, asked whether it is ready as each session starts; absent, a tendb session is on the rules. */
   readonly judge?: Judge;
   readonly clock: Clock;
@@ -536,6 +538,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
             };
       const access: ShapeAccess = commands === undefined ? withSetup : { ...withSetup, commands };
       const toolset = shapeToolset(commands !== undefined);
+      const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
       const skipped = ready?.note ?? null;
       const project = getProject(state.db, shape.projectId);
       // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next.
@@ -561,11 +564,12 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           profile: {
             kind: 'explore',
             judge,
-            systemPrompt: shapeSystemPrompt(launch.agentModels),
+            systemPrompt: shapeSystemPrompt(launch.agentModels, subagents),
             tools: [...toolset.tools],
             allowedTools: [...shapeAllowedTools(judge)],
             disallowedTools: [...toolset.disallowedTools],
-            agents: toolset.agents,
+            // Without subagents (Codex) the session has none of Plan's agents (sessions spec S8).
+            agents: subagents ? toolset.agents : {},
           },
           cwd: launch.cwd,
           instructions: ready?.instructions ?? null,

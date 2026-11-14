@@ -54,7 +54,7 @@ import { noisePng, pngImage } from './png';
 import { READ_CHARGE_MAX_BYTES } from '../src/conversation';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true);
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`
