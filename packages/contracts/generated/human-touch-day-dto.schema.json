@@ -41,6 +41,16 @@
       "minimum": 0,
       "maximum": 9007199254740991
     },
+    "plan": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "moveReport": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "cards": {
       "type": "integer",
       "minimum": 0,
@@ -80,6 +90,8 @@
     "proposal",
     "review",
     "check",
+    "plan",
+    "moveReport",
     "cards",
     "tasksRan",
     "cardsPerTask",

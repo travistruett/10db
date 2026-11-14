@@ -8,6 +8,7 @@ import {
   type GoalSummaryDto,
   type HumanTouchDayDto,
   type PassViewDto,
+  type RigorFiguresDto,
   type ProjectViewDto,
   type TaskDto,
   type WorkstreamDto,
@@ -1553,6 +1554,8 @@ describe('FactoryView human-touch panel', () => {
     proposal: 0,
     review: 0,
     check: 0,
+    plan: 0,
+    moveReport: 0,
     cards: 0,
     tasksRan: 0,
     cardsPerTask: null,
@@ -1578,6 +1581,8 @@ describe('FactoryView human-touch panel', () => {
           workstreamFailed: 19,
           flag: 14,
           proposal: 2,
+          plan: 3,
+          moveReport: 1,
           cards: 60,
           tasksRan: 24,
           cardsPerTask: 2.5,
@@ -1607,13 +1612,30 @@ describe('FactoryView human-touch panel', () => {
       '2',
       '0',
       '0',
+      '3',
+      '1',
       '60',
       '2.5',
       '137 min',
       '485 min',
     ]);
     // A day with no task running has no cards per task to show.
-    expect(quiet).toEqual(['Nov 2', '0', '0', '0', '0', '0', '0', '0', '0', '–', '0 min', '0 min']);
+    expect(quiet).toEqual([
+      'Nov 2',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '–',
+      '0 min',
+      '0 min',
+    ]);
     expect(
       within(table)
         .getAllByRole('columnheader')
@@ -1627,6 +1649,8 @@ describe('FactoryView human-touch panel', () => {
       'Proposal',
       'Review',
       'Check',
+      'Plan',
+      'Move report',
       'Cards',
       'Per task',
       'Waited on an answer',
@@ -1648,6 +1672,114 @@ describe('FactoryView human-touch panel', () => {
     renderApp('/factory');
 
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
+  });
+});
+
+describe('FactoryView rigor panel', () => {
+  const row = (
+    rigor: RigorFiguresDto['rows'][number]['rigor'],
+    over: Partial<RigorFiguresDto['rows'][number]> = {},
+  ): RigorFiguresDto['rows'][number] => ({
+    rigor,
+    tasksDone: 0,
+    stepsPerTask: null,
+    sessionsPerTask: null,
+    pullRequestsPerTask: null,
+    stepsPerGoal: null,
+    sessionsPerGoal: null,
+    sentBackPerTask: null,
+    pullRequestsPerGoal: null,
+    shippedWithFindings: null,
+    ...over,
+  });
+
+  const figures = (
+    period: RigorFiguresDto['period'],
+    judgeOverride: RigorFiguresDto['judgeOverride'],
+  ): RigorFiguresDto => ({
+    period,
+    rows: [
+      row('light', {
+        tasksDone: 4,
+        stepsPerTask: 1.25,
+        sessionsPerTask: 1,
+        pullRequestsPerTask: 1,
+        stepsPerGoal: 2.5,
+        sessionsPerGoal: 2,
+        sentBackPerTask: 0,
+        pullRequestsPerGoal: 1.5,
+        shippedWithFindings: 0,
+      }),
+      row('standard', {
+        tasksDone: 3,
+        stepsPerTask: 3,
+        sessionsPerTask: 2.66,
+        pullRequestsPerTask: 0,
+        sentBackPerTask: 0.33,
+        pullRequestsPerGoal: null,
+        shippedWithFindings: 1 / 3,
+      }),
+      row('careful'),
+      row('critical'),
+      row('all', { tasksDone: 7, stepsPerTask: 2, sessionsPerTask: 1.7, sentBackPerTask: 0.1 }),
+    ],
+    judgeOverride,
+  });
+
+  it('shows a row per rigor and refetches for the period chosen', async () => {
+    const asked: (string | null)[] = [];
+    serve(
+      goals(goalListDto()),
+      http.get(daemonUrl('/projects/:projectId/rigor-figures'), ({ request }) => {
+        const days = new URL(request.url).searchParams.get('days');
+        asked.push(days);
+        return HttpResponse.json(
+          days === '30' ? figures(30, null) : figures(14, { calls: 12, overridden: 3 }),
+        );
+      }),
+    );
+    renderApp('/factory');
+
+    const table = await screen.findByRole('table', { name: 'Work per task by rigor' });
+    expect(
+      within(table)
+        .getAllByRole('row')
+        .map((r) =>
+          within(r)
+            .getAllByRole(r.querySelector('th') ? 'columnheader' : 'cell')
+            .map((c) => c.textContent),
+        ),
+    ).toEqual([
+      [
+        'Rigor',
+        'Tasks done',
+        'Steps per task',
+        'Sessions per task',
+        'PRs per task',
+        'Steps per goal',
+        'Sessions per goal',
+        'PRs per goal',
+        'Sent back per task',
+        'Shipped with findings',
+      ],
+      ['Light', '4', '1.3', '1', '1', '2.5', '2', '1.5', '0', '0%'],
+      ['Standard', '3', '3', '2.7', '0', '–', '–', '–', '0.3', '33%'],
+      ['Careful', '0', '–', '–', '–', '–', '–', '–', '–', '–'],
+      ['Critical', '0', '–', '–', '–', '–', '–', '–', '–', '–'],
+      ['All', '7', '2', '1.7', '–', '–', '–', '–', '0.1', '–'],
+    ]);
+    expect(screen.getByText("You changed the judge's sizing 3 of 12 times")).toBeTruthy();
+    expect(asked).toEqual(['14']);
+
+    fireEvent.click(screen.getByLabelText('30 days'));
+
+    await waitFor(() => {
+      expect(asked).toEqual(['14', '30']);
+    });
+    // The judge made no calls in that period, so there is no override line.
+    await waitFor(() => {
+      expect(screen.queryByText(/You changed the judge's sizing/)).toBeNull();
+    });
   });
 });
 
@@ -1763,7 +1895,9 @@ describe('FactoryView across projects', () => {
     expect(await within(betaGroup).findByRole('button', { name: /^Beta goal/ })).toBeTruthy();
     // Human touch is one project's; with every project shown it says to choose one.
     expect(
-      screen.getByText('Choose a project to see how often a person was needed in it.'),
+      screen.getByText(
+        'Choose a project to see its work per rigor and how often a person was needed in it.',
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Human touch' })).toBeNull();
   });
