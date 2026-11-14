@@ -117,8 +117,6 @@ export interface PromptInput {
   readonly judged?: boolean;
   /** Which judge that is: `tendb`, 10db's own, is named as such; auto mode's wording otherwise. */
   readonly judge?: JudgeKind;
-  /** A Codex session searches the web from OpenAI's index (the Web switch is on). */
-  readonly codexWebSearch?: boolean;
   /** The judge also settles the lane's WebSearch and WebFetch (the Web switch is on), so they wait on no card. */
   readonly webJudged?: boolean;
   /** A person is in the session (the trust policy's `attended`); absent counts as attended. */
@@ -346,8 +344,6 @@ const SANDBOX_RULES = [
 
 /** Codex has no auto mode, and a command it cannot run loses its output instead of stopping on a prompt. */
 /** What a Codex session's web search is, with the Web switch on. */
-const CODEX_WEB_SEARCH_RULE = "Web search answers from OpenAI's index; it opens no page you name.";
-
 const CODEX_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains fails with its output lost. If you need one, ask with `mcp__10db__ask_human`. The builder adds a host in Settings, which applies from your next session.";
 
@@ -457,7 +453,6 @@ interface SetupLines {
   readonly tendb: boolean;
   readonly inPass: boolean;
   readonly webJudged: boolean;
-  readonly codexWebSearch: boolean;
   readonly attended: boolean;
 }
 
@@ -494,10 +489,8 @@ function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string
       return withSetupLines(SANDBOX_RULES, setup);
     case Provider.Codex:
       return withSetupLines(
-        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).flatMap((line) =>
-          line === CLAUDE_HOSTS_RULE
-            ? [CODEX_HOSTS_RULE, ...(setup.codexWebSearch ? [CODEX_WEB_SEARCH_RULE] : [])]
-            : [line],
+        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
+          line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
         ),
         setup,
       );
@@ -915,7 +908,6 @@ export function buildSessionPrompt(input: PromptInput): string {
       tendb: input.judge === JudgeKind.Tendb,
       inPass: input.inPass === true,
       webJudged: input.webJudged === true,
-      codexWebSearch: input.codexWebSearch === true,
       attended: input.attended !== false,
     },
   );

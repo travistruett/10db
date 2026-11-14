@@ -4163,6 +4163,44 @@ describe('flows', () => {
         expect(filed.find((t) => t.id === ids[1])?.description).toContain(QA_FINDINGS);
       });
 
+      it('files one follow-up when QA sends the work back and the review rejects past its limit again', async () => {
+        const LATER = '1. BLOCKING src/api/a.txt:9 the card still hides what the reviewer found.';
+        const QA_SENT_BACK = '1. BLOCKING src/api/a.txt:1 the empty state crashes.';
+        engine = await createTestEngine({
+          Alpha: [
+            [plan, turn],
+            // Round 1 of the review, then its rejection past the limit that ships, then QA sends the work
+            // back, the review rejects past its limit once more, and QA approves.
+            [turn],
+            [reject('op-flow-0591', '1. NOTE round 1'), turn],
+            [turn],
+            [reject('op-flow-0592', FINAL), turn],
+            [reject('op-flow-0593', QA_SENT_BACK), turn],
+            [turn],
+            [reject('op-flow-0594', LATER), turn],
+            [approve('op-flow-0595'), turn],
+          ],
+        });
+        engine.state.write((ctx) =>
+          setPlaybook(ctx, null, { rows: [{ rigor: 'critical', reviewRounds: 1 }] }),
+        );
+        const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
+          flow: 'full',
+          criteria: 4,
+        });
+        await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+        expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+        const [filed, ...rest] = filedFor(task.id);
+        expect(rest).toEqual([]);
+        expect(step(workstream.id, 2)?.shippedAtLimit).toEqual({
+          followUpTaskId: filed?.id,
+          followUpTitle: filed?.title,
+        });
+        // The follow-up is still unstarted, so what the review found the second time joins it.
+        expect(filed?.description).toContain(FINAL);
+        expect(filed?.description).toContain(LATER);
+      });
+
       it('skips QA, as an approval would, when only Markdown changed', async () => {
         const docsPlan = {
           do: 'mcp' as const,
@@ -5810,11 +5848,14 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         ),
       );
     };
-    const start = async (setup: Parameters<typeof createTestEngine>[3] = GATEWAY) => {
+    const start = async (
+      setup: Parameters<typeof createTestEngine>[3] = GATEWAY,
+      project: Parameters<typeof createTestEngine>[1] = {},
+    ) => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
         { Alpha: [[turn]] },
-        {},
+        project,
         { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
         { ...setup, openRouter: { fetch: judgeFetch } },
       );
@@ -5869,6 +5910,19 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       });
       expect(states).toHaveLength(1);
       expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      await engine.runner.idle();
+    });
+
+    it("a gateway lane's call the project's allowed commands cover runs with no model; the step's own list settles nothing", async () => {
+      const { spec, judgeCall } = await start(GATEWAY, { allowedCommands: ['psql'] });
+      expect(await hook(spec, judgeCall, bash('psql -c "select 1"', 'toolu_20'))).toEqual({
+        decision: 'allow',
+        settled: "The builder's allow rule covers this call, so it runs, as in Claude Code.",
+      });
+      expect(states).toEqual([]);
+      // The step's own list (`Bash(git log:*)`) is not the builder's: its call still reaches the model.
+      await hook(spec, judgeCall, bash('git log -p', 'toolu_21'));
+      expect(states).toHaveLength(1);
       await engine.runner.idle();
     });
 
@@ -5964,13 +6018,18 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       return { spec, judgeCall, workstream };
     };
 
-    it("a Codex lane's deploy is a tendb_judge skip, with cached web search", async () => {
+    // Codex's cached web search has had no live check that it opens no page, so it is off on every session.
+    it("a Codex lane's deploy is a tendb_judge skip, with web search off and the thread saying why", async () => {
       const { spec, judgeCall, workstream } = await startCodex();
-      expect(spec.webSearch).toBe('cached');
+      expect(spec.webSearch).toBe('disabled');
       answer = () => 'writes_live';
       await hook(spec, judgeCall, bash('vercel deploy --prod', 'call_1'));
       expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['tendb_judge']);
       await engine.runner.idle();
+      const notices = listTaskThread(engine.store.db, workstream.taskId).map((m) => m.body);
+      expect(notices.filter((body) => body.startsWith('Web search on ChatGPT'))).toEqual([
+        'Web search on ChatGPT comes after a live check, so this session searches nothing.',
+      ]);
     });
 
     it("a Codex lane's patch that deletes a file reaches the model with the hunk named", async () => {
@@ -8381,6 +8440,10 @@ describe("a Light task's review safety net", () => {
     expect(engine.adapter.prompts).toHaveLength(2);
     // The review runs on the Light row's rounds, on the cell of the lowest stronger rigor that reviews.
     expect(step(workstream.id, 1)).toMatchObject({ reviewRounds: 1 });
+    // The drawer shows the step's own reason, so it says why the review was added.
+    expect(step(workstream.id, 1)?.reason).toMatch(
+      /^review added: changes `src\/api\/package\.json`/,
+    );
     expect(
       reasons(workstream.id).some(
         (r) =>
@@ -8472,6 +8535,39 @@ describe("a Light task's review safety net", () => {
         (r) => typeof r === 'string' && r.includes('review added: the changes could not be read'),
       ),
     ).toBe(true);
+  });
+
+  it('ends cancelled, and adds no review, when a cancel lands while the safety net reads the change', async () => {
+    const real = createGit();
+    let reading = false;
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const git: Git = {
+      ...real,
+      diffSince: async (...args) => {
+        reading = true;
+        await gate;
+        return real.diffSince(...args);
+      },
+    };
+    engine = await createTestEngine(
+      { Alpha: [implement('op-net-0071', 'src/api/package.json', '{}')] },
+      {},
+      { git },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api', 'deps'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await waitFor(() => reading);
+    // The cancel waits for the lane, which is held in the read until it is let go.
+    const cancelling = engine.runner.cancel(workstream.id);
+    release();
+    await cancelling;
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);
+    expect(engine.adapter.prompts).toHaveLength(1);
   });
 
   it('adds nothing to a Standard task, which has its review planned', async () => {

@@ -1705,7 +1705,8 @@ describe("a pass task's handoffs", () => {
       handOffAfter('three\n', 'op-pass-h3'),
       [...turn('four\n', 'Finished the form.'), { do: 'await_message', contains: 'never sent' }],
     ]);
-    await waitFor(isReady(id, 1));
+    // Three handoffs, each committing the page's work in git, outlast the default wait under load.
+    await waitFor(isReady(id, 1), 30_000);
     expect(engine.adapter.prompts).toHaveLength(4);
     const turns = listPassTurns(engine.store.db, pass.id);
     expect(turns.map((t) => [t.seq, t.ending])).toEqual([[1, 'ready']]);

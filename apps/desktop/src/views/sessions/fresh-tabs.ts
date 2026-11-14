@@ -1,7 +1,7 @@
 import { ProjectId } from '@10db/contracts';
 import { z } from 'zod';
 
-// Sessions plan call 4: a fresh tab lives in the client until its first `@` or its first send, and is
+// A fresh tab lives in the client until its first `@` or its first send, and is
 // kept in `localStorage` as a per-window convenience. These are pure functions over the list; the
 // storage read and write are the only effects, each in try/catch.
 

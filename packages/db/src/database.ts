@@ -4,6 +4,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { z } from 'zod';
+import { holdsPrePlaybookRouting, playbookMoveRan } from './pre-playbook-routing';
 import * as schema from './schema';
 
 export type TendbDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
@@ -65,6 +66,21 @@ export class NewerSchemaError extends SchemaMismatchError {
     super(
       path,
       `${path} was migrated by a newer version of 10db. Run that version or a later one; this build leaves the database untouched.`,
+    );
+  }
+}
+
+/**
+ * The database still holds routing settings from before the playbook and no 10db build moved them
+ * there; the migration that drops them would lose them.
+ */
+export class PlaybookMoveMissingError extends SchemaMismatchError {
+  override readonly name = 'PlaybookMoveMissingError';
+
+  constructor(path: string) {
+    super(
+      path,
+      `${path} holds model settings that a 10db release made before the playbook and has not moved them to it. Open a 10db build from #608 (f31017b6) through 81715524 once, so it moves the model settings to the playbook, then this one. Nothing was changed.`,
     );
   }
 }
@@ -140,6 +156,9 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
+  // The routing tables the playbook replaced are dropped by a migration, so settings still in them must have moved first.
+  if (holdsPrePlaybookRouting(db) && !playbookMoveRan(db))
+    throw new PlaybookMoveMissingError(db.$client.name);
   // A migration copies rows by the references they hold and may drop the table they came from, so a
   // row that already names a missing one stops the upgrade before anything changes.
   if (applied.length < baseline.length) {

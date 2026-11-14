@@ -97,6 +97,7 @@ import {
   type FileAccessContext,
 } from '../sandbox';
 import type { ToolDecision } from '../sessions';
+import { projectGrantLines } from '../trust';
 import {
   createInboxService,
   createLimitNotes,
@@ -1886,6 +1887,33 @@ describe('limit cards', () => {
     ]);
   });
 
+  it('a grant with no note answers that very call from then on, and no judge reads it as a line', async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(DEPLOY));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    expect(projectGrantLines(state.db, ws.project.id)).toEqual([]);
+    limits.note('t1', WRITES_LIVE);
+    expect(await broker(ws)(bash(DEPLOY))).toEqual({ behavior: 'allow' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(`${DEPLOY} --force`));
+    await settle();
+    expect(onlyOpenCard().body).toBe(`${DEPLOY} --force`);
+  });
+
+  it("a grant with the builder's note is a line every judge reads", async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(DEPLOY));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project', note: 'deploys with vercel' });
+    expect(projectGrantLines(state.db, ws.project.id)).toEqual([
+      'Allowed by the builder in this project (Writing To Live Systems): deploys with vercel',
+    ]);
+  });
+
   it('Always in this project on a 300-character call with no note is refused and stores nothing; with a note it stores the note', async () => {
     const ws = seedWorkstream(base);
     limits.note('t1', WRITES_LIVE);
@@ -2389,6 +2417,52 @@ describe('permission broker in a sandboxed lane', () => {
     const decision = await pending;
     expect(decision.behavior).toBe('deny');
     expect(decision.behavior === 'deny' ? decision.message : '').toMatch(/equivalent/i);
+  });
+
+  describe("a call 10db's judge noted at a limit", () => {
+    const WRITES_LIVE = {
+      limit: 'writes_live' as const,
+      reason: "10db's judge: Writing To Live Systems",
+    };
+    function noted(ws: ReturnType<typeof seedWorkstream>) {
+      const limits = createLimitNotes();
+      limits.note('t1', WRITES_LIVE);
+      return createPermissionBroker(
+        { state, inbox, git: NO_GIT, logger: silentLogger },
+        {
+          projectId: ws.project.id,
+          workstreamId: ws.workstream.id,
+          sessionId: mintId('Session'),
+          observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+          signal: controller.signal,
+          sandbox: { fileAccess, hazards: DEFAULT_HAZARDS },
+          limits,
+        },
+      );
+    }
+
+    it("is still refused with no card where 10db's gates refuse it", async () => {
+      const ws = seedWorkstream(base);
+      const decision = await noted(ws)(
+        request('Read', { file_path: join(fileAccess.home, '.claude.json') }),
+      );
+      expect(decision.behavior).toBe('deny');
+      expect(openCards()).toEqual([]);
+    });
+
+    it('raises its limit card where the gates would allow it', async () => {
+      const ws = seedWorkstream(base);
+      void noted(ws)(request('Bash', { command: 'ls' }));
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow this? It may write to a live system');
+    });
+
+    it('a once-only call never offers Always in this project', async () => {
+      const ws = seedWorkstream(base);
+      void noted(ws)(request('Bash', { command: 'while :; do :; done', run_in_background: true }));
+      await settle();
+      expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    });
   });
 
   const BACKGROUND_FLAG: readonly {

@@ -72,15 +72,18 @@ export type LiveSystemsDto = z.infer<typeof LiveSystemsDto>;
 export const GRANT_TARGET_MAX = 500;
 
 /**
- * What a grant allows, as one line every judge reads: the builder's note, or the call in quotes. No newline or
- * tab, so it can't add a list entry, and never `$defaults`, which would splice Claude Code's own rules in.
+ * What a grant allows, as one line every judge reads: the builder's note, or the call in quotes. No control,
+ * format or line-separator character, as a live system, so it can't add a list entry or hide text, and never
+ * `$defaults`, which would splice Claude Code's own rules in.
  */
 export const GrantTarget = z
   .string()
   .trim()
   .min(1)
   .max(GRANT_TARGET_MAX)
-  .regex(/^[^\n\r\t]+$/, { message: 'A grant is one line' })
+  .regex(/^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u, {
+    message: 'A grant is one line, with no control or format characters',
+  })
   .refine((s) => !s.includes('$defaults'), { message: 'A grant cannot name $defaults' });
 export type GrantTarget = z.infer<typeof GrantTarget>;
 

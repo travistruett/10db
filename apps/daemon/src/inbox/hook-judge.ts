@@ -18,6 +18,8 @@ import {
   callKey,
   callSummary,
   crossesLimit,
+  grantCallSummary,
+  projectGrantedCalls,
   skipMessage,
   type FastPathContext,
   type LimitAt,
@@ -69,12 +71,16 @@ export interface HookJudgeContext {
   readonly taskId: TaskId | null;
   readonly fastPath: FastPathContext;
   readonly policy: TrustPolicy;
-  readonly preExisting: readonly string[];
   /** The builder's approved calls and the project's grants as they are now, so a grant removed mid-session stops at once. */
   readonly allowLines: () => readonly string[];
   /** The judge of this call: only a `tendb` call is 10db's judge's. */
   readonly judgeNow: (req: JudgedCallRequest) => JudgeKind;
-  /** The session's own answer on the `rules` floor, T4's unattended answer and skip included in a lane. */
+  /**
+   * Whether the builder's own allowed commands (the project's, never a step's base list) cover the call: it is
+   * settled before any judge reads it, as Claude Code's allow rule settles it on native.
+   */
+  readonly coveredByBuilderRule: (req: JudgedCallRequest) => boolean;
+  /** The session's own answer on the `rules` floor, a lane's unattended answer and skip included. */
   readonly floorVerdict: (req: JudgedCallRequest) => GuardVerdict;
   /** A lane's skip recorder; null where the builder is in the session. */
   readonly skips: SkipRecorder | null;
@@ -86,6 +92,8 @@ export interface HookJudgeContext {
 
 const FAST_PATH_SETTLED = 'A read, an edit or a read-only command that reaches no secret';
 const MODEL_SETTLED = "Allowed by 10db's judge";
+const RULE_SETTLED = "The builder's allow rule covers this call, so it runs, as in Claude Code.";
+const GRANT_SETTLED = 'The builder allowed this very call in this project.';
 
 const InputRecord = z.record(z.string(), z.unknown());
 
@@ -113,6 +121,12 @@ export function createHookJudge(
     if (ctx.judgeNow(req) !== JudgeKind.Tendb) return { decision: 'allow' };
     // A question is the builder's to answer, whatever any judge thinks of it.
     if (req.toolName === 'AskUserQuestion') return { decision: 'allow' };
+    if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
+    const input = InputRecord.safeParse(req.input).data ?? {};
+    if (
+      projectGrantedCalls(deps.state.db, ctx.projectId).has(grantCallSummary(req.toolName, input))
+    )
+      return { decision: 'allow', settled: GRANT_SETTLED };
     const now = ctx.clock.now().getTime();
     if (downAt !== null && now - downAt.ms < FLOOR_BACKOFF_MS) return floor(req, downAt.detail);
     const verdict = await crossesLimit(
@@ -127,7 +141,6 @@ export function createHookJudge(
         fastPath: ctx.fastPath,
         policy: ctx.policy,
         allow: ctx.allowLines(),
-        preExisting: ctx.preExisting,
         ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
         ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),
         signal: req.signal,
@@ -153,7 +166,6 @@ export function createHookJudge(
           ctx.limits.note(req.toolUseId, at);
           return { decision: 'ask', reason: `10db's judge asks the builder: ${at.reason}` };
         }
-        const input = InputRecord.safeParse(req.input).data ?? {};
         ctx.skips.record({
           toolName: req.toolName,
           toolUseId: req.toolUseId,

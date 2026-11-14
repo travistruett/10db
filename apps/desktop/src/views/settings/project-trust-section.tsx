@@ -281,7 +281,17 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
           <SettingRow
             key={row.key}
             label={row.label}
-            description={<TrustRowText description={row.description} providers={row.providers} />}
+            description={
+              <TrustRowText
+                description={row.description}
+                providers={row.providers}
+                whileOn={
+                  (overrides?.[row.key] ?? app.data?.switches[row.key]) === true
+                    ? row.whileOn
+                    : null
+                }
+              />
+            }
           >
             <SegmentedControl
               aria-label={row.label}

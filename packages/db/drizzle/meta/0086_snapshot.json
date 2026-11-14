@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e2f2a47d-f014-4d7f-afea-ea6cf95234b4",
+  "id": "abc9e42b-c684-4ccb-bfb0-92004e89f264",
   "prevId": "ec9c40f7-8113-4d49-ba62-68e7cb41b956",
   "tables": {
     "aa_models": {
@@ -677,80 +677,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_tasks": {
-      "name": "chat_tasks",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_tasks_task_idx": {
-          "name": "chat_tasks_task_idx",
-          "columns": [
-            "task_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chat_tasks_chat_id_chats_id_fk": {
-          "name": "chat_tasks_chat_id_chats_id_fk",
-          "tableFrom": "chat_tasks",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "chat_tasks_task_id_tasks_id_fk": {
-          "name": "chat_tasks_task_id_tasks_id_fk",
-          "tableFrom": "chat_tasks",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_tasks_chat_id_task_id_pk": {
-          "columns": [
-            "chat_id",
-            "task_id"
-          ],
-          "name": "chat_tasks_chat_id_task_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chats": {
       "name": "chats",
       "columns": {
@@ -835,7 +761,7 @@
           "name": "last_activity_at",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "archived_at": {
@@ -853,13 +779,6 @@
             "project_id"
           ],
           "isUnique": false
-        },
-        "chats_conversation_unique": {
-          "name": "chats_conversation_unique",
-          "columns": [
-            "conversation_id"
-          ],
-          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -1400,13 +1319,6 @@
         "context_pct": {
           "name": "context_pct",
           "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "commands": {
-          "name": "commands",
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -9517,6 +9429,13 @@
         },
         "sized_for": {
           "name": "sized_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sizing_owed_for": {
+          "name": "sizing_owed_for",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

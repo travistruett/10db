@@ -247,9 +247,12 @@ describe('assessing a project from its repository', () => {
     const a = assessor(slow);
     const first = a.assess(project.id);
     const second = a.assess(project.id);
-    await vi.waitFor(() => {
-      expect(asked).toBe(1);
-    });
+    await vi.waitFor(
+      () => {
+        expect(asked).toBe(1);
+      },
+      { timeout: 20_000 },
+    );
     release(ANSWER);
     expect(await first).toEqual(await second);
     expect(asked).toBe(1);

@@ -35,6 +35,34 @@ export function grantTargetOf(note: string | null, summary: string): string | nu
   return target.length > GRANT_TARGET_MAX ? null : target;
 }
 
+const QUOTED_CALL = /^the call (".*")$/s;
+
+/**
+ * The call a grant with no note names, exactly as its card showed it; null for a grant in the builder's own
+ * words. The call is the agent's text, so it is matched as written and never read by a judge as a rule.
+ */
+export function grantedCallOf(target: string): string | null {
+  const quoted = QUOTED_CALL.exec(target)?.[1];
+  if (quoted === undefined) return null;
+  try {
+    // The quotes are the JSON `grantTargetOf` wrote; anything else is not a quoted call.
+    const call: unknown = JSON.parse(quoted);
+    return typeof call === 'string' ? call : null;
+  } catch {
+    return null;
+  }
+}
+
+/** How a card and the hook judge name a call a grant can match: a command as written, else the input as JSON. */
+export function grantCallSummary(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): string {
+  const command = input['command'];
+  if (toolName === 'Bash' && typeof command === 'string') return command;
+  return JSON.stringify(input).slice(0, 2000);
+}
+
 /** A grant as the line every judge reads. */
 export function grantLine(grant: Pick<TrustGrantDto, 'limit' | 'target'>): string {
   return grant.limit === null
@@ -42,7 +70,22 @@ export function grantLine(grant: Pick<TrustGrantDto, 'limit' | 'target'>): strin
     : `Allowed by the builder in this project (${LIMITS[grant.limit].label}): ${grant.target}`;
 }
 
-/** The project's grants as lines, read fresh, so a removed grant stops at once. */
+/**
+ * The project's grants in the builder's own words, as lines, read fresh, so a removed grant stops at once. A
+ * grant of a quoted call is matched by `projectGrantedCalls` instead.
+ */
 export function projectGrantLines(db: DbReader, projectId: ProjectId): string[] {
-  return listTrustGrants(db, projectId).map(grantLine);
+  return listTrustGrants(db, projectId)
+    .filter((grant) => grantedCallOf(grant.target) === null)
+    .map(grantLine);
+}
+
+/** The calls the project's grants with no note allow, each exactly as written, read fresh. */
+export function projectGrantedCalls(db: DbReader, projectId: ProjectId): ReadonlySet<string> {
+  const calls = new Set<string>();
+  for (const grant of listTrustGrants(db, projectId)) {
+    const call = grantedCallOf(grant.target);
+    if (call !== null) calls.add(call);
+  }
+  return calls;
 }

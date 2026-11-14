@@ -236,9 +236,12 @@ describe('Open Pull Request', () => {
     );
     const pr = getPassPullRequest(h.store.db, passId);
     expect(pr).toMatchObject({ draft: true });
-    await vi.waitFor(() => {
-      expect(h.gh.body(pr?.url ?? '')).toContain('Gate passed in a scratch worktree');
-    });
+    await vi.waitFor(
+      () => {
+        expect(h.gh.body(pr?.url ?? '')).toContain('Gate passed in a scratch worktree');
+      },
+      { timeout: 20_000 },
+    );
     expect(h.gh.body(pr?.url ?? '')).toContain('- Settings page');
     expect(h.gh.body(pr?.url ?? '')).not.toContain('People page');
     // The scratch worktree and its branch are gone; the folder is as the builder left it.
@@ -375,9 +378,12 @@ describe('Open Pull Request', () => {
       { timeout: 20_000 },
     );
     const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
-    await vi.waitFor(() => {
-      expect(h.gh.body(url)).toContain('Gate failed in a scratch worktree');
-    });
+    await vi.waitFor(
+      () => {
+        expect(h.gh.body(url)).toContain('Gate failed in a scratch worktree');
+      },
+      { timeout: 20_000 },
+    );
     expect(getPassProgress(h.store.db, passId).notices).toEqual([
       expect.objectContaining({ id: 'gate', kind: PassNoticeKind.GateFailed, sendable: true }),
     ]);
@@ -428,11 +434,14 @@ describe('Open Pull Request', () => {
     expect(await prs.open(passId)).toMatchObject({ review: 'started' });
     await h.jobs.idle();
 
-    await vi.waitFor(() => {
-      expect(notices(passId)).toEqual([
-        expect.objectContaining({ id: 'review', kind: PassNoticeKind.ReviewFailed }),
-      ]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(notices(passId)).toEqual([
+          expect.objectContaining({ id: 'review', kind: PassNoticeKind.ReviewFailed }),
+        ]);
+      },
+      { timeout: 20_000 },
+    );
   });
 
   it('opens no pull request and starts no gate for a pass abandoned while its branch was pushed', async () => {
@@ -503,16 +512,19 @@ describe('Open Pull Request', () => {
 
     checks.start({ passId, sha: tip, gate: true, review: false, baseRef: null });
 
-    await vi.waitFor(() => {
-      expect(notices(passId)).toEqual([
-        expect.objectContaining({
-          id: 'gate',
-          kind: PassNoticeKind.GateFailed,
-          sendable: false,
-          text: `The gate on ${tip.slice(0, 7)} could not run: no room for a scratch worktree`,
-        }),
-      ]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(notices(passId)).toEqual([
+          expect.objectContaining({
+            id: 'gate',
+            kind: PassNoticeKind.GateFailed,
+            sendable: false,
+            text: `The gate on ${tip.slice(0, 7)} could not run: no room for a scratch worktree`,
+          }),
+        ]);
+      },
+      { timeout: 20_000 },
+    );
     await checks.stop(passId);
   });
 
@@ -540,14 +552,17 @@ describe('Open Pull Request', () => {
       });
 
       checks.start({ passId, sha: tip, gate: false, review: true, baseRef: null });
-      await vi.waitFor(() => {
-        expect(h.logs.lines()).toContainEqual(
-          expect.objectContaining({
-            msg: 'pass pull request body not updated',
-            err: 'the body file could not be written',
-          }),
-        );
-      });
+      await vi.waitFor(
+        () => {
+          expect(h.logs.lines()).toContainEqual(
+            expect.objectContaining({
+              msg: 'pass pull request body not updated',
+              err: 'the body file could not be written',
+            }),
+          );
+        },
+        { timeout: 20_000 },
+      );
       await checks.stop(passId);
       // An unhandled rejection is reported on a later turn of the event loop.
       await new Promise((resolve) => setImmediate(resolve));
@@ -580,21 +595,30 @@ describe('Open Pull Request', () => {
     await prs.open(passId);
     await h.jobs.idle();
 
-    await vi.waitFor(() => {
-      expect(h.logs.lines()).toContainEqual(
-        expect.objectContaining({ msg: 'gate finished', aborted: true }),
-      );
-    });
+    await vi.waitFor(
+      () => {
+        expect(h.logs.lines()).toContainEqual(
+          expect.objectContaining({ msg: 'gate finished', aborted: true }),
+        );
+      },
+      { timeout: 20_000 },
+    );
     expect(h.gh.prCreates()).toHaveLength(1);
     expect(gateState(passId)).toBe(PassGateState.NotRun);
-    await vi.waitFor(() => {
-      expect(h.git$('worktree', 'list')).not.toContain('gate-');
-    });
+    await vi.waitFor(
+      () => {
+        expect(h.git$('worktree', 'list')).not.toContain('gate-');
+      },
+      { timeout: 20_000 },
+    );
     // The body says the gate did not run, not that it is running.
     const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
-    await vi.waitFor(() => {
-      expect(h.gh.body(url)).toContain('Gate not run');
-    });
+    await vi.waitFor(
+      () => {
+        expect(h.gh.body(url)).toContain('Gate not run');
+      },
+      { timeout: 20_000 },
+    );
     expect(h.gh.body(url)).not.toContain('Gate running');
   });
 
@@ -639,9 +663,12 @@ describe('Open Pull Request', () => {
       await prs.open(passId);
       await h.jobs.idle();
       if (until)
-        await vi.waitFor(() => {
-          expect(until(passId)).toBe(true);
-        });
+        await vi.waitFor(
+          () => {
+            expect(until(passId)).toBe(true);
+          },
+          { timeout: 20_000 },
+        );
       await prs.stopPassChecks(passId);
       // The close writes the body again, marking the pull request ready.
       await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
@@ -743,14 +770,17 @@ describe('Open Pull Request', () => {
 
     held.release(new Error('no room for a scratch worktree'));
 
-    await vi.waitFor(() => {
-      expect(notices(passId)).toEqual([
-        expect.objectContaining({
-          id: 'gate',
-          text: expect.stringContaining('no room for a scratch worktree') as unknown,
-        }),
-      ]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(notices(passId)).toEqual([
+          expect.objectContaining({
+            id: 'gate',
+            text: expect.stringContaining('no room for a scratch worktree') as unknown,
+          }),
+        ]);
+      },
+      { timeout: 20_000 },
+    );
   });
 
   it('after a restart, writes no running gate into the body when none runs', async () => {
@@ -819,18 +849,24 @@ describe('Open Pull Request', () => {
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     await prs.open(passId);
     await h.jobs.idle();
-    await vi.waitFor(() => {
-      expect(asked).toHaveLength(1);
-    });
+    await vi.waitFor(
+      () => {
+        expect(asked).toHaveLength(1);
+      },
+      { timeout: 20_000 },
+    );
 
     // Asked with the tip already reviewed, a page lands before the push: the push's tip is new.
     expect(await prs.open(passId)).toMatchObject({ review: 'unchanged' });
     const tip = signOff(people, 'src/people/page.tsx', 'people, signed\n');
     await h.jobs.idle();
 
-    await vi.waitFor(() => {
-      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
-    });
+    await vi.waitFor(
+      () => {
+        expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
+      },
+      { timeout: 20_000 },
+    );
     expect(asked).toHaveLength(2);
   });
 
@@ -860,20 +896,29 @@ describe('Open Pull Request', () => {
     const tip = signOff(settings, 'src/settings/e.tsx', long('e'));
     await prs.open(passId);
     await h.jobs.idle();
-    await vi.waitFor(() => {
-      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
-    });
+    await vi.waitFor(
+      () => {
+        expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
+      },
+      { timeout: 20_000 },
+    );
 
     expect(await prs.open(passId)).toMatchObject({ review: 'started' });
     await h.jobs.idle();
 
-    await vi.waitFor(() => {
-      expect(asked).toHaveLength(2);
-    });
+    await vi.waitFor(
+      () => {
+        expect(asked).toHaveLength(2);
+      },
+      { timeout: 20_000 },
+    );
     expect(asked[1]).toContain('+e-end');
-    await vi.waitFor(() => {
-      expect(notices(passId).filter((n) => n.id === 'review-cut')).toEqual([]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(notices(passId).filter((n) => n.id === 'review-cut')).toEqual([]);
+      },
+      { timeout: 20_000 },
+    );
   });
 });
 

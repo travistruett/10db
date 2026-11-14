@@ -342,7 +342,7 @@ a Codex delete or move), then the `crosses_limit` decision through OpenRouter (`
 goes to the model as fenced data, with the policy, the untracked and ignored entries the checkout held before the
 session and the project's grants. `unsure`, an `allow` below the decision's floor and an input over 12 000
 characters are limits. A judge that can't answer is the `rules` floor for that call, and for 60 s after a timeout or
-an error; in a lane the floor's answer is T4's skip. A session on 10db's judge runs Claude Code in `default` mode.
+an error; in a lane the floor's answer is the unattended skip. A session on 10db's judge runs Claude Code in `default` mode.
 
 ### 4.4 A lane's Bash and its children
 

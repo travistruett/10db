@@ -8,6 +8,8 @@ export interface TrustRow {
   readonly description: string;
   /** What the switch does on Claude and on Codex, and what each still lacks. */
   readonly providers: string;
+  /** What a provider still lacks while the switch is on; null when nothing waits. */
+  readonly whileOn: string | null;
 }
 
 const NEXT = 'Applies from the next session.';
@@ -17,35 +19,41 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Web',
     description: `Lets sessions search and fetch the web. ${NEXT}`,
     providers:
-      "On: Claude in auto mode judges each search and fetch, with no card; Claude through a gateway, or on a model auto mode doesn't run, is judged by 10db's judge; Codex searches from OpenAI's index and opens no page it names. Off: no session searches or fetches without asking.",
+      "On: Claude in auto mode judges each search and fetch, with no card; Claude through a gateway, or on a model auto mode doesn't run, is judged by 10db's judge. Off: no session searches or fetches without asking.",
+    whileOn: 'Web search on ChatGPT comes after a live check: Codex sessions search nothing yet.',
   },
   projectInstructions: {
     label: 'Project instructions',
     description: `The project's AGENTS.md, CLAUDE.md and .claude/rules, in each session's instructions. ${NEXT}`,
     providers:
       'Claude: in the system prompt. Codex: as developer instructions, since Codex reads no AGENTS.md in a checkout 10db keeps untrusted.',
+    whileOn: null,
   },
   yourInstructions: {
     label: 'Your instructions',
     description: `Your ~/.claude/CLAUDE.md, after the project's. ${NEXT}`,
     providers: "Claude and Codex: after the project's instructions, in the same place.",
+    whileOn: null,
   },
   yourSkills: {
     label: 'Your skills',
     description: `The skills in ~/.claude/skills and ~/.agents/skills, which sessions read but never change. ${NEXT}`,
     providers:
       'A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; Comes along says why.',
+    whileOn: null,
   },
   yourPlugins: {
     label: 'Your plugins',
     description: `The plugins Claude Code has installed for you, each switchable below. ${NEXT}`,
     providers:
       "Claude: skills, agents, commands and hooks, as Claude Code runs them; their MCP servers wait for 10db's support for your MCP servers. Codex: skills only.",
+    whileOn: null,
   },
   projectSkills: {
     label: 'Project skills, commands and agents',
     description: `The project's .claude/skills, commands and agents, copied with only the frontmatter that describes them. ${NEXT}`,
     providers: 'Codex: skills only.',
+    whileOn: null,
   },
 };
 

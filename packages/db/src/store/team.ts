@@ -23,7 +23,7 @@ export const BUILDER_HANDLE = 'me';
 export const SEED_BUILDER_NAME = 'You';
 
 type PersonaRow = typeof schema.personas.$inferSelect;
-const personaDto = (row: Omit<PersonaRow, 'minimumScore' | 'modelPin'>): PersonaDto => ({
+const personaDto = (row: PersonaRow): PersonaDto => ({
   id: row.id,
   key: row.key,
   name: row.name,

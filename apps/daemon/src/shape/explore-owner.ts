@@ -343,9 +343,17 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
   };
 
   /** The PreToolUse hook of a session: confinement, then the read budget's charge (§5.4). */
+  /**
+   * Plan's own judge of a call. `tendbReady` chooses each call's judge, as the hook judge does: a native session's
+   * call outside auto mode has no classifier behind it, so the confinement reads it as 10db's judge or the rules.
+   */
   const preToolUse =
-    (shapeId: ShapeId, access: ShapeAccess, limits: PictureLimits) =>
+    (shapeId: ShapeId, access: ShapeAccess, limits: PictureLimits, tendbReady: boolean) =>
     (req: ShapeToolRequest): ShapeVerdict => {
+      const judge =
+        access.judge === undefined
+          ? undefined
+          : judgeForCall(access.judge, req.reportedMode ?? null, tendbReady);
       let verdict: ShapeVerdict = judgeShapeCall(
         {
           toolName: req.toolName,
@@ -354,7 +362,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           agentType: req.agentType,
           cwd: req.cwd,
         },
-        access,
+        judge === undefined ? access : { ...access, judge },
       );
       // A picture or PDF the session itself Reads is resent with every later request (§5.4); a
       // subagent's reaches the session as text, so only the session's own Reads are counted.
@@ -590,7 +598,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
               : ready.canUseTool(req),
-          preToolUse: preToolUse(shapeId, access, limits),
+          preToolUse: preToolUse(shapeId, access, limits, tendbReady),
           ...(deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {
@@ -605,16 +613,19 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
                       checkout: launch.cwd,
                       tmpDir: launch.cwd,
                       secretFiles: access.secretFiles ?? [],
+                      preExisting: [],
                     },
                     policy,
-                    preExisting: [],
                     allowLines: () => projectGrantLines(state.db, project.id),
                     judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+                    // Plan's allow list holds none of the project's allowed commands, on native too.
+                    coveredByBuilderRule: () => false,
                     floorVerdict: (req) => {
                       const floor = preToolUse(
                         shapeId,
                         { ...access, judge: JudgeKind.Rules },
                         limits,
+                        tendbReady,
                       )({ ...req, toolUseId: req.toolUseId ?? undefined });
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;

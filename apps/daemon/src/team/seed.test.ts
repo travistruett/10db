@@ -5,7 +5,6 @@ import {
   listModelProfiles,
   listPersonas,
   patchPersona,
-  readLegacyRouting,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -24,16 +23,9 @@ afterEach(() => {
 });
 
 describe('seedTeam', () => {
-  it('seeds the personas and the builder, no model profile and nothing in the tables the playbook replaced', () => {
+  it('seeds the personas and the builder, and no model profile', () => {
     seedTeam(state, readDefaultPersonas());
     expect(listModelProfiles(state.db)).toEqual([]);
-    const legacy = readLegacyRouting(state.db);
-    expect([legacy.flows, legacy.patterns, legacy.roleSettings, legacy.bindings]).toEqual([
-      [],
-      [],
-      [],
-      [],
-    ]);
     expect(listPersonas(state.db).map((p) => p.key)).toEqual([
       'implementer',
       'plan-reviewer',

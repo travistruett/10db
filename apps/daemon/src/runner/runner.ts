@@ -71,7 +71,7 @@ import {
   approvedLines,
   buildTrustPolicy,
   CROSSES_LIMIT_QUESTION,
-  PRE_EXISTING_MAX,
+  PRE_EXISTING_READ_MAX,
   callKey,
   callSummary,
   createSkipRecorder,
@@ -110,6 +110,7 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
+  appendRetryLimitFindings,
   insertRetryLimitFollowUp,
   insertPassTurn,
   insertSession,
@@ -359,6 +360,10 @@ import { stepSkills } from './step-skills';
  * that resumes such a conversation keeps the same line.
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
+
+/** What a Codex session's thread says while the Web switch is on and its web search stays off. */
+const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check, so this session searches nothing.';
 
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
@@ -1341,8 +1346,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { steps: row.steps, added: null };
     const review = planAddedStep(planInputOf(tx, row, leased), StepRole.Review);
     if (review === undefined) return { steps: row.steps, added: null };
+    // The step's own reason is what the task drawer shows, so it says why the step is there before how its
+    // model was picked.
+    const added = { ...review, reason: `review added: ${forced}; ${review.reason}` };
     return {
-      steps: [...row.steps.slice(0, at + 1), review, ...row.steps.slice(at + 1)],
+      steps: [...row.steps.slice(0, at + 1), added, ...row.steps.slice(at + 1)],
       added: forced,
     };
   }
@@ -1420,6 +1428,13 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): WorkstreamStep[] {
     const steps = advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id));
     if (!atLimit) return steps;
+    // A step that already shipped at its limit keeps its follow-up: a later rejection of the same step, after
+    // QA sent the work back, adds to it while it is unstarted and files no second one.
+    const earlier = row.steps[row.stepIndex]?.shippedAtLimit;
+    if (earlier !== undefined) {
+      appendRetryLimitFindings(ctx, earlier.followUpTaskId, atLimit);
+      return steps;
+    }
     const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit);
     return steps.map((s, i) =>
       i === row.stepIndex
@@ -2521,7 +2536,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto', tendbReady);
     const judged = sessionJudge !== JudgeKind.Rules;
     // On 10db's judge Claude Code runs in default mode: the hook settles every call it allows, so auto
-    // mode's classifier would only add its cost (call 4).
+    // mode's classifier would only add its cost.
     const sessionPermissionMode: LanePermissionMode | null =
       lanePermissionMode !== null && sessionJudge === JudgeKind.Tendb
         ? 'default'
@@ -2530,13 +2545,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     const preExisting =
       laneSession === null || !tendbReady
         ? []
-        : await opts.git.untrackedAndIgnored(checkout, PRE_EXISTING_MAX).catch((error: unknown) => {
-            opts.logger.warn(
-              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-              "the checkout's untracked files could not be read; 10db's judge reads none",
-            );
-            return [];
-          });
+        : await opts.git
+            .untrackedAndIgnored(checkout, PRE_EXISTING_READ_MAX)
+            .catch((error: unknown) => {
+              opts.logger.warn(
+                { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+                "the checkout's untracked files could not be read; 10db's judge reads none",
+              );
+              return [];
+            });
     const startFloor =
       laneSession === null
         ? null
@@ -2562,14 +2579,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       'trust policy',
     );
-    /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
-    const sayFloor = (ctx: WriteContext, reason: FloorReason, detail?: string): void => {
-      const text = floorNoticeText(reason, {
-        attended: pass !== null,
-        ...(detail === undefined ? {} : { detail }),
-      });
+    /** Says a notice in the task's thread, unless the thread already says it. */
+    const sayOnce = (ctx: WriteContext, text: string): void => {
       if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
       insertSystemNotice(ctx, task.id, text);
+    };
+    /** Says in the task's thread that the session is on the rules floor. */
+    const sayFloor = (ctx: WriteContext, reason: FloorReason, detail?: string): void => {
+      sayOnce(
+        ctx,
+        floorNoticeText(reason, {
+          attended: pass !== null,
+          ...(detail === undefined ? {} : { detail }),
+        }),
+      );
     };
     let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
@@ -2647,7 +2670,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
       judge: sessionJudge,
-      codexWebSearch: switches.web,
       webJudged: judged && switches.web,
       setupLine:
         laneSession === null
@@ -2904,7 +2926,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(unattended === null ? {} : { away: unattended }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
-    /** The guard's answer for a lane's call under `judge`, with T4's unattended answer and skip in a lane. */
+    /** The guard's answer for a lane's call under `judge`, with the unattended answer and skip in a lane. */
     const laneVerdict = (
       req: {
         readonly toolName: string;
@@ -2968,9 +2990,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       return answer.verdict;
     };
     const limitNotes = createLimitNotes();
+    // The entries of the session's allow list the builder added: never the step's own reads, so `Bash(cat:*)`
+    // can't settle `cat .env` before 10db's judge reads it.
+    const builderRules = allowedTools.filter((tool) =>
+      project.allowedCommands.some((command) => tool === `Bash(${command}:*)`),
+    );
     let saidUnavailable = false;
     // 10db's judge, for the calls the guard leaves open: on a tendb session, and on a native one for a call
-    // outside auto mode (call 6). A session on the rules has none.
+    // outside auto mode. A session on the rules has none.
     const judgeCall =
       laneSession === null || sessionJudge === JudgeKind.Rules
         ? null
@@ -2984,9 +3011,9 @@ export function createRunner(opts: RunnerOptions): Runner {
                 checkout,
                 tmpDir: laneSession.tmpDir,
                 secretFiles: laneSession.fileAccess.secretFiles ?? [],
+                preExisting,
               },
               policy,
-              preExisting,
               allowLines: () => [
                 ...new Set([
                   ...approvedLines(approved),
@@ -2994,6 +3021,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                 ]),
               ],
               judgeNow: (req) => judgeForCall(sessionJudge, req.reportedMode ?? null, tendbReady),
+              coveredByBuilderRule: (req) =>
+                matchesAllowedTool(req.toolName, req.input, builderRules, checkout),
               floorVerdict: (req) => laneVerdict(req, JudgeKind.Rules),
               skips: unattended?.skips ?? null,
               limits: limitNotes,
@@ -3021,7 +3050,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         env: launch.env,
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
-        webSearch: switches.web ? 'cached' : 'disabled',
+        // Cached web search has had no live check that it opens no page, so no Codex session searches.
+        webSearch: 'disabled',
         sandbox: laneSession?.spec ?? null,
         instructions: setupPlan.instructions.text,
         ...(laneSession
@@ -3322,6 +3352,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
               }
               if (startFloor !== null) sayFloor(ctx, startFloor);
+              if (provider === Provider.Codex && switches.web) sayOnce(ctx, CODEX_WEB_WAITS);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')
@@ -3344,7 +3375,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
-            // Auto mode's denials join 10db's judge's in the judge log (call 13).
+            // Auto mode's denials join 10db's judge's in the judge log.
             opts.state.write((ctx) =>
               insertJudgeCall(ctx, {
                 decision: JudgeDecision.CrossesLimit,

@@ -20,9 +20,12 @@ import {
 export function TrustRowText({
   description,
   providers,
+  whileOn,
 }: {
   readonly description: string;
   readonly providers: string;
+  /** Shown while the switch is on: what a provider still lacks. */
+  readonly whileOn: string | null;
 }) {
   return (
     <>
@@ -30,6 +33,11 @@ export function TrustRowText({
       <Text component="span" display="block" size="xs" c="dimmed" mt={4}>
         {providers}
       </Text>
+      {whileOn === null ? null : (
+        <Text component="span" display="block" size="xs" c="dimmed" mt={4}>
+          {whileOn}
+        </Text>
+      )}
     </>
   );
 }
@@ -159,7 +167,13 @@ export function TrustSection() {
           <SettingRow
             key={row.key}
             label={row.label}
-            description={<TrustRowText description={row.description} providers={row.providers} />}
+            description={
+              <TrustRowText
+                description={row.description}
+                providers={row.providers}
+                whileOn={switches?.[row.key] === true ? row.whileOn : null}
+              />
+            }
           >
             <Group justify="flex-end">
               <Switch

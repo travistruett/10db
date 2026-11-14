@@ -70,6 +70,7 @@ async function turnWith(
     input: unknown;
     agentId?: string;
     agentType?: string;
+    reportedMode?: 'auto' | 'other';
   }[],
 ): Promise<void> {
   adapter.shapeBehaviour = (turn: FakeShapeTurn) => {
@@ -180,5 +181,19 @@ describe('a research turn on a native judge', () => {
       ['web', 'done', null],
     ]);
     expect(must(adapter.shapeSessions[0], 'a session').spec.profile.judge).toBe('native');
+  });
+
+  // A call outside auto mode has no classifier behind it: with 10db's judge not ready, the rules judge it.
+  it('refuses a fetch from the session itself that Claude Code reports outside auto mode', async () => {
+    await turnWith([
+      {
+        toolName: 'WebFetch',
+        input: { url: 'https://vega.github.io/vega-lite/docs/stack.html' },
+        reportedMode: 'other',
+      },
+    ]);
+    expect(calls().map((call) => [call.kind, call.status, call.deniedBy])).toEqual([
+      ['web', 'denied', '10db'],
+    ]);
   });
 });

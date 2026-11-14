@@ -1,4 +1,4 @@
-import type { ConversationOwnerKind } from '@10db/contracts';
+import type { ConversationOwnerKind, JudgeKind } from '@10db/contracts';
 import {
   ConversationState,
   type AccountId,
@@ -171,6 +171,11 @@ export interface Runtime {
   parkWait: boolean;
   /** Its owner archived it: nothing it is sent starts a turn until it is brought back. */
   retired: boolean;
+  /**
+   * The judge its last session started on, which the view shows: the rules where the account's judge is 10db's and
+   * it wasn't ready. Null before a session starts, when the view shows the account's.
+   */
+  judge: JudgeKind | null;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -204,6 +209,7 @@ export function newRuntime(id: ConversationId, state: ConversationState): Runtim
     closeReason: null,
     parkWait: false,
     retired: false,
+    judge: null,
     waiters: [],
   };
 }

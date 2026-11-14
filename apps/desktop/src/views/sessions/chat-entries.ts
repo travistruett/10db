@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import type { ConversationEntry } from '../../conversation';
 import { TaskRow, type TaskRowContext } from './task-row';
 
-// A chat's builder tools (plan call 2) come back as `mcp` calls on 10db's own server. A call whose result
+// A chat's builder tools come back as `mcp` calls on 10db's own server. A call whose result
 // reads as what the tool should return is a row of its own, with Undo; any other stays the kit's tool row.
 
 /** 10db's own server, as the adapters name it. */

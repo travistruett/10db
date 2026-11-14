@@ -353,6 +353,9 @@ function exploreQueryOptions(
               agentId: hookInput.agent_id,
               agentType: hookInput.agent_type,
               cwd: hookInput.cwd,
+              // Each call carries the mode Claude Code reports with it; none is not auto mode.
+              reportedMode:
+                hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
             };
             return toShapeHookOutput(
               await judgedVerdict(spec, spec.preToolUse(req), {
