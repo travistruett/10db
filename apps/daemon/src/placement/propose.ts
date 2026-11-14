@@ -11,7 +11,7 @@ export interface PlacementProposal {
 interface TaskTouches {
   readonly areas: readonly string[];
   /** The rows of the kinds the task names, in the builder's order. */
-  readonly kinds: readonly Pick<KindDto, 'label' | 'ownCopy'>[];
+  readonly kinds: readonly Pick<KindDto, 'key' | 'label' | 'ownCopy'>[];
   /** What the caller asked for; it counts only for a task the rule doesn't match. */
   readonly workspaceMode?: WorkspaceMode | undefined;
 }
@@ -25,11 +25,14 @@ type ProjectPlacement = Pick<ProjectDto, 'delivery' | 'workspaceMode'> & {
 /** Why a task goes to a separate copy while a pass holds the project's folder. */
 export const PASS_HOLDS_FOLDER_REASON = 'Your folder is in a UI Workbench pass';
 
-/** The kind's label in the plural, as it reads after "touches": Migration is migrations, Dependency dependencies. */
-function touchedName(label: string): string {
-  const name = label.trim().toLowerCase();
-  if (name.endsWith('s')) return name;
-  return name.endsWith('y') ? `${name.slice(0, -1)}ies` : `${name}s`;
+/** How the seeded kinds that ask for their own copy read after "touches"; any other kind reads as its label. */
+const SEEDED_TOUCHED_NAME: Readonly<Record<string, string>> = {
+  migration: 'migrations',
+  dependency: 'dependencies',
+};
+
+function touchedName(kind: Pick<KindDto, 'key' | 'label'>): string {
+  return SEEDED_TOUCHED_NAME[kind.key] ?? kind.label.trim();
 }
 
 /**
@@ -52,7 +55,7 @@ export function proposePlacement(project: ProjectPlacement, task: TaskTouches): 
   const isolated = new Set(project.isolate);
   const touches = new Set<string>();
   for (const area of task.areas) if (isolated.has(area)) touches.add(area);
-  for (const kind of task.kinds) if (kind.ownCopy) touches.add(touchedName(kind.label));
+  for (const kind of task.kinds) if (kind.ownCopy) touches.add(touchedName(kind));
   if (touches.size > 0)
     return { workspaceMode: WorkspaceMode.Worktree, reason: `touches ${[...touches].join(', ')}` };
   const asked = task.workspaceMode ?? project.workspaceMode;

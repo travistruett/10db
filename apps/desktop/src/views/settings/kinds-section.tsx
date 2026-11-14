@@ -56,10 +56,20 @@ export function KindsSection() {
     {
       accessor: 'switches',
       title: 'Switches',
+      // The badges keep their full words at any width: the table scrolls inside its frame instead.
+      noWrap: true,
       render: (kind) => (
-        <Group gap={4}>
+        <Group gap={4} wrap="nowrap">
           {switchesOf(kind).map((word) => (
-            <Badge key={word} size="md" tt="none" fw={500} variant="light" color="gray">
+            <Badge
+              key={word}
+              size="md"
+              tt="none"
+              fw={500}
+              variant="light"
+              color="gray"
+              style={{ flexShrink: 0 }}
+            >
               {word}
             </Badge>
           ))}

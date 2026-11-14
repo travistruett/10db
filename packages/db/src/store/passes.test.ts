@@ -10,7 +10,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../schema';
 import {
   abandonPassAndBatch,
@@ -358,6 +358,20 @@ describe('countLanes with a pass', () => {
     const lanes = countLanes(store.db);
     expect(lanes.byProject.get(project.id)).toBe(1);
     expect(lanes.byPass.get(pass.id)).toBeUndefined();
+  });
+});
+
+describe('listing a pass’s tasks', () => {
+  it('reads the kinds and the project’s default rigor once for the whole list', () => {
+    const ids = [task(project, 'A'), task(project, 'B'), task(project, 'C')];
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput(ids))).value;
+    const prepared = vi.spyOn(store.db.$client, 'prepare');
+    const tasks = listPassTasks(store.db, pass.id);
+    const reads = (table: string) =>
+      prepared.mock.calls.filter(([sql]) => sql.includes(`from "${table}"`)).length;
+    expect(tasks.map((t) => t.id)).toEqual(ids);
+    expect(reads('kinds')).toBe(1);
+    expect(reads('projects')).toBe(1);
   });
 });
 

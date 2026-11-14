@@ -27,6 +27,7 @@ const KINDS: readonly Pick<KindDto, 'key' | 'label' | 'ownCopy'>[] = [
   { key: 'migration', label: 'Migration', ownCopy: true },
   { key: 'dependency', label: 'Dependency', ownCopy: true },
   { key: 'payments', label: 'Payments', ownCopy: true },
+  { key: 'billing', label: 'Billing', ownCopy: true },
 ];
 const kindsNamed = (keys: readonly string[]) => KINDS.filter((k) => keys.includes(k.key));
 
@@ -67,7 +68,13 @@ const rows: readonly Row[] = [
     name: 'a custom kind that asks for its own copy',
     task: { areas: ['app'], kinds: ['payments'] },
     mode: 'worktree',
-    reason: 'touches payments',
+    reason: 'touches Payments',
+  },
+  {
+    name: 'a custom kind whose label does not end in s, read as written',
+    task: { areas: ['app'], kinds: ['billing'] },
+    mode: 'worktree',
+    reason: 'touches Billing',
   },
   {
     name: 'a kind that was deleted asks for nothing',

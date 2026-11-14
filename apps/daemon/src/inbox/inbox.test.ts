@@ -1055,7 +1055,7 @@ describe('proposal verdicts', () => {
     inbox.answer(card.id, { choice: 'accept' });
     expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
       workspaceMode: 'worktree',
-      placementReason: 'touches payments',
+      placementReason: 'touches Payments',
     });
   });
 

@@ -21,7 +21,7 @@ enabled one, the higher on a tie. A floor above the step's need (a risk rule or 
 moves the step to the strongest tier, one effort up. A role-default step is not pinned. A retry of any step whose
 profile has no score or no cost on its kind (a role default, or a routed step whose score AA has since dropped)
 climbs the same ladder: the next stronger model at the nearest effort, then the next effort on the strongest. When the
-account offers none of Claude Code's models, the plan is refused (`NoProfileError`).
+account offers none of Claude Code's models, the plan is refused, and the refusal points to Settings.
 
 When scores exist, routing is unchanged: the cheapest measured profile at or above the minimum, within the
 ceiling (decision 57). Each step's reason starts `by score:` or `by role default:`.

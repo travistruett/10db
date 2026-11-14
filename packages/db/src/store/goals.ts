@@ -22,7 +22,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { getTask, insertGoalTask, type Placement } from './tasks';
+import { getTasks, insertGoalTask, type Placement } from './tasks';
 import { BUILDER_HANDLE, getPerson } from './team';
 
 // Goals spec docs/superpowers/specs/2026-10-29-10db-goals-design.md §4, §5, §8 (phase 1).
@@ -346,7 +346,10 @@ export function listGoals(db: DbReader, projectId: ProjectId): GoalDto[] {
 /** A goal's tasks in board order, cancelled ones included (progress lists them apart, §8). */
 export function listGoalTasks(db: DbReader, goalId: GoalId): TaskDto[] {
   getGoal(db, goalId);
-  return goalTaskRows(db, goalId).map(({ id }) => getTask(db, id));
+  return getTasks(
+    db,
+    goalTaskRows(db, goalId).map(({ id }) => id),
+  );
 }
 
 /** When the person last opened the goal in Factory; null before the first time. */
