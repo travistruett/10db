@@ -8,5 +8,5 @@ export { offeredModels, offeredProfiles } from './offered';
 export { atEffort } from './pools';
 export { costOnAccount } from './cost-on-account';
 export { DEFAULT_CELLS } from './playbook-defaults';
-export { resolveSteps, type PlaybookScopes } from './playbook';
+export { resolveSteps, rowProcess, type PlaybookScopes } from './playbook';
 export { playbookView } from './playbook-view';

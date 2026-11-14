@@ -1,7 +1,13 @@
-import { NotFoundError, mintId, type PlaybookInput } from '@10db/contracts';
+import {
+  NotFoundError,
+  mintId,
+  type PlaybookInput,
+  type Rigor,
+  type StepRole,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
-import { getPlaybook, setPlaybook } from './playbook';
+import { getPlaybook, setPlaybook, type PlaybookRowOverride } from './playbook';
 import type { Store } from './store';
 import { insertPersona } from './team';
 import { createTestStore, seedProject } from './test-support';
@@ -17,6 +23,19 @@ afterEach(() => {
 
 const set = (projectId: Parameters<typeof getPlaybook>[1], input: PlaybookInput) =>
   store.write((ctx) => setPlaybook(ctx, projectId, input));
+
+const row = (
+  rigor: Rigor,
+  steps: StepRole[] | null,
+  process: Partial<Omit<PlaybookRowOverride, 'rigor' | 'steps'>> = {},
+): PlaybookRowOverride => ({
+  rigor,
+  steps,
+  reviewRounds: null,
+  fixBy: null,
+  approvesPlan: null,
+  ...process,
+});
 
 const reviewer = {
   key: 'strict-reviewer',
@@ -42,12 +61,12 @@ describe('playbook overrides', () => {
     });
 
     const global = getPlaybook(store.db, null);
-    expect(global.rows).toEqual([{ rigor: 'standard', steps: ['implement', 'review', 'qa'] }]);
+    expect(global.rows).toEqual([row('standard', ['implement', 'review', 'qa'])]);
     expect(global.cells).toEqual([
       { rigor: 'standard', role: 'review', personaId: null, model: null, effort: 'low' },
     ]);
     const own = getPlaybook(store.db, project.id);
-    expect(own.rows).toEqual([{ rigor: 'standard', steps: ['implement'] }]);
+    expect(own.rows).toEqual([row('standard', ['implement'])]);
     expect(own.cells.map((c) => [c.role, c.effort, c.model])).toEqual([
       ['implement', 'high', null],
       ['review', null, { kind: 'automatic', minimum: 60 }],
@@ -60,6 +79,53 @@ describe('playbook overrides', () => {
     expect(getPlaybook(store.db, project.id).rows).toEqual([]);
     expect(getPlaybook(store.db, project.id).cells.map((c) => c.role)).toEqual(['implement']);
     expect(getPlaybook(store.db, null)).toEqual(global);
+  });
+
+  it('keeps the steps when only a process field is set, per scope', () => {
+    const project = seedProject(store);
+    set(null, { rows: [{ rigor: 'standard', steps: ['implement', 'review', 'qa'] }] });
+    set(null, { rows: [{ rigor: 'standard', reviewRounds: 2 }] });
+    set(null, { rows: [{ rigor: 'standard', fixBy: 'fresh', approvesPlan: false }] });
+    expect(getPlaybook(store.db, null).rows).toEqual([
+      row('standard', ['implement', 'review', 'qa'], {
+        reviewRounds: 2,
+        fixBy: 'fresh',
+        approvesPlan: false,
+      }),
+    ]);
+
+    set(project.id, { rows: [{ rigor: 'standard', reviewRounds: 0 }] });
+    expect(getPlaybook(store.db, project.id).rows).toEqual([
+      row('standard', null, { reviewRounds: 0 }),
+    ]);
+    expect(getPlaybook(store.db, null).rows[0]?.reviewRounds).toBe(2);
+  });
+
+  it('keeps the process fields when only the steps change', () => {
+    set(null, { rows: [{ rigor: 'careful', reviewRounds: 3, approvesPlan: true }] });
+    set(null, { rows: [{ rigor: 'careful', steps: ['plan', 'implement'] }] });
+    expect(getPlaybook(store.db, null).rows).toEqual([
+      row('careful', ['plan', 'implement'], { reviewRounds: 3, approvesPlan: true }),
+    ]);
+  });
+
+  it('deletes a row once every field is cleared, and not before', () => {
+    set(null, { rows: [{ rigor: 'light', steps: ['implement'], reviewRounds: 1 }] });
+    set(null, { rows: [{ rigor: 'light', steps: null }] });
+    expect(getPlaybook(store.db, null).rows).toEqual([row('light', null, { reviewRounds: 1 })]);
+    set(null, { rows: [{ rigor: 'light', reviewRounds: null }] });
+    expect(getPlaybook(store.db, null).rows).toEqual([]);
+    expect(store.db.select().from(schema.playbookRows).all()).toEqual([]);
+  });
+
+  it('reads a row stored with steps only, from before the process fields', () => {
+    store.write((ctx) =>
+      ctx.tx
+        .insert(schema.playbookRows)
+        .values({ rigor: 'light', projectId: null, steps: ['implement'], updatedAt: ctx.now })
+        .run(),
+    );
+    expect(getPlaybook(store.db, null).rows).toEqual([row('light', ['implement'])]);
   });
 
   it('rewrites a cell in place instead of adding a second one', () => {

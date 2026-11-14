@@ -11,7 +11,14 @@ import {
   type TaskKind,
 } from '@10db/contracts';
 import type { PlaybookOverrides } from '@10db/db';
-import { DEFAULT_CELLS, DEFAULT_ROWS, FALLBACK_RUNG, type FallbackRung } from './playbook-defaults';
+import {
+  DEFAULT_CELLS,
+  DEFAULT_PROCESS,
+  DEFAULT_ROWS,
+  FALLBACK_RUNG,
+  type FallbackRung,
+  type RowProcess,
+} from './playbook-defaults';
 import { effortAbove, effortLevel } from './pools';
 import { ROLE_DEFAULT } from './role-defaults';
 
@@ -79,10 +86,21 @@ const scopesOf = (playbook: PlaybookScopes): PlaybookOverrides[] =>
 /** The steps a rigor's row runs: the project's row, else the global one, else the default. */
 function rowSteps(rigor: Rigor, playbook: PlaybookScopes): readonly StepRole[] {
   for (const scope of scopesOf(playbook)) {
-    const row = scope.rows.find((r) => r.rigor === rigor);
-    if (row) return row.steps;
+    const steps = scope.rows.find((r) => r.rigor === rigor)?.steps;
+    if (steps) return steps;
   }
   return DEFAULT_ROWS[rigor];
+}
+
+/** A rigor's review rounds, send-back fix and plan approval, each from the project's row, else the global one, else the default. */
+export function rowProcess(rigor: Rigor, playbook: PlaybookScopes): RowProcess {
+  const rows = scopesOf(playbook).flatMap((scope) => scope.rows.filter((r) => r.rigor === rigor));
+  const fallback = DEFAULT_PROCESS[rigor];
+  return {
+    reviewRounds: rows.find((r) => r.reviewRounds !== null)?.reviewRounds ?? fallback.reviewRounds,
+    fixBy: rows.find((r) => r.fixBy !== null)?.fixBy ?? fallback.fixBy,
+    approvesPlan: rows.find((r) => r.approvesPlan !== null)?.approvesPlan ?? fallback.approvesPlan,
+  };
 }
 
 /** Each field of the cell, from the project's cell, else the global one, else the default. */

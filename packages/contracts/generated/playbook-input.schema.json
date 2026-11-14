@@ -36,11 +36,42 @@
                 "type": "null"
               }
             ]
+          },
+          "reviewRounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fixBy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "resumed",
+                  "fresh"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvesPlan": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "required": [
-          "rigor",
-          "steps"
+          "rigor"
         ]
       }
     },

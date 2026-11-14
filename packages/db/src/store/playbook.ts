@@ -6,6 +6,7 @@ import {
   StepRole,
   type CellSetting,
   type Effort,
+  type FixBy,
   type ModelSetting,
   type PersonaId,
   type ProjectId,
@@ -17,10 +18,13 @@ import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
-/** What one scope overrides of a rigor's steps. */
+/** What one scope overrides of a rigor's steps and process; a null field is left to the scope above. */
 export interface PlaybookRowOverride {
   readonly rigor: Rigor;
-  readonly steps: readonly StepRole[];
+  readonly steps: readonly StepRole[] | null;
+  readonly reviewRounds: number | null;
+  readonly fixBy: FixBy | null;
+  readonly approvesPlan: boolean | null;
 }
 
 /** What one scope overrides of a cell; a null field is left to the scope above. */
@@ -43,7 +47,13 @@ const ROLE_ORDER: readonly StepRole[] = Object.values(StepRole);
 /** The rows and cells one scope overrides: a project's own, or the global ones for null. */
 export function getPlaybook(db: DbReader, projectId: ProjectId | null): PlaybookOverrides {
   const rows = db
-    .select({ rigor: schema.playbookRows.rigor, steps: schema.playbookRows.steps })
+    .select({
+      rigor: schema.playbookRows.rigor,
+      steps: schema.playbookRows.steps,
+      reviewRounds: schema.playbookRows.reviewRounds,
+      fixBy: schema.playbookRows.fixBy,
+      approvesPlan: schema.playbookRows.approvesPlan,
+    })
     .from(schema.playbookRows)
     .where(projectIs(schema.playbookRows.projectId, projectId))
     .orderBy(asc(schema.playbookRows.rigor))
@@ -70,8 +80,8 @@ export function getPlaybook(db: DbReader, projectId: ProjectId | null): Playbook
 }
 
 /**
- * Applies a form to one scope's playbook. A row with null steps, and a cell with every field null,
- * is cleared; a row or cell left out is untouched, and the other scope is never written.
+ * Applies a form to one scope's playbook. A row or cell field set to null is cleared, and one left out is
+ * kept; a row or cell with every field null is removed. The other scope is never written.
  */
 export function setPlaybook(
   ctx: WriteContext,
@@ -86,19 +96,29 @@ export function setPlaybook(
       eq(schema.playbookRows.rigor, row.rigor),
       projectIs(schema.playbookRows.projectId, projectId),
     );
-    if (row.steps === null) {
+    const current = ctx.tx.select().from(schema.playbookRows).where(where).get();
+    const merged = {
+      steps: row.steps === undefined ? (current?.steps ?? null) : row.steps,
+      reviewRounds:
+        row.reviewRounds === undefined ? (current?.reviewRounds ?? null) : row.reviewRounds,
+      fixBy: row.fixBy === undefined ? (current?.fixBy ?? null) : row.fixBy,
+      approvesPlan:
+        row.approvesPlan === undefined ? (current?.approvesPlan ?? null) : row.approvesPlan,
+    };
+    if (Object.values(merged).every((field) => field === null)) {
       ctx.tx.delete(schema.playbookRows).where(where).run();
       continue;
     }
-    const updated = ctx.tx
-      .update(schema.playbookRows)
-      .set({ steps: row.steps, updatedAt: ctx.now })
-      .where(where)
-      .run();
-    if (updated.changes === 0)
+    if (current === undefined)
       ctx.tx
         .insert(schema.playbookRows)
-        .values({ rigor: row.rigor, projectId, steps: row.steps, updatedAt: ctx.now })
+        .values({ rigor: row.rigor, projectId, ...merged, updatedAt: ctx.now })
+        .run();
+    else
+      ctx.tx
+        .update(schema.playbookRows)
+        .set({ ...merged, updatedAt: ctx.now })
+        .where(where)
         .run();
   }
   for (const cell of changes.cells) {

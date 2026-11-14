@@ -71,6 +71,12 @@ export const CellSetting = z.object({
 });
 export type CellSetting = z.infer<typeof CellSetting>;
 
+/** How a reviewer's send-back is fixed: by the build session that wrote the code, resumed, or by a fresh one. */
+export const FixBy = { Resumed: 'resumed', Fresh: 'fresh' } as const;
+export type FixBy = ValueOf<typeof FixBy>;
+
+const ReviewRounds = z.int().min(0).max(3);
+
 const Steps = z
   .array(z.enum(StepRole))
   .refine((steps) => steps.includes(StepRole.Implement), {
@@ -83,12 +89,21 @@ const Steps = z
 const noneTwice = (keys: readonly string[]) => new Set(keys).size === keys.length;
 
 /**
- * What a form changes in one scope's playbook. A row with null `steps`, and a cell with every field null,
- * is cleared: the scope above (or the default) applies again. A row or cell left out keeps what it has.
+ * What a form changes in one scope's playbook. A field of a row or cell set to null is cleared: the scope
+ * above (or the default) applies again, and a row or cell with every field cleared is removed. A field,
+ * row or cell left out keeps what it has.
  */
 export const PlaybookInput = z.object({
   rows: z
-    .array(z.object({ rigor: z.enum(Rigor), steps: Steps.nullable() }))
+    .array(
+      z.object({
+        rigor: z.enum(Rigor),
+        steps: Steps.nullable().optional(),
+        reviewRounds: ReviewRounds.nullable().optional(),
+        fixBy: z.enum(FixBy).nullable().optional(),
+        approvesPlan: z.boolean().nullable().optional(),
+      }),
+    )
     .refine((rows) => noneTwice(rows.map((r) => r.rigor)), { message: 'A rigor is set twice' })
     .default([]),
   cells: z
@@ -107,10 +122,15 @@ export type PlaybookSource = ValueOf<typeof PlaybookSource>;
 const sourced = <T extends z.ZodType>(value: T) =>
   z.object({ value, source: z.enum(PlaybookSource) });
 
-/** One rigor's steps, as they stand for a scope. */
+/** One rigor's steps and process, as they stand for a scope. */
 export const PlaybookRowDto = z.object({
   rigor: z.enum(Rigor),
   steps: sourced(Steps),
+  /** Times a reviewer may send the work back before it ships with its findings filed. */
+  reviewRounds: sourced(ReviewRounds),
+  fixBy: sourced(z.enum(FixBy)),
+  /** Whether the builder approves the plan before the build starts. */
+  approvesPlan: sourced(z.boolean()),
 });
 export type PlaybookRowDto = z.infer<typeof PlaybookRowDto>;
 

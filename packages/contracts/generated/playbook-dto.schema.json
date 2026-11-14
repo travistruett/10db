@@ -45,11 +45,80 @@
               "value",
               "source"
             ]
+          },
+          "reviewRounds": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          },
+          "fixBy": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "enum": [
+                  "resumed",
+                  "fresh"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          },
+          "approvesPlan": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
           }
         },
         "required": [
           "rigor",
-          "steps"
+          "steps",
+          "reviewRounds",
+          "fixBy",
+          "approvesPlan"
         ]
       }
     },
