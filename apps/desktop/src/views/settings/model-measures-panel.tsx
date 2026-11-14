@@ -34,7 +34,9 @@ function Evals({ evals, now }: { readonly evals: readonly ModelEvalDto[]; readon
         {evals.map((e) => (
           <Table.Tr key={e.benchmark}>
             <Table.Td>{e.benchmark}</Table.Td>
-            <Table.Td ta="right">{figure(e.accuracy)}</Table.Td>
+            <Table.Td ta="right">
+              {e.accuracy === null ? NO_DATA : `${String(Math.round(e.accuracy * 100))}%`}
+            </Table.Td>
             <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
             <Table.Td>
               <Read at={e.measuredAt} now={now} />

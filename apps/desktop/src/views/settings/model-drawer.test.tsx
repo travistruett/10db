@@ -118,6 +118,7 @@ describe('the model drawer’s OpenRouter additions', () => {
     );
     const evals = await screen.findByRole('table', { name: 'Eval costs' });
     expect(within(evals).getByText('terminal')).toBeTruthy();
+    expect(within(evals).getByText('50%')).toBeTruthy();
     expect(within(evals).getByText('$0.25')).toBeTruthy();
     expect(
       screen.getByText("OpenRouter's own evals; not the cost per task routing uses."),

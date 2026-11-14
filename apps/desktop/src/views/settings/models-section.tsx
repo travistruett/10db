@@ -1,4 +1,4 @@
-import { RIGORS, Rigor, type AccountId, type ModelRowDto, type StepRole } from '@10db/contracts';
+import type { AccountId } from '@10db/contracts';
 import {
   ActionIcon,
   Anchor,
@@ -15,162 +15,164 @@ import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import {
-  useCatalogueStatus,
-  useModelOffers,
-  useModelPicks,
-  useModels,
-  useRefreshModels,
-} from '../../daemon/model-queries';
-import { usePlaybook } from '../../daemon/playbook-queries';
+import { useJudgeStatus } from '../../daemon/judge-queries';
+import { useCatalogueStatus, useRefreshModels } from '../../daemon/model-queries';
 import { useNow } from '../../shell/relative';
+import { AgentsView } from './agents-view';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
+import { DecisionsModelsView } from './decisions-models-view';
+import { catalogueLine } from './model-format';
 import { OpenRouterStatusLine } from './openrouter-status-line';
-import { TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
-import { ModelDrawer } from './model-drawer';
-import { groupByFamily } from './model-families';
-import { catalogueLine, costNote } from './model-format';
-import {
-  earliestFirstSeen,
-  filterModels,
-  ModelColumn,
-  SortDirection,
-  sortModels,
-  type ModelFilter,
-  type ModelSort,
-} from './model-order';
-import { KindsSection } from './kinds-section';
-import { MoveReportNote } from './move-report-note';
-import { ModelsTable } from './models-table';
-import { PlaybookTable } from './playbook-table';
-import { rigorLabel } from './rigor-labels';
-import { RaisedPanel } from './raised-panel';
-import { RightsizingChart } from './rightsizing-chart';
-import { DotsMode, rightsizingSeries } from './rightsizing-series';
-import { ROLES } from './role-labels';
 import { SettingsSectionKey } from './sections';
 
-const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
+/** The two views of the page: the agents' models by account, and the models behind 10db's own decisions. */
+export const ModelsView = { Agents: 'agents', Decisions: 'decisions' } as const;
+export type ModelsView = (typeof ModelsView)[keyof typeof ModelsView];
 
-const DOTS_LABELS = [
-  { value: DotsMode.Every, label: 'Every effort' },
-  { value: DotsMode.Frontier, label: 'Frontier only' },
+const VIEW_LABELS = [
+  { value: ModelsView.Agents, label: 'Agents' },
+  { value: ModelsView.Decisions, label: 'Decisions' },
 ] as const;
 
-const isDotsMode = (value: string): value is DotsMode =>
-  Object.values(DotsMode).some((mode) => mode === value);
+const isModelsView = (value: string): value is ModelsView =>
+  Object.values(ModelsView).some((view) => view === value);
 
-const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === value);
+const ACCOUNT_LABEL = (
+  <Text size="xs" c="dimmed">
+    Account
+  </Text>
+);
 
-const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
+/** The account decisions are paid by, shown where the Agents view has its account; it is changed in Settings › Decisions. */
+function PaidByAccount() {
+  const paidBy = useJudgeStatus().data?.account ?? null;
+  return (
+    <Tooltip label="Change it under Settings › Decisions" position="bottom">
+      <Select
+        aria-label="Account"
+        size="xs"
+        w={240}
+        leftSection={
+          <Text size="xs" c="dimmed">
+            Paid by
+          </Text>
+        }
+        leftSectionWidth={72}
+        leftSectionPointerEvents="none"
+        data={paidBy === null ? [] : [{ value: paidBy.id, label: paidBy.label }]}
+        value={paidBy?.id ?? null}
+        placeholder="No OpenRouter account"
+        disabled
+      />
+    </Tooltip>
+  );
+}
 
 /**
- * Settings › Models: the playbook and the kinds on one account, then Intelligence against cost per task with
- * the picks of one rigor drawn on it, then every model the account runs. A model's detail is in the drawer.
+ * Settings › Models: a title, a switch between the Agents and Decisions views and the account the page reads,
+ * above the view chosen. The Agents account stays chosen across a switch; Decisions shows the account decisions
+ * are paid by, which is changed in Settings › Decisions. A failure of the Agents view hides only that view.
  */
 export function ModelsSection() {
   const now = useNow();
   const accounts = useAccounts();
+  const [view, setView] = useState<ModelsView>(ModelsView.Agents);
   const [chosen, setChosen] = useState<AccountId | null>(null);
   const live = (accounts.data ?? []).filter((a) => !a.archived);
-  // The page always has an account: the one chosen, else the default, else the first live one.
+  // The Agents view always has an account: the one chosen, else the default, else the first live one.
   const account =
     live.find((a) => a.id === chosen) ?? live.find((a) => a.isDefault) ?? live[0] ?? null;
-  const accountId = account?.id ?? null;
-  const models = useModels(accountId, accountId !== null);
-  // The chart's rings follow one rigor; Standard is the one most work gets.
-  const [rigor, setRigor] = useState<Rigor>(Rigor.Standard);
-  const picks = useModelPicks(accountId, rigor, null);
-  const playbook = usePlaybook(null);
-  const offers = useModelOffers();
   const status = useCatalogueStatus();
   const refresh = useRefreshModels();
-  const [filter, setFilter] = useState<ModelFilter>(NO_FILTER);
-  const [sort, setSort] = useState<ModelSort>({
-    column: ModelColumn.Intelligence,
-    direction: SortDirection.Descending,
-  });
-  const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
-  const [selected, setSelected] = useState<ModelRowDto | null>(null);
-  const [opened, setOpened] = useState(false);
-  // The list goes back to its first page whenever what it holds or its order changes.
-  const paging = usePaging(JSON.stringify([filter, sort, accountId]), TABLE_PAGE_SIZES[0]);
+  const agents = view === ModelsView.Agents;
+
+  const accountSelect = agents ? (
+    <Select
+      aria-label="Account"
+      size="xs"
+      w={240}
+      leftSection={ACCOUNT_LABEL}
+      leftSectionWidth={72}
+      leftSectionPointerEvents="none"
+      allowDeselect={false}
+      data={live.map((a) => ({ value: a.id, label: a.label }))}
+      value={account?.id ?? null}
+      placeholder={accounts.isPending ? 'Reading accounts…' : 'No account'}
+      disabled={live.length === 0}
+      onChange={(value) => {
+        const next = live.find((a) => a.id === value);
+        if (next) setChosen(next.id);
+      }}
+    />
+  ) : (
+    <PaidByAccount />
+  );
 
   const header = (
     <Stack gap={4}>
       <Group justify="space-between" align="center" wrap="nowrap">
         <Title order={3}>Models</Title>
         <Group gap="xs" wrap="nowrap">
-          {refresh.isError ? (
+          {agents && refresh.isError ? (
             <Text size="xs" c="red" role="alert">
               {refresh.error.message}
             </Text>
           ) : null}
-          <Select
-            aria-label="Account"
-            size="xs"
-            w={240}
-            leftSection={
-              <Text size="xs" c="dimmed">
-                Account
-              </Text>
-            }
-            leftSectionWidth={72}
-            leftSectionPointerEvents="none"
-            allowDeselect={false}
-            data={live.map((a) => ({ value: a.id, label: a.label }))}
-            value={accountId}
-            placeholder={accounts.isPending ? 'Reading accounts…' : 'No account'}
-            disabled={live.length === 0}
-            onChange={(value) => {
-              const next = live.find((a) => a.id === value);
-              if (next) setChosen(next.id);
-            }}
-          />
-          <Tooltip
-            label="Fetch prices from models.dev and re-read every account's model list"
-            position="left"
-          >
-            <ActionIcon
-              variant="default"
-              size="input-xs"
-              aria-label="Refresh Models"
-              loading={refresh.isPending}
-              onClick={() => {
-                refresh.mutate();
-              }}
+          {accountSelect}
+          {agents ? (
+            <Tooltip
+              label="Fetch prices from models.dev and re-read every account's model list"
+              position="left"
             >
-              <IconRefresh size={16} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
+              <ActionIcon
+                variant="default"
+                size="input-xs"
+                aria-label="Refresh Models"
+                loading={refresh.isPending}
+                onClick={() => {
+                  refresh.mutate();
+                }}
+              >
+                <IconRefresh size={16} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
         </Group>
       </Group>
-      <Text size="xs" c="dimmed">
-        {status.data !== undefined
-          ? catalogueLine(status.data, now)
-          : status.isError
-            ? 'The catalogue status could not be read.'
-            : 'Reading the catalogue…'}{' '}
-        <ArtificialAnalysisCredit />
-      </Text>
-      <ArtificialAnalysisStatusLine />
-      <OpenRouterStatusLine />
+      <SegmentedControl
+        size="xs"
+        w="fit-content"
+        aria-label="Models view"
+        data={[...VIEW_LABELS]}
+        value={view}
+        onChange={(value) => {
+          if (isModelsView(value)) setView(value);
+        }}
+      />
+      {agents ? (
+        <>
+          <Text size="xs" c="dimmed">
+            {status.data !== undefined
+              ? catalogueLine(status.data, now)
+              : status.isError
+                ? 'The catalogue status could not be read.'
+                : 'Reading the catalogue…'}{' '}
+            <ArtificialAnalysisCredit />
+          </Text>
+          <ArtificialAnalysisStatusLine />
+          <OpenRouterStatusLine />
+        </>
+      ) : null}
     </Stack>
   );
 
-  if (accounts.isPending)
-    return (
-      <Stack>
-        {header}
-        <Text c="dimmed">Reading accounts…</Text>
-      </Stack>
-    );
-  // A failed background read keeps the accounts already shown, as during a daemon restart.
-  if (accounts.isError && accounts.data === undefined)
-    return (
-      <Stack>
-        {header}
+  const body = () => {
+    if (!agents) return <DecisionsModelsView />;
+    if (accounts.isPending) return <Text c="dimmed">Reading accounts…</Text>;
+    // A failed background read keeps the accounts already shown, as during a daemon restart.
+    if (accounts.isError && accounts.data === undefined)
+      return (
         <Group gap="sm">
           <Text c="red" role="alert">
             {accounts.error.message}
@@ -185,12 +187,9 @@ export function ModelsSection() {
             Try Again
           </Button>
         </Group>
-      </Stack>
-    );
-  if (account === null)
-    return (
-      <Stack>
-        {header}
+      );
+    if (account === null)
+      return (
         <Text c="dimmed">
           <Anchor
             renderRoot={(props) => (
@@ -205,161 +204,14 @@ export function ModelsSection() {
           </Anchor>{' '}
           to see what each role gets.
         </Text>
-      </Stack>
-    );
-  if (models.isError)
-    return (
-      <Stack>
-        {header}
-        <Group gap="sm">
-          <Text c="red" role="alert">
-            {models.error.message}
-          </Text>
-          <Button
-            variant="default"
-            size="xs"
-            onClick={() => {
-              void models.refetch();
-            }}
-          >
-            Try Again
-          </Button>
-        </Group>
-      </Stack>
-    );
-  if (models.data === undefined)
-    return (
-      <Stack>
-        {header}
-        <Text c="dimmed">Loading models…</Text>
-      </Stack>
-    );
+      );
+    return <AgentsView account={account} />;
+  };
 
-  const everyModel = models.data;
-  // Rows of another account stay up while this one loads; no ring is drawn on a price that is not this account's.
-  const settling = models.isPlaceholderData;
-  const accountRows = filterModels(everyModel, { ...NO_FILTER, accountId });
-  const families = groupByFamily(
-    sortModels(filterModels(everyModel, { ...filter, accountId }), sort),
-  );
-  // A refresh can shrink the list under the page; the page shown is never past the last one.
-  const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
-  const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
-  // Only the roles the rigor's row runs are ringed and counted as using a model.
-  const runs = playbook.data?.rows.find((r) => r.rigor === rigor)?.steps.value ?? null;
-  const drawnPicks = settling
-    ? []
-    : (picks.data?.picks ?? []).filter((p) => runs === null || runs.includes(p.role));
-  const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role: null, dots });
-  const usedBy = new Map<string, string[]>();
-  for (const pick of drawnPicks)
-    if (pick.model !== null)
-      usedBy.set(pick.model, [...(usedBy.get(pick.model) ?? []), roleLabel(pick.role)]);
-  const note = costNote(account, offers.data ?? []);
   return (
     <Stack gap="lg">
       {header}
-      <MoveReportNote />
-      <Stack gap="xs" component="section" aria-label="Playbook section">
-        <Title order={4} size="md" fw={600}>
-          Playbook
-        </Title>
-        <Text size="xs" c="dimmed">
-          Each rigor runs the steps in its row. A cell shows the model and effort it resolves to on{' '}
-          {account.label}, and the setting behind it; open a cell to change it, a rigor to change
-          its steps.
-        </Text>
-        <PlaybookTable projectId={null} accountId={accountId} />
-      </Stack>
-      <KindsSection />
-      <Stack gap="xs">
-        <Group justify="space-between">
-          <Title order={4} size="md" fw={600}>
-            Intelligence and cost
-          </Title>
-          <Group gap="xs" wrap="nowrap">
-            <Select
-              aria-label="Rigor for the rings"
-              size="xs"
-              w={190}
-              leftSection={
-                <Text size="xs" c="dimmed">
-                  Rings
-                </Text>
-              }
-              leftSectionWidth={56}
-              leftSectionPointerEvents="none"
-              allowDeselect={false}
-              data={RIGORS.map((r) => ({ value: r, label: rigorLabel(r) }))}
-              value={rigor}
-              onChange={(value) => {
-                if (value !== null && isRigor(value)) setRigor(value);
-              }}
-            />
-            <SegmentedControl
-              size="xs"
-              aria-label="Dots"
-              data={[...DOTS_LABELS]}
-              value={dots}
-              onChange={(value) => {
-                if (isDotsMode(value)) setDots(value);
-              }}
-            />
-          </Group>
-        </Group>
-        <RaisedPanel>
-          <RightsizingChart
-            result={result}
-            costLabel={`Cost per task (USD, log scale). ${note}`}
-            height={300}
-          />
-        </RaisedPanel>
-        <Text size="xs" c="dimmed">
-          Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account at
-          the rigor chosen.
-          {result.omitted > 0
-            ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
-            : ''}
-        </Text>
-      </Stack>
-      <Stack gap="xs">
-        <Title order={4} size="md" fw={600}>
-          All models
-        </Title>
-        {everyModel.length === 0 ? (
-          <Text c="dimmed">
-            No models yet. They appear once an account has been read; the refresh button reads every
-            account now.
-          </Text>
-        ) : (
-          <ModelsTable
-            families={shownFamilies}
-            paging={{ ...paging, page, total: families.length }}
-            filter={filter}
-            onFilter={setFilter}
-            sort={sort}
-            onSort={setSort}
-            now={now}
-            earliest={earliestFirstSeen(everyModel)}
-            usedBy={usedBy}
-            costNote={note}
-            onOpen={(r) => {
-              setSelected(r);
-              setOpened(true);
-            }}
-          />
-        )}
-      </Stack>
-      <ModelDrawer
-        row={selected}
-        opened={opened}
-        now={now}
-        picks={drawnPicks}
-        account={accountId}
-        onClose={() => {
-          setOpened(false);
-        }}
-      />
+      {body()}
     </Stack>
   );
 }
