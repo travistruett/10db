@@ -21,6 +21,11 @@ beforeAll(() => {
   writeFileSync(join(checkout, 'data', 'seed.db'), 'rows\n');
   writeFileSync(join(checkout, 'notes.md'), 'kept\n');
   symlinkSync('.env', join(checkout, 'notes.txt'));
+  // A folder whose name reads as an option, a link two levels down, and a file outside the checkout.
+  mkdirSync(join(checkout, '-d'));
+  mkdirSync(join(checkout, 'a', 'b'), { recursive: true });
+  symlinkSync(join('a', 'b'), join(checkout, 'lnk'));
+  writeFileSync(join(root, 'outside.txt'), 'private\n');
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
   // `data/` is ignored and `notes.md` untracked, and both were there before the session.
   ctx = {
@@ -69,6 +74,12 @@ describe('fastPathAllows', () => {
     ['a Codex add over a pre-existing file', 'Edit', { file_path: 'data/seed.db' }, false, 'add'],
     ['an edit of a pre-existing untracked file', 'Edit', { file_path: 'notes.md' }, false],
     ['a new file in a pre-existing ignored folder', 'Write', { file_path: 'data/new.db' }, true],
+    [
+      'a write that is new as the kernel reads it and pre-existing with .. collapsed',
+      'Write',
+      { file_path: 'lnk/../data/seed.db' },
+      false,
+    ],
     ['ls', 'Bash', bash('ls -la src'), true],
     ['git log', 'Bash', bash('git log -5 --oneline'), true],
     ['cat .env', 'Bash', bash('cat .env'), false],
@@ -92,6 +103,47 @@ describe('fastPathAllows', () => {
     ['diff -r', 'Bash', bash('diff -r src data'), false],
     ['jq -n env', 'Bash', bash('jq -n env'), false],
     ['jq $ENV', 'Bash', bash("jq '$ENV' src/a.json"), false],
+    ['rg -e with a folder', 'Bash', bash('rg -e KEY src'), false],
+    ['rg -e on one file', 'Bash', bash('rg -e KEY src/a.ts'), true],
+    ['grep -e on one file', 'Bash', bash('grep -n -e KEY src/a.ts'), true],
+    ['grep -r with a folder after --', 'Bash', bash('grep -r KEY src/a.ts -- -d'), false],
+    ['grep -R with a folder after --', 'Bash', bash('grep -R KEY src/a.ts -- -d'), false],
+    [
+      'grep -d recurse with a folder after --',
+      'Bash',
+      bash('grep -d recurse KEY src/a.ts -- -d'),
+      false,
+    ],
+    ['grep -f a file outside', 'Bash', bash('grep -o -f <root>/outside.txt src/a.ts'), false],
+    ['cat a file outside the checkout', 'Bash', bash('cat <root>/outside.txt'), false],
+    [
+      'diff with a file outside the checkout',
+      'Bash',
+      bash('diff <root>/outside.txt src/a.ts'),
+      false,
+    ],
+    ['sort --files0-from', 'Bash', bash('sort --files0-from=src/a.ts'), false],
+    ['wc --files0-from', 'Bash', bash('wc --files0-from src/a.ts'), false],
+    ['jq env.HOME', 'Bash', bash('jq env.HOME src/a.json'), false],
+    ['jq $__loc__', 'Bash', bash("jq '$__loc__' src/a.json"), false],
+    ['jq input_filename', 'Bash', bash('jq input_filename src/a.json'), false],
+    ['jq on one file', 'Bash', bash('jq . src/a.json'), false],
+    ['git log --patch', 'Bash', bash('git log --patch'), false],
+    ['git log -U3', 'Bash', bash('git log -U3'), false],
+    ['git log --word-diff', 'Bash', bash('git log --word-diff'), false],
+    ['git log -c', 'Bash', bash('git log -c'), false],
+    ['git log --binary', 'Bash', bash('git log --binary'), false],
+    ['git log --remerge-diff', 'Bash', bash('git log --remerge-diff'), false],
+    ['git log a blob', 'Bash', bash('git log HEAD:.env'), false],
+    ['git log with a format and a count', 'Bash', bash('git log -n 5 --format=%h:%s'), true],
+    ['git log --stat', 'Bash', bash('git log --stat -3 main'), true],
+    ['git log --format that checks signatures', 'Bash', bash('git log --format=%G?'), false],
+    ['git status', 'Bash', bash('git status --short'), true],
+    ['head of one file', 'Bash', bash('head -n 5 src/a.ts'), true],
+    ['a listing piped to wc', 'Bash', bash('ls | wc -l'), true],
+    ['find in the checkout', 'Bash', bash('find src -name a.ts -type f'), true],
+    ['find -L', 'Bash', bash('find -L src -name a.ts'), false],
+    ['ls outside the checkout', 'Bash', bash('ls <root>'), false],
     ['a test run', 'Bash', bash('pnpm test'), false],
     ['a deploy', 'Bash', bash('vercel deploy --prod'), false],
     ['a subagent', 'Task', { prompt: 'look around' }, true],
@@ -102,7 +154,9 @@ describe('fastPathAllows', () => {
     ['an input that is a string', 'Bash', 'ls', false],
   ])('%s: %s is fast: %s', (_name, toolName, input, fast, hunk) => {
     // The temp dir is made per run, so a row names it by a placeholder.
-    const placed = JSON.parse(JSON.stringify(input).replace('<tmpDir>', ctx.tmpDir)) as unknown;
+    const placed = JSON.parse(
+      JSON.stringify(input).replaceAll('<tmpDir>', ctx.tmpDir).replaceAll('<root>', root),
+    ) as unknown;
     expect(
       fastPathAllows({ toolName, input: placed, cwd: checkout, hunk: hunk ?? null }, ctx),
     ).toBe(fast);

@@ -9,6 +9,7 @@ import {
   readOnlyShellRefusal,
   realPathReadings,
 } from '../guard';
+import { Operands, readCallOf, type ReadCall } from './read-allowlist';
 
 /** What a Codex `apply_patch` hunk does to its file. */
 export const PatchHunk = { Add: 'add', Update: 'update', Delete: 'delete', Move: 'move' } as const;
@@ -105,89 +106,54 @@ function isDirectory(path: string): boolean {
   }
 }
 
-/** A word longer than this is not split into the paths it may hold; the call goes to the model. */
-const MAX_OPTION_WORD = 256;
+/** Whether every reading of a path, with its `..` kept as written, is inside the checkout or the temp dir. */
+function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
+  // `..` is kept as written: after a link it means something else, and both readings must be inside.
+  const written = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
+  return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
+}
+
+/** Whether a read command may open or list `word`: an existing, non-secret file (or folder) inside. */
+function readTargetIsSafe(
+  word: string,
+  cwd: string,
+  ctx: FastPathContext,
+  folders: boolean,
+): boolean {
+  if (word === '-') return true;
+  const target = from(cwd, word);
+  if (!isRegularFile(target) && !(folders && isDirectory(target))) return false;
+  return !namesSecret(target, ctx.secretFiles) && staysIn(word, cwd, ctx);
+}
+
+function operandsAreSafe(read: ReadCall, cwd: string, ctx: FastPathContext): boolean {
+  switch (read.operands) {
+    case Operands.Text:
+      return true;
+    case Operands.Revisions:
+      // A `rev:path` names a blob, and a leading `:` is pathspec magic.
+      return read.targets.every((word) => !word.includes(':'));
+    case Operands.Files:
+      return read.targets.every((word) => readTargetIsSafe(word, cwd, ctx, false));
+    case Operands.Listings: {
+      const targets = read.targets.length === 0 ? [cwd] : read.targets;
+      return targets.every((word) => readTargetIsSafe(word, cwd, ctx, true));
+    }
+  }
+}
 
 /**
- * The paths a word may name, or null for a word too long to split: a plain word; a long option's value after
- * its `=`; every tail of a short option, since its value may be attached; and the part after a `:`, which
- * names a file in a revision (`HEAD:.env`).
+ * Whether every segment of a command is a listed read command with only allowed options, reading only regular,
+ * non-secret files inside the checkout or the temp dir (`read-allowlist.ts`).
  */
-function pathsOf(word: string): string[] | null {
-  if (word.length > MAX_OPTION_WORD) return null;
-  const paths: string[] = [];
-  if (word.startsWith('--')) {
-    const value = /^--[A-Za-z][\w-]*=(.*)$/s.exec(word)?.[1];
-    if (value !== undefined) paths.push(value);
-  } else if (word.startsWith('-') && word.length > 1) {
-    for (let at = 1; at < word.length; at += 1) paths.push(word.slice(at));
-  } else {
-    paths.push(word);
-  }
-  const colon = word.lastIndexOf(':');
-  if (colon >= 0) paths.push(word.slice(colon + 1));
-  return paths.filter((p) => p !== '');
-}
-
-const SEARCHES: ReadonlySet<string> = new Set([
-  'grep',
-  'egrep',
-  'fgrep',
-  'rg',
-  'ag',
-  'ack',
-  'diff',
-]);
-/** A `git log` option that prints file contents: a patch, a word diff or a line range. */
-const LOG_PATCH = /^(-[^-]*[puUL]|--patch.*|--unified.*|--cc|--word-diff.*|--full-diff|--dd)$/;
-
-/** The words that aren't options: a search's pattern and targets. */
-const plainWords = (args: readonly string[]): string[] =>
-  args.filter((a) => a === '-' || !a.startsWith('-'));
-
-/** Whether a search or diff may read a whole directory: no target, or one that is a directory. */
-function searchesDirectory(cmd: string, args: readonly string[], cwd: string): boolean {
-  const plain = plainWords(args);
-  // A search's first plain word is its pattern; diff's every word is a target.
-  const targets = cmd === 'diff' ? plain : plain.slice(1);
-  if (targets.length === 0) return true;
-  return plain.some((word) => isDirectory(from(cwd, word)));
-}
-
-function printsHistory(args: readonly string[]): boolean {
-  const [sub = '', ...rest] = args;
-  if (sub === 'show' || sub === 'diff' || sub === 'grep') return true;
-  return sub === 'log' && rest.some((a) => LOG_PATCH.test(a));
-}
-
-function readsEnvironment(args: readonly string[]): boolean {
-  return args.some(
-    (a) =>
-      a === '-n' ||
-      a === '--null-input' ||
-      (a.startsWith('-') && !a.startsWith('--') && a.includes('n')) ||
-      a === 'env' ||
-      a.includes('$ENV'),
-  );
-}
-
-function bashOnlyReads(command: string, cwd: string, secretFiles: readonly string[]): boolean {
+function bashOnlyReads(command: string, cwd: string, ctx: FastPathContext): boolean {
   if (readOnlyShellRefusal(command) !== null) return false;
   const segments = plainCommandWords(command);
   if (segments === null) return false;
-  for (const [cmd = '', ...args] of segments) {
-    if (cmd === 'cd') return false;
-    if (SEARCHES.has(cmd) && searchesDirectory(cmd, args, cwd)) return false;
-    if (cmd === 'git' && printsHistory(args)) return false;
-    if (cmd === 'jq' && readsEnvironment(args)) return false;
-    for (const word of args) {
-      if (/[*?[]/.test(word) || word.startsWith('~')) return false;
-      const paths = pathsOf(word);
-      if (paths === null) return false;
-      if (paths.some((p) => namesSecret(from(cwd, p), secretFiles))) return false;
-    }
-  }
-  return true;
+  return segments.every((segment) => {
+    const read = readCallOf(segment);
+    return read !== null && operandsAreSafe(read, cwd, ctx);
+  });
 }
 
 const EDIT_TOOLS: Readonly<Record<string, string>> = {
@@ -202,10 +168,9 @@ function editStaysIn(call: LimitCall, path: string | null, ctx: FastPathContext)
   if (call.hunk === PatchHunk.Delete || call.hunk === PatchHunk.Move) return false;
   const target = from(call.cwd, path);
   if (namesSecret(target, ctx.secretFiles)) return false;
-  // `..` is kept as written: after a link it means something else, and both readings must be inside.
   const written = isAbsolute(path) ? path : `${call.cwd}${sep}${path}`;
   if (overwritesPreExisting(written, ctx)) return false;
-  return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
+  return staysIn(path, call.cwd, ctx);
 }
 
 function exists(path: string): boolean {
@@ -218,18 +183,20 @@ function exists(path: string): boolean {
 }
 
 /**
- * Whether an edit changes a file that was there before the session and that git can't bring back: it exists,
- * and on some reading it is a pre-existing entry or under one.
+ * Whether an edit changes a file that was there before the session and that git can't bring back: it exists on
+ * some reading (as the kernel opens it, or with `..` collapsed), and on some reading it is a pre-existing entry
+ * or under one.
  */
 function overwritesPreExisting(written: string, ctx: FastPathContext): boolean {
-  if (!exists(written)) return false;
+  if (!exists(written) && !realPathReadings(written).paths.some(exists)) return false;
   return ctx.preExisting.some((entry) => isWithin(join(ctx.checkout, entry), written));
 }
 
 /**
  * Whether a call can't cross a limit, so 10db's judge allows it with no model: a read, a listing, an edit in the
- * checkout or the session's temp dir, a read-only command, a subagent launch, and 10db's own tools, and never a
- * call that can reach a secret, search a directory, print history or the environment, or delete or move a file.
+ * checkout or the session's temp dir, a listed read command with listed options on files inside, a subagent
+ * launch, and 10db's own tools, and never a call that can reach a secret, search a directory, print history or
+ * the environment, or delete or move a file.
  */
 export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
   const { input } = call;
@@ -266,7 +233,7 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
     }
     case 'Bash': {
       const command = field(fields, 'command');
-      return command !== null && bashOnlyReads(command, call.cwd, ctx.secretFiles);
+      return command !== null && bashOnlyReads(command, call.cwd, ctx);
     }
     default: {
       const pathField = EDIT_TOOLS[tool];
