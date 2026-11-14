@@ -2120,6 +2120,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
     // Read before the start slot is taken, so nothing it throws can hold the slot.
     const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
+    // The calls the builder approved by Run these now: a lane nobody watches runs them.
+    const approvedKeys = pass === null ? approvedCallKeys(db, task.id) : [];
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
@@ -2545,7 +2547,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             { state: opts.state, log: opts.logger },
             { workstreamId: id, sessionId: session.id },
           ),
-          approvedKeys: approvedCallKeys(db, task.id),
+          approvedKeys,
           taskId: task.id,
           projectId: project.id,
         };

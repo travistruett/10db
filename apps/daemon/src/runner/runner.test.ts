@@ -5833,6 +5833,19 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     },
   );
 
+  it("frees the account's start and the temp dir when reading the lane's approved calls throws", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    // A real read failure: the table the approvals are read from is gone.
+    engine.store.db.$client.exec('DROP TABLE skip_approvals');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    // A leaked start slot would leave this acquire pending forever.
+    (await engine.startGate.acquire(engine.project.accountId))();
+  });
+
   it('leaves no temp dir behind when the adapter throws on start', async () => {
     const probe = sandboxProbe();
     engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
