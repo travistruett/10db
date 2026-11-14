@@ -940,16 +940,23 @@ describe('the Models page switch', () => {
 
   it('reads Reading… in the paid-by select while the judge status loads, and the error when it fails', async () => {
     serve();
+    // The status answers only when released, so the placeholder is read while it is still loading.
+    const { promise: released, resolve: release } = Promise.withResolvers<null>();
     server.use(
-      http.get(daemonUrl('/judge'), () =>
-        HttpResponse.json({ error: 'internal', message: 'The judge is down' }, { status: 500 }),
-      ),
+      http.get(daemonUrl('/judge'), async () => {
+        await released;
+        return HttpResponse.json(
+          { error: 'internal', message: 'The judge is down' },
+          { status: 500 },
+        );
+      }),
     );
     await renderWithDaemonAndRouter(<ModelsSection />);
     await screen.findByRole('heading', { name: 'Playbook' });
     chooseView('Decisions');
     const select = await screen.findByRole('combobox', { name: 'Account' });
     expect(select).toHaveProperty('placeholder', 'Reading…');
+    release(null);
     await waitFor(() => {
       expect(select).toHaveProperty('placeholder', 'The judge is down');
     });
