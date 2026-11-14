@@ -884,4 +884,29 @@ describe('review round 1', () => {
     expect(w.stateOf()).toBe('idle_warm');
     expect(w.ends.map((e) => e.how)).toEqual(['stopped', 'complete']);
   });
+
+  it.each([
+    ['taken', false],
+    ['never taken', true],
+  ] as const)(
+    'keeps the original and settles the stop when a Redo of a %s message cannot store its edit',
+    async (_name, untaken) => {
+      w = exploreWorld();
+      const gates = stoppableTurns(w);
+      w.adapter.shapeInterruptReceipt = (queued) => ({ stillQueued: untaken ? [...queued] : [] });
+      w.send('one');
+      await waitFor(() => gates.length === 1);
+      const original = untaken ? w.send('two') : w.items()[0];
+      await expect(
+        w.engine.redo(w.conv.id, () => {
+          throw new Error('the edit could not be stored');
+        }),
+      ).rejects.toThrow('the edit could not be stored');
+      w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+      for (const g of gates) g.release();
+      await w.engine.settled(w.conv.id);
+      expect(w.items().some((i) => i.id === original?.id)).toBe(true);
+      expect(w.stateOf()).not.toBe('stopping');
+    },
+  );
 });

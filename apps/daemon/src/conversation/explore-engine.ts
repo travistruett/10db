@@ -1084,19 +1084,22 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         settleTurn(rt);
       }
       rt.ended = 'stopped';
-      if (untaken) {
-        // The agent would run the original by itself: its session goes, and the edit alone is sent.
-        state.write((ctx) => {
-          deleteItem(ctx, original.id);
-        });
+      // The edit is stored first: if it can't be, the original stays. The stop settles either way.
+      try {
         const edit = post();
-        handBack(rt);
-        reduce(rt, { type: 'stop_grace_passed' });
+        // The agent would run the original by itself: it goes, and so does its session, so the edit
+        // alone is sent.
+        if (untaken)
+          state.write((ctx) => {
+            deleteItem(ctx, original.id);
+          });
         return edit;
+      } finally {
+        if (untaken) {
+          handBack(rt);
+          reduce(rt, { type: 'stop_grace_passed' });
+        } else reduce(rt, { type: 'stop_settled' });
       }
-      const edit = post();
-      reduce(rt, { type: 'stop_settled' });
-      return edit;
     },
     sendNow(id) {
       const rt = runtimeOf(id);
