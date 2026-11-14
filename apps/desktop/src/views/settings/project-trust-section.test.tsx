@@ -42,6 +42,8 @@ function serve(
         plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: true }],
         judges: [],
         tendbReady: false,
+        mcpServers: [],
+        mcpNotice: null,
       }),
     ),
     http.get(daemonUrl('/projects/:projectId/live-systems'), () => HttpResponse.json(live)),

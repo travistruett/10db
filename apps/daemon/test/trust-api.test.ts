@@ -149,6 +149,8 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: false, on: false }],
       judges: [expect.objectContaining({ judge: JudgeKind.Native, why: null })],
       tendbReady: false,
+      mcpServers: [],
+      mcpNotice: null,
     });
   });
 
