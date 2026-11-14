@@ -302,7 +302,15 @@ describe('the Models page', () => {
     // The header names the ID and the tier; Input, Output and Speed are one dimmed line.
     expect(within(drawer).getByText('alpha-max')).toBeTruthy();
     expect(within(drawer).getByText(/Capable tier/)).toBeTruthy();
-    expect(within(drawer).getByText(/\$5\.00 in · \$25\.00 out · speed 40 tokens\/s/)).toBeTruthy();
+    // The speed is its own element, so its source can be described.
+    expect(
+      within(drawer).getByText(
+        (_, el) =>
+          /^List price per 1M tokens: \$5\.00 in · \$25\.00 out · speed 40 tokens\/s$/.test(
+            (el?.textContent ?? '').trim(),
+          ) && el?.tagName === 'P',
+      ),
+    ).toBeTruthy();
     expect(within(drawer).getByRole('heading', { name: 'Offered by' })).toBeTruthy();
     // The drawer shows AA scores and speed, so it carries the credit.
     expect(within(drawer).getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();

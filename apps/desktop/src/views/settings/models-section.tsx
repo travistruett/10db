@@ -355,6 +355,7 @@ export function ModelsSection() {
         opened={opened}
         now={now}
         picks={drawnPicks}
+        account={accountId}
         onClose={() => {
           setOpened(false);
         }}
