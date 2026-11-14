@@ -106,6 +106,7 @@ export function RecentDecisions({
     {
       accessor: 'model',
       title: 'Model',
+      noWrap: true,
       render: (call) => modelName(call.model, models),
     },
     { accessor: 'answer', title: 'Answer (sure)', render: (call) => answerText(call) },
