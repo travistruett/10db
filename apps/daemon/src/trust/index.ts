@@ -17,4 +17,10 @@ export {
   PRE_EXISTING_READ_MAX,
   type LimitAt,
 } from './crosses-limit';
-export { grantLine, grantTargetOf, projectGrantLines } from './grants';
+export {
+  grantCallSummary,
+  grantLine,
+  grantTargetOf,
+  projectGrantedCalls,
+  projectGrantLines,
+} from './grants';

@@ -6,11 +6,13 @@ import {
   DEFAULT_HAZARDS,
   JudgeKind,
   TRUST_DEFAULTS,
+  type ProjectId,
   type TrustSurface,
 } from '@10db/contracts';
 import {
   createTestStore,
   insertTask,
+  insertTrustGrant,
   insertWorkstream,
   listSkipsForWorkstream,
   schema,
@@ -54,6 +56,8 @@ let model: Model;
 let grants: string[];
 let floors: string[];
 let limits: LimitNotes;
+/** The project the last `hookJudge` seeded. */
+let seeded: ProjectId;
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'hook-judge-')));
@@ -128,6 +132,7 @@ function hookJudge(
 ) {
   const surface = opts.surface ?? 'pass';
   const project = seedProject(store);
+  seeded = project.id;
   return createHookJudge(
     { judge: judge(), state, logger: silentLogger },
     {
@@ -261,6 +266,26 @@ describe('the hook judge, attended', () => {
     expect(await run(hookJudge({ now }), req)).toEqual(verdict);
     expect(sent).toHaveLength(answer === null ? 0 : 1);
     expect(limits.take('toolu_1')).toEqual(noted);
+  });
+
+  it('the very call a quoted grant names is settled before any model; another call still meets the judge', async () => {
+    model = { choice: 'writes_live', p: 0.95 };
+    const judgeCall = hookJudge();
+    store.write((ctx) =>
+      insertTrustGrant(ctx, {
+        projectId: seeded,
+        limit: 'writes_live',
+        target: `the call ${JSON.stringify(DEPLOY)}`,
+        sourceInboxId: null,
+      }),
+    );
+    expect(await run(judgeCall, bash(DEPLOY))).toEqual({
+      decision: 'allow',
+      settled: 'The builder allowed this very call in this project.',
+    });
+    expect(sent).toEqual([]);
+    expect((await run(judgeCall, bash(`${DEPLOY} --force`))).decision).toBe('ask');
+    expect(sent).toHaveLength(1);
   });
 
   it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {

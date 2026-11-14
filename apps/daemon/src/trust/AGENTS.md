@@ -7,7 +7,9 @@
   only options it may carry, and its files regular, non-secret and inside the checkout or the temp dir); `crosses-limit.ts` asks the `crosses_limit` decision the rest, with the call fenced as data, and
   reads `unsure`, a below-floor `allow` and an input over `CALL_INPUT_MAX_CHARS` as a limit; `grants.ts` turns a
   project's grants (`trust_grants`) into the allow lines every judge reads (`grantTargetOf` keeps a note on one line
-  or quotes the call). `call-judge.ts` starts a `tendb` session on the rules when 10db's judge isn't ready.
+  or quotes the call). A grant of a quoted call is the agent's text, so no judge reads it: `projectGrantedCalls`
+  matches it exactly against `grantCallSummary` of a call, in the hook judge before any model and in the broker
+  before a limit or escalation card. `call-judge.ts` starts a `tendb` session on the rules when 10db's judge isn't ready.
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).

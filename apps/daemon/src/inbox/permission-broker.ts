@@ -65,7 +65,9 @@ import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessio
 import {
   answerAway,
   callKey,
+  grantCallSummary,
   grantTargetOf,
+  projectGrantedCalls,
   routedToPerson,
   skipMessage,
   type LimitAt,
@@ -341,9 +343,7 @@ function unlessTooDeep<T>(read: () => T, fallback: T): T {
 }
 
 function summarize(req: ToolRequest): string {
-  const command = req.input['command'];
-  if (req.toolName === 'Bash' && typeof command === 'string') return command;
-  return JSON.stringify(req.input).slice(0, 2000);
+  return grantCallSummary(req.toolName, req.input);
 }
 
 /**
@@ -558,6 +558,9 @@ export function createPermissionBroker(
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
       return { behavior: 'allow' };
     }
+    // The builder's Always in this project on this very call, matched as written.
+    if (judged && !onceOnly && projectGrantedCalls(deps.state.db, ctx.projectId).has(summary))
+      return { behavior: 'allow' };
     if (ctx.unattended !== undefined) return skipUnattended(req, ask, ctx.unattended);
     const storable =
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;

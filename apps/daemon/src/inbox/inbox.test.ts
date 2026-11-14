@@ -97,6 +97,7 @@ import {
   type FileAccessContext,
 } from '../sandbox';
 import type { ToolDecision } from '../sessions';
+import { projectGrantLines } from '../trust';
 import {
   createInboxService,
   createLimitNotes,
@@ -1883,6 +1884,33 @@ describe('limit cards', () => {
     inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
     expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
       { target: 'the call "vercel deploy --prod # and any other command"' },
+    ]);
+  });
+
+  it('a grant with no note answers that very call from then on, and no judge reads it as a line', async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(DEPLOY));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    expect(projectGrantLines(state.db, ws.project.id)).toEqual([]);
+    limits.note('t1', WRITES_LIVE);
+    expect(await broker(ws)(bash(DEPLOY))).toEqual({ behavior: 'allow' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(`${DEPLOY} --force`));
+    await settle();
+    expect(onlyOpenCard().body).toBe(`${DEPLOY} --force`);
+  });
+
+  it("a grant with the builder's note is a line every judge reads", async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(DEPLOY));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project', note: 'deploys with vercel' });
+    expect(projectGrantLines(state.db, ws.project.id)).toEqual([
+      'Allowed by the builder in this project (Writing To Live Systems): deploys with vercel',
     ]);
   });
 
