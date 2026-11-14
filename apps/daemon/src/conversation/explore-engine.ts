@@ -108,6 +108,13 @@ export interface ExploreEngine {
   parked(id: ConversationId): boolean;
   /** Resolves once the conversation runs no turn and has no effect left to apply. */
   settled(id: ConversationId): Promise<void>;
+  /**
+   * Its owner archives it (sessions spec §6.7): a start is cancelled, a turn stopped within the stop
+   * grace (its partial text kept), a card withdrawn, and a warm session closed with its row ended, so
+   * its token reaches nothing. Until `unretire`, nothing it is sent starts a turn.
+   */
+  retire(id: ConversationId): Promise<void>;
+  unretire(id: ConversationId): void;
   recover(): Promise<void>;
   close(): Promise<void>;
 }
@@ -180,7 +187,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const conv = conversation(rt.id);
     const parked = holding(rt) && !COUNTED_UNDER_HOLD.has(event.type);
     return {
-      queued: parked ? 0 : queued,
+      queued: parked || rt.retired ? 0 : queued,
       providerSessionId: conv.providerSessionId !== null,
       restartedWhilePaused: rt.restartedWhilePaused,
       steer: capabilitiesOf(conv).steer,
@@ -470,6 +477,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     // Once the engine has closed, a starter stays queued for the next start's Send now.
     if (closed) return;
     const rt = runtimeOf(id);
+    if (rt.retired) return;
     if (holding(rt)) {
       park(rt);
       return;
@@ -538,6 +546,20 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     reduce(rt, { type: 'daemon_restart' });
     // Its Send now line is written before the API serves.
     await rt.chain;
+  };
+
+  const settled = async (id: ConversationId): Promise<void> => {
+    const rt = runtimeOf(id);
+    for (;;) {
+      const chain = rt.chain;
+      await chain;
+      // Once closed, nothing moves the state again: a restart's recovery settles it.
+      if (rt.chain === chain && (!BUSY.has(rt.state) || closed)) return;
+      if (rt.chain === chain)
+        await new Promise<void>((resolve) => {
+          rt.waiters.push(resolve);
+        });
+    }
   };
 
   let closedDown: Promise<void> | null = null;
@@ -664,6 +686,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.state === S.PausedAccount && rt.pausedUntil !== null
             ? rt.pausedUntil.toISOString()
             : null,
+        commands: conv.commands,
       };
     },
     live(id) {
@@ -671,18 +694,20 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
     busy: () => [...runtimes.values()].filter((rt) => BUSY.has(rt.state)).map((rt) => rt.id),
     parked: (id) => runtimeOf(id).parked,
-    async settled(id) {
+    settled,
+    async retire(id) {
       const rt = runtimeOf(id);
-      for (;;) {
-        const chain = rt.chain;
-        await chain;
-        // Once closed, nothing moves the state again: a restart's recovery settles it.
-        if (rt.chain === chain && (!BUSY.has(rt.state) || closed)) return;
-        if (rt.chain === chain)
-          await new Promise<void>((resolve) => {
-            rt.waiters.push(resolve);
-          });
-      }
+      rt.retired = true;
+      rt.parked = false;
+      reduce(rt, { type: 'archive', confirmed: true });
+      await settled(id);
+      // A stop leaves its session warm; an archived conversation keeps none.
+      if (rt.session !== null) reduce(rt, { type: 'idle_close' });
+      await rt.chain;
+      await rt.closing;
+    },
+    unretire(id) {
+      runtimeOf(id).retired = false;
     },
     recover,
     close,

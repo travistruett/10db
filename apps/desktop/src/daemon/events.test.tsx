@@ -14,11 +14,10 @@ import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
-import { useConversationLive } from './conversation-queries';
+import { liveKeys, useConversationLive } from './conversation-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
 import { screenKeys } from './screen-queries';
 import { passKeys, useTurnActivity } from './pass-queries';
-import { threadKeys } from './thread-queries';
 import { useBatches, useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
@@ -409,13 +408,13 @@ describe('useEventStream', () => {
     expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([key]));
   });
 
-  it("refetches a pass on every pass event, and a task's thread and turns when a message joins it", () => {
+  it("refetches a pass on every pass event, and a task's stream and turns when a message joins it", () => {
     // The stream's first open refetches everything, so the table is what can go wrong.
     expect(INVALIDATIONS['pass']).toEqual(expect.arrayContaining([passKeys.all]));
     // A message joining a page starts its turn, and a run pausing or resuming changes its page: the
     // queue reads both from the live passes.
     expect(EVENT_INVALIDATIONS['task.message_added']).toEqual(
-      expect.arrayContaining([threadKeys.all, passKeys.turnsAll, passKeys.live]),
+      expect.arrayContaining([liveKeys.all, passKeys.turnsAll, passKeys.live]),
     );
     expect(INVALIDATIONS['workstream']).toEqual(expect.arrayContaining([passKeys.live]));
     // A tool call is written into the pass, never refetched: one arrives per call.

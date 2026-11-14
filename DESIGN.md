@@ -21,7 +21,10 @@ favors legibility and calm over decoration.
   Integrations, an account's state) is the exception: teal = works, yellow = needs the builder, gray = off, never
   green or red, and its dot always comes with words. Every card in the Inbox's Open tab waits on the
   builder, so its kind is yellow, a flag's too: red there would read as an error. The Waiting tab holds what the
-  builder waits on someone else for; waiting on someone shows as a line on the card, not a color.
+  builder waits on someone else for; waiting on someone shows as a line on the card, not a color. A status is
+  never told by color alone: a bare dot means running, a dot with a ring waits on the builder (yellow, or red for
+  a failure), and failed, paused and done are icons in their colors. Green on a Sessions tab means landed (merged,
+  or a closed pass on a `local` project); a signed-off pass that isn't closed is a dimmed check.
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
 - **Density:** `size="sm"` controls in lists and tables; `md` in forms and dialogs.
 - **Board cards:** compact `Paper`s that drag from anywhere on the card, with no handle: a pointer drag
@@ -63,7 +66,8 @@ favors legibility and calm over decoration.
   as a line with a dot, such as "Waiting on you: answer in Inbox", only when the color is yellow, red or
   orange, because only then does the builder have something to do or read. A failed task's line is the
   plain-words one below. Blue, green and gray cards show no line: the border and the column say it, and
-  the screen-reader summary still does.
+  the screen-reader summary still does. A Sessions tab follows the same states as a pill: a 1 px yellow ring
+  waits on you, a 1 px red ring stopped on an error, and its state mark sits where × shows on hover.
 - **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
   `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's Needs you block:
   "The review session stopped without reporting a result. Retry runs the review step again." The line is
@@ -128,7 +132,16 @@ favors legibility and calm over decoration.
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).
   Nothing moves for decoration.
 - **Nudges:** a model's suggestion beside an input (Plan's fast-model nudges) is a `Button variant="subtle"
-size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at once; never a badge or a color.
+size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at once; never a badge or a color. A
+  suggestion built by rules (Sessions' Start from) is not a nudge: it shows its source's icon, with no sparkles and
+  no ×.
+- **Fills:** the `bg_1` raised panel is the builder's own message. Code, command output, banners and read-only
+  lines sit on `bg_0` with a 1 px `bg_2` border.
+- **Diffs:** colored text on `bg_1`, changed words on `bg_2`, no tinted rows, and 10db's own gutter per hunk.
+- **Agent output** renders as markdown through one component, by
+  `docs/architecture/decisions/2026-11-13-agent-output-renders-as-hardened-markdown.md`, with a Selenized Shiki
+  theme for code. **Tool calls** are rows, not cards; cards stay for what the builder answers.
+- **Keys:** ⌘↩ sends in every composer; on Sessions, ⌘T (anywhere), ⌘W, ⌘⇧T, ⌘1–9, ⌘⇧[ ], ⌘J and Esc.
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
@@ -144,7 +157,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   of what is already on screen, such as the pills just picked, is left out. A count of what is hidden or
   waiting is a `CountBadge` (`apps/desktop/src/shell/count-badge.tsx`) in the control's `rightSection`, or
   beside the label in a control that has none; a row with a line of its own says it in words there ("4
-  goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`.
+  goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`. The Sessions badge
+  counts the tabs that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
 - **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
   it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
   the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate
@@ -156,13 +170,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Modals:** a form modal is centered, with a header and a footer of actions that stay put while its
   body scrolls.
 - **Navigation:** nav links take the `md` radius, so their hover and active fills are rounded pills
-  inset from the sidebar's edge. The fill marks where you are; no outline on each item.
+  inset from the sidebar's edge. The fill marks where you are; no outline on each item. On Sessions only, the
+  header holds the tab strip from 88 px, just after the traffic lights; its empty space stays a drag region and
+  zooms the window on a double-click.
 - **Scope follows the question, not the screen**
   (`docs/architecture/decisions/2026-11-09-scope-follows-the-question.md`). A view that answers "what needs
   me?" or "what is running, and on what?" is global: the Inbox and Factory. They show every project and
   narrow by a visible project filter, never by the project chosen elsewhere. A view of how one repo's work
-  is shaped belongs to a project: Board, Plan, Knowledge and the project's settings. The sidebar reads in
-  that order: Inbox and Factory; then a "Project" label over the project switcher and that project's Board,
+  is shaped belongs to a project: Board, Plan, Knowledge and the project's settings. Sessions is global too:
+  its tabs cross projects, each naming its own. The sidebar reads in that order: Inbox, Factory and Sessions; then a "Project" label over the project switcher and that project's Board,
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
   same order (Back to Board, the project's sections, then the app-wide ones), one scope at a time: a "This
   project" / "All projects" switch under Back to Board picks which half the sections list shows, under subheads,

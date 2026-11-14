@@ -169,6 +169,8 @@ export interface Runtime {
   closeReason: string | null;
   /** A parked starter waits for the update hold to clear. */
   parkWait: boolean;
+  /** Its owner archived it: nothing it is sent starts a turn until it is brought back. */
+  retired: boolean;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -201,6 +203,7 @@ export function newRuntime(id: ConversationId, state: ConversationState): Runtim
     restartedWhilePaused: false,
     closeReason: null,
     parkWait: false,
+    retired: false,
     waiters: [],
   };
 }

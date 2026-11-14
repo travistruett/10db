@@ -1,15 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   InvalidError,
   isShapeImage,
+  NotFoundError,
   ShapeFileKind,
   shapeFileKind,
   TASK_PICTURE_MAX_BYTES,
   TASK_PICTURE_NAME_MAX_CHARS,
-  type TaskPictureKind,
+  TaskPictureKind,
+  type ConversationFileId,
+  type ConversationId,
 } from '@10db/contracts';
+import { getFile, type DbReader } from '@10db/db';
 import { refuseMislabelledBytes, safeFileName } from './file-check';
 
 // Workbench spec §4.3, §11, §12, §13. A picture pasted with a builder's message: what it must be,
@@ -79,4 +83,30 @@ export function keepPicture(dir: string, picture: CheckedPicture): KeptPicture {
     rmSync(temporary, { force: true });
   }
   return { storedPath, sha256, written: true };
+}
+
+const isMissingFile = (error: unknown) =>
+  error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+/**
+ * A picture the builder sent with a message of this conversation, its bytes and media type. Throws
+ * NotFoundError for a file of another conversation, one that is no picture, or one whose bytes are gone
+ * from the data directory.
+ */
+export function readConversationPicture(
+  db: DbReader,
+  conversationId: ConversationId,
+  fileId: ConversationFileId,
+): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind } {
+  const row = getFile(db, fileId);
+  const kind = TaskPictureKind.safeParse(row.mediaType);
+  if (row.conversationId !== conversationId || row.itemId === null || !kind.success)
+    throw new NotFoundError('conversation file', fileId);
+  try {
+    return { bytes: readFileSync(row.storedPath), mediaType: kind.data };
+  } catch (error) {
+    // A picture removed from the data directory by hand is gone, not a fault of the daemon.
+    if (isMissingFile(error)) throw new NotFoundError('conversation file', fileId);
+    throw error;
+  }
 }

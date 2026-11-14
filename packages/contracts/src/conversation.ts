@@ -87,7 +87,8 @@ export function noticeText(body: { text: string } | ModelChangeNotice): string {
 
 /** Each item kind's body, as it is stored in `conversation_items.body`. */
 export const ConversationItemBody = {
-  message: TextBody,
+  /** A builder's message, with the paths its `@` mentions name (the `@path` stays in the text). */
+  message: z.object({ text: z.string(), mentions: z.array(z.string()).optional() }),
   agent_message: TextBody,
   reasoning: TextBody,
   tool_call: ToolCallView,

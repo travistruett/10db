@@ -1,4 +1,11 @@
-import type { AgentAccountKind, Effort, ProjectId, SessionId, ShapeId } from '@10db/contracts';
+import type {
+  AgentAccountKind,
+  ConversationId,
+  Effort,
+  ProjectId,
+  SessionId,
+  ShapeId,
+} from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { WaitObserver } from '../inbox';
 import type { LaneSandboxSpec, SessionSetup } from '../sandbox';
@@ -23,10 +30,16 @@ export interface ShapeLaunch {
   readonly agentModels: readonly string[];
 }
 
-/** What a session's commands and project tools are prepared from: the conversation and who asks. */
+/**
+ * What a session's commands and project tools are prepared from: the conversation and who asks. A
+ * chat's session is prepared the same way, with no Plan.
+ */
 export interface ShapePrepareInput {
   readonly projectId: ProjectId;
-  readonly shapeId: ShapeId;
+  /** The conversation whose cards the broker raises. */
+  readonly conversationId: ConversationId;
+  /** The Plan the conversation is, when it is one. */
+  readonly shapeId?: ShapeId;
   readonly sessionId: SessionId;
   /** The kind of the account the session runs on, which names where its login is kept. */
   readonly accountKind: AgentAccountKind;

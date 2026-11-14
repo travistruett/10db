@@ -89,6 +89,8 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A chat was created, renamed, moved in the strip, archived or touched; `entityType: 'chat'`. */
+  ChatChanged: 'chat.changed',
   /** A conversation stored an item; `data` names its id, seq and kind. */
   ConversationItemAdded: 'conversation.item_added',
   /** A stored item changed in place (a plan, a marker resolved, a card's call); `data.id`. */

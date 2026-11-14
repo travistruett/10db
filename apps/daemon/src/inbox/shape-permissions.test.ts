@@ -7,10 +7,14 @@ import {
   ShapeOrigin,
   type ConversationId,
   type InboxItemDto,
+  type ProjectId,
+  type SessionId,
   type ShapeId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   createTestStore,
+  getInboxItem,
   insertShape,
   listInbox,
   listPermissionRules,
@@ -315,5 +319,64 @@ describe('a Plan conversation asks through the permission broker', () => {
     const card = onlyOpenCard();
     expect(card.title).toBe('Allow network access to pypi.org?');
     expect(card.detail?.['shapeId']).toBe(owner.shapeId);
+  });
+});
+
+describe("a chat's card never folds", () => {
+  type Asker =
+    { workstreamId: null; conversationId: ConversationId } | { workstreamId: WorkstreamId };
+  const ask = (projectId: ProjectId, owner: Asker, sessionId: SessionId) =>
+    inbox.ask({
+      ...owner,
+      projectId,
+      sessionId,
+      kind: 'permission',
+      title: 'Retire a principle?',
+      body: 'The chat asks to retire a principle.',
+      options: [
+        { label: PermissionChoice.AllowOnce, description: 'Allow this once' },
+        { label: PermissionChoice.Deny, description: 'Deny' },
+      ],
+      recommendation: null,
+      category: 'access',
+      urgency: 'normal',
+      detail: null,
+      signal: new AbortController().signal,
+    });
+  const chat = (): Asker => ({ workstreamId: null, conversationId: mintId('Conversation') });
+  const rows: {
+    name: string;
+    askers: (lane: WorkstreamId) => [Asker, Asker];
+    oneSession: boolean;
+  }[] = [
+    { name: 'two chats on one project', askers: () => [chat(), chat()], oneSession: false },
+    {
+      name: 'two parallel calls in one chat',
+      askers: () => {
+        const one = chat();
+        return [one, one];
+      },
+      oneSession: true,
+    },
+    {
+      name: "a chat's card beside a lane's identical card",
+      askers: (lane) => [{ workstreamId: lane }, chat()],
+      oneSession: false,
+    },
+  ];
+
+  it.each(rows)('$name: a card each, and each answer reaches only its own call', async (row) => {
+    const ws = seedWorkstream(base);
+    const [a, b] = row.askers(ws.workstream.id);
+    const session = mintId('Session');
+    const first = ask(ws.project.id, a, session);
+    const second = ask(ws.project.id, b, row.oneSession ? session : mintId('Session'));
+    expect(second.item.id).not.toBe(first.item.id);
+    expect(openCards()).toHaveLength(2);
+    inbox.answer(second.item.id, { choice: PermissionChoice.Deny });
+    expect((await second.answer).choice).toBe(PermissionChoice.Deny);
+    expect(getInboxItem(state.db, first.item.id).state).toBe('OPEN');
+    inbox.answer(first.item.id, { choice: PermissionChoice.AllowOnce });
+    expect((await first.answer).choice).toBe(PermissionChoice.AllowOnce);
   });
 });

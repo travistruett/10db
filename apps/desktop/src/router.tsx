@@ -16,6 +16,8 @@ import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { recordSearch } from './views/shape/record/record-tabs';
 import { RecordView } from './views/shape/record/record-view';
 import { ShapeView } from './views/shape/shape-view';
+import { SessionsView } from './views/sessions/sessions-view';
+import { sessionsSearch } from './views/sessions/sessions-search';
 import { settingsSearch } from './views/settings/focus-target';
 import {
   isSettingsSectionKey,
@@ -62,6 +64,21 @@ function WorkbenchPage() {
   return (
     <ViewBoundary name="UI Workbench">
       <WorkbenchView />
+    </ViewBoundary>
+  );
+}
+
+function SessionsPage() {
+  const search = sessionsRoute.useSearch();
+  const navigate = sessionsRoute.useNavigate();
+  return (
+    <ViewBoundary name="Sessions">
+      <SessionsView
+        search={search}
+        onSearch={(next, replace) => {
+          void navigate({ search: next, replace });
+        }}
+      />
     </ViewBoundary>
   );
 }
@@ -178,6 +195,12 @@ const workbenchRoute = createRoute({
   validateSearch: workbenchSearch,
   component: WorkbenchPage,
 });
+const sessionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sessions',
+  validateSearch: sessionsSearch,
+  component: SessionsPage,
+});
 const knowledgeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/knowledge',
@@ -247,6 +270,7 @@ const routeTree = rootRoute.addChildren([
   recordRoute,
   inboxRoute,
   workbenchRoute,
+  sessionsRoute,
   knowledgeRoute,
   tasksRoute,
   settingsIndexRoute,

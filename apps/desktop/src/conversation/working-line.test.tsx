@@ -77,7 +77,7 @@ describe('WorkingLine', () => {
     {
       name: 'waiting on a card points at it',
       props: { conversation: inState('waiting_card'), streaming: null },
-      words: 'Waiting for your answer above',
+      words: 'Waiting for your answer',
     },
     {
       name: 'stopping says so',

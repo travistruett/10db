@@ -5,13 +5,15 @@ import {
   ConversationItemsPage,
   ConversationLiveDto,
   type ConversationDeltaFrame,
+  type ConversationFileId,
   type ConversationId,
   type ConversationItemId,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { applyFrame, liveItemsOf, type LiveItems } from '../conversation/live-items';
-import { readJson } from './client';
+import { readJson, type DaemonClient } from './client';
+import { dataUrlOf } from './data-url';
 import { useDaemon } from './provider';
 import { shapeKeys } from './shape-queries';
 
@@ -34,6 +36,18 @@ export const liveKeys = {
 const NO_ITEMS: readonly ConversationItemDto[] = [];
 const NO_LIVE: LiveItems = new Map();
 
+/** How the conversation's state, capabilities and queue are read. */
+export function conversationQueryOptions(client: DaemonClient, id: ConversationId) {
+  return {
+    queryKey: conversationKeys.one(id),
+    queryFn: async () =>
+      readJson(
+        await client.conversations[':conversationId'].$get({ param: { conversationId: id } }),
+        ConversationDto,
+      ),
+  };
+}
+
 /** The conversation's state, capabilities and queue. */
 export function useConversation(id: ConversationId | null) {
   const { client } = useDaemon();
@@ -42,39 +56,49 @@ export function useConversation(id: ConversationId | null) {
     queryFn: async () =>
       id === null
         ? Promise.reject(new Error('No conversation'))
-        : readJson(
-            await client.conversations[':conversationId'].$get({ param: { conversationId: id } }),
-            ConversationDto,
-          ),
+        : conversationQueryOptions(client, id).queryFn(),
     enabled: id !== null,
   });
 }
 
 /** Every stored item of the conversation, in `seq` order, read a page at a time. */
 export function useConversationItems(id: ConversationId | null): readonly ConversationItemDto[] {
+  return useConversationItemsState(id).items;
+}
+
+/** Every stored item of the conversation, read a page at a time. */
+export async function readConversationItems(
+  client: DaemonClient,
+  id: ConversationId,
+): Promise<ConversationItemDto[]> {
+  const items: ConversationItemDto[] = [];
+  let afterSeq: number | null = null;
+  for (;;) {
+    const page: ConversationItemsPage = await readJson(
+      await client.conversations[':conversationId'].items.$get({
+        param: { conversationId: id },
+        query: afterSeq === null ? {} : { afterSeq },
+      }),
+      ConversationItemsPage,
+    );
+    items.push(...page.items);
+    if (page.nextAfterSeq === null) return items;
+    afterSeq = page.nextAfterSeq;
+  }
+}
+
+/** The stored items, and whether the first read of them is still on its way. */
+export function useConversationItemsState(id: ConversationId | null): {
+  readonly items: readonly ConversationItemDto[];
+  readonly loading: boolean;
+} {
   const { client } = useDaemon();
   const query = useQuery({
     queryKey: id === null ? ['conversations', 'none', 'items'] : conversationKeys.items(id),
-    queryFn: async () => {
-      if (id === null) return [];
-      const items: ConversationItemDto[] = [];
-      let afterSeq: number | null = null;
-      for (;;) {
-        const page: ConversationItemsPage = await readJson(
-          await client.conversations[':conversationId'].items.$get({
-            param: { conversationId: id },
-            query: afterSeq === null ? {} : { afterSeq },
-          }),
-          ConversationItemsPage,
-        );
-        items.push(...page.items);
-        if (page.nextAfterSeq === null) return items;
-        afterSeq = page.nextAfterSeq;
-      }
-    },
+    queryFn: async () => (id === null ? [] : readConversationItems(client, id)),
     enabled: id !== null,
   });
-  return query.data ?? NO_ITEMS;
+  return { items: query.data ?? NO_ITEMS, loading: id !== null && query.isPending };
 }
 
 /** The ids the conversation has stored, whose frames are stale. */
@@ -168,17 +192,41 @@ async function refreshAfter(queryClient: QueryClient, id: ConversationId): Promi
   ]);
 }
 
+/** What the builder sends a conversation: words, the files its `@` mentions name, and pictures. */
+export interface ConversationMessageSend {
+  readonly conversationId: ConversationId;
+  readonly text: string;
+  readonly mentions?: readonly string[];
+  readonly pictures?: readonly File[];
+}
+
+/** The request body: JSON for words alone, a multipart form when pictures go with them. */
+function messageRequest({ text, mentions = [], pictures = [] }: ConversationMessageSend) {
+  if (pictures.length === 0)
+    return {
+      headers: { 'content-type': 'application/json' },
+      init: { body: JSON.stringify(mentions.length === 0 ? { text } : { text, mentions }) },
+    };
+  const form = new FormData();
+  form.append('text', text);
+  for (const path of mentions) form.append('mention', path);
+  // Each picture goes under its own name.
+  for (const picture of pictures) form.append('picture', picture);
+  // No content type: the form's own carries the boundary.
+  return { init: { body: form } };
+}
+
 /** Sends the builder's message; the conversation's owner queues its turn. */
 export function useSendConversationMessage() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { readonly conversationId: ConversationId; readonly text: string }) =>
+    mutationFn: async (input: ConversationMessageSend) =>
       readJson(
-        await client.conversations[':conversationId'].messages.$post({
-          param: { conversationId: input.conversationId },
-          json: { text: input.text },
-        }),
+        await client.conversations[':conversationId'].messages.$post(
+          { param: { conversationId: input.conversationId } },
+          messageRequest(input),
+        ),
         ConversationItemDto,
       ),
     onSuccess: (_item, input) => refreshAfter(queryClient, input.conversationId),
@@ -196,6 +244,44 @@ export function useStopConversation() {
         ConversationDto,
       ),
     onSuccess: (_dto, conversationId) => refreshAfter(queryClient, conversationId),
+  });
+}
+
+/** Stops the turn and sends the edited message, with its pictures, as the next one. */
+export function useRedoConversation() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ConversationMessageSend) =>
+      readJson(
+        await client.conversations[':conversationId'].redo.$post(
+          { param: { conversationId: input.conversationId } },
+          messageRequest(input),
+        ),
+        ConversationItemDto,
+      ),
+    onSuccess: (_item, input) => refreshAfter(queryClient, input.conversationId),
+  });
+}
+
+/**
+ * A picture the builder sent with a message, as a data URL. A kept picture never changes, so it is read
+ * once; it is not under `conversationKeys.all`, which a new item asks again.
+ */
+export function useConversationPicture(conversationId: ConversationId, fileId: ConversationFileId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['conversation-pictures', conversationId, fileId] as const,
+    queryFn: async (): Promise<string> => {
+      // A picture the daemon no longer holds answers 404 from its error handler, not the route.
+      const res: Response = await client.conversations[':conversationId'].files[':fileId'].$get({
+        param: { conversationId, fileId },
+      });
+      if (!res.ok) throw new Error(`The daemon answered HTTP ${String(res.status)}`);
+      return dataUrlOf(await res.blob());
+    },
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
   });
 }
 

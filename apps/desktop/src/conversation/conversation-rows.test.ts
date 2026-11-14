@@ -6,7 +6,12 @@ import {
   subagentCall,
   toolEntry,
 } from '../test/tool-call-fixtures';
-import { conversationArticles, conversationRows, type ConversationRow } from './conversation-rows';
+import {
+  ARTICLE_ROWS,
+  conversationArticles,
+  conversationRows,
+  type ConversationRow,
+} from './conversation-rows';
 import type { ConversationEntry } from './entry';
 
 const read = (id: string, parentId: string | null = null) => toolEntry(readCall({ id, parentId }));
@@ -129,6 +134,17 @@ describe('conversationArticles', () => {
     ],
   ])('%s', (_name, entries, expected) => {
     expect(articles(entries)).toEqual(expected);
+  });
+
+  it('windows a long turn in parts of at most ARTICLE_ROWS rows, each part keyed by its first row', () => {
+    const replies = Array.from({ length: ARTICLE_ROWS * 2 + 1 }, (_, i) => reply(`t${String(i)}`));
+    const parts = conversationArticles(conversationRows([builder('b1'), ...replies]));
+    expect(parts.map((a) => [a.speaker, a.rows.length, a.id, a.continued])).toEqual([
+      ['builder', 1, 'b1', false],
+      ['agent', ARTICLE_ROWS, 't0', false],
+      ['agent', ARTICLE_ROWS, `t${String(ARTICLE_ROWS)}`, true],
+      ['agent', 1, `t${String(ARTICLE_ROWS * 2)}`, true],
+    ]);
   });
 
   it('keys each article by its first row', () => {

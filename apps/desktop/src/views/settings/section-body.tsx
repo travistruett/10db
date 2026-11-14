@@ -21,6 +21,7 @@ import { ProjectGeneralForm } from './project-general-form';
 import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
+import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
 
@@ -125,6 +126,14 @@ export function SectionBody({
           {heading}
           <ScopeLine>For every project. A project can override this in its own Trust.</ScopeLine>
           <TrustSection />
+        </>
+      );
+    case SettingsSectionKey.Sessions:
+      return (
+        <>
+          {heading}
+          <ScopeLine>For every project.</ScopeLine>
+          <SessionsSection />
         </>
       );
     case SettingsSectionKey.KeepAwake:

@@ -1,27 +1,36 @@
-import type { PassId, TaskId } from '@10db/contracts';
+import type { ConversationId, PassId, TaskId } from '@10db/contracts';
+import { useRedoConversation, useSendConversationMessage } from '../../daemon/conversation-queries';
 import { useSignOff } from '../../daemon/pass-close-queries';
-import { useRedoTurn, useStopPage } from '../../daemon/pass-queries';
-import { usePostTaskMessage } from '../../daemon/thread-queries';
-import type { PageActions } from './composer';
+import { usePostTaskMessage, useStopPage } from '../../daemon/pass-queries';
+import type { PageActions } from './page-composer';
 
 /**
- * What a page's composer does: Send posts to the task's thread, a plain Stop ends its turn, Stop and
- * Redo stops it and sends the draft, and Sign Off signs the page off in its pass.
+ * What a page's composer does: Send posts to the task's conversation, a plain Stop ends its turn, Stop
+ * and Redo stops it and sends the draft, and Sign Off signs the page off in its pass. A page whose task
+ * has no conversation yet sends its first message through the task's own intake, which makes one.
  */
-export function usePageActions(passId: PassId, taskId: TaskId): PageActions {
-  const post = usePostTaskMessage(taskId);
+export function usePageActions(
+  passId: PassId,
+  taskId: TaskId,
+  conversationId: ConversationId | null,
+): PageActions {
+  const post = useSendConversationMessage();
+  const first = usePostTaskMessage(taskId);
   const stop = useStopPage(taskId);
-  const redo = useRedoTurn(taskId);
+  const redo = useRedoConversation();
   const signOff = useSignOff();
   return {
-    send: async (draft) => {
-      await post.mutateAsync(draft);
+    send: async ({ text, pictures }) => {
+      if (conversationId === null) await first.mutateAsync({ text, pictures });
+      else await post.mutateAsync({ conversationId, text, pictures: [...pictures] });
     },
     stop: async () => {
       await stop.mutateAsync();
     },
-    redo: async (draft) => {
-      await redo.mutateAsync(draft);
+    redo: async ({ text, pictures }) => {
+      // A turn runs, so the task's conversation is there.
+      if (conversationId === null) throw new Error('This page has no turn to redo');
+      await redo.mutateAsync({ conversationId, text, pictures: [...pictures] });
     },
     signOff: async () => {
       await signOff.mutateAsync({ passId, taskId });

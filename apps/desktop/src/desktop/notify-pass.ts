@@ -47,6 +47,13 @@ export function nextNotificationId(id: number): number {
   return (id % MAX_NOTIFICATION_ID) + 1;
 }
 
+/** The id for the next notification, from the one sequence every notifier of the window draws on. */
+export function takeNotificationId(): number {
+  const id = nextId;
+  nextId = nextNotificationId(id);
+  return id;
+}
+
 let shown: Shown[] = [];
 let nextId = notificationIdSeed(Date.now());
 let listening: Promise<void> | null = null;
@@ -114,8 +121,7 @@ export async function notifyPassReady(
   await listening;
   if (document.hasFocus() || !(await canNotify())) return;
   const area = pass?.pages.find((page) => page.taskId === detail.taskId)?.area;
-  const id = nextId;
-  nextId = nextNotificationId(id);
+  const id = takeNotificationId();
   shown = [
     ...shown,
     { id, projectId: item.projectId, taskId: detail.taskId, at: Date.now(), acted: false },

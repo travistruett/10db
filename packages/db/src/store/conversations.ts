@@ -47,6 +47,7 @@ export function insertConversation(
     providerSessionId: null,
     state: input.state,
     contextPct: null,
+    commands: null,
     nextSeq: 1,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -93,7 +94,10 @@ export function patchConversation(
   ctx: WriteContext,
   id: ConversationId,
   patch: Partial<
-    Pick<ConversationRow, 'model' | 'providerSessionId' | 'state' | 'contextPct' | 'accountId'>
+    Pick<
+      ConversationRow,
+      'model' | 'providerSessionId' | 'state' | 'contextPct' | 'accountId' | 'commands'
+    >
   >,
 ): ConversationRow {
   const before = getConversation(ctx.tx, id);

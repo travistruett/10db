@@ -3,7 +3,9 @@
 // joins the composition root with the HTTP routes (daemon/shape-services.ts).
 
 export { shapeAgentModels } from './agent-models';
-export { judgeShapeCall, privateHostProblem } from './confinement';
+export { judgeShapeCall, privateHostProblem, type ShapeAccess } from './confinement';
+export type { ShapeLaunch } from './session-launch';
+export { gitTrackedFiles } from './ceremony';
 export {
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,

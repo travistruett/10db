@@ -2,9 +2,9 @@ import { BRAINSTORM_REFUSED_ON_CHATGPT } from '@10db/contracts';
 import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@mantine/core';
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { FILE_PICKER_ACCEPT } from './dropped-files';
+import { FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
 import { keepBoth, withoutSent, type LateOutcome } from './late-outcome';
-import { isSendKey } from './use-shape-keys';
+import { isSendKey } from '../../conversation/escape';
 
 export interface ComposerProps {
   /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */

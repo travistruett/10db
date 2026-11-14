@@ -251,6 +251,8 @@ export async function endTurnSteps(
     readonly workstreamId: WorkstreamId;
     readonly ending: PassTurnEnding;
     readonly reply: string | null;
+    /** The reply the session already streamed into the thread, which the turn's end attaches to. */
+    readonly replyItemId?: TaskMessageId | null;
   },
 ): Promise<boolean> {
   const db = deps.state.db;
@@ -259,7 +261,12 @@ export async function endTurnSteps(
     if (input.ending === PassTurnEnding.Ready && untakenMessages(ctx.tx, taskId).length > 0)
       return undefined;
     const open = openPassTurn(ctx.tx, taskId);
-    if (open) return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
+    if (open)
+      return endPassTurn(ctx, open.id, {
+        ending: input.ending,
+        replyBody: input.reply,
+        replyItemId: input.replyItemId ?? null,
+      });
     if (input.ending === PassTurnEnding.Ready) return undefined;
     if (input.ending === PassTurnEnding.Failed) {
       const latest = latestPassTurn(ctx.tx, taskId);

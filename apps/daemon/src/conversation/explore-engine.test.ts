@@ -1150,3 +1150,27 @@ describe('review round 1', () => {
     expect(readFileSync(join(dir, 'body.txt'), 'utf8')).toBe(long);
   });
 });
+
+describe('the commands a session offers', () => {
+  it('are stored on the conversation, and read while it is cold', async () => {
+    w = exploreWorld();
+    w.adapter.shapeBehaviour = (turn) => {
+      turn.emit({
+        type: 'commands',
+        commands: [
+          { name: 'compact', description: 'Compact the conversation', argumentHint: '[focus]' },
+        ],
+      });
+      return Promise.resolve({ text: 'Understood.' });
+    };
+    expect(w.engine.view(w.conv.id).commands).toBeNull();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.clock.advance(10 * 60_000);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(w.engine.view(w.conv.id).commands).toEqual([
+      { name: 'compact', description: 'Compact the conversation', argumentHint: '[focus]' },
+    ]);
+  });
+});

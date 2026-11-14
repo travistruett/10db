@@ -9,10 +9,8 @@ import { RENDER_READS } from './render-access';
 /** The reads a screen may make, and the further database reads the dev UI's other views draw. */
 export const DEV_UI_READS: readonly string[] = [
   ...RENDER_READS.map((r) => r.route),
-  '/tasks/:taskId/thread',
   '/tasks/:taskId/screens',
   '/screens/:screenId',
-  '/tasks/:taskId/thread/pictures/:fileId',
   '/shapes/:shapeId/screens/:name',
   // A call's whole output, read from its file: the dev UI's transcript expands it as the app's does.
   '/conversations/:conversationId/items/:itemId/full',
@@ -94,6 +92,14 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/trust':
     "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',
+  '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
+  '/conversations/:conversationId/files/:fileId':
+    "A picture the builder sent is the builder's own, kept to the 10db app.",
+  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
+  '/projects/:projectId/chat-models': 'Only Sessions draws it, in the 10db app.',
+  '/settings/sessions': 'Only Settings draws it, in the 10db app.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

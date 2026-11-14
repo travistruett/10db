@@ -107,6 +107,7 @@ import {
   insertPassTurn,
   insertSession,
   insertSource,
+  ensureTaskConversation,
   insertSystemNotice,
   listTaskThread,
   offerAllowThis,
@@ -198,7 +199,7 @@ import {
   type FlakyTest,
   type MigrationsBase,
 } from '../delivery';
-import type { StateStore } from '../events';
+import { createLiveFrames, type LiveFrames, type StateStore } from '../events';
 import {
   AccountLaunchError,
   KeychainError,
@@ -291,7 +292,6 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
-import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -324,7 +324,17 @@ import {
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
-import { heldInlineBytes, pictureLimitsFor } from '../conversation';
+import {
+  buildThreadDigest,
+  createItemRecorder,
+  createLiveRegistry,
+  FRESH_SESSION_NOTICE,
+  taskFilesDir,
+  heldInlineBytes,
+  pictureLimitsFor,
+  type ItemRecorder,
+  type LiveRegistry,
+} from '../conversation';
 import { stepSkills } from './step-skills';
 
 /**
@@ -401,6 +411,10 @@ export interface RunnerOptions {
   readonly exportAwsCredentials: AwsCredentialsExporter;
   readonly dataDir: string;
   readonly live: LiveSessions;
+  /** Where a task conversation's live frames go, on the event socket; absent, nobody hears them. */
+  readonly frames?: LiveFrames;
+  /** Serves what a task conversation's session streams now to `GET /conversations/:id/live`. */
+  readonly laneLive?: LiveRegistry;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
   /** A craft skill's text, for a session that has no plugin to load it from; null when there is none. */
@@ -918,6 +932,8 @@ function gateSummary(note: string | null, tail: string): string {
 const FIXING_IN_OWN_SESSION = 'fixing in its own session';
 
 export function createRunner(opts: RunnerOptions): Runner {
+  const frames = opts.frames ?? createLiveFrames();
+  const laneLive = opts.laneLive ?? createLiveRegistry();
   const db = opts.state.db;
   const projectMcpReader = createProjectMcpReader({
     state: opts.state,
@@ -3001,6 +3017,22 @@ export function createRunner(opts: RunnerOptions): Runner {
       throw error;
     }
     ctl.handle = handle;
+    // A page's session streams into its task's conversation (sessions spec §6.1): its replies, its
+    // thinking and its calls are the conversation's items, stored by the library as they finish.
+    let items: { readonly recorder: ItemRecorder; readonly unserve: () => void } | null = null;
+    if (pass) {
+      const conversationId = opts.state.write((ctx) => ensureTaskConversation(ctx, task.id).id);
+      const recorder = createItemRecorder({
+        state: opts.state,
+        clock: opts.clock,
+        log,
+        dataDir: opts.dataDir,
+        frames,
+        conversationId,
+        turnId: () => openPassTurn(db, task.id)?.id ?? null,
+      });
+      items = { recorder, unserve: laneLive.serve(conversationId, recorder.buffers) };
+    }
     const messages = createLaneMessages({
       state: opts.state,
       taskId: task.id,
@@ -3068,13 +3100,17 @@ export function createRunner(opts: RunnerOptions): Runner {
      * not over: the agent is about to see it, and the next completion decides. Otherwise the turn
      * ends Ready, and the session stays open for the builder's next message.
      */
-    const passTurnComplete = async (text: string | null): Promise<void> => {
+    const passTurnComplete = async (
+      text: string | null,
+      replyItemId: TaskMessageId | null,
+    ): Promise<void> => {
       armIdleClose(id, ctl);
       try {
         const ended = await endTurnSteps(passWork, {
           workstreamId: id,
           ending: PassTurnEnding.Ready,
           reply: text,
+          replyItemId,
           fence: ctl.fence,
           providerSessionId: st.providerSessionId,
           reason: '',
@@ -3260,6 +3296,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'tool_call': {
             log.debug(streamEventLogFields(event), 'session stream event');
+            items?.recorder.record(event);
             // A call is the live line's once, when first seen: a Codex command reports each piece of output.
             if (seenCalls.has(event.call.id)) break;
             seenCalls.add(event.call.id);
@@ -3274,8 +3311,11 @@ export function createRunner(opts: RunnerOptions): Runner {
           case 'text_delta':
           case 'reasoning_delta':
           case 'message':
-          case 'commands':
           case 'plan_update':
+            log.debug(streamEventLogFields(event), 'session stream event');
+            items?.recorder.record(event);
+            break;
+          case 'commands':
             log.debug(streamEventLogFields(event), 'session stream event');
             break;
           case 'context': {
@@ -3376,6 +3416,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           case 'turn_complete': {
+            // Before the turn's end is written, so a reply that streamed is the turn's reply.
+            const replyItemId =
+              items?.recorder.turnEnded({ cut: (event.result ?? 'success') !== 'success' }) ?? null;
+            items?.recorder.newTurn();
             st.lastTurn = event.result ?? 'success';
             // What this turn skipped; the next turn's calls count afresh.
             const turnSkips = unattended?.skips.inTurn() ?? null;
@@ -3411,7 +3455,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 break;
               }
               if (await passHandoff()) break;
-              await passTurnComplete(event.text ?? null);
+              await passTurnComplete(event.text ?? null, replyItemId);
               break;
             }
             const recorded = handoffForSession(db, session.id);
@@ -3636,6 +3680,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       releaseStart();
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
+      // A turn that ended early keeps what it streamed, marked partial (sessions spec §6.3).
+      if (items !== null) {
+        try {
+          items.recorder.storePartial();
+        } catch (error) {
+          log.warn({ err: error }, "the turn's partial items could not be kept");
+        }
+        items.unserve();
+      }
       opts.live.unregister(session.id);
       // However the session ended (finished, cancelled, handed off, the daemon stopping), nothing
       // its commands started keeps running: a background loop would otherwise outlive the session

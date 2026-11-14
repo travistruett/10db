@@ -1,5 +1,9 @@
 import type { TurnActivityDto } from '@10db/contracts';
 import {
+  ConversationId,
+  ConversationItemDto,
+  ConversationItemsPage,
+  ConversationLiveDto,
   GoalPassPagesDto,
   mintId,
   PassDto,
@@ -12,13 +16,11 @@ import {
   PassTurnWithFilesDto,
   TaskScreenDto,
   PassViewDto,
-  TaskFileDto,
-  TaskId,
   TaskMessageDto,
-  TaskThreadDto,
   WorkbenchSetupDto,
   type InboxItemDto,
   type PassTurnActivity,
+  type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
@@ -94,6 +96,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     state: 'QUEUED',
     nextActionKind: 'start',
     spokenTo: false,
+    conversationId: mintId('Conversation'),
     turn: null,
     pausedUntil: null,
     failure: null,
@@ -413,22 +416,22 @@ export function taskMessageDto(
   });
 }
 
-/** A picture pasted with `message`. */
-export function taskFileDto(
-  message: Pick<TaskMessageDto, 'id' | 'taskId'>,
-  overrides: Partial<TaskFileDto> = {},
-): TaskFileDto {
-  return TaskFileDto.parse({
-    id: mintId('ConversationFile'),
-    taskId: message.taskId,
-    messageId: message.id,
-    name: 'Screenshot 2026-11-09 at 12.17.03.png',
-    mediaType: 'image/png',
-    size: 4,
-    sha256: 'c'.repeat(64),
-    inlineSent: true,
+/** An item of a page's conversation: the builder's message, unless given. */
+export function pageItemDto(
+  conversationId: ConversationId,
+  item: Partial<ConversationItemDto> & Pick<ConversationItemDto, 'kind'>,
+): ConversationItemDto {
+  return ConversationItemDto.parse({
+    id: mintId('ConversationItem'),
+    conversationId,
+    seq: 1,
+    author: 'builder',
+    partial: false,
+    hasFull: false,
+    deliveredAt: null,
     createdAt: minutesBeforeNow(12),
-    ...overrides,
+    text: 'The padding is too tight',
+    ...item,
   });
 }
 
@@ -442,8 +445,10 @@ export interface PassRoutes {
   readonly turns?: Readonly<Record<string, readonly PassTurnWithFilesDto[]>>;
   /** By turn id. */
   readonly activity?: Readonly<Record<string, readonly TurnActivityDto[]>>;
-  /** By task id. */
-  readonly threads?: Readonly<Record<string, TaskThreadDto>>;
+  /** A task conversation's items, by conversation id. */
+  readonly conversations?: Readonly<Record<string, readonly ConversationItemDto[]>>;
+  /** What a task conversation streams now, by conversation id. */
+  readonly streams?: Readonly<Record<string, ConversationLiveDto['items']>>;
   readonly goalPages?: GoalPassPagesDto;
   readonly setup?: WorkbenchSetupDto;
 }
@@ -476,10 +481,21 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
     http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) =>
       HttpResponse.json(routes.activity?.[String(params['turnId'])] ?? []),
     ),
-    http.get(daemonUrl('/tasks/:taskId/thread'), ({ params }) => {
-      const taskId = TaskId.parse(params['taskId']);
+    http.get(daemonUrl('/conversations/:conversationId/items'), ({ params }) =>
+      HttpResponse.json(
+        ConversationItemsPage.parse({
+          items: routes.conversations?.[String(params['conversationId'])] ?? [],
+          nextAfterSeq: null,
+        }),
+      ),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/live'), ({ params }) => {
+      const conversationId = ConversationId.parse(params['conversationId']);
       return HttpResponse.json(
-        routes.threads?.[taskId] ?? TaskThreadDto.parse({ taskId, messages: [] }),
+        ConversationLiveDto.parse({
+          conversationId,
+          items: routes.streams?.[conversationId] ?? [],
+        }),
       );
     }),
     http.get(daemonUrl('/goals/:goalId/pass-pages'), () =>

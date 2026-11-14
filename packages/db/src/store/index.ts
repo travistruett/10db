@@ -6,6 +6,7 @@ export * from './board-columns';
 export * from './claims';
 export * from './conversation-files';
 export * from './conversation-items';
+export * from './chats';
 export * from './conversations';
 export * from './decisions';
 export * from './events';

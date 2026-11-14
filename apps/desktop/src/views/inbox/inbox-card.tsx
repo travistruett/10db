@@ -43,6 +43,7 @@ import { RecordDecision } from './record-decision';
 import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
 import { SettingsSectionKey } from '../settings/sections';
 import { usePeople } from '../../daemon/people';
+import { OpenSessionLink, SessionBadge, useSessionOfCard } from './session-card-link';
 import { SlackPreview } from './slack-preview';
 import {
   AskSomeoneFooter,
@@ -156,6 +157,7 @@ export function InboxCard({
   const rejection = reviewRejection(item);
   const principle = usePrincipleOf(item, selected);
   const dismissable = isDismissable(item);
+  const session = useSessionOfCard(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
     <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
@@ -191,6 +193,7 @@ export function InboxCard({
             {kind}
             {where}
             {times}
+            {session === null ? null : <SessionBadge chat={session} />}
             <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
               {item.title}
             </Text>
@@ -310,10 +313,12 @@ export function InboxCard({
             </Badge>
           ) : null}
           {times}
+          {session === null ? null : <SessionBadge chat={session} />}
           <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             {item.title}
           </Text>
         </Group>
+        {session === null ? null : <OpenSessionLink chat={session} />}
         {identical === null ? null : (
           <Text size="sm" c="dimmed">
             {identical} are open. Dismiss All closes all {count}.

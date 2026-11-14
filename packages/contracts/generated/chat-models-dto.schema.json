@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "default": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "offered": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "efficient",
+                  "balanced",
+                  "capable",
+                  "frontier"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "tier"
+        ]
+      }
+    },
+    "unavailable": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "default",
+    "offered",
+    "unavailable"
+  ]
+}

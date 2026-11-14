@@ -21,7 +21,7 @@ import { readJson } from './client';
 import { passKeys } from './pass-queries';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
-import { threadKeys } from './thread-queries';
+import { conversationKeys } from './conversation-queries';
 
 // Workbench spec §5.4, §8.3, §9.2: how a pass's pages are signed off and taken out, and how the pass
 // opens its pull request and closes. Each mutation reads the passes again once it lands, as the pass
@@ -112,9 +112,9 @@ export function useSendToAgent() {
         }),
         TaskMessageDto,
       ),
-    onSuccess: (_message, { taskId }) =>
+    onSuccess: () =>
       Promise.all(
-        [passKeys.all, threadKeys.of(taskId)].map((queryKey) =>
+        [passKeys.all, conversationKeys.all].map((queryKey) =>
           queryClient.invalidateQueries({ queryKey }),
         ),
       ),

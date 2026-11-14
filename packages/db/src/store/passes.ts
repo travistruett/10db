@@ -32,7 +32,7 @@ import * as schema from '../schema';
 import { findUnfinishedBatch, getBatchRow, insertBatch, transitionBatch } from './batches';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { dropAllowThisOffers } from './task-thread';
+import { dropAllowThisOffers, ensureTaskConversation } from './task-thread';
 import { getTask, getTasks } from './tasks';
 
 type PassRow = typeof schema.passes.$inferSelect;
@@ -214,6 +214,8 @@ export function insertPass(
       .set({ passId: input.id, updatedAt: ctx.now })
       .where(eq(schema.tasks.id, taskId))
       .run();
+    // A page's thread is its task's conversation, which the page reads and writes from the start.
+    ensureTaskConversation(ctx, taskId);
     ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
   }
   ctx.emit({
@@ -261,6 +263,7 @@ export function joinPass(ctx: WriteContext, passId: PassId, taskIds: readonly Ta
       .set({ passId, updatedAt: ctx.now })
       .where(eq(schema.tasks.id, taskId))
       .run();
+    ensureTaskConversation(ctx, taskId);
     ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
   }
   ctx.emit({

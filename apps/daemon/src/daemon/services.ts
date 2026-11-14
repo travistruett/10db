@@ -187,7 +187,7 @@ import {
 } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
-import type { ThreadService } from '../thread';
+import type { TaskThread } from '../conversation';
 import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
@@ -196,6 +196,7 @@ import type { TrustServices } from './trust-services';
 import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { ConversationApiServices } from './conversation-services';
+import type { ChatApiServices } from './chat-services';
 import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
 import type { ListenerReader } from './listening-ports';
@@ -295,10 +296,12 @@ export function createServices(deps: {
   readonly shape: ShapeApiServices;
   /** The conversation routes (sessions spec §10), over the explore engine. */
   readonly conversation: ConversationApiServices;
+  /** A chat's own routes (sessions spec §10). */
+  readonly chat: ChatApiServices;
   /** Importing a planning effort into a Plan. */
   readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
-  readonly thread: ThreadService;
+  readonly thread: TaskThread;
   readonly pictures: Pictures;
   /** The dev server 10db runs for a project while a pass is open. */
   readonly preview: Preview;
@@ -798,6 +801,7 @@ export function createServices(deps: {
     ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.conversation,
+    ...deps.chat,
     ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,

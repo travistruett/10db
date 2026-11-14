@@ -1,10 +1,11 @@
-import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { clearMocks } from '@tauri-apps/api/mocks';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../test/daemon';
 import { daemonEvent, projectViewDto } from '../test/fixtures';
 import { mintId } from '@10db/contracts';
+import { mockNative } from '../test/native-notifications';
 import {
   pagesByStatus,
   passDto,
@@ -23,39 +24,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-
-interface Sent {
-  readonly title: string;
-  readonly options: { readonly id?: number; readonly body?: string };
-}
-
-/** The native side: every IPC call in order, the click channel, and each notification sent. */
-function mockNative() {
-  const calls: string[] = [];
-  let clicks: { onmessage: (message: unknown) => void } | null = null;
-  const sent: Sent[] = [];
-  mockWindows('main');
-  mockIPC((cmd, args) => {
-    calls.push(cmd);
-    if (cmd === 'plugin:notification|register_listener') {
-      // The mocked payload carries the Channel the plugin delivers clicks on.
-      clicks = (args as { handler: { onmessage: (message: unknown) => void } }).handler;
-    }
-    return undefined;
-  });
-  // The plugin sends through the window's Notification, granted already so it asks nothing.
-  const notify = vi.fn(function record(title: string, options: Sent['options']) {
-    calls.push('notification');
-    sent.push({ title, options });
-  });
-  vi.stubGlobal('Notification', Object.assign(notify, { permission: 'granted' }));
-  vi.spyOn(document, 'hasFocus').mockReturnValue(false);
-  // What tauri-plugin-notification 2.8 sends on a click (desktop.rs `performed`): the action, and the
-  // notification as it was shown.
-  const click = (id: number) =>
-    clicks?.onmessage({ actionId: 'tap', inputValue: null, notification: { id, title: '' } });
-  return { calls, sent, click };
-}
 
 describe('a ready notification', () => {
   it('says which page is ready, and its click selects that page and brings the window forward', async () => {

@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
+  ConversationOwnerKind,
   EventType,
   InvalidError,
   InboxItemId,
@@ -23,6 +24,7 @@ import {
   type InboxItemDto,
   type ProjectDto,
   type AccountId,
+  type Effort,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -184,7 +186,7 @@ import {
   type LiveFrames,
   type StateStore,
 } from '../events';
-import { createGit, memoryPinStore, resolveGit } from '../git';
+import { createGit, memoryPinStore, resolveGit, runGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
   createGh,
@@ -203,8 +205,21 @@ import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../ke
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
-import { createBuilderMcpHandler } from '../builder';
-import { createExploreEngine } from '../conversation';
+import { createBuilderMcpHandler, createBuilderTools } from '../builder';
+import {
+  createExploreEngine,
+  createLiveRegistry,
+  createTaskThread,
+  pictureLimitsFor,
+} from '../conversation';
+import {
+  chatHooks,
+  chatsUnavailable,
+  createChatLiveSessions,
+  createChatService,
+  createChatTools,
+  createConversationFiles,
+} from '../chat';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
@@ -248,11 +263,18 @@ import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredModels } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
-import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
+import {
+  createShapeJev,
+  createShapeService,
+  gitTrackedFiles,
+  shapeAgentModels,
+  type ShapeLaunch,
+} from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
+import { createChatApiServices } from './chat-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -312,7 +334,6 @@ import {
   routingInputs,
   seedTeam,
 } from '../team';
-import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -1490,6 +1511,63 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox.withdraw(id);
     },
   });
+  const conversationModels = (projectId: ProjectId) => {
+    // A conversation that can't run on the project's account has no model to choose.
+    if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
+    const project = getProject(db, projectId);
+    const inputs = routingInputs(db, project);
+    return {
+      default: planConversationModel(db, project, null)?.model ?? null,
+      offered: offeredModels(inputs.profiles),
+    };
+  };
+  const conversationLaunch = (
+    projectId: ProjectId,
+    chosen: string | null,
+    effort: Effort | null,
+  ): ShapeLaunch => {
+    const project = getProject(db, projectId);
+    const row = getAccountRow(db, project.accountId);
+    const refusal = brainstormRefusal(projectId);
+    if (refusal !== null) throw new InvalidError(refusal);
+    const run = conversationRun(db, project, chosen, effort);
+    if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
+    // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
+    // account has stopped offering gives way to the Plan cell's model.
+    const modelId = run.model;
+    const session = launcher.session(row, modelId, listAccountModels(db, row.id));
+    return {
+      cwd: project.repoPath,
+      model: session.model,
+      modelId,
+      effort: run.effort,
+      agentModels: shapeAgentModels(agentKind(row.kind)),
+      env: session.env,
+      account: session.expect,
+      access: {
+        checkout: project.repoPath,
+        home: homedir(),
+        protectedReads: guarded.map((p) => p.path),
+        sandboxRoots: allSandboxRootsOf(sandboxRoots ?? namedSandboxRoots({}, homedir())),
+      },
+    };
+  };
+  // Plan's and a chat's sessions run commands only in a read-only lane sandbox; with none they run none.
+  const conversationPrepare =
+    laneSandbox === null
+      ? undefined
+      : createShapePreparer({
+          state,
+          inbox,
+          git,
+          logger: logger.child({ component: 'shape' }),
+          laneSandbox,
+          protectedPaths: guarded,
+          projectEnv: () => launcher.projectEnv(),
+          exportAwsCredentials,
+          builderHome,
+          laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+        });
   const shape = createShapeService({
     state,
     adapter,
@@ -1513,62 +1591,48 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     brainstormRefusal,
     // A Plan conversation runs commands only in a read-only lane sandbox; with none it runs none.
-    ...(laneSandbox === null
-      ? {}
-      : {
-          prepare: createShapePreparer({
-            state,
-            inbox,
-            git,
-            logger: logger.child({ component: 'shape' }),
-            laneSandbox,
-            protectedPaths: guarded,
-            projectEnv: () => launcher.projectEnv(),
-            exportAwsCredentials,
-            builderHome,
-            laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
-          }),
-        }),
-    models(projectId) {
-      // A conversation that can't run on the project's account has no model to choose.
-      if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
-      const project = getProject(db, projectId);
-      const inputs = routingInputs(db, project);
-      return {
-        default: planConversationModel(db, project, null)?.model ?? null,
-        offered: offeredModels(inputs.profiles),
-      };
-    },
-    launch(projectId, chosen, effort) {
-      const project = getProject(db, projectId);
-      const row = getAccountRow(db, project.accountId);
-      const refusal = brainstormRefusal(projectId);
-      if (refusal !== null) throw new InvalidError(refusal);
-      const run = conversationRun(db, project, chosen, effort);
-      if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
-      // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
-      // account has stopped offering gives way to the Plan cell's model.
-      const modelId = run.model;
-      const session = launcher.session(row, modelId, listAccountModels(db, row.id));
-      return {
-        cwd: project.repoPath,
-        model: session.model,
-        modelId,
-        effort: run.effort,
-        agentModels: shapeAgentModels(agentKind(row.kind)),
-        env: session.env,
-        account: session.expect,
-        access: {
-          checkout: project.repoPath,
-          home: homedir(),
-          protectedReads: guarded.map((p) => p.path),
-          sandboxRoots: allSandboxRootsOf(sandboxRoots ?? namedSandboxRoots({}, homedir())),
+    ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
+    models: conversationModels,
+    launch: conversationLaunch,
+  });
+  const chat = createChatService({
+    state,
+    engine: exploreEngine,
+    dataDir: opts.dataDir,
+    now: () => clock.now(),
+    modelsOf: conversationModels,
+    // Until chats run on Codex (M5b), a project on a ChatGPT plan says when they come.
+    unavailable: (projectId) => chatsUnavailable(brainstormRefusal(projectId) !== null),
+  });
+  const chatLive = createChatLiveSessions();
+  exploreEngine.register(
+    ConversationOwnerKind.Chat,
+    chatHooks({
+      live: chatLive,
+      state,
+      log: logger.child({ component: 'chat' }),
+      dataDir: opts.dataDir,
+      now: () => clock.now(),
+      mcp: {
+        get url() {
+          return mcpUrl;
         },
-      };
-    },
+      },
+      launch: (projectId, model) => conversationLaunch(projectId, model, null),
+      ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
+      limitsFor: pictureLimitsFor,
+      judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
+    }),
+  );
+  const conversationFiles = createConversationFiles({
+    state,
+    now: () => clock.now().getTime(),
+    trackedFiles: gitTrackedFiles,
   });
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
+  // What each task conversation's session streams now; the runner owns those sessions.
+  const laneLive = createLiveRegistry();
   const createdRunner = createRunner({
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
@@ -1594,6 +1658,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     exportAwsCredentials,
     dataDir: opts.dataDir,
     live,
+    frames: liveFrames,
+    laneLive,
     limits,
     mcpUrl: () => mcpUrl,
     skillBody: (name) => readSkillBody(name, opts.harnessDir ?? HARNESS_PLUGIN_DIR),
@@ -1989,6 +2055,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
     },
   });
+  const thread = createTaskThread({
+    state,
+    dataDir: opts.dataDir,
+    pages: {
+      deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
+    },
+  });
   const services = createServices({
     state,
     github: {
@@ -2070,7 +2143,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       engine: exploreEngine,
       shape,
+      chat,
+      files: (id, q) => Promise.resolve(conversationFiles(id, q)),
       dataDir: opts.dataDir,
+      laneLive,
+      task: {
+        post: (taskId, message, how) => thread.postTaskMessage(taskId, message, how),
+      },
+    }),
+    chat: createChatApiServices({
+      state,
+      chat,
+      git: (repo, args) => runGit(repo, args, { bin: gitBin }),
+      now: () => clock.now(),
+      log: logger.child({ component: 'chat' }),
     }),
     planRecord: createPlanRecordServices({
       state,
@@ -2081,13 +2167,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,
-    thread: createThreadService({
-      state,
-      dataDir: opts.dataDir,
-      pages: {
-        deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
-      },
-    }),
+    thread,
     knowledge: createKnowledgeServices({
       state,
       searchAvailable: knowledgeIndex.failed.length === 0,
@@ -2346,6 +2426,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
+      chatTools: createChatTools({
+        state,
+        bus,
+        inbox,
+        live: chatLive,
+        clock,
+        builder: createBuilderTools(services),
+        getTask: (id) => services.getTask(id),
+      }),
     }),
   });
   // What a restart found of each explore conversation is settled before the API serves it.

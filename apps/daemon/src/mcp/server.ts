@@ -1,6 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
+  ChatId,
+  ChatToolInputs,
+  ChatToolName,
+  ConversationOwnerKind,
   DomainError,
   McpToolInputs,
   McpToolName,
@@ -10,12 +14,19 @@ import {
   type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getLiveSessionByTokenHash, isLaneSession, sessionShapeId } from '@10db/db';
+import {
+  getConversation,
+  getLiveSessionByTokenHash,
+  isLaneSession,
+  sessionShapeId,
+  type SessionRow,
+} from '@10db/db';
 import { z } from 'zod';
 import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
 import { ClaimWaits } from './claim-wait';
+import { CHAT_TOOL_DESCRIPTIONS } from './chat-tools';
 import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
 import { ToolImages } from './tool-images';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
@@ -86,6 +97,26 @@ function shapeTools(
   return tools.length > 0 ? tools : null;
 }
 
+/** The tools of a chat's session, or null when it is no chat's or 10db was given none to offer. */
+function chatTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
+  if (!deps.chatTools || session.conversationId === null) return null;
+  const conv = getConversation(deps.state.db, session.conversationId);
+  if (conv.ownerKind !== ConversationOwnerKind.Chat) return null;
+  const handlers = deps.chatTools({
+    sessionId: session.id,
+    conversationId: conv.id,
+    // The owner id of a chat's conversation is a ChatId; parsed, as text read from the database.
+    chatId: ChatId.parse(conv.ownerId),
+    projectId: conv.projectId,
+  });
+  return Object.values(ChatToolName).map((name) => ({
+    name,
+    description: CHAT_TOOL_DESCRIPTIONS[name],
+    schema: ChatToolInputs[name],
+    run: handlers[name],
+  }));
+}
+
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
 export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
   // Every session's claim waits in one place, so a deadlock check sees the waits of all of them.
@@ -96,13 +127,15 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
     if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     // A session's tool set comes from its row: a lane's tools for a workstream, Plan's for a shape's
-    // conversation. A Plan session holds no lane, claim or area, so it never gets a lane's tools.
+    // conversation, a chat's for a chat's. A Plan or chat session holds no lane, claim or area, so it
+    // never gets a lane's tools.
+    // A chat's session gets the builder's tools held to its project, and no lane or Plan tool.
     const shapeId = isLaneSession(session) ? null : sessionShapeId(deps.state.db, session);
     const tools = isLaneSession(session)
       ? laneTools(deps, session.id, session.workstreamId, claimWaits)
-      : shapeId === null
-        ? null
-        : shapeTools(deps, session.id, shapeId);
+      : shapeId !== null
+        ? shapeTools(deps, session.id, shapeId)
+        : chatTools(deps, session);
     if (tools === null) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     const server = new McpServer({ name: '10db', version: '0.1.0' });

@@ -11,8 +11,9 @@ import type { PictureLimits } from './picture-limits';
 
 // Sessions spec §6.2, Workbench spec §6.3. The pure delivery rules every conversation's builder
 // messages follow, whoever owns the conversation. A message is pushed under a client uuid kept before
-// the session is handed it, the first time under its own id's, delivered only when a
-// turn lists that uuid, and pushed again after an interrupt that may have lost it.
+// the session is handed it, the first time under its own id's, delivered only when a turn lists that
+// uuid, pushed again after an interrupt that may have lost it, and, after a restart, read back from the
+// agent's own conversation where it can be.
 
 export interface DeliverableFile {
   readonly id: ConversationFileId;
@@ -124,4 +125,25 @@ export function outgoingMessage(
     uuid: clientUuid(message, fresh),
     blocks: blocks.map((b) => b.id),
   };
+}
+
+/** What rule 5 asks the agent's own conversation after a restart. */
+export interface ReadBackAsk {
+  /** Every uuid a message in doubt went under. */
+  readonly wanted: readonly string[];
+  /** When the oldest of them was written: the agent's conversation is read from there. */
+  readonly since: string;
+}
+
+/**
+ * Rule 5's ask over the messages pushed and never seen taken, oldest first: the uuids each went under,
+ * since the oldest pushed one was written; null when none went under a uuid, so nothing is asked.
+ */
+export function readBackAsk(
+  inDoubt: readonly { readonly pushUuids: readonly string[]; readonly createdAt: string }[],
+): ReadBackAsk | null {
+  const pushed = inDoubt.filter((m) => m.pushUuids.length > 0);
+  const [oldest] = pushed;
+  if (oldest === undefined) return null;
+  return { wanted: pushed.flatMap((m) => m.pushUuids), since: oldest.createdAt };
 }

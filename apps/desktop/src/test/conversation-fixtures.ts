@@ -42,6 +42,7 @@ export function conversationDto(
     costUsd: null,
     sendNow: false,
     pausedUntil: null,
+    commands: null,
     ...overrides,
   });
 }
