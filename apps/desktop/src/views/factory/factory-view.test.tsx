@@ -1553,6 +1553,8 @@ describe('FactoryView human-touch panel', () => {
     proposal: 0,
     review: 0,
     check: 0,
+    plan: 0,
+    moveReport: 0,
     cards: 0,
     tasksRan: 0,
     cardsPerTask: null,
@@ -1578,6 +1580,8 @@ describe('FactoryView human-touch panel', () => {
           workstreamFailed: 19,
           flag: 14,
           proposal: 2,
+          plan: 3,
+          moveReport: 1,
           cards: 60,
           tasksRan: 24,
           cardsPerTask: 2.5,
@@ -1607,13 +1611,30 @@ describe('FactoryView human-touch panel', () => {
       '2',
       '0',
       '0',
+      '3',
+      '1',
       '60',
       '2.5',
       '137 min',
       '485 min',
     ]);
     // A day with no task running has no cards per task to show.
-    expect(quiet).toEqual(['Nov 2', '0', '0', '0', '0', '0', '0', '0', '0', '–', '0 min', '0 min']);
+    expect(quiet).toEqual([
+      'Nov 2',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '–',
+      '0 min',
+      '0 min',
+    ]);
     expect(
       within(table)
         .getAllByRole('columnheader')
@@ -1627,6 +1648,8 @@ describe('FactoryView human-touch panel', () => {
       'Proposal',
       'Review',
       'Check',
+      'Plan',
+      'Move report',
       'Cards',
       'Per task',
       'Waited on an answer',

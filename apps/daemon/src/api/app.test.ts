@@ -1405,6 +1405,8 @@ describe('goal routes', () => {
       proposal: 0,
       review: 0,
       check: 0,
+      plan: 0,
+      moveReport: 0,
       cards: 1,
       tasksRan: 1,
       cardsPerTask: 1,
