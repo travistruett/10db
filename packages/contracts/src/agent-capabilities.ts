@@ -36,6 +36,8 @@ export const AgentCapabilitiesDto = z.strictObject({
   plan: z.boolean(),
   reasoning: z.boolean(),
   subagents: z.boolean(),
+  /** The agent searches the web: Codex's web search stays off until a live check. */
+  webSearch: z.boolean(),
   modelSwitch: z.enum(ModelSwitch),
   /** The builder can take the session over in a terminal. */
   takeover: z.boolean(),

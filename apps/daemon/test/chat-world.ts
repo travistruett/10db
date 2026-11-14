@@ -109,6 +109,7 @@ export function chatWorld(
       ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,
+      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
@@ -125,6 +126,7 @@ export function chatWorld(
         { model: 'claude-sonnet-5-5', tier: null },
       ],
     }),
+    webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
   });
   return {
     store,

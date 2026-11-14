@@ -36,6 +36,7 @@ export function claudeCapabilities(
     plan: true,
     reasoning: true,
     subagents: true,
+    webSearch: true,
     modelSwitch: ModelSwitch.NextTurn,
     takeover: true,
     costUsd: isMetered(kind),
@@ -58,6 +59,8 @@ export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = 
   plan: true,
   reasoning: true,
   subagents: false,
+  // `cached` waits on a live check that it fetches no page the agent names.
+  webSearch: false,
   modelSwitch: ModelSwitch.NextTurn,
   takeover: true,
   costUsd: false,

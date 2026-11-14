@@ -17,6 +17,7 @@ const CLAUDE = {
   plan: true,
   reasoning: true,
   subagents: true,
+  webSearch: true,
   modelSwitch: 'next_turn',
   takeover: true,
 } as const;
@@ -26,6 +27,7 @@ const CODEX = {
   label: 'Codex',
   readBack: true,
   subagents: false,
+  webSearch: false,
   costUsd: false,
 } as const;
 

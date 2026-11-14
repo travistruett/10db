@@ -38,10 +38,14 @@
           "tier"
         ]
       }
+    },
+    "webSearch": {
+      "type": "boolean"
     }
   },
   "required": [
     "default",
-    "offered"
+    "offered",
+    "webSearch"
   ]
 }

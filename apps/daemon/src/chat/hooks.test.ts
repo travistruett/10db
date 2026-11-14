@@ -1,4 +1,4 @@
-import { ChatToolName, JudgeKind } from '@10db/contracts';
+import { AccountKind, ChatToolName, JudgeKind } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { ManualClock } from '../clock';
@@ -119,6 +119,21 @@ describe("a chat's session", () => {
       ).toBe(web);
     },
   );
+
+  // Web search stays off on Codex until a live check: a chat there is never told it searches the web.
+  it.each([
+    { kind: AccountKind.ClaudeSubscription, web: true },
+    { kind: AccountKind.CodexSignin, web: false },
+  ])('on a $kind account tells the agent it searches the web: $web', async ({ kind, web }) => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Tendb });
+    w.launchOn(kind);
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    const prompt = w.adapter.shapeSessions[0]?.spec.profile.systemPrompt ?? '';
+    expect(prompt.includes('search the web')).toBe(web);
+    expect(prompt.includes('no web search')).toBe(!web);
+  });
 
   it("runs on the chat's pick, or the plan role's when it has none", async () => {
     expect((await firstSpec(JudgeKind.Native, 'claude-sonnet-5-5')).model).toBe(

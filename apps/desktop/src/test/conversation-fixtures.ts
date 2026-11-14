@@ -21,6 +21,7 @@ export const CLAUDE_CAPABILITIES: AgentCapabilitiesDto = {
   plan: false,
   reasoning: true,
   subagents: true,
+  webSearch: true,
   modelSwitch: 'next_turn',
   takeover: true,
   costUsd: false,

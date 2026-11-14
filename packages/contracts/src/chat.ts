@@ -66,10 +66,19 @@ export const ChatPatchInput = z
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ChatPatchInput = z.infer<typeof ChatPatchInput>;
 
+/**
+ * What a Codex session says while its web search stays off: `cached` waits on a live check that it fetches no
+ * page the agent names. A lane's thread says it once; a chat's fresh tab says it in place of the web.
+ */
+export const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check, so this session searches nothing.';
+
 /** What a chat may run on: the account's models and its default. */
 export const ChatModelsDto = z.object({
   default: z.string().nullable(),
   offered: z.array(ShapeModelOption),
+  /** Whether the project's agent searches the web (`capabilities.webSearch`), for the fresh tab's words. */
+  webSearch: z.boolean(),
 });
 export type ChatModelsDto = z.infer<typeof ChatModelsDto>;
 

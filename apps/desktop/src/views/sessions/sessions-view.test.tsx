@@ -3,7 +3,12 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pickOption } from '../../test/combobox';
-import { chatDto, chatServer, type ChatServerOptions } from '../../test/chat-fixtures';
+import {
+  chatDto,
+  chatModelsDto,
+  chatServer,
+  type ChatServerOptions,
+} from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 
@@ -53,6 +58,17 @@ describe('Sessions: a fresh tab', () => {
     ).toBeTruthy();
     expect(composer().getAttribute('placeholder')).toBe('Ask about ampsio…');
     expect(screen.getByText('⌘↩ sends · @ files')).toBeTruthy();
+  });
+
+  it('on a ChatGPT-plan project says once that the chat searches nothing, and never that it does', async () => {
+    open('/sessions', { models: chatModelsDto({ webSearch: false }) });
+    expect(
+      await screen.findAllByText(
+        'Web search on ChatGPT comes after a live check, so this session searches nothing.',
+      ),
+    ).toHaveLength(1);
+    expect(screen.getByText(/A chat reads ampsio and runs commands\./)).toBeTruthy();
+    expect(screen.queryByText(/searches the web/)).toBeNull();
   });
 
   it('lists Sessions third in the sidebar, after Inbox and Factory, with no badge', async () => {

@@ -105,6 +105,8 @@ export interface ChatServiceDeps {
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
   modelsOf(projectId: ProjectId): { default: string | null; offered: readonly ShapeModelOption[] };
+  /** Whether the agent of the project's account searches the web (`capabilities.webSearch`). */
+  webSearchOf(projectId: ProjectId): boolean;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -168,7 +170,11 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     models(projectId) {
       const models = deps.modelsOf(projectId);
-      return { default: models.default, offered: [...models.offered] };
+      return {
+        default: models.default,
+        offered: [...models.offered],
+        webSearch: deps.webSearchOf(projectId),
+      };
     },
 
     async archive(id) {

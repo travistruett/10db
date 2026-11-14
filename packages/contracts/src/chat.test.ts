@@ -26,6 +26,7 @@ const capabilities = {
   plan: true,
   reasoning: true,
   subagents: true,
+  webSearch: true,
   modelSwitch: 'next_turn',
   takeover: true,
   costUsd: false,

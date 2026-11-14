@@ -1,4 +1,9 @@
-import type { ChatDto, ProjectId, ProjectViewDto } from '@10db/contracts';
+import {
+  CODEX_WEB_WAITS,
+  type ChatDto,
+  type ProjectId,
+  type ProjectViewDto,
+} from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
@@ -50,6 +55,10 @@ export function FreshTab({
   const narrow = useMediaQuery(NARROW_QUERY);
   const [draft, setDraft] = useSessionDraft(draftKey.fresh(tab.id));
   const models = useChatModels(tab.projectId);
+  // Codex's web search stays off until a live check (`capabilities.webSearch`): a chat there is never said to
+  // search the web, and says once why it searches nothing.
+  const web = models.data?.webSearch === true;
+  const noWeb = models.data?.webSearch === false;
   const starts = useSessionStarts(tab.projectId);
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
@@ -104,7 +113,9 @@ export function FreshTab({
     <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <Box maw={720} mx="auto" px="md" pt="12vh" pb="xl">
         <Text size="sm" c="dimmed" mb="md">
-          A chat reads {name}, runs commands and searches the web.
+          {web
+            ? `A chat reads ${name}, runs commands and searches the web.`
+            : `A chat reads ${name} and runs commands.`}
         </Text>
         <Group gap="sm" mb={4} wrap="wrap">
           <Select
@@ -135,9 +146,15 @@ export function FreshTab({
           ) : null}
         </Group>
         <Text size="xs" c="dimmed" mb="sm">
-          Uses {name}&apos;s account. Reads the code, runs commands and searches the web. Asks
-          before anything that crosses a limit.
+          {web
+            ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
+            : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
         </Text>
+        {noWeb ? (
+          <Text size="xs" c="dimmed" mb="sm">
+            {CODEX_WEB_WAITS}
+          </Text>
+        ) : null}
         <Box mx="calc(var(--mantine-spacing-md) * -1)">
           <Composer
             draft={draft}

@@ -1579,6 +1579,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     dataDir: opts.dataDir,
     now: () => clock.now(),
     modelsOf: conversationModels,
+    webSearchOf: (projectId) =>
+      adapter.capabilities(
+        { kind: agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind) },
+        null,
+      ).webSearch,
   });
   const chatLive = createChatLiveSessions();
   exploreEngine.register(
@@ -1598,6 +1603,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
+      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
       judge,
     }),
