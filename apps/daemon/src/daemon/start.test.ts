@@ -39,7 +39,6 @@ import {
 import {
   findModelProfile,
   getAccount,
-  getAppSetting,
   getWorkstream,
   listAccountModels,
   listAccounts,
@@ -122,7 +121,7 @@ describe('startDaemon', () => {
     ).rejects.toThrow(AlreadyRunningError);
   });
 
-  it('moves the settings made before the playbook once, after seeding the kinds', async () => {
+  it('seeds the kinds', async () => {
     daemon = await startDaemon({
       sandbox: null,
       dataDir: dir.path,
@@ -131,8 +130,6 @@ describe('startDaemon', () => {
       logLevel: 'warn',
       ...QUIET,
     });
-    expect(getAppSetting(daemon.state.db, 'playbook.moved')).toBe(true);
-    expect(getAppSetting(daemon.state.db, 'playbook.moveReport')).toEqual([]);
     expect(listKinds(daemon.state.db).map((k) => k.key)).toContain('security');
   });
 

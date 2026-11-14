@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `sizing_owed_for` text;

@@ -103,6 +103,7 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
+  appendRetryLimitFindings,
   insertRetryLimitFollowUp,
   insertPassTurn,
   insertSession,
@@ -1304,8 +1305,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { steps: row.steps, added: null };
     const review = planAddedStep(planInputOf(tx, row, leased), StepRole.Review);
     if (review === undefined) return { steps: row.steps, added: null };
+    // The step's own reason is what the task drawer shows, so it says why the step is there before how its
+    // model was picked.
+    const added = { ...review, reason: `review added: ${forced}; ${review.reason}` };
     return {
-      steps: [...row.steps.slice(0, at + 1), review, ...row.steps.slice(at + 1)],
+      steps: [...row.steps.slice(0, at + 1), added, ...row.steps.slice(at + 1)],
       added: forced,
     };
   }
@@ -1383,6 +1387,13 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): WorkstreamStep[] {
     const steps = advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id));
     if (!atLimit) return steps;
+    // A step that already shipped at its limit keeps its follow-up: a later rejection of the same step, after
+    // QA sent the work back, adds to it while it is unstarted and files no second one.
+    const earlier = row.steps[row.stepIndex]?.shippedAtLimit;
+    if (earlier !== undefined) {
+      appendRetryLimitFindings(ctx, earlier.followUpTaskId, atLimit);
+      return steps;
+    }
     const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit);
     return steps.map((s, i) =>
       i === row.stepIndex

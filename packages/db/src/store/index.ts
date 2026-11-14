@@ -26,7 +26,6 @@ export * from './knowledge-search';
 export * from './principles';
 export * from './landing-groups';
 export * from './lane-times';
-export * from './legacy-routing';
 export * from './plan-record';
 export * from './shape-review';
 export * from './shape-shadow';

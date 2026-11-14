@@ -7,6 +7,7 @@ import {
   insertWorkstream,
   listEventsAfter,
   listJudgeCalls,
+  listOwedTasks,
   patchJudgeConfig,
   moveTask,
   patchTask,
@@ -494,10 +495,11 @@ describe('a judge answer for text or pins that have since changed', () => {
     edit(task.id, { title: 'Alpha v2' });
     await sizer.settled([task.id]);
     release();
+    // The edit cut the three calls for the earlier text short, as the real judge does on an abort.
+    const cut = () => listJudgeCalls(store.db, 20).filter((c) => c.outcome === 'stopped');
     await vi.waitFor(() => {
-      expect(stale()).toHaveLength(3);
+      expect(cut()).toHaveLength(3);
     });
-    expect(stale().every((c) => c.outcome === 'stopped')).toBe(true);
     expect(getTask(store.db, task.id)).toMatchObject({
       rigor: 'light',
       rigorReason: 'judged Light (0.90)',
@@ -636,5 +638,123 @@ describe('the start-up sweep', () => {
     sizer.sweep();
     await sizer.settled([task.id]);
     expect(judge.requests).toHaveLength(0);
+  });
+});
+
+describe('a judge call cut off by a shutdown', () => {
+  beforeEach(withAccount);
+
+  /** A judge whose calls never answer on their own: only an abort ends them. */
+  const never = () => scriptedJudge(state, () => new Promise<ScriptedAnswer>(() => undefined));
+  const owed = (id: TaskId) => listOwedTasks(store.db).find((t) => t.id === id)?.owedFor ?? null;
+  const HOUR = 60 * 60 * 1000;
+
+  /** A task queued for a judge that never answers, then the service stopped, then a new one started. */
+  async function restartedAfterCutOff(input: Partial<TaskInput> = {}) {
+    const first = start(never());
+    const task = create(input);
+    const fingerprint = sizingFingerprint(getTask(store.db, task.id));
+    first.stop();
+    await first.settled([task.id]);
+    return { task, fingerprint };
+  }
+
+  it('is asked again at the next start, and its answer applied', async () => {
+    const { task, fingerprint } = await restartedAfterCutOff();
+    expect(owed(task.id)).toBe(fingerprint);
+    expect(getTask(store.db, task.id)).toMatchObject({ rigor: null, sizedByRules: true });
+    const judge = scriptedJudge(state, answering(careful));
+    const sizer = start(judge);
+    sizer.sweep();
+    await sizer.settled([task.id]);
+    expect(new Set(judge.requests.map((r) => r.taskId))).toEqual(new Set([task.id]));
+    expect(getTask(store.db, task.id)).toMatchObject({ rigor: 'careful', sizedByRules: false });
+    expect(owed(task.id)).toBeNull();
+  });
+
+  it('is not asked again once its calls answered before the stop', async () => {
+    const first = start(scriptedJudge(state, answering(careful)));
+    const task = create();
+    await first.settled([task.id]);
+    expect(owed(task.id)).toBeNull();
+    first.stop();
+    const judge = scriptedJudge(state, answering(careful));
+    start(judge).sweep();
+    await service?.settled([task.id]);
+    expect(judge.requests).toHaveLength(0);
+  });
+
+  it('is not asked for a task made more than 24 hours ago, and the debt is dropped', async () => {
+    const { task } = await restartedAfterCutOff();
+    clock.advance(25 * HOUR);
+    const judge = scriptedJudge(state, answering(careful));
+    start(judge).sweep();
+    await service?.settled([task.id]);
+    expect(judge.requests).toHaveLength(0);
+    expect(owed(task.id)).toBeNull();
+    expect(getTask(store.db, task.id).sizedByRules).toBe(true);
+  });
+
+  it('is asked for a task made days ago and edited since, counting the day from the debt', async () => {
+    const task = create();
+    clock.advance(3 * 24 * HOUR);
+    const first = start(never());
+    edit(task.id, { title: 'Alpha, reworded' });
+    first.stop();
+    await first.settled([task.id]);
+    expect(owed(task.id)).not.toBeNull();
+    const judge = scriptedJudge(state, answering(careful));
+    start(judge).sweep();
+    await service?.settled([task.id]);
+    expect(new Set(judge.requests.map((r) => r.taskId))).toEqual(new Set([task.id]));
+    expect(owed(task.id)).toBeNull();
+  });
+
+  it('is not asked about text that changed while the daemon was down, and the debt is dropped', async () => {
+    const { task } = await restartedAfterCutOff();
+    edit(task.id, { title: 'Alpha, reworded' });
+    const judge = scriptedJudge(state, answering(careful));
+    start(judge).sweep();
+    await service?.settled([task.id]);
+    expect(judge.requests).toHaveLength(0);
+    expect(owed(task.id)).toBeNull();
+  });
+
+  const ENDS: readonly {
+    readonly name: string;
+    readonly script: () => ScriptedAnswer;
+    readonly setup: () => void;
+  }[] = [
+    {
+      name: 'a fallback that is not a stop',
+      script: () => ({ fallback: 'error' }),
+      setup: () => undefined,
+    },
+    {
+      name: 'both decisions switched off',
+      script: () => careful,
+      setup: () => {
+        state.write((ctx) =>
+          patchJudgeConfig(ctx, {
+            decisions: { task_rigor: { enabled: false }, task_kinds: { enabled: false } },
+          }),
+        );
+      },
+    },
+    { name: 'answers applied', script: () => careful, setup: () => undefined },
+  ];
+
+  it.each(ENDS)('stops being owed when the judge’s work ends: $name', async ({ script, setup }) => {
+    setup();
+    const sizer = start(scriptedJudge(state, script));
+    const task = create();
+    await sizer.settled([task.id]);
+    expect(owed(task.id)).toBeNull();
+  });
+
+  it('is never owed for a task nothing queued: the judge is off', () => {
+    start(offJudge);
+    const task = create();
+    expect(owed(task.id)).toBeNull();
   });
 });
