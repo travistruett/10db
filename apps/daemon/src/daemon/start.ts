@@ -2333,6 +2333,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         bus,
         inbox,
         live: chatLive,
+        clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
       }),

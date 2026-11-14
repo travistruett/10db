@@ -24,9 +24,11 @@ import {
   getDecision,
   getInboxItem,
   getPrinciple,
+  getProject,
   recordChatTask,
   setChatTitle,
 } from '@10db/db';
+import type { Clock } from '../clock';
 import type { EventBus, StateStore } from '../events';
 import { ParkedError, type InboxService } from '../inbox';
 import type { ChatToolHandlers, ChatToolsFor } from '../mcp';
@@ -44,7 +46,8 @@ export type BuilderTools = Record<BuilderToolName, (args: unknown) => unknown>;
 export interface ChatToolsDeps {
   readonly state: StateStore;
   readonly bus: Pick<EventBus, 'subscribe'>;
-  readonly inbox: Pick<InboxService, 'ask'>;
+  readonly inbox: Pick<InboxService, 'ask' | 'withdraw'>;
+  readonly clock: Clock;
   readonly live: ChatLiveSessions;
   readonly builder: BuilderTools;
   readonly getTask: (id: TaskId) => TaskDto;
@@ -55,6 +58,8 @@ export const BUILDER_KEPT_TASK = 'The builder kept this task.';
 export const BUILDER_KEPT_RECORD = 'The builder kept this record as it is.';
 /** What a tool waiting on a card says once the turn was stopped or the session ended. */
 export const BUILDER_STOPPED = 'The builder stopped the turn.';
+/** What a tool says once its card waited out the project's human wait and was withdrawn. */
+export const BUILDER_NO_ANSWER = 'The builder did not answer in time, so nothing changed.';
 
 /** A card a chat's tool raises can be allowed once or denied. */
 const ASK_OPTIONS: readonly InboxOption[] = [
@@ -136,10 +141,19 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
     const run = (name: BuilderToolName, args: unknown): Promise<unknown> =>
       Promise.resolve(builder[name](args));
 
-    /** Asks the builder on a card owned by the conversation; answers whether they allowed it. */
-    const ask = async (title: string, body: string): Promise<'allow' | 'deny' | 'stopped'> => {
+    /**
+     * Asks the builder on a card owned by the conversation; answers whether they allowed it. The card
+     * waits the project's human wait, inside the call's own timeout of that wait plus 5 minutes
+     * (`hooks.ts`), so it is withdrawn before the agent is told the call timed out and a late Allow
+     * finds it closed.
+     */
+    const ask = async (
+      title: string,
+      body: string,
+    ): Promise<'allow' | 'deny' | 'stopped' | 'timed_out'> => {
       const live = deps.live.get(conversationId, sessionId);
       if (live === null) return 'stopped';
+      const waitMs = getProject(state.db, projectId).humanWaitMinutes * 60_000;
       const { item, answer } = deps.inbox.ask({
         workstreamId: null,
         conversationId,
@@ -155,23 +169,31 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
         detail: null,
         signal: live.signal,
       });
-      live.observer.onWaitStart(item);
       let off: () => void = () => undefined;
-      // A card withdrawn (a Stop, an archive) answers the call: nothing waits on it any more.
-      const withdrawn = new Promise<'stopped'>((resolve) => {
+      let settle: (why: 'stopped' | 'timed_out') => void = () => undefined;
+      // A card withdrawn (a Stop, an archive, the wait passing) answers the call: nothing waits on it any
+      // more. The first reason given wins.
+      const withdrawn = new Promise<'stopped' | 'timed_out'>((resolve) => {
+        settle = resolve;
         off = deps.bus.subscribe((event) => {
           if (event.entityId !== item.id) return;
           if (getInboxItem(state.db, item.id).state === InboxState.Cancelled) resolve('stopped');
         });
       });
+      const deadline = deps.clock.setTimeout(() => {
+        settle('timed_out');
+        deps.inbox.withdraw(item.id);
+      }, waitMs);
       try {
+        live.observer.onWaitStart(item);
         const answered = await Promise.race([answer, withdrawn]);
-        if (answered === 'stopped') return 'stopped';
+        if (answered === 'stopped' || answered === 'timed_out') return answered;
         return answered.choice === PermissionChoice.AllowOnce ? 'allow' : 'deny';
       } catch (error) {
         if (error instanceof ParkedError) return 'stopped';
         throw error;
       } finally {
+        deadline.cancel();
         off();
         live.observer.onWaitEnd(item);
       }
@@ -186,7 +208,8 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
     ): Promise<unknown> => {
       const verdict = await ask(title, body);
       if (verdict === 'allow') return act();
-      return { done: false, note: verdict === 'deny' ? kept : BUILDER_STOPPED };
+      const notes = { deny: kept, stopped: BUILDER_STOPPED, timed_out: BUILDER_NO_ANSWER } as const;
+      return { done: false, note: notes[verdict] };
     };
 
     const handlers: Record<ChatToolName, (input: unknown) => Promise<unknown>> = {

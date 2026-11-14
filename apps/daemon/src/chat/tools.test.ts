@@ -17,9 +17,10 @@ import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
 import { seedProfiles } from '../../test/seed-profiles';
+import { ManualClock, type Clock } from '../clock';
 import { startDaemon, type RunningDaemon } from '../daemon';
 import { FakeAdapter, type FakeShapeTurn } from '../sessions';
-import { BUILDER_KEPT_TASK, BUILDER_STOPPED } from './tools';
+import { BUILDER_KEPT_TASK, BUILDER_NO_ANSWER, BUILDER_STOPPED } from './tools';
 
 // Sessions spec §6.6: a chat's agent reaches every builder tool through 10db's own /mcp by its
 // session's token, held to the chat's project; removing or retiring work it didn't make asks the
@@ -32,10 +33,8 @@ let adapter: FakeAdapter;
 let api: ReturnType<typeof apiClient>;
 let project: ProjectDto;
 
-beforeEach(async () => {
-  dir = tempDir('daemon');
-  repo = createTempRepo();
-  adapter = new FakeAdapter({});
+/** Starts the daemon on the test's data directory, on `clock` when one is given. */
+async function boot(clock?: Clock): Promise<void> {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: dir.path,
@@ -44,9 +43,17 @@ beforeEach(async () => {
     logLevel: 'warn',
     caffeinate: () => null,
     watch: false,
+    ...(clock === undefined ? {} : { clock }),
   });
   seedProfiles(daemon.state);
   api = apiClient(daemon.url, daemon.token);
+}
+
+beforeEach(async () => {
+  dir = tempDir('daemon');
+  repo = createTempRepo();
+  adapter = new FakeAdapter({});
+  await boot();
   project = await api.post('/projects', ProjectDto, {
     name: 'demo',
     repoPath: repo.path,
@@ -296,6 +303,32 @@ describe("a chat's tools on /mcp", () => {
     expect(listInbox(running().state.db, { states: ['OPEN'] }).map((c) => c.id)).not.toContain(
       card.id,
     );
+    expect((await tasksOf()).map((t) => t.id)).toEqual([task.id]);
+  });
+
+  it("withdraws a card the builder leaves past the project's human wait, and a late Allow removes nothing", async () => {
+    await running().stop();
+    const clock = new ManualClock();
+    await boot(clock);
+    const task = await builderTask();
+    let said = '';
+    const chat = await newChat();
+    const turn = agentTurn(chat, async (call) => {
+      said = await call('remove_task', { taskId: task.id });
+    });
+    const card = await waitForAsync(() => Promise.resolve(openCards()[0]));
+    clock.advance(project.humanWaitMinutes * 60_000 - 1);
+    expect(openCards().map((c) => c.id)).toEqual([card.id]);
+    clock.advance(1);
+    await turn;
+    expect(said).toContain(BUILDER_NO_ANSWER);
+    expect(openCards()).toEqual([]);
+    const late = await fetch(`${running().url}/inbox/${card.id}/answer`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${running().token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ choice: 'allow_once' }),
+    });
+    expect(late.status).toBe(409);
     expect((await tasksOf()).map((t) => t.id)).toEqual([task.id]);
   });
 
