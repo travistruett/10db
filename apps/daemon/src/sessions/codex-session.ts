@@ -17,7 +17,7 @@ import {
   type HookInput,
 } from './codex-guard';
 import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
-import { codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
+import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import {
   createTurnState,
   hasKnownShape,
@@ -487,13 +487,13 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   };
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
+    const developerInstructions = codexDeveloperInstructions(spec);
     const params = {
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
       config: codexThreadConfig(spec),
-      // Codex loads no AGENTS.md under `untrusted` (L4): the instructions travel with the thread.
-      ...(spec.instructions ? { developerInstructions: spec.instructions } : {}),
+      ...(developerInstructions === null ? {} : { developerInstructions }),
     };
     const resumeId = spec.resumeProviderSessionId;
     let thread;

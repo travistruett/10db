@@ -1,6 +1,6 @@
 import { SandboxedMcpServer } from '../sandbox';
 import { lanePermissions } from './codex-lane-permissions';
-import type { AgentSessionCore, SessionMcpServer } from './types';
+import type { AgentSessionCore, AgentSessionSpec, SessionMcpServer } from './types';
 
 /** The name of the permission profile 10db's template defines and every lane thread must run under. */
 export const LANE_PROFILE = 'lane';
@@ -65,4 +65,17 @@ export function codexThreadConfig(spec: AgentSessionCore): Record<string, unknow
       },
     },
   };
+}
+
+/**
+ * What a thread is told beyond Codex's own prompt. Codex loads no AGENTS.md under `untrusted` (L4), so the
+ * project's and the builder's instructions travel with the thread; an explore conversation's own prompt (Plan's or
+ * a chat's) comes before them, as Claude Code appends it before the setup's. Null when there is nothing to say.
+ */
+export function codexDeveloperInstructions(spec: AgentSessionSpec): string | null {
+  const parts = [
+    ...(spec.profile.kind === 'explore' ? [spec.profile.systemPrompt] : []),
+    ...(spec.instructions ? [spec.instructions] : []),
+  ].filter((part) => part !== '');
+  return parts.length === 0 ? null : parts.join('\n\n');
 }

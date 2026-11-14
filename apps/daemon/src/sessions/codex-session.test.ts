@@ -2268,7 +2268,8 @@ describe('the guard socket', () => {
         model: 'gpt-5.6-sol',
         approvalPolicy: 'never',
         config: codexThreadConfig(spec),
-        developerInstructions: 'Use pnpm.',
+        // The conversation's own prompt comes first, then the project's and the builder's instructions.
+        developerInstructions: 'You are a chat.\n\nUse pnpm.',
       });
       const config = codexThreadConfig(spec);
       expect(config).toMatchObject({
