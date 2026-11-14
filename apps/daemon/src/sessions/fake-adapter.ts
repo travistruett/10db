@@ -180,8 +180,11 @@ export class FakeAdapter implements AgentAdapter {
     for (const wake of waiters) wake();
   }
 
+  /** What the fake says it can do, over the agent's own: a test stages another agent's row. */
+  capabilityOverrides: Partial<AgentCapabilities> = {};
+
   capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities {
-    return capabilitiesOf(account.kind, model);
+    return { ...capabilitiesOf(account.kind, model), ...this.capabilityOverrides };
   }
 
   /**
@@ -257,6 +260,13 @@ export class FakeAdapter implements AgentAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /**
+   * What a Shape session's interrupt answers, from the uuids of the messages it holds that no turn has
+   * begun: by default none, as a Claude Code without `interrupt_receipt_v1`.
+   */
+  shapeInterruptReceipt: (
+    queued: readonly string[],
+  ) => InterruptReceipt | Promise<InterruptReceipt> = () => null;
   /** The same for a lane session: its stop waits for it before the session ends. */
   laneStopGate: Promise<void> | null = null;
 
@@ -276,6 +286,7 @@ export class FakeAdapter implements AgentAdapter {
           (turn) => this.shapeBehaviour(turn),
           providerSessionId,
           this.claim(providerSessionId),
+          (queued) => this.shapeInterruptReceipt(queued),
         );
     const handle: SessionHandle = {
       events: inner.events,

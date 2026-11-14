@@ -20,12 +20,14 @@ import {
 } from '@10db/contracts';
 import {
   conversationCostUsd,
+  deleteItem,
   endSession,
   getAccountRow,
   getConversation,
   getProject,
   insertItem,
   insertSession,
+  lastItems,
   listPushedTurnStarters,
   listQueuedTurnStarters,
   markFilesInline,
@@ -41,9 +43,9 @@ import {
 import type { Clock, Timer } from '../clock';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
-import type { AgentAdapter, SessionHandle } from '../sessions';
+import type { AgentAdapter, InterruptReceipt, SessionHandle } from '../sessions';
 import type { Hold } from '../verify';
-import { clientUuid } from './delivery-rules';
+import { clientUuid, pushedAgainAfter } from './delivery-rules';
 import type { ExploreLaunch, ExploreOwnerHooks, Outgoing, TurnEnd } from './explore-hooks';
 import { openSession, type OpenSession } from './explore-session';
 import {
@@ -63,6 +65,8 @@ export const STOP_GRACE_MS = 10_000;
 export const WARM_CAP = 4;
 /** A live session this close to its credentials' expiry is closed before a push, so the next start has fresh ones. */
 const CREDENTIALS_MARGIN_MS = 5 * 60_000;
+/** How far back a Redo looks for the builder's message it replaces. */
+const REDO_LOOKBACK = 50;
 
 const S = ConversationState;
 const E = ExploreEffect;
@@ -121,6 +125,12 @@ export interface ExploreEngineDeps {
   readonly warmCap?: number;
 }
 
+/** What a reduction saw, for its effects to act on: the starters waiting, and the turn that ended. */
+interface Taken {
+  readonly waiting: ReadonlySet<ConversationItemId>;
+  readonly end: TurnEnd;
+}
+
 interface Session {
   readonly open: OpenSession;
   /** The engine asked it to end: its `ended` is no event of the conversation's. */
@@ -149,6 +159,16 @@ interface Runtime {
   held: boolean;
   /** A start under way was cancelled. */
   cancelled: boolean;
+  /** Ends a stop that neither a receipt nor the turn's end settled in time. */
+  grace: Timer | null;
+  /** What the last interrupt answers. */
+  receipt: Promise<InterruptReceipt> | null;
+  /** A receipt settled the stop: the interrupted turn's own end is still to come, and is dropped (call 25). */
+  lateComplete: boolean;
+  /** The message a Redo replaces, while its stop settles (call 30). */
+  redo: ConversationItemId | null;
+  /** The session the engine last stopped or saw end, whose stream a partial is stored from. */
+  lastSession: Session | null;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -156,6 +176,7 @@ interface Runtime {
 export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const { state, adapter, clock, log } = deps;
   const idleMs = deps.idleMs ?? IDLE_MS;
+  const stopGraceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
   const owners = new Map<ConversationOwnerKind, ExploreOwnerHooks>();
   const runtimes = new Map<ConversationId, Runtime>();
 
@@ -192,6 +213,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         parked: false,
         held: false,
         cancelled: false,
+        grace: null,
+        receipt: null,
+        lateComplete: false,
+        redo: null,
+        lastSession: null,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -210,10 +236,12 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const handed = (rt: Runtime): ConversationItemRow[] =>
     rt.session === null ? [] : listPushedTurnStarters(state.db, rt.id);
 
-  const factsOf = (rt: Runtime): ExploreFacts => {
+  /** The reducer's facts; a hold counts nothing queued, except to a Stop, which clears a parked start. */
+  const factsOf = (rt: Runtime, event: ExploreEvent): ExploreFacts => {
     const conv = conversation(rt.id);
+    const parked = holding(rt) && event.type !== 'stop';
     return {
-      queued: holding(rt) ? 0 : unpushed(rt).length + handed(rt).length,
+      queued: parked ? 0 : unpushed(rt).length + handed(rt).length,
       providerSessionId: conv.providerSessionId !== null,
       restartedWhilePaused: false,
       steer: capabilitiesOf(conv).steer,
@@ -256,15 +284,20 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
 
   /** Reduces `event`; answers the refusal's words, or null. */
   const reduce = (rt: Runtime, event: ExploreEvent): string | null => {
-    const outcome = reduceExplore(rt.state, event, factsOf(rt));
+    const outcome = reduceExplore(rt.state, event, factsOf(rt, event));
     if ('refused' in outcome) return outcome.refused;
     // Flags a later effect reads, set now: a start under way sees its cancel at once.
     if (outcome.effects.includes(E.CancelStart)) rt.cancelled = true;
     if (outcome.effects.includes(E.DropPendingStart)) rt.parked = false;
+    // What streamed is kept as it stands now: the next turn may begin streaming before the chain runs.
+    if (outcome.effects.includes(E.StorePartial)) storePartialNow(rt);
     // A start sends what waited when it was asked for; what lands later is the next turn's.
-    const waiting = new Set(unpushed(rt).map((item) => item.id));
+    const taken: Taken = {
+      waiting: new Set(unpushed(rt).map((item) => item.id)),
+      end: { how: rt.ended, starters: [...rt.starters] },
+    };
     setState(rt, outcome.next);
-    for (const effect of outcome.effects) enqueue(rt, () => apply(rt, effect, waiting));
+    for (const effect of outcome.effects) enqueue(rt, () => apply(rt, effect, taken));
     return null;
   };
 
@@ -354,6 +387,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const stopSession = (rt: Runtime, session: Session): Promise<void> => {
     session.asked = true;
     session.open.detach();
+    rt.lastSession = session;
     if (rt.session === session) rt.session = null;
     const stopped = (async () => {
       try {
@@ -365,6 +399,86 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     })();
     rt.closing = stopped;
     return stopped;
+  };
+
+  const storePartialNow = (rt: Runtime): void => {
+    const open = (rt.session ?? rt.lastSession)?.open;
+    if (open !== undefined)
+      state.write((ctx) => {
+        open.storePartial(ctx);
+      });
+  };
+
+  /** The running turn is over: it took what it began with. */
+  const settleTurn = (rt: Runtime): void => {
+    rt.grace?.cancel();
+    rt.grace = null;
+    rt.inTurn = false;
+    state.write((ctx) => {
+      markItemsDelivered(ctx, rt.id, rt.starters);
+    });
+  };
+
+  /** `p`, or `fallback` once the stop grace has passed without it. */
+  const withinGrace = <T>(p: Promise<T>, fallback: T): Promise<T> =>
+    new Promise((resolve) => {
+      const timer = clock.setTimeout(() => {
+        resolve(fallback);
+      }, stopGraceMs);
+      void p.then((value) => {
+        timer.cancel();
+        resolve(value);
+      });
+    });
+
+  /** The starters a session holds that went under one of `uuids`: every one a combined push carried. */
+  const itemsOf = (rt: Runtime, uuids: readonly string[]): Set<ConversationItemId> => {
+    const named = new Set(uuids);
+    return new Set(
+      handed(rt)
+        .filter((item) => item.pushUuids.some((uuid) => named.has(uuid)))
+        .map((item) => item.id),
+    );
+  };
+
+  /** A receipt that came while the stop waits: it settles the stop, unless a Redo decides first. */
+  const receiptCame = (rt: Runtime, session: Session): void => {
+    if (rt.session !== session || rt.state !== S.Stopping || !rt.inTurn || rt.redo !== null) return;
+    rt.lateComplete = true;
+    settleTurn(rt);
+    rt.ended = 'stopped';
+    reduce(rt, { type: 'stop_settled' });
+  };
+
+  /** Neither a receipt nor the turn's end came within the grace: the session is stopped. */
+  const graceOver = (rt: Runtime, session: Session): void => {
+    rt.grace = null;
+    if (rt.session !== session || rt.state !== S.Stopping) return;
+    settleTurn(rt);
+    handBack(rt);
+    rt.ended = 'stopped';
+    reduce(rt, { type: 'stop_grace_passed' });
+  };
+
+  /** Pushes again, as one message under a uuid of its own, what an interrupt may have lost (rule 4). */
+  const pushAgain = (
+    rt: Runtime,
+    session: Session,
+    items: readonly ConversationItemRow[],
+  ): void => {
+    const first = items[0];
+    if (first === undefined) return;
+    const conv = conversation(rt.id);
+    const hooks = hooksOf(conv);
+    const limits = session.open.launch.limits;
+    const out = combined(
+      items.map((item) => hooks.outgoing(conv, item, { fresh: false, digest: null, limits })),
+    );
+    const uuid = clientUuid(first, randomUUID);
+    state.write((ctx) => {
+      markPushed(ctx, rt, items, out, uuid, false);
+    });
+    session.open.handle.send(out.text, out.images, uuid);
   };
 
   const start = async (rt: Runtime, waiting: ReadonlySet<ConversationItemId>): Promise<void> => {
@@ -478,11 +592,15 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         rateLimited: () => undefined,
         turnComplete: (event) => {
           if (rt.session !== self) return;
-          state.write((ctx) => {
-            markItemsDelivered(ctx, rt.id, rt.starters);
-          });
-          rt.inTurn = false;
-          rt.ended = event.result === 'error' ? 'failed' : 'complete';
+          if (rt.lateComplete) {
+            rt.lateComplete = false;
+            return;
+          }
+          settleTurn(rt);
+          // A Redo settles its stop once it has read the receipt.
+          if (rt.state === S.Stopping && rt.redo !== null) return;
+          rt.ended =
+            rt.state === S.Stopping ? 'stopped' : event.result === 'error' ? 'failed' : 'complete';
           reduce(rt, { type: 'turn_complete' });
         },
         ended: (event) => {
@@ -491,6 +609,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           });
           void launch.release();
           if (self === null || self.asked || rt.session !== self) return;
+          rt.grace?.cancel();
+          rt.grace = null;
+          rt.lastSession = self;
           rt.session = null;
           rt.inTurn = false;
           handBack(rt);
@@ -508,14 +629,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
 
   // --- Effects ---------------------------------------------------------------------------------------
 
-  const apply = async (
-    rt: Runtime,
-    effect: ExploreEffect,
-    waiting: ReadonlySet<ConversationItemId>,
-  ): Promise<void> => {
+  const apply = async (rt: Runtime, effect: ExploreEffect, taken: Taken): Promise<void> => {
     switch (effect) {
       case E.Start:
-        await start(rt, waiting);
+        await start(rt, taken.waiting);
         return;
       case E.Push:
       case E.NextTurn:
@@ -524,7 +641,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         return;
       case E.OnTurnEnded: {
         const conv = conversation(rt.id);
-        await hooksOf(conv).onTurnEnded(conv, { how: rt.ended, starters: rt.starters });
+        await hooksOf(conv).onTurnEnded(conv, taken.end);
         return;
       }
       case E.Close: {
@@ -537,14 +654,55 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       case E.RunQueue:
         if (unpushed(rt).length > 0) reduce(rt, { type: 'builder_message' });
         return;
-      case E.Inject:
-      case E.DropPendingStart:
-      case E.CancelStart:
-      case E.Interrupt:
-      case E.WithdrawCard:
-      case E.RepushStillQueued:
-      case E.StopHandle:
+      case E.Inject: {
+        // One push each, under its own uuid, so a receipt can name each one.
+        const session = rt.session;
+        if (session !== null) for (const item of unpushed(rt)) pushAgain(rt, session, [item]);
+        return;
+      }
+      case E.CancelStart: {
+        // The start has run by now: it saw the cancel and opened nothing, or it opened a session.
+        rt.cancelled = false;
+        const session = rt.session;
+        if (session === null) return;
+        handBack(rt);
+        rt.inTurn = false;
+        await stopSession(rt, session);
+        return;
+      }
+      case E.Interrupt: {
+        const session = rt.session;
+        if (session === null) return;
+        rt.grace?.cancel();
+        rt.grace = clock.setTimeout(() => {
+          graceOver(rt, session);
+        }, stopGraceMs);
+        const receipt = session.open.handle.interrupt().catch(() => null);
+        rt.receipt = receipt;
+        void receipt.then(() => {
+          receiptCame(rt, session);
+        });
+        return;
+      }
+      case E.RepushStillQueued: {
+        const session = rt.session;
+        const asked = rt.receipt;
+        rt.receipt = null;
+        if (session === null) return;
+        const receipt = asked === null ? null : await withinGrace(asked, null);
+        const still = receipt === null ? null : itemsOf(rt, receipt.stillQueued);
+        pushAgain(rt, session, pushedAgainAfter(handed(rt), still));
+        return;
+      }
+      case E.StopHandle: {
+        const session = rt.session;
+        if (session !== null) await stopSession(rt, session);
+        return;
+      }
+      // Stored when reduced.
       case E.StorePartial:
+      case E.DropPendingStart:
+      case E.WithdrawCard:
       case E.FreshNext:
       case E.StartFreshFromDigest:
       case E.PausedNotice:
@@ -589,8 +747,64 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       owners.set(kind, hooks);
     },
     queued,
-    stop: () => Promise.resolve(),
-    redo: (_id, post) => Promise.resolve(post()),
+    /** Resolves once the stop's effects have been applied: the interrupt asked, or the start cancelled. */
+    async stop(id) {
+      const rt = runtimeOf(id);
+      reduce(rt, { type: 'stop' });
+      await new Promise<void>((resolve) => {
+        enqueue(rt, resolve);
+      });
+    },
+    async redo(id, post) {
+      const rt = runtimeOf(id);
+      const original =
+        lastItems(state.db, id, REDO_LOOKBACK)
+          .reverse()
+          .find(
+            (item) =>
+              item.author === ConversationItemAuthor.Builder &&
+              item.kind === ConversationItemKind.Message,
+          ) ?? null;
+      rt.redo = original?.id ?? null;
+      reduce(rt, { type: 'stop' });
+      // The interrupt is asked for on the chain; its receipt says whether the agent took the original.
+      await new Promise<void>((resolve) => {
+        enqueue(rt, resolve);
+      });
+      const asked = rt.receipt;
+      const receipt = asked === null ? null : await withinGrace(asked, null);
+      rt.redo = null;
+      const session = rt.session;
+      if (rt.state !== S.Stopping || session === null) {
+        const edit = post();
+        queued(id);
+        return edit;
+      }
+      if (rt.inTurn) {
+        // The turn's own end is still to come: it is dropped when it does.
+        rt.lateComplete = true;
+        settleTurn(rt);
+      }
+      rt.ended = 'stopped';
+      if (
+        original !== null &&
+        receipt !== null &&
+        itemsOf(rt, receipt.stillQueued).has(original.id)
+      ) {
+        // The agent would run the original by itself: its session goes, and the edit alone is sent.
+        rt.lateComplete = false;
+        state.write((ctx) => {
+          deleteItem(ctx, original.id);
+        });
+        const edit = post();
+        handBack(rt);
+        reduce(rt, { type: 'stop_grace_passed' });
+        return edit;
+      }
+      const edit = post();
+      reduce(rt, { type: 'stop_settled' });
+      return edit;
+    },
     sendNow: () => undefined,
     async modelChanged(id, model) {
       const rt = runtimeOf(id);

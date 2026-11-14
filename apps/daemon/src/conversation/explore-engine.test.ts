@@ -269,3 +269,210 @@ describe('a turn from a queued message to a warm session', () => {
 function never(): never {
   throw new Error('missing');
 }
+
+/** Turns that wait for their gate, write half a sentence first, and end at once when interrupted. */
+function stoppableTurns(world: ExploreWorld, opts: { readonly lateEnd?: Promise<void> } = {}) {
+  const gates: ReturnType<typeof gate>[] = [];
+  world.adapter.shapeBehaviour = async (turn) => {
+    const g = gate();
+    gates.push(g);
+    turn.emit({
+      type: 'text_delta',
+      itemId: `half-${String(turn.number)}`,
+      offset: 0,
+      text: 'Half a sen',
+    });
+    const aborted = new Promise<'aborted'>((resolve) => {
+      turn.signal.addEventListener('abort', () => {
+        resolve('aborted');
+      });
+    });
+    if ((await Promise.race([g.promise, aborted])) === 'aborted') {
+      await opts.lateEnd;
+      return {};
+    }
+    return { text: 'Understood.' };
+  };
+  return gates;
+}
+
+const partials = (world: ExploreWorld) =>
+  world
+    .items()
+    .filter((i) => i.partial)
+    .map((i) => [i.kind, i.body]);
+
+describe('Stop', () => {
+  it('interrupts, keeps what streamed once, pushes again what the receipt left out, and runs the rest next', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const lost = w.send('two');
+    const kept = w.send('three');
+    w.adapter.shapeInterruptReceipt = (queued) => ({ stillQueued: queued.slice(-1) });
+    const stopping = w.engine.stop(w.conv.id);
+    expect(w.stateOf()).toBe('stopping');
+    await stopping;
+    await waitFor(() => gates.length === 2 && w.ends.length === 1);
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 3);
+    expect(w.stateOf()).toBe('running');
+    expect(partials(w)).toEqual([['agent_message', { text: 'Half a sen' }]]);
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped']);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two', 'three', 'two']);
+    expect(w.items().find((i) => i.id === kept.id)?.pushUuids).toHaveLength(1);
+    expect(w.items().find((i) => i.id === lost.id)?.pushUuids).toHaveLength(2);
+    for (const g of gates) g.release();
+  });
+
+  it('settles warm when nothing waits', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped']);
+    expect(partials(w)).toHaveLength(1);
+  });
+
+  it.each([
+    ['the turn’s end, then the receipt', 'end-first'],
+    ['the receipt, then the turn’s end', 'receipt-first'],
+  ] as const)('settles a stop once when %s arrive', async (_name, order) => {
+    w = exploreWorld();
+    const late = gate();
+    const receipt = gate();
+    const gates = stoppableTurns(w, order === 'receipt-first' ? { lateEnd: late.promise } : {});
+    w.adapter.shapeInterruptReceipt = async (queued) => {
+      if (order === 'end-first') await receipt.promise;
+      return { stillQueued: [...queued] };
+    };
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    w.send('two');
+    await w.engine.stop(w.conv.id);
+    await waitFor(() => w.ends.length === 1);
+    // The second end of the one turn: the receipt after its end, or its own end after the receipt.
+    receipt.release();
+    late.release();
+    await waitFor(() => gates.length === 2);
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped']);
+    expect(partials(w)).toHaveLength(1);
+    expect(w.stateOf()).toBe('running');
+    gates[1]?.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped', 'complete']);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two']);
+  });
+
+  it('stops the session when neither a receipt nor the turn’s end comes within the grace, and hands back what it held', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.adapter.shapeInterruptReceipt = () => new Promise(() => undefined);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const held = w.send('two');
+    await w.engine.stop(w.conv.id);
+    w.clock.advance(10_000);
+    await waitFor(() => w.adapter.shapeSessions.length === 2);
+    expect(w.items().find((i) => i.id === held.id)?.handedBackAt).not.toBeNull();
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped']);
+    expect(w.adapter.shapeSessions[1]?.spec).toMatchObject({
+      prompt: 'two',
+      resumeProviderSessionId: 'fake-shape-1',
+    });
+    for (const g of gates) g.release();
+    await waitFor(() => gates.length === 2);
+    gates[1]?.release();
+    await w.engine.settled(w.conv.id);
+  });
+
+  it('cancels a start, and keeps a queued message waiting through a Stop until a new one', async () => {
+    w = exploreWorld();
+    const starting = gate();
+    w.specGate = starting.promise;
+    w.send('one');
+    await w.engine.stop(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    starting.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toEqual([]);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toEqual([]);
+    expect(w.engine.view(w.conv.id).queued).toBe(1);
+    w.specGate = null;
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[0]?.spec.prompt).toBe('one\n\ntwo');
+  });
+
+  it('clears a start parked behind a hold, so the release starts nothing', async () => {
+    w = exploreWorld();
+    w.engine.holdStarts(w.conv.id);
+    w.send('one');
+    await w.engine.stop(w.conv.id);
+    expect(w.engine.parked(w.conv.id)).toBe(false);
+    w.engine.releaseStarts(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toEqual([]);
+    expect(w.engine.view(w.conv.id).queued).toBe(1);
+  });
+
+  it('redoes a turn with the edited message as the next one', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const edit = await w.engine.redo(w.conv.id, () => w.keep('one, edited'));
+    await waitFor(() => gates.length === 2);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['one, edited']);
+    expect(w.ends.at(0)?.how).toBe('stopped');
+    gates[1]?.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.ends.at(-1)?.starters).toEqual([edit.id]);
+  });
+
+  it('sends a resumed session the edit alone when the receipt says the message it redoes was never taken', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    w.adapter.shapeInterruptReceipt = (queued) => ({ stillQueued: [...queued] });
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const original = w.send('two');
+    await w.engine.redo(w.conv.id, () => w.keep('two, edited'));
+    // The agent may begin the original before its session is stopped; later turns run straight through.
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+    for (const g of gates) g.release();
+    await waitFor(() => w.adapter.shapeSessions.length === 2);
+    expect(w.items().some((i) => i.id === original.id)).toBe(false);
+    expect(w.adapter.shapeSessions[1]?.spec).toMatchObject({
+      prompt: 'two, edited',
+      resumeProviderSessionId: 'fake-shape-1',
+    });
+    for (const g of gates) g.release();
+    await w.engine.settled(w.conv.id);
+  });
+
+  it.each([
+    ['inject', ['two']],
+    ['queue', []],
+  ] as const)('with steer %s, a message while running goes %s', async (steer, during) => {
+    w = exploreWorld();
+    w.adapter.capabilityOverrides = { steer };
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    w.send('two');
+    // A queued message changes nothing until the turn ends; an injected one is pushed at once.
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === during.length);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(during);
+    gates[0]?.release();
+    await waitFor(() => gates.length === 2);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two']);
+    gates[1]?.release();
+    await w.engine.settled(w.conv.id);
+  });
+});

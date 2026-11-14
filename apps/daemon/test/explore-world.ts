@@ -84,6 +84,8 @@ export interface ExploreWorld extends EngineInstance {
   specGate: Promise<void> | null;
   /** Stores a builder message and tells the engine, as an owner does (rule 1). */
   send(text: string): ConversationItemRow;
+  /** Stores a builder message only, as a Redo's `post` does. */
+  keep(text: string): ConversationItemRow;
   items(): ConversationItemRow[];
   stateOf(): ConversationState;
   /** A second engine over the same store, with its own fake and clock, as a restart is. */
@@ -145,16 +147,18 @@ export function exploreWorld(
     specGate: null,
     ...build({}),
     send(text) {
-      const item = state.write((ctx) =>
+      const item = world.keep(text);
+      world.engine.queued(conv.id);
+      return item;
+    },
+    keep: (text) =>
+      state.write((ctx) =>
         insertItem(ctx, conv.id, {
           author: ConversationItemAuthor.Builder,
           kind: ConversationItemKind.Message,
           body: { text },
         }),
-      );
-      world.engine.queued(conv.id);
-      return item;
-    },
+      ),
     items: () => listItems(state.db, conv.id),
     stateOf: () => world.engine.view(conv.id).state,
     restart(over = {}) {

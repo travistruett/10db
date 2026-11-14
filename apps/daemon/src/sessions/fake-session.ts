@@ -617,6 +617,9 @@ export function runFakeExploreSession(
   behaviour: FakeShapeBehaviour,
   providerSessionId: string,
   onEnded: () => void,
+  interruptReceipt: (
+    queued: readonly string[],
+  ) => InterruptReceipt | Promise<InterruptReceipt> = () => null,
 ): SessionHandle {
   const core = createFakeSessionCore();
   core.onEnd(onEnded);
@@ -708,9 +711,18 @@ export function runFakeExploreSession(
       queue.push({ text, images, uuid: uuid ?? null });
       wake?.();
     },
-    interrupt() {
+    async interrupt() {
       current?.abort();
-      return Promise.resolve(null);
+      const receipt = await interruptReceipt(
+        queue.flatMap((m) => (m.uuid === null ? [] : [m.uuid])),
+      );
+      // A message the receipt does not name was lost with the interrupted turn, as Claude Code's is.
+      if (receipt !== null) {
+        const named = new Set(receipt.stillQueued);
+        for (const m of [...queue])
+          if (m.uuid !== null && !named.has(m.uuid)) queue.splice(queue.indexOf(m), 1);
+      }
+      return receipt;
     },
     stop() {
       current?.abort();
