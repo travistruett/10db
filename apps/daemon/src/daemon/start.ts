@@ -1496,6 +1496,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     engine: exploreEngine,
     clock,
+    judge,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     joiningProblem: (taskId) => starter.joiningProblem(taskId),

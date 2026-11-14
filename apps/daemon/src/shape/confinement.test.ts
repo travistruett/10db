@@ -717,8 +717,8 @@ describe('judgeShapeCall in the read-only sandbox', () => {
 });
 
 // Trust line §8: where Plan's judge is native, its own session searches and fetches the web and its
-// commands go to auto mode's classifier, not a card. Plan still writes no code, and its reads keep their
-// rules. On a rules or 10db judge every answer is today's.
+// commands go to auto mode's classifier, not a card; on 10db's judge they go to it the same way. Plan still
+// writes no code, and its reads keep their rules. On a rules judge every answer is today's.
 describe('judgeShapeCall by the session’s judge', () => {
   let sandboxed: ShapeAccess;
   beforeEach(() => {
@@ -809,20 +809,17 @@ describe('judgeShapeCall by the session’s judge', () => {
     ],
   ];
 
-  it.each(ROWS)('on a native judge, answers %s', (_name, make, native) => {
-    expect(judgeShapeCall(make(), { ...sandboxed, judge: 'native' }).decision).toBe(native);
+  // 10db's judge takes the calls auto mode would: its rows answer as native's (T5 Task 11).
+  it.each(
+    ROWS.flatMap(([name, make, judged]) =>
+      (['native', 'tendb'] as const).map((judge) => [judge, name, make, judged] as const),
+    ),
+  )('on a %s judge, answers %s', (judge, _name, make, judged) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge }).decision).toBe(judged);
   });
 
-  it.each(
-    ROWS.flatMap(
-      ([name, make, , today]) =>
-        [
-          [name, 'rules', make, today],
-          [name, 'tendb', make, today],
-        ] as const,
-    ),
-  )('on a %s judge… answers %s as today', (_name, judge, make, today) => {
-    expect(judgeShapeCall(make(), { ...sandboxed, judge }).decision).toBe(today);
+  it.each(ROWS)('on a rules judge… answers %s as today', (_name, make, _judged, today) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge: 'rules' }).decision).toBe(today);
   });
 
   it('says Plan writes no code when it refuses an edit, on every judge', () => {

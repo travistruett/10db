@@ -73,11 +73,11 @@ export const SHAPE_ALLOWED_TOOLS: readonly string[] = [
 ];
 
 /**
- * What a Plan session approves without a prompt, by its judge. On a native judge the web tools are left
- * out: an allow rule would approve a call before auto mode's classifier sees it.
+ * What a Plan session approves without a prompt, by its judge. On a judge that runs the web tools are left
+ * out: an allow rule would approve a call before auto mode's classifier or 10db's judge sees it.
  */
 export function shapeAllowedTools(judge: JudgeKind | undefined): readonly string[] {
-  return judge === JudgeKind.Native
+  return judge !== undefined && judge !== JudgeKind.Rules
     ? SHAPE_ALLOWED_TOOLS.filter((name) => name !== 'WebSearch' && name !== 'WebFetch')
     : SHAPE_ALLOWED_TOOLS;
 }

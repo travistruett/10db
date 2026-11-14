@@ -224,6 +224,7 @@ export function createShapePreparer(deps: {
           signal: input.signal,
           mcpApproved: projectMcp.configHashes,
           sandbox: { fileAccess: sandboxed.fileAccess, hazards: [], commandsAsk: true },
+          ...(input.limits === undefined ? {} : { limits: input.limits }),
         },
       );
       const skipped = skippedServersNote(
