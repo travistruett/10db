@@ -137,7 +137,14 @@ export interface TestEngine {
     areas?: string[],
     dependsOn?: TaskDto['id'][],
     /** `riskTags` shape the steps a scripted `full` flow runs; `kinds` are the keys the task is filed with. */
-    plan?: { flow: string; riskTags?: string[]; kinds?: string[]; criteria?: number },
+    plan?: {
+      flow: string;
+      riskTags?: string[];
+      kinds?: string[];
+      criteria?: number;
+      /** A scripted `full` flow runs without the builder's plan approval unless it asks for it. */
+      approvesPlan?: boolean;
+    },
     batchId?: BatchId,
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
@@ -154,6 +161,8 @@ function rigorOfFlow(flow: string): Rigor {
       return Rigor.Light;
     case 'standard':
       return Rigor.Standard;
+    case 'careful':
+      return Rigor.Careful;
     case 'full':
       return Rigor.Critical;
     default:
@@ -549,7 +558,11 @@ export async function createTestEngine(
         state.write((ctx) =>
           setPlaybook(ctx, seeded.id, {
             rows: [
-              { rigor: Rigor.Critical, steps: fullFlowSteps(plan.riskTags ?? [], criteria.length) },
+              {
+                rigor: Rigor.Critical,
+                steps: fullFlowSteps(plan.riskTags ?? [], criteria.length),
+                approvesPlan: plan.approvesPlan ?? false,
+              },
             ],
           }),
         );

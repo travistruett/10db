@@ -25,6 +25,7 @@ export function nextActionAfterCrash(
     case 'uncommitted':
     case 'merge':
     case 'builder_review':
+    case 'plan_approval':
     case 'pass_review':
       return previous;
     case 'answer':
@@ -71,6 +72,7 @@ export function nextActionOnAnotherAccount(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'plan_approval':
     case 'pass_review':
       return previous;
   }
@@ -108,6 +110,7 @@ export function withUndelivered(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'plan_approval':
       return next;
   }
 }
@@ -140,6 +143,7 @@ export function resumedSessionOf(action: NextAction): string | null {
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'plan_approval':
     case 'pass_review':
       return null;
   }

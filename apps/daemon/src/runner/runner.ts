@@ -231,7 +231,7 @@ import {
   projectInstructionsLoaded,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
-import { escalateStep, resolveSteps } from '../routing';
+import { escalateStep, resolveSteps, rowProcess } from '../routing';
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
@@ -277,6 +277,7 @@ import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
+import { raisePlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {
@@ -1224,6 +1225,54 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * Whether the builder approves the plan before step `to` starts: it is Build, the steps before it
+   * include Plan, and the task's rigor row asks for the approval. A row is read as it stands now.
+   */
+  function approvesPlanBefore(row: WorkstreamRow, to: number): boolean {
+    if (row.steps[to]?.role !== StepRole.Implement) return false;
+    if (!row.steps.slice(0, to).some((s) => s.role === StepRole.Plan)) return false;
+    const rigor = getTask(db, row.taskId).effectiveRigor;
+    return rowProcess(rigor, playbookInputs(db, row.projectId).playbook).approvesPlan;
+  }
+
+  /**
+   * The planning steps are done and the builder approves the plan before Build: one `plan` card with
+   * the plan, the workstream waiting on it with no session and no lease, its claims kept. Build starts
+   * from the builder's answer (`approvePlan`).
+   */
+  function parkForPlanApproval(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+  ): 'stop' {
+    const plan = [...row.steps.slice(0, row.stepIndex + 1)]
+      .reverse()
+      .find((s) => s.role === StepRole.Plan)?.result?.summary;
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      const card = raisePlanApproval(ctx, {
+        workstreamId: id,
+        projectId: row.projectId,
+        taskTitle: getTask(ctx.tx, row.taskId).title,
+        plan: plan ?? 'The plan step recorded no plan.',
+      });
+      transitionWorkstream(ctx, id, {
+        to: S.WaitingHuman,
+        fence: ctl.fence,
+        patch: {
+          steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+          nextAction: { kind: 'plan_approval', inboxId: card.id },
+          currentSessionId: null,
+        },
+        reason: 'waiting for the builder to approve the plan',
+      });
+      clearLease(ctx, id);
+    });
+    return 'stop';
+  }
+
+  /**
    * The last read-only step is over and the work is done: DONE, or waiting for the builder's check
    * when the project has no gate. A rejection at the retry limit (`atLimit`) ships the same way and,
    * in the same write, files its findings as a follow-up task and names it on the step.
@@ -1396,6 +1445,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           atLimit: null,
         });
       case 'advance':
+        if (approvesPlanBefore(row, move.to)) return parkForPlanApproval(id, ctl, row, step);
         return advanceTo(id, ctl, row, step, move.to, null);
       case 'send_back': {
         const attempt = row.attempt + 1;
