@@ -1571,6 +1571,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
   const createdRunner = createRunner({
+    judge,
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,

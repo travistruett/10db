@@ -58,6 +58,15 @@ function environmentLines(input: TrustPolicyInput): string[] {
   ];
 }
 
+/** The approved calls a judge reads by intent, as lines: only the classifier's, which it skipped by intent. */
+export function approvedLines(approved: readonly ApprovedAction[]): string[] {
+  return approved.flatMap((a) => {
+    if (a.kind !== SkipKind.Classifier) return [];
+    const line = approvedLine(a);
+    return line === null ? [] : [line];
+  });
+}
+
 /** One session's policy, for every judge alike (trust line §3). */
 export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
   return TrustPolicy.parse({
@@ -67,16 +76,7 @@ export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
     environment: environmentLines(input),
     coordination: coordinationLines(input.surface, input.gateCommand),
     // Only the classifier reads by intent; the guard and the broker match the other approvals' keys.
-    allow: [
-      ...new Set([
-        ...(input.approved ?? []).flatMap((a) => {
-          if (a.kind !== SkipKind.Classifier) return [];
-          const line = approvedLine(a);
-          return line === null ? [] : [line];
-        }),
-        ...input.grants,
-      ]),
-    ],
+    allow: [...new Set([...approvedLines(input.approved ?? []), ...input.grants])],
     switches: input.switches,
   });
 }

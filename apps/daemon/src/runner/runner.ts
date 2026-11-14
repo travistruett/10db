@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import {
   TrustSurface,
   ClaimKind,
+  JudgeDecision,
+  JudgeOutcome,
   Approval,
   ConflictError,
   currentStep,
@@ -66,7 +68,10 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
+  approvedLines,
   buildTrustPolicy,
+  CROSSES_LIMIT_QUESTION,
+  PRE_EXISTING_MAX,
   callKey,
   callSummary,
   createSkipRecorder,
@@ -86,6 +91,7 @@ import {
 } from '../trust';
 import {
   activeClaims,
+  insertJudgeCall,
   clearLease,
   endSession,
   getAccountRow,
@@ -209,8 +215,16 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
-import { answerUnattended, judgePreToolUse, stringField, type ProtectedPath } from '../guard';
 import {
+  answerUnattended,
+  judgePreToolUse,
+  stringField,
+  type GuardVerdict,
+  type ProtectedPath,
+} from '../guard';
+import {
+  createHookJudge,
+  createLimitNotes,
   createPermissionBroker,
   raiseGateHostCards,
   createProjectMcpReader,
@@ -218,6 +232,7 @@ import {
   type InboxService,
   type WaitObserver,
 } from '../inbox';
+import type { Judge } from '../judge';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import {
@@ -370,6 +385,9 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   warmIdleMs: 10 * 60_000,
 };
 
+/** The model a logged auto mode denial names: Claude Code's own classifier, not one 10db asks. */
+const AUTO_MODE_JUDGE_MODEL = 'claude-code-auto-mode';
+
 export interface RunnerOptions {
   /** The daemon's resolved git and gh, which run a pass's commit, push or merge the builder allowed. */
   readonly gitTools: { readonly git: string; readonly gh: string | null };
@@ -397,6 +415,8 @@ export interface RunnerOptions {
    */
   readonly migrationsBase?: MigrationsBase;
   readonly clock: Clock;
+  /** 10db's judge: asked whether it is ready as each session starts, and for each call it judges. */
+  readonly judge: Judge;
   readonly logger: Logger;
   /** Gives a repo MCP server that names an AWS profile that profile's short-lived credentials. */
   readonly exportAwsCredentials: AwsCredentialsExporter;
@@ -2480,10 +2500,27 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
     const capability = opts.adapter.capabilities(launch.expect, launch.model);
-    // 10db's judge isn't wired into a lane's hook yet, so no lane starts on it.
-    const tendbReady = false;
+    // Read as each session starts: without a key or with a switch off, a tendb session starts on the rules.
+    const tendbReady = await opts.judge.ready(JudgeDecision.CrossesLimit);
     const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto', tendbReady);
     const judged = sessionJudge !== JudgeKind.Rules;
+    // On 10db's judge Claude Code runs in default mode: the hook settles every call it allows, so auto
+    // mode's classifier would only add its cost (call 4).
+    const sessionPermissionMode: LanePermissionMode | null =
+      lanePermissionMode !== null && sessionJudge === JudgeKind.Tendb
+        ? 'default'
+        : lanePermissionMode;
+    // What the checkout held before this session, so 10db's judge tells it from what the session makes.
+    const preExisting =
+      laneSession === null || !tendbReady
+        ? []
+        : await opts.git.untrackedAndIgnored(checkout, PRE_EXISTING_MAX).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "the checkout's untracked files could not be read; 10db's judge reads none",
+            );
+            return [];
+          });
     const startFloor =
       laneSession === null
         ? null
@@ -2510,8 +2547,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       'trust policy',
     );
     /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
-    const sayFloor = (ctx: WriteContext, reason: FloorReason): void => {
-      const text = floorNoticeText(reason, { attended: pass !== null });
+    const sayFloor = (ctx: WriteContext, reason: FloorReason, detail?: string): void => {
+      const text = floorNoticeText(reason, {
+        attended: pass !== null,
+        ...(detail === undefined ? {} : { detail }),
+      });
       if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
       insertSystemNotice(ctx, task.id, text);
     };
@@ -2590,6 +2630,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
+      judge: sessionJudge,
       webJudged: judged && switches.web,
       setupLine:
         laneSession === null
@@ -2846,6 +2887,109 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(unattended === null ? {} : { away: unattended }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
+    /** The guard's answer for a lane's call under `judge`, with T4's unattended answer and skip in a lane. */
+    const laneVerdict = (
+      req: {
+        readonly toolName: string;
+        readonly input: unknown;
+        readonly cwd?: string | undefined;
+        readonly toolUseId?: string | null | undefined;
+      },
+      judge: JudgeKind,
+    ): GuardVerdict => {
+      // The hook's input is the model's own JSON: read as a record here, where it is keyed.
+      const input = ToolInputRecord.safeParse(req.input).data ?? {};
+      const key = callKey(req.toolName, input, checkout);
+      const verdict = judgePreToolUse({
+        attended: unattended === null,
+        dockerOn: project.sandboxDocker,
+        deployApproved: unattended?.approvedKeys.includes(key) === true,
+        toolName: req.toolName,
+        toolInput: req.input,
+        repoPath: checkout,
+        ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
+        areas: project.areas,
+        hazards: project.hazards,
+        claims: claims(),
+        readOnly,
+        delivery: project.delivery,
+        protectedPaths: opts.protectedPaths,
+        // Every page of the pass is a page here: another task's is never written.
+        ...(pass
+          ? { inPass: { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch } }
+          : {}),
+        ownSession: {
+          configDir,
+          providerSessionId: st.providerSessionId ?? resumeId,
+          filesDir: taskFilesDir(opts.dataDir, task.id),
+        },
+        ...(fileAccess ? { fileAccess } : {}),
+        judge,
+        coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
+        webOn: switches.web,
+      });
+      if (unattended === null) return verdict;
+      const answer = answerUnattended({
+        verdict,
+        judge,
+        callKey: key,
+        approvedKeys: unattended.approvedKeys,
+        path: stringField(input, 'file_path') ?? stringField(input, 'notebook_path'),
+        toolName: req.toolName,
+      });
+      if (answer.skip !== null)
+        unattended.skips.record({
+          toolName: req.toolName,
+          toolUseId: req.toolUseId ?? null,
+          callKey: key,
+          summary: callSummary(req.toolName, input).text,
+          kind: answer.skip.kind,
+          limit: answer.skip.limit,
+          reason: answer.skip.reason,
+          source: SkipSource.Guard,
+        });
+      return answer.verdict;
+    };
+    const limitNotes = createLimitNotes();
+    let saidUnavailable = false;
+    // 10db's judge, for the calls the guard leaves open: on a tendb session, and on a native one for a call
+    // outside auto mode (call 6). A session on the rules has none.
+    const judgeCall =
+      laneSession === null || sessionJudge === JudgeKind.Rules
+        ? null
+        : createHookJudge(
+            { judge: opts.judge, state: opts.state, logger: opts.logger },
+            {
+              projectId: project.id,
+              workstreamId: id,
+              taskId: task.id,
+              fastPath: {
+                checkout,
+                tmpDir: laneSession.tmpDir,
+                secretFiles: laneSession.fileAccess.secretFiles ?? [],
+              },
+              policy,
+              preExisting,
+              allowLines: () => [
+                ...new Set([
+                  ...approvedLines(approved),
+                  ...projectGrantLines(opts.state.db, project.id),
+                ]),
+              ],
+              judgeNow: (req) => judgeForCall(sessionJudge, req.reportedMode ?? null, tendbReady),
+              floorVerdict: (req) => laneVerdict(req, JudgeKind.Rules),
+              skips: unattended?.skips ?? null,
+              limits: limitNotes,
+              onFloor: (detail) => {
+                if (saidUnavailable) return;
+                saidUnavailable = true;
+                opts.state.write((ctx) => {
+                  sayFloor(ctx, FloorReason.JudgeUnavailable, detail);
+                });
+              },
+              clock: opts.clock,
+            },
+          );
     try {
       handle = opts.adapter.open({
         sessionId: session.id,
@@ -2875,7 +3019,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           workstreamId: id,
           sequence: session.sequence,
           allowedTools,
-          ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
+          ...(sessionPermissionMode === null ? {} : { lanePermissionMode: sessionPermissionMode }),
         },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) => {
@@ -2886,60 +3030,10 @@ export function createRunner(opts: RunnerOptions): Runner {
               sayFloor(ctx, FloorReason.LeftAutoMode);
             });
           }
-          // The hook's input is the model's own JSON: read as a record here, where it is keyed.
-          const input = ToolInputRecord.safeParse(req.input).data ?? {};
-          const key = callKey(req.toolName, input, checkout);
           unattended?.skips.seen(req.toolUseId ?? null);
-          const verdict = judgePreToolUse({
-            attended: unattended === null,
-            dockerOn: project.sandboxDocker,
-            deployApproved: unattended?.approvedKeys.includes(key) === true,
-            toolName: req.toolName,
-            toolInput: req.input,
-            repoPath: checkout,
-            ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
-            areas: project.areas,
-            hazards: project.hazards,
-            claims: claims(),
-            readOnly,
-            delivery: project.delivery,
-            protectedPaths: opts.protectedPaths,
-            // Every page of the pass is a page here: another task's is never written.
-            ...(pass
-              ? { inPass: { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch } }
-              : {}),
-            ownSession: {
-              configDir,
-              providerSessionId: st.providerSessionId ?? resumeId,
-              filesDir: taskFilesDir(opts.dataDir, task.id),
-            },
-            ...(fileAccess ? { fileAccess } : {}),
-            judge,
-            coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
-            webOn: switches.web,
-          });
-          if (unattended === null) return verdict;
-          const answer = answerUnattended({
-            verdict,
-            judge,
-            callKey: key,
-            approvedKeys: unattended.approvedKeys,
-            path: stringField(input, 'file_path') ?? stringField(input, 'notebook_path'),
-            toolName: req.toolName,
-          });
-          if (answer.skip !== null)
-            unattended.skips.record({
-              toolName: req.toolName,
-              toolUseId: req.toolUseId ?? null,
-              callKey: key,
-              summary: callSummary(req.toolName, input).text,
-              kind: answer.skip.kind,
-              limit: answer.skip.limit,
-              reason: answer.skip.reason,
-              source: SkipSource.Guard,
-            });
-          return answer.verdict;
+          return laneVerdict(req, judge);
         },
+        ...(judgeCall === null ? {} : { judgeCall }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
@@ -2950,6 +3044,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             signal: abort.signal,
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
+            limits: limitNotes,
             ...(unattended === null
               ? {}
               : { unattended: { judge: sessionJudge, checkout, ...unattended } }),
@@ -3211,6 +3306,22 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
+            // Auto mode's denials join 10db's judge's in the judge log (call 13).
+            opts.state.write((ctx) =>
+              insertJudgeCall(ctx, {
+                decision: JudgeDecision.CrossesLimit,
+                model: AUTO_MODE_JUDGE_MODEL,
+                state: `${denied.toolName}: ${denied.summary}`,
+                question: CROSSES_LIMIT_QUESTION,
+                answer: denied.limit ?? 'limit',
+                confidence: null,
+                outcome: JudgeOutcome.Acted,
+                latencyMs: null,
+                costUsd: null,
+                workstreamId: id,
+                taskId: task.id,
+              }),
+            );
             // A lane has no thread to show it on: the denial is a skip, listed for the builder.
             if (!pass) {
               const classifier = denied.by === 'classifier';

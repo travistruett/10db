@@ -623,6 +623,11 @@ export interface Git {
    */
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
   /**
+   * The untracked and ignored entries of the checkout, as `git status` lists them (an ignored folder once,
+   * ending in `/`), in its order, at most `max`. Read against a private index, as `changedPaths` is.
+   */
+  untrackedAndIgnored(repo: string, max: number): Promise<string[]>;
+  /**
    * Puts the files under `dirs` back as HEAD has them: each changed one is rewritten and each one
    * HEAD lacks is removed; ignored files stay. Runs nothing from the repository, and leaves the
    * checkout's own index as it was. Resolves with the paths it put back, sorted.
@@ -4261,6 +4266,30 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async changedPaths(repo, only) {
       return changes(await pinned(repo), only);
+    },
+    async untrackedAndIgnored(repo, max) {
+      const c = await pinned(repo);
+      const tip = await revParse(c, 'HEAD^{commit}');
+      const out = await withPrivateIndex(c, tip, (env) =>
+        git(
+          c,
+          [
+            'status',
+            '--porcelain=v1',
+            '-z',
+            '--ignored',
+            '--untracked-files=normal',
+            '--ignore-submodules=all',
+            '--no-renames',
+          ],
+          { env },
+        ),
+      );
+      return out
+        .split('\0')
+        .filter((entry) => entry.startsWith('?? ') || entry.startsWith('!! '))
+        .map((entry) => entry.slice(3))
+        .slice(0, max);
     },
     async restoreDirs(repo, dirs) {
       const named = checkPaths(repo, dirs);

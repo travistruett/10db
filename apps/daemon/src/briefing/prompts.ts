@@ -1,5 +1,6 @@
 import {
   findingNotes,
+  JudgeKind,
   REVIEW_ROLES,
   ToolAccess,
   type ClaimKind,
@@ -114,6 +115,8 @@ export interface PromptInput {
    * its limits, and its commands and edits are not described as stopping on a card.
    */
   readonly judged?: boolean;
+  /** Which judge that is: `tendb`, 10db's own, is named as such; auto mode's wording otherwise. */
+  readonly judge?: JudgeKind;
   /** The judge also settles the lane's WebSearch and WebFetch (the Web switch is on), so they wait on no card. */
   readonly webJudged?: boolean;
   /** A person is in the session (the trust policy's `attended`); absent counts as attended. */
@@ -311,6 +314,12 @@ const JUDGED_PASS_RULE = judgedAutoModeRule(
   "Don't retry a refused call another way; say what it was and why you need it, and the builder can allow it.",
 );
 
+/** 10db's judge says so where auto mode's line names auto mode. */
+const TENDB_JUDGES = "10db's judge checks";
+const AUTO_MODE_JUDGES = "Claude Code's auto mode judges";
+const TENDB_WEB_SENTENCE =
+  "WebSearch and WebFetch go to 10db's judge, which refuses a fetch that would send the project's code or secrets out.";
+
 /** Added to a judged lane's line when the Web switch is on. */
 const WEB_JUDGED_SENTENCE =
   "WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.";
@@ -440,6 +449,7 @@ interface SetupLines {
   readonly instructionsLoaded: boolean;
   readonly setupLine: string | null;
   readonly judged: boolean;
+  readonly tendb: boolean;
   readonly inPass: boolean;
   readonly webJudged: boolean;
   readonly attended: boolean;
@@ -454,7 +464,9 @@ function autoModeLine(setup: SetupLines): string {
     : setup.attended
       ? JUDGED_LANE_RULE
       : judgedAutoModeRule(LANE_REFUSED_CALL, SKIPPED_RULE);
-  return setup.webJudged ? `${limits} ${WEB_JUDGED_SENTENCE}` : limits;
+  const named = setup.tendb ? limits.replace(AUTO_MODE_JUDGES, TENDB_JUDGES) : limits;
+  if (!setup.webJudged) return named;
+  return `${named} ${setup.tendb ? TENDB_WEB_SENTENCE : WEB_JUDGED_SENTENCE}`;
 }
 
 /** The sandbox's lines with the instructions line as the setup has it, and the setup line after it. */
@@ -892,6 +904,7 @@ export function buildSessionPrompt(input: PromptInput): string {
       instructionsLoaded: input.instructionsLoaded === true,
       setupLine: input.setupLine ?? null,
       judged: input.judged === true,
+      tendb: input.judge === JudgeKind.Tendb,
       inPass: input.inPass === true,
       webJudged: input.webJudged === true,
       attended: input.attended !== false,

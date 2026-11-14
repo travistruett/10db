@@ -509,6 +509,7 @@ export async function createTestEngine(
   // serve() on a TCP port always reports an AddressInfo once listening.
   const mcpUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
   const created = createRunner({
+    judge: triageJudge,
     // The daemon's own git and gh, as `startDaemon` resolves them.
     gitTools: { git: await resolveGit(), gh: resolveGh() },
     laneSandbox: null,

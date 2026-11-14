@@ -1313,6 +1313,12 @@ describe('buildSessionPrompt for flow steps', () => {
       WEB_JUDGED_SENTENCE,
     ],
     [
+      "tendb names 10db's judge",
+      { judged: true, judge: 'tendb' as const, webJudged: true },
+      JUDGED_LANE_RULE.replace("Claude Code's auto mode judges", "10db's judge checks"),
+      "WebSearch and WebFetch go to 10db's judge, which refuses a fetch that would send the project's code or secrets out.",
+    ],
+    [
       'a lane on the floor',
       { judged: false },
       "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
