@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { InboxItemId, mintId, RoutedBy } from '@10db/contracts';
+import { InboxItemId, mintId, QuestionCategory, RoutedBy } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -29,6 +29,7 @@ import {
   updatePerson,
   getTask,
   getWorkstreamRow,
+  insertPerson,
   insertTask,
   insertWorkstream,
   patchAccount,
@@ -36,6 +37,7 @@ import {
   recordAccountSecret,
   seedAccount,
   seedProject,
+  setRoutingRules,
   transitionWorkstream,
   type Store,
 } from '@10db/db';
@@ -102,6 +104,24 @@ import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
 import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
+
+/**
+ * Routes every category of the project's questions to a stakeholder. A lane nobody watches answers a
+ * question to the builder at once (T4 call 21); one routed to a person still waits on them, parked, so
+ * a row about parking and answers asks one of those.
+ */
+export function routeQuestionsAway(engine: Pick<TestEngine, 'state' | 'project'>): void {
+  engine.state.write((ctx) => {
+    const person = insertPerson(ctx, { handle: 'stakeholder', name: 'Stakeholder' });
+    setRoutingRules(ctx, engine.project.id, {
+      rules: Object.values(QuestionCategory).map((category) => ({
+        category,
+        area: null,
+        personId: person.id,
+      })),
+    });
+  });
+}
 
 export interface TestEngine {
   readonly store: Store;
@@ -400,6 +420,7 @@ export async function createTestEngine(
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      awayFor: (id) => live.get(id)?.away,
       // As the daemon does: a builder message the MCP side writes goes to the page's session.
       deliverMessage: (taskId, messageId) =>
         created.deliverMessage(taskId, messageId, { redo: false }),

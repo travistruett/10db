@@ -106,18 +106,27 @@ export async function runAcceptanceChecks(input: {
       "SELECT count(*) AS n FROM workstreams w WHERE w.state = 'DONE' AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.workstream_id = w.id AND e.kind = 'gate' AND e.exit_code = 0)",
     );
     const handoffs = count('SELECT count(*) AS n FROM handoffs');
-    const answered = count(
-      "SELECT count(*) AS n FROM inbox_items WHERE kind = 'question' AND state = 'RESOLVED'",
-    );
+    // A Board task nobody watches is answered at once and its question kept (T4 call 21).
+    const answered =
+      count(
+        "SELECT count(*) AS n FROM inbox_items WHERE kind = 'question' AND state = 'RESOLVED'",
+      ) + count("SELECT count(*) AS n FROM skipped_actions WHERE kind = 'question'");
     const recoveries = count("SELECT count(*) AS n FROM events WHERE type = 'recovery.step'");
     const dupOps = count(
       'SELECT count(*) AS n FROM (SELECT workstream_id, op_id FROM tool_ops GROUP BY workstream_id, op_id HAVING count(*) > 1)',
     );
-    // A permission card stores the tool it asks about; "_" is escaped so a name cannot widen the match.
-    const gatedCards = count(
-      "SELECT count(*) AS n FROM inbox_items WHERE kind = 'permission' AND json_extract(detail, '$.toolName') LIKE ? ESCAPE '\\'",
-      `mcp\\_\\_${input.mcpServer.replace(/[\\%_]/g, '\\$&')}\\_\\_%`,
-    );
+    // A permission card stores the tool it asks about, and a task nobody watches skips the call
+    // instead (T4); "_" is escaped so a name cannot widen the match.
+    const toolPattern = `mcp\\_\\_${input.mcpServer.replace(/[\\%_]/g, '\\$&')}\\_\\_%`;
+    const gatedCards =
+      count(
+        "SELECT count(*) AS n FROM inbox_items WHERE kind = 'permission' AND json_extract(detail, '$.toolName') LIKE ? ESCAPE '\\'",
+        toolPattern,
+      ) +
+      count(
+        "SELECT count(*) AS n FROM skipped_actions WHERE tool_name LIKE ? ESCAPE '\\'",
+        toolPattern,
+      );
     const events = z
       .object({ n: z.int(), maxSeq: z.int().nullable() })
       .parse(db.prepare('SELECT count(*) AS n, max(seq) AS maxSeq FROM events').get());
@@ -190,7 +199,11 @@ export async function runAcceptanceChecks(input: {
           : `missing or empty at HEAD: ${missing.join(', ')}`,
       ),
       check('handoff crossed', handoffs >= 1, `${String(handoffs)} handoff(s)`),
-      check('question answered', answered >= 1, `${String(answered)} question card(s) resolved`),
+      check(
+        'question answered',
+        answered >= 1,
+        `${String(answered)} question(s) answered: card(s) resolved, or answered at once`,
+      ),
       check(
         'recovered after kill -9',
         recoveries >= 1,
@@ -234,7 +247,7 @@ export async function runAcceptanceChecks(input: {
       check(
         'repo MCP tool gated',
         gatedCards >= 1,
-        `${String(gatedCards)} permission card(s) for mcp__${input.mcpServer}__ tools: repo tool calls reach canUseTool`,
+        `${String(gatedCards)} permission card(s) or skip(s) for mcp__${input.mcpServer}__ tools: repo tool calls never run unjudged`,
       ),
       checkServerEnv(input.mcpServer, input.mcpServerEnvKeys),
     ];

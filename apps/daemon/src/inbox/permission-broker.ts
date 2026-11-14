@@ -5,6 +5,7 @@ import {
   SkipKind,
   SkipSource,
   type ConversationId,
+  type TaskId,
   type JudgeKind,
   DeniedBy,
   PermissionChoice,
@@ -61,7 +62,7 @@ import {
   type FileAccessContext,
 } from '../sandbox';
 import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
-import { callKey, skipMessage, type SkipRecorder } from '../trust';
+import { answerAway, callKey, routedToPerson, skipMessage, type SkipRecorder } from '../trust';
 import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
 
@@ -140,6 +141,9 @@ type BrokerContext = BrokerOwner & {
     readonly checkout: string;
     readonly approvedKeys: readonly string[];
     readonly skips: SkipRecorder;
+    /** The run's task, whose question routes say who still answers a question. */
+    readonly taskId: TaskId;
+    readonly projectId: ProjectId;
   };
 };
 
@@ -410,6 +414,19 @@ export function createPermissionBroker(
       };
     }
     const answers: Record<string, string> = {};
+    const away = ctx.unattended;
+    if (
+      away !== undefined &&
+      !routedToPerson(
+        deps.state.db,
+        { id: away.taskId, projectId: ctx.projectId },
+        { category: QuestionCategory.Other, topic: null },
+      )
+    ) {
+      for (const q of parsed.data.questions)
+        answers[q.question] = answerAway(away, req.toolName, q.question);
+      return { behavior: 'allow', updatedInput: { ...req.input, answers } };
+    }
     for (const q of parsed.data.questions) {
       const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,

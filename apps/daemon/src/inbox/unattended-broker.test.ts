@@ -8,7 +8,7 @@ import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
 import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
-import { callKey, createSkipRecorder } from '../trust';
+import { AWAY_ANSWER, callKey, createSkipRecorder } from '../trust';
 import { createInboxService, createPermissionBroker, type InboxService } from './index';
 
 // T4 Task 4 (trust line §5, Review Focus 1): a lane nobody watches never waits on the broker. Every
@@ -84,6 +84,8 @@ function broker(opts: {
             unattended: {
               judge: opts.judge ?? JudgeKind.Rules,
               checkout: fileAccess.checkout,
+              taskId: ws.task.id,
+              projectId: ws.project.id,
               approvedKeys: (opts.approved ?? []).map((a) =>
                 callKey(a.tool, a.input, fileAccess.checkout),
               ),
@@ -211,5 +213,43 @@ describe('an unattended lane', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(openCards().map((c) => c.title)).toEqual(['Allow mcp__x__y?']);
     expect(b.waits).toHaveLength(1);
+  });
+});
+
+describe('an unattended lane asks no question', () => {
+  const question = (text: string) => ({
+    question: text,
+    header: 'Pick',
+    options: [
+      { label: 'A', description: '' },
+      { label: 'B', description: '' },
+    ],
+    multiSelect: false,
+  });
+
+  // T4 call 21: two questions in one call are two rows, each answered with the away answer.
+  it('an unattended AskUserQuestion answers each question with the away answer and opens no item', async () => {
+    const b = broker({});
+    const questions = [question('Teal or red?'), question('Round or square?')];
+    expect(await b.decide('AskUserQuestion', { questions })).toEqual({
+      behavior: 'allow',
+      updatedInput: {
+        questions,
+        answers: { 'Teal or red?': AWAY_ANSWER, 'Round or square?': AWAY_ANSWER },
+      },
+    });
+    expect(listSkipsForWorkstream(state.db, b.ws.workstream.id)).toMatchObject([
+      {
+        toolName: 'AskUserQuestion',
+        summary: 'Teal or red?',
+        kind: 'question',
+        source: 'question',
+        reason: 'The builder was away.',
+        limit: null,
+      },
+      { summary: 'Round or square?', kind: 'question' },
+    ]);
+    expect(listInbox(state.db, {})).toEqual([]);
+    expect(b.waits).toEqual([]);
   });
 });

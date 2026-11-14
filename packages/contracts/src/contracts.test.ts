@@ -71,8 +71,16 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 9: the model tiers became four rungs', () => {
-    expect(PROTOCOL_VERSION).toBe(10);
+  it('is 11: an unattended ask_human answers with no Inbox item', () => {
+    expect(PROTOCOL_VERSION).toBe(11);
+  });
+});
+
+describe('McpToolOutputs.ask_human', () => {
+  it("ask_human's output takes a null inboxId", () => {
+    expect(
+      McpToolOutputs.ask_human.safeParse({ inboxId: null, answer: 'a', note: null }).success,
+    ).toBe(true);
   });
 });
 

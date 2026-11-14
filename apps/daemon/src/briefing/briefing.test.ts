@@ -156,6 +156,26 @@ const base = {
   contextPack: emptyPack,
 };
 
+// T4 call 21: a lane nobody watches is told its questions are answered at once; a pass keeps asking.
+describe('a question in a task nobody watches', () => {
+  const ASK_LINE =
+    'When a decision is not yours to make, ask with ask_human (or your question tool).';
+  const AWAY_LINE =
+    'Nobody is watching this task: a question gets "The builder is away. Make the call yourself and say in your handoff what you decided and why." at once. Decide yourself, and say in your handoff what you decided and why.';
+
+  it('an unattended lane is told questions are answered at once', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' }, attended: false });
+    expect(prompt).toContain(AWAY_LINE);
+    expect(prompt).not.toContain(ASK_LINE);
+  });
+
+  it('a pass keeps its ask line', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass: true });
+    expect(prompt).toContain(ASK_LINE);
+    expect(prompt).not.toContain(AWAY_LINE);
+  });
+});
+
 describe('telling the lane who answers its questions', () => {
   const at = '2026-11-12T10:00:00.000Z';
   const person = (handle: string, name: string) => ({

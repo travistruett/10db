@@ -4,6 +4,7 @@ import {
   insertPerson,
   listInbox,
   listSessions,
+  listSkipsForWorkstream,
   patchAccount,
   setInboxRecipients,
   setRoutingRules,
@@ -55,8 +56,17 @@ const askUser: FakeStep = {
   },
 };
 
-/** Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim. */
-function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = true) {
+/**
+ * Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim.
+ * `triage` adds a project-wide route for that category to Tess, who has no Slack: its question waits
+ * for triage, the builder's card until it is routed, so a lane nobody watches still asks it (T4 call 21).
+ */
+function routeTo(
+  category: string,
+  handles: ('mark' | 'ana')[],
+  areaScoped = true,
+  triage: string | null = null,
+) {
   const person = (handle: string, name: string, userId: string) =>
     engine.store.write((ctx) =>
       insertPerson(ctx, {
@@ -68,11 +78,24 @@ function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = tru
   const people = { mark: person('mark', 'Mark', 'U1'), ana: person('ana', 'Ana', 'U2') };
   engine.store.write((ctx) =>
     setRoutingRules(ctx, engine.project.id, {
-      rules: handles.map((h) => ({
-        category: category as 'product',
-        area: areaScoped ? 'api' : null,
-        personId: people[h].id,
-      })),
+      rules: [
+        ...handles.map((h) => ({
+          category: category as 'product',
+          area: areaScoped ? 'api' : null,
+          personId: people[h].id,
+        })),
+        ...(triage === null
+          ? []
+          : [
+              {
+                category: triage as 'product',
+                area: null,
+                personId: engine.store.write((ctx) =>
+                  insertPerson(ctx, { handle: 'tess', name: 'Tess' }),
+                ).value.id,
+              },
+            ]),
+      ],
     }),
   );
 }
@@ -142,22 +165,23 @@ describe('a question routed to someone else', () => {
     expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', currentSessionId: null });
   });
 
-  it('still waits live for a builder question, until the timer', async () => {
+  // T4 call 21: a lane nobody watches never waits on the builder; a question for them is answered at once.
+  it('answers a builder question at once, while another category routes to someone', async () => {
     engine = await createTestEngine(oneAsk(askHuman('engineering', 'op-builder-ask-1')));
     routeTo('product', ['mark']);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    await waitFor(openCard);
-    engine.clock.advance(9 * 60_000);
-    expect(ws(workstream.id).currentSessionId).not.toBeNull();
-    engine.clock.advance(60_000);
     await engine.runner.idle();
-    expect(ws(workstream.id).currentSessionId).toBeNull();
+    expect(listInbox(engine.store.db, {})).toEqual([]);
+    expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+      { toolName: 'ask_human', summary: 'Charge tax?', kind: 'question' },
+    ]);
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 
-  it('parks a session already waiting on a builder card when it asks a second, routed question', async () => {
+  it('parks a session already waiting on a card triage has yet to route when it asks a second, routed question', async () => {
     engine = await createTestEngine(oneAsk(askHuman('engineering', 'op-builder-ask-2')));
-    routeTo('product', ['mark']);
+    routeTo('product', ['mark'], true, 'engineering');
     const { task, workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const first = await waitFor(openCard);
@@ -236,8 +260,9 @@ describe('a question routed to someone else', () => {
 });
 
 describe('Runner.parkFor', () => {
-  it('parks a live session waiting on a builder card', async () => {
+  it('parks a live session waiting on a card triage has yet to route', async () => {
     engine = await createTestEngine(oneAsk(askHuman('engineering', 'op-park-for-0001')));
+    routeTo('product', [], true, 'engineering');
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -256,6 +281,7 @@ describe('Runner.parkFor', () => {
       Alpha: [[askHuman('engineering', 'op-folded-ask-001'), turn], [turn]],
       Beta: [[askHuman('engineering', 'op-folded-ask-002'), turn], [turn]],
     });
+    routeTo('product', [], true, 'engineering');
     const alpha = engine.addTask('Alpha');
     const beta = engine.addTask('Beta', ['ui']);
     engine.launch(alpha.workstream.id);
@@ -323,8 +349,9 @@ describe('a question the judge routes after the lane asked', () => {
   });
 });
 
-describe('a question triage keeps with the builder', () => {
-  it('leaves the session live, waiting as for any builder question', async () => {
+// T4 call 21: a question no rule sends to a person is the builder's, so a lane nobody watches answers it.
+describe('a question no route sends to a person', () => {
+  it('is answered at once in a lane, with no card left for triage', async () => {
     engine = await createTestEngine(
       oneAsk(askHuman('product', 'op-triage-builder1')),
       {},
@@ -346,17 +373,11 @@ describe('a question triage keeps with the builder', () => {
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    await waitFor(() => {
-      const now = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
-      return now !== undefined && now.routedBy !== 'triage_pending' ? now : undefined;
-    });
-    expect(listInbox(engine.store.db, {}).find((c) => c.id === card.id)).toMatchObject({
-      routedBy: 'rule',
-      assignees: ['me'],
-    });
-    expect(ws(workstream.id).currentSessionId).not.toBeNull();
-    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+    await engine.runner.idle();
+    expect(listInbox(engine.store.db, {})).toEqual([]);
+    expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+      { toolName: 'ask_human', kind: 'question' },
+    ]);
   });
 });
 

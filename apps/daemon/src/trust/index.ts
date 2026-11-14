@@ -6,5 +6,6 @@ export { judgeForCall, ReportedMode, startingJudge } from './call-judge';
 export { deniedNoticeText, goAheadText, offersAllowThis, type DeniedCall } from './go-ahead';
 export { FloorReason, floorNoticeText, floorReason, floorWhy } from './floor-notice';
 export { callKey, callSummary } from './call-summary';
-export { skipMessage } from './skip';
+export { AWAY_ANSWER, skipMessage } from './skip';
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
+export { answerAway, routedToPerson, type AwayLane } from './away-question';

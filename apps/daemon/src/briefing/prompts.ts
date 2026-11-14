@@ -18,6 +18,7 @@ import { quotedWords, renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 import { renderPlanContext } from './plan-context-text';
+import { AWAY_ANSWER } from '../trust';
 
 interface StepBrief {
   readonly index: number;
@@ -110,6 +111,8 @@ export interface PromptInput {
   readonly judged?: boolean;
   /** The judge also settles the lane's WebSearch and WebFetch (the Web switch is on), so they wait on no card. */
   readonly webJudged?: boolean;
+  /** A person is in the session (the trust policy's `attended`); absent counts as attended. */
+  readonly attended?: boolean;
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -490,6 +493,20 @@ function withSandboxRules(
   });
 }
 
+/** The line that tells a session to ask the builder when a decision isn't its own. */
+const ASKS_THE_BUILDER = 'When a decision is not yours to make, ask with ';
+
+/**
+ * T4 call 21: a lane nobody watches is told its questions are answered at once, and decides itself.
+ * Where the task routes questions to people, those still go to them.
+ */
+function awayRules(rules: readonly string[], routed: boolean): string[] {
+  const away = routed
+    ? `Nobody is watching this task: a question the routes below don't send to someone gets "${AWAY_ANSWER}" at once. Decide yourself, and say in your handoff what you decided and why.`
+    : `Nobody is watching this task: a question gets "${AWAY_ANSWER}" at once. Decide yourself, and say in your handoff what you decided and why.`;
+  return rules.map((rule) => (rule.startsWith(ASKS_THE_BUILDER) ? away : rule));
+}
+
 const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
 
 const bullets = (lines: readonly string[]) =>
@@ -832,6 +849,30 @@ function stepSection(input: PromptInput): string[] {
 
 export function buildSessionPrompt(input: PromptInput): string {
   const claims = input.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
+  const lines = withSandboxRules(
+    input.step.tools === ToolAccess.ReadOnly
+      ? readOnlyRules(input.step.role)
+      : [
+          ...(input.inPass === true ? PASS_RULES : RULES),
+          ...(input.pictures === true ? [PICTURES_RULE] : []),
+        ],
+    input.sandboxed === true,
+    input.provider,
+    {
+      instructionsLoaded: input.instructionsLoaded === true,
+      setupLine: input.setupLine ?? null,
+      judged: input.judged === true,
+      inPass: input.inPass === true,
+      webJudged: input.webJudged === true,
+    },
+  );
+  const rules =
+    input.attended === false
+      ? awayRules(
+          lines,
+          (input.questionRoutes ?? []).some((r) => r.people.length > 0),
+        )
+      : lines;
   return [
     'You are working on one task in a shared repository, managed by 10db.',
     '',
@@ -847,25 +888,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     `Your claims: ${claims}.`,
     '',
     'Rules:',
-    bullets(
-      withSandboxRules(
-        input.step.tools === ToolAccess.ReadOnly
-          ? readOnlyRules(input.step.role)
-          : [
-              ...(input.inPass === true ? PASS_RULES : RULES),
-              ...(input.pictures === true ? [PICTURES_RULE] : []),
-            ],
-        input.sandboxed === true,
-        input.provider,
-        {
-          instructionsLoaded: input.instructionsLoaded === true,
-          setupLine: input.setupLine ?? null,
-          judged: input.judged === true,
-          inPass: input.inPass === true,
-          webJudged: input.webJudged === true,
-        },
-      ),
-    ),
+    bullets(rules),
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),

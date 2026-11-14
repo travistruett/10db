@@ -2305,6 +2305,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const prompt = buildSessionPrompt({
       provider,
       inPass: pass !== null,
+      attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
@@ -2534,14 +2535,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
     };
 
-    opts.live.register(session.id, {
-      signal: abort.signal,
-      observer,
-      askedToHandOff: () => {
-        st.handoffAskedByTool = true;
-      },
-    });
-    const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     // A lane nobody watches never waits on a card (trust line §5): what would raise one is skipped,
     // recorded here, and listed for the builder; the calls they approved by Run these now go on.
     const unattended = policy.attended
@@ -2552,7 +2545,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             { workstreamId: id, sessionId: session.id },
           ),
           approvedKeys: approvedCallKeys(db, task.id),
+          taskId: task.id,
+          projectId: project.id,
         };
+    opts.live.register(session.id, {
+      signal: abort.signal,
+      observer,
+      askedToHandOff: () => {
+        st.handoffAskedByTool = true;
+      },
+      ...(unattended === null ? {} : { away: unattended }),
+    });
+    const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
       handle = opts.adapter.open({
         sessionId: session.id,

@@ -384,7 +384,12 @@ export const McpToolOutputs = {
     principles: z.array(PrincipleHit).default([]),
     empty: z.boolean(),
   }),
-  ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
+  ask_human: z.object({
+    // Null when no Inbox item was raised: an unattended lane is answered at once.
+    inboxId: InboxItemId.nullable(),
+    answer: z.string(),
+    note: z.string().nullable(),
+  }),
   record_decision: z.object({ decisionId: DecisionId }),
   // A result recorded before self-filing or principles has neither id; it still parses.
   propose: z.object({

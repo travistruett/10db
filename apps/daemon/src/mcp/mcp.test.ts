@@ -17,6 +17,7 @@ import {
   getWorkstream,
   insertBatch,
   insertDecision,
+  insertPerson,
   insertEvidence,
   insertPrinciple,
   insertSession,
@@ -26,6 +27,7 @@ import {
   insertWorkstream,
   listBoardColumns,
   listInbox,
+  listSkipsForWorkstream,
   listTasks,
   listToolOpResults,
   patchWorkstream,
@@ -33,6 +35,7 @@ import {
   schema,
   searchPrinciples,
   seedProject,
+  setRoutingRules,
   setSmallProposalLimit,
   setWorkstreamNotice,
   transitionBatch,
@@ -56,7 +59,13 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  seedWorkstream,
+  tempDir,
+  waitFor,
+} from '../../test/fixtures';
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -70,7 +79,8 @@ import {
 } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
-import type { Logger } from '../log';
+import { silentLogger, type Logger } from '../log';
+import { AWAY_ANSWER, createSkipRecorder, type AwayLane } from '../trust';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
@@ -100,6 +110,8 @@ let workstreamBranch: string | null = 'main';
 let sessionAbort = new AbortController();
 /** One session's own stop, beside `sessionAbort`; a test aborts it to end only that session. */
 const sessionStops = new Map<string, AbortController>();
+/** The sessions of lanes nobody watches, with the recorder their questions are kept by. */
+const awaySessions = new Map<string, AwayLane>();
 /** How long one request_claim call waits before answering "still waiting"; a test shortens it. */
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
@@ -195,6 +207,7 @@ beforeEach(async () => {
     log: capturingLogger,
     waitObserverFor: () => undefined,
     askedToHandOff: () => undefined,
+    awayFor: (id) => awaySessions.get(id),
     sessionSignal: (id) => {
       const own = sessionStops.get(id);
       return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
@@ -2339,6 +2352,65 @@ describe('MCP tools', () => {
     expect(reused.isError).toBe(true);
     expect(reused.text).toContain('already used for record_decision');
     expect(state.db.select().from(schema.deviations).all()).toHaveLength(0);
+  });
+
+  // T4 call 21: a lane nobody watches is answered at once, and the question is kept for the builder.
+  it('an unattended ask_human answers at once with the away answer and records the question', async () => {
+    const s = await seedSession();
+    awaySessions.set(s.session.id, {
+      skips: createSkipRecorder(
+        { state, log: silentLogger },
+        { workstreamId: s.workstream.id, sessionId: s.session.id },
+      ),
+      taskId: s.task.id,
+      projectId: s.project.id,
+    });
+    const result = await s.call('ask_human', {
+      opId: 'op-away-0001',
+      category: 'design',
+      question: 'Teal or red?',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+    });
+    expect(result.json).toEqual({ inboxId: null, answer: AWAY_ANSWER, note: null });
+    expect(listInbox(state.db, {})).toEqual([]);
+    expect(listSkipsForWorkstream(state.db, s.workstream.id)).toMatchObject([
+      { toolName: 'ask_human', summary: 'Teal or red?', kind: 'question', source: 'question' },
+    ]);
+  });
+
+  // A route the builder set names who answers: an unattended lane's question still goes to them.
+  it('an unattended ask_human whose category routes to a person still asks', async () => {
+    const s = await seedSession();
+    awaySessions.set(s.session.id, {
+      skips: createSkipRecorder(
+        { state, log: silentLogger },
+        { workstreamId: s.workstream.id, sessionId: s.session.id },
+      ),
+      taskId: s.task.id,
+      projectId: s.project.id,
+    });
+    state.write((ctx) => {
+      const person = insertPerson(ctx, { handle: 'ana', name: 'Ana' });
+      setRoutingRules(ctx, s.project.id, {
+        rules: [{ category: 'design', area: null, personId: person.id }],
+      });
+    });
+    const pending = s.call('ask_human', {
+      opId: 'op-away-0002',
+      category: 'design',
+      question: 'Teal or red?',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+    });
+    await waitFor(() => listInbox(state.db, {})[0]);
+    expect(listSkipsForWorkstream(state.db, s.workstream.id)).toEqual([]);
+    s.stopSession();
+    await pending;
   });
 
   it('waits on ask_human until the builder answers', async () => {

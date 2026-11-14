@@ -139,7 +139,7 @@ import {
   tempDir,
   waitFor,
 } from '../../test/fixtures';
-import { createTestEngine, type TestEngine } from '../../test/engine';
+import { createTestEngine, routeQuestionsAway, type TestEngine } from '../../test/engine';
 import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
 import { importBundle, planImportChanges } from '../plan-record';
 import { failedRepoCheck } from '../../test/fixtures';
@@ -869,6 +869,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-park-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -957,6 +958,7 @@ describe('runner', () => {
       'cancels the run of a live session waiting on $name, with no review round and no new session',
       async ({ ask }) => {
         engine = await createTestEngine(parkedBook(ask));
+        routeQuestionsAway(engine);
         const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
         engine.launch(workstream.id);
         const card = await waitFor(openCard);
@@ -971,6 +973,7 @@ describe('runner', () => {
 
     it('cancels a run already parked in WAITING_HUMAN with no session, and never requeues it', async () => {
       engine = await createTestEngine(parkedBook(askHuman));
+      routeQuestionsAway(engine);
       const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
       engine.launch(workstream.id);
       const card = await waitFor(openCard);
@@ -994,6 +997,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-pin-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -1031,6 +1035,7 @@ describe('runner', () => {
     engine = await createTestEngine({
       Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
@@ -1047,6 +1052,7 @@ describe('runner', () => {
 
   it('goes STARTING -> RUNNING -> WAITING_HUMAN when the first step is a question', async () => {
     engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
@@ -1067,6 +1073,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-grace-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -1468,6 +1475,7 @@ describe('runner', () => {
         { Alpha: sessions },
         { handoffPct: 12, nudgePct: 90, ...(gateCommand ? { gateCommand } : {}) },
       );
+      routeQuestionsAway(engine);
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await drive(workstream.id);
@@ -1878,6 +1886,7 @@ describe('runner', () => {
       'parks normally when the turn completes after the wait timer fired, %s',
       async (_name, answerEarly, expected) => {
         engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+        routeQuestionsAway(engine);
         let first = true;
         // The timer's stop is swallowed so the script runs on to turn_complete and a normal end, as a real adapter can.
         interceptStart((h) => ({
@@ -1922,6 +1931,7 @@ describe('runner', () => {
             [write('src/api/a.txt'), commit('op-slow-0001', ['src/api/a.txt']), turn],
           ],
         });
+        routeQuestionsAway(engine);
         let release: () => void = () => undefined;
         const released = new Promise<void>((r) => {
           release = r;
@@ -1959,6 +1969,7 @@ describe('runner', () => {
 
     it('ends the session and frees it for a parked answer when the loop fails while waiting', async () => {
       engine = await createTestEngine({ Alpha: [[askShip, { do: 'hang' }]] });
+      routeQuestionsAway(engine);
       let fail: (error: Error) => void = () => undefined;
       const failed = new Promise<never>((_resolve, reject) => {
         fail = reject;
@@ -2016,6 +2027,7 @@ describe('runner', () => {
       'carries %s into the next session when the answered session crashes before it starts',
       async (_name, ask, choice, finalScript, promptText) => {
         engine = await createTestEngine({ Alpha: [[ask, turn], [crash], finalScript] });
+        routeQuestionsAway(engine);
         secondSessionNeverStarts();
         const { workstream } = engine.addTask('Alpha');
         engine.launch(workstream.id);
@@ -2615,6 +2627,7 @@ describe('accounts', () => {
         [write('src/api/a.txt'), commit('op-ans-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -2947,6 +2960,7 @@ describe('moving accounts', () => {
         [write('src/api/a.txt'), commit('op-moveask-01', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -3077,6 +3091,7 @@ describe('moving accounts', () => {
       },
       { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
     );
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     await engine.runner.idle();
@@ -3177,6 +3192,7 @@ describe('moving accounts', () => {
         [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const home = engine.project.accountId;
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -3399,6 +3415,7 @@ describe('flows', () => {
         [...compacted, approve('op-flow-ask-03'), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -7161,6 +7178,7 @@ describe('without a gate command', () => {
           { Alpha: [implement('op-check-0060'), [askShip, turn], implement('op-check-0061')] },
           noGate,
         );
+        routeQuestionsAway(engine);
         const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
         await runToWait(workstream.id);
         exhaust(workstream.id);
@@ -7435,6 +7453,7 @@ describe('without a gate command', () => {
           { Alpha: [implement('op-check-0030'), [askShip, turn], implement('op-check-0031')] },
           noGate,
         );
+        routeQuestionsAway(engine);
         const { workstream } = engine.addTask('Alpha');
         await runToWait(workstream.id);
         answerCheck('send_back', note);

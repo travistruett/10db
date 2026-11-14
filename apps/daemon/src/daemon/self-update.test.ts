@@ -4,6 +4,7 @@ import type { ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
   HealthResponse,
+  PersonDto,
   ProjectDto,
   SelfUpdateStatusDto,
   ShapeDto,
@@ -175,6 +176,17 @@ async function addProject(api: ReturnType<typeof apiClient>) {
     gateCommand: 'true',
     flowId: await quickFlowId(api),
     areas: [{ name: 'src', globs: ['src/**'] }],
+  });
+}
+
+/**
+ * Routes the project's engineering questions to a person with no Slack. A lane nobody watches
+ * answers a builder question at once (T4 call 21); this one waits for triage on the builder's card.
+ */
+async function routeEngineering(api: ReturnType<typeof apiClient>, projectId: string) {
+  const person = await api.post('/people', PersonDto, { handle: 'tess', name: 'Tess' });
+  await api.put(`/projects/${projectId}/routing-rules`, z.unknown(), {
+    rules: [{ category: 'engineering', area: null, personId: person.id }],
   });
 }
 
@@ -439,6 +451,7 @@ describe('self-update in the daemon', () => {
           adapter: new FakeAdapter({ Alpha: [[ask, { do: 'turn_complete' }]] }),
         });
         const project = await addProject(api);
+        await routeEngineering(api, project.id);
         const alpha = await startTask(api, project.id, 'Alpha', 'src');
         await waitForAsync(
           async () => (await lanesOf(api)).get(alpha.id)?.state === 'WAITING_HUMAN',
@@ -615,6 +628,7 @@ describe('self-update in the daemon', () => {
           { name: 'docs', globs: ['docs/**'] },
         ],
       });
+      await routeEngineering(api, project.id);
       const alpha = await startTask(api, project.id, 'Alpha', 'src');
       const beta = await startTask(api, project.id, 'Beta', 'docs');
       await waitFor(() => started.mock.results.length === 2, 30_000);

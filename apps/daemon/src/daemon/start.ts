@@ -2184,6 +2184,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      awayFor: (id) => live.get(id)?.away,
       claimWaits,
       deliverMessage: (taskId, messageId) =>
         createdRunner.deliverMessage(taskId, messageId, { redo: false }),

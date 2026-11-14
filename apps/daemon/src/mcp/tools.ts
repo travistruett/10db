@@ -107,6 +107,7 @@ import {
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
+import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -118,6 +119,8 @@ export interface McpDeps {
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
   /** Tells the runner a tool's answer asked the session to hand off. */
   askedToHandOff(sessionId: SessionId): void;
+  /** The lane nobody watches a session runs in, whose questions are answered at once; absent, it asks. */
+  awayFor?(sessionId: SessionId): AwayLane | undefined;
   /** Every session's claim waits; the daemon shares them with the scheduler. */
   readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
@@ -384,6 +387,23 @@ export function createToolHandlers(
       const done = prior(input.opId, McpToolName.AskHuman);
       if (done !== undefined) return McpToolOutputs.ask_human.parse(done);
       const { project } = context();
+      const away = deps.awayFor?.(sessionId);
+      if (
+        away !== undefined &&
+        !routedToPerson(
+          deps.state.db,
+          { id: away.taskId, projectId: away.projectId },
+          {
+            category: input.category,
+            topic: input.topic ?? null,
+          },
+        )
+      ) {
+        const answer = answerAway(away, McpToolName.AskHuman, input.question);
+        return deps.state.write((ctx) =>
+          record('ask_human', input.opId, { inboxId: null, answer, note: null }, ctx),
+        );
+      }
       const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
       const { item, answer } = deps.inbox.ask({
         projectId: project.id,

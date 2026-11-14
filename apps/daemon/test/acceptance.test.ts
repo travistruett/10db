@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { DaemonEvent, InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
-import { listEvidence, listSessions, schema } from '@10db/db';
+import { DaemonEvent, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import { listEvidence, listInbox, listSessions, listSkipsForWorkstream } from '@10db/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
+import { AWAY_ANSWER } from '../src/trust';
 import { apiClient, quickFlowId } from './api-client';
 import {
   createTempRepo,
@@ -122,7 +123,9 @@ afterAll(async () => {
 });
 
 describe('§1.3 with the fake adapter', () => {
-  it('runs three tasks through handoff, questions, permissions and verification to DONE', async () => {
+  // T4: nobody watches a Board task, so its questions are answered at once and a call that would
+  // card is skipped, each kept for the builder; the run goes on to DONE.
+  it('runs three tasks through handoff, questions answered at once, a skipped call and verification to DONE', async () => {
     const project = await api.post('/projects', ProjectDto, {
       name: 'acceptance',
       repoPath: repo.path,
@@ -148,18 +151,6 @@ describe('§1.3 with the fake adapter', () => {
     const beta = await task('Beta', ['b']);
     const gamma = await task('Gamma', ['c'], [alpha.id]);
     for (const t of [alpha, beta, gamma]) await api.post(`/tasks/${t.id}/start`, WorkstreamDto);
-
-    const answer = async (kind: string, title: string, choice: string) => {
-      const card = await waitForAsync(async () =>
-        (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).find(
-          (i) => i.kind === kind && i.title.includes(title),
-        ),
-      );
-      await api.post(`/inbox/${card.id}/answer`, z.unknown(), { choice });
-    };
-    await answer('permission', 'Bash', 'allow_once');
-    await answer('question', 'badge color', 'Teal');
-    await answer('question', 'corners', 'Round');
 
     const all = await waitForAsync(async () => {
       const list = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
@@ -194,24 +185,33 @@ describe('§1.3 with the fake adapter', () => {
     expect(gammaCommits.map((o) => o.detail['isError'])).toEqual([false, false]);
     expect(gammaCommits[1]?.detail['text']).toBe(gammaCommits[0]?.detail['text']);
 
-    // Each inbox answer took effect in the session that asked.
+    // Each answer reached the session that asked, and each skip and question is kept.
     const seen = (title: string, kind: string) =>
       adapter.observations.filter((o) => o.title === title && o.kind === kind);
-    expect(seen('Beta', 'tool_denied')).toEqual([]);
-    expect(seen('Beta', 'tool_allowed').map((o) => o.detail['toolName'])).toEqual(
-      expect.arrayContaining(['Bash', 'AskUserQuestion']),
-    );
+    expect(seen('Beta', 'tool_denied').map((o) => o.detail['toolName'])).toEqual(['Bash']);
     expect(
       JSON.stringify(
         seen('Beta', 'tool_allowed').find((o) => o.detail['toolName'] === 'AskUserQuestion')
           ?.detail['answers'],
       ),
-    ).toContain('Teal');
+    ).toContain(AWAY_ANSWER);
     const asked = seen('Gamma', 'mcp_result').find((o) => o.detail['tool'] === 'ask_human');
-    expect(String(asked?.detail['text'])).toContain('Round');
-
-    const decisions = daemon.state.db.select().from(schema.decisions).all();
-    expect(decisions.map((d) => d.choice)).toContain('Round');
+    expect(String(asked?.detail['text'])).toContain(AWAY_ANSWER);
+    const kept = (title: string) =>
+      listSkipsForWorkstream(
+        daemon.state.db,
+        all.find((w) => w.taskId === (title === 'Beta' ? beta.id : gamma.id))?.id ?? alphaWs.id,
+      ).map((s) => [s.toolName, s.kind]);
+    expect(kept('Beta')).toEqual([
+      ['Bash', 'default_mode_card'],
+      ['AskUserQuestion', 'question'],
+    ]);
+    expect(kept('Gamma')).toEqual([['ask_human', 'question']]);
+    expect(
+      listInbox(daemon.state.db, { states: ['OPEN'] }).filter(
+        (i) => i.kind === 'question' || i.kind === 'permission',
+      ),
+    ).toEqual([]);
   }, 60_000);
 
   it('replays the full history after a cursor, as a reopened window would', async () => {
