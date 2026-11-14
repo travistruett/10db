@@ -52,9 +52,7 @@ const judgeRuns = (judge: JudgeKind): boolean => {
 /** What an ask of this kind becomes in an unattended lane on this judge. */
 export function unattendedOutcome(kind: AskKind, judge: JudgeKind): UnattendedOutcome {
   switch (kind) {
-    case AskKind.WebOrMcp:
-    case AskKind.UnknownTool:
-    case AskKind.MonitorSocket:
+    // Call 4: a loop with no end goes to the classifier, which T3's Shared Mac line covers.
     case AskKind.EndlessLoop:
       return judgeRuns(judge) ? O.ToJudge : O.Skip;
     // Agent-written config runs before no approval (call 6): project hooks load in no sandboxed
@@ -63,6 +61,12 @@ export function unattendedOutcome(kind: AskKind, judge: JudgeKind): UnattendedOu
       return O.Allow;
     // A Read runs in Claude Code's own process, where the kernel doesn't reach (call 5); the
     // classifier knows nothing of claims (call 3).
+    // The guard asks about the web, a socket, an MCP or unreviewed tool only where no judge would
+    // see the call: the Web switch is off, nothing shows the classifier judging it, or an allow rule
+    // would settle it unjudged. A bare allow would hand it to the permission mode unjudged.
+    case AskKind.WebOrMcp:
+    case AskKind.UnknownTool:
+    case AskKind.MonitorSocket:
     case AskKind.MonitorNoCommand:
     case AskKind.ReadOutside:
     case AskKind.SecretRead:

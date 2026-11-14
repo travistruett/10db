@@ -25,15 +25,15 @@ type Row = readonly [
 
 const O = UnattendedOutcome;
 const TABLE: readonly Row[] = [
-  [AskKind.WebOrMcp, O.ToJudge, O.Skip, 'sends_data_out', null],
+  [AskKind.WebOrMcp, O.Skip, O.Skip, 'sends_data_out', null],
   [
     AskKind.UnknownTool,
-    O.ToJudge,
+    O.Skip,
     O.Skip,
     null,
     "mcp__x__y isn't a tool 10db can judge for a task nobody is watching.",
   ],
-  [AskKind.MonitorSocket, O.ToJudge, O.Skip, 'sends_data_out', null],
+  [AskKind.MonitorSocket, O.Skip, O.Skip, 'sends_data_out', null],
   [AskKind.MonitorNoCommand, O.Skip, O.Skip, null, 'Monitor needs a command to run.'],
   [
     AskKind.ReadOutside,
@@ -246,6 +246,16 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
     expect(skipOf(unattended('WebFetch', { url: 'https://example.com', prompt: 'x' }))).toBe(
       'web_or_mcp',
     );
+  });
+
+  it('WebFetch with the Web switch off on native is a skip, not the classifier’s', () => {
+    expect(
+      skipOf(unattended('WebFetch', { url: 'https://example.com', prompt: 'x' }, JudgeKind.Native)),
+    ).toBe('web_or_mcp');
+  });
+
+  it('a third-party MCP tool on native is a skip, not the classifier’s', () => {
+    expect(skipOf(unattended('mcp__docs__search', {}, JudgeKind.Native))).toBe('web_or_mcp');
   });
 
   it('a Read of a home path on native is a skip, not the classifier’s', () => {
