@@ -173,6 +173,39 @@
           "type": "null"
         }
       ]
+    },
+    "commands": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "argumentHint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "description",
+              "argumentHint"
+            ]
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -185,6 +218,7 @@
     "queued",
     "costUsd",
     "sendNow",
-    "pausedUntil"
+    "pausedUntil",
+    "commands"
   ]
 }

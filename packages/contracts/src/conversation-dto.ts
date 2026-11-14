@@ -15,6 +15,14 @@ import { ToolCallView } from './tool-call-view';
 
 const Timestamp = z.iso.datetime();
 
+/** A slash command the agent offers in its session. */
+export const AgentCommandDto = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+  argumentHint: z.string().nullable(),
+});
+export type AgentCommandDto = z.infer<typeof AgentCommandDto>;
+
 export const ConversationDto = z.object({
   id: ConversationId,
   owner: z.object({ kind: z.enum(ConversationOwnerKind), id: z.string() }),
@@ -30,6 +38,8 @@ export const ConversationDto = z.object({
   sendNow: z.boolean(),
   /** A paused account's reset, null when it waits on the account. */
   pausedUntil: Timestamp.nullable(),
+  /** The commands the agent last listed, kept so a cold conversation still offers `/`; null before any. */
+  commands: z.array(AgentCommandDto).nullable(),
 });
 export type ConversationDto = z.infer<typeof ConversationDto>;
 
@@ -142,6 +152,24 @@ export const ConversationFullDto = z.object({
 });
 export type ConversationFullDto = z.infer<typeof ConversationFullDto>;
 
-/** A builder message's text; its pictures travel as multipart parts, as a thread message's do. */
-export const PostConversationMessage = z.object({ text: z.string() });
+/** Most characters of one `@` mention's path. */
+export const MENTION_PATH_MAX = 1_024;
+
+/** A path an `@` mention names: relative to the checkout, never climbing out of it. */
+export const MentionPath = z
+  .string()
+  .min(1)
+  .max(MENTION_PATH_MAX)
+  .refine((p) => !p.startsWith('/') && !p.includes('\0') && !p.split('/').includes('..'), {
+    message: 'A mention names a path inside the checkout',
+  });
+
+/**
+ * A builder message's text and the paths its `@` mentions name (the `@path` stays in the text); its
+ * pictures travel as multipart parts, as a thread message's do.
+ */
+export const PostConversationMessage = z.object({
+  text: z.string(),
+  mentions: z.array(MentionPath).default([]),
+});
 export type PostConversationMessage = z.infer<typeof PostConversationMessage>;

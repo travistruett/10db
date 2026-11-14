@@ -8,6 +8,8 @@ export * from './board';
 export * from './card-resolution';
 export * from './catalogue';
 export * from './command-runners';
+export * from './chat';
+export * from './chat-tools';
 export * from './conversation';
 export * from './conversation-dto';
 export * from './decision-models';
