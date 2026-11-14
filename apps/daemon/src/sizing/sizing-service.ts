@@ -1,5 +1,6 @@
 import {
   EventType,
+  JUDGE_TIMEOUT_MS,
   JudgeDecision,
   JudgeOutcome,
   RigorSource,
@@ -37,8 +38,6 @@ import { sizeByRules } from './rules';
 const MAX_CALLS_AT_ONCE = 4;
 /** The start-up sweep asks the judge only about tasks made this recently; older ones get the rules. */
 const SWEEP_JUDGES_WITHIN_MS = 24 * 60 * 60 * 1000;
-/** How long a start waits for sizing still in flight before it goes on with the rules' answer. */
-export const SIZING_WAIT_MS = 4_000;
 
 export interface SizingDeps {
   readonly state: StateStore;
@@ -358,7 +357,7 @@ export function createSizingService(deps: SizingDeps): SizingService {
   });
 
   return {
-    settled(taskIds, timeoutMs = SIZING_WAIT_MS) {
+    settled(taskIds, timeoutMs = JUDGE_TIMEOUT_MS) {
       const pending = taskIds.flatMap((id) => inflight.get(id)?.done ?? []);
       if (pending.length === 0) return Promise.resolve();
       return new Promise<void>((resolve) => {

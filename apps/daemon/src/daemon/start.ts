@@ -10,6 +10,7 @@ import {
   EventType,
   InvalidError,
   InboxItemId,
+  JUDGE_TIMEOUT_MS,
   noOpenRouterSync,
   PROTOCOL_VERSION,
   Provider,
@@ -94,7 +95,7 @@ import {
   type JudgeService,
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
-import { createSizingService, SIZING_WAIT_MS } from '../sizing';
+import { createSizingService } from '../sizing';
 import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -2008,7 +2009,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
     starter,
     sizing,
-    sizingWaitMs: opts.sizingWaitMs ?? SIZING_WAIT_MS,
+    sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
