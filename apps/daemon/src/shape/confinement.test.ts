@@ -769,17 +769,30 @@ describe('judgeShapeCall by the session’s judge', () => {
       'deny',
     ],
     ['a command under nohup', () => call('Bash', { command: 'nohup pnpm dev' }), 'allow', 'deny'],
+    // What the classifier would not judge for 10db stays 10db's: the caps, and the page rules.
     [
-      'a search query past the researcher’s limit',
-      () => call('WebSearch', { query: 'q'.repeat(RESEARCH_QUERY_LIMIT + 1) }, RESEARCHER),
-      'allow',
+      'a search query past the length cap',
+      () => call('WebSearch', { query: 'q'.repeat(RESEARCH_QUERY_LIMIT + 1) }),
+      'deny',
       'deny',
     ],
     [
-      'a fetch of an http page by the researcher',
-      () => call('WebFetch', { url: 'http://example.com/' }, RESEARCHER),
-      'allow',
+      'a fetch of an http page',
+      () => call('WebFetch', { url: 'http://example.com/' }),
       'deny',
+      'deny',
+    ],
+    [
+      'a fetch of the loopback host',
+      () => call('WebFetch', { url: 'https://127.0.0.1:4317/mcp' }),
+      'deny',
+      'deny',
+    ],
+    [
+      'a fetch of a public page by the researcher',
+      () => call('WebFetch', { url: 'https://example.com/' }, RESEARCHER),
+      'allow',
+      'allow',
     ],
     ['an Edit', () => call('Edit', { file_path: path('checkout/src/a.ts') }), 'deny', 'deny'],
     [

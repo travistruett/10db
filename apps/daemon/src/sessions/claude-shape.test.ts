@@ -34,6 +34,7 @@ import type {
   ToolRequest,
 } from './types';
 import { testPolicy } from '../../test/fixtures';
+import { judgeShapeCall } from '../shape';
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
@@ -487,6 +488,65 @@ describe('the PreToolUse hook', () => {
         permissionDecision: 'allow',
         updatedInput: { effortKey: 'density', reviewer: 'scope' },
       },
+    });
+  });
+
+  describe('with Plan’s own judge of a web call', () => {
+    const access = (judge: 'native' | 'rules') => ({
+      checkout: '/repo',
+      home: '/home',
+      protectedReads: [],
+      filesDir: '/files',
+      sandboxRoots: ['/tmp/10db'],
+      judge,
+    });
+    const judged = (judge: 'native' | 'rules') =>
+      hookFor((req) =>
+        judgeShapeCall(
+          {
+            toolName: req.toolName,
+            toolInput: req.input,
+            agentId: req.agentId,
+            agentType: req.agentType,
+          },
+          access(judge),
+        ),
+      );
+
+    it.each([
+      [
+        'a fetch of the loopback MCP host, on a native judge',
+        'native',
+        'http://127.0.0.1:4317/mcp',
+        'deny',
+      ],
+      [
+        'a fetch of a private address, on a native judge',
+        'native',
+        'https://10.0.0.5/admin',
+        'deny',
+      ],
+      ['a fetch from the session, on a rules judge', 'rules', 'https://example.com/', 'deny'],
+    ] as const)('refuses %s', async (_name, judge, url, decision) => {
+      const call = await judged(judge);
+      expect(await call({ tool_name: 'WebFetch', tool_input: { url, prompt: 'x' } })).toMatchObject(
+        {
+          hookSpecificOutput: { permissionDecision: decision },
+        },
+      );
+    });
+
+    it('leaves a fetch of a public page to Claude Code’s own judge, on a native judge: no decision', async () => {
+      const call = await judged('native');
+      expect(
+        await call({
+          tool_name: 'WebFetch',
+          tool_input: { url: 'https://example.com/', prompt: 'x' },
+        }),
+      ).toEqual({});
+      expect(
+        await call({ tool_name: 'WebSearch', tool_input: { query: 'vega-lite ties' } }),
+      ).toEqual({});
     });
   });
 

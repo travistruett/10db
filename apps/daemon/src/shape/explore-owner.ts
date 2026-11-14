@@ -66,7 +66,7 @@ import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertedStateNote } from './converted-state';
 import { buildDigest } from './digest';
 import { asImage, shapeFilesDir } from './dropped-files';
-import { SHAPE_ALLOWED_TOOLS, shapeSystemPrompt, shapeToolset } from './policy';
+import { shapeAllowedTools, shapeSystemPrompt, shapeToolset } from './policy';
 import {
   carriedNotice,
   eachFitsAlone,
@@ -531,7 +531,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
             judge,
             systemPrompt: shapeSystemPrompt(launch.agentModels),
             tools: [...toolset.tools],
-            allowedTools: SHAPE_ALLOWED_TOOLS,
+            allowedTools: [...shapeAllowedTools(judge)],
             disallowedTools: [...toolset.disallowedTools],
             agents: toolset.agents,
           },

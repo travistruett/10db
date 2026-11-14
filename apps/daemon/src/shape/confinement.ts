@@ -348,8 +348,14 @@ const isProjectTool = (toolName: string): boolean =>
   !toolName.startsWith(MCP_PREFIX) &&
   toolName.split('__').length >= 3;
 
-function judgeWeb(call: ShapeCall): GuardVerdict {
-  if (!isResearcher(call))
+/**
+ * A web call. On a rules judge only the researcher touches the web. On a native judge the session may
+ * too, and what passes the checks below goes on to Claude Code's own flow, auto mode's classifier
+ * included: a bare allow is no decision (trust line §8). The checks stay 10db's either way, for the
+ * classifier makes none of them: a query's length, a page that is https, public and named.
+ */
+function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
+  if (judge !== JudgeKind.Native && !isResearcher(call))
     return deny(
       `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${SHAPE_RESEARCHER}", and ask it in words.`,
     );
@@ -397,9 +403,7 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
           'The researcher reads no files: it holds neither the project nor the conversation’s files, and answers from the web.',
         )
       : judgeRead(call, access);
-  // Where the session's judge is native, its web calls go to auto mode's classifier (trust line §8).
-  if (WEB_TOOLS.has(call.toolName))
-    return access.judge === JudgeKind.Native ? ALLOW : judgeWeb(call);
+  if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call, access.judge);
   if (call.toolName === 'Skill') return judgeSkill(call);
   if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
