@@ -5,7 +5,7 @@ import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 const percent = (part: number, whole: number): string =>
   `${String(Math.round((part / whole) * 100))}%`;
 
-/** Settings › Decisions › Sizing (spec §8 Calibration). */
+/** Sizing: how often a converted task's size was within one bucket of the lane time it took (spec §8 Calibration). */
 function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
   const buckets = (['S', 'M', 'L', 'XL'] as const)
     .filter((b) => sizing.buckets[b].n > 0)
@@ -49,7 +49,7 @@ const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tas
 const perTask = (rate: QuestionMeasureDto['converted']): string =>
   `${String(Math.round((rate.cards / rate.tasks) * 100) / 100)} question cards per task (${taskCount(rate.tasks)})`;
 
-/** Settings › Decisions › Questions (spec §7 Measure): Inbox question cards, converted against other tasks. */
+/** Questions (spec §7 Measure): Inbox question cards, converted against other tasks. */
 function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto }) {
   const { converted, other } = questions;
   return (
