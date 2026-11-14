@@ -1,0 +1,26 @@
+# apps/daemon/src/chat
+
+- `chat/` is Sessions' chat (sessions spec §7.1, decision
+  `decisions/2026-11-14-sessions-is-a-top-level-screen-and-a-chat-is-attended.md`): a tab of its own over an
+  explore conversation the engine runs. `service.ts` keeps the chat's row (`chats`, `chat_tasks` in
+  `@10db/db`'s `store/chats.ts`): it creates the conversation on the project's account, takes the message
+  route's chat branch (the message queued with its `mentions` and pictures, the chat titled from its first line,
+  `last_activity_at` touched), moves the tab, and changes the model only between turns. Archive goes through
+  `ExploreEngine.retire` (a start cancelled, a turn stopped with its partial kept, a card withdrawn, a warm
+  session closed with its row ended, so its token reaches nothing), then removes `<dataDir>/conversations/<id>/`.
+- `hooks.ts` is the chat as an engine owner: the attended explore profile (Plan's read-only sandbox through the
+  shape preparer, read tools, `Task` and `Agent`, the web where a judge sees each call, the builder's setup, no
+  write tool and none of Plan's agents), the attended `TrustPolicy`, and every chat tool in `allowedTools`.
+  `confinement.ts` is its PreToolUse hook. `live-sessions.ts` names each chat's open session, so a tool's card
+  is told to the engine and goes when the session ends.
+- `tools.ts` holds the chat's tools on `/mcp` (`mcp/chat-tools.ts` is the server's side): each is the builder's
+  tool (`builder/tools.ts`) held to the chat's project. `tool-policy.ts` is the table of what asks:
+  `remove_task` on a task the chat did not file, and retire, withdraw and supersede every time, raise a
+  permission card owned by the conversation; a Stop or archive withdraws it. `create_task` records the task in
+  `chat_tasks`; `edit_task` answers the old values for Undo; `set_title` is cut at a word to 28 characters and
+  never replaces the builder's name.
+- `conversation-files.ts` serves `GET /conversations/:id/files?q=` from `git ls-files` of the checkout the daemon
+  resolves from the conversation (a chat's is its project's; a task's comes with Do It), ranked by `file-rank.ts`,
+  which reads the query as text. `session-starts.ts` and `start-facts.ts` build Start from's three rules from a
+  failed task, the base's commits of the last day and the area of `HEAD`'s files; a fact that can't be read
+  offers nothing. `settings.ts` is Settings › Sessions.
