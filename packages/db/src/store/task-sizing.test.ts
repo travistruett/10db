@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTaskSizing,
   BUILDER_CHOSE_PLACEMENT,
+  listUnsizedTasks,
   readTaskSizing,
   createTestStore,
   getTask,
@@ -291,5 +292,23 @@ describe('applyTaskSizing', () => {
       });
       expect(asked).toBe(0);
     });
+  });
+});
+
+describe('listUnsizedTasks', () => {
+  it('lists open tasks never sized, oldest first, with when they were made', () => {
+    const p = project();
+    const first = store.write((ctx) => insertTask(ctx, p.id, { ...brief, title: 'First' })).value;
+    const second = store.write((ctx) => insertTask(ctx, p.id, { ...brief, title: 'Second' })).value;
+    const sizedAlready = store.write((ctx) => insertTask(ctx, p.id, brief)).value;
+    const removed = store.write((ctx) => insertTask(ctx, p.id, brief)).value;
+    apply(sizedAlready.id);
+    store.write((ctx) => {
+      setTaskStatus(ctx, removed.id, 'cancelled');
+    });
+    expect(listUnsizedTasks(store.db)).toEqual([
+      { id: first.id, createdAt: first.createdAt },
+      { id: second.id, createdAt: second.createdAt },
+    ]);
   });
 });

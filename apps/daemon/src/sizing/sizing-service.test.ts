@@ -520,3 +520,40 @@ describe('settled', () => {
     expect(getTask(store.db, task.id).rigor).toBeNull();
   });
 });
+
+describe('the start-up sweep', () => {
+  beforeEach(withAccount);
+
+  it('sizes every unsized unstarted task by rules, and asks the judge only about those made in the last 24 hours', async () => {
+    const old = create({ title: 'Old', areas: ['migrations'] });
+    clock.advance(25 * 60 * 60 * 1000);
+    const recent = create({ title: 'Recent', areas: ['migrations'] });
+    const started = state.write((ctx) => {
+      const made = insertTask(ctx, projectId, { ...brief, title: 'Started' });
+      insertWorkstream(ctx, made.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } });
+      return made;
+    });
+    const judge = scriptedJudge(state, answering(careful));
+    const sizer = start(judge);
+    expect(sizedFor(old.id)).toBeNull();
+    sizer.sweep();
+    await sizer.settled([old.id, recent.id]);
+    expect(getTask(store.db, old.id).kinds).toEqual([{ key: 'migration', source: 'rules' }]);
+    expect(sizedFor(old.id)).not.toBeNull();
+    expect(getTask(store.db, old.id)).toMatchObject({ rigor: null, sizedByRules: true });
+    expect(getTask(store.db, recent.id)).toMatchObject({ rigor: 'careful', sizedByRules: false });
+    expect(new Set(judge.requests.map((r) => r.taskId))).toEqual(new Set([recent.id]));
+    expect(sizedFor(started.id)).toBeNull();
+  });
+
+  it('leaves a task that was already sized alone', async () => {
+    const judge = scriptedJudge(state, answering(careful));
+    start(offJudge);
+    const task = create();
+    service?.stop();
+    const sizer = start(judge);
+    sizer.sweep();
+    await sizer.settled([task.id]);
+    expect(judge.requests).toHaveLength(0);
+  });
+});

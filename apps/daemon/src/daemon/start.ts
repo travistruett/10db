@@ -2296,6 +2296,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   void sends.recoverSending();
   replyWatch.start();
   timerWatch.start();
+  // Tasks made while the daemon was down are sized now; the judge is asked about the last day's only.
+  sizing.sweep();
   if (selfUpdate) {
     selfUpdate.start();
     selfUpdate.tick().catch((error: unknown) => {

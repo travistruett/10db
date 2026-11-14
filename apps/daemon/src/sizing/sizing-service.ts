@@ -16,6 +16,7 @@ import {
   getJudgeConfig,
   getProject,
   listKinds,
+  listUnsizedTasks,
   placementRuleMoves,
   readTaskSizing,
   recordJudgeOutcome,
@@ -34,6 +35,8 @@ import { sizeByRules } from './rules';
 
 /** Judge calls run for this many tasks at a time; the rest wait their turn, oldest first. */
 const MAX_TASKS_AT_ONCE = 4;
+/** The start-up sweep asks the judge only about tasks made this recently; older ones get the rules. */
+const SWEEP_JUDGES_WITHIN_MS = 24 * 60 * 60 * 1000;
 /** How long a start waits for sizing still in flight before it goes on with the rules' answer. */
 export const SIZING_WAIT_MS = 4_000;
 
@@ -54,6 +57,11 @@ export interface SizingService {
    * awaits this before it reads anything.
    */
   settled(taskIds: readonly TaskId[], timeoutMs?: number): Promise<void>;
+  /**
+   * Sizes every open task no sizing has fingerprinted, by rules, and asks the judge about those made in the
+   * last 24 hours. Run once when the daemon starts, for tasks made while it was down.
+   */
+  sweep(): void;
   /** Stops listening for task events and cuts the calls in flight short. */
   stop(): void;
 }
@@ -308,6 +316,18 @@ export function createSizingService(deps: SizingDeps): SizingService {
           resolve();
         });
       });
+    },
+    sweep() {
+      const since = deps.clock.now().getTime() - SWEEP_JUDGES_WITHIN_MS;
+      for (const { id, createdAt } of listUnsizedTasks(deps.state.db)) {
+        try {
+          const fingerprint = sizeByRulesNow(id);
+          if (fingerprint !== null && Date.parse(createdAt) >= since && judgeAvailable())
+            enqueue(id, fingerprint);
+        } catch (error) {
+          deps.log.error({ err: error, taskId: id }, 'could not size a task');
+        }
+      }
     },
     stop() {
       unsubscribe();

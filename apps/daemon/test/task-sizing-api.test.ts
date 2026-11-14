@@ -134,3 +134,33 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
     expect(await taskOf(api, project.id, task.id)).toMatchObject({ rigor: null });
   });
 });
+
+describe('a daemon start', () => {
+  it('sizes the tasks made while it was down', async () => {
+    const { api, project, task } = await start(50);
+    for (const call of held) call.answer();
+    await waitForAsync(async () => (await taskOf(api, project.id, task.id))?.rigor === 'critical');
+    // As if the task had been made by a daemon that never sized it.
+    daemon?.state.db.$client
+      .prepare('UPDATE tasks SET sized_for = NULL, rigor = NULL, rigor_source = NULL WHERE id = ?')
+      .run(task.id);
+    await daemon?.stop();
+    daemon = await startDaemonWithProfiles({
+      sandbox: null,
+      dataDir: data.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      caffeinate: () => null,
+      watch: false,
+      tickMs: 3_600_000,
+      keychain: createMemoryKeychain(),
+      // Made just now, so the judge is asked: it can't be reached, and the rules' value stands.
+      fetch: () => Promise.reject(new Error('no network')),
+    });
+    const sizedFor = (): unknown =>
+      daemon?.state.db.$client.prepare('SELECT sized_for FROM tasks WHERE id = ?').get(task.id);
+    await waitForAsync(() => Promise.resolve(JSON.stringify(sizedFor()) !== '{"sized_for":null}'));
+    expect(sizedFor()).not.toMatchObject({ sized_for: null });
+  });
+});

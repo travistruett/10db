@@ -11,7 +11,7 @@ import {
   type TaskId,
   type TaskKind,
 } from '@10db/contracts';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import { listKinds } from './kinds';
 import type { DbReader, WriteContext } from './store';
@@ -58,6 +58,16 @@ export interface TaskSizingState {
   readonly sizingCalls: SizingCalls;
   /** Whether any workstream of the task exists. */
   readonly started: boolean;
+}
+
+/** Open tasks no sizing has ever fingerprinted, oldest first, each with when it was made. */
+export function listUnsizedTasks(db: DbReader): { id: TaskId; createdAt: string }[] {
+  return db
+    .select({ id: schema.tasks.id, createdAt: schema.tasks.createdAt })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.status, TaskStatus.Open), isNull(schema.tasks.sizedFor)))
+    .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
+    .all();
 }
 
 /** The task's sizing state, one light read; null for a task that does not exist. */
