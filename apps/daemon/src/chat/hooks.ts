@@ -280,6 +280,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             token: start.mcpToken,
             toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000,
           },
+          hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           canUseTool: (req) =>

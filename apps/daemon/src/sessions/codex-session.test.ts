@@ -614,6 +614,29 @@ describe('the process', () => {
     });
   });
 
+  // Plan's /mcp tools answer within 60 s, but a card its hook raises waits on the builder: the hook's own
+  // wait, not the tool timeout, bounds the guard's curl.
+  it('gives the guard hook the session hook wait, not the /mcp tool timeout', async () => {
+    let seen: Readonly<Record<string, string>> = {};
+    const server = fakeAppServer(FINE);
+    const base = specOf();
+    const spec = specOf({
+      mcp: { ...base.mcp, toolTimeoutMs: 60_000 },
+      hookWaitMs: 905_000,
+    });
+    const handle = startCodexSession(
+      spec,
+      depsOf(server, {
+        spawn: (_path, env) => {
+          seen = env;
+          return server.child;
+        },
+      }),
+    );
+    await firstEvent(handle);
+    expect(seen['TENDB_GUARD_MAX_SECONDS']).toBe('905');
+  });
+
   it('puts the guard socket in the socket dir under the last 12 characters of the session ID', () => {
     expect(guardSocketPath('/run', mintId('Session'))).toMatch(/^\/run\/[A-Za-z0-9_-]{12}\.sock$/);
     expect(guardSocketPath('/run', 'ses_0123456789abcdefghij')).toBe('/run/89abcdefghij.sock');

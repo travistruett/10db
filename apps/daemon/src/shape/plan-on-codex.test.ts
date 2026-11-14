@@ -48,6 +48,9 @@ describe('Plan on a ChatGPT account', () => {
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
     // Codex has no Agent tool: the session gets no agents, and its prompt asks for none.
     expect(spec.profile.agents).toEqual({});
+    // Its hook waits on a card as long as the builder's wait, not Plan's 60 s tool timeout.
+    expect(spec.hookWaitMs).toBe((f.c.project.humanWaitMinutes + 5) * 60_000);
+    expect(spec.hookWaitMs).toBeGreaterThan(spec.mcp.toolTimeoutMs);
     expect(spec.profile.systemPrompt).not.toContain('Agent call');
     expect(spec.profile.systemPrompt).toContain('need a Claude account');
     const conversation = f.engine.view(shapeConversation(f.c.store.db, shapeId).id);

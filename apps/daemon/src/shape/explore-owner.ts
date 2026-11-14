@@ -592,6 +592,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           env: launch.env,
           account: launch.account,
           mcp: { url: deps.mcp.url, token: start.mcpToken, toolTimeoutMs: deps.mcp.toolTimeoutMs },
+          // A card Plan's hook raises waits on the builder as a lane's question does.
+          hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           canUseTool: (req) =>

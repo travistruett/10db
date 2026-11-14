@@ -120,6 +120,11 @@ export interface AgentSessionCore {
    * Absent without a sandbox.
    */
   readonly setup?: SessionSetupDirs;
+  /**
+   * How long the guard hook waits on 10db for one call, a card's wait on the builder included: the builder's
+   * human wait plus five minutes. Absent, the `/mcp` tool wait.
+   */
+  readonly hookWaitMs?: number;
   readonly mcp: {
     readonly url: string;
     readonly token: string;

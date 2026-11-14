@@ -916,7 +916,10 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
       HOME: home.emptyHome,
       TENDB_MCP_TOKEN: spec.mcp.token,
       TENDB_GUARD_SOCKET: socketPath,
-      TENDB_GUARD_MAX_SECONDS: String(Math.ceil(spec.mcp.toolTimeoutMs / 1_000)),
+      // A card the hook raises waits on the builder, so the hook's own wait bounds it, not a tool's.
+      TENDB_GUARD_MAX_SECONDS: String(
+        Math.ceil((spec.hookWaitMs ?? spec.mcp.toolTimeoutMs) / 1_000),
+      ),
     };
     const child = (deps.spawn ?? spawnAppServer)(deps.codexPath, childEnv());
     child.stderr.on('data', (chunk: Buffer | string) => {
