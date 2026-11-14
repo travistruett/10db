@@ -10,21 +10,11 @@ export { AWAY_ANSWER, SKIP_RESUMES_MAX, skipMessage, stoppedBySkip } from './ski
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
 export { answerAway, routedToPerson, type AwayLane } from './away-question';
 export { writtenConfig } from './written-config';
+export { PatchHunk, type FastPathContext } from './fast-path';
 export {
-  fastPathAllows,
-  namesSecret,
-  PatchHunk,
-  type FastPathContext,
-  type LimitCall,
-} from './fast-path';
-export {
-  CALL_INPUT_MAX_CHARS,
-  CROSSES_LIMIT_OPTIONS,
   CROSSES_LIMIT_QUESTION,
   crossesLimit,
   PRE_EXISTING_MAX,
-  type CrossesLimitRequest,
   type LimitAt,
-  type LimitVerdict,
 } from './crosses-limit';
 export { grantLine, grantTargetOf, projectGrantLines } from './grants';
