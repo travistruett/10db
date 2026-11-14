@@ -526,6 +526,13 @@
       "when": 1794606121932,
       "tag": "0074_drop_old_transcripts",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1794626471715,
+      "tag": "0075_skipped_actions",
+      "breakpoints": true
     }
   ]
 }

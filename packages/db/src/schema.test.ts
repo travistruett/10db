@@ -253,6 +253,29 @@ describe('schema', () => {
   );
 });
 
+describe('skipped_actions', () => {
+  it('keeps one row per call in a run, and any number with no tool use id', () => {
+    const { ws1: workstreamId } = seedProjectAndWorkstreams();
+    const row = (toolUseId: string | null) => ({
+      id: mintId('SkippedAction'),
+      workstreamId,
+      toolName: 'Bash',
+      toolUseId,
+      summary: 'ls',
+      kind: 'deploy' as const,
+      reason: 'x',
+      source: 'guard' as const,
+      createdAt: now,
+    });
+    db.insert(schema.skippedActions).values(row('tu')).run();
+    expect(() => db.insert(schema.skippedActions).values(row('tu')).run()).toThrow(
+      /UNIQUE constraint failed/,
+    );
+    db.insert(schema.skippedActions).values(row(null)).run();
+    db.insert(schema.skippedActions).values(row(null)).run();
+  });
+});
+
 describe('the conversation tables', () => {
   function seedConversation() {
     const { accountId, projectId } = seedProjectAndWorkstreams();

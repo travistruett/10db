@@ -70,6 +70,10 @@ import type {
   PassTurnId,
   TakeOutStep,
   TaskPageReportId,
+  SkippedActionId,
+  SkipKind,
+  SkipSource,
+  LimitName,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -2339,4 +2343,58 @@ export const taskPageReports = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index('task_page_reports_task_idx').on(t.taskId, t.workstreamId)],
+);
+
+/**
+ * A call an unattended lane skipped, or a question it was answered at once (trust line §5): a record,
+ * written once. One row per tool use id in a run, so a call the broker skipped and Claude Code then
+ * reports as denied is one row.
+ */
+export const skippedActions = sqliteTable(
+  'skipped_actions',
+  {
+    id: text('id').$type<SkippedActionId>().primaryKey(),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    toolName: text('tool_name').notNull(),
+    toolUseId: text('tool_use_id'),
+    /** The call's key (`callKey`); null for a question, which nothing approves. */
+    callKey: text('call_key'),
+    summary: text('summary').notNull(),
+    /** The summary was cut: the builder never sees the whole call, so intent can't approve it. */
+    summaryCut: integer('summary_cut', { mode: 'boolean' }).notNull().default(false),
+    kind: text('kind').$type<SkipKind>().notNull(),
+    /** Not `limit`, a word hand-written SQL reserves. */
+    limitName: text('limit_name').$type<LimitName>(),
+    reason: text('reason').notNull(),
+    source: text('source').$type<SkipSource>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('skipped_actions_one_per_call')
+      .on(t.workstreamId, t.toolUseId)
+      .where(sql`tool_use_id IS NOT NULL`),
+    index('skipped_actions_workstream_idx').on(t.workstreamId),
+  ],
+);
+
+/** The skips the builder approved for a follow-up task, by Run these now. */
+export const skipApprovals = sqliteTable(
+  'skip_approvals',
+  {
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    skippedActionId: text('skipped_action_id')
+      .$type<SkippedActionId>()
+      .notNull()
+      .references(() => skippedActions.id),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.skippedActionId] })],
 );

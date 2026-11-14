@@ -93,3 +93,10 @@ only process that writes the database.
   `putItem` stores an item under a caller's id, or updates it there. The explore queue is read from rows:
   `listQueuedTurnStarters` (builder messages and prompted presses neither pushed nor delivered) and
   `listPushedTurnStarters` (handed to a session, not taken); `openTurnMarker` is the open "Send now" line.
+- Skipped calls, migration 0075 (generated; trust line §5, T4): `skipped_actions` (what an unattended lane skipped
+  or was answered at once: tool, tool use id, `call_key`, summary and whether it was cut, `SkipKind`, `limit_name`
+  rather than the reserved `limit`, reason, source; a record) keeps one row per `tool_use_id` in a run through a
+  partial unique index and `ON CONFLICT DO NOTHING`, so a second report of one call writes nothing inside the
+  caller's write. `skip_approvals` joins a follow-up task to the skips Run these now approved; `approveSkips`
+  refuses another project's or an unapprovable one (`approvalOf`), and the approvals are read only until the
+  follow-up is `done`.
