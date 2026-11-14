@@ -2,6 +2,7 @@ import type { ChatDto, ProjectId } from '@10db/contracts';
 import { Box } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
+import { Announcer } from '../../conversation/announcer';
 import { HeaderSlot } from '../../shell/header-slot';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ChatTab } from './chat-tab';
@@ -56,6 +57,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const patch = usePatchChat();
   const unarchive = useUnarchiveChat();
   const [fresh, setFresh] = useState<readonly FreshTabState[]>(readFreshTabs);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
   useEffect(() => {
     writeFreshTabs(fresh);
   }, [fresh]);
@@ -122,6 +124,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Announcer message={announcement} label="Sessions announcements" />
       <HeaderSlot>
         <TabStrip
           tabs={tabs}
@@ -149,11 +152,12 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
             void openRecent(selected.tab, chat);
           }}
         />
-      ) : selected?.kind === 'chat' ? (
+      ) : selected?.kind === 'chat' && projects.isSuccess ? (
         <ChatTab
           key={selected.chat.id}
           chat={selected.chat}
-          projectName={list.find((p) => p.id === selected.chat.projectId)?.name ?? ''}
+          project={list.find((p) => p.id === selected.chat.projectId)}
+          onAnnounce={setAnnouncement}
         />
       ) : null}
     </Box>

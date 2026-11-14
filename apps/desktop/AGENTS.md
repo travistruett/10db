@@ -61,6 +61,7 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 - `views/inbox/`: the Inbox: cards across projects, checks and knowledge proposals (`src/views/inbox/AGENTS.md`)
 - `views/knowledge/`: Knowledge: its tabs, shelves and lists (`src/views/knowledge/AGENTS.md`)
 - `views/project-setup/`: the one project form (`src/views/project-setup/AGENTS.md`)
+- `views/sessions/`: Sessions: tabs of chats, a fresh tab, the session bar (`src/views/sessions/AGENTS.md`)
 - `views/settings/`: Settings: sections, Trust, Decisions, Models, accounts and integrations (`src/views/settings/AGENTS.md`)
 - `views/shape/`: Plan (Shape): the conversation and a Plan's record (`src/views/shape/AGENTS.md`)
 - `views/workbench/`: the Workbench: pages, passes, turns and pictures (`src/views/workbench/AGENTS.md`)

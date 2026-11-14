@@ -52,6 +52,14 @@ export function useConversation(id: ConversationId | null) {
 
 /** Every stored item of the conversation, in `seq` order, read a page at a time. */
 export function useConversationItems(id: ConversationId | null): readonly ConversationItemDto[] {
+  return useConversationItemsState(id).items;
+}
+
+/** The stored items, and whether the first read of them is still on its way. */
+export function useConversationItemsState(id: ConversationId | null): {
+  readonly items: readonly ConversationItemDto[];
+  readonly loading: boolean;
+} {
   const { client } = useDaemon();
   const query = useQuery({
     queryKey: id === null ? ['conversations', 'none', 'items'] : conversationKeys.items(id),
@@ -74,7 +82,7 @@ export function useConversationItems(id: ConversationId | null): readonly Conver
     },
     enabled: id !== null,
   });
-  return query.data ?? NO_ITEMS;
+  return { items: query.data ?? NO_ITEMS, loading: id !== null && query.isPending };
 }
 
 /** The ids the conversation has stored, whose frames are stale. */
