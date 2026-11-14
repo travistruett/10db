@@ -1,6 +1,7 @@
 import {
   EventType,
   JudgeDecision,
+  JudgeOutcome,
   RigorSource,
   TaskId,
   TaskKindSource,
@@ -17,6 +18,7 @@ import {
   listKinds,
   placementRuleMoves,
   readTaskSizing,
+  recordJudgeOutcome,
   type DbReader,
   type Placement,
   type TaskSizingState,
@@ -73,6 +75,17 @@ const PINNED_KIND_SOURCES: readonly TaskKind['source'][] = [
 
 const rigorPinned = (task: TaskSizingState): boolean =>
   task.rigorSource === RigorSource.Builder || task.rigorSource === RigorSource.Agent;
+
+/** What a judge answer depends on besides the text: the pins that decided what was asked. */
+const pinsOf = (task: TaskSizingState): string =>
+  JSON.stringify([
+    rigorPinned(task),
+    task.kinds
+      .filter((k) => PINNED_KIND_SOURCES.includes(k.source))
+      .map((k) => k.key)
+      .sort(),
+    [...task.kindsOff].sort(),
+  ]);
 
 /** Whether a task can be sized at all: open, never started and not a Workbench page. */
 function sizable(task: TaskSizingState): boolean {
@@ -171,6 +184,20 @@ export function createSizingService(deps: SizingDeps): SizingService {
     ]);
 
     deps.state.write((ctx) => {
+      const now = readTaskSizing(ctx.tx, job.taskId);
+      // The answers were asked for this text and these pins, of a task that has not started: anything
+      // else and they are for a task that is no longer the one asked about.
+      if (
+        now === null ||
+        !sizable(now) ||
+        sizingFingerprint(now) !== job.fingerprint ||
+        pinsOf(now) !== pinsOf(asked)
+      ) {
+        for (const answer of [rigorAnswer, ...kindAnswers])
+          if (answer?.kind === 'answered')
+            recordJudgeOutcome(ctx, answer.callId, JudgeOutcome.Stopped);
+        return;
+      }
       const rigor =
         rigorAnswer === null
           ? null
@@ -187,8 +214,6 @@ export function createSizingService(deps: SizingDeps): SizingService {
         calls[kind.key] = read.callId;
         if (read.touches) judged.push({ key: kind.key, source: TaskKindSource.Judge });
       });
-      const now = readTaskSizing(ctx.tx, job.taskId);
-      if (now === null) return;
       const sized = sizeByRules({
         task: now,
         kinds: listKinds(ctx.tx),

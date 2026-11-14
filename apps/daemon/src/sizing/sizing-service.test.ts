@@ -352,3 +352,101 @@ describe('judge sizing', () => {
     await sizer.settled(tasks.map((t) => t.id));
   });
 });
+
+describe('a judge answer for text or pins that have since changed', () => {
+  beforeEach(withAccount);
+
+  /** A judge whose first answers (`critical`, `yes`) wait for `release`; any task named "v2" is answered at once. */
+  function held() {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const judge = scriptedJudge(state, async (req) => {
+      const rigor = req.decision === JudgeDecision.TaskRigor;
+      if (req.state.includes('v2')) return { choice: rigor ? 'light' : 'no', confidence: 0.9 };
+      await gate;
+      return { choice: rigor ? 'critical' : 'yes', confidence: 0.9 };
+    });
+    return { judge, release };
+  }
+  const stale = () =>
+    listJudgeCalls(store.db, 20).filter((c) => c.answer === 'critical' || c.answer === 'yes');
+
+  it.each([
+    {
+      name: 'the builder set a rigor',
+      during: (id: TaskId) => edit(id, { rigor: 'standard' }),
+      then: { rigor: 'standard', rigorSource: 'builder', kinds: [] },
+    },
+    {
+      name: 'the builder added a kind',
+      during: (id: TaskId) => edit(id, { kinds: [{ key: 'docs', source: 'builder' }] }),
+      then: { rigor: null, kinds: [{ key: 'docs', source: 'builder' }] },
+    },
+    {
+      name: 'the builder took a kind off',
+      during: (id: TaskId) =>
+        store.db.$client.prepare('UPDATE tasks SET kinds_off = ? WHERE id = ?').run('["docs"]', id),
+      then: { rigor: null, kinds: [] },
+    },
+    {
+      name: 'the task started',
+      during: (id: TaskId) =>
+        state.write((ctx) =>
+          insertWorkstream(ctx, id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+        ),
+      then: { rigor: null, kinds: [] },
+    },
+  ])('applies nothing and logs them stopped when $name', async ({ during, then }) => {
+    const { judge, release } = held();
+    const sizer = start(judge);
+    const task = create();
+    await vi.waitFor(() => {
+      expect(judge.requests).toHaveLength(3);
+    });
+    during(task.id);
+    release();
+    await sizer.settled([task.id]);
+    expect(getTask(store.db, task.id)).toMatchObject(then);
+    expect(stale()).toHaveLength(3);
+    expect(stale().every((c) => c.outcome === 'stopped')).toBe(true);
+    expect(sizing(task.id)?.sizingCalls).toEqual({ rigor: null, kinds: {} });
+  });
+
+  it('applies nothing when the text was edited, and sizes the new text instead', async () => {
+    const { judge, release } = held();
+    const sizer = start(judge);
+    const task = create();
+    await vi.waitFor(() => {
+      expect(judge.requests).toHaveLength(3);
+    });
+    edit(task.id, { title: 'Alpha v2' });
+    await sizer.settled([task.id]);
+    release();
+    await vi.waitFor(() => {
+      expect(stale()).toHaveLength(3);
+    });
+    expect(stale().every((c) => c.outcome === 'stopped')).toBe(true);
+    expect(getTask(store.db, task.id)).toMatchObject({
+      rigor: 'light',
+      rigorReason: 'judged Light (0.90)',
+      kinds: [],
+    });
+    expect(sizing(task.id)?.sizedFor).toBe(sizingFingerprint(getTask(store.db, task.id)));
+  });
+
+  it('does not ask again for a change that is not an edit of the text', async () => {
+    const { judge, release } = held();
+    const sizer = start(judge);
+    const task = create();
+    await vi.waitFor(() => {
+      expect(judge.requests).toHaveLength(3);
+    });
+    state.write((ctx) => moveTask(ctx, task.id, { to: null, after: null, before: null }));
+    release();
+    await sizer.settled([task.id]);
+    expect(judge.requests).toHaveLength(3);
+    expect(getTask(store.db, task.id)).toMatchObject({ rigor: 'critical', rigorSource: 'judge' });
+  });
+});
