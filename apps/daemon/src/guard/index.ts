@@ -6,15 +6,17 @@ export {
   classifyPath,
   foldPathCase,
   isOverLongPath,
+  isWithinOnEveryReading,
   OVER_LONG_PATH_REFUSAL,
   PathResolutionError,
   realPathOf,
+  realPathReadings,
   resolveInRepo,
 } from './paths';
 export { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from './shell-words';
 export { READ_COMMANDS, readOnlyShellRefusal } from './read-only';
 export { protectedPaths, type ProtectedPath } from './account-rules';
-export { EQUALS_EXPANSION } from './plain-command';
+export { EQUALS_EXPANSION, plainCommandWords } from './plain-command';
 export { plainWordReadings } from './command-forms';
 export { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 export { hazardFor, hazardHit } from './hazards';

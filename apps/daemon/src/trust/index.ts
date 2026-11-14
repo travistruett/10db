@@ -10,3 +10,10 @@ export { AWAY_ANSWER, SKIP_RESUMES_MAX, skipMessage, stoppedBySkip } from './ski
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
 export { answerAway, routedToPerson, type AwayLane } from './away-question';
 export { writtenConfig } from './written-config';
+export {
+  fastPathAllows,
+  namesSecret,
+  PatchHunk,
+  type FastPathContext,
+  type LimitCall,
+} from './fast-path';

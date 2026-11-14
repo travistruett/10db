@@ -1,4 +1,5 @@
 export { deniedEnvNames } from './env-allowlist';
+export { isSecretFileName } from './project-access';
 export {
   buildLaneProfile,
   isSandboxDomain,

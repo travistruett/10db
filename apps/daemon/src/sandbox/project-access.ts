@@ -96,6 +96,10 @@ export interface ProjectAccessInput {
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 /** Folded the way the file system folds names, so `.ENV` is caught where it is the same file. */
 const SECRET_FILE_PREFIX = foldPathCase('.env');
+/** Whether a file name is one the sandbox treats as secret: `.env` and every name after it, case-folded. */
+export function isSecretFileName(name: string): boolean {
+  return foldPathCase(name).startsWith(SECRET_FILE_PREFIX);
+}
 const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
 /** Listing errors that mean the directory is gone, so it can hide no secret file. */
 const VANISHED: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR']);
@@ -150,7 +154,7 @@ export async function secretFilesIn(
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!UNWALKED_DIRECTORIES.has(entry.name)) pending.push(path);
-      } else if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
+      } else if (isSecretFileName(entry.name)) {
         for (const secret of await secretPathsOf(path, entry)) found.add(secret);
       }
     }
