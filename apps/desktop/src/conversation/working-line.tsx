@@ -68,7 +68,7 @@ function lineOf(
       };
     }
     case ConversationState.WaitingCard:
-      return { words: 'Waiting for your answer above', mark: null };
+      return { words: 'Waiting for your answer', mark: null };
     case ConversationState.Stopping:
       return { words: 'Stopping…', mark: 'dot' };
     case ConversationState.PausedAccount:

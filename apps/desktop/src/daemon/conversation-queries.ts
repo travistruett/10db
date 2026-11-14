@@ -168,17 +168,40 @@ async function refreshAfter(queryClient: QueryClient, id: ConversationId): Promi
   ]);
 }
 
+/** What the builder sends a conversation: words, the files its `@` mentions name, and pictures. */
+export interface ConversationMessageSend {
+  readonly conversationId: ConversationId;
+  readonly text: string;
+  readonly mentions?: readonly string[];
+  readonly pictures?: readonly File[];
+}
+
+/** The request body: JSON for words alone, a multipart form when pictures go with them. */
+function messageRequest({ text, mentions = [], pictures = [] }: ConversationMessageSend) {
+  if (pictures.length === 0)
+    return {
+      headers: { 'content-type': 'application/json' },
+      init: { body: JSON.stringify(mentions.length === 0 ? { text } : { text, mentions }) },
+    };
+  const form = new FormData();
+  form.append('text', text);
+  for (const path of mentions) form.append('mention', path);
+  for (const picture of pictures) form.append('picture', picture, picture.name);
+  // No content type: the form's own carries the boundary.
+  return { init: { body: form } };
+}
+
 /** Sends the builder's message; the conversation's owner queues its turn. */
 export function useSendConversationMessage() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { readonly conversationId: ConversationId; readonly text: string }) =>
+    mutationFn: async (input: ConversationMessageSend) =>
       readJson(
-        await client.conversations[':conversationId'].messages.$post({
-          param: { conversationId: input.conversationId },
-          json: { text: input.text },
-        }),
+        await client.conversations[':conversationId'].messages.$post(
+          { param: { conversationId: input.conversationId } },
+          messageRequest(input),
+        ),
         ConversationItemDto,
       ),
     onSuccess: (_item, input) => refreshAfter(queryClient, input.conversationId),

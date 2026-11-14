@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { isSendKey } from '../shape/use-shape-keys';
+import { isSendKey } from '../../conversation/escape';
 import { ComposerPhase, composerButtons, composerPhase } from './composer-buttons';
 import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
 import type { PageStatus } from './page-status';

@@ -117,7 +117,11 @@ describe('planItemEntries', () => {
     ['an edit note', event('edit', 'x'), []],
     ['a screenshot', event('screen', SCREEN), ['custom']],
     ['a screenshot that does not parse', event('screen', '{'), []],
-    ['an open Send now line', marker(null), ['divider Send now [Send Now]']],
+    [
+      'an open Send now line',
+      marker(null),
+      ['divider These waited through a restart. Nothing was sent. [Send Now]'],
+    ],
     ['a resolved Send now line', marker('2026-11-13T09:00:00.000Z'), []],
   ])('%s', (_name, item, expected) => {
     expect(entries([item]).map(summary)).toEqual(expected);

@@ -5,7 +5,7 @@ import {
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   TASK_PICTURE_MAX_BYTES,
 } from '@10db/contracts';
-import { nameImage } from '../shape/dropped-files';
+import { nameImage } from '../../conversation/dropped-files';
 
 // Workbench spec §4.3: the composer takes pasted, dropped or picked PNG, JPEG and WebP pictures. It
 // checks each before it holds it, so the reason shows at once; the daemon checks the bytes again when

@@ -1,5 +1,4 @@
 import {
-  OUTPUT_TAIL_CHARS,
   PREVIEW_CHARS,
   ScreenMessageBody,
   ToolCallView,
@@ -8,7 +7,8 @@ import {
 } from '@10db/contracts';
 import { createElement } from 'react';
 import type { ConversationEntry } from '../../conversation';
-import type { LiveCall, LiveItems } from '../../conversation/live-items';
+import { itemEntry, liveEntries } from '../../conversation/item-entries';
+import type { LiveItems } from '../../conversation/live-items';
 import { Screenshot } from './screenshot';
 
 // Plan's conversation items, then what streams now, as the conversation kit's entries (M4b call 15).
@@ -57,8 +57,6 @@ function planLineCall(item: Item<'tool_call'>): ToolCallView {
   });
 }
 
-const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
-
 function shapeEventEntry(item: Item<'shape_event'>, shapeId: ShapeId): ConversationEntry | null {
   const { id } = item;
   switch (item.event) {
@@ -77,74 +75,38 @@ function shapeEventEntry(item: Item<'shape_event'>, shapeId: ShapeId): Conversat
   }
 }
 
+/** Plan's own items first; the kinds every conversation has go to the kit's map. */
 function entryOf(
   item: ConversationItemDto,
   sendNow: () => void,
   shapeId: ShapeId,
 ): ConversationEntry | null {
-  const { id } = item;
   switch (item.kind) {
-    case 'message':
-      return { kind: 'builder', id, text: item.text, extra: null };
-    case 'agent_message':
-      // A note's text (a resume, a model change) is 10db speaking, not either side.
-      return item.author === 'system'
-        ? { kind: 'notice', id, text: item.text, tone: 'info' }
-        : { kind: 'reply', id, text: item.text, partial: item.partial };
-    case 'reasoning':
-      return { kind: 'reasoning', id, text: item.text, durationMs: null };
     case 'tool_call':
-      if (item.call.harnessTool !== PLAN_TOOL) return { kind: 'tool', id, call: item.call };
-      return item.call.title === '' ? null : { kind: 'tool', id, call: planLineCall(item) };
-    case 'notice':
-      return item.change === undefined
-        ? { kind: 'notice', id, text: item.text, tone: 'info' }
-        : {
-            kind: 'divider',
-            id,
-            text: `Now on ${item.change.label} · ${item.change.model}`,
-            action: null,
-          };
+      if (item.call.harnessTool !== PLAN_TOOL)
+        return { kind: 'tool', id: item.id, call: item.call };
+      return item.call.title === ''
+        ? null
+        : { kind: 'tool', id: item.id, call: planLineCall(item) };
     case 'shape_event':
       return shapeEventEntry(item, shapeId);
-    case 'plan':
-      return {
-        kind: 'notice',
-        id,
-        text: `Made a plan · ${plural(item.steps.length, 'step', 'steps')}`,
-        tone: 'info',
-      };
-    case 'turn_marker':
-      return item.resolvedAt === null
-        ? { kind: 'divider', id, text: 'Send now', action: { label: 'Send Now', onClick: sendNow } }
-        : null;
-    case 'digest':
+    case 'message':
+    case 'agent_message':
+    case 'reasoning':
+    case 'notice':
     case 'card':
-      return null;
+    case 'plan':
+    case 'turn_marker':
+    case 'digest':
+      // Plan shows its question and permission cards beside the transcript and keeps no receipts.
+      return itemEntry(item, {
+        sendNow,
+        label: 'Agent',
+        receipts: false,
+        working: false,
+        cards: [],
+      });
   }
-}
-
-/** What streams now, after what is stored: a reply as it arrives, the agent's thinking, a call. */
-function liveEntries(live: LiveItems, stored: ReadonlySet<string>): ConversationEntry[] {
-  return [...live].flatMap(([id, item]): ConversationEntry[] => {
-    if (stored.has(id)) return [];
-    switch (item.kind) {
-      case 'agent_message':
-        return [{ kind: 'reply', id, text: item.text, partial: false, streaming: true }];
-      case 'reasoning':
-        return [{ kind: 'reasoning', id, text: item.text, durationMs: null }];
-      case 'tool_call':
-        return item.call === null
-          ? []
-          : [{ kind: 'tool', id, call: withOutput(item.call, item.output) }];
-    }
-  });
-}
-
-/** A running command shows the output streamed so far, its tail as the stored call keeps it. */
-function withOutput(call: ToolCallView, output: LiveCall['output']): ToolCallView {
-  if (call.kind !== 'command' || output === '') return call;
-  return { ...call, outputTail: output.slice(-OUTPUT_TAIL_CHARS) };
 }
 
 /** The entries Plan's conversation draws as: its stored items in `seq` order, then what streams. */

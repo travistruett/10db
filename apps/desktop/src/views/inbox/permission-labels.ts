@@ -26,6 +26,12 @@ export const PERMISSION_LABELS: Readonly<Record<PermissionChoice, string>> = {
 
 /** A permission choice in words; the server choice names the server its card carries. */
 function permissionWords(item: InboxItemDto, choice: PermissionChoice): string {
+  // A conversation's session is the span a grant covers: "workstream" is the lane's word.
+  if (
+    choice === PermissionChoice.AllowWorkstream &&
+    typeof item.detail?.['conversationId'] === 'string'
+  )
+    return 'Allow for this session';
   if (choice !== PermissionChoice.AllowMcpServer) return PERMISSION_LABELS[choice];
   // The detail is JSON read back from the daemon: a boundary, so parse it.
   const grant = McpToolGrant.safeParse(item.detail?.[MCP_TOOL_GRANT_DETAIL]);
