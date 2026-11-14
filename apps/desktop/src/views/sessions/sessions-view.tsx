@@ -2,6 +2,7 @@ import type { ChatDto, ProjectId } from '@10db/contracts';
 import { Box } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
+import { useInbox } from '../../daemon/queries';
 import { Announcer } from '../../conversation/announcer';
 import { HeaderSlot } from '../../shell/header-slot';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -18,7 +19,9 @@ import {
 } from './fresh-tabs';
 import { draftKey, sessionDrafts } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
-import { TabStrip, type StripTab } from './tab-strip';
+import { openCardsByConversation } from './needs-you';
+import { markSeen, readSeen } from './seen';
+import { panelId, TabStrip, type StripTab } from './tab-strip';
 
 export interface SessionsViewProps {
   readonly search: SessionsSearch;
@@ -58,6 +61,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const unarchive = useUnarchiveChat();
   const [fresh, setFresh] = useState<readonly FreshTabState[]>(readFreshTabs);
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [seen, setSeen] = useState(readSeen);
+  const inbox = useInbox();
   useEffect(() => {
     writeFreshTabs(fresh);
   }, [fresh]);
@@ -81,6 +86,21 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         : null;
   const selected = tabs.find((t) => t.key === wanted) ?? tabs[0] ?? null;
 
+  // A tab is seen while it is selected and the window has focus.
+  const selectedChat = selected?.kind === 'chat' ? selected.chat : null;
+  const lastReplyAt = selectedChat?.lastReplyAt ?? null;
+  useEffect(() => {
+    if (selectedChat === null || lastReplyAt === null) return;
+    const look = (): void => {
+      if (document.hasFocus()) setSeen(markSeen(selectedChat.id, new Date().toISOString()));
+    };
+    look();
+    window.addEventListener('focus', look);
+    return () => {
+      window.removeEventListener('focus', look);
+    };
+  }, [selectedChat, lastReplyAt]);
+
   const select_ = (tab: StripTab): void => {
     if (tab.kind === 'chat') {
       onSearch({ chat: tab.chat.id }, false);
@@ -89,6 +109,15 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       onSearch({ fresh: tab.tab.id }, false);
       select(tab.tab.projectId);
     }
+  };
+
+  /** Closing keeps the chat warm: its tab leaves the strip and focus goes to the tab on the right. */
+  const closeTab = (tab: StripTab): void => {
+    const index = tabs.indexOf(tab);
+    const next = tabs[index + 1] ?? tabs[index - 1];
+    if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: null });
+    else setFresh((tabsNow) => removeFreshTab(tabsNow, tab.tab.id));
+    if (tab.key === selected?.key && next !== undefined) select_(next);
   };
 
   const newTab = (): void => {
@@ -130,36 +159,51 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           tabs={tabs}
           selectedKey={selected?.key ?? null}
           projects={list}
+          cards={openCardsByConversation(inbox.data ?? [])}
+          seen={seen}
           onSelect={select_}
+          onClose={closeTab}
           onNew={newTab}
+          onReorder={(tab, position) => {
+            if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: position });
+          }}
         />
       </HeaderSlot>
-      {selected?.kind === 'fresh' ? (
-        <FreshTab
-          key={selected.tab.id}
-          tab={selected.tab}
-          projects={list}
-          onProject={(projectId) => {
-            changeProject(selected.tab, projectId);
-          }}
-          onModel={(model) => {
-            setFresh((tabsNow) => setFreshModel(tabsNow, selected.tab.id, model));
-          }}
-          onChatMade={(chat, send) => {
-            chatMade(selected.tab, chat, send);
-          }}
-          onOpenRecent={(chat) => {
-            void openRecent(selected.tab, chat);
-          }}
-        />
-      ) : selected?.kind === 'chat' && projects.isSuccess ? (
-        <ChatTab
-          key={selected.chat.id}
-          chat={selected.chat}
-          project={list.find((p) => p.id === selected.chat.projectId)}
-          onAnnounce={setAnnouncement}
-        />
-      ) : null}
+      {selected === null ? null : (
+        <div
+          role="tabpanel"
+          id={panelId(selected.key)}
+          aria-labelledby={`session-tab-${selected.key}`}
+          style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+        >
+          {selected.kind === 'fresh' ? (
+            <FreshTab
+              key={selected.tab.id}
+              tab={selected.tab}
+              projects={list}
+              onProject={(projectId) => {
+                changeProject(selected.tab, projectId);
+              }}
+              onModel={(model) => {
+                setFresh((tabsNow) => setFreshModel(tabsNow, selected.tab.id, model));
+              }}
+              onChatMade={(chat, send) => {
+                chatMade(selected.tab, chat, send);
+              }}
+              onOpenRecent={(chat) => {
+                void openRecent(selected.tab, chat);
+              }}
+            />
+          ) : projects.isSuccess ? (
+            <ChatTab
+              key={selected.chat.id}
+              chat={selected.chat}
+              project={list.find((p) => p.id === selected.chat.projectId)}
+              onAnnounce={setAnnouncement}
+            />
+          ) : null}
+        </div>
+      )}
     </Box>
   );
 }

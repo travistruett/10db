@@ -1,7 +1,7 @@
 import { Box, Group, ScrollArea } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
-import { EdgeFade } from './edge-fade';
+import { EdgeFade } from '../../shell/edge-fade';
 
 const SCROLLBAR = 12;
 /** Room between the columns and the scrollbar under them. */
