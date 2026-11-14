@@ -12,6 +12,7 @@ import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
 import { HumanTouchPanel } from './human-touch-panel';
+import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
 import { PassLine } from '../workbench/pass-line';
 
@@ -60,10 +61,13 @@ export function FactoryView() {
         <ProjectGoals key={project.id} project={project} linkedGoalId={linkedGoalId} />
       ))}
       {only ? (
-        <HumanTouchPanel projectId={only.id} />
+        <>
+          <RigorPanel projectId={only.id} />
+          <HumanTouchPanel projectId={only.id} />
+        </>
       ) : shown.length > 1 ? (
         <Text size="sm" c="dimmed">
-          Choose a project to see how often a person was needed in it.
+          Choose a project to see its work per rigor and how often a person was needed in it.
         </Text>
       ) : null}
     </Stack>

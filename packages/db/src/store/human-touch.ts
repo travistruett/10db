@@ -356,20 +356,35 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
   for (let i = 0; i < HUMAN_TOUCH_DAYS; i += 1) {
     const day = dayKey(windowEnd - (i + 1) * DAY_MS);
     const raised = cards.filter((c) => dayKey(Date.parse(c.createdAt)) === day);
-    const count = (kind: InboxKind, failed?: boolean): number =>
-      raised.filter((c) => c.kind === kind && (failed === undefined || isFailureCard(c) === failed))
-        .length;
+    // Typed over every kind, so a kind added later fails typecheck until it has a column.
+    const byKind: Record<InboxKind, number> = {
+      [InboxKind.Permission]: 0,
+      [InboxKind.Question]: 0,
+      [InboxKind.Flag]: 0,
+      [InboxKind.Proposal]: 0,
+      [InboxKind.Review]: 0,
+      [InboxKind.Check]: 0,
+      [InboxKind.Plan]: 0,
+      [InboxKind.PlaybookMoveReport]: 0,
+    };
+    let workstreamFailed = 0;
+    for (const c of raised) {
+      if (isFailureCard(c)) workstreamFailed += 1;
+      else byKind[c.kind] += 1;
+    }
     const tasksRan = ran.get(day)?.size ?? 0;
     const total = raised.length;
     days.push({
       day,
-      permission: count(InboxKind.Permission),
-      question: count(InboxKind.Question),
-      workstreamFailed: count(InboxKind.Flag, true),
-      flag: count(InboxKind.Flag, false),
-      proposal: count(InboxKind.Proposal),
-      review: count(InboxKind.Review),
-      check: count(InboxKind.Check),
+      permission: byKind[InboxKind.Permission],
+      question: byKind[InboxKind.Question],
+      workstreamFailed,
+      flag: byKind[InboxKind.Flag],
+      proposal: byKind[InboxKind.Proposal],
+      review: byKind[InboxKind.Review],
+      check: byKind[InboxKind.Check],
+      plan: byKind[InboxKind.Plan],
+      moveReport: byKind[InboxKind.PlaybookMoveReport],
       cards: total,
       tasksRan,
       cardsPerTask: tasksRan === 0 ? null : total / tasksRan,

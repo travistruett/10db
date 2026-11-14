@@ -69,6 +69,7 @@ import {
   latestEventSeq,
   listKinds,
   humanTouchDays,
+  rigorFigures,
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
@@ -682,6 +683,10 @@ export function createServices(deps: {
     humanTouch: (projectId) => {
       getProject(db, projectId);
       return { days: humanTouchDays(db, projectId, deps.clock.now()) };
+    },
+    rigorFigures: (projectId, days) => {
+      getProject(db, projectId);
+      return rigorFigures(db, projectId, deps.clock.now(), days);
     },
     // The view mark advances in the same transaction that reads the window it closes.
     openGoalDigest: (goalId) => deps.state.write((ctx) => openGoalDigest(ctx, goalId)),

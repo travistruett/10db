@@ -23,6 +23,7 @@ import {
   PrincipleWrite,
   ProposalId,
   ProposalListQuery,
+  RigorFiguresQuery,
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
@@ -904,6 +905,17 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/human-touch', (c) =>
       c.json(deps.services.humanTouch(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get(
+      '/projects/:projectId/rigor-figures',
+      validator('query', (value): RigorFiguresQuery => RigorFiguresQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.rigorFigures(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query').days,
+          ),
+        ),
     )
     .get('/goals/:goalId/digest', (c) =>
       c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),

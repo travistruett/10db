@@ -164,6 +164,8 @@ describe('humanTouchDays', () => {
     card(project.id, 'flag', `${WORKSTREAM_FAILED_TITLE_PREFIX}A`, a.workstreamId);
     card(project.id, 'flag', 'Stray file');
     card(project.id, 'proposal', 'Add a rule');
+    card(project.id, 'plan', 'Approve the plan');
+    card(project.id, 'playbook_move_report', 'Move report');
     at('2026-11-02T11:00:00.000Z');
     store.write((ctx) => {
       endSession(ctx, a.sessionId, 'done');
@@ -192,12 +194,28 @@ describe('humanTouchDays', () => {
       proposal: 1,
       review: 0,
       check: 0,
-      cards: 5,
+      plan: 1,
+      moveReport: 1,
+      cards: 7,
       tasksRan: 2,
-      cardsPerTask: 2.5,
+      cardsPerTask: 3.5,
       waitingMinutes: 30,
       failedMinutes: 0,
     });
+    // Every kind has a column, so the columns add up to the day's cards.
+    const busyDay = by('2026-11-02');
+    expect(
+      busyDay &&
+        busyDay.permission +
+          busyDay.question +
+          busyDay.workstreamFailed +
+          busyDay.flag +
+          busyDay.proposal +
+          busyDay.review +
+          busyDay.check +
+          busyDay.plan +
+          busyDay.moveReport,
+    ).toBe(busyDay?.cards);
     expect(by('2026-11-01')).toMatchObject({
       question: 1,
       cards: 1,

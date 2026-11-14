@@ -8,6 +8,7 @@ import {
   DevUiConnectionDto,
   HealthResponse,
   HumanTouchDto,
+  RigorFiguresDto,
   InvalidError,
   mintId,
   InboxAnswerRefused,
@@ -1405,6 +1406,8 @@ describe('goal routes', () => {
       proposal: 0,
       review: 0,
       check: 0,
+      plan: 0,
+      moveReport: 0,
       cards: 1,
       tasksRan: 1,
       cardsPerTask: 1,
@@ -1424,6 +1427,46 @@ describe('goal routes', () => {
     expect((await app(services).request('/projects/not-a-project/human-touch', auth)).status).toBe(
       400,
     );
+  });
+
+  describe('GET /projects/:projectId/rigor-figures', () => {
+    const figures = (days: 7 | 14 | 30): RigorFiguresDto => ({
+      period: days,
+      rows: [],
+      judgeOverride: null,
+    });
+
+    it.each([
+      { name: 'no days asks for 14', query: '', status: 200, asked: 14 },
+      { name: 'days=7', query: '?days=7', status: 200, asked: 7 },
+      { name: 'days=30', query: '?days=30', status: 200, asked: 30 },
+      { name: 'days=9 is refused', query: '?days=9', status: 400, asked: null },
+      { name: 'days=week is refused', query: '?days=week', status: 400, asked: null },
+      { name: 'an unknown parameter is refused', query: '?weeks=2', status: 400, asked: null },
+    ])('$name', async ({ query, status, asked }) => {
+      const calls: [string, number][] = [];
+      const services = stubServices({
+        rigorFigures: (id, days) => {
+          calls.push([id, days]);
+          return figures(days);
+        },
+      });
+      const res = await app(services).request(`/projects/${projectId}/rigor-figures${query}`, auth);
+      expect(res.status).toBe(status);
+      expect(calls).toEqual(asked === null ? [] : [[projectId, asked]]);
+      if (asked !== null) expect(RigorFiguresDto.parse(await res.json()).period).toBe(asked);
+    });
+
+    it('answers 404 for a project the daemon does not have', async () => {
+      const services = stubServices({
+        rigorFigures: (id) => {
+          throw new NotFoundError('project', id);
+        },
+      });
+      expect(
+        (await app(services).request(`/projects/${projectId}/rigor-figures`, auth)).status,
+      ).toBe(404);
+    });
   });
 });
 

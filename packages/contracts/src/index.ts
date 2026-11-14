@@ -64,6 +64,7 @@ export * from './shape-screens';
 export * from './shape-view';
 export * from './slack';
 export * from './rigor';
+export * from './rigor-figures';
 export * from './states';
 export * from './agent-capabilities';
 export * from './steps';

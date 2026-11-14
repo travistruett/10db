@@ -237,5 +237,68 @@
       },
       { "do": "turn_complete" }
     ]
+  ],
+
+  "Measure the light task": [
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "notes/light.txt",
+          "content": "light\n"
+        }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-rf-light1",
+          "paths": ["notes/light.txt"],
+          "message": "Add notes/light.txt"
+        }
+      },
+      {
+        "do": "turn_complete"
+      }
+    ]
+  ],
+  "Measure the standard task": [
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "notes/standard.txt",
+          "content": "standard\n"
+        }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-rf-standard1",
+          "paths": ["notes/standard.txt"],
+          "message": "Add notes/standard.txt"
+        }
+      },
+      {
+        "do": "turn_complete"
+      }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-rf-review1",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
+      },
+      {
+        "do": "turn_complete"
+      }
+    ]
   ]
 }
