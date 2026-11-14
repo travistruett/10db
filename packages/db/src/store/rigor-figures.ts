@@ -208,19 +208,9 @@ export function rigorFigures(
 ): RigorFiguresDto {
   const nowMs = now.getTime();
   const from = nowMs - days * DAY_MS;
-  const tookOut = new Set(
-    db
-      .select({ taskId: schema.passTakeOuts.taskId })
-      .from(schema.passTakeOuts)
-      .all()
-      .map((r) => r.taskId),
-  );
   // A task in a Workbench pass never ran a rigor's plan, so it measures nothing about the rigor.
   const done = listTasks(db, projectId).filter(
-    (t) =>
-      t.status === TaskStatus.Done &&
-      (t.passId === null || t.passId === undefined) &&
-      !tookOut.has(t.id),
+    (t) => t.status === TaskStatus.Done && (t.passId === null || t.passId === undefined),
   );
   const doneAt = doneTimes(db, done);
   const inWindow = done.filter((t) => {
