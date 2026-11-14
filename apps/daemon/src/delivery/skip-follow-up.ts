@@ -1,6 +1,7 @@
 import {
   latestPerTask,
   shipReadiness,
+  TaskMessageKind,
   type ProjectId,
   type BatchId,
   type TaskId,
@@ -11,6 +12,8 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  insertSystemNotice,
+  listTaskThread,
   listWorkstreams,
   markSkipFollowUpStarted,
   patchTask,
@@ -21,8 +24,8 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { followUpStart, type SourceState } from './follow-up-start';
 
-// T4 Task 10: a follow-up of Run these now starts from where its source stands when it starts, read
-// fresh each time, so a pull request merged between the press and the start starts from the base.
+// A follow-up of Run these now starts from where its source stands when it starts, read fresh each
+// time, so a pull request merged between the press and the start starts from the base.
 
 /** The source run's batch and pull request as they stand now. */
 export function sourceStateOf(db: DbReader, sourceWorkstreamId: WorkstreamId): SourceState {
@@ -62,7 +65,10 @@ export function startPendingSkipFollowUps(deps: SkipFollowUpDeps): void {
   for (const follow of pendingSkipFollowUps(db)) {
     try {
       const start = followUpStart(sourceStateOf(db, follow.sourceWorkstreamId));
-      if (start.kind === 'wait') continue;
+      if (start.kind === 'wait') {
+        if (start.reason !== null) sayWhyItWaits(deps, follow.taskId, start.reason);
+        continue;
+      }
       const task = getTask(db, follow.taskId);
       // A start a crash cut off before its stamp already made the run: it is only stamped.
       if (task.workstreamId === null) {
@@ -86,6 +92,14 @@ export function startPendingSkipFollowUps(deps: SkipFollowUpDeps): void {
       );
     }
   }
+}
+
+/** Tells the follow-up's task why it waits, once: a pass over it again with the same reason writes nothing. */
+function sayWhyItWaits(deps: SkipFollowUpDeps, taskId: TaskId, reason: string): void {
+  deps.state.write((ctx) => {
+    const said = listTaskThread(ctx.tx, taskId).findLast((m) => m.kind === TaskMessageKind.Notice);
+    if (said?.body !== reason) insertSystemNotice(ctx, taskId, reason);
+  });
 }
 
 /**

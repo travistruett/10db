@@ -16,18 +16,22 @@ const ABANDONED =
   "The source's work was abandoned, so it isn't on the base this follow-up starts from.";
 const UNMERGED =
   "The source's pull request was closed without merging, so its work isn't on the base this follow-up starts from.";
+const UNREAD =
+  "10db couldn't read the source's pull request, so its work may not be on the base this follow-up starts from.";
+const ON_PULL_REQUEST: FollowUpStart = {
+  kind: 'wait',
+  reason:
+    "Waiting for the source's pull request to merge or close: a second batch never ships on a branch another batch owns.",
+};
+const WAIT: FollowUpStart = { kind: 'wait', reason: null };
 const NEVER_PUSHED =
   "The source's work was never pushed, so it isn't on the base this follow-up starts from.";
 
 describe('followUpStart', () => {
   it.each<[string, Partial<SourceState>, FollowUpStart]>([
-    ['the batch is cutting', { batch: 'CUTTING' }, { kind: 'wait' }],
-    ['the batch is shipping', { batch: 'SHIPPING' }, { kind: 'wait' }],
-    [
-      'an open batch with a member running',
-      { batch: 'OPEN', readiness: 'blocked' },
-      { kind: 'wait' },
-    ],
+    ['the batch is cutting', { batch: 'CUTTING' }, WAIT],
+    ['the batch is shipping', { batch: 'SHIPPING' }, WAIT],
+    ['an open batch with a member running', { batch: 'OPEN', readiness: 'blocked' }, WAIT],
     [
       'an open batch whose members settled',
       { batch: 'OPEN', readiness: 'ready' },
@@ -39,15 +43,15 @@ describe('followUpStart', () => {
       { kind: 'join' },
     ],
     ['shipped and merged', { pullRequest: 'merged' }, base()],
-    ['shipped, its pull request open', { pullRequest: 'open' }, { kind: 'wait' }],
-    ['shipped, its pull request unread', { pullRequest: 'unknown' }, { kind: 'wait' }],
+    ['shipped, its pull request open', { pullRequest: 'open' }, ON_PULL_REQUEST],
+    ['shipped, its pull request unread', { pullRequest: 'unknown' }, base(UNREAD)],
     ['shipped, its pull request closed unmerged', { pullRequest: 'closed' }, base(UNMERGED)],
     ['shipped locally', { delivery: 'local', pullRequest: null }, base()],
     ['closed', { batch: 'CLOSED' }, base()],
     [
       'its ship failed, the pull request open',
       { batch: 'FAILED', pullRequest: 'open' },
-      { kind: 'wait' },
+      ON_PULL_REQUEST,
     ],
     [
       'its ship failed, the pull request merged',
