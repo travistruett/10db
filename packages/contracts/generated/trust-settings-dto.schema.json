@@ -32,6 +32,21 @@
           "additionalProperties": {
             "type": "boolean"
           }
+        },
+        "yourMcpServers": {
+          "default": true,
+          "type": "boolean"
+        },
+        "mcpServers": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
         }
       },
       "required": [
@@ -121,12 +136,172 @@
     },
     "tendbReady": {
       "type": "boolean"
+    },
+    "mcpServers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "claude_json",
+              "codex_config",
+              "plugin"
+            ]
+          },
+          "pluginId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "http",
+                  "sse"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "envNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "headerNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "shownEnv": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ]
+            }
+          },
+          "configHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "new",
+              "changed",
+              "approved",
+              "left_out"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "codexOnly": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sendsNoHeaders": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "source",
+          "pluginId",
+          "transport",
+          "command",
+          "args",
+          "cwd",
+          "url",
+          "envNames",
+          "headerNames",
+          "shownEnv",
+          "configHash",
+          "state",
+          "reason",
+          "on",
+          "codexOnly",
+          "sendsNoHeaders"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "mcpNotice": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
     "switches",
     "plugins",
     "judges",
-    "tendbReady"
+    "tendbReady",
+    "mcpServers",
+    "mcpNotice"
   ]
 }

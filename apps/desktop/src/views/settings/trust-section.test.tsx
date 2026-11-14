@@ -18,9 +18,16 @@ const CODEX_WEB_WAITS =
   'Web search on ChatGPT comes after a live check: Codex sessions search nothing yet.';
 
 function serve(
-  initial: Omit<TrustSettingsDto, 'judges' | 'tendbReady'> & Partial<TrustSettingsDto>,
+  initial: Omit<TrustSettingsDto, 'judges' | 'tendbReady' | 'mcpServers' | 'mcpNotice'> &
+    Partial<TrustSettingsDto>,
 ) {
-  let settings: TrustSettingsDto = { judges: [], tendbReady: false, ...initial };
+  let settings: TrustSettingsDto = {
+    judges: [],
+    tendbReady: false,
+    mcpServers: [],
+    mcpNotice: null,
+    ...initial,
+  };
   const put: TrustSwitches[] = [];
   server.use(
     http.get(daemonUrl('/settings/trust'), () => HttpResponse.json(settings)),

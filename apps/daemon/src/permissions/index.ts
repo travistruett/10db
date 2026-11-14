@@ -24,7 +24,9 @@ export {
 export { mcpGrantRules, mcpServerPattern, mcpToolGrant } from './mcp-server-rule';
 export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
 export {
+  approveMcpServer,
   appTrustSwitches,
+  mcpApprovals,
   projectTrustOverrides,
   setAppTrustSwitches,
   setProjectTrustOverrides,

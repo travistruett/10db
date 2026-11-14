@@ -105,6 +105,8 @@ export function createTrustServices(deps: {
         on: switches.yourPlugins && (switches.plugins[plugin.id] ?? plugin.enabledInClaude),
       })),
       judges: accountJudges(db, deps.adapter),
+      mcpServers: [],
+      mcpNotice: null,
     };
   };
 

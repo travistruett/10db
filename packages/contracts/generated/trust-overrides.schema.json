@@ -29,6 +29,19 @@
       "additionalProperties": {
         "type": "boolean"
       }
+    },
+    "yourMcpServers": {
+      "type": "boolean"
+    },
+    "mcpServers": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+      },
+      "additionalProperties": {
+        "type": "boolean"
+      }
     }
   },
   "additionalProperties": false

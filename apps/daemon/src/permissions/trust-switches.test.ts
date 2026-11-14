@@ -1,8 +1,10 @@
-import { mintId, TRUST_DEFAULTS } from '@10db/contracts';
+import { mintId, TRUST_DEFAULTS, YourMcpSource, yourMcpServerKey } from '@10db/contracts';
 import { createTestStore, setAppSetting } from '@10db/db';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  approveMcpServer,
   appTrustSwitches,
+  mcpApprovals,
   projectTrustOverrides,
   setAppTrustSwitches,
   setProjectTrustOverrides,
@@ -14,6 +16,8 @@ const one = mintId('Project');
 const two = mintId('Project');
 
 const ignore = (): void => undefined;
+const github = yourMcpServerKey(YourMcpSource.ClaudeJson, 'github');
+const hash = 'a'.repeat(64);
 
 describe('trust switches', () => {
   it('starts with every switch on', () => {
@@ -25,7 +29,13 @@ describe('trust switches', () => {
 
   it('keeps what the builder sets', () => {
     const test = createTestStore();
-    const set = { ...TRUST_DEFAULTS, web: false, plugins: { 'p@m': false } };
+    const set = {
+      ...TRUST_DEFAULTS,
+      web: false,
+      plugins: { 'p@m': false },
+      yourMcpServers: false,
+      mcpServers: { [github]: false },
+    };
     test.store.write((ctx) => {
       setAppTrustSwitches(ctx, set);
     });
@@ -84,6 +94,8 @@ describe('trust switches', () => {
       yourPlugins: false,
       projectSkills: false,
       plugins: {},
+      yourMcpServers: false,
+      mcpServers: {},
     });
     expect(onInvalid).toHaveBeenCalledWith('trust', 'on');
     test.close();
@@ -109,6 +121,45 @@ describe('trust switches', () => {
       ...TRUST_DEFAULTS,
       plugins: { 'p@m': true },
     });
+    test.close();
+  });
+
+  it('a stored server switch whose key is not a server key is dropped and named', () => {
+    const test = createTestStore();
+    test.store.write((ctx) => {
+      setAppSetting(ctx, 'trust', { mcpServers: { [github]: false, __proto__x: true } });
+    });
+    const onInvalid = vi.fn();
+    expect(appTrustSwitches(test.store.db, onInvalid).mcpServers).toEqual({ [github]: false });
+    expect(onInvalid).toHaveBeenCalledWith('mcpServers.__proto__x', true);
+    test.close();
+  });
+});
+
+describe('mcp approvals', () => {
+  it('no approvals at first', () => {
+    const test = createTestStore();
+    expect(mcpApprovals(test.store.db).size).toBe(0);
+    test.close();
+  });
+
+  it('keeps an approval and reads it back', () => {
+    const test = createTestStore();
+    test.store.write((ctx) => {
+      approveMcpServer(ctx, github, hash);
+    });
+    expect([...mcpApprovals(test.store.db)]).toEqual([[github, hash]]);
+    test.close();
+  });
+
+  it('an approvals value that is not the shape is empty, and says so', () => {
+    const test = createTestStore();
+    test.store.write((ctx) => {
+      setAppSetting(ctx, 'trust.mcp-approvals', { [github]: 'not-a-hash' });
+    });
+    const onInvalid = vi.fn();
+    expect(mcpApprovals(test.store.db, onInvalid).size).toBe(0);
+    expect(onInvalid).toHaveBeenCalledWith({ [github]: 'not-a-hash' });
     test.close();
   });
 });

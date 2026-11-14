@@ -285,6 +285,7 @@ import {
   TrustSwitches,
 } from './trust';
 import { LiveSystemsDto, TrustGrantDto } from './trust-policy';
+import { ApproveYourMcpServer, YourMcpServerDto } from './your-mcp';
 import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
 
@@ -371,6 +372,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-trust-dto': ProjectTrustDto,
   'setup-preview-dto': SetupPreviewDto,
   'installed-plugin-dto': InstalledPluginDto,
+  'your-mcp-server-dto': YourMcpServerDto,
+  'approve-your-mcp-server': ApproveYourMcpServer,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
