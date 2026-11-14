@@ -418,6 +418,48 @@ describe('TaskDrawer', () => {
     expect(within(d).queryByTestId('kind-sources')).toBeNull();
   });
 
+  it('saves only what the builder changed: a judge answer that lands while it is open is not sent back', async () => {
+    const patched: TaskPatch[] = [];
+    const before = taskDto();
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(before);
+      }),
+      ...baseHandlers(),
+    );
+    const view = (task: TaskDto) => (
+      <TaskDrawer task={task} columnName="Ready" peers={peers} onClose={() => undefined} />
+    );
+    const { rerender } = renderWithDaemon(view(before));
+    await dialog();
+    // The judge's answer lands while the drawer is open.
+    const judged = taskDto({
+      id: before.id,
+      rigor: 'careful',
+      effectiveRigor: 'careful',
+      rigorSource: 'judge',
+      effectiveRigorSource: 'judge',
+      kinds: [{ key: 'docs', source: 'judge' }],
+      sizedByRules: false,
+    });
+    rerender(view(judged));
+    await edit('Description', 'Some words');
+    const d = await dialog();
+    // The form follows the live task, and the builder has changed neither field: no discard prompt for them.
+    expect(await within(d).findByText('Docs · judged')).toBeTruthy();
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).not.toHaveProperty('rigor');
+    expect(patched[0]).not.toHaveProperty('kinds');
+    expect(patched[0]).toMatchObject({ description: 'Some words' });
+  });
+
   it('saves the title, description, criteria, kinds, rigor and effort', async () => {
     const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: TaskPatch[] = [];

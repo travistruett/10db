@@ -182,12 +182,17 @@ export function TaskDrawer({
   const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
-  const [rigor, setRigor] = useState<Rigor | null>(task.rigor);
-  const [kinds, setKinds] = useState<TaskKind[]>([...task.kinds]);
+  // Rigor and kinds follow the live task until the builder edits them, so a judge answer that lands while the
+  // drawer is open is neither hidden nor sent back as the builder's change.
+  const [rigorEdit, setRigorEdit] = useState<{ readonly value: Rigor | null } | null>(null);
+  const [kindsEdit, setKindsEdit] = useState<TaskKind[] | null>(null);
+  const rigor = rigorEdit === null ? task.rigor : rigorEdit.value;
+  const kinds = kindsEdit ?? task.kinds;
   const [effortPin, setEffortPin] = useState<Effort | null>(task.effortPin);
   const kindsChanged =
-    kinds.length !== task.kinds.length ||
-    kinds.some((k) => !task.kinds.some((t) => t.key === k.key && t.source === k.source));
+    kindsEdit !== null &&
+    (kindsEdit.length !== task.kinds.length ||
+      kindsEdit.some((k) => !task.kinds.some((t) => t.key === k.key && t.source === k.source)));
   const [modelSetting, setModelSetting] = useState<ModelSetting | null>(task.modelSetting);
   const modelSettingChanged = !sameSetting(modelSetting, task.modelSetting);
   // Areas are the claims the lane takes when it starts, so they change only before then.
@@ -514,7 +519,7 @@ export function TaskDrawer({
                 description="What the work touches. A kind can raise the rigor and add steps."
                 value={kinds}
                 onChange={(next) => {
-                  setKinds(next);
+                  setKindsEdit(next);
                 }}
               />
               <KindSources value={kinds} />
@@ -524,7 +529,9 @@ export function TaskDrawer({
                 value={rigor}
                 projectId={task.projectId}
                 kindKeys={kinds.map((k) => k.key)}
-                onChange={setRigor}
+                onChange={(next) => {
+                  setRigorEdit({ value: next });
+                }}
               />
               {accountId === undefined ? null : (
                 <ModelSettingSelect
