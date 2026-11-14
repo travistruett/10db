@@ -1,5 +1,6 @@
 import {
   JudgeDecision,
+  type AskedDecision,
   type DecisionStatsDto,
   type JudgeStatusDto,
   type ShadowAgreementDto,
@@ -25,7 +26,7 @@ const work = accountDto({ kind: 'openrouter', label: 'Work key', secretSet: true
 function keyedStatus(
   floor = 0.8,
   extra: Partial<JudgeStatusDto> = {},
-  decision: JudgeDecision = DECISION,
+  decision: AskedDecision = DECISION,
 ): JudgeStatusDto {
   const base = judgeStatusDto();
   return judgeStatusDto({

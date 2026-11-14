@@ -23,28 +23,6 @@
         "decisions": {
           "type": "object",
           "properties": {
-            "review_size": {
-              "type": "object",
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "model": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "floor": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1
-                }
-              },
-              "required": [
-                "enabled",
-                "model",
-                "floor"
-              ]
-            },
             "shape_ready": {
               "default": {
                 "enabled": true,
@@ -234,10 +212,7 @@
                 "floor"
               ]
             }
-          },
-          "required": [
-            "review_size"
-          ]
+          }
         }
       },
       "required": [

@@ -94,7 +94,7 @@ function build(options: { off?: boolean } = {}) {
 }
 
 const request: JudgeRequest = {
-  decision: 'review_size',
+  decision: 'shape_ready',
   state: 'Task: add a label. Diff: 3 lines.',
   question: 'Does this change need a review?',
   options: ['review', 'skip'],
@@ -173,7 +173,7 @@ describe('judge.choose with a System One model', () => {
     expect(logged()).toEqual([
       expect.objectContaining({
         id: answer.callId,
-        decision: 'review_size',
+        decision: 'shape_ready',
         model: 'typesafe/jev-1.13',
         question: request.question,
         answer: 'skip',
@@ -203,7 +203,7 @@ describe('judge.choose with a System One model', () => {
 describe('judge.choose with another decision model', () => {
   beforeEach(() => {
     store.write((ctx) =>
-      patchJudgeConfig(ctx, { decisions: { review_size: { model: 'liquid/d1' } } }),
+      patchJudgeConfig(ctx, { decisions: { shape_ready: { model: 'liquid/d1' } } }),
     );
   });
 
@@ -256,7 +256,7 @@ describe('judge.choose with another decision model', () => {
     ['a model the list leaves out', 'anthropic/claude-haiku-5.5', CHAT_URL],
     ['a TypeSafe model the list leaves out', 'typesafe/jev-2', SYSTEM_ONE_URL],
   ])('sends %s to its endpoint', async (_name, model, url) => {
-    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { model } } }));
+    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_ready: { model } } }));
     await build().choose(request);
     expect(seen.map((s) => s.url)).toEqual([url]);
   });
@@ -265,7 +265,7 @@ describe('judge.choose with another decision model', () => {
     decisionModels = null;
     store.write((ctx) =>
       patchJudgeConfig(ctx, {
-        decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
+        decisions: { shape_ready: { model: 'anthropic/claude-haiku-5.5' } },
       }),
     );
     await build().choose(request);
@@ -277,7 +277,7 @@ describe('judge.choose with a chat model', () => {
   beforeEach(() => {
     store.write((ctx) =>
       patchJudgeConfig(ctx, {
-        decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
+        decisions: { shape_ready: { model: 'anthropic/claude-haiku-5.5' } },
       }),
     );
   });
@@ -342,7 +342,7 @@ describe('judge.choose falls back', () => {
 
   it.each([
     ['the master switch is off', { enabled: false }],
-    ['the decision is off', { decisions: { review_size: { enabled: false } } }],
+    ['the decision is off', { decisions: { shape_ready: { enabled: false } } }],
   ])('is off when %s', async (_name, patch) => {
     store.write((ctx) => patchJudgeConfig(ctx, patch));
     const answer = await build().choose(request);
@@ -406,7 +406,7 @@ describe('judge.choose falls back', () => {
     ['a choice that was not offered', '{"choice":"maybe","confidence":0.9}'],
   ])('turns a chat answer with %s into an error', async (_name, content) => {
     store.write((ctx) =>
-      patchJudgeConfig(ctx, { decisions: { review_size: { model: 'openai/gpt-5-nano' } } }),
+      patchJudgeConfig(ctx, { decisions: { shape_ready: { model: 'openai/gpt-5-nano' } } }),
     );
     handler = () => json(chatBody(content));
     expect(await build().choose(request)).toMatchObject({ kind: 'fallback', reason: 'error' });
@@ -593,7 +593,7 @@ describe('judge.test', () => {
   });
 
   it('still tests with the decision switched off', async () => {
-    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { enabled: false } } }));
+    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_ready: { enabled: false } } }));
     expect((await build().test(mintId('Account'))).ok).toBe(true);
   });
 });
