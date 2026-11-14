@@ -260,6 +260,10 @@ export class FakeAdapter implements AgentAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /** When set, a Shape session reports `started` only once it resolves. */
+  shapeStartGate: Promise<void> | null = null;
+  /** What switching a Shape session's model answers; it switches by default. */
+  shapeModelSwitch: (model: string) => Promise<void> = () => Promise.resolve();
   /**
    * What a Shape session's interrupt answers, from the uuids of the messages it holds that no turn has
    * begun: by default none, as a Claude Code without `interrupt_receipt_v1`.
@@ -298,6 +302,7 @@ export class FakeAdapter implements AgentAdapter {
             providerSessionId,
             this.claim(providerSessionId),
             (queued) => this.shapeInterruptReceipt(queued),
+            () => this.shapeStartGate,
           );
     const handle: SessionHandle = {
       events: inner.events,
@@ -311,9 +316,10 @@ export class FakeAdapter implements AgentAdapter {
         if (this.shapeStopGate !== null) await this.shapeStopGate;
         await inner.stop();
       },
-      setModel: (model) => {
+      setModel: async (model) => {
+        await this.shapeModelSwitch(model);
         models.push(model);
-        return inner.setModel(model);
+        await inner.setModel(model);
       },
     };
     this.shapeSessions.push({ spec, sent, uuids, models, handle });

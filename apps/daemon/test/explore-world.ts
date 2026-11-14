@@ -82,6 +82,10 @@ export interface ExploreWorld extends EngineInstance {
   readonly starts: ExploreStart[];
   /** When set, a start waits for it before its session is built. */
   specGate: Promise<void> | null;
+  /** The owner's hooks a test replaces, read at each call. */
+  overrides: Partial<Pick<ExploreOwnerHooks, 'digest' | 'outgoing' | 'spec'>>;
+  /** How often a launch was released. */
+  released: number;
   /** Stores a builder message and tells the engine, as an owner does (rule 1). */
   send(text: string): ConversationItemRow;
   /** Stores a builder message only, as a Redo's `post` does. */
@@ -147,6 +151,8 @@ export function exploreWorld(
     ends,
     starts,
     specGate: null,
+    overrides: {},
+    released: 0,
     ...build({}),
     send(text) {
       const item = world.keep(text);
@@ -200,6 +206,7 @@ export function exploreWorld(
       async spec(c, start) {
         starts.push(start);
         if (world.specGate !== null) await world.specGate;
+        if (world.overrides.spec !== undefined) return world.overrides.spec(c, start);
         return {
           spec: {
             sessionId: start.sessionId,
@@ -236,21 +243,26 @@ export function exploreWorld(
           expiresAt: null,
           accountId: project.accountId,
           model: 'claude-opus-5-5',
-          release: () => Promise.resolve(),
+          release: () => {
+            world.released += 1;
+            return Promise.resolve();
+          },
           track: () => undefined,
         };
       },
       digest: (c) =>
+        world.overrides.digest?.(c) ??
         listItems(state.db, c.id)
           .map(textOf)
           .filter((t) => t !== '')
           .join('\n'),
-      outgoing: (_c, item) => ({
-        text: textOf(item),
-        images: [],
-        blocks: [],
-        sent: () => undefined,
-      }),
+      outgoing: (c, item, session) =>
+        world.overrides.outgoing?.(c, item, session) ?? {
+          text: textOf(item),
+          images: [],
+          blocks: [],
+          sent: () => undefined,
+        },
       onTurnEnded: (_c, end) => {
         ends.push(end);
         return Promise.resolve();

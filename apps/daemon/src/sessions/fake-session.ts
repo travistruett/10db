@@ -627,6 +627,7 @@ export function runFakeExploreSession(
   interruptReceipt: (
     queued: readonly string[],
   ) => InterruptReceipt | Promise<InterruptReceipt> = () => null,
+  startGate: () => Promise<void> | null = () => null,
 ): SessionHandle {
   const core = createFakeSessionCore();
   core.onEnd(onEnded);
@@ -650,6 +651,8 @@ export function runFakeExploreSession(
   };
 
   const loop = async (): Promise<void> => {
+    await startGate();
+    if (core.ended()) return;
     emit({ type: 'started', providerSessionId, pid: null });
     queue.push({ text: spec.prompt, images: spec.images ?? [], uuid: spec.promptUuid ?? null });
     while (!core.ended()) {

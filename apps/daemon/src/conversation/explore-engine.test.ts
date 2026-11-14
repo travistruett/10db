@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { idUuid, type ToolCallView } from '@10db/contracts';
 import {
+  getConversation,
   getSession,
   insertInboxItem,
   listAccountModels,
@@ -12,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { exploreWorld, gate, type ExploreWorld } from '../../test/explore-world';
 import type { SessionEvent } from '../sessions';
 import { waitFor } from '../../test/fixtures';
+import { FRESH_SESSION_NOTICE } from './explore-engine';
 import { fullOutputDir } from './full-output';
 
 // Sessions spec §6.3–§6.8: the explore engine on a real store, the fake adapter and a manual clock.
@@ -927,5 +929,125 @@ describe('review round 1', () => {
     expect(w.stateOf()).toBe('idle_warm');
     expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two', 'two']);
     expect(w.items().find((i) => i.id === dropped.id)?.deliveredAt).not.toBeNull();
+  });
+
+  it('leaves a starter the receipt says is still queued untaken, and runs it as the next turn', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    const message = w.send('one');
+    await waitFor(() => gates.length === 1);
+    const uuid = w.adapter.shapeSessions[0]?.spec.promptUuid ?? '';
+    w.adapter.shapeInterruptReceipt = () => ({ stillQueued: [uuid] });
+    await w.engine.stop(w.conv.id);
+    expect(w.items().find((i) => i.id === message.id)?.deliveredAt).toBeNull();
+    expect(w.stateOf()).toBe('running');
+  });
+
+  it('bounds the wait for a session that will not stop, so the next start goes on', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeStopGate = new Promise(() => undefined);
+    w.clock.advance(10 * 60_000);
+    w.send('two');
+    await waitFor(() => w.clock.pendingTimers() > 0 && w.stateOf() === 'starting');
+    w.clock.advance(10_000);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).not.toBe('starting');
+  });
+
+  it('ends a start whose message could not be built in error, and releases its launch', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.clock.advance(10 * 60_000);
+    w.overrides = {
+      outgoing: () => {
+        throw new Error('the picture could not be read');
+      },
+    };
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+    expect(notices(w).at(-1)).toEqual({ text: 'the picture could not be read' });
+  });
+
+  it('reads a cancelled resume, then a failed start, as no failed resume, and keeps one digest', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.clock.advance(10 * 60_000);
+    await w.engine.settled(w.conv.id);
+    const starting = gate();
+    w.adapter.shapeStartGate = starting.promise;
+    w.send('two');
+    await waitFor(() => w.adapter.shapeSessions.length === 2);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    w.adapter.shapeStartGate = null;
+    w.overrides = { spec: () => Promise.reject(new Error('no model for planning')) };
+    w.send('three');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+    expect(w.engine.view(w.conv.id)).toMatchObject({ queued: 2 });
+    expect(getConversation(w.state.db, w.conv.id).providerSessionId).toBe('fake-shape-1');
+    expect(w.items().filter((i) => i.kind === 'digest')).toEqual([]);
+  });
+
+  it('pushes nothing again under a hold when a stop settles, and does at the release', async () => {
+    w = exploreWorld();
+    const gates = stoppableTurns(w);
+    w.adapter.shapeInterruptReceipt = () => ({ stillQueued: [] });
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    w.engine.holdStarts(w.conv.id);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two']);
+    expect(w.engine.busy()).toEqual([]);
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+    w.engine.releaseStarts(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two', 'two']);
+  });
+
+  it('notes a model change only once the warm session took it', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeModelSwitch = () => Promise.reject(new Error('the model switch failed'));
+    await expect(w.engine.modelChanged(w.conv.id, 'claude-sonnet-5-5')).rejects.toThrow(
+      'the model switch failed',
+    );
+    expect(notices(w)).toEqual([]);
+    expect(w.engine.view(w.conv.id).model).toBeNull();
+  });
+
+  it('starts fresh after a stop a receipt settled past the context limit', async () => {
+    w = exploreWorld();
+    const held = gate();
+    w.adapter.shapeBehaviour = async (turn) => {
+      turn.emit({ type: 'context', percentage: 80, totalTokens: 160_000, maxTokens: 200_000 });
+      await Promise.race([
+        held.promise,
+        new Promise((resolve) => {
+          turn.signal.addEventListener('abort', resolve);
+        }),
+      ]);
+      await held.promise;
+      return {};
+    };
+    w.adapter.shapeInterruptReceipt = () => ({ stillQueued: [] });
+    w.send('one');
+    await waitFor(() => getConversation(w.state.db, w.conv.id).contextPct === 80);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(notices(w)).toEqual([{ text: FRESH_SESSION_NOTICE }]);
+    held.release();
   });
 });

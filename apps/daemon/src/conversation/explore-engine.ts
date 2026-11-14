@@ -21,6 +21,7 @@ import {
   type ConversationLiveDto,
   type InboxItemId,
   type ProjectId,
+  type SessionId,
 } from '@10db/contracts';
 import {
   conversationCostUsd,
@@ -52,12 +53,7 @@ import { timerAt, type Clock, type Timer } from '../clock';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
 import { markModelUnusable } from '../catalogue';
-import {
-  SessionEndReason,
-  type AgentAdapter,
-  type InterruptReceipt,
-  type SessionHandle,
-} from '../sessions';
+import { SessionEndReason, type AgentAdapter, type InterruptReceipt } from '../sessions';
 import type { Hold } from '../verify';
 import { clientUuid, pushedAgainAfter } from './delivery-rules';
 import type { ExploreLaunch, ExploreOwnerHooks, Outgoing, TurnEnd } from './explore-hooks';
@@ -71,6 +67,7 @@ import {
 } from './explore-state';
 import { pictureLimitsFor, type PictureLimits } from './picture-limits';
 import { settleRestart } from './explore-recovery';
+import { capItemBody } from './full-output';
 import { warmToClose } from './warm-cap';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
@@ -519,7 +516,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     session.open.detach();
     rt.lastSession = session;
     if (rt.session === session) rt.session = null;
-    const stopped = (async () => {
+    rt.resuming = false;
+    const ended = (async () => {
       try {
         await session.open.handle.stop();
       } catch (error) {
@@ -527,6 +525,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       }
       await session.open.done;
     })();
+    // A session that does not end within the grace is let go: nothing after it waits on it forever.
+    const stopped = withinGrace(ended, undefined).then(() => undefined);
     rt.closing = stopped;
     return stopped;
   };
@@ -573,14 +573,26 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       });
   };
 
-  /** The running turn is over: it took what it began with. */
-  const settleTurn = (rt: Runtime): void => {
+  /** The running turn is over: it took what it began with, but for what a receipt says is still queued. */
+  const settleTurn = (
+    rt: Runtime,
+    stillQueued: ReadonlySet<ConversationItemId> = new Set(),
+  ): void => {
     rt.grace?.cancel();
     rt.grace = null;
     rt.inTurn = false;
+    const taken = rt.starters.filter((id) => !stillQueued.has(id));
     state.write((ctx) => {
-      markItemsDelivered(ctx, rt.id, rt.starters);
+      markItemsDelivered(ctx, rt.id, taken);
     });
+  };
+
+  /** Strictly past the owner's limit at a turn's end, the next start is fresh from the digest. */
+  const freshIfFull = (rt: Runtime): void => {
+    const conv = conversation(rt.id);
+    const pct = conv.contextPct;
+    if (rt.state === S.IdleWarm && pct !== null && pct > hooksOf(conv).freshAtContextPct)
+      reduce(rt, { type: 'context_full' });
   };
 
   /** `p`, or `fallback` once the stop grace has passed without it. */
@@ -606,12 +618,13 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   };
 
   /** A receipt that came while the stop waits: it settles the stop, unless a Redo decides first. */
-  const receiptCame = (rt: Runtime, session: Session): void => {
+  const receiptCame = (rt: Runtime, session: Session, receipt: InterruptReceipt): void => {
     if (rt.session !== session || rt.state !== S.Stopping || !rt.inTurn || rt.redo !== null) return;
     session.open.skipTurn();
-    settleTurn(rt);
+    settleTurn(rt, itemsOf(rt, receipt?.stillQueued ?? []));
     rt.ended = 'stopped';
     reduce(rt, { type: 'stop_settled' });
+    freshIfFull(rt);
   };
 
   /** Neither a receipt nor the turn's end came within the grace: the session is stopped. */
@@ -645,9 +658,48 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     session.open.handle.send(out.text, out.images, uuid);
   };
 
+  /** What a start has made so far, for a failure to undo. */
+  interface Made {
+    launch: ExploreLaunch | null;
+    sessionId: SessionId | null;
+    pushed: readonly ConversationItemId[];
+  }
+
+  /**
+   * A start that could not open a session: what it made goes (the row ends, so no live row keeps a
+   * token MCP would accept; the launch is released; what it marked pushed waits again), the builder is
+   * told why, and the conversation ends in error. No failure here is a failed resume.
+   */
+  const startFailed = async (rt: Runtime, made: Made, error: unknown): Promise<void> => {
+    const { sessionId } = made;
+    state.write((ctx) => {
+      if (sessionId !== null) endSession(ctx, sessionId, 'start_failed');
+      markItemsHandedBack(ctx, rt.id, [...made.pushed]);
+    });
+    if (made.launch !== null) await made.launch.release();
+    rt.session = null;
+    rt.resuming = false;
+    rt.inTurn = false;
+    notice(rt, error instanceof Error ? error.message : String(error));
+    reduce(rt, { type: 'ended', how: 'error' });
+  };
+
   const start = async (rt: Runtime, waiting: ReadonlySet<ConversationItemId>): Promise<void> => {
     // A new handle never opens on an agent session the last one still holds (call 24).
     await rt.closing;
+    const made: Made = { launch: null, sessionId: null, pushed: [] };
+    try {
+      await openFor(rt, waiting, made);
+    } catch (error) {
+      await startFailed(rt, made, error);
+    }
+  };
+
+  const openFor = async (
+    rt: Runtime,
+    waiting: ReadonlySet<ConversationItemId>,
+    made: Made,
+  ): Promise<void> => {
     const cancelled = (): boolean => {
       if (!rt.cancelled) return false;
       rt.cancelled = false;
@@ -673,16 +725,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     }
     const resume = conv.providerSessionId;
     const fresh = resume === null;
-    // A fresh session after the agent has spoken is told what came before, and the digest is kept.
+    // A fresh session after the agent has spoken is told what came before; the digest is kept with the
+    // session's row, so a start that fails or is cancelled stores none.
     const digest = fresh && spoke(rt) ? hooks.digest(conv) : null;
-    if (digest !== null)
-      state.write((ctx) => {
-        insertItem(ctx, rt.id, {
-          author: ConversationItemAuthor.System,
-          kind: ConversationItemKind.Digest,
-          body: { text: digest },
-        });
-      });
     const limits: PictureLimits = pictureLimitsFor(account.kind);
     const out = combined(
       items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
@@ -690,52 +735,50 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const uuid = clientUuid(first, randomUUID);
     const sessionId = mintId('Session');
     const { token, hash } = deps.mintToken();
-    /** A start that could not open a session: the builder is told why, and the conversation ends in error. */
-    const failed = (error: unknown): void => {
-      notice(rt, error instanceof Error ? error.message : String(error));
-      rt.inTurn = false;
-      reduce(rt, { type: 'ended', how: 'error' });
-    };
     // Set once the session is made; its events and cards come only after, on a later turn of the loop.
     let self: Session | null = null;
-    let launch: ExploreLaunch;
-    try {
-      launch = await hooks.spec(conv, {
-        sessionId,
-        mcpToken: token,
-        resume,
-        digest,
-        first: out,
-        observer: {
-          // A card this session waits on is an item and a state (§6.6).
-          onWaitStart: (item) => {
-            if (self === null || rt.session !== self) return;
-            rt.card = item.id;
-            state.write((ctx) => {
-              insertItem(ctx, rt.id, {
-                author: ConversationItemAuthor.Agent,
-                kind: ConversationItemKind.Card,
-                body: { inboxItemId: item.id },
-              });
+    const launch = await hooks.spec(conv, {
+      sessionId,
+      mcpToken: token,
+      resume,
+      digest,
+      first: out,
+      observer: {
+        // A card this session waits on is an item and a state (§6.6).
+        onWaitStart: (item) => {
+          if (self === null || rt.session !== self) return;
+          rt.card = item.id;
+          state.write((ctx) => {
+            insertItem(ctx, rt.id, {
+              author: ConversationItemAuthor.Agent,
+              kind: ConversationItemKind.Card,
+              body: { inboxItemId: item.id },
             });
-            reduce(rt, { type: 'card_raised' });
-          },
-          onWaitEnd: (item) => {
-            if (rt.card !== item.id) return;
-            rt.card = null;
-            reduce(rt, { type: 'card_settled' });
-          },
+          });
+          reduce(rt, { type: 'card_raised' });
         },
-      });
-    } catch (error) {
-      failed(error);
-      return;
-    }
+        onWaitEnd: (item) => {
+          if (rt.card !== item.id) return;
+          rt.card = null;
+          reduce(rt, { type: 'card_settled' });
+        },
+      },
+    });
+    made.launch = launch;
     if (cancelled()) {
+      made.launch = null;
       await launch.release();
       return;
     }
     state.write((ctx) => {
+      if (digest !== null) {
+        const capped = capItemBody(ConversationItemKind.Digest, { text: digest });
+        insertItem(ctx, rt.id, {
+          author: ConversationItemAuthor.System,
+          kind: ConversationItemKind.Digest,
+          body: capped.body,
+        });
+      }
       insertSession(ctx, {
         id: sessionId,
         conversationId: rt.id,
@@ -748,23 +791,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       });
       markPushed(ctx, rt, items, out, uuid, fresh);
     });
-    let handle: SessionHandle;
-    try {
-      handle = adapter.open({ ...launch.spec, promptUuid: uuid });
-    } catch (error) {
-      // The row was written with its token hash: ended, so no live row keeps a token MCP would accept.
-      state.write((ctx) => {
-        endSession(ctx, sessionId, 'start_failed');
-        markItemsHandedBack(
-          ctx,
-          rt.id,
-          items.map((item) => item.id),
-        );
-      });
-      await launch.release();
-      failed(error);
-      return;
-    }
+    made.sessionId = sessionId;
+    made.pushed = items.map((item) => item.id);
+    const handle = adapter.open({ ...launch.spec, promptUuid: uuid });
     const open = openSession({
       state,
       clock,
@@ -812,10 +841,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.ended =
             rt.state === S.Stopping ? 'stopped' : event.result === 'error' ? 'failed' : 'complete';
           reduce(rt, { type: 'turn_complete' });
-          // Strictly past the owner's limit, the next start is fresh from the digest.
-          const pct = conversation(rt.id).contextPct;
-          if (rt.state === S.IdleWarm && pct !== null && pct > hooks.freshAtContextPct)
-            reduce(rt, { type: 'context_full' });
+          freshIfFull(rt);
         },
         ended: (event) => {
           state.write((ctx) => {
@@ -892,6 +918,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       case E.CancelStart: {
         // The start has run by now: it saw the cancel and opened nothing, or it opened a session.
         rt.cancelled = false;
+        rt.resuming = false;
         const session = rt.session;
         if (session === null) return;
         handBack(rt);
@@ -908,8 +935,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         }, stopGraceMs);
         const receipt = session.open.handle.interrupt().catch(() => null);
         rt.receipt = receipt;
-        void receipt.then(() => {
-          receiptCame(rt, session);
+        void receipt.then((answered) => {
+          receiptCame(rt, session, answered);
         });
         return;
       }
@@ -920,7 +947,22 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         if (session === null) return;
         const receipt = asked === null ? null : await withinGrace(asked, null);
         const still = receipt === null ? null : itemsOf(rt, receipt.stillQueued);
-        pushAgain(rt, session, pushedAgainAfter(handed(rt), still));
+        const again = pushedAgainAfter(handed(rt), still);
+        if (!holding(rt)) {
+          pushAgain(rt, session, again);
+          return;
+        }
+        // Under a hold nothing new runs: what may have been lost waits, parked, for the release.
+        if (again.length > 0) {
+          state.write((ctx) => {
+            markItemsHandedBack(
+              ctx,
+              rt.id,
+              again.map((item) => item.id),
+            );
+          });
+          rt.parked = true;
+        }
         return;
       }
       case E.StopHandle: {
@@ -1089,7 +1131,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       if (rt.inTurn) {
         // The turn's own end is still to come: it is dropped when it does, unless its session goes.
         if (!untaken) session.open.skipTurn();
-        settleTurn(rt);
+        settleTurn(rt, itemsOf(rt, receipt?.stillQueued ?? []));
       }
       rt.ended = 'stopped';
       // The edit is stored first: if it can't be, the original stays. The stop settles either way.
@@ -1124,24 +1166,36 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     async modelChanged(id, model) {
       const rt = runtimeOf(id);
       if (BUSY.has(rt.state)) throw new ConflictError('Stop first');
-      const conv = conversation(id);
-      const hooks = hooksOf(conv);
-      const before = hooks.describeModel(conv, conv.model);
-      const after = hooks.describeModel(conv, model);
-      state.write((ctx) => {
-        patchConversation(ctx, id, { model });
-        if (after.model !== before.model)
-          insertItem(ctx, id, {
-            author: ConversationItemAuthor.System,
-            kind: ConversationItemKind.Notice,
-            body: { kind: 'model_change', label: after.label, model: after.model },
-          });
+      // On the chain, so no effect runs between the switch and its notice; both only once it took.
+      await new Promise<void>((resolve, reject) => {
+        enqueue(rt, async () => {
+          try {
+            const conv = conversation(id);
+            const hooks = hooksOf(conv);
+            const before = hooks.describeModel(conv, conv.model);
+            const after = hooks.describeModel(conv, model);
+            const session = rt.session;
+            const switching =
+              rt.state === S.IdleWarm && session !== null && after.model !== before.model;
+            const nextTurn = capabilitiesOf(conv).modelSwitch === ModelSwitch.NextTurn;
+            if (switching && nextTurn) await session.open.handle.setModel(after.launchId);
+            state.write((ctx) => {
+              patchConversation(ctx, id, { model });
+              if (after.model !== before.model)
+                insertItem(ctx, id, {
+                  author: ConversationItemAuthor.System,
+                  kind: ConversationItemKind.Notice,
+                  body: { kind: 'model_change', label: after.label, model: after.model },
+                });
+            });
+            // An agent that can't switch a live session closes it; the next start runs the pick.
+            if (switching && !nextTurn) reduce(rt, { type: 'idle_close' });
+            resolve();
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
       });
-      const session = rt.session;
-      if (rt.state !== S.IdleWarm || session === null || after.model === before.model) return;
-      if (capabilitiesOf(conv).modelSwitch === ModelSwitch.NextTurn)
-        await session.open.handle.setModel(after.launchId);
-      else reduce(rt, { type: 'idle_close' });
     },
     holdStarts(id) {
       runtimeOf(id).held = true;
