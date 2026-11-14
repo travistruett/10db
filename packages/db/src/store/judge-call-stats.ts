@@ -14,11 +14,15 @@ export interface JudgeCallModelStat {
   readonly medianLatencyMs: number | null;
 }
 
-/** The outcomes of a call that got an answer; a fallback or a cut-short call has none. */
+/**
+ * The outcomes of a call that got an answer; a fallback or a cut-short call has none. A call the builder
+ * overrode was answered too: it cost what it cost and took as long.
+ */
 const ANSWERED: readonly JudgeOutcome[] = [
   JudgeOutcome.Acted,
   JudgeOutcome.BelowFloor,
   JudgeOutcome.Shadow,
+  JudgeOutcome.Overridden,
 ];
 
 function median(values: readonly number[]): number | null {
@@ -68,7 +72,8 @@ export function judgeCallModelStats(db: DbReader, since: string): JudgeCallModel
 
 /**
  * What each decision's calls since `since` came to, for the decisions that have any. `calls` counts every call;
- * a stopped call is counted apart from the fallbacks, since nothing failed. Cost sums every logged cost, and the
+ * a stopped call is counted apart from the fallbacks, since nothing failed, and an overridden one apart from `acted`,
+ * since the builder changed what it set. Cost sums every logged cost, and the
  * median latency and the answers come from the calls that got an answer, so a timeout does not stretch them.
  */
 export function judgeDecisionStats(db: DbReader, since: string): DecisionStatsDto[] {
@@ -98,6 +103,7 @@ export function judgeDecisionStats(db: DbReader, since: string): DecisionStatsDt
         acted: count(JudgeOutcome.Acted),
         belowFloor: count(JudgeOutcome.BelowFloor),
         shadow: count(JudgeOutcome.Shadow),
+        overridden: count(JudgeOutcome.Overridden),
         stopped: count(JudgeOutcome.Stopped),
         fallbacks: {
           off: count(JudgeOutcome.FallbackOff),

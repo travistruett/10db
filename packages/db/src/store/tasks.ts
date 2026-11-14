@@ -1104,6 +1104,8 @@ export function patchTask(
         : {
             rigorSource: fields.rigor === null ? null : (rigorSource ?? RigorSource.Builder),
             rigorReason: null,
+            // The next edit event sizes the task again: its fingerprint no longer matches.
+            ...(fields.rigor === null ? { sizedFor: null } : {}),
           }),
       ...(landing === undefined ? {} : landingColumns(landing)),
       // The patch is the builder's placement control: the reason says so, replacing a proposed one.
