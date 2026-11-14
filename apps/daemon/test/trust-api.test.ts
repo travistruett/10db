@@ -286,22 +286,22 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       accountId: old.id,
       label: 'Bedrock old',
       model: 'claude-sonnet-4-5',
-      judge: JudgeKind.Rules,
-      why: "Auto mode doesn't run on this model on this account.",
+      judge: JudgeKind.Tendb,
+      why: null,
     });
     expect(byId.get(gateway.id)).toEqual({
       accountId: gateway.id,
       label: 'Gateway',
       model: 'claude-opus-5-5',
-      judge: JudgeKind.Rules,
-      why: "Auto mode doesn't run through a gateway account yet.",
+      judge: JudgeKind.Tendb,
+      why: null,
     });
     expect(byId.get(codex.id)).toEqual({
       accountId: codex.id,
       label: 'ChatGPT',
       model: 'gpt-5.5',
-      judge: JudgeKind.Rules,
-      why: 'Codex has no judge in 10db yet.',
+      judge: JudgeKind.Tendb,
+      why: null,
     });
     expect(byId.has(openRouter.id)).toBe(false);
     expect(judges).toHaveLength(5);
