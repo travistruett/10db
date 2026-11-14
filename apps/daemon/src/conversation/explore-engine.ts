@@ -681,7 +681,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.state === S.PausedAccount && rt.pausedUntil !== null
             ? rt.pausedUntil.toISOString()
             : null,
-        commands: null,
+        commands: conv.commands,
       };
     },
     live(id) {

@@ -194,7 +194,7 @@ describe("a chat's tools on /mcp", () => {
       said.push(await call('remove_task', { taskId: task.id }));
       said.push(await call('remove_task', { taskId: task.id }));
     });
-    const first = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    const first = await waitForAsync(() => Promise.resolve(openCards()[0]));
     expect(openCards()).toHaveLength(1);
     expect(first.detail).toMatchObject({ conversationId: chat.conversationId });
     expect((await api.get(`/conversations/${chat.conversationId}`, ConversationDto)).state).toBe(
@@ -202,7 +202,7 @@ describe("a chat's tools on /mcp", () => {
     );
     await answer(first, 'deny');
     const second = await waitForAsync(() =>
-      Promise.resolve(openCards().find((c) => c.id !== first.id) ?? false),
+      Promise.resolve(openCards().find((c) => c.id !== first.id)),
     );
     expect((await tasksOf()).map((t) => t.id)).toEqual([task.id]);
     await answer(second, 'allow_once');
@@ -226,7 +226,7 @@ describe("a chat's tools on /mcp", () => {
         }),
       );
     });
-    const card = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    const card = await waitForAsync(() => Promise.resolve(openCards()[0]));
     expect(card.title).toBe('Retire a principle?');
     expect(await tasksOf()).toEqual([]);
     await answer(card, 'deny');
@@ -255,7 +255,7 @@ describe("a chat's tools on /mcp", () => {
     const turn = agentTurn(chat, async (call) => {
       said = await call('remove_task', { taskId: task.id });
     });
-    const card = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    const card = await waitForAsync(() => Promise.resolve(openCards()[0]));
     await api.post(`/conversations/${chat.conversationId}/stop`, z.unknown());
     await turn;
     expect(said).toContain(BUILDER_STOPPED);

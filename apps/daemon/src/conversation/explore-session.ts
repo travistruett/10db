@@ -1,6 +1,7 @@
 import {
   ConversationItemAuthor,
   ConversationItemKind,
+  EventType,
   mintId,
   ToolCallStatus,
   type ConversationId,
@@ -225,6 +226,22 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
       }
       case 'commands':
         commands = event.commands;
+        // Kept on the conversation, so a cold one still offers `/`; the screen reads the view again.
+        state.write((ctx) => {
+          patchConversation(ctx, conversationId, {
+            commands: event.commands.map((c) => ({
+              name: c.name,
+              description: c.description,
+              argumentHint: c.argumentHint ?? null,
+            })),
+          });
+          ctx.emit({
+            type: EventType.ConversationState,
+            entityType: 'conversation',
+            entityId: conversationId,
+            data: { commands: true },
+          });
+        });
         return;
       case 'context':
         state.write((ctx) => {
