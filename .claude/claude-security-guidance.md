@@ -1,6 +1,8 @@
 # 10db security review guidance
 
-The security-guidance plugin's diff review reads this file. Its commit reviewer does not read it yet.
+The one copy of 10db's security review guidance, for every reviewer on every provider. The Claude
+security-guidance plugin's diff review loads it from this fixed path (its commit reviewer does not yet), and
+`.claude/agents/code-reviewer.md`, which Claude and Codex reviewers both run, points here.
 
 ## How to report
 

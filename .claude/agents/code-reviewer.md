@@ -17,7 +17,8 @@ for read-only commands (`git diff`, `git log`, `git show`, running tests); never
 push. Attack the diff: wrong behavior against the spec, missing failure handling, a test that
 cannot fail, a boundary without zod, a rule from `.claude/rules/` broken. For each finding give the
 file and line, a concrete failing input, and the consequence. Rank most severe first. Say "no
-findings" when there are none; do not pad.
+findings" when there are none; do not pad. Judge security findings against the threat model in
+`.claude/claude-security-guidance.md`, the one copy every reviewer uses whatever its provider.
 
 **Reviews converge.** The dispatch names the round; with none, it is round 1.
 
