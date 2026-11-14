@@ -6,6 +6,7 @@ export {
   classifyPath,
   foldPathCase,
   isOverLongPath,
+  isSecretFileName,
   isWithinOnEveryReading,
   OVER_LONG_PATH_REFUSAL,
   PathResolutionError,

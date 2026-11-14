@@ -127,6 +127,16 @@ export function foldPathCase(text: string): string {
 
 const fold = foldPathCase;
 
+const SECRET_FILE_PREFIX = foldPathCase('.env');
+
+/**
+ * Whether a file name is one the sandbox treats as secret: `.env` and every name after it, folded the way
+ * the file system folds names, so `.ENV` is caught where it is the same file.
+ */
+export function isSecretFileName(name: string): boolean {
+  return foldPathCase(name).startsWith(SECRET_FILE_PREFIX);
+}
+
 /**
  * The real paths an absolute path names on each reading that resolves: as the kernel opens it, and
  * with `..` collapsed as text first. `complete` is false when a reading cannot be resolved (a `..`

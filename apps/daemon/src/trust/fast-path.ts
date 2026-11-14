@@ -2,12 +2,12 @@ import { statSync } from 'node:fs';
 import { basename, isAbsolute, resolve, sep } from 'node:path';
 import {
   foldPathCase,
+  isSecretFileName,
   isWithinOnEveryReading,
   plainCommandWords,
   readOnlyShellRefusal,
   realPathReadings,
 } from '../guard';
-import { isSecretFileName } from '../sandbox';
 
 /** What a Codex `apply_patch` hunk does to its file. */
 export const PatchHunk = { Add: 'add', Update: 'update', Delete: 'delete', Move: 'move' } as const;
