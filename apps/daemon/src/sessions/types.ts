@@ -12,6 +12,7 @@ import type {
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
+import type { WebSearchMode } from './codex-generated/ts/WebSearchMode';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
@@ -70,6 +71,9 @@ export type ToolDecision =
 
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
+
+/** The web search modes 10db sends Codex; `live` and `indexed` are never among them. */
+export type CodexWebSearch = Extract<WebSearchMode, 'cached' | 'disabled'>;
 
 /** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
 export type LanePermissionMode = 'default' | 'auto';
@@ -132,6 +136,12 @@ export interface AgentSessionCore {
    * coordination lines of its surface and whether a person is in it. Claude renders it for auto mode.
    */
   readonly policy: TrustPolicy;
+  /**
+   * Codex's web search for this thread: `cached` with the Web switch on, answering from OpenAI's index and
+   * fetching no page the agent names; `disabled` with it off, as when absent. Claude ignores it: its web is
+   * WebSearch and WebFetch, judged through the hook.
+   */
+  readonly webSearch?: CodexWebSearch;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /**

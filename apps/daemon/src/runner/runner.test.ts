@@ -131,7 +131,13 @@ import {
   type LaneSession,
   type LaneSessionInput,
 } from '../sandbox';
-import type { FakeScriptBook, SessionEvent, SessionHandle, LaneSessionSpec } from '../sessions';
+import type {
+  FakeScriptBook,
+  JudgedCallRequest,
+  SessionEvent,
+  SessionHandle,
+  LaneSessionSpec,
+} from '../sessions';
 import {
   createMemoryKeychain,
   FAKE_SRT,
@@ -5804,7 +5810,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       if (judgeCall === undefined) throw new Error('the lane has no session judge');
       return { spec, judgeCall, task, workstream };
     };
-    const call = (toolName: string, input: Record<string, unknown>, toolUseId: string) => ({
+    const call = (
+      toolName: string,
+      input: Record<string, unknown>,
+      toolUseId: string,
+    ): JudgedCallRequest => ({
       toolName,
       input,
       toolUseId,
@@ -5816,9 +5826,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const hook = async (
       spec: LaneSessionSpec,
       judgeCall: NonNullable<LaneSessionSpec['judgeCall']>,
-      req: ReturnType<typeof call>,
+      req: JudgedCallRequest,
     ) => {
-      const verdict = spec.preToolUse(req);
+      const verdict = spec.preToolUse({ ...req, toolUseId: req.toolUseId ?? undefined });
       return verdict.decision === 'allow' && !('settled' in verdict && verdict.settled)
         ? judgeCall(req)
         : verdict;
@@ -5906,6 +5916,51 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(states).toHaveLength(1);
       await hook(spec, judgeCall, { ...bash('pnpm build', 'toolu_9'), reportedMode: 'auto' });
       expect(states).toHaveLength(1);
+      await engine.runner.idle();
+    });
+
+    const CODEX: Parameters<typeof createTestEngine>[3] = {
+      account: { kind: 'codex_signin', label: 'ChatGPT plan' },
+    };
+    const startCodex = async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { ...CODEX, openRouter: { fetch: judgeFetch } },
+      );
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, {
+          expectedIdentity: 'chatgpt@example.com · ws-1',
+        }),
+      );
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      const judgeCall = spec.judgeCall;
+      if (judgeCall === undefined) throw new Error('the lane has no session judge');
+      return { spec, judgeCall, workstream };
+    };
+
+    it("a Codex lane's deploy is a tendb_judge skip, with cached web search", async () => {
+      const { spec, judgeCall, workstream } = await startCodex();
+      expect(spec.webSearch).toBe('cached');
+      answer = () => 'writes_live';
+      await hook(spec, judgeCall, bash('vercel deploy --prod', 'call_1'));
+      expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['tendb_judge']);
+      await engine.runner.idle();
+    });
+
+    it("a Codex lane's patch that deletes a file reaches the model with the hunk named", async () => {
+      const { spec, judgeCall } = await startCodex();
+      await hook(spec, judgeCall, {
+        ...call('Edit', { file_path: join(spec.cwd, 'src', 'api', 'a.txt') }, 'call_2'),
+        hunk: 'delete',
+      });
+      expect(states).toHaveLength(1);
+      expect(states[0]).toContain('Patch: deletes the file');
       await engine.runner.idle();
     });
 

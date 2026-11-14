@@ -844,6 +844,29 @@ describe('the thread and the first turn', () => {
     });
   });
 
+  it.each([
+    ['cached when the Web switch is on', 'cached' as const],
+    ['disabled when it is off', 'disabled' as const],
+  ])(
+    'thread/start carries web_search %s, approvalPolicy never and no approvalsReviewer',
+    async (_name, mode) => {
+      const { handle, server } = startWith({}, { webSearch: mode });
+      await firstEvent(handle);
+      await vi.waitFor(() => {
+        expect(methods(server)).toContain('turn/start');
+      });
+      expect(sentParams(server, 'thread/start')).toMatchObject({
+        approvalPolicy: 'never',
+        config: { web_search: mode },
+      });
+      expect(sentParams(server, 'thread/start')).not.toHaveProperty('approvalsReviewer');
+      const sent = JSON.stringify(server.sent());
+      expect(sent).not.toMatch(/"web_search":"(live|indexed)"/);
+      expect(sent).not.toContain('approvalsReviewer');
+      expect(sent).not.toContain('on-request');
+    },
+  );
+
   it('sends approvalPolicy never, the model, and effort on turn/start', async () => {
     const { handle, server } = startWith({}, { effort: 'high' });
     await firstEvent(handle);

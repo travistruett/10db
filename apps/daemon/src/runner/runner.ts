@@ -2631,6 +2631,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
       judge: sessionJudge,
+      codexWebSearch: switches.web,
       webJudged: judged && switches.web,
       setupLine:
         laneSession === null
@@ -3004,6 +3005,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         env: launch.env,
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
+        webSearch: switches.web ? 'cached' : 'disabled',
         sandbox: laneSession?.spec ?? null,
         instructions: setupPlan.instructions.text,
         ...(laneSession
