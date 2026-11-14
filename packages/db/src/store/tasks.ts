@@ -503,6 +503,34 @@ export function insertRetryLimitFollowUp(
   });
 }
 
+/**
+ * Adds the findings of a later rejection at the retry limit to the follow-up task an earlier one filed, while
+ * that task is still open and unstarted; once it has started, was removed or is gone, the findings stay on
+ * the step and nothing is written. A task shipped at its limit never files a second follow-up for the one
+ * step.
+ */
+export function appendRetryLimitFindings(
+  ctx: WriteContext,
+  followUpId: TaskId,
+  found: RetryLimitFindings,
+): void {
+  const task = ctx.tx.select().from(schema.tasks).where(eq(schema.tasks.id, followUpId)).get();
+  if (task?.status !== TaskStatus.Open) return;
+  const started = ctx.tx
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, followUpId))
+    .get();
+  if (started !== undefined) return;
+  patchTask(ctx, followUpId, {
+    description: [
+      task.description,
+      `The ${found.role} step rejected the work again at the retry limit. These findings are open too:`,
+      found.notes,
+    ].join('\n\n'),
+  });
+}
+
 /** Writes a task the caller has already validated, at the end of the board, and announces it with its proposal, if any. */
 function writeTask(
   ctx: WriteContext,
