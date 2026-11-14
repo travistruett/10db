@@ -97,6 +97,13 @@ export interface GuardInput {
   readonly coveredByAllowRule: boolean;
   /** The project's Web switch is on, so WebSearch and WebFetch go to a judge that runs, not a card. */
   readonly webOn?: boolean;
+  /**
+   * A person is in the session (the trust policy's `attended`); absent counts as attended. Only an
+   * unattended lane's verdicts become skips.
+   */
+  readonly attended?: boolean;
+  /** The project's Docker switch is on: an unattended lane's docker call is not refused here. */
+  readonly dockerOn?: boolean;
 }
 
 /**
@@ -120,9 +127,13 @@ export interface FileAccessJudge {
  */
 export type GuardVerdict =
   | { readonly decision: 'allow'; readonly settled?: string }
-  | { readonly decision: 'deny'; readonly reason: string }
+  /** `rule` names a refusal an unattended lane lists as a skip (`answerUnattended`). */
+  | { readonly decision: 'deny'; readonly reason: string; readonly rule?: DenyRule }
   /** `kind` says why, for an unattended lane's answer (`answerUnattended`); absent, it is skipped. */
   | { readonly decision: 'ask'; readonly reason: string; readonly kind?: AskKind };
+
+/** A refusal an unattended lane lists: the floor's deploy, Docker while it is off, a closed secret. */
+export type DenyRule = typeof JudgedRule.Deploy | 'docker_off' | 'secret_read';
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
 /**
@@ -644,6 +655,8 @@ function judgeShell(
   // order is not certain (a loop, a function), a `cd` anywhere may come before any segment.
   let afterCd = !ordered && changesDirectory(parse.segments);
   let coveredDeploy = false;
+  // The floor's deploy refusal is listed as a skip unattended; any other refusal in the line wins.
+  let deployRefusal: GuardVerdict | null = null;
   let previousSeparator = '';
   for (const { segment, words, hiddenByEnv, hiddenByRedirection } of segments) {
     const head = words[0] ?? '';
@@ -723,8 +736,14 @@ function judgeShell(
     if (DIRECTORY_CHANGES.has(head)) afterCd = true;
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))) {
-      if (applies(JudgedRule.Deploy))
-        return deny('Deploy and publish commands are never run by agents.');
+      if (applies(JudgedRule.Deploy)) {
+        deployRefusal ??= {
+          decision: 'deny',
+          reason: 'Deploy and publish commands are never run by agents.',
+          rule: JudgedRule.Deploy,
+        };
+        continue;
+      }
       if (ctx.coveredByAllowRule) coveredDeploy = true;
     }
     const line = words.join(' ');
@@ -741,6 +760,7 @@ function judgeShell(
       }
     }
   }
+  if (deployRefusal !== null) return deployRefusal;
   return coveredDeploy ? COVERED_DEPLOY : ALLOW;
 }
 

@@ -33,6 +33,7 @@
         "unread_edit_path",
         "endless_loop",
         "unread_hazard",
+        "pass_git",
         "deploy",
         "docker_off",
         "escalation",

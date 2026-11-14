@@ -188,12 +188,42 @@ const skipped = (skip: UnattendedSkip): UnattendedAnswer => ({
 });
 
 /**
+ * A refusal an unattended lane lists: the floor's deploy (call 8; one approved by its key runs),
+ * Docker while it is off (call 7) and a closed secret. Every other refusal stands as it is.
+ */
+function refusalAnswer(
+  input: UnattendedInput,
+  verdict: Extract<GuardVerdict, { decision: 'deny' }>,
+): UnattendedAnswer {
+  if (verdict.rule === undefined) return { verdict, skip: null };
+  switch (verdict.rule) {
+    case 'deploy':
+      if (judgeRuns(input.judge)) return { verdict, skip: null };
+      if (input.approvedKeys.includes(input.callKey)) return { verdict: BARE_ALLOW, skip: null };
+      return skipped({
+        kind: SkipKind.Deploy,
+        limit: LimitName.WritesLive,
+        reason: verdict.reason,
+      });
+    case 'docker_off':
+      return skipped({ kind: SkipKind.DockerOff, limit: null, reason: verdict.reason });
+    case 'secret_read':
+      return skipped({
+        kind: SkipKind.SecretRead,
+        limit: LimitName.ReadsSecrets,
+        reason: verdict.reason,
+      });
+  }
+}
+
+/**
  * The guard's verdict as an unattended lane gets it: an ask is answered at once, by the table, and a
  * call the builder approved by its exact key goes on, on every judge. An ask with no kind is skipped
  * as a tool 10db can't judge, so nothing waits. Allows and other refusals pass unchanged.
  */
 export function answerUnattended(input: UnattendedInput): UnattendedAnswer {
   const { verdict } = input;
+  if (verdict.decision === 'deny') return refusalAnswer(input, verdict);
   if (verdict.decision !== 'ask') return { verdict, skip: null };
   if (verdict.kind === undefined)
     return skipped({

@@ -8,6 +8,7 @@ import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from '.
 import { JudgedRule, judgedRuleApplies } from './judged-rules';
 import { realPathOf } from './paths';
 import { laneReadOnlyWords } from './read-only';
+import { splitCommand, stripCommandPrefixes } from './shell-words';
 import { CLAUDE_TOOLS_REVIEWED } from './reviewed-tools';
 import { firstUnread } from './unread-commands';
 import { AskKind } from './unattended';
@@ -112,6 +113,29 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
   } catch (cause) {
     if (isTooDeep(cause)) return command;
     throw cause;
+  }
+}
+
+/** What an unattended lane is told of a docker call while the project has Docker off. */
+export const DOCKER_OFF =
+  'Docker is off for this project. Turning it on is Settings › Project › Docker.';
+
+const DOCKER_PROGRAMS: ReadonlySet<string> = new Set(['docker', 'docker-compose', 'podman']);
+
+/** A Bash or Monitor command with a segment whose program is docker, docker-compose or podman. */
+function callsDocker(input: GuardInput): boolean {
+  if (input.toolName !== 'Bash' && input.toolName !== 'Monitor') return false;
+  const command = stringField(input.toolInput, 'command');
+  if (command === null) return false;
+  try {
+    return splitCommand(command).some((segment) => {
+      const program = stripCommandPrefixes(segment.words, { lookThroughRunners: true })[0]
+        ?.split('/')
+        .at(-1);
+      return program !== undefined && DOCKER_PROGRAMS.has(program);
+    });
+  } catch {
+    return false;
   }
 }
 
@@ -356,6 +380,14 @@ function onlyReads(input: GuardInput): boolean {
 export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const verdict = judgeToolUse(input);
   if (verdict.decision !== 'allow') return verdict;
+  // Unattended, a docker call while the project has Docker off is a skip the item lists (call 7);
+  // attended, the kernel refuses it as before.
+  if (input.attended === false && input.dockerOn !== true && callsDocker(input))
+    return {
+      decision: 'deny',
+      reason: DOCKER_OFF,
+      rule: 'docker_off',
+    };
   if (HOST_LIST_TOOLS.has(input.toolName) && HostList.safeParse(input.toolInput).success) {
     return {
       decision: 'deny',
