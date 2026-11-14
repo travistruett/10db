@@ -146,6 +146,7 @@ const KIND_TITLES: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Review]: '10db has a review for you',
   [InboxKind.Flag]: '10db flagged something',
   [InboxKind.Check]: '10db has work for you to check',
+  [InboxKind.Plan]: '10db has a plan for you to approve',
   [InboxKind.PlaybookMoveReport]: '10db could not move every setting',
 };
 
