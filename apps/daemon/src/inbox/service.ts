@@ -287,7 +287,7 @@ function foldKeyFor(
     AskInput,
     | 'projectId'
     | 'workstreamId'
-    | 'shapeId'
+    | 'conversationId'
     | 'kind'
     | 'title'
     | 'body'
@@ -302,7 +302,9 @@ function foldKeyFor(
     input.projectId,
     // A conversation's card never folds, with a lane's or with its own: two calls a session makes at once
     // each wait on their own card, so one answer can't leave the other waiting.
-    ...(input.shapeId === undefined ? [] : [`shape:${input.shapeId}`, randomUUID()]),
+    ...(input.conversationId === undefined
+      ? []
+      : [`conversation:${input.conversationId}`, randomUUID()]),
     ...(input.foldPerLane === true && input.workstreamId !== null ? [input.workstreamId] : []),
     // A call Claude Code handed to a person never shares a card with an ordinary ask.
     ...(input.escalated === true ? ['escalated'] : []),
@@ -534,7 +536,8 @@ export function createInboxService(deps: {
       else deps.onParkedAnswer(target, item);
     }
     // A conversation's session (a Plan's, a chat's) waits with no target, so it is handed the answer
-    // here; one that stopped waiting withdrew its card, and a stored rule from the answer still holds.
+    // here. Its card never folds, so the one waiter is the call that raised it; one that stopped waiting
+    // withdrew its card, and a stored rule from the answer still holds.
     if (item.detail?.[CONVERSATION_CARD_KEY] !== undefined)
       for (const waiter of live?.values() ?? []) waiter.resolve(answer);
     return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
@@ -666,7 +669,11 @@ export function createInboxService(deps: {
           taskIds: targetTaskIds(ctx.tx, target === null ? [] : [target]),
           passPage,
         });
-        const foldKey = input.foldKey ?? foldKeyFor(input, routed.handles);
+        // A conversation's card never takes a caller's fold key either: its one waiter is the call that raised it.
+        const foldKey =
+          input.conversationId === undefined
+            ? (input.foldKey ?? foldKeyFor(input, routed.handles))
+            : foldKeyFor(input, routed.handles);
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
           if (target === null) return existing;
