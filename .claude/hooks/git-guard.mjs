@@ -1362,21 +1362,31 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       // The exception holds only for a command that is this one plain git call: no other segment,
       // wrapper, assignment, git option before the verb, substitution, heredoc or `$`, so nothing
       // the shell runs or expands first, and no config, can point git at another checkout.
-      const loneGitCall =
+      const filled = segs.filter((x) => x.words.length > 0);
+      const plainGitCall =
         whole === command &&
-        segs.filter((x) => x.words.length > 0).length === 1 &&
+        filled.at(-1) === seg &&
         seg.words[0] === 'git' &&
         seg.words[1] === git.verb &&
         git.config.length === 0 &&
         seg.substitutions.length === 0 &&
         seg.heredocs.length === 0 &&
         !/[$`]/.test(whole);
+      const loneGitCall = plainGitCall && filled.length === 1;
+      // A discard may also follow plain `cd <dir> &&` segments. `&&` stops the line at a failed cd,
+      // so git runs in `dir`, the directory those cds lead to, or not at all; `dir` is null when a
+      // cd can't be read. Only the git call itself is checked for retargeting, since `cd` is one.
+      const cdsThenGitCall =
+        plainGitCall &&
+        dir !== null &&
+        filled.slice(0, -1).every((x) => x.words[0] === 'cd' && x.separator === '&&') &&
+        !RETARGETS.test(seg.raw);
       const ownDiscard =
-        loneGitCall &&
+        dir !== null &&
+        (loneGitCall ? !RETARGETS.test(whole) : cdsThenGitCall) &&
         ['checkout', 'restore'].includes(git.verb) &&
-        isFileDiscard(git.verb, a, cwd) &&
-        !RETARGETS.test(whole) &&
-        inAgentWorktree(cwd);
+        isFileDiscard(git.verb, a, dir) &&
+        inAgentWorktree(dir);
       // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
       // call, for the same reason as above; the cwd is the repository the branch names live in.
       // GitHub is asked only for a call that would ask otherwise (`&&` stops before the lookup).

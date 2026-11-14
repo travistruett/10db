@@ -700,6 +700,67 @@ describe('git guard in an agent worktree beside the checkout', () => {
     expect(inAgent('git restore c.ts', join(agent, 'src'))).toBe('allow');
   });
 
+  // A cd the guard can read, joined by `&&` so a failed cd stops the line before git, is followed:
+  // the exception holds where git runs. AGENT stands for the agent worktree's path.
+  it.each<[string, string, 'checkout' | 'agent' | 'elsewhere', Outcome]>([
+    [
+      'cd to the agent worktree from the checkout',
+      'cd AGENT && git checkout -- a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'cd to the agent worktree from elsewhere',
+      'cd AGENT && git restore a.ts',
+      'elsewhere',
+      'allow',
+    ],
+    ['cd -- to the agent worktree', 'cd -- AGENT && git restore a.ts', 'checkout', 'allow'],
+    ['a relative cd within the agent worktree', 'cd src && git restore c.ts', 'agent', 'allow'],
+    [
+      'two cds ending in the agent worktree',
+      'cd CHECKOUT && cd AGENT && git restore a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'cd joined by ;, which runs git where a failed cd left it',
+      'cd AGENT; git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['cd joined by a newline', 'cd AGENT\ngit restore a.ts', 'checkout', 'ask'],
+    ['cd joined by ||', 'cd AGENT || git restore a.ts', 'checkout', 'ask'],
+    ['cds ending in the checkout', 'cd AGENT && cd CHECKOUT && git restore a.ts', 'agent', 'ask'],
+    ['cd in a subshell that ends before git', '(cd AGENT) && git restore a.ts', 'checkout', 'ask'],
+    ['cd to a path the shell expands', 'cd $HOME && git restore a.ts', 'agent', 'ask'],
+    [
+      'cd with an option the guard does not read',
+      'cd -P AGENT && git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['cd, then git -C the checkout', 'cd AGENT && git -C CHECKOUT restore a.ts', 'agent', 'ask'],
+    [
+      'cd, then a GIT_DIR prefix',
+      'cd AGENT && GIT_DIR=CHECKOUT/.git git restore a.ts',
+      'agent',
+      'ask',
+    ],
+    ['cd, then another command', 'cd AGENT && true && git restore a.ts', 'checkout', 'ask'],
+    ['cd, then an untracked path', 'cd AGENT && git restore gone.ts', 'checkout', 'ask'],
+    ['cd, then a whole-tree discard', 'cd AGENT && git checkout -- .', 'checkout', 'ask'],
+    [
+      'cd, then a discard and a force push',
+      'cd AGENT && git restore a.ts && git push --force',
+      'checkout',
+      'ask',
+    ],
+  ])('%s', (_name, command, from, expected) => {
+    const cwd = { checkout: checkout.dir, agent, elsewhere }[from];
+    expect(inAgent(command.replaceAll('AGENT', agent), cwd)).toBe(expected);
+  });
+
   it.each<[string, string]>([
     ['checkout -- one file', 'git checkout -- a.ts'],
     ['restore one file', 'git restore a.ts'],
