@@ -66,6 +66,7 @@ export const EventType = {
   RecoveryStep: 'recovery.step',
   SettingsChanged: 'settings.changed',
   PersonaSaved: 'persona.saved',
+  /** Nothing emits it now; event rows written while flows existed hold it, and the event log still parses them. */
   FlowSaved: 'flow.saved',
   PersonSaved: 'person.saved',
   PersonRemoved: 'person.removed',

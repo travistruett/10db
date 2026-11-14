@@ -637,7 +637,7 @@ export function usePatchTask() {
   return useMutation({
     mutationFn: async ({ taskId, patch }: { readonly taskId: TaskId; readonly patch: TaskPatch }) =>
       readJson(await client.tasks[':taskId'].$patch({ param: { taskId }, json: patch }), TaskDto),
-    // A new flow or risk tag re-plans the task's steps.
+    // A new rigor or kind re-plans the task's steps.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),

@@ -183,7 +183,7 @@ export function KindDrawer({
         />
         <Textarea
           label="Description"
-          description="One line the judge reads to decide whether a task is this kind."
+          description="One line saying what this kind of work is."
           autosize
           minRows={2}
           maxLength={300}
