@@ -111,3 +111,8 @@ only process that writes the database.
   Migration 0084 (generated): `skip_follow_ups`, one row per follow-up Run these now made (its task, the source run
   and its batch), written in the answer's write and stamped `started_at` once when it starts; `pendingSkipFollowUps`
   and `skipFollowUpOf` leave out a follow-up whose task is done or removed.
+- Grants, migration 0085 (generated; trust line §5, T5): `trust_grants` (`store/trust-grants.ts`), one row per
+  Always in this project answer: the project (deleted with it), the limit its card named or null (`limit_name`, a
+  CHECK over the four), a one-line `target` parsed with `GrantTarget` before it is written, and the card it came
+  from. `listTrustGrants` answers a project's oldest first; `deleteTrustGrant` answers false for a grant that isn't
+  that project's. The writes append no event.
