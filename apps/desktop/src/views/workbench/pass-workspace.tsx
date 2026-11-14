@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
-import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
+import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
 import type { PassWorkspaceProps } from './pass-workspace-props';
@@ -137,7 +137,6 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
               (turn) => turn.taskId === shown.page.taskId && turn.seq === shown.page.turn?.seq,
             )?.openedAt ?? null
           }
-          now={now}
           composerFocus={composerFocus}
           draft={drafts.get(shown.page.taskId) ?? EMPTY_DRAFT}
           onDraft={(draft) => {

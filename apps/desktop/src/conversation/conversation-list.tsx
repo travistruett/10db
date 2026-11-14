@@ -219,7 +219,7 @@ function WindowedArticles({
                   ref={virtualizer.measureElement}
                   data-index={item.index}
                   pt={article.speaker === 'builder' ? 20 : item.index === 0 ? 'md' : 0}
-                  pb="md"
+                  pb={articles[item.index + 1]?.continued === true ? 0 : 'md'}
                 >
                   <Article
                     article={article}
@@ -268,7 +268,13 @@ function Article({ article, marked, loadFull, onAllow, agentLabel }: ArticleProp
   return (
     <article aria-labelledby={heading}>
       <VisuallyHidden>
-        <h2 id={heading}>{article.speaker === 'builder' ? 'You' : agentLabel}</h2>
+        <h2 id={heading}>
+          {article.speaker === 'builder'
+            ? 'You'
+            : article.continued
+              ? `${agentLabel}, continued`
+              : agentLabel}
+        </h2>
       </VisuallyHidden>
       {article.rows.map((row, i) => {
         const highlighted = idsOf(row).some((id) => marked.has(id));

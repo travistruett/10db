@@ -1,5 +1,14 @@
 import type { AgentCapabilitiesDto } from '@10db/contracts';
-import { ActionIcon, Box, Button, CloseButton, Group, Stack, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  CloseButton,
+  Group,
+  Stack,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
 import { IconPaperclip } from '@tabler/icons-react';
 import {
   useEffect,
@@ -7,6 +16,7 @@ import {
   useState,
   type ClipboardEvent,
   type DragEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 import { ComposerInput, type ComposerMentions } from './composer-mentions';
@@ -37,13 +47,19 @@ export interface ComposerProps {
   readonly locked?: boolean;
   /** Sends the draft; rejects with the daemon's words, and the draft stays. */
   readonly onSend: (draft: Draft) => Promise<void> | void;
-  /** A plain Stop: the turn ends and nothing is sent. */
-  readonly onStop: () => void;
+  /** A plain Stop: the turn ends and nothing is sent; a rejection's words show beside Send. */
+  readonly onStop: () => Promise<void> | void;
   /** Stops the turn and sends the draft as the next one. */
   readonly onRedo: (draft: Draft) => Promise<void> | void;
   readonly inputRef?: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   /** The input's accessible name. */
   readonly label?: string;
+  /** Attach's accessible name. */
+  readonly attachLabel?: string;
+  /** The screen's own controls on the left of the bar, before Attach (a page's Open Page). */
+  readonly leading?: ReactNode;
+  /** The screen's own buttons before Send (a page's Sign Off). */
+  readonly actions?: ReactNode;
 }
 
 /** Whether the input's suggestion list is open: the list it controls is in the page only then. */
@@ -75,11 +91,13 @@ function Thumbnail({ file, onRemove }: { readonly file: File; readonly onRemove:
     <Box component="li" pos="relative" style={{ listStyle: 'none' }}>
       <img
         ref={image}
-        alt={file.name}
+        alt=""
         width={56}
         height={56}
         style={{ objectFit: 'cover', borderRadius: 'var(--mantine-radius-sm)', display: 'block' }}
       />
+      {/* The name is the item's words; the thumbnail only shows it. */}
+      <VisuallyHidden>{file.name}</VisuallyHidden>
       <CloseButton
         size="xs"
         pos="absolute"
@@ -106,6 +124,9 @@ export function Composer({
   inputRef,
   mentions,
   label = 'Message',
+  attachLabel = 'Attach',
+  leading,
+  actions,
 }: ComposerProps) {
   const [busy, setBusy] = useState<'send' | 'stop' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -144,9 +165,7 @@ export function Composer({
   };
   const stop = (): void => {
     if (phase.stop === 'stop_and_redo') void run('stop', () => onRedo(outgoing(draft)), true);
-    else {
-      onStop();
-    }
+    else void run('stop', onStop, false);
   };
 
   const hasFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
@@ -263,11 +282,12 @@ export function Composer({
         ) : null}
         <Group justify="space-between" wrap="nowrap" gap="xs" pt={4}>
           <Group gap="xs" wrap="nowrap">
+            {leading}
             {canAttach ? (
               <ActionIcon
                 variant="subtle"
                 size="lg"
-                aria-label="Attach"
+                aria-label={attachLabel}
                 disabled={locked}
                 onClick={() => {
                   picker.current?.click();
@@ -292,6 +312,7 @@ export function Composer({
                 {phase.stop === 'stop_and_redo' ? 'Stop and Redo' : 'Stop'}
               </Button>
             )}
+            {actions}
             {phase.send === 'hidden' ? null : (
               <Button
                 variant={phase.send === 'filled' ? 'filled' : 'default'}

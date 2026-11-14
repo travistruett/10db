@@ -2,8 +2,8 @@ import { act, fireEvent, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
-import { Composer, type PageActions } from './composer';
-import { EMPTY_DRAFT, type Draft } from './drafts';
+import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
+import { PageComposer, type PageActions } from './page-composer';
 import { PageStatus } from './page-status';
 
 beforeEach(() => {
@@ -22,7 +22,7 @@ function actions(): PageActions & { [K in keyof PageActions]: ReturnType<typeof 
 function Harness(props: { status: PageStatus; actions: PageActions; firstMessage?: boolean }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   return (
-    <Composer
+    <PageComposer
       area="Settings"
       status={props.status}
       firstMessage={props.firstMessage ?? false}
@@ -45,7 +45,7 @@ function variant(name: string): string | null {
   return screen.getByRole('button', { name }).getAttribute('data-variant');
 }
 
-describe('Composer buttons', () => {
+describe('PageComposer buttons', () => {
   it('on a Ready page: Sign Off is the primary until the builder types, then Send is', async () => {
     const { acts, input } = await renderComposer(PageStatus.Ready);
     expect(variant('Sign Off')).toBe('filled');
@@ -64,7 +64,11 @@ describe('Composer buttons', () => {
       fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
       await Promise.resolve();
     });
-    expect(acts.send).toHaveBeenCalledWith({ text: 'padding too tight', pictures: [] });
+    expect(acts.send).toHaveBeenCalledWith({
+      text: 'padding too tight',
+      mentions: [],
+      pictures: [],
+    });
     expect((input as HTMLTextAreaElement).value).toBe('');
   });
 
@@ -86,7 +90,11 @@ describe('Composer buttons', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
       await Promise.resolve();
     });
-    expect(acts.redo).toHaveBeenCalledWith({ text: 'use the old header', pictures: [] });
+    expect(acts.redo).toHaveBeenCalledWith({
+      text: 'use the old header',
+      mentions: [],
+      pictures: [],
+    });
     expect(acts.send).not.toHaveBeenCalled();
   });
 
@@ -108,7 +116,7 @@ describe('Composer buttons', () => {
   });
 });
 
-describe('Composer pictures', () => {
+describe('PageComposer pictures', () => {
   it('takes a pasted screenshot, which alone can be sent', async () => {
     const { acts, input } = await renderComposer(PageStatus.NotStarted);
     const shot = new File([new Uint8Array([1])], 'image', { type: 'image/png' });
@@ -122,6 +130,7 @@ describe('Composer pictures', () => {
     });
     expect(acts.send).toHaveBeenCalledWith({
       text: '',
+      mentions: [],
       pictures: [expect.objectContaining({ name: 'pasted-image.png' })],
     });
   });

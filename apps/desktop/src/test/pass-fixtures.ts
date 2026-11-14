@@ -1,5 +1,9 @@
 import type { TurnActivityDto } from '@10db/contracts';
 import {
+  ConversationId,
+  ConversationItemDto,
+  ConversationItemsPage,
+  ConversationLiveDto,
   GoalPassPagesDto,
   mintId,
   PassDto,
@@ -13,12 +17,11 @@ import {
   TaskScreenDto,
   PassViewDto,
   TaskFileDto,
-  TaskId,
   TaskMessageDto,
-  TaskThreadDto,
   WorkbenchSetupDto,
   type InboxItemDto,
   type PassTurnActivity,
+  type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
@@ -94,7 +97,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     state: 'QUEUED',
     nextActionKind: 'start',
     spokenTo: false,
-    conversationId: null,
+    conversationId: mintId('Conversation'),
     turn: null,
     pausedUntil: null,
     failure: null,
@@ -128,7 +131,6 @@ export function pagesByStatus() {
     route: '/billing',
     state: 'RUNNING',
     spokenTo: true,
-    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 4, activity: turnActivity() }),
   });
   const ready = passPageDto({
@@ -138,7 +140,6 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
     spokenTo: true,
-    conversationId: null,
     turn: pageTurn({
       startedMinutesAgo: 12,
       endedAt: minutesBeforeNow(3),
@@ -152,7 +153,6 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'answer',
     spokenTo: true,
-    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 6 }),
   });
   const failed = passPageDto({
@@ -162,7 +162,6 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
     spokenTo: true,
-    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 9, endedAt: minutesBeforeNow(8) }),
     failure: { failureKind: 'session_failed', retryItemId: mintId('InboxItem') },
   });
@@ -173,7 +172,6 @@ export function pagesByStatus() {
     state: 'PAUSED_LIMIT',
     nextActionKind: 'resume',
     spokenTo: true,
-    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 15 }),
     pausedUntil: '2026-11-09T15:40:00.000Z',
   });
@@ -419,6 +417,25 @@ export function taskMessageDto(
   });
 }
 
+/** An item of a page's conversation: the builder's message, unless given. */
+export function pageItemDto(
+  conversationId: ConversationId,
+  item: Partial<ConversationItemDto> & Pick<ConversationItemDto, 'kind'>,
+): ConversationItemDto {
+  return ConversationItemDto.parse({
+    id: mintId('ConversationItem'),
+    conversationId,
+    seq: 1,
+    author: 'builder',
+    partial: false,
+    hasFull: false,
+    deliveredAt: null,
+    createdAt: minutesBeforeNow(12),
+    text: 'The padding is too tight',
+    ...item,
+  });
+}
+
 /** A picture pasted with `message`. */
 export function taskFileDto(
   message: Pick<TaskMessageDto, 'id' | 'taskId'>,
@@ -448,8 +465,10 @@ export interface PassRoutes {
   readonly turns?: Readonly<Record<string, readonly PassTurnWithFilesDto[]>>;
   /** By turn id. */
   readonly activity?: Readonly<Record<string, readonly TurnActivityDto[]>>;
-  /** By task id. */
-  readonly threads?: Readonly<Record<string, TaskThreadDto>>;
+  /** A task conversation's items, by conversation id. */
+  readonly conversations?: Readonly<Record<string, readonly ConversationItemDto[]>>;
+  /** What a task conversation streams now, by conversation id. */
+  readonly streams?: Readonly<Record<string, ConversationLiveDto['items']>>;
   readonly goalPages?: GoalPassPagesDto;
   readonly setup?: WorkbenchSetupDto;
 }
@@ -482,10 +501,21 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
     http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) =>
       HttpResponse.json(routes.activity?.[String(params['turnId'])] ?? []),
     ),
-    http.get(daemonUrl('/tasks/:taskId/thread'), ({ params }) => {
-      const taskId = TaskId.parse(params['taskId']);
+    http.get(daemonUrl('/conversations/:conversationId/items'), ({ params }) =>
+      HttpResponse.json(
+        ConversationItemsPage.parse({
+          items: routes.conversations?.[String(params['conversationId'])] ?? [],
+          nextAfterSeq: null,
+        }),
+      ),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/live'), ({ params }) => {
+      const conversationId = ConversationId.parse(params['conversationId']);
       return HttpResponse.json(
-        routes.threads?.[taskId] ?? TaskThreadDto.parse({ taskId, messages: [] }),
+        ConversationLiveDto.parse({
+          conversationId,
+          items: routes.streams?.[conversationId] ?? [],
+        }),
       );
     }),
     http.get(daemonUrl('/goals/:goalId/pass-pages'), () =>

@@ -5,6 +5,7 @@ import {
   ConversationItemsPage,
   ConversationLiveDto,
   type ConversationDeltaFrame,
+  type ConversationFileId,
   type ConversationId,
   type ConversationItemId,
 } from '@10db/contracts';
@@ -12,6 +13,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { useCallback } from 'react';
 import { applyFrame, liveItemsOf, type LiveItems } from '../conversation/live-items';
 import { readJson, type DaemonClient } from './client';
+import { dataUrlOf } from './data-url';
 import { useDaemon } from './provider';
 import { shapeKeys } from './shape-queries';
 
@@ -208,7 +210,8 @@ function messageRequest({ text, mentions = [], pictures = [] }: ConversationMess
   const form = new FormData();
   form.append('text', text);
   for (const path of mentions) form.append('mention', path);
-  for (const picture of pictures) form.append('picture', picture, picture.name);
+  // Each picture goes under its own name.
+  for (const picture of pictures) form.append('picture', picture);
   // No content type: the form's own carries the boundary.
   return { init: { body: form } };
 }
@@ -244,20 +247,41 @@ export function useStopConversation() {
   });
 }
 
-/** Stops the turn and sends `text` as the next one. */
+/** Stops the turn and sends the edited message, with its pictures, as the next one. */
 export function useRedoConversation() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { readonly conversationId: ConversationId; readonly text: string }) =>
+    mutationFn: async (input: ConversationMessageSend) =>
       readJson(
-        await client.conversations[':conversationId'].redo.$post({
-          param: { conversationId: input.conversationId },
-          json: { text: input.text, mentions: [] },
-        }),
+        await client.conversations[':conversationId'].redo.$post(
+          { param: { conversationId: input.conversationId } },
+          messageRequest(input),
+        ),
         ConversationItemDto,
       ),
     onSuccess: (_item, input) => refreshAfter(queryClient, input.conversationId),
+  });
+}
+
+/**
+ * A picture the builder sent with a message, as a data URL. A kept picture never changes, so it is read
+ * once; it is not under `conversationKeys.all`, which a new item asks again.
+ */
+export function useConversationPicture(conversationId: ConversationId, fileId: ConversationFileId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['conversation-pictures', conversationId, fileId] as const,
+    queryFn: async (): Promise<string> => {
+      // A picture the daemon no longer holds answers 404 from its error handler, not the route.
+      const res: Response = await client.conversations[':conversationId'].files[':fileId'].$get({
+        param: { conversationId, fileId },
+      });
+      if (!res.ok) throw new Error(`The daemon answered HTTP ${String(res.status)}`);
+      return dataUrlOf(await res.blob());
+    },
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
   });
 }
 

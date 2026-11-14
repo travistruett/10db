@@ -98,12 +98,20 @@ export function conversationRows(
   return rows;
 }
 
+/**
+ * The most rows one article draws. A longer turn is windowed in parts, each a virtual item of its own,
+ * so a turn of thousands of rows never mounts whole.
+ */
+export const ARTICLE_ROWS = 40;
+
 /** One message as a screen reader meets it: the builder's, or the agent's turn up to the next. */
 export interface ConversationArticle {
   /** Its first row's id. */
   readonly id: string;
   readonly speaker: 'builder' | 'agent';
   readonly rows: readonly ConversationRow[];
+  /** A later part of a long turn: the turn's first part holds its start. */
+  readonly continued: boolean;
 }
 
 /** A row's id: its entry's, or its group's. */
@@ -120,20 +128,31 @@ export function rowId(row: ConversationRow): string {
 
 /**
  * The articles `rows` draw as: each builder message is one, and every other row joins the agent's
- * article that runs from the last builder message to the next.
+ * article that runs from the last builder message to the next, in parts of at most `ARTICLE_ROWS`.
  */
 export function conversationArticles(
   rows: readonly ConversationRow[],
 ): readonly ConversationArticle[] {
-  const out: { id: string; speaker: 'builder' | 'agent'; rows: ConversationRow[] }[] = [];
+  const out: {
+    id: string;
+    speaker: 'builder' | 'agent';
+    rows: ConversationRow[];
+    continued: boolean;
+  }[] = [];
   for (const row of rows) {
     if (row.kind === 'entry' && row.entry.kind === 'builder') {
-      out.push({ id: row.entry.id, speaker: 'builder', rows: [row] });
+      out.push({ id: row.entry.id, speaker: 'builder', rows: [row], continued: false });
       continue;
     }
     const last = out.at(-1);
-    if (last?.speaker === 'agent') last.rows.push(row);
-    else out.push({ id: rowId(row), speaker: 'agent', rows: [row] });
+    if (last?.speaker === 'agent' && last.rows.length < ARTICLE_ROWS) last.rows.push(row);
+    else
+      out.push({
+        id: rowId(row),
+        speaker: 'agent',
+        rows: [row],
+        continued: last?.speaker === 'agent',
+      });
   }
   return out;
 }

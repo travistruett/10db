@@ -82,7 +82,7 @@ describe('withPictures', () => {
       refused: ['three.png can’t be added: a message’s pictures are at most 40 MB together'],
     },
   ])('$name', ({ held, added, kept, refused }) => {
-    const result = withPictures(held, added);
+    const result = withPictures(held, added, ['png', 'jpeg', 'webp']);
     expect(result.pictures.map((p) => p.name)).toEqual(kept);
     expect(result.refused).toEqual(refused);
   });
