@@ -17,6 +17,12 @@ import type { Json } from '@10db/db';
 export const BODY_CAP_CHARS = 32_768;
 /** How much of a text over the cap the item keeps. */
 export const CAPPED_TEXT_CHARS = 30_000;
+/** The most of a call's output kept on disk: its tail, past a line saying how much was cut. */
+export const FULL_OUTPUT_MAX_CHARS = 4_000_000;
+/** How long a string of a capped call's other fields, or a plan step, may be. */
+const FIELD_CHARS = 2_000;
+/** How many entries of a list a capped call keeps. */
+const LIST_ENTRIES = 50;
 
 const FILES = { output: 'output.txt', patch: 'patch.diff', text: 'body.txt' } as const;
 
@@ -39,6 +45,13 @@ export function fullOutputDir(
     'items',
     ConversationItemId.parse(itemId),
   );
+}
+
+/** A call's output as kept on disk: at most the last `FULL_OUTPUT_MAX_CHARS`, saying what was cut. */
+export function boundedOutput(output: string): string {
+  if (output.length <= FULL_OUTPUT_MAX_CHARS) return output;
+  const cut = output.length - FULL_OUTPUT_MAX_CHARS;
+  return `[${String(cut)} characters cut from the start]\n${output.slice(cut)}`;
 }
 
 /** Writes each part given, mode 600; answers whether it wrote any. */
@@ -93,6 +106,14 @@ function patchOf(hunks: readonly ToolCallHunk[]): string {
 
 const fits = (body: unknown): boolean => JSON.stringify(body).length <= BODY_CAP_CHARS;
 
+/** A JSON value with every string cut to `FIELD_CHARS` and every list to `LIST_ENTRIES`. */
+function shortened(value: Json): Json {
+  if (typeof value === 'string') return value.slice(0, FIELD_CHARS);
+  if (Array.isArray(value)) return value.slice(0, LIST_ENTRIES).map(shortened);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, shortened(v)]));
+}
+
 /**
  * An item body under the cap, and what it left out (call 31). A body whose JSON fits is kept as it
  * is; a longer text keeps its first 30,000 characters; a longer edit keeps the hunks that fit, marked
@@ -138,10 +159,24 @@ export function capItemBody(
           body: { ...call, command: call.command.slice(0, CAPPED_TEXT_CHARS) },
           full: { text: call.command },
         };
-      return { body, full: null };
+      // Any other call: its long strings and lists are cut, and the whole call is kept as text.
+      return { body: shortened(body), full: { text: JSON.stringify(call, null, 2) } };
+    }
+    case 'plan': {
+      const parsed = ConversationItemBody.plan.safeParse(body);
+      if (!parsed.success) return { body, full: null };
+      const steps: (typeof parsed.data.steps)[number][] = [];
+      for (const step of parsed.data.steps) {
+        const cut = { ...step, text: step.text.slice(0, FIELD_CHARS) };
+        if (!fits({ steps: [...steps, cut] })) break;
+        steps.push(cut);
+      }
+      return {
+        body: { steps },
+        full: { text: parsed.data.steps.map((s) => `- [${s.status}] ${s.text}`).join('\n') },
+      };
     }
     case 'card':
-    case 'plan':
     case 'shape_event':
     case 'turn_marker':
       return { body, full: null };

@@ -1050,4 +1050,36 @@ describe('review round 1', () => {
     expect(notices(w)).toEqual([{ text: FRESH_SESSION_NOTICE }]);
     held.release();
   });
+
+  it('keeps the text a failed turn streamed with no message, marked partial', async () => {
+    w = exploreWorld();
+    w.adapter.shapeBehaviour = (turn) => {
+      turn.emit({ type: 'text_delta', itemId: 'cut', offset: 0, text: 'Half a sen' });
+      return Promise.reject(new Error('the turn failed'));
+    };
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(partials(w)).toEqual([['agent_message', { text: 'Half a sen' }]]);
+  });
+
+  it('keeps a partial past the body cap to the cap, and the rest on disk', async () => {
+    w = exploreWorld();
+    const long = 'x'.repeat(40_000);
+    w.adapter.shapeBehaviour = async (turn) => {
+      turn.emit({ type: 'text_delta', itemId: 'long', offset: 0, text: long });
+      await new Promise((resolve) => {
+        turn.signal.addEventListener('abort', resolve);
+      });
+      return {};
+    };
+    w.adapter.shapeInterruptReceipt = () => ({ stillQueued: [] });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    const [kept] = w.items().filter((i) => i.partial);
+    expect(JSON.stringify(kept?.body).length).toBeLessThanOrEqual(32_768);
+    const dir = fullOutputDir(w.dataDir, w.conv.id, kept?.id ?? never());
+    expect(readFileSync(join(dir, 'body.txt'), 'utf8')).toBe(long);
+  });
 });

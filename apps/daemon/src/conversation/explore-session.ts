@@ -21,7 +21,7 @@ import type { LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
 import type { AgentCommand, SessionEvent, SessionHandle, ToolCallFull } from '../sessions';
 import type { ExploreLaunch } from './explore-hooks';
-import { capItemBody, writeFullOutput } from './full-output';
+import { boundedOutput, capItemBody, writeFullOutput, type FullOutput } from './full-output';
 import { createLiveBuffers, type LiveBuffers } from './live-buffers';
 import { storePartial } from './partial';
 
@@ -58,10 +58,8 @@ export interface OpenSession {
    * its stop): they are dropped, up to and including its `turn_complete` (call 25).
    */
   skipTurn(): void;
-  /** Stores each reasoning item in flight, complete (call 10). */
-  storeReasoning(write: WriteContext): void;
   /** Stores what streamed, marked partial, and empties the buffers. */
-  storePartial(write: WriteContext): ConversationItemId[];
+  storePartial(): ConversationItemId[];
   /** A turn begins: its plan is a new item (call 11). */
   newTurn(): void;
   /** Resolves when the session's events have ended. */
@@ -99,6 +97,22 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
   const reasoning = new Set<string>();
   let planItem: ConversationItemId | null = null;
 
+  /** What a write left for the disk, put there once the write has committed. */
+  let disk: [ConversationItemId, FullOutput][] = [];
+  /** Runs `fn` in one write, then writes what its items keep on disk, outside the transaction. */
+  const write = <T>(fn: (ctx: WriteContext) => T): T => {
+    const value = state.write(fn);
+    const pending = disk;
+    disk = [];
+    for (const [id, full] of pending)
+      try {
+        writeFullOutput(deps.dataDir, conversationId, id, full);
+      } catch (error) {
+        deps.log.warn({ err: error, conversationId }, 'an item’s full output could not be kept');
+      }
+    return value;
+  };
+
   const store = (
     ctx: WriteContext,
     id: ConversationItemId,
@@ -116,10 +130,17 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
       partial,
     });
     // The adapter's own output and patch are whole; the cap's text is what the item left out.
-    writeFullOutput(deps.dataDir, conversationId, id, { ...capped.full, ...full });
+    const output = full?.output;
+    const onDisk: FullOutput = {
+      ...capped.full,
+      ...(full?.patch === undefined ? {} : { patch: full.patch }),
+      ...(output === undefined ? {} : { output: boundedOutput(output) }),
+    };
+    if (Object.keys(onDisk).length > 0) disk.push([id, onDisk]);
   };
 
-  const storeReasoning = (ctx: WriteContext, except?: string): void => {
+  /** Stores each text in flight: reasoning complete (call 10), a reply with no `message` partial. */
+  const storeTexts = (ctx: WriteContext, except?: string, replies = false): void => {
     for (const adapterId of [...reasoning]) {
       if (adapterId === except) continue;
       reasoning.delete(adapterId);
@@ -127,20 +148,24 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
       if (held?.kind !== 'reasoning' || held.text === '') continue;
       store(ctx, held.itemId, ConversationItemKind.Reasoning, { text: held.text }, null);
     }
+    if (!replies) return;
+    for (const held of buffers.inFlight())
+      if (held.kind === 'agent_message' && held.text !== '')
+        store(ctx, held.itemId, ConversationItemKind.AgentMessage, { text: held.text }, null, true);
   };
 
   /** A new item begins: the reasoning before it is complete. */
   const nextItem = (adapterId: string): void => {
     if ([...reasoning].some((id) => id !== adapterId))
-      state.write((ctx) => {
-        storeReasoning(ctx, adapterId);
+      write((ctx) => {
+        storeTexts(ctx, adapterId);
       });
   };
 
   const finishedCall = (call: ToolCallView, full: ToolCallFull | undefined): void => {
     const id = buffers.itemIdOf(call.id);
     buffers.finish(call.id);
-    state.write((ctx) => {
+    write((ctx) => {
       store(ctx, id, ConversationItemKind.ToolCall, { ...call }, full ?? null);
     });
   };
@@ -173,7 +198,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         nextItem(event.itemId);
         const id = buffers.itemIdOf(event.itemId);
         buffers.finish(event.itemId);
-        state.write((ctx) => {
+        write((ctx) => {
           store(ctx, id, ConversationItemKind.AgentMessage, { text: event.text }, null);
         });
         return;
@@ -185,13 +210,16 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         return;
       case 'plan_update': {
         const id = (planItem ??= mintId('ConversationItem'));
-        state.write((ctx) => {
-          putItem(ctx, conversationId, {
+        write((ctx) => {
+          store(
+            ctx,
             id,
-            author: ConversationItemAuthor.Agent,
-            kind: ConversationItemKind.Plan,
-            body: { steps: event.steps.map((s) => ({ text: s.text, status: s.status })) },
-          });
+            ConversationItemKind.Plan,
+            {
+              steps: event.steps.map((s) => ({ text: s.text, status: s.status })),
+            },
+            null,
+          );
         });
         return;
       }
@@ -208,8 +236,9 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         sink.consumed(event.uuids);
         return;
       case 'turn_complete':
-        state.write((ctx) => {
-          storeReasoning(ctx);
+        // What streamed with no `message` to finish it is kept, so no turn end loses text.
+        write((ctx) => {
+          storeTexts(ctx, undefined, true);
           updateSessionUsage(ctx, sessionId, {
             inputTokens: event.inputTokens,
             outputTokens: event.outputTokens,
@@ -263,12 +292,13 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     skipTurn() {
       skipping += 1;
     },
-    storeReasoning: (ctx) => {
-      storeReasoning(ctx);
-    },
-    storePartial(ctx) {
+    storePartial() {
       reasoning.clear();
-      const ids = storePartial(ctx, conversationId, buffers.inFlight());
+      const ids = write((ctx) =>
+        storePartial(ctx, conversationId, buffers.inFlight(), (id, full) => {
+          disk.push([id, full]);
+        }),
+      );
       buffers.dispose();
       return ids;
     },

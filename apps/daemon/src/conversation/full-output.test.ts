@@ -10,7 +10,9 @@ import { describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
   BODY_CAP_CHARS,
+  boundedOutput,
   capItemBody,
+  FULL_OUTPUT_MAX_CHARS,
   fullOutputDir,
   readFullOutput,
   writeFullOutput,
@@ -75,6 +77,41 @@ describe('capItemBody', () => {
     expect(kept.length).toBeGreaterThan(0);
     expect(kept.length).toBeLessThan(10);
     expect(capped.full?.patch?.split('\n').filter((l) => l.startsWith('+'))).toHaveLength(10);
+  });
+
+  it('keeps the steps of a long plan that fit, each step cut, and the whole plan as text', () => {
+    const steps = Array.from({ length: 40 }, (_, n) => ({
+      text: `${String(n)} ${'s'.repeat(5_000)}`,
+      status: 'pending' as const,
+    }));
+    const capped = capItemBody('plan', { steps });
+    expect(JSON.stringify(capped.body).length).toBeLessThanOrEqual(BODY_CAP_CHARS);
+    expect(capped.full?.text?.split('\n')).toHaveLength(40);
+  });
+
+  it('cuts the long strings of any other call, and keeps the whole call as text', () => {
+    const search: ToolCallView = {
+      ...edit([]),
+      kind: 'search',
+      harnessTool: 'Grep',
+      pattern: 'p'.repeat(50_000),
+      paths: null,
+      matchCount: null,
+    };
+    const capped = capItemBody('tool_call', search);
+    expect(JSON.stringify(capped.body).length).toBeLessThanOrEqual(BODY_CAP_CHARS);
+    expect(ToolCallView.safeParse(capped.body).success).toBe(true);
+    expect(capped.full?.text).toContain('p'.repeat(50_000));
+  });
+});
+
+describe('boundedOutput', () => {
+  it('keeps an output to its last four million characters, saying how many were cut', () => {
+    const output = 'a'.repeat(10) + 'b'.repeat(FULL_OUTPUT_MAX_CHARS);
+    expect(boundedOutput(output)).toBe(
+      `[10 characters cut from the start]\n${'b'.repeat(FULL_OUTPUT_MAX_CHARS)}`,
+    );
+    expect(boundedOutput('short')).toBe('short');
   });
 });
 

@@ -67,7 +67,7 @@ import {
 } from './explore-state';
 import { pictureLimitsFor, type PictureLimits } from './picture-limits';
 import { settleRestart } from './explore-recovery';
-import { capItemBody } from './full-output';
+import { capItemBody, writeFullOutput } from './full-output';
 import { warmToClose } from './warm-cap';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
@@ -566,11 +566,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     hasItemOfKind(state.db, rt.id, ConversationItemKind.AgentMessage);
 
   const storePartialNow = (rt: Runtime): void => {
-    const open = (rt.session ?? rt.lastSession)?.open;
-    if (open !== undefined)
-      state.write((ctx) => {
-        open.storePartial(ctx);
-      });
+    (rt.session ?? rt.lastSession)?.open.storePartial();
   };
 
   /** The running turn is over: it took what it began with, but for what a receipt says is still queued. */
@@ -770,15 +766,17 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       await launch.release();
       return;
     }
-    state.write((ctx) => {
-      if (digest !== null) {
-        const capped = capItemBody(ConversationItemKind.Digest, { text: digest });
-        insertItem(ctx, rt.id, {
-          author: ConversationItemAuthor.System,
-          kind: ConversationItemKind.Digest,
-          body: capped.body,
-        });
-      }
+    const kept =
+      digest === null ? null : capItemBody(ConversationItemKind.Digest, { text: digest });
+    const digestItem = state.write((ctx) => {
+      const item =
+        kept === null
+          ? null
+          : insertItem(ctx, rt.id, {
+              author: ConversationItemAuthor.System,
+              kind: ConversationItemKind.Digest,
+              body: kept.body,
+            });
       insertSession(ctx, {
         id: sessionId,
         conversationId: rt.id,
@@ -790,7 +788,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         accountId: launch.accountId,
       });
       markPushed(ctx, rt, items, out, uuid, fresh);
+      return item;
     });
+    // What the digest's item left out is kept on disk, once the write has committed.
+    if (digestItem !== null && kept?.full != null)
+      writeFullOutput(deps.dataDir, rt.id, digestItem.id, kept.full);
     made.sessionId = sessionId;
     made.pushed = items.map((item) => item.id);
     const handle = adapter.open({ ...launch.spec, promptUuid: uuid });
