@@ -38,7 +38,8 @@ import { HeaderSlotProvider, HeaderSlotTarget } from './header-slot';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
-import { useSessionsNeedingYouCount } from '../views/sessions/needing-you-count';
+import { useSessionsNeedingYou } from '../views/sessions/needing-you-count';
+import { nextNeeding } from '../views/sessions/session-keys';
 import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
@@ -98,15 +99,50 @@ function InboxBadge({ count }: { readonly count: number }) {
   );
 }
 
-/** The sessions waiting on the builder; nothing when none does. */
+/**
+ * The sessions waiting on the builder; nothing when none does. A click goes to the next one after the
+ * open tab, from any view (UI spec §5.5); the link around it would only open Sessions.
+ */
 function SessionsBadge() {
-  const count = useSessionsNeedingYouCount();
+  const needing = useSessionsNeedingYou();
+  const navigate = useNavigate();
+  const { select } = useSelectedProject();
+  const current = useRouterState({
+    select: (state) => {
+      const chat: unknown = state.location.search.chat;
+      return typeof chat === 'string' ? chat : null;
+    },
+  });
+  const count = needing.length;
   if (count === 0) return null;
+  const goNext = (): void => {
+    const at = needing.findIndex((chat) => chat.id === current);
+    const next =
+      needing[
+        nextNeeding(
+          needing.map(() => true),
+          at,
+        ) ?? 0
+      ];
+    if (next === undefined) return;
+    select(next.projectId);
+    void navigate({ to: '/sessions', search: { chat: next.id } });
+  };
   return (
-    <CountBadge
-      count={count}
-      phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
-    />
+    // Keyboard users have ⌘J for the same move, so the badge is a pointer shortcut only.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+    <span
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        goNext();
+      }}
+    >
+      <CountBadge
+        count={count}
+        phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
+      />
+    </span>
   );
 }
 

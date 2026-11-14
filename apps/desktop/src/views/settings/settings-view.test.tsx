@@ -409,6 +409,24 @@ describe('SettingsView', () => {
     });
   });
 
+  it('shows the Sessions switch on by default and saves it off', async () => {
+    const put: unknown[] = [];
+    server.use(
+      http.put(daemonUrl('/settings/sessions'), async ({ request }) => {
+        put.push(await request.json());
+        return HttpResponse.json({ notifyReplies: false });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/sessions');
+    const toggle = await screen.findByRole('switch', { name: 'Notify when a chat replies' });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(put).toEqual([{ notifyReplies: false }]);
+    });
+  });
+
   it('shows the bad line of the extra allowed commands without calling the daemon', async () => {
     const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
     const patched: unknown[] = [];

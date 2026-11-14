@@ -20,6 +20,7 @@ const APP_LINKS = [
   'Decisions',
   'Lane permissions',
   'Trust',
+  'Sessions',
   'Integrations',
   'People',
   'Updates',

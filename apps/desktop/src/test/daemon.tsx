@@ -223,6 +223,10 @@ export function baseHandlers(
     http.get(daemonUrl('/settings/keep-awake', base), () =>
       HttpResponse.json(KeepAwakeStatus.parse({ mode: 'while_running', active: false })),
     ),
+    http.get(daemonUrl('/settings/sessions', base), () =>
+      HttpResponse.json({ notifyReplies: true }),
+    ),
+    http.get(daemonUrl('/chats', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/lane-permissions', base), () =>
       HttpResponse.json(LanePermissionsDto.parse({ autoMode: true })),
     ),

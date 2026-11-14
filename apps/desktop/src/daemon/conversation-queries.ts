@@ -11,7 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { applyFrame, liveItemsOf, type LiveItems } from '../conversation/live-items';
-import { readJson } from './client';
+import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 import { shapeKeys } from './shape-queries';
 
@@ -34,6 +34,18 @@ export const liveKeys = {
 const NO_ITEMS: readonly ConversationItemDto[] = [];
 const NO_LIVE: LiveItems = new Map();
 
+/** How the conversation's state, capabilities and queue are read. */
+export function conversationQueryOptions(client: DaemonClient, id: ConversationId) {
+  return {
+    queryKey: conversationKeys.one(id),
+    queryFn: async () =>
+      readJson(
+        await client.conversations[':conversationId'].$get({ param: { conversationId: id } }),
+        ConversationDto,
+      ),
+  };
+}
+
 /** The conversation's state, capabilities and queue. */
 export function useConversation(id: ConversationId | null) {
   const { client } = useDaemon();
@@ -42,10 +54,7 @@ export function useConversation(id: ConversationId | null) {
     queryFn: async () =>
       id === null
         ? Promise.reject(new Error('No conversation'))
-        : readJson(
-            await client.conversations[':conversationId'].$get({ param: { conversationId: id } }),
-            ConversationDto,
-          ),
+        : conversationQueryOptions(client, id).queryFn(),
     enabled: id !== null,
   });
 }
@@ -53,6 +62,27 @@ export function useConversation(id: ConversationId | null) {
 /** Every stored item of the conversation, in `seq` order, read a page at a time. */
 export function useConversationItems(id: ConversationId | null): readonly ConversationItemDto[] {
   return useConversationItemsState(id).items;
+}
+
+/** Every stored item of the conversation, read a page at a time. */
+export async function readConversationItems(
+  client: DaemonClient,
+  id: ConversationId,
+): Promise<ConversationItemDto[]> {
+  const items: ConversationItemDto[] = [];
+  let afterSeq: number | null = null;
+  for (;;) {
+    const page: ConversationItemsPage = await readJson(
+      await client.conversations[':conversationId'].items.$get({
+        param: { conversationId: id },
+        query: afterSeq === null ? {} : { afterSeq },
+      }),
+      ConversationItemsPage,
+    );
+    items.push(...page.items);
+    if (page.nextAfterSeq === null) return items;
+    afterSeq = page.nextAfterSeq;
+  }
 }
 
 /** The stored items, and whether the first read of them is still on its way. */
@@ -63,23 +93,7 @@ export function useConversationItemsState(id: ConversationId | null): {
   const { client } = useDaemon();
   const query = useQuery({
     queryKey: id === null ? ['conversations', 'none', 'items'] : conversationKeys.items(id),
-    queryFn: async () => {
-      if (id === null) return [];
-      const items: ConversationItemDto[] = [];
-      let afterSeq: number | null = null;
-      for (;;) {
-        const page: ConversationItemsPage = await readJson(
-          await client.conversations[':conversationId'].items.$get({
-            param: { conversationId: id },
-            query: afterSeq === null ? {} : { afterSeq },
-          }),
-          ConversationItemsPage,
-        );
-        items.push(...page.items);
-        if (page.nextAfterSeq === null) return items;
-        afterSeq = page.nextAfterSeq;
-      }
-    },
+    queryFn: async () => (id === null ? [] : readConversationItems(client, id)),
     enabled: id !== null,
   });
   return { items: query.data ?? NO_ITEMS, loading: id !== null && query.isPending };
