@@ -145,6 +145,7 @@
                   "verify",
                   "revise",
                   "builder_review",
+                  "plan_approval",
                   "pass_review"
                 ]
               },

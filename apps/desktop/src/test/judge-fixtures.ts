@@ -4,6 +4,7 @@ import {
   type DecisionStatsListDto,
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
+  type AskedDecision,
   JudgeCallDto,
   JudgeCallsPageQuery,
   JudgeConfigPatch,
@@ -142,7 +143,7 @@ export function serveJudge(initial: {
           { error: 'invalid', message: initial.refuseModel },
           { status: 400 },
         );
-      const merged = (name: JudgeDecision) => {
+      const merged = (name: AskedDecision) => {
         const current = status.config.decisions[name];
         const change = body.decisions?.[name];
         return {
@@ -167,7 +168,6 @@ export function serveJudge(initial: {
           enabled: body.enabled ?? status.config.enabled,
           accountId,
           decisions: {
-            review_size: merged(JudgeDecision.ReviewSize),
             shape_ready: merged(JudgeDecision.ShapeReady),
             shape_record: merged(JudgeDecision.ShapeRecord),
             shape_elsewhere: merged(JudgeDecision.ShapeElsewhere),

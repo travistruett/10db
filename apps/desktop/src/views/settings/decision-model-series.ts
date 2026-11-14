@@ -1,5 +1,6 @@
 import {
   JudgeDecision,
+  isAskedDecision,
   type DecisionModelDto,
   type DecisionStatsListDto,
   type JudgeConfig,
@@ -44,7 +45,7 @@ export function decisionModelSeries(
   const paid = placed.map((p) => p.cost).filter((c) => c > 0);
   const anyFree = placed.some((p) => p.cost === 0);
   const freeX = anyFree ? (paid.length === 0 ? FREE_X_WITHOUT_PAID : Math.min(...paid) / 4) : null;
-  const decisions = Object.values(JudgeDecision).filter((d) => d in config.decisions);
+  const decisions = Object.values(JudgeDecision).filter(isAskedDecision);
   const points = placed.map(({ model, cost, seconds }): DecisionModelPoint => {
     const free = cost === 0;
     return {

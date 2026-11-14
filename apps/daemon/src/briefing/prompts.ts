@@ -67,7 +67,12 @@ export interface PromptInput {
   readonly previousResult: StepResult | null;
   /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
   readonly earlierResults: readonly StepResult[];
-  readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
+  readonly revisedBy: {
+    readonly role: StepRole;
+    readonly personaName: string;
+    /** The rejection's findings, told to a resumed session, which never saw the review. */
+    readonly notes?: string;
+  } | null;
   /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
   readonly sandboxed?: boolean;
   /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
@@ -615,6 +620,7 @@ export function briefedFromHandoff(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'plan_approval':
     case 'pass_review':
       return false;
   }
@@ -753,13 +759,23 @@ function actionSection(input: PromptInput): string {
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
     case 'builder_review':
       return 'The builder is checking the work; there is nothing to do until they answer.';
+    case 'plan_approval':
+      return 'The builder is reading the plan; there is nothing to do until they answer.';
     case 'pass_review':
       return 'The builder is looking at the page; there is nothing to do until they write.';
     case 'revise': {
       const by = input.revisedBy
         ? `The ${input.revisedBy.role} step (${input.revisedBy.personaName})`
         : 'A reviewer';
-      return input.step.tools === ToolAccess.Edit
+      const edits = input.step.tools === ToolAccess.Edit;
+      if (input.action.providerSessionId !== null) {
+        // The session that did the work, resumed: it never saw the review, so the findings come with the prompt.
+        const told = edits
+          ? `${by} rejected the work. Its findings are below. Address each one, commit, and end your turn.`
+          : `${by} rejected your result. Its findings are below. Address each one, then call mcp__10db__complete_step again.`;
+        return input.revisedBy?.notes ? `${told}\n\n${input.revisedBy.notes}` : told;
+      }
+      return edits
         ? `${by} rejected the work. Its notes are under Earlier steps. Address each one, commit, and end your turn.`
         : `${by} rejected your result. Its notes are under Earlier steps. Address each one, then call mcp__10db__complete_step again.`;
     }

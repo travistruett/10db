@@ -1,5 +1,7 @@
 import {
   JudgeDecision,
+  isAskedDecision,
+  type AskedDecision,
   type DecisionModelDto,
   type DecisionStatsListDto,
   type JudgeStatusDto,
@@ -18,7 +20,7 @@ import {
 
 type Row =
   | { readonly kind: 'group'; readonly id: string; readonly label: string }
-  | { readonly kind: 'decision'; readonly id: string; readonly decision: JudgeDecision };
+  | { readonly kind: 'decision'; readonly id: string; readonly decision: AskedDecision };
 
 const STATUS_BADGE = {
   [DecisionStatus.Acting]: { color: 'teal', variant: 'light' },
@@ -64,7 +66,7 @@ export function DecisionsTable({
   readonly stats: DecisionStatsListDto | undefined;
   readonly shadow: readonly ShadowAgreementDto[] | undefined;
   readonly models: readonly DecisionModelDto[] | undefined;
-  readonly onOpen: (decision: JudgeDecision) => void;
+  readonly onOpen: (decision: AskedDecision) => void;
   /** The Status column; off where the page is not the place that switches decisions on. */
   readonly withStatus?: boolean;
 }) {
@@ -72,12 +74,12 @@ export function DecisionsTable({
   const allOn = config.enabled && !status.off;
   const keyed = status.account !== null && status.account.secretState === 'set';
   const records: Row[] = groupedDecisions(
-    Object.values(JudgeDecision).filter((d) => d in config.decisions),
+    Object.values(JudgeDecision).filter(isAskedDecision),
   ).flatMap(({ group, decisions }) => [
     { kind: 'group', id: `group:${group}`, label: DECISION_GROUP_LABEL[group] },
     ...decisions.map((decision): Row => ({ kind: 'decision', id: decision, decision })),
   ]);
-  const ofDecision = (row: Row, then: (d: JudgeDecision) => React.ReactNode) =>
+  const ofDecision = (row: Row, then: (d: AskedDecision) => React.ReactNode) =>
     row.kind === 'decision' ? then(row.decision) : null;
   const columns: DataTableColumn<Row>[] = [
     {

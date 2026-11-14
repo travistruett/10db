@@ -248,7 +248,14 @@ function OpenInbox({
       return;
     }
     // A check card is answered by its own buttons, never by a key.
-    if (!selectedRow || !selected || selected.kind === InboxKind.Check || answer.isPending) return;
+    if (
+      !selectedRow ||
+      !selected ||
+      selected.kind === InboxKind.Check ||
+      selected.kind === InboxKind.Plan ||
+      answer.isPending
+    )
+      return;
     if (previewing) return;
     if (isDismissable(selected)) {
       dismiss(selectedRow);
@@ -283,7 +290,9 @@ function OpenInbox({
   useInboxKeys({
     count: rows.length,
     optionCount:
-      selected?.kind === InboxKind.Check || previewing ? 0 : (selected?.options.length ?? 0),
+      selected?.kind === InboxKind.Check || selected?.kind === InboxKind.Plan || previewing
+        ? 0
+        : (selected?.options.length ?? 0),
     onMove: (delta) => {
       const next = rows[Math.min(rows.length - 1, Math.max(0, index + delta))];
       if (!next || next.key === selectedRow?.key) return false;

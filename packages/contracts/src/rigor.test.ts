@@ -99,9 +99,40 @@ describe('PlaybookInput', () => {
       value: { rows: [{ rigor: 'careful', steps: ['plan', 'plan_review', 'implement'] }] },
       ok: true,
     },
+    {
+      name: 'a row with only its process fields',
+      value: {
+        rows: [{ rigor: 'careful', reviewRounds: 2, fixBy: 'fresh', approvesPlan: false }],
+      },
+      ok: true,
+    },
+    {
+      name: 'a row with its process fields cleared',
+      value: {
+        rows: [{ rigor: 'careful', reviewRounds: null, fixBy: null, approvesPlan: null }],
+      },
+      ok: true,
+    },
+    {
+      name: 'a row with four review rounds',
+      value: { rows: [{ rigor: 'careful', reviewRounds: 4 }] },
+      ok: false,
+    },
+    {
+      name: 'a row with a fix by nothing known',
+      value: { rows: [{ rigor: 'careful', fixBy: 'psychic' }] },
+      ok: false,
+    },
     { name: 'nothing', value: {}, ok: true },
   ])('$name: parses $ok', ({ value, ok }) => {
     expect(PlaybookInput.safeParse(value).success).toBe(ok);
+  });
+});
+
+describe('PlaybookInput: a partial patch per field', () => {
+  it('leaves out what a row form does not send', () => {
+    const parsed = PlaybookInput.parse({ rows: [{ rigor: 'light', reviewRounds: 1 }] });
+    expect(parsed.rows[0]).toEqual({ rigor: 'light', reviewRounds: 1 });
   });
 });
 

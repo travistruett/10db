@@ -56,7 +56,8 @@ describe('Settings › Decisions', () => {
       open();
       await screen.findByRole('table', { name: 'Decisions' });
       const groups = screen.getAllByRole('rowheader').map((h) => h.textContent);
-      expect(groups).toEqual(['Delivery', 'Plan', 'Stakeholder questions']);
+      // The retired review-size decision is no longer configured, so it has no Delivery group.
+      expect(groups).toEqual(['Plan', 'Stakeholder questions']);
       expect(screen.queryByText('Sizing', { selector: 'th' })).toBeNull();
     });
 
@@ -68,11 +69,15 @@ describe('Settings › Decisions', () => {
         stats: {
           since: '2026-10-14T12:00:00.000Z',
           decisions: [
-            decisionStatsDto(JudgeDecision.ReviewSize, { calls: 120, acted: 62, costUsd: 0.0123 }),
+            decisionStatsDto(JudgeDecision.QuestionRoute, {
+              calls: 120,
+              acted: 62,
+              costUsd: 0.0123,
+            }),
           ],
         },
       });
-      const row = await rowOf('Skip review for small changes');
+      const row = await rowOf('Who a question goes to');
       await waitFor(() => {
         expect(row.textContent).toContain('120 calls · 62 acted · $0.0123');
       });
@@ -115,7 +120,7 @@ describe('Settings › Decisions', () => {
       });
       await screen.findByRole('table', { name: 'Decisions' });
       for (const label of [
-        'Skip review for small changes',
+        'Who a question goes to',
         'Enough to propose',
         'Whether a reply approves',
       ]) {

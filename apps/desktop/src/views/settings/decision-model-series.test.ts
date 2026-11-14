@@ -57,11 +57,11 @@ describe('decisionModelSeries', () => {
   it('lists the decisions that use a model, from the config', () => {
     const { points } = decisionModelSeries(
       [model('a/one'), model('a/two')],
-      config({ [JudgeDecision.ReviewSize]: 'a/one', [JudgeDecision.ShapeReady]: 'a/one' }),
+      config({ [JudgeDecision.ShapeReady]: 'a/one', [JudgeDecision.QuestionRoute]: 'a/one' }),
     );
     expect(points.find((p) => p.id === 'a/one')?.usedBy).toEqual([
-      JudgeDecision.ReviewSize,
       JudgeDecision.ShapeReady,
+      JudgeDecision.QuestionRoute,
     ]);
     expect(points.find((p) => p.id === 'a/two')?.usedBy).toEqual([]);
   });

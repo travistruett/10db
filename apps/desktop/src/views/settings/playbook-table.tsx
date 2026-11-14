@@ -11,13 +11,13 @@ import { useState } from 'react';
 import { useEveryRigorPicks, useModels } from '../../daemon/model-queries';
 import { usePlaybook } from '../../daemon/playbook-queries';
 import { PlaybookCellButton, PlaybookCellEditor } from './playbook-cell-editor';
-import { scopeSource } from './playbook-edits';
+import { processLine, scopeSource } from './playbook-edits';
 import { PlaybookRowDrawer } from './playbook-row-drawer';
 import { RIGOR_LABELS } from './rigor-labels';
 import { ROLES } from './role-labels';
 
 /**
- * The playbook of one scope: a row per rigor saying which steps run, and a cell per rigor and role showing what
+ * The playbook of one scope: a row per rigor saying which steps run and how it is reviewed, and a cell per rigor and role showing what
  * it resolves to on the account. A row's name opens its steps, a cell opens its editor.
  */
 export function PlaybookTable({
@@ -54,7 +54,7 @@ export function PlaybookTable({
     {
       accessor: 'rigor',
       title: 'Rigor',
-      width: 150,
+      width: 210,
       render: (row) => (
         <UnstyledButton
           aria-label={`${RIGOR_LABELS[row.rigor].label} steps`}
@@ -74,6 +74,9 @@ export function PlaybookTable({
           </Group>
           <Text size="xs" c="dimmed">
             {RIGOR_LABELS[row.rigor].about}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {processLine(row)}
           </Text>
         </UnstyledButton>
       ),

@@ -1,7 +1,7 @@
 import type {
   DecisionModelDto,
   DecisionStatsDto,
-  JudgeDecision,
+  AskedDecision,
   JudgeStatusDto,
   ShadowAgreementDto,
 } from '@10db/contracts';
@@ -66,7 +66,7 @@ function DrawerBody({
   shadow,
   models,
 }: {
-  readonly decision: JudgeDecision;
+  readonly decision: AskedDecision;
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsDto | undefined;
   readonly statsFailed: boolean;
@@ -162,7 +162,7 @@ export function DecisionDrawer({
   onClose,
 }: {
   /** The decision shown; null keeps the drawer closed. */
-  readonly decision: JudgeDecision | null;
+  readonly decision: AskedDecision | null;
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsDto | undefined;
   /** The stats could not be read, as against not read yet. */

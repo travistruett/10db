@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './index';
-import { keepingFeedback, withUndelivered } from './next-action';
+import { keepingFeedback, resumedSessionOf, withUndelivered } from './next-action';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
@@ -85,9 +85,21 @@ describe('nextActionAfterCrash with builder input', () => {
     ],
     [
       'keeps a revise with the step that rejected',
-      { kind: 'revise', reviewStep: 1 },
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
       'p1',
-      { kind: 'revise', reviewStep: 1 },
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
+    ],
+    [
+      'sends a revise that resumed its step’s session fresh after a crash',
+      { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
+      'p-build',
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
+    ],
+    [
+      'keeps a fresh revise as it is, whatever session crashed',
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
+      'p-fix',
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
     ],
     [
       'keeps an uncommitted step with the files it left, so the next session still commits them',
@@ -181,10 +193,17 @@ describe('nextActionOnAnotherAccount', () => {
     ['leaves verification alone', { kind: 'verify' }, handoff, null, { kind: 'verify' }],
     [
       'leaves a revision alone',
-      { kind: 'revise', reviewStep: 1 },
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
       handoff,
       null,
-      { kind: 'revise', reviewStep: 1 },
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
+    ],
+    [
+      'starts a revise that would resume a session on another account fresh',
+      { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
+      handoff,
+      null,
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
     ],
     [
       'leaves a fix alone',
@@ -243,6 +262,12 @@ describe('withUndelivered', () => {
       messageId,
       { kind: 'answer', inboxId, providerSessionId: 'p1' },
     ],
+    [
+      'keeps a revise that resumes its step’s session',
+      { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
+      messageId,
+      { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
+    ],
     ['keeps verification', { kind: 'verify' }, messageId, { kind: 'verify' }],
     ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
     [
@@ -292,5 +317,23 @@ describe('keepingFeedback', () => {
     ],
   ])('%s', (_name, previous, stopped, expected) => {
     expect(keepingFeedback(previous, stopped)).toEqual(expected);
+  });
+});
+
+describe('resumedSessionOf', () => {
+  it.each<[string, NextAction, string | null]>([
+    [
+      'names the session a revise resumes',
+      { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
+      'p-build',
+    ],
+    [
+      'names none for a fresh revise',
+      { kind: 'revise', reviewStep: 1, providerSessionId: null },
+      null,
+    ],
+    ['names none for a gate fix', { kind: 'fix', evidenceId }, null],
+  ])('%s', (_name, action, expected) => {
+    expect(resumedSessionOf(action)).toBe(expected);
   });
 });

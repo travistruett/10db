@@ -111,11 +111,7 @@ test.describe('Settings › Models', () => {
       const view = main.getByRole('radiogroup', { name: 'Models view' });
       await expect(view.getByRole('radio', { name: 'Agents' })).toBeChecked();
       await expect(main.getByRole('region', { name: 'Playbook section' })).toBeVisible();
-      // The playbook's cell popovers put aria-haspopup on a bare div (playbook-cell-editor.tsx), which axe refuses,
-      // so this scan leaves the playbook out.
-      await expectAccessible(page, `settings models agents ${scheme}`, [
-        '[aria-label="Playbook section"]',
-      ]);
+      await expectAccessible(page, `settings models agents ${scheme}`);
 
       await view.getByText('Decisions').click();
       await expect(view.getByRole('radio', { name: 'Decisions' })).toBeChecked();
@@ -195,7 +191,7 @@ test.describe('Settings › Decisions with logged calls', () => {
     await openDecisions(page, 'dark');
     const main = page.getByRole('main');
     const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
-    for (const group of ['Delivery', 'Plan', 'Stakeholder questions']) {
+    for (const group of ['Plan', 'Stakeholder questions']) {
       await expect(decisions.getByText(group, { exact: true })).toBeVisible();
     }
     // The e2e daemon runs with TENDB_JUDGE=off.
@@ -227,8 +223,8 @@ test.describe('Settings › Decisions with logged calls', () => {
     const main = page.getByRole('main');
     await expect(main.getByRole('table', { name: 'Decisions', exact: true })).toBeVisible();
     await expectAccessible(page, 'settings decisions light');
-    await main.getByRole('button', { name: 'Skip review for small changes' }).first().click();
-    await expect(page.getByRole('dialog', { name: 'Skip review for small changes' })).toBeVisible();
+    await main.getByRole('button', { name: 'Who a question goes to' }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Who a question goes to' })).toBeVisible();
     await expectAccessible(page, 'settings decisions drawer light');
   });
 });

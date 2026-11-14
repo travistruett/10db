@@ -1,4 +1,9 @@
-import { JudgeDecision, type DecisionModelDto } from '@10db/contracts';
+import {
+  JudgeDecision,
+  isAskedDecision,
+  type AskedDecision,
+  type DecisionModelDto,
+} from '@10db/contracts';
 import { Alert, Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -52,7 +57,7 @@ export function DecisionsModelsView() {
   const status = useJudgeStatus();
   const stats = useDecisionStats();
   const shadow = useShapeMeasures();
-  const [open, setOpen] = useState<JudgeDecision | null>(null);
+  const [open, setOpen] = useState<AskedDecision | null>(null);
   const [openModel, setOpenModel] = useState<DecisionModelDto | null>(null);
   const [modelOpened, setModelOpened] = useState(false);
   const keyed =
@@ -62,10 +67,10 @@ export function DecisionsModelsView() {
   if (status.isError) return <Alert color="red">{status.error.message}</Alert>;
   const judge = status.data;
   const modelList = models.data?.models;
-  const decisionsOf = (model: string): JudgeDecision[] =>
-    Object.values(JudgeDecision).filter(
-      (d) => d in judge.config.decisions && judge.config.decisions[d].model === model,
-    );
+  const decisionsOf = (model: string): AskedDecision[] =>
+    Object.values(JudgeDecision)
+      .filter(isAskedDecision)
+      .filter((d) => judge.config.decisions[d].model === model);
 
   const comparison = () => {
     if (judge.off) return <Unavailable text={OFF_WORDS} link={false} />;

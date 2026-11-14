@@ -2,7 +2,6 @@ import {
   AccountKind,
   ConflictError,
   InvalidError,
-  JudgeDecision,
   UpstreamError,
   type AccountId,
   type DecisionModelListDto,
@@ -54,9 +53,11 @@ export type JudgeApiServices = Pick<
 /** The models a patch sets that differ from the ones saved, each once. */
 function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
   const models = new Set<string>();
-  for (const decision of Object.values(JudgeDecision)) {
-    const model = patch.decisions?.[decision]?.model;
-    if (model !== undefined && model !== config.decisions[decision].model) models.add(model);
+  for (const [decision, now] of Object.entries(config.decisions)) {
+    const changes: Record<string, { readonly model?: string | undefined } | undefined> =
+      patch.decisions ?? {};
+    const model = changes[decision]?.model;
+    if (model !== undefined && model !== now.model) models.add(model);
   }
   return [...models];
 }

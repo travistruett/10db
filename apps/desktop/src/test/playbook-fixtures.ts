@@ -29,6 +29,23 @@ const DEFAULT_MINIMUM: Readonly<Record<Rigor, number>> = {
   critical: 50,
 };
 
+/** The process each rigor runs before any scope changes it. */
+const DEFAULT_PROCESS: Readonly<
+  Record<
+    Rigor,
+    {
+      readonly reviewRounds: number;
+      readonly fixBy: 'resumed' | 'fresh';
+      readonly approvesPlan: boolean;
+    }
+  >
+> = {
+  light: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+  standard: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+  careful: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false },
+  critical: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true },
+};
+
 const own = <T>(value: T, source: PlaybookSource = 'default') => ({ value, source });
 
 /**
@@ -37,17 +54,18 @@ const own = <T>(value: T, source: PlaybookSource = 'default') => ({ value, sourc
  */
 export function playbookDto(
   over: {
-    readonly rows?: readonly PlaybookRowDto[];
+    readonly rows?: readonly (Pick<PlaybookRowDto, 'rigor'> & Partial<PlaybookRowDto>)[];
     readonly cells?: readonly PlaybookCellDto[];
   } = {},
 ): PlaybookDto {
-  const rows = RIGORS.map(
-    (rigor): PlaybookRowDto =>
-      over.rows?.find((r) => r.rigor === rigor) ?? {
-        rigor,
-        steps: own([...DEFAULT_STEPS[rigor]]),
-      },
-  );
+  const rows = RIGORS.map((rigor): PlaybookRowDto => ({
+    rigor,
+    steps: own([...DEFAULT_STEPS[rigor]]),
+    reviewRounds: own(DEFAULT_PROCESS[rigor].reviewRounds),
+    fixBy: own(DEFAULT_PROCESS[rigor].fixBy),
+    approvesPlan: own(DEFAULT_PROCESS[rigor].approvesPlan),
+    ...over.rows?.find((r) => r.rigor === rigor),
+  }));
   const cells = RIGORS.flatMap((rigor) =>
     Object.values(StepRole).map(
       (role): PlaybookCellDto =>

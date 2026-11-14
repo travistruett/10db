@@ -25,9 +25,8 @@ describe('judge config', () => {
     ['not an object', 'on'],
     [
       'a floor above one',
-      { enabled: true, decisions: { review_size: { enabled: true, model: 'm', floor: 3 } } },
+      { enabled: true, decisions: { shape_ready: { enabled: true, model: 'm', floor: 3 } } },
     ],
-    ['a missing decision', { enabled: false, decisions: {} }],
   ])('reads %s as the defaults', (_name, stored) => {
     store.write((ctx) => {
       setAppSetting(ctx, 'judge', stored);
@@ -35,15 +34,30 @@ describe('judge config', () => {
     expect(getJudgeConfig(store.db)).toEqual(DEFAULT_JUDGE_CONFIG);
   });
 
+  it('reads a stored config with the retired review_size, dropping it, and a missing decision with its default', () => {
+    store.write((ctx) => {
+      setAppSetting(ctx, 'judge', {
+        enabled: false,
+        decisions: { review_size: { enabled: false, model: 'm', floor: 0.5 } },
+      });
+    });
+    const config = getJudgeConfig(store.db);
+    expect(config.enabled).toBe(false);
+    expect(config.decisions).toEqual(DEFAULT_JUDGE_CONFIG.decisions);
+    // Stored back by a patch, it stays dropped.
+    store.write((ctx) => patchJudgeConfig(ctx, { enabled: true }));
+    expect(getJudgeConfig(store.db)).toEqual(DEFAULT_JUDGE_CONFIG);
+  });
+
   it('merges a patch into what is stored, one field at a time', () => {
-    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { floor: 0.9 } } }));
+    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_ready: { floor: 0.9 } } }));
     store.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));
     expect(getJudgeConfig(store.db)).toEqual({
       enabled: false,
       accountId: null,
       decisions: {
         ...DEFAULT_JUDGE_CONFIG.decisions,
-        review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.9 },
+        shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.9 },
       },
     });
   });
@@ -51,10 +65,10 @@ describe('judge config', () => {
   it('answers the config a patch produced', () => {
     const config = store.write((ctx) =>
       patchJudgeConfig(ctx, {
-        decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
+        decisions: { shape_ready: { model: 'anthropic/claude-haiku-5.5' } },
       }),
     ).value;
-    expect(config.decisions.review_size.model).toBe('anthropic/claude-haiku-5.5');
+    expect(config.decisions.shape_ready.model).toBe('anthropic/claude-haiku-5.5');
   });
 
   describe('the account decisions run on', () => {

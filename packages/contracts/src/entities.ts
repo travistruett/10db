@@ -952,10 +952,19 @@ export const NextAction = z.discriminatedUnion('kind', [
     paths: z.array(z.string().min(1)).min(1),
   }),
   z.object({ kind: z.literal('verify') }),
-  /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
-  z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
+  /**
+   * Rerun a step a reviewer rejected; the rejecting step's notes are in its result. With a
+   * `providerSessionId` the step's own session is resumed to fix it; without one a fresh session starts.
+   */
+  z.object({
+    kind: z.literal('revise'),
+    reviewStep: z.int().min(0),
+    providerSessionId: z.string().min(1).nullable().default(null),
+  }),
   /** The work is done and the project has no gate: the builder approves it or sends it back. */
   z.object({ kind: z.literal('builder_review'), inboxId: InboxItemId }),
+  /** The plan is done and the rigor's row asks the builder to approve it: `inboxId` is the `plan` card. */
+  z.object({ kind: z.literal('plan_approval'), inboxId: InboxItemId }),
   /**
    * A page of a Workbench pass is Ready, or its turn failed: the builder looks at it and writes again
    * or signs it off. `inboxId` names the Ready `check` item or the failed turn's `flag`.
@@ -1128,6 +1137,13 @@ export const CheckChoice = {
   SendBack: 'send_back',
 } as const;
 export type CheckChoice = (typeof CheckChoice)[keyof typeof CheckChoice];
+
+/** The two answers to a plan card: build to it, or send it back to be planned again with a note. */
+export const PlanChoice = {
+  Approve: 'approve',
+  SendBack: 'send_back',
+} as const;
+export type PlanChoice = (typeof PlanChoice)[keyof typeof PlanChoice];
 
 /**
  * The choice every lane question card offers beside the lane's own: answering it stops the run and

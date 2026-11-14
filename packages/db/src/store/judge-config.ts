@@ -4,7 +4,7 @@ import {
   InvalidError,
   JudgeConfig,
   type JudgeConfigPatch,
-  JudgeDecision,
+  type AskedDecision,
 } from '@10db/contracts';
 import { findAccountRow } from './accounts';
 import { getAppSetting, setAppSetting } from './settings';
@@ -21,11 +21,10 @@ export function getJudgeConfig(db: DbReader): JudgeConfig {
 /** Merges the patch into the current config, field by field, stores it and answers it. */
 export function patchJudgeConfig(ctx: WriteContext, patch: JudgeConfigPatch): JudgeConfig {
   const current = getJudgeConfig(ctx.tx);
+  const changes: Record<string, NonNullable<JudgeConfigPatch['decisions']>[AskedDecision]> =
+    patch.decisions ?? {};
   const decisions = Object.fromEntries(
-    Object.values(JudgeDecision).map((name) => [
-      name,
-      { ...current.decisions[name], ...patch.decisions?.[name] },
-    ]),
+    Object.entries(current.decisions).map(([name, now]) => [name, { ...now, ...changes[name] }]),
   );
   // Both inputs were parsed by the contract's schemas, so the merge is a JudgeConfig; parsing again
   // is what guarantees it.

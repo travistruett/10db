@@ -124,10 +124,8 @@ describe('the Decisions view of Models', () => {
 
   it('opens the decision drawer from a row of the decisions table', async () => {
     await open();
-    fireEvent.click(await screen.findByRole('button', { name: 'Skip review for small changes' }));
-    expect(
-      await screen.findByRole('dialog', { name: 'Skip review for small changes' }),
-    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Who a question goes to' }));
+    expect(await screen.findByRole('dialog', { name: 'Who a question goes to' })).toBeTruthy();
   });
 
   it('opens a model’s drawer with its speed by provider', async () => {

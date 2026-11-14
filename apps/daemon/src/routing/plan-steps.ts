@@ -1,4 +1,5 @@
 import {
+  REVIEW_ROLES,
   ROLE_LABEL,
   StepRole,
   ToolAccess,
@@ -15,7 +16,7 @@ import {
 } from '@10db/contracts';
 import { DEFAULT_PERSONA_FOR } from './catalogue';
 import { chooseModel, type ChooseTask } from './choose-model';
-import { resolveSteps, type PlaybookScopes, type ResolvedStep } from './playbook';
+import { resolveSteps, rowProcess, type PlaybookScopes, type ResolvedStep } from './playbook';
 
 export interface PlanInput {
   /** The rigor the task runs at (`effectiveRigor`). */
@@ -50,7 +51,7 @@ function personaFor(step: ResolvedStep, personas: readonly PersonaDto[]): Person
   );
 }
 
-function routedStep(step: ResolvedStep, input: PlanInput): WorkstreamStep {
+function routedStep(step: ResolvedStep, input: PlanInput, reviewRounds: number): WorkstreamStep {
   const persona = personaFor(step, input.personas);
   const choice = chooseModel({
     def: { role: step.role, need: step.need },
@@ -77,6 +78,7 @@ function routedStep(step: ResolvedStep, input: PlanInput): WorkstreamStep {
     result: null,
     earlier: [],
     sentBack: 0,
+    ...(REVIEW_ROLES.includes(step.role) ? { reviewRounds } : {}),
     setting: choice.setting,
     // With nothing to run on, the step names the tier and has no profile; the launcher never starts a tier name.
     profileId: choice.profile?.id ?? null,
@@ -90,15 +92,33 @@ function routedStep(step: ResolvedStep, input: PlanInput): WorkstreamStep {
 
 /** Resolves a task's rigor, kinds and the playbook into the steps a workstream runs. */
 export function planSteps(input: PlanInput): StepPlanDto {
+  const { reviewRounds } = rowProcess(input.rigor, input.playbook);
   const steps = resolveSteps({
     rigor: input.rigor,
     taskKinds: input.taskKinds,
     kinds: input.kinds,
     playbook: input.playbook,
-  }).map((step) => routedStep(step, input));
+  }).map((step) => routedStep(step, input, reviewRounds));
   return {
     rigor: input.rigor,
     steps,
     overBudget: steps.flatMap((s, i) => (s.overBudget ? [i] : [])),
   };
+}
+
+/**
+ * The step for `role` as the task would run it if its plan had that role as well, newly routed: a
+ * role no row runs takes the cell of the lowest stronger rigor that does, as a kind's added step does.
+ * Undefined when the plan holds no step for the role.
+ */
+export function planAddedStep(input: PlanInput, role: StepRole): WorkstreamStep | undefined {
+  const { reviewRounds } = rowProcess(input.rigor, input.playbook);
+  const resolved = resolveSteps({
+    rigor: input.rigor,
+    taskKinds: input.taskKinds,
+    kinds: input.kinds,
+    playbook: input.playbook,
+    addedRoles: [role],
+  }).find((step) => step.role === role);
+  return resolved === undefined ? undefined : routedStep(resolved, input, reviewRounds);
 }

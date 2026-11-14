@@ -1,5 +1,5 @@
 import { Rigor, StepRole, type CellSetting } from '@10db/contracts';
-import type { PlaybookCellOverride, PlaybookOverrides } from '@10db/db';
+import type { PlaybookCellOverride, PlaybookOverrides, PlaybookRowOverride } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CELLS, DEFAULT_ROWS } from './playbook-defaults';
 import { playbookView } from './playbook-view';
@@ -26,10 +26,40 @@ const standardReview = (view: ReturnType<typeof playbookView>) => {
   if (found === undefined) throw new Error('no Standard review cell');
   return found;
 };
+const row = (
+  rigor: Rigor,
+  steps: StepRole[] | null,
+  process: Partial<Omit<PlaybookRowOverride, 'rigor' | 'steps'>> = {},
+): PlaybookRowOverride => ({
+  rigor,
+  steps,
+  reviewRounds: null,
+  fixBy: null,
+  approvesPlan: null,
+  ...process,
+});
 const stepsOf = (view: ReturnType<typeof playbookView>, rigor: Rigor) =>
   view.rows.find((r) => r.rigor === rigor)?.steps;
 
 describe('playbookView: what a scope sees, and where each value comes from', () => {
+  it('shows each process field with its source, defaults first', () => {
+    const view = playbookView(
+      scopes(
+        { rows: [row(Rigor.Careful, null, { reviewRounds: 3 })] },
+        { rows: [row(Rigor.Careful, null, { fixBy: 'resumed' })] },
+      ),
+    );
+    expect(view.rows.find((r) => r.rigor === Rigor.Careful)).toMatchObject({
+      reviewRounds: { value: 3, source: 'global' },
+      fixBy: { value: 'resumed', source: 'project' },
+      approvesPlan: { value: false, source: 'default' },
+    });
+    expect(view.rows.find((r) => r.rigor === Rigor.Critical)).toMatchObject({
+      reviewRounds: { value: 2, source: 'default' },
+      approvesPlan: { value: true, source: 'default' },
+    });
+  });
+
   it('is 10db’s defaults, sourced as default, when nothing is overridden', () => {
     const view = playbookView(scopes());
     expect(view.rows.map((r) => r.rigor)).toEqual(['light', 'standard', 'careful', 'critical']);
@@ -52,7 +82,7 @@ describe('playbookView: what a scope sees, and where each value comes from', () 
   it('takes a global row and cell over the default, field by field', () => {
     const view = playbookView(
       scopes({
-        rows: [{ rigor: Rigor.Standard, steps: [StepRole.Implement] }],
+        rows: [row(Rigor.Standard, [StepRole.Implement])],
         cells: [cell(Rigor.Standard, StepRole.Review, { effort: 'high' })],
       }),
     );
@@ -75,7 +105,7 @@ describe('playbookView: what a scope sees, and where each value comes from', () 
           ],
         },
         {
-          rows: [{ rigor: Rigor.Standard, steps: [StepRole.Implement, StepRole.Qa] }],
+          rows: [row(Rigor.Standard, [StepRole.Implement, StepRole.Qa])],
           cells: [cell(Rigor.Standard, StepRole.Review, { effort: 'max' })],
         },
       ),
@@ -92,7 +122,7 @@ describe('playbookView: what a scope sees, and where each value comes from', () 
 
   it('ignores the project scope when there is none, so a global view never says project', () => {
     const view = playbookView(
-      scopes({ rows: [{ rigor: Rigor.Light, steps: [StepRole.Implement, StepRole.Review] }] }),
+      scopes({ rows: [row(Rigor.Light, [StepRole.Implement, StepRole.Review])] }),
     );
     expect(stepsOf(view, Rigor.Light)?.source).toBe('global');
   });

@@ -87,6 +87,7 @@ import type {
   ProposalKind,
   Provider,
   QuestionCategory,
+  FixBy,
   Rigor,
   RoutingRuleId,
   SessionId,
@@ -1275,7 +1276,10 @@ export const kinds = sqliteTable('kinds', {
   updatedAt: updatedAt(),
 });
 
-/** The steps a rigor runs, as one scope overrides 10db's default: one row per rigor and project, and one per rigor with none. */
+/**
+ * A rigor's steps and process, as one scope overrides 10db's default: one row per rigor and project, and one
+ * per rigor with none. A null field leaves it to the scope above.
+ */
 export const playbookRows = sqliteTable(
   'playbook_rows',
   {
@@ -1283,7 +1287,10 @@ export const playbookRows = sqliteTable(
     projectId: text('project_id')
       .$type<ProjectId>()
       .references(() => projects.id),
-    steps: text('steps', { mode: 'json' }).$type<StepRole[]>().notNull(),
+    steps: text('steps', { mode: 'json' }).$type<StepRole[]>(),
+    reviewRounds: integer('review_rounds'),
+    fixBy: text('fix_by').$type<FixBy>(),
+    approvesPlan: integer('approves_plan', { mode: 'boolean' }),
     updatedAt: updatedAt(),
   },
   (t) => [

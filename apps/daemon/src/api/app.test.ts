@@ -2345,7 +2345,7 @@ describe('judge routes', () => {
       'PATCH /judge with a floor above one',
       'PATCH',
       '/judge',
-      { decisions: { review_size: { floor: 2 } } },
+      { decisions: { shape_ready: { floor: 2 } } },
     ],
     ['PATCH /judge with an account that is no id', 'PATCH', '/judge', { accountId: 'nope' }],
   ])('answers 400 for %s without reaching a service', async (_name, method, path, body) => {

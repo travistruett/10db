@@ -1,4 +1,4 @@
-import type { JudgeDecision } from '@10db/contracts';
+import type { AskedDecision } from '@10db/contracts';
 import { Alert, Anchor, Group, Stack, Switch, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -28,7 +28,7 @@ export function DecisionsSection() {
   const patch = usePatchJudge();
   const stats = useDecisionStats();
   const shadow = useShapeMeasures();
-  const [open, setOpen] = useState<JudgeDecision | null>(null);
+  const [open, setOpen] = useState<AskedDecision | null>(null);
   const keyed =
     status.data !== undefined && !status.data.off && status.data.account?.secretSet === true;
   const models = useDecisionModels(keyed);

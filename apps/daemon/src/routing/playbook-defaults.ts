@@ -1,4 +1,4 @@
-import { ModelTier, Rigor, StepRole, type CellSetting, type Effort } from '@10db/contracts';
+import { FixBy, ModelTier, Rigor, StepRole, type CellSetting, type Effort } from '@10db/contracts';
 import { effortAbove } from './pools';
 import { ROLE_DEFAULT } from './role-defaults';
 
@@ -14,6 +14,21 @@ export const DEFAULT_ROWS: Readonly<Record<Rigor, readonly StepRole[]>> = {
     StepRole.Review,
     StepRole.Qa,
   ],
+};
+
+/** How a rigor's reviewing steps and send-backs run, until a scope overrides it. */
+export interface RowProcess {
+  readonly reviewRounds: number;
+  readonly fixBy: FixBy;
+  readonly approvesPlan: boolean;
+}
+
+/** The process each rigor starts with. */
+export const DEFAULT_PROCESS: Readonly<Record<Rigor, RowProcess>> = {
+  [Rigor.Light]: { reviewRounds: 1, fixBy: FixBy.Resumed, approvesPlan: false },
+  [Rigor.Standard]: { reviewRounds: 1, fixBy: FixBy.Resumed, approvesPlan: false },
+  [Rigor.Careful]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: false },
+  [Rigor.Critical]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: true },
 };
 
 /**

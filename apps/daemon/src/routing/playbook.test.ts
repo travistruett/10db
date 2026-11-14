@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import type { PlaybookCellOverride, PlaybookOverrides, PlaybookRowOverride } from '@10db/db';
 import { describe, expect, it } from 'vitest';
-import { resolveSteps, type PlaybookScopes } from './playbook';
+import { resolveSteps, rowProcess, type PlaybookScopes } from './playbook';
 
 const NONE: PlaybookOverrides = { rows: [], cells: [] };
 
@@ -22,7 +22,24 @@ const scopes = (
   project: project === null ? null : { ...NONE, ...project },
 });
 
-const row = (rigor: Rigor, ...steps: StepRole[]): PlaybookRowOverride => ({ rigor, steps });
+const row = (rigor: Rigor, ...steps: StepRole[]): PlaybookRowOverride => ({
+  rigor,
+  steps,
+  reviewRounds: null,
+  fixBy: null,
+  approvesPlan: null,
+});
+const processRow = (
+  rigor: Rigor,
+  process: Partial<Omit<PlaybookRowOverride, 'rigor'>>,
+): PlaybookRowOverride => ({
+  rigor,
+  steps: null,
+  reviewRounds: null,
+  fixBy: null,
+  approvesPlan: null,
+  ...process,
+});
 const cell = (
   rigor: Rigor,
   role: StepRole,
@@ -327,5 +344,65 @@ describe('resolveSteps: what a step gets', () => {
   it('gives a kind’s override of a role the rigor does not run no step', () => {
     const kinds = [kind('security', { overrides: { qa: override({ effort: 'high' }) } })];
     expect(roles(resolve(Rigor.Careful, scopes(), kinds, ['security']))).not.toContain('qa');
+  });
+});
+
+describe('rowProcess: project, then global, then default, field by field', () => {
+  it.each([
+    {
+      name: 'the default of Light',
+      rigor: Rigor.Light,
+      playbook: scopes(),
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+    },
+    {
+      name: 'the default of Standard',
+      rigor: Rigor.Standard,
+      playbook: scopes(),
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+    },
+    {
+      name: 'the default of Careful',
+      rigor: Rigor.Careful,
+      playbook: scopes(),
+      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false },
+    },
+    {
+      name: 'the default of Critical',
+      rigor: Rigor.Critical,
+      playbook: scopes(),
+      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true },
+    },
+    {
+      name: 'a global row overriding one field',
+      rigor: Rigor.Standard,
+      playbook: scopes({ rows: [processRow(Rigor.Standard, { reviewRounds: 3 })] }),
+      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: false },
+    },
+    {
+      name: 'a project row overriding another field over a global one',
+      rigor: Rigor.Standard,
+      playbook: scopes(
+        { rows: [processRow(Rigor.Standard, { reviewRounds: 3, fixBy: 'fresh' })] },
+        { rows: [processRow(Rigor.Standard, { fixBy: 'resumed', approvesPlan: true })] },
+      ),
+      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: true },
+    },
+    {
+      name: 'zero rounds and false are values, not gaps',
+      rigor: Rigor.Critical,
+      playbook: scopes({
+        rows: [processRow(Rigor.Critical, { reviewRounds: 0, approvesPlan: false })],
+      }),
+      want: { reviewRounds: 0, fixBy: 'fresh', approvesPlan: false },
+    },
+    {
+      name: 'a row of another rigor',
+      rigor: Rigor.Light,
+      playbook: scopes({ rows: [processRow(Rigor.Critical, { reviewRounds: 0 })] }),
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+    },
+  ])('$name', ({ rigor, playbook, want }) => {
+    expect(rowProcess(rigor, playbook)).toEqual(want);
   });
 });

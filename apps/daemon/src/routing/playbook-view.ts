@@ -8,7 +8,7 @@ import {
   type PlaybookSource,
   type Rigor,
 } from '@10db/contracts';
-import { DEFAULT_CELLS, DEFAULT_ROWS } from './playbook-defaults';
+import { DEFAULT_CELLS, DEFAULT_PROCESS, DEFAULT_ROWS } from './playbook-defaults';
 import type { PlaybookScopes } from './playbook';
 
 const ROLES: readonly StepRole[] = Object.values(StepRole);
@@ -33,18 +33,37 @@ function pick<K extends keyof CellSetting>(
 }
 
 /**
- * The playbook as one scope sees it: for each rigor the steps it runs, and for each rigor and role its
+ * The playbook as one scope sees it: for each rigor the steps it runs and its process, and for each rigor and role its
  * cell, every value with the scope that set it (a project's own, else the global one, else 10db's default).
  * A cell is given for every role, empty where nothing names one, so a form can show a row's added step.
  */
 export function playbookView(playbook: PlaybookScopes): PlaybookDto {
   const sources = layers(playbook);
   const rows = RIGORS.map((rigor: Rigor): PlaybookRowDto => {
-    for (const { source, scope } of sources) {
-      const row = scope.rows.find((r) => r.rigor === rigor);
-      if (row !== undefined) return { rigor, steps: { value: [...row.steps], source } };
-    }
-    return { rigor, steps: { value: [...DEFAULT_ROWS[rigor]], source: 'default' } };
+    const found = sources.flatMap(({ source, scope }) =>
+      scope.rows.filter((r) => r.rigor === rigor).map((row) => ({ source, row })),
+    );
+    const fallback = DEFAULT_PROCESS[rigor];
+    const steps = found.find((f) => f.row.steps !== null);
+    const rounds = found.find((f) => f.row.reviewRounds !== null);
+    const fix = found.find((f) => f.row.fixBy !== null);
+    const approves = found.find((f) => f.row.approvesPlan !== null);
+    return {
+      rigor,
+      steps: {
+        value: [...(steps?.row.steps ?? DEFAULT_ROWS[rigor])],
+        source: steps?.source ?? 'default',
+      },
+      reviewRounds: {
+        value: rounds?.row.reviewRounds ?? fallback.reviewRounds,
+        source: rounds?.source ?? 'default',
+      },
+      fixBy: { value: fix?.row.fixBy ?? fallback.fixBy, source: fix?.source ?? 'default' },
+      approvesPlan: {
+        value: approves?.row.approvesPlan ?? fallback.approvesPlan,
+        source: approves?.source ?? 'default',
+      },
+    };
   });
   const cells = RIGORS.flatMap((rigor) =>
     ROLES.map((role): PlaybookCellDto => {
