@@ -360,6 +360,64 @@ describe('TaskDrawer', () => {
     expect(within(await dialog()).queryByTestId('waits-on')).toBeNull();
   });
 
+  it.each([
+    {
+      name: 'judged',
+      source: 'judge',
+      reason: 'judged Careful (0.86)',
+      line: 'Judged Careful (0.86)',
+      kind: 'Docs · judged',
+    },
+    {
+      name: 'raised by rules',
+      source: 'rules',
+      reason: 'at least Careful: migration',
+      line: 'At least Careful: migration',
+      kind: 'Docs · rules',
+    },
+    {
+      name: 'an agent’s',
+      source: 'agent',
+      reason: 'touches the contracts',
+      line: 'An agent: touches the contracts',
+      kind: 'Docs · agent',
+    },
+    {
+      name: 'the builder’s',
+      source: 'builder',
+      reason: null,
+      line: 'Rigor you set',
+      kind: 'Docs · you',
+    },
+  ] as const)('says who sized the rigor and each kind: $name', async (row) => {
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      ...baseHandlers(),
+    );
+    open({
+      task: {
+        rigor: 'careful',
+        effectiveRigor: 'careful',
+        effectiveRigorSource: row.source,
+        effectiveRigorReason: row.reason,
+        kinds: [{ key: 'docs', source: row.source }],
+      },
+    });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(row.line, { exact: false })).toBeTruthy();
+    expect((await within(d).findByTestId('kind-sources')).textContent).toBe(row.kind);
+  });
+
+  it('says a task sized by rules alone was, with no kinds listed', async () => {
+    serve();
+    open({ task: { sizedByRules: true } });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(/Sized by rules/)).toBeTruthy();
+    expect(within(d).queryByTestId('kind-sources')).toBeNull();
+  });
+
   it('saves the title, description, criteria, kinds, rigor and effort', async () => {
     const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: TaskPatch[] = [];

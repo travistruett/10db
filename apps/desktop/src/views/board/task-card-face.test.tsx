@@ -280,8 +280,40 @@ describe('TaskCard face: rigor and kinds', () => {
       }),
     });
     expect(screen.getByTestId('indicator-rigor').textContent).toBe('Careful');
-    expect(screen.getByTestId('indicator-kind-ui').textContent).toBe('UI');
-    expect(screen.getByTestId('indicator-kind-gone-kind').textContent).toBe('gone-kind');
+    expect(screen.getByTestId('indicator-kind-ui').textContent).toBe('UI · agent');
+    expect(screen.getByTestId('indicator-kind-gone-kind').textContent).toBe('gone-kind · you');
+  });
+
+  it.each([
+    { source: 'judge', word: 'judged' },
+    { source: 'rules', word: 'rules' },
+    { source: 'agent', word: 'agent' },
+    { source: 'builder', word: 'you' },
+  ] as const)('says who sized the rigor and each kind: $word', ({ source, word }) => {
+    card({
+      kinds: [kindDto({ key: 'docs', label: 'Docs' })],
+      task: taskDto({
+        rigor: source === 'rules' ? null : 'careful',
+        effectiveRigor: 'careful',
+        effectiveRigorSource: source,
+        effectiveRigorReason: 'because',
+        kinds: [{ key: 'docs', source }],
+      }),
+    });
+    expect(screen.getByTestId('indicator-rigor').textContent).toBe(`Careful · ${word}`);
+    expect(screen.getByTestId('indicator-kind-docs').textContent).toBe(`Docs · ${word}`);
+  });
+
+  it('shows the rigor of a task sized by the rules above the project’s default, never the default itself', () => {
+    card({
+      defaultRigor: 'standard',
+      task: taskDto({
+        effectiveRigor: 'careful',
+        effectiveRigorSource: 'rules',
+        effectiveRigorReason: 'at least Careful: migration',
+      }),
+    });
+    expect(screen.getByTestId('indicator-rigor').textContent).toBe('Careful · rules');
   });
 
   it('says nothing for a task at the project’s default rigor with no kinds', () => {

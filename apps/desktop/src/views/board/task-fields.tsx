@@ -1,8 +1,9 @@
 import { Effort, type KindDto, type ProjectId, type Rigor, type TaskKind } from '@10db/contracts';
-import { MultiSelect, Select, type SelectProps } from '@mantine/core';
+import { MultiSelect, Select, Text, type SelectProps } from '@mantine/core';
 import { useKinds } from '../../daemon/kind-queries';
 import { useProjects } from '../../daemon/queries';
 import { projectDefaultLabel, rigorOptions } from './rigor-options';
+import { kindBadge } from './sizing-source';
 
 /** The value for "follow the project's rigor": Select cannot hold null as an option. */
 const FOLLOW = '';
@@ -65,6 +66,22 @@ export function KindsSelect({ value, onChange, ...props }: KindsSelectProps) {
         onChange(keys.map((key) => value.find((k) => k.key === key) ?? { key, source: 'builder' }));
       }}
     />
+  );
+}
+
+/** Who gave each of the task's kinds, in the words the card's badges use ("Docs · judged"); nothing for none. */
+export function KindSources({ value }: { readonly value: readonly TaskKind[] }) {
+  const kinds = useKinds().data ?? [];
+  if (value.length === 0) return null;
+  return (
+    <Text size="xs" c="dimmed" data-testid="kind-sources">
+      {value
+        .map(
+          (k) =>
+            kindBadge(kinds.find((kind) => kind.key === k.key)?.label ?? k.key, k.source).label,
+        )
+        .join(', ')}
+    </Text>
   );
 }
 

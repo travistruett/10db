@@ -79,7 +79,8 @@ import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
-import { EffortPinSelect, KindsSelect, RigorSelect } from './task-fields';
+import { rigorSourceLine } from './sizing-source';
+import { EffortPinSelect, KindSources, KindsSelect, RigorSelect } from './task-fields';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import { HeadlineField, WhyField } from './task-words-fields';
@@ -516,9 +517,10 @@ export function TaskDrawer({
                   setKinds(next);
                 }}
               />
+              <KindSources value={kinds} />
               <RigorSelect
                 label="Rigor"
-                description="How much process the task gets."
+                description={`How much process the task gets. ${rigorSourceLine(task)}.`}
                 value={rigor}
                 projectId={task.projectId}
                 kindKeys={kinds.map((k) => k.key)}

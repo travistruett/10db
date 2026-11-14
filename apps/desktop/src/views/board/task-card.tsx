@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { ciResult } from './ci-line';
-import { rigorLabel } from '../settings/rigor-labels';
+import { kindBadge, rigorBadge } from './sizing-source';
 import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -137,6 +137,7 @@ function indicatorsOf(
 ): Indicator[] {
   const waits = waitsOn(task, peers);
   const ci = ciResult(batch, batches);
+  const rigor = rigorBadge(task, defaultRigor);
   return [
     goalTitle
       ? {
@@ -175,24 +176,14 @@ function indicatorsOf(
     task.status === TaskStatus.Cancelled
       ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }
       : null,
-    // The project's default rigor is the baseline every card has; one the builder set, or a kind raised, is worth saying.
-    task.rigor !== null || task.effectiveRigor !== defaultRigor
-      ? {
-          kind: 'rigor',
-          label: rigorLabel(task.effectiveRigor),
-          color: 'gray',
-          tooltip:
-            task.rigor === null
-              ? 'Rigor, from the project and the task’s kinds'
-              : 'Rigor the builder set',
-        }
-      : null,
-    ...task.kinds.map((k) => ({
-      kind: `kind-${k.key}`,
-      label: kinds.find((kind) => kind.key === k.key)?.label ?? k.key,
-      color: 'gray',
-      tooltip: k.source === 'builder' ? 'Kind set by the builder' : 'Kind an agent gave the task',
-    })),
+    // The project's default rigor is the baseline every card has; one someone set or sized is worth saying, with who.
+    rigor === null
+      ? null
+      : { kind: 'rigor', label: rigor.label, color: 'gray', tooltip: rigor.tooltip },
+    ...task.kinds.map((k) => {
+      const badge = kindBadge(kinds.find((kind) => kind.key === k.key)?.label ?? k.key, k.source);
+      return { kind: `kind-${k.key}`, label: badge.label, color: 'gray', tooltip: badge.tooltip };
+    }),
   ].filter((indicator) => indicator !== null);
 }
 
