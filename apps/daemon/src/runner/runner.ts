@@ -76,7 +76,10 @@ import {
   judgeForCall,
   offersAllowThis,
   projectLiveSystems,
+  SKIP_RESUMES_MAX,
+  skipMessage,
   startingJudge,
+  stoppedBySkip,
 } from '../trust';
 import {
   activeClaims,
@@ -755,6 +758,8 @@ interface Control {
   builderStop: boolean;
   /** Closes a pass task's session once it has been idle since its last turn ended. */
   idleTimer: Timer | null;
+  /** How often each step's turn a skip stopped was resumed, by step index, across the run's sessions. */
+  readonly skipResumes: Map<number, number>;
   done: Promise<void>;
 }
 
@@ -3095,6 +3100,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            // What this turn skipped; the next turn's calls count afresh.
+            const turnSkips = unattended?.skips.inTurn() ?? null;
+            unattended?.skips.nextTurn();
             // The model ran a turn: a mark from an error's wording alone on it was wrong.
             if (st.lastTurn === 'success' && !st.modelProven) {
               st.modelProven = true;
@@ -3156,6 +3164,26 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : null;
             // Set at each turn end, so a later turn that reaches no limit clears it.
             st.unaskedRunEnded = unasked?.atLimit ? unasked.run.count : null;
+            // A lane nobody watches whose turn ended on a skip, often because the judge said to stop, is
+            // told to carry on, a bounded number of times per step (T4 call 10). A handoff, a background
+            // hold, a builder message or a stop has the turn end as it would.
+            const resumed = ctl.skipResumes.get(row.stepIndex) ?? 0;
+            if (
+              turnSkips !== null &&
+              turnSkips.last !== null &&
+              stoppedBySkip(turnSkips) &&
+              st.lastTurn === 'success' &&
+              resumed < SKIP_RESUMES_MAX &&
+              !(recorded && stands) &&
+              !st.handoffRequested &&
+              !st.heldForBackground &&
+              stopRequested(ctl) === null &&
+              untakenMessages(db, task.id).length === 0
+            ) {
+              ctl.skipResumes.set(row.stepIndex, resumed + 1);
+              handle.send(skipMessage(turnSkips.last.limit, turnSkips.last.reason));
+              break;
+            }
             if (recorded && stands && !unasked?.atLimit) {
               ctl.unaskedHandoffs = unasked?.run ?? null;
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
@@ -4170,6 +4198,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         messages: null,
         builderStop: false,
         idleTimer: null,
+        skipResumes: new Map(),
         done: Promise.resolve(),
       };
       active.set(id, ctl);

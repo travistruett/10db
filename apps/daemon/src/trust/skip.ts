@@ -30,6 +30,9 @@ export interface TurnSkips {
   readonly skips: number;
 }
 
+/** How many times a step's turn a skip stopped is resumed, per start of the run. */
+export const SKIP_RESUMES_MAX = 2;
+
 /** A turn whose last call was skipped stopped because of it (T4 call 10). */
 export const stoppedBySkip = (turn: TurnSkips): boolean => turn.lastCallSkipped;
 
