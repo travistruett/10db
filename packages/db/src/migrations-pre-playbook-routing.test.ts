@@ -20,7 +20,7 @@ let db: TendbDatabase;
 
 beforeEach(() => {
   // A space in the path mirrors ~/Library/Application Support/10db.
-  dir = mkdtempSync(join(tmpdir(), '10db old routing '));
+  dir = mkdtempSync(join(tmpdir(), '10db pre-playbook routing '));
   db = openDatabase(join(dir, '10db.sqlite'));
 });
 
@@ -41,7 +41,7 @@ const appliedCount = () =>
     .array(z.object({ n: z.number() }))
     .parse(db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').all())[0]?.n;
 
-const OLD_TABLES = ['flows', 'patterns', 'role_settings', 'team_bindings'];
+const PRE_PLAYBOOK_TABLES = ['flows', 'patterns', 'role_settings', 'team_bindings'];
 
 const markMoved = () =>
   sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
@@ -57,8 +57,8 @@ const persona = (pin: string | null, score: number | null) =>
     AT,
   );
 
-/** A project and a task, so a task column can hold an old value. */
-function task(riskTags: string, flowId: string | null): void {
+/** A project, with the flow it was given when `flowId` is set. */
+function project(flowId: string | null = null): void {
   db.$client.pragma('foreign_keys = OFF');
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
@@ -68,11 +68,17 @@ function task(riskTags: string, flowId: string | null): void {
   );
   sql(
     `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
-       handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
-     VALUES ('prj_a', 'a', '/tmp/a', 'true', '[]', '[]', 2, 'claude', 'acc_a', 40, 50, 10, ?, ?)`,
+       handoff_pct, nudge_pct, human_wait_minutes, flow_id, created_at, updated_at)
+     VALUES ('prj_a', 'a', '/tmp/a', 'true', '[]', '[]', 2, 'claude', 'acc_a', 40, 50, 10, ?, ?, ?)`,
+    flowId,
     AT,
     AT,
   );
+}
+
+/** A project and a task, so a task column can hold a value the playbook replaced. */
+function task(riskTags: string, flowId: string | null): void {
+  project();
   sql(
     `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
        workspace_mode, risk_tags, flow_id, created_at, updated_at)
@@ -84,7 +90,7 @@ function task(riskTags: string, flowId: string | null): void {
   );
 }
 
-/** What an unmoved database can hold, one row each: a table row or a value in an old column. */
+/** What an unmoved database can hold, one row each: a table row or a value in a column the playbook replaced. */
 const UNMOVED: readonly (readonly [name: string, seed: () => void])[] = [
   [
     'a role setting',
@@ -103,6 +109,32 @@ const UNMOVED: readonly (readonly [name: string, seed: () => void])[] = [
         AT,
       ),
   ],
+  [
+    'a pattern',
+    () =>
+      sql(
+        `INSERT INTO patterns (id, project_id, name, match, setting, position, created_at, updated_at)
+         VALUES ('pat_a', NULL, 'p', '{}', '{"kind":"top_of_tier"}', 0, ?, ?)`,
+        AT,
+        AT,
+      ),
+  ],
+  [
+    'a team binding',
+    () => {
+      project();
+      persona(null, null);
+      sql(
+        `INSERT INTO team_bindings (project_id, role, persona_id) VALUES ('prj_a', 'review', 'per_a')`,
+      );
+    },
+  ],
+  [
+    'a project’s flow',
+    () => {
+      project('flw_a');
+    },
+  ],
   ['a persona’s model pin', () => persona('{"model":"claude-opus-5-5","effort":"high"}', null)],
   ['a persona’s minimum score', () => persona(null, 50)],
   [
@@ -119,23 +151,23 @@ const UNMOVED: readonly (readonly [name: string, seed: () => void])[] = [
   ],
 ];
 
-describe('the migration that drops the old routing tables', () => {
-  it('migrates an empty file, a fresh install, with neither the setting nor any old row', () => {
+describe('the migration that drops the routing tables the playbook replaced', () => {
+  it('migrates an empty file, a fresh install, with neither the setting nor any pre-playbook row', () => {
     migrateDatabase(db);
     expect(tables()).not.toEqual(expect.arrayContaining(['flows']));
   });
 
-  it('migrates a database at the previous head whose old tables are empty and the setting is absent', () => {
+  it('migrates a database at the previous head whose pre-playbook tables are empty and the setting is absent', () => {
     migrateDatabase(db, migrationsBefore(dir, DROP));
-    expect(tables()).toEqual(expect.arrayContaining(OLD_TABLES));
+    expect(tables()).toEqual(expect.arrayContaining(PRE_PLAYBOOK_TABLES));
     persona(null, null);
     task('[]', null);
     migrateDatabase(db);
-    expect(tables().filter((name) => OLD_TABLES.includes(name))).toEqual([]);
+    expect(tables().filter((name) => PRE_PLAYBOOK_TABLES.includes(name))).toEqual([]);
     expect(names('SELECT key AS name FROM personas')).toEqual(['a']);
   });
 
-  it('migrates old rows once the move has run, and keeps the rows the playbook replaced them with', () => {
+  it('migrates pre-playbook rows once the move has run, and keeps the rows the playbook replaced them with', () => {
     migrateDatabase(db, migrationsBefore(dir, DROP));
     markMoved();
     UNMOVED.forEach(([, seed], i) => {
@@ -144,9 +176,25 @@ describe('the migration that drops the old routing tables', () => {
     persona('{"model":"claude-opus-5-5","effort":"high"}', 50);
     task('["security"]', 'flw_a');
     migrateDatabase(db);
-    expect(tables().filter((name) => OLD_TABLES.includes(name))).toEqual([]);
+    expect(tables().filter((name) => PRE_PLAYBOOK_TABLES.includes(name))).toEqual([]);
     expect(names('SELECT id AS name FROM tasks')).toEqual(['tsk_a']);
     expect(names("SELECT name FROM pragma_table_info('personas')")).not.toContain('model_pin');
+  });
+
+  it('reads a playbook.moved that is not JSON as not moved, and refuses', () => {
+    migrateDatabase(db, migrationsBefore(dir, DROP));
+    sql(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'tru', ?)`,
+      AT,
+    );
+    sql(
+      `INSERT INTO flows (id, name, steps, created_at, updated_at) VALUES ('flw_a', 'f', '[]', ?, ?)`,
+      AT,
+      AT,
+    );
+    expect(() => {
+      migrateDatabase(db);
+    }).toThrow(PlaybookMoveMissingError);
   });
 
   it.each(UNMOVED)(
@@ -167,7 +215,7 @@ describe('the migration that drops the old routing tables', () => {
         'Open a 10db build from #608 (f31017b6) through 81715524 once',
       );
       expect(appliedCount()).toBe(before);
-      expect(tables()).toEqual(expect.arrayContaining(OLD_TABLES));
+      expect(tables()).toEqual(expect.arrayContaining(PRE_PLAYBOOK_TABLES));
     },
   );
 });

@@ -4,7 +4,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { z } from 'zod';
-import { holdsOldRouting, playbookMoveRan } from './old-routing-data';
+import { holdsPrePlaybookRouting, playbookMoveRan } from './pre-playbook-routing';
 import * as schema from './schema';
 
 export type TendbDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
@@ -125,8 +125,8 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
-  // The old routing tables are dropped by a migration, so settings still in them must have moved first.
-  if (holdsOldRouting(db) && !playbookMoveRan(db))
+  // The routing tables the playbook replaced are dropped by a migration, so settings still in them must have moved first.
+  if (holdsPrePlaybookRouting(db) && !playbookMoveRan(db))
     throw new PlaybookMoveMissingError(db.$client.name);
   // SQLite rebuilds a table to drop a NOT NULL, and a rebuilt table that others reference can only be
   // dropped with foreign keys off. The pragma is a no-op inside the migration's transaction, so it is

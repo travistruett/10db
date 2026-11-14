@@ -5,10 +5,10 @@ import type { TendbDatabase } from './database';
 const MOVED_SETTING = 'playbook.moved';
 
 /** Tables that held routing settings before the playbook. */
-const OLD_TABLES = ['flows', 'patterns', 'role_settings', 'team_bindings'] as const;
+const PRE_PLAYBOOK_TABLES = ['flows', 'patterns', 'role_settings', 'team_bindings'] as const;
 
 /** Columns of kept tables that held routing settings, with the SQL that says a row carries one. */
-const OLD_COLUMNS = [
+const PRE_PLAYBOOK_COLUMNS = [
   {
     table: 'tasks',
     column: 'risk_tags',
@@ -21,7 +21,6 @@ const OLD_COLUMNS = [
 ] as const;
 
 const Named = z.object({ name: z.string() });
-const Value = z.object({ value: z.string() });
 
 function tableNames(db: TendbDatabase): Set<string> {
   return new Set(
@@ -40,20 +39,20 @@ function hasColumn(db: TendbDatabase, table: string, column: string): boolean {
 }
 
 /**
- * Whether the database holds routing settings from before the playbook: a row in an old table, or a
- * value in an old column. Reads only what exists, so a database from any earlier schema answers
+ * Whether the database holds routing settings from before the playbook: a row in a table the playbook replaced, or a
+ * value in a column it replaced. Reads only what exists, so a database from any earlier schema answers
  * without error.
  */
-export function holdsOldRouting(db: TendbDatabase): boolean {
+export function holdsPrePlaybookRouting(db: TendbDatabase): boolean {
   const tables = tableNames(db);
-  for (const table of OLD_TABLES) {
+  for (const table of PRE_PLAYBOOK_TABLES) {
     if (
       tables.has(table) &&
       db.$client.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined
     )
       return true;
   }
-  return OLD_COLUMNS.some(
+  return PRE_PLAYBOOK_COLUMNS.some(
     ({ table, column, set }) =>
       tables.has(table) &&
       hasColumn(db, table, column) &&
@@ -61,11 +60,21 @@ export function holdsOldRouting(db: TendbDatabase): boolean {
   );
 }
 
+/** A stored setting value: JSON text, read as nothing when it is not. */
+const StoredJson = z.string().transform((text, ctx): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    ctx.addIssue({ code: 'custom', message: 'not JSON' });
+    return z.NEVER;
+  }
+});
+
 /** Whether a 10db build that moved the routing settings to the playbook has run on this database. */
 export function playbookMoveRan(db: TendbDatabase): boolean {
   if (!tableNames(db).has('app_settings')) return false;
   const row = db.$client.prepare('SELECT value FROM app_settings WHERE key = ?').get(MOVED_SETTING);
-  if (row === undefined) return false;
-  // The setting's value is JSON written by this package's settings store.
-  return JSON.parse(Value.parse(row).value) === true;
+  // A value that does not read as `true` means the move did not run.
+  const stored = z.object({ value: StoredJson }).safeParse(row);
+  return stored.success && stored.data.value === true;
 }

@@ -36,7 +36,7 @@ const tier = (name: string) => JSON.stringify({ kind: 'tier', tier: name });
 
 function seed(): void {
   db.$client.pragma('foreign_keys = OFF');
-  // The routing tables seeded below are the old ones; saying the move to the playbook ran keeps the
+  // The routing tables seeded below are the ones the playbook replaced; saying the move to the playbook ran keeps the
   // refusal that guards their drop out of a test of this migration.
   sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(

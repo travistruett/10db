@@ -403,13 +403,13 @@ export function createSizingService(deps: SizingDeps): SizingService {
         }
       }
       // Tasks whose judge call was cut off by the last stop: asked again when still wanted, else forgiven.
-      for (const { id, createdAt, owedFor } of listOwedTasks(deps.state.db)) {
+      for (const { id, updatedAt, owedFor } of listOwedTasks(deps.state.db)) {
         if (inflight.has(id)) continue;
         try {
           const task = readTaskSizing(deps.state.db, id);
           const wanted =
             task !== null &&
-            Date.parse(createdAt) >= since &&
+            Date.parse(updatedAt) >= since &&
             sizable(task, id) &&
             sizingFingerprint(task) === owedFor;
           if (wanted && judgeAvailable()) enqueue(id, owedFor);

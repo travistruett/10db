@@ -225,6 +225,10 @@ describe('appendRetryLimitFindings', () => {
     expect(now.description).toContain(first);
     expect(now.description).toContain(later);
     expect(now.description.indexOf(first)).toBeLessThan(now.description.indexOf(later));
+    expect(now.acceptanceCriteria).toEqual([
+      'Fixed: BLOCKING src/api/a.ts:3 the empty state has no test.',
+      'Fixed: BLOCKING src/api/a.ts:9 the card still hides it.',
+    ]);
   });
 
   it.each([

@@ -680,6 +680,9 @@ describe('what a task runs, before and after rigor and kinds', () => {
 });
 
 /** Lines of the design that change what a step says rather than what it picks, with the words its reason carries. */
+/** The lines the reason tests showed, recorded as each passes, for the coverage check below. */
+const shownByReasons = new Set<Line>();
+
 describe('what a step says when no model reaches its need', () => {
   it('STRONGEST_WHEN_UNREACHED: a build cell asking for 100 intelligence', () => {
     const plan = planSteps({
@@ -709,6 +712,7 @@ describe('what a step says when no model reaches its need', () => {
     });
     const step = plan.steps.find((s) => s.role === StepRole.Implement);
     expect(step?.reason).toContain('none reaches 100 intelligence, so the highest scoring');
+    shownByReasons.add('STRONGEST_WHEN_UNREACHED');
   });
 });
 
@@ -716,7 +720,7 @@ describe('the table of changes', () => {
   it('uses every line of the design in a row, so a line nothing shows is removed', () => {
     const used = new Set<unknown>([
       ...CASES.flatMap((c) => c.changes.flatMap((change) => change.slice(3))),
-      'STRONGEST_WHEN_UNREACHED',
+      ...shownByReasons,
     ]);
     expect(Object.keys(LINES).filter((line) => !used.has(line))).toEqual([]);
   });

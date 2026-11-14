@@ -528,6 +528,10 @@ export function appendRetryLimitFindings(
       `The ${found.role} step rejected the work again at the retry limit. These findings are open too:`,
       found.notes,
     ].join('\n\n'),
+    acceptanceCriteria: [
+      ...task.acceptanceCriteria,
+      ...parseFindings(found.notes).map((f) => `Fixed: ${f.text}`),
+    ],
   });
 }
 

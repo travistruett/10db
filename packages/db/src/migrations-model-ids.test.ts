@@ -56,7 +56,7 @@ const PROFILE = `INSERT INTO model_profiles (id, provider, model, effort, aa_slu
 
 function seed(): void {
   db.$client.pragma('foreign_keys = OFF');
-  // Persona pins are old routing data; saying the move to the playbook ran keeps the refusal that
+  // Persona pins are routing the playbook replaced; saying the move to the playbook ran keeps the refusal that
   // guards their drop out of a test of this migration.
   sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(

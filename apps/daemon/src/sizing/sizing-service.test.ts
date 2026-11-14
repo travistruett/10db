@@ -7,6 +7,7 @@ import {
   insertWorkstream,
   listEventsAfter,
   listJudgeCalls,
+  listOwedTasks,
   patchJudgeConfig,
   moveTask,
   patchTask,
@@ -494,7 +495,7 @@ describe('a judge answer for text or pins that have since changed', () => {
     edit(task.id, { title: 'Alpha v2' });
     await sizer.settled([task.id]);
     release();
-    // The edit cut the three calls for the old text short, as the real judge does on an abort.
+    // The edit cut the three calls for the earlier text short, as the real judge does on an abort.
     const cut = () => listJudgeCalls(store.db, 20).filter((c) => c.outcome === 'stopped');
     await vi.waitFor(() => {
       expect(cut()).toHaveLength(3);
@@ -645,7 +646,7 @@ describe('a judge call cut off by a shutdown', () => {
 
   /** A judge whose calls never answer on their own: only an abort ends them. */
   const never = () => scriptedJudge(state, () => new Promise<ScriptedAnswer>(() => undefined));
-  const owed = (id: TaskId) => sizing(id)?.sizingOwedFor ?? null;
+  const owed = (id: TaskId) => listOwedTasks(store.db).find((t) => t.id === id)?.owedFor ?? null;
   const HOUR = 60 * 60 * 1000;
 
   /** A task queued for a judge that never answers, then the service stopped, then a new one started. */
@@ -692,6 +693,21 @@ describe('a judge call cut off by a shutdown', () => {
     expect(judge.requests).toHaveLength(0);
     expect(owed(task.id)).toBeNull();
     expect(getTask(store.db, task.id).sizedByRules).toBe(true);
+  });
+
+  it('is asked for a task made days ago and edited since, counting the day from the debt', async () => {
+    const task = create();
+    clock.advance(3 * 24 * HOUR);
+    const first = start(never());
+    edit(task.id, { title: 'Alpha, reworded' });
+    first.stop();
+    await first.settled([task.id]);
+    expect(owed(task.id)).not.toBeNull();
+    const judge = scriptedJudge(state, answering(careful));
+    start(judge).sweep();
+    await service?.settled([task.id]);
+    expect(new Set(judge.requests.map((r) => r.taskId))).toEqual(new Set([task.id]));
+    expect(owed(task.id)).toBeNull();
   });
 
   it('is not asked about text that changed while the daemon was down, and the debt is dropped', async () => {

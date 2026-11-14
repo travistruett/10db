@@ -59,8 +59,6 @@ export interface TaskSizingState {
   readonly kindsOff: readonly string[];
   /** The fingerprint of the text last sized; null before the first sizing. */
   readonly sizedFor: string | null;
-  /** The fingerprint the judge still owes an answer for; null when none is owed. */
-  readonly sizingOwedFor: string | null;
   /** The judge calls whose answers sizing applied: the rigor call and one call per kind key. */
   readonly sizingCalls: SizingCalls;
   /** Whether any workstream of the task exists. */
@@ -78,14 +76,14 @@ export function listUnsizedTasks(db: DbReader): { id: TaskId; createdAt: string 
 }
 
 /**
- * Open tasks the judge still owes an answer for, oldest first, each with when it was made and the fingerprint
- * it is owed for.
+ * Open tasks the judge still owes an answer for, oldest first, each with when it was last written (the sizing
+ * that recorded the debt writes it) and the fingerprint it is owed for.
  */
-export function listOwedTasks(db: DbReader): { id: TaskId; createdAt: string; owedFor: string }[] {
+export function listOwedTasks(db: DbReader): { id: TaskId; updatedAt: string; owedFor: string }[] {
   return db
     .select({
       id: schema.tasks.id,
-      createdAt: schema.tasks.createdAt,
+      updatedAt: schema.tasks.updatedAt,
       owedFor: schema.tasks.sizingOwedFor,
     })
     .from(schema.tasks)
@@ -128,7 +126,6 @@ export function readTaskSizing(db: DbReader, taskId: TaskId): TaskSizingState | 
     kinds: row.kinds,
     kindsOff: row.kindsOff,
     sizedFor: row.sizedFor,
-    sizingOwedFor: row.sizingOwedFor,
     sizingCalls: row.sizingCalls,
     started: started !== undefined,
   };
