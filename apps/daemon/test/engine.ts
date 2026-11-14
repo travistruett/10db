@@ -78,6 +78,7 @@ import {
   createTimerWatch,
   createTriage,
   draftOnOpen,
+  keptWithBuilder,
   routedAway,
   type ReplyWatch,
   type StakeholderSends,
@@ -282,11 +283,14 @@ export async function createTestEngine(
     judge: triageJudge,
     log: silentLogger,
     afterRouted: (id) => {
+      // Read before the draft, which may hand a person's card back to the builder for want of Slack.
+      const kept = keptWithBuilder(getInboxItem(state.db, id));
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
       // Only a card that now goes to someone else parks its sessions; a builder card waits live,
-      // except for a lane nobody watches, which answers at once.
+      // except one triage kept with the builder in a lane nobody watches, which answers at once.
       if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
-      else inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
+      else if (kept)
+        inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
   });
