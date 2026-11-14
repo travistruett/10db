@@ -16,9 +16,6 @@ import {
   RoutedBy,
   isModelTier,
   kindsOfTask,
-  JudgeCallId,
-  JudgeDecision,
-  JudgeOutcome,
   ModelMarkBasis,
   parseFindings,
   PermissionChoice,
@@ -82,7 +79,6 @@ import {
   endSession,
   getAccountRow,
   getBatch,
-  getJudgeConfig,
   getEvidence,
   BUILDER_HANDLE,
   getInboxItem,
@@ -128,7 +124,6 @@ import {
   passPageAreas,
   patchWorkstream,
   questionRoutesForTask,
-  recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
   releaseClaims,
@@ -201,7 +196,6 @@ import {
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
-import type { Judge } from '../judge';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -235,7 +229,14 @@ import {
   projectInstructionsLoaded,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
-import { escalateStep, planSteps, resolveSteps, rowProcess } from '../routing';
+import {
+  escalateStep,
+  planAddedStep,
+  planSteps,
+  resolveSteps,
+  rowProcess,
+  type PlanInput,
+} from '../routing';
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
@@ -284,12 +285,7 @@ import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
-import {
-  REVIEW_SIZE_DIFF_BYTES,
-  REVIEW_SIZE_QUESTION,
-  reviewSizeRule,
-  reviewSizeState,
-} from './review-size';
+import { FORCED_REVIEW_DIFF_BYTES, forcedReview } from './forced-review';
 import {
   createLaneMessages,
   outgoingMessage,
@@ -371,8 +367,6 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
-  /** Asked whether a review that is next in line is needed. */
-  readonly judge: Judge;
   /**
    * A task's first launch waits here for its before picture (Workbench spec §10), for at most the
    * pictures' own bound; absent, a launch waits for none.
@@ -1216,9 +1210,17 @@ export function createRunner(opts: RunnerOptions): Runner {
   function withCurrentPlan(tx: DbReader, id: WorkstreamId, leased: AccountId): WorkstreamRow {
     const row = getWorkstreamRow(tx, id);
     if (row.steps.length === 0) return row;
+    return {
+      ...row,
+      steps: replanSteps(row.steps, row.stepIndex, planSteps(planInputOf(tx, row, leased)).steps),
+    };
+  }
+
+  /** What planning reads for a task: its rigor and kinds, the playbook, and what the leased account offers. */
+  function planInputOf(tx: DbReader, row: WorkstreamRow, leased: AccountId): PlanInput {
     const task = getTask(tx, row.taskId);
     const project = getProject(tx, row.projectId);
-    const plan = planSteps({
+    return {
       rigor: task.effectiveRigor,
       task,
       taskKinds: task.kinds,
@@ -1226,8 +1228,70 @@ export function createRunner(opts: RunnerOptions): Runner {
       personas: listPersonas(tx),
       ...playbookInputs(tx, project.id),
       ...routingInputs(tx, { ...project, accountId: leased }),
-    });
-    return { ...row, steps: replanSteps(row.steps, row.stepIndex, plan.steps) };
+    };
+  }
+
+  /**
+   * The steps of `row`, an implement step that has just passed, with a Review added after it when the change
+   * forced one (`forced`, why) and no review follows. The Review is planned for the task's rigor like any
+   * added step. `added` is why, or null when nothing was added.
+   */
+  function withSafetyNet(
+    tx: DbReader,
+    leased: AccountId,
+    row: WorkstreamRow,
+    forced: string | null,
+  ): { readonly steps: WorkstreamStep[]; readonly added: string | null } {
+    const at = row.stepIndex;
+    const follows = row.steps.slice(at + 1).some((s) => s.role === StepRole.Review);
+    if (forced === null || row.steps[at]?.role !== StepRole.Implement || follows)
+      return { steps: row.steps, added: null };
+    const review = planAddedStep(planInputOf(tx, row, leased), StepRole.Review);
+    if (review === undefined) return { steps: row.steps, added: null };
+    return {
+      steps: [...row.steps.slice(0, at + 1), review, ...row.steps.slice(at + 1)],
+      added: forced,
+    };
+  }
+
+  /**
+   * Why a review must follow the implement step that just passed, when the plan as it stands has none after
+   * it: a kind that is always reviewed, a change too large to judge at a glance, a file nobody weighs from a
+   * diff. An unreadable change reviews too. Read before the write that moves the workstream on.
+   */
+  async function reviewForcedAfter(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    checkout: string,
+  ): Promise<string | null> {
+    const now = withCurrentPlan(db, id, ctl.accountId);
+    if (
+      now.steps[now.stepIndex]?.role !== StepRole.Implement ||
+      now.steps.slice(now.stepIndex + 1).some((s) => s.role === StepRole.Review)
+    )
+      return null;
+    if (row.baseHead === null) return 'the changes could not be read';
+    try {
+      const head = await opts.git.head(checkout);
+      const changes = await opts.git.diffSince(
+        checkout,
+        row.baseHead,
+        head,
+        FORCED_REVIEW_DIFF_BYTES,
+      );
+      return forcedReview(
+        kindsOfTask(getTask(db, row.taskId).kinds, listKinds(db)),
+        changes,
+        getProject(db, row.projectId).hazards,
+      );
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'the changes could not be read, so a review is added',
+      );
+      return 'the changes could not be read';
+    }
   }
 
   /**
@@ -1338,72 +1402,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (ended.qaSkipped)
       opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
     return ended.outcome;
-  }
-
-  /**
-   * Whether the review step that is next can be left out because a model judged the change small,
-   * clear and covered by its tests. The rules that force a review make no call; so does a judge the
-   * builder has switched off. The call is made outside any database write. Any answer but `skip` at
-   * or above the floor, and every fallback, runs the review. The reason names the model, so the
-   * builder sees who skipped it.
-   */
-  async function reviewSkippedByJudge(
-    id: WorkstreamId,
-    row: WorkstreamRow,
-    review: WorkstreamStep,
-    checkout: string,
-    signal: AbortSignal,
-  ): Promise<string | null> {
-    if (opts.judge.off) return null;
-    const config = getJudgeConfig(db);
-    const decision = config.decisions.review_size;
-    if (!config.enabled || !decision.enabled || row.baseHead === null) return null;
-    const task = getTask(db, row.taskId);
-    let changes: Awaited<ReturnType<Git['diffSince']>>;
-    try {
-      const head = await opts.git.head(checkout);
-      changes = await opts.git.diffSince(checkout, row.baseHead, head, REVIEW_SIZE_DIFF_BYTES);
-    } catch (error) {
-      // An unreadable diff is no reason to skip a review.
-      opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
-      return null;
-    }
-    if (
-      reviewSizeRule(
-        { kinds: kindsOfTask(task.kinds, listKinds(db)) },
-        changes,
-        review,
-        getProject(db, row.projectId).hazards,
-      ) === 'review'
-    )
-      return null;
-    const answer = await opts.judge.choose({
-      decision: JudgeDecision.ReviewSize,
-      state: reviewSizeState(task, changes),
-      question: REVIEW_SIZE_QUESTION,
-      options: ['review', 'skip'],
-      workstreamId: id,
-      taskId: task.id,
-      signal,
-    });
-    if (answer.kind === 'fallback') {
-      opts.logger.info(
-        { workstreamId: id, reason: answer.reason, detail: answer.detail },
-        'review size: the judge did not answer; the review runs',
-      );
-      return null;
-    }
-    const skips = answer.choice === 'skip' && answer.confidence >= decision.floor;
-    const callId = JudgeCallId.parse(answer.callId);
-    opts.state.write((ctx) => {
-      recordJudgeOutcome(
-        ctx,
-        callId,
-        skips || answer.choice === 'review' ? JudgeOutcome.Acted : JudgeOutcome.BelowFloor,
-      );
-    });
-    if (!skips) return null;
-    return `review skipped by ${answer.model} (${String(answer.confidence)}): small, clear and covered by its tests`;
   }
 
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
@@ -3625,24 +3623,33 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     const step = currentStep(row);
+    const forced = await reviewForcedAfter(id, ctl, row, checkout);
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return;
+    }
     opts.state.write((ctx) => {
       countFinished(ctx, step);
       // Planned again first: a rigor changed while the session ran decides whether a step follows.
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
-      const move = moveAfter(current.steps, current.stepIndex);
-      const next = move.kind === 'advance' ? current.steps[move.to] : undefined;
+      const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
+      const move = moveAfter(net.steps, current.stepIndex);
+      const next = move.kind === 'advance' ? net.steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
         transitionWorkstream(ctx, id, {
           to: S.Queued,
           fence: ctl.fence,
           patch: {
             nextAction: { kind: 'start' },
-            steps: advanceSteps(current.steps, current.stepIndex, move.to, entryFor(ctx, id)),
+            steps: advanceSteps(net.steps, current.stepIndex, move.to, entryFor(ctx, id)),
             stepIndex: move.to,
             model: next.model,
             effort: next.effort,
           },
-          reason: `no gate command; next: ${next.role}`,
+          reason:
+            net.added === null
+              ? `no gate command; next: ${next.role}`
+              : `no gate command; review added: ${net.added}; next: ${next.role}`,
         });
         clearLease(ctx, id);
         return;
@@ -3914,54 +3921,25 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     if (result.exitCode === 0) {
       const step = currentStep(row);
-      const move = moveAfter(row.steps, row.stepIndex);
-      const planned = move.kind === 'advance' ? row.steps[move.to] : undefined;
-      // A review the judge skips leaves the plan, as a QA step of docs alone does. A cancel or a
-      // shutdown cuts the call short through the same handle that stops a gate.
-      let skipped: string | null = null;
-      if (move.kind === 'advance' && planned?.role === StepRole.Review) {
-        const judgeAbort = new AbortController();
-        ctl.gateAbort = judgeAbort;
-        const already = stopRequested(ctl);
-        if (already === 'cancelled' || already === 'shutdown') judgeAbort.abort();
-        try {
-          skipped = await reviewSkippedByJudge(id, row, planned, checkout, judgeAbort.signal);
-        } finally {
-          ctl.gateAbort = null;
-        }
-      }
-      // With the review gone, the step that follows it is QA, which a change of Markdown alone skips.
-      const afterReview =
-        skipped !== null && move.kind === 'advance' ? row.steps[move.to + 1] : undefined;
-      const skipsQa =
-        afterReview?.role === StepRole.Qa && (await changesOnlyMarkdown(row, checkout));
-      // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
+      // The diff is read before the write, which then adds the review it forces.
+      const forced = await reviewForcedAfter(id, ctl, row, checkout);
+      // The read took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
         return;
       }
-      // Shutdown cut the call short: record nothing, and recovery runs the gate again.
+      // Shutdown stopped it: record nothing, and recovery runs the gate again.
       if (stopRequested(ctl) === 'shutdown') return;
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
         countFinished(ctx, step);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
-        // decides whether a Review follows or the work is done. The judge's skip applies only to a
-        // Review that is still next.
+        // decides whether a Review follows or the work is done.
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
-        const reviewAt = current.stepIndex + 1;
-        const dropped = new Set<number>();
-        if (skipped !== null && current.steps[reviewAt]?.role === StepRole.Review) {
-          dropped.add(reviewAt);
-          if (skipsQa && current.steps[reviewAt + 1]?.role === StepRole.Qa) {
-            dropped.add(reviewAt + 1);
-            opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
-          }
-        }
-        const steps = current.steps.filter((_, i) => !dropped.has(i));
+        const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
+        const steps = net.steps;
         const after = moveAfter(steps, current.stepIndex);
         const next = after.kind === 'advance' ? steps[after.to] : undefined;
-        const skippedNote = dropped.size === 0 ? null : skipped;
         if (after.kind === 'advance' && next) {
           transitionWorkstream(ctx, id, {
             to: S.Queued,
@@ -3974,9 +3952,9 @@ export function createRunner(opts: RunnerOptions): Runner {
               effort: next.effort,
             },
             reason:
-              skippedNote === null
+              net.added === null
                 ? `gate passed; next: ${next.role}`
-                : `gate passed; ${skippedNote}; next: ${next.role}`,
+                : `gate passed; review added: ${net.added}; next: ${next.role}`,
           });
           clearLease(ctx, id);
           return;
@@ -3985,13 +3963,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
-        markDone(
-          ctx,
-          id,
-          ctl.fence,
-          current,
-          skippedNote === null ? 'gate passed' : `gate passed; ${skippedNote}`,
-        );
+        markDone(ctx, id, ctl.fence, current, 'gate passed');
       });
       return;
     }

@@ -105,3 +105,20 @@ export function planSteps(input: PlanInput): StepPlanDto {
     overBudget: steps.flatMap((s, i) => (s.overBudget ? [i] : [])),
   };
 }
+
+/**
+ * The step for `role` as the task would run it if its plan had that role as well, newly routed: a
+ * role no row runs takes the cell of the lowest stronger rigor that does, as a kind's added step does.
+ * Undefined when the plan holds no step for the role.
+ */
+export function planAddedStep(input: PlanInput, role: StepRole): WorkstreamStep | undefined {
+  const { reviewRounds } = rowProcess(input.rigor, input.playbook);
+  const resolved = resolveSteps({
+    rigor: input.rigor,
+    taskKinds: input.taskKinds,
+    kinds: input.kinds,
+    playbook: input.playbook,
+    addedRoles: [role],
+  }).find((step) => step.role === role);
+  return resolved === undefined ? undefined : routedStep(resolved, input, reviewRounds);
+}
