@@ -31,7 +31,7 @@ way to pick a decision model by what it costs and how fast it answers.
 **Calls you might disagree with:** the switch is page state, not in the address; the Decisions view's Account select
 shows the account decisions are paid by and does not change it (Paid by on Settings › Decisions does); "Calls run"
 on a decision model counts its answered calls over 30 days, the only per-model count the stats carry; a decision
-model with neither a cost nor a time is listed but not drawn on the chart.
+model with no cost or no time is listed but not drawn on the chart.
 
 **Needed from you:** nothing. This plan waits for the playbook PR and PR 2 to merge before its build starts.
 
@@ -113,7 +113,8 @@ mantine-datatable 9.4, vitest, Testing Library + MSW, Playwright.
 
 **Files:**
 - Create: `packages/contracts/src/model-measures.ts` (exported from `index.ts`, registered in `json-schema.ts`'s
-  `CONTRACT_SCHEMAS` as `model-measures-dto`; run `pnpm --filter @10db/contracts generate`)
+  `CONTRACT_SCHEMAS` as `model-measures-dto`, and its query as `model-measures-query`, as `models-query` is; run
+  `pnpm --filter @10db/contracts generate`)
 - Create: `apps/daemon/src/catalogue/model-measures.ts`, `model-measures.test.ts`
 - Modify: `apps/daemon/src/daemon/services.ts` (or the service file that serves `/models/status`),
   `apps/daemon/src/api/app.ts` (one `.get`), `apps/daemon/src/screens/render-access.ts`,
@@ -161,7 +162,7 @@ speeds but no evals → evalsMissing "OpenRouter has run no evals on this model.
   `~maker/...-latest` router id joins nothing; each reason, including off with stored rows (no rows returned) and a
   null catalogue; speeds ordered fastest first; an eval row and a speed row for the same model both returned. In
   `models-api.test.ts`: `GET /models/measures?model=…&account=…` answers seeded rows with `accountProvider` for an
-  Anthropic, a Bedrock, an OpenAI-kind and a gateway account (one row per `AccountKind`, `it.each`), and makes no
+  account of each `AccountKind` (`it.each` over every kind, each row's provider from the Global Constraints' table), and makes no
   request. In `app.test.ts`: the path's row and a missing `model` → 400.
 - [ ] **Step 2: Run** `pnpm --filter @10db/daemon exec vitest run src/catalogue/model-measures.test.ts <route test>
   --maxWorkers=2` and see them fail.
@@ -205,8 +206,8 @@ measured speed and more scores" with a link to Settings › Decisions (`?focus=p
 paid by." with the same link; failed or rate limited → the daemon's `message`; off → "OpenRouter isn't read while
 10db runs with TENDB_JUDGE=off or TENDB_BENCHMARKS=off.". The AA line's no-key state, when OpenRouter's read is ok,
 says "No Artificial Analysis key: scores at max effort only, through OpenRouter" instead of "compared without
-scores". Each chart point carries its Intelligence source (`rightsizing-series.ts`), and the chart's tooltip adds
-its words under the number.
+scores". Each chart point carries its Intelligence and Cost per task sources (`rightsizing-series.ts`), and the
+chart's tooltip adds each one's words under its number.
 
 - [ ] **Step 1: Write the failing tests:** a table over every `ModelSource` × field and every
   `DecisionNumberSource` with the Global Constraints' words; `SourcedNumber` exposes its source through its
@@ -224,7 +225,9 @@ its words under the number.
 
 **Files:**
 - Modify: `apps/desktop/src/views/settings/model-drawer.tsx`, `apps/desktop/src/daemon/model-queries.ts`
-  (`useModelMeasures(model: string | null)`), its fixtures in `test/`
+  (`useModelMeasures(model: string | null, account: AccountId | null)`: the account is in the query key and sent as
+  `account`, so the daemon can answer `accountProvider`), its fixtures in `test/` (the fixture answers
+  `accountProvider` only when the request carries `account`)
 - Create: `apps/desktop/src/views/settings/model-measures-panel.tsx`, `model-drawer.test.tsx` (or extend the
   drawer cases in `models-section.test.tsx` if they live there)
 
@@ -241,8 +244,8 @@ provider marked "This account's" (from the answer's `accountProvider`); `evalsMi
 their own headings when empty.
 
 - [ ] **Step 1: Write the failing tests:** a row with coding and agentic sourced `aa_via_openrouter` shows both and
-  their source; a row with neither shows neither; evals and speeds render from the fixture with the account's
-  provider marked; speeds with no evals shows `evalsMissing` under Eval costs; a read older than a day shows its age.
+  their source; a row with neither shows neither; the measures request carries `account=<the page's account id>`;
+  evals and speeds render from the fixture with the account's provider marked; speeds with no evals shows `evalsMissing` under Eval costs; a read older than a day shows its age.
 - [ ] **Step 2: Run and see them fail.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the drawer tests and `models-section.test.tsx`; typecheck; lint.
@@ -259,7 +262,10 @@ their own headings when empty.
   returns: accounts loading or failed, no account, `/models` loading or failed), and
   `decisions-models-view.tsx` holding only PR 2's `DecisionsTable` (`withStatus={false}`) and `DecisionDrawer`, which
   Task 5 fills in
-- Modify: `apps/desktop/src/views/settings/models-section.tsx`, `models-section.test.tsx`
+- Modify: `apps/desktop/src/views/settings/models-section.tsx`, `models-section.test.tsx`,
+  `apps/desktop/src/views/settings/decisions-table.tsx` (a `withStatus` prop, default true; with it off the Status
+  column goes and the group row's `colSpan` becomes the column count, not today's fixed 5), and a case in
+  `decisions-section.test.tsx` that Settings › Decisions still shows Status
 
 **Interfaces:**
 - Produces: `ModelsView = { Agents: 'agents', Decisions: 'decisions' } as const` (+ type) in
@@ -277,8 +283,8 @@ button and the AA lines show on Agents only.
   failed `/models` read still lets Decisions draw.
 - [ ] **Step 2: Run and see them fail.**
 - [ ] **Step 3: Implement**; the move to `agents-view.tsx` changes no behaviour (its tests pass untouched).
-- [ ] **Step 4: Run** `models-section.test.tsx` and the playbook's tests (`playbook-table.test.tsx`); typecheck;
-  lint.
+- [ ] **Step 4: Run** `models-section.test.tsx`, `decisions-section.test.tsx` and the playbook's tests
+  (`playbook-table.test.tsx`); typecheck; lint.
 - [ ] **Step 5: Commit** — `feat(desktop): models has an agents and a decisions view` with the value card:
   `Value: protects=the switch between the two views and the account each reads; fails_when=Decisions reads a project
   account, the Agents account resets, or an Agents failure hides Decisions; why_new=models-section tests cover one
@@ -291,11 +297,11 @@ button and the AA lines show on Agents only.
 - Create: `decision-model-series.ts`,
   `decision-model-series.test.ts`, `decision-models-chart.tsx`, `decision-models-table.tsx`,
   `decision-model-drawer.tsx`, `decisions-models-view.test.tsx`
-- Modify: `apps/desktop/src/views/settings/decisions-table.tsx` (a `withStatus` prop; the view leaves Status out,
-  spec §7)
 
 **Interfaces:**
-- Consumes: PR 2's `DecisionsTable` (with `shadow` from `useShapeMeasures`), `DecisionDrawer`, `DECISIONS`,
+- Consumes: PR 2's `DecisionsTable` (`withStatus={false}`, Task 4; `shadow` from `useShapeMeasures().data?.shadow`),
+  `DecisionDrawer` (its props as `decisions-section.tsx` passes them: `statsFailed={stats.isError}` and `shadow` as
+  that decision's entry of the agreement list), `DECISIONS`,
   `modelName`, `formatDecisionUsd`, `statsFor`, `useDecisionStats`, `useDecisionModels`, `useJudgeStatus`; Task 2's `SourcedNumber`/`decisionSourceText`; Task 3's
   `ModelMeasuresPanel`.
 - Produces:
@@ -352,7 +358,10 @@ with the daemon's reason and a link to Paid by.
   open a model's drawer and a decision model's drawer; compare OpenRouter's measured latency with your calls'
   median (PR 1's QA item 2). Note in the ledger (outside the repo) whether each looks plausible, never the numbers
   themselves (spec §3).
-- [ ] **Step 4: Commit** — `test(desktop): the models switch through the real daemon`.
+- [ ] **Step 4: Commit** — `test(desktop): the models switch through the real daemon` with the value card:
+  `Value: protects=the switch and both views through the real daemon with the judge off, axe-clean in both themes;
+  fails_when=the switch, the decisions table or the judge-off notice breaks against the real backend; why_new=Task 4
+  and 5's render tests use MSW fixtures; no_claim=the chart and list with a live OpenRouter key (click-through).`
 
 ### Task 7: Docs
 
