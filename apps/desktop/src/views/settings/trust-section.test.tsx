@@ -14,6 +14,9 @@ import { TRUST_ROWS } from './trust-rows';
 
 // Trust spec §9: Settings › Trust switches what comes along into each session, app-wide.
 
+const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check: Codex sessions search nothing yet.';
+
 function serve(
   initial: Omit<TrustSettingsDto, 'judges' | 'tendbReady'> & Partial<TrustSettingsDto>,
 ) {
@@ -52,6 +55,8 @@ describe('Settings › Trust', () => {
       expect(screen.getByText(row.providers)).toBeTruthy();
       expect(row.description.endsWith('Applies from the next session.')).toBe(true);
     }
+    // With Web on, the row says Codex's web search waits for its live check; off, it says nothing of it.
+    expect(screen.getByText(CODEX_WEB_WAITS)).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Web' }));
     await waitFor(() => {
       expect(put).toEqual([{ ...TRUST_DEFAULTS, web: false }]);
@@ -59,6 +64,7 @@ describe('Settings › Trust', () => {
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Web' })).toHaveProperty('checked', false);
     });
+    expect(screen.queryByText(CODEX_WEB_WAITS)).toBeNull();
   });
 
   it('lists a plugin off in Claude Code as off, and switches it', async () => {

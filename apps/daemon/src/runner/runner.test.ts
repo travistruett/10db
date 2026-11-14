@@ -5980,13 +5980,18 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       return { spec, judgeCall, workstream };
     };
 
-    it("a Codex lane's deploy is a tendb_judge skip, with cached web search", async () => {
+    // Codex's cached web search has had no live check that it opens no page, so it is off on every session.
+    it("a Codex lane's deploy is a tendb_judge skip, with web search off and the thread saying why", async () => {
       const { spec, judgeCall, workstream } = await startCodex();
-      expect(spec.webSearch).toBe('cached');
+      expect(spec.webSearch).toBe('disabled');
       answer = () => 'writes_live';
       await hook(spec, judgeCall, bash('vercel deploy --prod', 'call_1'));
       expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['tendb_judge']);
       await engine.runner.idle();
+      const notices = listTaskThread(engine.store.db, workstream.taskId).map((m) => m.body);
+      expect(notices.filter((body) => body.startsWith('Web search on ChatGPT'))).toEqual([
+        'Web search on ChatGPT comes after a live check, so this session searches nothing.',
+      ]);
     });
 
     it("a Codex lane's patch that deletes a file reaches the model with the hunk named", async () => {

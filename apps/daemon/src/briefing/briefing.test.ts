@@ -1413,20 +1413,6 @@ describe('buildSessionPrompt for flow steps', () => {
     const CLAUDE_EDIT =
       'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
 
-    it('a Codex session with web search says it opens no page; without it, nothing', () => {
-      const line = "Web search answers from OpenAI's index; it opens no page you name.";
-      expect(buildSessionPrompt({ ...codexInput, codexWebSearch: true })).toContain(line);
-      expect(buildSessionPrompt(codexInput)).not.toContain(line);
-      expect(
-        buildSessionPrompt({
-          ...base,
-          action: { kind: 'start' },
-          sandboxed: true,
-          codexWebSearch: true,
-        }),
-      ).not.toContain(line);
-    });
-
     it('tells a Codex lane that ending its turn finishes the step, and a handoff is only for 10db to ask', () => {
       const prompt = buildSessionPrompt(codexInput);
       expect(prompt).toContain('Never call write_handoff to finish a step');

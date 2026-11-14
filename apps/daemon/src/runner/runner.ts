@@ -360,6 +360,10 @@ import { stepSkills } from './step-skills';
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
+/** What a Codex session's thread says while the Web switch is on and its web search stays off. */
+const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check, so this session searches nothing.';
+
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
 
@@ -2564,14 +2568,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       'trust policy',
     );
-    /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
-    const sayFloor = (ctx: WriteContext, reason: FloorReason, detail?: string): void => {
-      const text = floorNoticeText(reason, {
-        attended: pass !== null,
-        ...(detail === undefined ? {} : { detail }),
-      });
+    /** Says a notice in the task's thread, unless the thread already says it. */
+    const sayOnce = (ctx: WriteContext, text: string): void => {
       if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
       insertSystemNotice(ctx, task.id, text);
+    };
+    /** Says in the task's thread that the session is on the rules floor. */
+    const sayFloor = (ctx: WriteContext, reason: FloorReason, detail?: string): void => {
+      sayOnce(
+        ctx,
+        floorNoticeText(reason, {
+          attended: pass !== null,
+          ...(detail === undefined ? {} : { detail }),
+        }),
+      );
     };
     let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
@@ -2649,7 +2659,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
       judge: sessionJudge,
-      codexWebSearch: switches.web,
       webJudged: judged && switches.web,
       setupLine:
         laneSession === null
@@ -3030,7 +3039,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         env: launch.env,
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
-        webSearch: switches.web ? 'cached' : 'disabled',
+        // Cached web search has had no live check that it opens no page, so no Codex session searches.
+        webSearch: 'disabled',
         sandbox: laneSession?.spec ?? null,
         instructions: setupPlan.instructions.text,
         ...(laneSession
@@ -3331,6 +3341,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
               }
               if (startFloor !== null) sayFloor(ctx, startFloor);
+              if (provider === Provider.Codex && switches.web) sayOnce(ctx, CODEX_WEB_WAITS);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')
