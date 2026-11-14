@@ -1630,18 +1630,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // An ended unattended run lists what it skipped while nobody watched, once; the sweep raises the
   // item of a run that ended before a crash, or that recovery just failed.
   const skippedDeps = { state, git, log: logger.child({ component: 'skipped' }) };
-  bus.subscribe((event) => {
+  // The raises still reading a run's changed paths, which stop() waits for before the store closes.
+  const skippedRaises = new Set<Promise<void>>();
+  const unsubscribeSkipped = bus.subscribe((event) => {
     if (event.type !== EventType.WorkstreamChanged) return;
     const to = event.data['to'];
     if (to !== WorkstreamState.Done && to !== WorkstreamState.Failed) return;
     const id = WorkstreamId.safeParse(event.entityId);
     if (!id.success) return;
-    raiseSkippedCard(skippedDeps, id.data).catch((error: unknown) => {
-      logger.warn(
-        { err: error, workstreamId: id.data },
-        'could not raise the skipped item of a run',
-      );
-    });
+    const raised = raiseSkippedCard(skippedDeps, id.data)
+      .catch((error: unknown) => {
+        logger.warn(
+          { err: error, workstreamId: id.data },
+          'could not raise the skipped item of a run',
+        );
+      })
+      .finally(() => {
+        skippedRaises.delete(raised);
+      });
+    skippedRaises.add(raised);
   });
   await sweepUnlistedRuns(skippedDeps);
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
@@ -2396,6 +2403,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A tick asked for before the stop may still be reading the branches; it launches nothing now,
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
+      unsubscribeSkipped();
+      await Promise.all(skippedRaises);
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });
