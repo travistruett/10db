@@ -96,26 +96,6 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(created.ok()).toBe(true);
   const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
-  // A Board task nobody watches answers a question for the builder at once. One the project routes
-  // to a person with no Slack waits for triage on the builder's card, which this run answers.
-  const person = await request.post(`${daemonUrl}/people`, {
-    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
-    data: { handle: 'tess', name: 'Tess' },
-  });
-  expect(person.ok()).toBe(true);
-  const routed = await request.put(`${daemonUrl}/projects/${projectId}/routing-rules`, {
-    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
-    data: {
-      rules: [
-        {
-          category: 'other',
-          area: null,
-          personId: z.object({ id: z.string() }).parse(await person.json()).id,
-        },
-      ],
-    },
-  });
-  expect(routed.ok()).toBe(true);
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -200,25 +180,25 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await sheet.getByRole('button', { name: 'Start 1 task' }).click();
   await expect(sheet).toBeHidden();
 
-  // The agent's question reaches the inbox; answer it from the keyboard.
+  // A Board task nobody watches is never asked anything: the agent's question is answered at once,
+  // and the run's Inbox item lists it once the run is done.
   await open(page, 'Inbox');
-  await expect(page.getByText(QUESTION)).toBeVisible();
   // The fake's first probe recorded the default account's identity and said so in a card. That card
-  // offers Record again, so it is a question the daemon acts on and has no Dismiss; it sits above
-  // the question and is the open row, so the question's row is opened by selecting it.
+  // offers Record again, so it is a question the daemon acts on; it sits above the run's item and is
+  // the open row, so the item's row is opened by selecting it.
   await expect(page.getByText('Claude plan runs as builder@example.com')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
-  await page.getByRole('button', { name: new RegExp(QUESTION) }).click();
-  await expect(page.getByRole('radio', { name: /Howdy/ })).toBeVisible();
-  await expectAccessible(page, 'inbox, question, dark');
-  await page.getByRole('heading', { name: 'Inbox', level: 2 }).click();
-  await page.keyboard.press('2');
-  await expect(page.getByRole('radio', { name: /Howdy/ })).toBeChecked();
-  await page.keyboard.press('Enter');
-  // The stakeholder's drafted message quotes the question; the card's own line is what goes.
-  await expect(page.getByText(QUESTION, { exact: true })).toBeHidden();
+  const away = page.getByRole('button', {
+    name: new RegExp(`Skipped while you were away: ${TASK}`),
+  });
+  await away.click();
+  await expect(page.getByText('Questions it would have asked:')).toBeVisible();
+  await expect(page.getByText(QUESTION)).toBeVisible();
+  await expectAccessible(page, 'inbox, skipped while away, dark');
+  await page.getByRole('radio', { name: /Dismiss/ }).check();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect(page.getByText(QUESTION)).toBeHidden();
 
-  // The work resumes, commits, passes 10db's gate and is DONE.
+  // The work went on, committed, passed 10db's gate and is DONE.
   await open(page, 'Board');
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
