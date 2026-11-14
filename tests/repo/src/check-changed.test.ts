@@ -82,12 +82,22 @@ describe('scripts/check-changed.mjs', () => {
     expect(planFor('apps/desktop/src-tauri/src/main.rs').rust).toBe(true);
   });
 
-  it('adds the repo rule tests for a docs or script change, and no package', () => {
-    const plan = planFor('docs/architecture/decisions/README.md', 'scripts/check.sh');
+  it('adds the repo rule tests for a docs, script or GitHub template change, and no package', () => {
+    const plan = planFor(
+      'docs/architecture/decisions/README.md',
+      'scripts/check.sh',
+      '.github/pull_request_template.md',
+      '.github/ISSUE_TEMPLATE/bug.yml',
+    );
     expect(plan).toMatchObject({
       full: false,
       changed: [],
-      outside: ['docs/architecture/decisions/README.md', 'scripts/check.sh'],
+      outside: [
+        'docs/architecture/decisions/README.md',
+        'scripts/check.sh',
+        '.github/pull_request_template.md',
+        '.github/ISSUE_TEMPLATE/bug.yml',
+      ],
       affected: ['tests/repo'],
     });
   });

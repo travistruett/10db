@@ -13,6 +13,7 @@ export type EnvDaemonOptions = Pick<
   | 'limits'
   | 'judgeOff'
   | 'benchmarksOff'
+  | 'openRouterSync'
   | 'slack'
   | 'catalogueSync'
   | 'pictures'
@@ -52,6 +53,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(env.TENDB_JUDGE === 'off' ? { judgeOff: true } : {}),
     ...(env.TENDB_BENCHMARKS === 'off' ? { benchmarksOff: true } : {}),
+    openRouterSync: env.TENDB_JUDGE !== 'off' && env.TENDB_BENCHMARKS !== 'off',
     slack: slackOnFromEnv(env),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },

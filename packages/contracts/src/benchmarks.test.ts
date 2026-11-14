@@ -30,5 +30,12 @@ describe('benchmark status', () => {
       unmeasuredProfiles: [],
     });
     expect(parsed.off).toBe(false);
+    expect(parsed.openRouter).toEqual({
+      keyConfigured: false,
+      lastSuccessAt: null,
+      outcome: null,
+      message: null,
+      off: false,
+    });
   });
 });

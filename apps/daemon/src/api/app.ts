@@ -38,6 +38,7 @@ import {
   InboxAnswer,
   InboxItemId,
   InboxState,
+  JudgeCallsPageQuery,
   JudgeConfigPatch,
   BenchmarkKeyInput,
   ModelPicksQuery,
@@ -1312,11 +1313,18 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
       async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
+    .get('/judge/models', async (c) => c.json(await deps.services.listDecisionModels()))
     .get(
       '/judge/calls',
       validator('query', (query) => JudgeCallsQuery.parse(query)),
       (c) => c.json(deps.services.listJudgeCalls(c.req.valid('query').limit)),
     )
+    .get(
+      '/judge/calls/page',
+      validator('query', (query) => JudgeCallsPageQuery.parse(query)),
+      (c) => c.json(deps.services.pageJudgeCalls(c.req.valid('query'))),
+    )
+    .get('/judge/decisions', (c) => c.json(deps.services.judgeDecisionStats()))
     .get('/benchmarks/status', async (c) => c.json(await deps.services.benchmarkStatus()))
     .put(
       '/benchmarks/key',

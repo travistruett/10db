@@ -70,6 +70,7 @@ import {
   getAccount,
   type DbReader,
   listAccountModels,
+  listOpenRouterMeasures,
   listAccounts,
   listBatches,
   listBoardColumns,
@@ -109,7 +110,7 @@ import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
-import { buildModelRows, type CatalogueSync } from '../catalogue';
+import { buildModelRows, groupMeasuresByModel, type CatalogueSync } from '../catalogue';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
@@ -211,6 +212,8 @@ export function createServices(deps: {
   readonly refreshModels: (opts: { readonly force: boolean }) => Promise<void>;
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
+  /** Whether OpenRouter's measures may show: an OpenRouter account is picked for decisions and no kill switch is on. */
+  readonly openRouterOn: () => boolean;
   readonly judge: JudgeApiServices;
   /** gh's login and the Sign In that changes it. */
   readonly github: GithubApiServices;
@@ -722,6 +725,11 @@ export function createServices(deps: {
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
+        openRouter: groupMeasuresByModel(
+          deps.openRouterOn() ? listOpenRouterMeasures(db) : [],
+          deps.catalogue.catalogue(),
+        ),
+        now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
     modelPicks: (accountId, rigor, projectId) => {

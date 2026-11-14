@@ -29,6 +29,7 @@ export * from './shape-review';
 export * from './shape-shadow';
 export * from './mcp-approvals';
 export * from './model-profiles';
+export * from './openrouter-measures';
 export * from './pass-shared';
 export * from './pass-sign-offs';
 export * from './pass-take-outs';
@@ -60,5 +61,6 @@ export { createTestStore, seedAccount, seedProject, TEST_ACCOUNT_EMAIL } from '.
 export * from './settings';
 export * from './stock-hazards';
 export * from './judge-calls';
+export * from './judge-call-stats';
 export * from './judge-config';
 export * from './small-proposal-limit';

@@ -1,4 +1,8 @@
-import { ConflictError, type BenchmarkStatusDto } from '@10db/contracts';
+import {
+  ConflictError,
+  type BenchmarkStatusDto,
+  type OpenRouterSyncStatusDto,
+} from '@10db/contracts';
 import type { ApiServices } from '../api';
 import type { BenchmarkSync } from '../benchmarks';
 import { AA_KEY_ACCOUNT, KeychainError, type Keychain } from '../environment';
@@ -24,6 +28,8 @@ export function createBenchmarkServices(deps: {
   readonly keychain: Keychain;
   /** Started with `TENDB_BENCHMARKS=off`: the key is not read or written, even to say whether it is set. */
   readonly off: boolean;
+  /** OpenRouter's sync status; with no sync running it says whether a kill switch is why. */
+  readonly openRouter: () => OpenRouterSyncStatusDto;
 }): BenchmarkApiServices {
   /**
    * The sync records whether a key was there when it last ran; the card shows whether one is there now, so
@@ -37,6 +43,7 @@ export function createBenchmarkServices(deps: {
           async () => (await deps.keychain.readAsync(AA_KEY_ACCOUNT)) !== null,
         ),
     off: deps.off,
+    openRouter: deps.openRouter(),
   });
   const refuseWhenOff = (): void => {
     if (deps.off) throw new ConflictError('Started with TENDB_BENCHMARKS=off');

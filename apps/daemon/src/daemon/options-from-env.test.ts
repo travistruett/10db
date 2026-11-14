@@ -77,6 +77,7 @@ describe('daemonOptionsFromEnv', () => {
       logLevel: 'warn',
       sandbox: {},
       slack: true,
+      openRouterSync: true,
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
       catalogueSync: true,
@@ -123,6 +124,17 @@ describe('judgeOff', () => {
     ['unset', {}, false],
   ])('is %s -> %s for TENDB_JUDGE', (_name, source, off) => {
     expect(daemonOptionsFromEnv(loadEnv(source)).judgeOff ?? false).toBe(off);
+  });
+});
+
+describe('openRouterSync', () => {
+  it.each([
+    ['neither kill switch', {}, true],
+    ['TENDB_JUDGE=off', { TENDB_JUDGE: 'off' }, false],
+    ['TENDB_BENCHMARKS=off', { TENDB_BENCHMARKS: 'off' }, false],
+    ['both', { TENDB_JUDGE: 'off', TENDB_BENCHMARKS: 'off' }, false],
+  ])('is %s -> %s', (_name, source, on) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).openRouterSync).toBe(on);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { BenchmarkStatusDto } from '@10db/contracts';
+import { noOpenRouterSync, type BenchmarkStatusDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { syncWarning } from './warning';
 
@@ -14,6 +14,7 @@ const status = (outcome: BenchmarkStatusDto['outcome'], message: string | null =
     unmeasuredProfiles: [],
     off: false,
     syncing: false,
+    openRouter: noOpenRouterSync(),
   }) satisfies BenchmarkStatusDto;
 
 describe('syncWarning', () => {

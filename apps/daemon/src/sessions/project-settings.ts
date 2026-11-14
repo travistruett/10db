@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
-import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
+import { readRepoConfigFileIn, RepoConfigFileError } from './repo-config-file';
 
 const SETTINGS_FILE = join('.claude', 'settings.json');
 /**
@@ -56,7 +56,7 @@ const ProjectSettings = z.looseObject({ env: z.record(z.string(), z.string()).op
 export function projectSettingsBillingProblem(cwd: string): string | null {
   let text: string | null;
   try {
-    text = readRepoConfigFile(join(cwd, SETTINGS_FILE));
+    text = readRepoConfigFileIn(cwd, SETTINGS_FILE);
   } catch (error) {
     if (!(error instanceof RepoConfigFileError)) throw error;
     return `${SETTINGS_FILE} could not be read (${error.message})`;

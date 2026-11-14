@@ -21,6 +21,25 @@ export const AaModelDto = z.object({
 });
 export type AaModelDto = z.infer<typeof AaModelDto>;
 
+/** The last OpenRouter model-data sync, beside Artificial Analysis's. */
+export const OpenRouterSyncStatusDto = z.object({
+  keyConfigured: z.boolean(),
+  lastSuccessAt: z.iso.datetime().nullable(),
+  outcome: z.enum(['ok', 'no_key', 'unauthorized', 'rate_limited', 'failed']).nullable(),
+  message: z.string().nullable(),
+  /** Either kill switch is on (`TENDB_JUDGE=off` or `TENDB_BENCHMARKS=off`). */
+  off: z.boolean(),
+});
+export type OpenRouterSyncStatusDto = z.infer<typeof OpenRouterSyncStatusDto>;
+
+export const noOpenRouterSync = (): OpenRouterSyncStatusDto => ({
+  keyConfigured: false,
+  lastSuccessAt: null,
+  outcome: null,
+  message: null,
+  off: false,
+});
+
 export const BenchmarkStatusDto = z.object({
   keyConfigured: z.boolean(),
   /** The last attempt, and the last attempt that stored data; the daily sync runs from the second. */
@@ -37,6 +56,7 @@ export const BenchmarkStatusDto = z.object({
   off: z.boolean().default(false),
   /** A sync is running now, so the outcome above is the one before it. */
   syncing: z.boolean().default(false),
+  openRouter: OpenRouterSyncStatusDto.default(noOpenRouterSync),
 });
 export type BenchmarkStatusDto = z.infer<typeof BenchmarkStatusDto>;
 

@@ -9,6 +9,7 @@ import {
   type Effort,
   type SupportedAccountKind,
 } from '@10db/contracts';
+import type { OpenRouterMeasure } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
 import { buildModelRows, type ModelRowAccount } from './model-rows';
@@ -16,6 +17,7 @@ import { parseCatalogue } from './source';
 
 const CATALOGUE = parseCatalogue(readModelsDevFixture());
 const AT = '2026-11-06T10:00:00.000Z';
+const NOW = new Date('2026-11-13T12:00:00.000Z');
 
 const account = (kind: SupportedAccountKind, archived = false): ModelRowAccount => ({
   id: mintId('Account'),
@@ -77,6 +79,7 @@ const scored = (intelligence: number | null) => ({ intelligence });
 describe('buildModelRows', () => {
   it('merges every effort of a model and every account offering it into one row', () => {
     const rows = buildModelRows({
+      now: NOW,
       catalogue: CATALOGUE,
       accounts: [subscription, bedrock],
       profiles: [
@@ -117,6 +120,17 @@ describe('buildModelRows', () => {
         intelligence: 40,
         costPerTaskUsd: null,
         outputTokensPerSecond: 60,
+        coding: null,
+        agentic: null,
+        speedProvider: null,
+        // Artificial Analysis is the only source until the others are joined in.
+        sources: {
+          intelligence: 'aa',
+          coding: null,
+          agentic: null,
+          costPerTask: null,
+          speed: 'aa',
+        },
         efforts: [
           expect.objectContaining({ effort: 'high', intelligence: 40 }),
           expect.objectContaining({ effort: 'low', intelligence: 30 }),
@@ -127,8 +141,129 @@ describe('buildModelRows', () => {
     ]);
   });
 
+  describe('with measures from OpenRouter', () => {
+    const measure = (over: Partial<OpenRouterMeasure>): OpenRouterMeasure => ({
+      id: 'anthropic/claude-opus-5.5',
+      kind: 'speed',
+      key: '',
+      intelligence: null,
+      coding: null,
+      agentic: null,
+      accuracy: null,
+      costPerTaskUsd: null,
+      tokensPerSecond: null,
+      latencyMs: null,
+      measuredAt: '2026-11-13T08:00:00.000Z',
+      ...over,
+    });
+    const rowsWith = (openRouter: OpenRouterMeasure[], asked?: ModelRowAccount) =>
+      buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts: [subscription, bedrock],
+        profiles: [
+          profile({ effort: 'high', scores: scored(null), outputTokensPerSecond: 20 }),
+          profile({ effort: 'max', scores: scored(null), outputTokensPerSecond: 20 }),
+        ],
+        offers: [offer(subscription.id), offer(bedrock.id)],
+        openRouter: new Map([['claude-opus-5-5', openRouter]]),
+        ...(asked === undefined ? {} : { account: asked }),
+      })[0];
+
+    it('takes the row’s Coding and Agentic from the Max effort when another effort ranks first', () => {
+      const [row] = buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [
+          profile({ effort: 'high', scores: scored(60), costPerTaskUsd: 1 }),
+          profile({ effort: 'max', scores: scored(60), costPerTaskUsd: 2 }),
+        ],
+        offers: [offer(subscription.id)],
+        openRouter: new Map([
+          ['claude-opus-5-5', [measure({ kind: 'score_aa', coding: 31, agentic: 22 })]],
+        ]),
+      });
+      expect(row?.efforts.map((e) => e.effort)).toEqual(['high', 'max']);
+      expect(row).toMatchObject({ coding: 31, agentic: 22 });
+      expect(row?.sources).toMatchObject({
+        coding: 'aa_via_openrouter',
+        agentic: 'aa_via_openrouter',
+      });
+    });
+
+    it('does not let a relayed score reorder the efforts or change the row’s headline', () => {
+      const [row] = buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [
+          profile({ effort: 'high', scores: scored(60), costPerTaskUsd: 1 }),
+          profile({ effort: 'max', scores: scored(null) }),
+        ],
+        offers: [offer(subscription.id)],
+        openRouter: new Map([
+          ['claude-opus-5-5', [measure({ kind: 'score_aa', intelligence: 61 })]],
+        ]),
+      });
+      expect(row?.efforts.map((e) => [e.effort, e.intelligence, e.sources.intelligence])).toEqual([
+        ['high', 60, 'aa'],
+        ['max', 61, 'aa_via_openrouter'],
+      ]);
+      expect(row).toMatchObject({ intelligence: 60, costPerTaskUsd: 1 });
+      expect(row?.sources.intelligence).toBe('aa');
+    });
+
+    it('shows the score OpenRouter relays on the Max effort alone, and names it', () => {
+      const row = rowsWith([
+        measure({ kind: 'score_aa', intelligence: 55, coding: 31, agentic: 22 }),
+      ]);
+      expect(row?.efforts.map((e) => [e.effort, e.intelligence, e.sources.intelligence])).toEqual([
+        ['max', 55, 'aa_via_openrouter'],
+        ['high', null, null],
+      ]);
+      expect(row).toMatchObject({ intelligence: 55, coding: 31, agentic: 22 });
+      expect(row?.sources).toMatchObject({
+        intelligence: 'aa_via_openrouter',
+        coding: 'aa_via_openrouter',
+        agentic: 'aa_via_openrouter',
+      });
+    });
+
+    it('shows the speed on the provider of the asked account', () => {
+      const row = rowsWith(
+        [
+          measure({ key: 'Amazon Bedrock', tokensPerSecond: 90 }),
+          measure({ key: 'Anthropic', tokensPerSecond: 60 }),
+        ],
+        bedrock,
+      );
+      expect(row).toMatchObject({
+        outputTokensPerSecond: 90,
+        speedProvider: 'Amazon Bedrock',
+        sources: { speed: 'openrouter' },
+      });
+      expect(row?.efforts.map((e) => e.outputTokensPerSecond)).toEqual([90]);
+    });
+
+    it('takes the median across providers when no account is asked, and the speed AA gives with none fresh', () => {
+      expect(
+        rowsWith([
+          measure({ key: 'A', tokensPerSecond: 10 }),
+          measure({ key: 'B', tokensPerSecond: 30 }),
+        ]),
+      ).toMatchObject({ outputTokensPerSecond: 20, speedProvider: null });
+      expect(
+        rowsWith([
+          measure({ key: 'A', tokensPerSecond: 99, measuredAt: '2026-11-10T00:00:00.000Z' }),
+        ]),
+      ).toMatchObject({ outputTokensPerSecond: 20, sources: { speed: 'aa' } });
+    });
+  });
+
   it('shows no score as null, never as zero', () => {
     const [row] = buildModelRows({
+      now: NOW,
       catalogue: CATALOGUE,
       accounts: [subscription],
       profiles: [profile({ scores: scored(null) })],
@@ -142,6 +277,7 @@ describe('buildModelRows', () => {
 
   it('scores a model from its strongest effort even when the strongest by speed has none', () => {
     const [row] = buildModelRows({
+      now: NOW,
       catalogue: CATALOGUE,
       accounts: [subscription],
       profiles: [
@@ -174,6 +310,7 @@ describe('buildModelRows', () => {
     },
   ])('takes speed from $name', ({ low, high, expected }) => {
     const [row] = buildModelRows({
+      now: NOW,
       catalogue: CATALOGUE,
       accounts: [subscription],
       profiles: [
@@ -195,6 +332,7 @@ describe('buildModelRows', () => {
 
     it('lists the efforts strongest first and takes the row’s cost from the first', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [subscription],
         profiles: [
@@ -212,6 +350,7 @@ describe('buildModelRows', () => {
 
     it('ties on Intelligence by the cheaper cost, then the higher effort', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [subscription],
         profiles: [priced('high', 40, 3), priced('medium', 40, 1), priced('max', 40, 3)],
@@ -222,6 +361,7 @@ describe('buildModelRows', () => {
 
     it('scales every cost to an account that prices its own copy 10% above the maker', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [bedrock],
         profiles: [priced('low', 30, 1), priced('high', 40, 2)],
@@ -237,6 +377,7 @@ describe('buildModelRows', () => {
 
     it('narrows a row to the efforts the account lists, and its Intelligence follows', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [subscription],
         profiles: [priced('low', 30, 0.5), priced('high', 40, 2)],
@@ -249,6 +390,7 @@ describe('buildModelRows', () => {
 
     it('shows no efforts, and dashes, when the efforts an account lists match no profile', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [subscription],
         profiles: [priced('high', 40, 2)],
@@ -261,6 +403,7 @@ describe('buildModelRows', () => {
     it('keeps the maker’s efforts and costs for a model the account does not offer', () => {
       // The account lists another model, narrowed to one effort and priced; this model is not in its list.
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [bedrock],
         profiles: [priced('low', 30, 1), priced('high', 40, 2)],
@@ -275,6 +418,7 @@ describe('buildModelRows', () => {
 
     it('keeps the maker’s cost where the account’s offer of the model is marked unusable', () => {
       const rows = buildModelRows({
+        now: NOW,
         catalogue: CATALOGUE,
         accounts: [bedrock],
         profiles: [priced('low', 30, 1), priced('high', 40, 2)],
@@ -406,9 +550,13 @@ describe('buildModelRows', () => {
       },
     ])('$name', ({ profiles, offers, accounts, expected, ...rest }) => {
       const only = 'only' in rest ? rest.only : undefined;
-      const rows = buildModelRows({ catalogue: CATALOGUE, accounts, profiles, offers }).filter(
-        (r) => only === undefined || r.model === only,
-      );
+      const rows = buildModelRows({
+        now: NOW,
+        catalogue: CATALOGUE,
+        accounts,
+        profiles,
+        offers,
+      }).filter((r) => only === undefined || r.model === only);
       expect(rows).toHaveLength(expected.length);
       expected.forEach((want, i) => {
         expect(rows[i]).toMatchObject(want);
@@ -418,6 +566,7 @@ describe('buildModelRows', () => {
 
   it('lists a model offered with no catalogue at all as Unknown rather than guessing it runs', () => {
     const [row] = buildModelRows({
+      now: NOW,
       catalogue: null,
       accounts: [bedrock],
       profiles: [],

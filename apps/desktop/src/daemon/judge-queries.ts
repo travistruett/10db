@@ -1,4 +1,5 @@
 import {
+  DecisionModelListDto,
   JudgeCallDto,
   type AccountId,
   JudgeStatusDto,
@@ -14,7 +15,11 @@ import { useDaemon } from './provider';
 export const judgeKeys = {
   status: ['judge', 'status'],
   calls: ['judge', 'calls'],
+  models: ['judge', 'models'],
 } as const;
+
+/** The daemon keeps OpenRouter's list for hours; an open Settings page needn't ask it again sooner than this. */
+const MODELS_STALE_MS = 60 * 60 * 1000;
 
 const JudgeCallList = z.array(JudgeCallDto);
 
@@ -43,6 +48,17 @@ export function useJudgeCalls() {
       ),
     refetchInterval: CALLS_REFRESH_MS,
     refetchOnWindowFocus: 'always',
+  });
+}
+
+/** OpenRouter's decision models, through the daemon; only asked for when `enabled` (a key is set). */
+export function useDecisionModels(enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: judgeKeys.models,
+    queryFn: async () => readJson(await client.judge.models.$get(), DecisionModelListDto),
+    enabled,
+    staleTime: MODELS_STALE_MS,
   });
 }
 
