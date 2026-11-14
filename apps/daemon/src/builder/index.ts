@@ -1,2 +1,2 @@
 export { createBuilderMcpHandler } from './server';
-export { createBuilderTools, type BuilderServices } from './tools';
+export { createBuilderTools } from './tools';

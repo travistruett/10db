@@ -4,4 +4,4 @@ export { createMcpHandler } from './server';
 export { mintSessionToken } from './tokens';
 export { ToolImages } from './tool-images';
 export type { ShapeToolHandlers, ShapeToolsFor } from './shape-tools';
-export { CHAT_TOOL_DESCRIPTIONS, type ChatToolHandlers, type ChatToolsFor } from './chat-tools';
+export type { ChatToolHandlers, ChatToolsFor } from './chat-tools';

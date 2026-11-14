@@ -20,8 +20,3 @@ export function useSessionsNeedingYou(): readonly ChatDto[] {
       needsYou(tabInfo({ kind: 'chat', key: chat.id, chat, position: 0 }, cards, {}).state),
     );
 }
-
-/** How many open sessions wait on the builder: the sidebar badge, nothing at 0. */
-export function useSessionsNeedingYouCount(): number {
-  return useSessionsNeedingYou().length;
-}

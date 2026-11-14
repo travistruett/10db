@@ -128,7 +128,7 @@ type AskInput = AskOwner & {
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
-export const SHAPE_CARD_KEY = 'shapeId';
+const SHAPE_CARD_KEY = 'shapeId';
 /** The detail key naming the conversation whose session asked a card. */
 const CONVERSATION_CARD_KEY = 'conversationId';
 
