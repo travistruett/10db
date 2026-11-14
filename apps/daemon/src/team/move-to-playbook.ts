@@ -64,7 +64,8 @@ const lines = (entries: readonly PlaybookMoveEntry[]): string =>
  * Moves the routing settings made before the playbook into it, once, in the caller's transaction, reading
  * them only through `readLegacyRouting`: flows and risk tags become rigor and kinds, role settings, team
  * bindings, persona pins and minimums become cells, and global patterns on risk tags become kind overrides.
- * What has no place in the playbook is reported: a project's entries on one Inbox card each, the global ones
+ * A row that cannot be read is reported and skipped; the rest of the move runs. What has no place in the
+ * playbook is reported: a project's entries on one Inbox card each, the global ones
  * in an app setting. The old tables are left as they are.
  */
 export function moveToPlaybook(ctx: WriteContext): MoveReport {
@@ -89,7 +90,13 @@ export function moveToPlaybook(ctx: WriteContext): MoveReport {
       kinds: [...task.kinds],
     });
 
-  const report = reportOf([...cells.entries, ...patterns.entries, ...rigor.entries]);
+  const unreadable = legacy.unreadable.map((error): ScopedMoveEntry => ({
+    projectId: null,
+    setting: `${error.table} ${error.rowId}`,
+    value: 'could not read',
+    why: 'The row does not have a shape this version knows, so nothing was carried over from it',
+  }));
+  const report = reportOf([...cells.entries, ...patterns.entries, ...rigor.entries, ...unreadable]);
   for (const { projectId, entries } of report.projects) {
     const name = getProject(ctx.tx, projectId).name;
     insertInboxItem(ctx, {

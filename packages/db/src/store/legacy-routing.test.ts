@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readLegacyRouting } from './legacy-routing';
+import { sql } from 'drizzle-orm';
+import { LegacyRoutingError, readLegacyRouting } from './legacy-routing';
 import {
   seedLegacyBinding,
   seedLegacyFlow,
@@ -92,5 +93,23 @@ describe('readLegacyRouting', () => {
       { id: task.id, projectId: project.id, status: 'open', riskTags: ['auth'], flowId: flow.id },
     ]);
     expect(legacy.projects).toEqual([{ id: project.id, flowId: flow.id }]);
+  });
+
+  it('names the table and row of one that does not parse, and still reads the rest', () => {
+    const [good, bad] = store.write((ctx) => [
+      seedLegacyFlow(ctx, { name: 'good', steps: [{ role: 'implement', need: 40 }] }),
+      seedLegacyFlow(ctx, { name: 'bad', steps: [{ role: 'implement', need: 40 }] }),
+    ]).value;
+    if (!good || !bad) throw new Error('flows were not seeded');
+    store.write((ctx) => {
+      ctx.tx.run(sql`UPDATE flows SET steps = '"not steps"' WHERE id = ${bad.id}`);
+    });
+
+    const legacy = readLegacyRouting(store.db);
+    expect(legacy.flows.map((f) => f.id)).toEqual([good.id]);
+    expect(legacy.unreadable).toHaveLength(1);
+    const [error] = legacy.unreadable;
+    expect(error).toBeInstanceOf(LegacyRoutingError);
+    expect(error).toMatchObject({ table: 'flows', rowId: bad.id });
   });
 });

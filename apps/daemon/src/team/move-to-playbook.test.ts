@@ -34,6 +34,7 @@ import {
   seedLegacyTaskRouting,
 } from '../../test/legacy-rows';
 import { readDefaultPersonas } from '@10db/harness';
+import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { moveToPlaybook } from './move-to-playbook';
@@ -477,6 +478,23 @@ describe('moveToPlaybook: what it leaves for the builder to read', () => {
     const stored = PlaybookMoveEntry.array().parse(getAppSetting(state.db, 'playbook.moveReport'));
     expect(stored.map((e) => e.setting)).toEqual(['Pattern "Areas"']);
     expect(stored[0]?.value).toBeTruthy();
+  });
+});
+
+describe('moveToPlaybook: a row it cannot read', () => {
+  it('reports the row by table and id, and still moves everything else', () => {
+    const bad = addFlow('broken', [{ role: 'implement' }]);
+    state.write((ctx) => {
+      ctx.tx.run(sql`UPDATE flows SET steps = '"not steps"' WHERE id = ${bad.id}`);
+    });
+    setting('review', null, frontier);
+    expect(run).not.toThrow();
+    const stored = PlaybookMoveEntry.array().parse(getAppSetting(state.db, 'playbook.moveReport'));
+    expect(stored).toContainEqual(
+      expect.objectContaining({ setting: `flows ${bad.id}`, value: 'could not read' }),
+    );
+    expect(modelsOf(null, 'review')).toEqual(all(frontier));
+    expect(getAppSetting(state.db, 'playbook.moved')).toBe(true);
   });
 });
 
