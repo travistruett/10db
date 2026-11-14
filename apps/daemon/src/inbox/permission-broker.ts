@@ -1,4 +1,5 @@
 import {
+  type ConversationId,
   DeniedBy,
   PermissionChoice,
   MCP_TOOL_GRANT_DETAIL,
@@ -61,10 +62,18 @@ export interface WaitObserver {
   onWaitEnd(item: InboxItemDto): void;
 }
 
-/** Whose session asks: a lane's workstream, or a Plan conversation, which offers no workstream rule. */
+/** Whose session asks: a lane's workstream, or a conversation (Plan's), which offers no workstream rule. */
 type BrokerOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
-  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+  | {
+      readonly workstreamId: WorkstreamId;
+      readonly conversationId?: never;
+      readonly shapeId?: never;
+    }
+  | {
+      readonly workstreamId: null;
+      readonly conversationId: ConversationId;
+      readonly shapeId?: ShapeId;
+    };
 
 type BrokerContext = BrokerOwner & {
   readonly projectId: ProjectId;
@@ -292,7 +301,11 @@ export function createPermissionBroker(
   let allowOnce = ctx.allowOnce ?? null;
   const owner: BrokerOwner =
     ctx.workstreamId === null
-      ? { workstreamId: null, shapeId: ctx.shapeId }
+      ? {
+          workstreamId: null,
+          conversationId: ctx.conversationId,
+          ...(ctx.shapeId === undefined ? {} : { shapeId: ctx.shapeId }),
+        }
       : { workstreamId: ctx.workstreamId };
   // A conversation has no workstream, so it is never offered a rule for one.
   const optionsFor = (storable: boolean): InboxOption[] =>

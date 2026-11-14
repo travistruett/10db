@@ -2,7 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
 import { DeniedBy, type ProjectDto } from '@10db/contracts';
-import { getProject, listPermissionRules } from '@10db/db';
+import { getProject, listPermissionRules, shapeConversation } from '@10db/db';
 import { allCheckouts } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
@@ -217,6 +217,7 @@ export function createShapePreparer(deps: {
         {
           projectId: project.id,
           workstreamId: null,
+          conversationId: shapeConversation(state.db, input.shapeId).id,
           shapeId: input.shapeId,
           sessionId: input.sessionId,
           observer: input.observer,

@@ -5,6 +5,7 @@ import {
   mintId,
   PermissionChoice,
   ShapeOrigin,
+  type ConversationId,
   type InboxItemDto,
   type ShapeId,
 } from '@10db/contracts';
@@ -14,6 +15,7 @@ import {
   listInbox,
   listPermissionRules,
   seedProject,
+  shapeConversation,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
@@ -71,11 +73,16 @@ afterEach(() => {
 function conversation(project = seedProject(base)): {
   projectId: ReturnType<typeof seedProject>['id'];
   shapeId: ShapeId;
+  conversationId: ConversationId;
 } {
   const shape = base.write((ctx) =>
     insertShape(ctx, project.id, { title: 'Audit', origin: ShapeOrigin.App }),
   );
-  return { projectId: project.id, shapeId: shape.value.id };
+  return {
+    projectId: project.id,
+    shapeId: shape.value.id,
+    conversationId: shapeConversation(base.db, shape.value.id).id,
+  };
 }
 
 function shapeBroker(
@@ -88,6 +95,7 @@ function shapeBroker(
     {
       projectId: owner.projectId,
       workstreamId: null,
+      conversationId: owner.conversationId,
       shapeId: owner.shapeId,
       sessionId: mintId('Session'),
       observer: {
@@ -144,6 +152,7 @@ describe('a Plan conversation asks through the permission broker', () => {
     expect(card.title).toBe(`Allow ${row.toolName}?`);
     expect(card.targets).toEqual([]);
     expect(card.detail?.['shapeId']).toBe(owner.shapeId);
+    expect(card.detail?.['conversationId']).toBe(owner.conversationId);
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowProject,

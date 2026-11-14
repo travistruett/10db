@@ -18,6 +18,7 @@ import {
   type ConversationId,
   type ConversationItemId,
   type ConversationLiveDto,
+  type InboxItemId,
   type ProjectId,
 } from '@10db/contracts';
 import {
@@ -155,6 +156,8 @@ export interface ExploreEngineDeps {
     projectId: ProjectId,
   ) => { readonly until: Date | null } | null;
   readonly defaultPauseMs: number;
+  /** Withdraws an Inbox card the session waited on, when Stop or an end leaves it unanswered. */
+  readonly withdrawCard?: (id: InboxItemId) => void;
   readonly idleMs?: number;
   readonly stopGraceMs?: number;
   readonly warmCap?: number;
@@ -213,6 +216,8 @@ interface Runtime {
   /** While paused: when it resumes, null when it waits on the account; and the timer that checks. */
   pausedUntil: Date | null;
   pauseTimer: Timer | null;
+  /** The Inbox card the session waits on. */
+  card: InboxItemId | null;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -273,6 +278,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         rateReset: null,
         pausedUntil: null,
         pauseTimer: null,
+        card: null,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -346,6 +352,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (outcome.effects.includes(E.DropPendingStart)) rt.parked = false;
     // What streamed is kept as it stands now: the next turn may begin streaming before the chain runs.
     if (outcome.effects.includes(E.StorePartial)) storePartialNow(rt);
+    if (outcome.effects.includes(E.WithdrawCard) && rt.card !== null) {
+      deps.withdrawCard?.(rt.card);
+      rt.card = null;
+    }
     // A start sends what waited when it was asked for; what lands later is the next turn's.
     const taken: Taken = {
       waiting: new Set(unpushed(rt).map((item) => item.id)),
@@ -620,6 +630,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       rt.inTurn = false;
       reduce(rt, { type: 'ended', how: 'error' });
     };
+    // Set once the session is made; its events and cards come only after, on a later turn of the loop.
+    let self: Session | null = null;
     let launch: ExploreLaunch;
     try {
       launch = await hooks.spec(conv, {
@@ -628,7 +640,26 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         resume,
         digest,
         first: out,
-        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        observer: {
+          // A card this session waits on is an item and a state (§6.6).
+          onWaitStart: (item) => {
+            if (self === null || rt.session !== self) return;
+            rt.card = item.id;
+            state.write((ctx) => {
+              insertItem(ctx, rt.id, {
+                author: ConversationItemAuthor.Agent,
+                kind: ConversationItemKind.Card,
+                body: { inboxItemId: item.id },
+              });
+            });
+            reduce(rt, { type: 'card_raised' });
+          },
+          onWaitEnd: (item) => {
+            if (rt.card !== item.id) return;
+            rt.card = null;
+            reduce(rt, { type: 'card_settled' });
+          },
+        },
       });
     } catch (error) {
       failed(error);
@@ -668,8 +699,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       failed(error);
       return;
     }
-    // Set once the session is made; its events are read only after, on a later turn of the loop.
-    let self: Session | null = null;
     const open = openSession({
       state,
       clock,

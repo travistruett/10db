@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  type ConversationId,
   CARD_PROPOSED_PRINCIPLES,
   CARD_RELEASED_WORKSTREAMS,
   CARD_RESOLUTION,
@@ -87,12 +88,20 @@ export class ParkedError extends Error {
 }
 
 /**
- * Who waits on a card: a lane's workstream, or a Plan conversation, whose card has no target and names
- * the conversation in its detail (`SHAPE_CARD_KEY`).
+ * Who waits on a card: a lane's workstream, or a conversation, whose card has no target and names the
+ * conversation in its detail (`CONVERSATION_CARD_KEY`), and Plan's shape too (`SHAPE_CARD_KEY`).
  */
 type AskOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
-  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+  | {
+      readonly workstreamId: WorkstreamId;
+      readonly conversationId?: never;
+      readonly shapeId?: never;
+    }
+  | {
+      readonly workstreamId: null;
+      readonly conversationId: ConversationId;
+      readonly shapeId?: ShapeId;
+    };
 
 type AskInput = AskOwner & {
   readonly projectId: ProjectId;
@@ -118,6 +127,8 @@ type AskInput = AskOwner & {
 
 /** The detail key naming the Plan conversation whose session asked a card. */
 export const SHAPE_CARD_KEY = 'shapeId';
+/** The detail key naming the conversation whose session asked a card. */
+export const CONVERSATION_CARD_KEY = 'conversationId';
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
 interface FlagInput {
@@ -636,9 +647,13 @@ export function createInboxService(deps: {
           ? null
           : { workstreamId: input.workstreamId, sessionId: input.sessionId };
       const detail =
-        input.shapeId === undefined
+        input.conversationId === undefined
           ? input.detail
-          : { ...input.detail, [SHAPE_CARD_KEY]: input.shapeId };
+          : {
+              ...input.detail,
+              [CONVERSATION_CARD_KEY]: input.conversationId,
+              ...(input.shapeId === undefined ? {} : { [SHAPE_CARD_KEY]: input.shapeId }),
+            };
       const item = deps.state.write((ctx) => {
         const routed = assigneesFor(ctx.tx, {
           projectId: input.projectId,

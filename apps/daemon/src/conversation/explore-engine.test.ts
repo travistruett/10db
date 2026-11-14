@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { idUuid, type ToolCallView } from '@10db/contracts';
-import { getSession, listAccountModels, replaceAccountModels, updateSessionUsage } from '@10db/db';
+import {
+  getSession,
+  insertInboxItem,
+  listAccountModels,
+  replaceAccountModels,
+  updateSessionUsage,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { exploreWorld, gate, type ExploreWorld } from '../../test/explore-world';
 import type { SessionEvent } from '../sessions';
@@ -707,5 +713,76 @@ describe('ends', () => {
       { model: 'claude-opus-5-5', unusable: true },
     ]);
     expect(w.stateOf()).toBe('ended_error');
+  });
+});
+
+describe('cards', () => {
+  /** A card the session waits on, as the broker raises it: a real Inbox item. */
+  function raiseCard(world: ExploreWorld) {
+    const item = world.state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: world.project.id,
+        kind: 'permission',
+        title: 'Allow Bash?',
+        body: 'pnpm test',
+        options: [],
+        recommendation: null,
+        category: 'access',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [],
+      }),
+    );
+    const start = world.starts[0];
+    if (start === undefined) throw new Error('no start');
+    start.observer.onWaitStart(item);
+    return {
+      item,
+      settle: () => {
+        start.observer.onWaitEnd(item);
+      },
+    };
+  }
+
+  it('holds the state on a card, shows it as an item, and goes on when it is answered', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const card = raiseCard(w);
+    expect(w.stateOf()).toBe('waiting_card');
+    expect(
+      w
+        .items()
+        .filter((i) => i.kind === 'card')
+        .map((i) => i.body),
+    ).toEqual([{ inboxItemId: card.item.id }]);
+    card.settle();
+    expect(w.stateOf()).toBe('running');
+    gates[0]?.release();
+    await w.engine.settled(w.conv.id);
+  });
+
+  it('withdraws a card on Stop, and on an end', async () => {
+    const withdrawn: string[] = [];
+    w = exploreWorld({ deps: { withdrawCard: (id) => withdrawn.push(id) } });
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const first = raiseCard(w);
+    await w.engine.stop(w.conv.id);
+    expect(withdrawn).toEqual([first.item.id]);
+    await w.engine.settled(w.conv.id);
+
+    const held = gate();
+    endingTurn(w, 'error', { before: held.promise });
+    w.send('two');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    const second = raiseCard(w);
+    held.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+    expect(withdrawn).toEqual([first.item.id, second.item.id]);
   });
 });
