@@ -63,7 +63,7 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { expandHome } from '../sandbox';
 import type { ShapeImage, ShapeToolRequest, ShapeVerdict } from '../sessions';
-import { buildTrustPolicy, projectGrantLines, projectLiveSystems } from '../trust';
+import { buildTrustPolicy, projectGrantLines, projectLiveSystems, startingJudge } from '../trust';
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertedStateNote } from './converted-state';
 import { buildDigest } from './digest';
@@ -427,7 +427,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const limits = deps.limitsFor(launch.account.kind);
       // Only this conversation's files: another conversation's, in the same project or not, stay unread.
       // Where the judge is native the session runs in auto mode, with the web (trust line §8, §12).
-      const judge = deps.judgeOf(launch.account.kind, launch.modelId);
+      // Plan always asks for its agent's judge; 10db's judge isn't wired into Plan's hook yet.
+      const judge = startingJudge(deps.judgeOf(launch.account.kind, launch.modelId), true, false);
       const fileAccess: ShapeAccess = {
         ...launch.access,
         filesDir: shapeFilesDir(deps.filesDir, shapeId),

@@ -5569,7 +5569,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         .map((message) => message.body)
         .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
     const GATEWAY_NOTICE =
-      "10db's rules judge this session, not auto mode: auto mode doesn't run through a gateway account yet. A call those rules can't settle waits on a card.";
+      "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.";
 
     it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge', async () => {
       const { specs, task, workstream } = await start(PLAN);

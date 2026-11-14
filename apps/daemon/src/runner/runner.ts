@@ -2480,7 +2480,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
     const capability = opts.adapter.capabilities(launch.expect, launch.model);
-    const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto');
+    // 10db's judge isn't wired into a lane's hook yet, so no lane starts on it.
+    const tendbReady = false;
+    const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto', tendbReady);
     const judged = sessionJudge !== JudgeKind.Rules;
     const startFloor =
       laneSession === null
@@ -2489,6 +2491,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             kind: agentKind(account.kind),
             model: launch.model,
             autoMode: lanePermissionMode === 'auto',
+            tendbReady,
           });
     // The allow list the session runs with, which the guard also reads: an allow rule settles a call
     // before a judge sees it.
@@ -2508,7 +2511,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     );
     /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
     const sayFloor = (ctx: WriteContext, reason: FloorReason): void => {
-      const text = floorNoticeText(reason, launch.model);
+      const text = floorNoticeText(reason, { attended: pass !== null });
       if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
       insertSystemNotice(ctx, task.id, text);
     };
@@ -2876,7 +2879,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) => {
-          const judge = judgeForCall(sessionJudge, req.reportedMode ?? null);
+          const judge = judgeForCall(sessionJudge, req.reportedMode ?? null, tendbReady);
           if (judged && judge === JudgeKind.Rules && !saidLeftAutoMode) {
             saidLeftAutoMode = true;
             opts.state.write((ctx) => {
