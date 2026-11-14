@@ -21,6 +21,7 @@ import type { ShapeService } from '../shape';
 
 export type ConversationApiServices = Pick<
   ApiServices,
+  | 'conversationOwnerKind'
   | 'getConversation'
   | 'conversationItems'
   | 'conversationLive'
@@ -59,6 +60,7 @@ export function createConversationServices(deps: {
     }
   };
   return {
+    conversationOwnerKind: (id) => known(id).ownerKind,
     getConversation(id) {
       known(id);
       return engine.view(id);

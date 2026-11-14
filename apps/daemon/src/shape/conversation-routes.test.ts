@@ -224,3 +224,34 @@ describe('the conversation routes', () => {
     }
   });
 });
+
+describe('a screen’s token when the conversation can’t be read', () => {
+  it('is refused with 403 on an error that is not a missing conversation', async () => {
+    const app = createApp({
+      startedAt: new Date(),
+      allowedOrigins: [],
+      token: TOKEN,
+      onUnexpectedError: () => undefined,
+      screens: {
+        claim: () => Promise.resolve(null),
+        deliver: () => false,
+        refuse: () => false,
+        tokenValid: (token) => token === RENDER,
+        mayRead: renderMayRead,
+        image: () => null,
+      },
+      services: stubServices({
+        conversationOwnerKind: () => {
+          throw new Error('the store is closed');
+        },
+      }),
+      upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),
+      mcp: () => Promise.resolve(new Response('mcp')),
+      builderMcp: () => Promise.resolve(new Response('builder')),
+    });
+    const res = await app.request(`/conversations/${mintId('Conversation')}`, {
+      headers: { Authorization: `Bearer ${RENDER}` },
+    });
+    expect(res.status).toBe(403);
+  });
+});

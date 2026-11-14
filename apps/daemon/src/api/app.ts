@@ -119,6 +119,7 @@ import {
   type ShapeConvertError,
   ConversationId,
   ConversationOwnerKind,
+  NotFoundError,
   ConversationItemId,
   PostConversationMessage,
 } from '@10db/contracts';
@@ -279,7 +280,8 @@ export function createApp(deps: ApiDeps) {
   /**
    * A token held by code an agent may edit (a screen's, the dev UI's) reads a conversation only where it
    * is a Plan's: what Plan's screen read before its transcript moved, never a task's thread, its tool
-   * output or a chat. A path that names no conversation, or one 10db lacks (which answers 404), passes.
+   * output or a chat. A path that names no conversation, or one 10db lacks (which answers 404), passes;
+   * an ownership that can't be read refuses.
    */
   const shapeOwnedOrNone = (path: string): boolean => {
     const raw = CONVERSATION_PATH.exec(path)?.[1];
@@ -287,9 +289,10 @@ export function createApp(deps: ApiDeps) {
     const id = ConversationId.safeParse(raw);
     if (!id.success) return true;
     try {
-      return deps.services.getConversation(id.data).owner.kind === ConversationOwnerKind.Shape;
-    } catch {
-      return true;
+      return deps.services.conversationOwnerKind(id.data) === ConversationOwnerKind.Shape;
+    } catch (error) {
+      // Only a conversation 10db lacks passes, so its route answers 404; any other error refuses.
+      return error instanceof NotFoundError;
     }
   };
   const app = new Hono()

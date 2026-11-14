@@ -39,6 +39,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     eventsAfter: () => [] as DaemonEvent[],
     subscribe: () => () => undefined,
     subscribeLive: () => () => undefined,
+    conversationOwnerKind: none,
     getConversation: none,
     conversationItems: none,
     conversationLive: none,
