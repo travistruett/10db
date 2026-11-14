@@ -10,6 +10,8 @@ import {
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { openOptions, pickOption } from '../../test/combobox';
+import { projectDto } from '../../test/fixtures';
 import { kindDto } from '../../test/playbook-fixtures';
 import { KindsSection } from './kinds-section';
 
@@ -154,6 +156,48 @@ describe('a kind’s drawer', () => {
       overrides: { review: { personaId: null, model: null, effort: 'high' } },
     });
     expect(Object.keys(calls.patched[0]?.body.overrides ?? {})).toEqual(['review']);
+  });
+
+  it('saves what implies the kind and the craft skills it loads', async () => {
+    const calls = serve([DOCS]);
+    renderWithDaemon(<KindsSection />);
+    const drawer = await openKind('Docs');
+    await pickOption(
+      drawer.getByRole('combobox', { name: 'Implied by', hidden: true }),
+      'migrations',
+    );
+    await pickOption(drawer.getByRole('combobox', { name: 'Skills', hidden: true }), 'Test First');
+    fireEvent.click(drawer.getByRole('button', { name: 'Save', hidden: true }));
+    await waitFor(() => {
+      expect(calls.patched).toHaveLength(1);
+    });
+    expect(calls.patched[0]?.body).toMatchObject({
+      impliedBy: ['migrations'],
+      skills: ['test-first'],
+    });
+  });
+
+  it('offers the stock hazards and every project’s areas and hazards as what implies a kind', async () => {
+    serve([DOCS]);
+    server.use(
+      http.get(daemonUrl('/projects'), () =>
+        HttpResponse.json([
+          projectDto({
+            areas: [{ name: 'billing', globs: ['src/billing/**'] }],
+            hazards: [{ name: 'secrets', globs: ['.env*'], commands: [] }],
+          }),
+        ]),
+      ),
+    );
+    renderWithDaemon(<KindsSection />);
+    const drawer = await openKind('Docs');
+    const list = await openOptions(
+      drawer.getByRole('combobox', { name: 'Implied by', hidden: true }),
+    );
+    for (const name of ['migrations', 'deps', 'billing', 'secrets'])
+      await waitFor(() => {
+        expect(within(list).getByRole('option', { name, hidden: true })).toBeTruthy();
+      });
   });
 
   it('drops an override that was cleared, so no empty one is stored', async () => {

@@ -1,13 +1,21 @@
-import type { PlaybookRowDto, ProjectId } from '@10db/contracts';
-import { Button, Checkbox, Drawer, Group, Stack, Text } from '@mantine/core';
+import { Ships, type PlaybookRowDto, type ProjectId } from '@10db/contracts';
+import { Button, Checkbox, Drawer, Group, Select, Stack, Text } from '@mantine/core';
 import { useSetPlaybook } from '../../daemon/playbook-queries';
 import { scopeSource, toggleStep } from './playbook-edits';
 import { RIGOR_LABELS } from './rigor-labels';
 import { ROLES } from './role-labels';
 
+const SHIPS_OPTIONS = [
+  { value: Ships.WithGoal, label: 'With its goal' },
+  { value: Ships.Alone, label: 'Alone' },
+];
+
+const isShips = (value: string): value is Ships => SHIPS_OPTIONS.some((o) => o.value === value);
+
 /**
- * The steps a rigor runs: a checkbox per role, with Build fixed on. A change saves at once in this scope; Reset
- * hands the row back to the scope above.
+ * The steps a rigor runs: a checkbox per role, with Build fixed on, and how its tasks ship: with the rest of
+ * their goal in one pull request, or alone. A change saves at once in this scope; Reset hands the steps back
+ * to the scope above.
  */
 export function PlaybookRowDrawer({
   row,
@@ -55,6 +63,18 @@ export function PlaybookRowDrawer({
               />
             ))}
           </Stack>
+          <Select
+            label="Ships"
+            description="With its goal, tasks of one goal that start together share a pull request; kinds with their own copy always ship alone."
+            allowDeselect={false}
+            data={SHIPS_OPTIONS}
+            value={row.ships.value}
+            disabled={set.isPending}
+            onChange={(value) => {
+              if (value !== null && isShips(value))
+                set.mutate({ rows: [{ rigor: row.rigor, ships: value }] });
+            }}
+          />
           {set.isError ? (
             <Text size="xs" c="red" role="alert">
               {`Couldn't save: ${set.error.message}`}

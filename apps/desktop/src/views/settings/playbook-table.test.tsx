@@ -350,6 +350,21 @@ describe('the playbook table', () => {
       });
     });
 
+    it('saves how a rigor ships, from the row it has', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Light steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Light: steps' }));
+      const ships = drawer.getByRole('combobox', { name: 'Ships', hidden: true });
+      expect(ships).toHaveProperty('value', 'With its goal');
+      await pickOption(ships, 'Alone');
+      await waitFor(() => {
+        expect(puts).toEqual([
+          { path: '/playbook', body: { rows: [{ rigor: 'light', ships: 'alone' }], cells: [] } },
+        ]);
+      });
+    });
+
     it('takes the plan review with the plan, and Reset hands the row back', async () => {
       const puts = serve({
         global: playbookDto({
