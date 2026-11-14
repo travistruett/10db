@@ -255,6 +255,17 @@ export function exploreWorld(
         ends.push(end);
         return Promise.resolve();
       },
+      readBackSpec: () =>
+        Promise.resolve({
+          account: {
+            accountId: project.accountId,
+            label: 'Claude',
+            kind: accountKind,
+            identity: null,
+          },
+          env: {},
+          cwd: '/repo',
+        }),
       describeModel: (_c, model) => {
         const id = model ?? 'claude-opus-5-5';
         return { model: id, label: MODEL_LABELS[id] ?? id, launchId: `launch:${id}` };

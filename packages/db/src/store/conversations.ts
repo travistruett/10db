@@ -77,6 +77,18 @@ export function conversationOf(db: DbReader, owner: ConversationOwner): Conversa
   );
 }
 
+/** Every conversation of a profile: the explore ones, which the engine recovers at a start. */
+export function listConversationsOfProfile(
+  db: DbReader,
+  profile: ConversationProfile,
+): ConversationRow[] {
+  return db
+    .select()
+    .from(schema.conversations)
+    .where(eq(schema.conversations.profile, profile))
+    .all();
+}
+
 export function patchConversation(
   ctx: WriteContext,
   id: ConversationId,

@@ -227,6 +227,21 @@ export function conversationCostUsd(db: DbReader, conversationId: ConversationId
   return row?.total ?? null;
 }
 
+/** Ends every session of the conversation that has not ended, as a restart finds them; answers how many. */
+export function endConversationSessions(
+  ctx: WriteContext,
+  conversationId: ConversationId,
+  exitReason: string,
+): number {
+  const live = ctx.tx
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.conversationId, conversationId), isNull(schema.sessions.endedAt)))
+    .all();
+  for (const row of live) endSession(ctx, row.id, exitReason);
+  return live.length;
+}
+
 export function getSession(db: DbReader, id: SessionId): SessionRow {
   const row = db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get();
   if (!row) throw new NotFoundError('session', id);

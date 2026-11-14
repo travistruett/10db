@@ -5,6 +5,7 @@ import {
   ConflictError,
   ConversationItemAuthor,
   ConversationItemKind,
+  ConversationProfile,
   ConversationState,
   mintId,
   ModelMarkBasis,
@@ -32,6 +33,7 @@ import {
   insertItem,
   insertSession,
   lastItems,
+  listConversationsOfProfile,
   listPushedTurnStarters,
   listQueuedTurnStarters,
   markFilesInline,
@@ -41,6 +43,7 @@ import {
   findItemByPushUuid,
   openTurnMarker,
   patchConversation,
+  updateItem,
   type ConversationItemRow,
   type ConversationRow,
   type WriteContext,
@@ -64,8 +67,10 @@ import {
   reduceExplore,
   type ExploreEvent,
   type ExploreFacts,
+  type ExploreOutcome,
 } from './explore-state';
 import { pictureLimitsFor, type PictureLimits } from './picture-limits';
+import { settleRestart } from './explore-recovery';
 import { warmToClose } from './warm-cap';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
@@ -96,6 +101,30 @@ const BUSY: ReadonlySet<ConversationState> = new Set([
   S.WaitingCard,
   S.Stopping,
 ]);
+
+/** What a state is, in the words a refused Send Now gives (call 17). */
+function stateWords(state: ConversationState): string {
+  switch (state) {
+    case S.Starting:
+      return 'the session is starting';
+    case S.Running:
+      return 'a turn runs';
+    case S.WaitingCard:
+      return 'a card waits for your answer';
+    case S.Stopping:
+      return 'the turn is stopping';
+    case S.TakenOver:
+      return 'the session is open in a terminal';
+    case S.PausedAccount:
+      return 'the account is paused';
+    case S.Sealed:
+      return 'this session handed its work to a task';
+    case S.IdleCold:
+    case S.IdleWarm:
+    case S.EndedError:
+      return 'nothing waits';
+  }
+}
 
 /** How a session's own end reads to the reducer (call 7). */
 function endedHow(reason: SessionEndReason): 'error' | 'paused' | 'unasked' {
@@ -219,6 +248,8 @@ interface Runtime {
   pauseTimer: Timer | null;
   /** The Inbox card the session waits on. */
   card: InboxItemId | null;
+  /** A restart found the conversation paused: its account's return waits under Send now. */
+  restartedWhilePaused: boolean;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -230,6 +261,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const warmCap = deps.warmCap ?? WARM_CAP;
   const owners = new Map<ConversationOwnerKind, ExploreOwnerHooks>();
   const runtimes = new Map<ConversationId, Runtime>();
+  let closed = false;
 
   const conversation = (id: ConversationId): ConversationRow => getConversation(state.db, id);
   // A change to an account (saved, a cap raised, a card answered) checks the conversations paused on it.
@@ -281,6 +313,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         pausedUntil: null,
         pauseTimer: null,
         card: null,
+        restartedWhilePaused: false,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -306,7 +339,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     return {
       queued: parked ? 0 : unpushed(rt).length + handed(rt).length,
       providerSessionId: conv.providerSessionId !== null,
-      restartedWhilePaused: false,
+      restartedWhilePaused: rt.restartedWhilePaused,
       steer: capabilitiesOf(conv).steer,
       resuming: rt.resuming,
     };
@@ -362,10 +395,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       });
   };
 
-  /** Reduces `event`; answers the refusal's words, or null. */
-  const reduce = (rt: Runtime, event: ExploreEvent): string | null => {
+  /** Reduces `event` and applies what it says; answers the outcome. */
+  const reduce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
     const outcome = reduceExplore(rt.state, event, factsOf(rt, event));
-    if ('refused' in outcome) return outcome.refused;
+    if ('refused' in outcome) return outcome;
     // Flags a later effect reads, set now: a start under way sees its cancel at once.
     if (outcome.effects.includes(E.CancelStart)) rt.cancelled = true;
     if (outcome.effects.includes(E.DropPendingStart)) rt.parked = false;
@@ -382,7 +415,23 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     };
     setState(rt, outcome.next);
     for (const effect of outcome.effects) enqueue(rt, () => apply(rt, effect, taken));
-    return null;
+    return outcome;
+  };
+
+  /** Whether an outcome sends something now: a start, a push or an injection. */
+  const runs = (outcome: ExploreOutcome): boolean =>
+    'effects' in outcome &&
+    outcome.effects.some((e) => e === E.Start || e === E.Push || e === E.Inject);
+
+  /** The open "Send now" line is resolved: what waited under it is on its way (calls 12, 29). */
+  const resolveSendNow = (rt: Runtime): void => {
+    const marker = openTurnMarker(state.db, rt.id);
+    if (marker === null) return;
+    state.write((ctx) => {
+      updateItem(ctx, marker.id, {
+        body: { marker: TurnMarker.SendNow, resolvedAt: ctx.now },
+      });
+    });
   };
 
   // --- Turn starters ------------------------------------------------------------------------------
@@ -508,6 +557,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       rt.pauseTimer = null;
       rt.pausedUntil = null;
       reduce(rt, { type: 'account_resumed' });
+      rt.restartedWhilePaused = false;
       return;
     }
     rt.pausedUntil = blocked.until;
@@ -925,6 +975,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   // --- The engine -------------------------------------------------------------------------------------
 
   const queued = (id: ConversationId): void => {
+    // Once the engine has closed, a starter stays queued for the next start's Send now.
+    if (closed) return;
     const rt = runtimeOf(id);
     if (holding(rt)) {
       rt.parked = true;
@@ -941,13 +993,56 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       Date.parse(expiresAt) - CREDENTIALS_MARGIN_MS <= clock.now().getTime()
     )
       reduce(rt, { type: 'idle_close' });
-    reduce(rt, { type: 'builder_message' });
+    if (runs(reduce(rt, { type: 'builder_message' }))) resolveSendNow(rt);
   };
 
   const release = (rt: Runtime): void => {
-    if (holding(rt) || !rt.parked) return;
+    if (closed || holding(rt) || !rt.parked) return;
     rt.parked = false;
-    if (unpushed(rt).length > 0) reduce(rt, { type: 'builder_message' });
+    if (unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' })))
+      resolveSendNow(rt);
+  };
+
+  const recover = async (): Promise<void> => {
+    for (const conv of listConversationsOfProfile(state.db, ConversationProfile.Explore)) {
+      const hooks = owners.get(conv.ownerKind);
+      if (hooks === undefined) continue;
+      const found = await settleRestart({ state, adapter, log }, conv, hooks, capabilitiesOf(conv));
+      for (const card of found.cards) deps.withdrawCard?.(card);
+      const rt = runtimeOf(conv.id);
+      rt.state = conversation(conv.id).state ?? S.IdleCold;
+      if (rt.state === S.PausedAccount) {
+        // The reset a pause waited for is not kept: it is checked again after the default pause.
+        rt.restartedWhilePaused = true;
+        rt.pausedUntil =
+          deps.accountBlocked(accountOf(conv).id, conv.projectId)?.until ??
+          new Date(clock.now().getTime() + deps.defaultPauseMs);
+        armPause(rt);
+      }
+      reduce(rt, { type: 'daemon_restart' });
+      // Its Send now line is written before the API serves.
+      await rt.chain;
+    }
+  };
+
+  const close = async (): Promise<void> => {
+    closed = true;
+    unsubscribeAccounts();
+    const stopping: Promise<void>[] = [];
+    for (const rt of runtimes.values()) {
+      for (const timer of [rt.idle, rt.grace, rt.pauseTimer]) timer?.cancel();
+      rt.idle = null;
+      rt.grace = null;
+      rt.pauseTimer = null;
+      const session = rt.session;
+      if (session === null) continue;
+      // Its events stop first (call 25); what it held goes back and what streamed is kept (call 22).
+      session.open.detach();
+      handBack(rt);
+      storePartialNow(rt);
+      stopping.push(stopSession(rt, session));
+    }
+    await Promise.all(stopping);
   };
 
   return {
@@ -1013,7 +1108,18 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       reduce(rt, { type: 'stop_settled' });
       return edit;
     },
-    sendNow: () => undefined,
+    sendNow(id) {
+      const rt = runtimeOf(id);
+      if (openTurnMarker(state.db, id) === null)
+        throw new ConflictError('Nothing waits under Send now');
+      if (holding(rt)) throw new ConflictError('Nothing can run while 10db holds new turns');
+      const facts = factsOf(rt, { type: 'builder_message' });
+      const would = reduceExplore(rt.state, { type: 'builder_message' }, facts);
+      if ('refused' in would) throw new ConflictError(would.refused);
+      if (!runs(would)) throw new ConflictError(`Nothing can run while ${stateWords(rt.state)}`);
+      reduce(rt, { type: 'builder_message' });
+      resolveSendNow(rt);
+    },
     async modelChanged(id, model) {
       const rt = runtimeOf(id);
       if (BUSY.has(rt.state)) throw new ConflictError('Stop first');
@@ -1081,10 +1187,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           });
       }
     },
-    recover: () => Promise.resolve(),
-    close() {
-      unsubscribeAccounts();
-      return Promise.resolve();
-    },
+    recover,
+    close,
   };
 }

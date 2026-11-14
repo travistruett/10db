@@ -1,7 +1,7 @@
 import type { AccountId, ConversationFileId, ConversationItemId, SessionId } from '@10db/contracts';
 import type { ConversationItemRow, ConversationRow, WriteContext } from '@10db/db';
 import type { WaitObserver } from '../inbox';
-import type { ExploreSessionSpec, ShapeImage } from '../sessions';
+import type { ConversationReadSpec, ExploreSessionSpec, ShapeImage } from '../sessions';
 import type { PictureLimits } from './picture-limits';
 
 // Sessions spec §6.1: what an explore conversation's owner (Plan, and from M5a a chat) gives the
@@ -71,6 +71,13 @@ export interface ExploreOwnerHooks {
     },
   ): Outgoing;
   onTurnEnded(conv: ConversationRow, end: TurnEnd): Promise<void>;
+  /**
+   * What reading the agent's own conversation back needs after a restart (rule 5); absent for an owner
+   * whose agent keeps no conversation to read (Claude Code's).
+   */
+  readBackSpec?(
+    conv: ConversationRow,
+  ): Promise<Pick<ConversationReadSpec, 'account' | 'env' | 'cwd'>>;
   /** The model a pick runs on (null: the role's), for a warm session's switch and the change's notice. */
   describeModel(conv: ConversationRow, model: string | null): ExploreModel;
   readonly freshAtContextPct: number;
