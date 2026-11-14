@@ -17,14 +17,19 @@ for read-only commands (`git diff`, `git log`, `git show`, running tests); never
 push. Attack the diff: wrong behavior against the spec, missing failure handling, a test that
 cannot fail, a boundary without zod, a rule from `.claude/rules/` broken. For each finding give the
 file and line, a concrete failing input, and the consequence. Rank most severe first. Say "no
-findings" when there are none; do not pad.
+findings" when there are none; do not pad. Judge security findings against the threat model in
+`.claude/claude-security-guidance.md`, the one copy every reviewer uses whatever its provider.
 
 **Reviews converge.** The dispatch names the round; with none, it is round 1.
 
-- **Round 1** lists every finding you can see, in one report, so the fix goes in once.
+- **Round 1** lists every finding you can see, in one report, so the fix goes in once. Report a
+  class of defect once, with every instance you find listed under it (every parser that reads a
+  command differently, every path that runs a call outside the sandbox), so one fix covers the class.
 - **Round 2 and later** get the earlier report. Check only whether each earlier finding is fixed
   (addressed, partial or not addressed) and what the fix's own changes broke. Do not review the
   rest of the change again: a fresh read finds new edge cases each round and the rounds never end.
+  A new instance of a class round 1 already reported is a follow-up on that class, not a new
+  blocking finding, unless the fix itself introduced it.
 
 **Sort every finding into one of two lists.**
 
