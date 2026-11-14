@@ -878,6 +878,9 @@ function gateSummary(note: string | null, tail: string): string {
   return room > 0 ? `${head}${tail.slice(-room)}` : note.slice(0, GATE_SUMMARY_CHARS);
 }
 
+/** What a resumed send-back adds to its step's reason. */
+const FIXING_IN_OWN_SESSION = 'fixing in its own session';
+
 export function createRunner(opts: RunnerOptions): Runner {
   const db = opts.state.db;
   const projectMcpReader = createProjectMcpReader({
@@ -1020,8 +1023,9 @@ export function createRunner(opts: RunnerOptions): Runner {
    */
   function withFreshFixEscalated(id: WorkstreamId, ctl: Control): WorkstreamRow {
     const row = getWorkstreamRow(db, id);
-    const action =
-      actionOnAnotherAccount(id, ctl, row) ?? reviseAfterModelDrift(id, ctl, row) ?? row.nextAction;
+    const moved = actionOnAnotherAccount(id, ctl, row);
+    const drifted = moved === null ? reviseAfterModelDrift(id, ctl, row) : null;
+    const action = moved ?? drifted ?? row.nextAction;
     const step = row.steps[row.stepIndex];
     if (
       action.kind !== 'revise' ||
@@ -1030,18 +1034,27 @@ export function createRunner(opts: RunnerOptions): Runner {
     )
       return row;
     const rejecter = row.steps[action.reviewStep]?.role ?? StepRole.Review;
+    const cause =
+      moved !== null
+        ? 'it ran on another account'
+        : drifted !== null
+          ? 'the account no longer offers the model it ran on'
+          : 'it crashed';
     const up = escalated(
       row,
       step,
-      `the ${rejecter} step rejected it, and the session that wrote it could not be resumed`,
+      `the ${rejecter} step rejected it, and the session that wrote it could not be resumed: ${cause}`,
       ctl.accountId,
     );
     opts.state.write((ctx) => {
+      // Read again here: the steps read above may have been saved since.
+      const current = getWorkstreamRow(ctx.tx, id);
+      if (current.steps[current.stepIndex]?.fixFresh !== FixFresh.Pending) return;
       if (up.moved && step.profileId)
         recordProfileOutcome(ctx, step.profileId, { firstPass: false, escalated: true });
       patchWorkstream(ctx, id, ctl.fence, {
-        steps: row.steps.map((s, i) =>
-          i === row.stepIndex ? { ...up.step, fixFresh: FixFresh.Done } : s,
+        steps: current.steps.map((s, i) =>
+          i === current.stepIndex ? { ...up.step, fixFresh: FixFresh.Done } : s,
         ),
         model: up.step.model,
         effort: up.step.effort,
@@ -1209,7 +1222,7 @@ export function createRunner(opts: RunnerOptions): Runner {
    */
   function withCurrentPlan(tx: DbReader, id: WorkstreamId, leased: AccountId): WorkstreamRow {
     const row = getWorkstreamRow(tx, id);
-    if (row.steps.length === 0) return row;
+    if (row.steps.length === 0 || row.steps.some((s) => s.fixedPlan === true)) return row;
     return {
       ...row,
       steps: replanSteps(row.steps, row.stepIndex, planSteps(planInputOf(tx, row, leased)).steps),
@@ -1244,7 +1257,12 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): { readonly steps: WorkstreamStep[]; readonly added: string | null } {
     const at = row.stepIndex;
     const follows = row.steps.slice(at + 1).some((s) => s.role === StepRole.Review);
-    if (forced === null || row.steps[at]?.role !== StepRole.Implement || follows)
+    if (
+      forced === null ||
+      row.steps[at]?.role !== StepRole.Implement ||
+      follows ||
+      row.steps.some((s) => s.fixedPlan === true)
+    )
       return { steps: row.steps, added: null };
     const review = planAddedStep(planInputOf(tx, row, leased), StepRole.Review);
     if (review === undefined) return { steps: row.steps, added: null };
@@ -1266,9 +1284,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     checkout: string,
   ): Promise<string | null> {
     const now = withCurrentPlan(db, id, ctl.accountId);
+    // Whether a review is already planned is decided in the write, from the steps as they are then.
     if (
       now.steps[now.stepIndex]?.role !== StepRole.Implement ||
-      now.steps.slice(now.stepIndex + 1).some((s) => s.role === StepRole.Review)
+      now.steps.some((s) => s.fixedPlan === true)
     )
       return null;
     if (row.baseHead === null) return 'the changes could not be read';
@@ -1534,7 +1553,9 @@ export function createRunner(opts: RunnerOptions): Runner {
           ? {
               step: {
                 ...target,
-                reason: `${target.reason}; fixing in its own session`,
+                reason: target.reason.includes(FIXING_IN_OWN_SESSION)
+                  ? target.reason
+                  : `${target.reason}; ${FIXING_IN_OWN_SESSION}`,
                 fixFresh: FixFresh.Pending,
               },
               moved: false,

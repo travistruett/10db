@@ -122,9 +122,10 @@ export function insertPlannedWorkstream(
     first: { model: first.model, effort: first.effort },
   });
   patchWorkstream(ctx, ws.id, null, {
-    steps: plan.steps.map((s, i) =>
-      i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
-    ),
+    steps: plan.steps.map((s, i) => {
+      const planned = plan.rigor === null ? { ...s, fixedPlan: true as const } : s;
+      return i === 0 ? { ...planned, status: 'running', startedAt: ctx.now } : planned;
+    }),
     stepIndex: 0,
   });
   return getWorkstream(ctx.tx, ws.id);

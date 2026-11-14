@@ -625,6 +625,10 @@
             "minimum": 0,
             "maximum": 3
           },
+          "fixedPlan": {
+            "type": "boolean",
+            "const": true
+          },
           "providerSessionId": {
             "type": "string",
             "minLength": 1

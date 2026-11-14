@@ -75,6 +75,11 @@ export const WorkstreamStep = z.object({
    */
   reviewRounds: z.int().min(0).max(3).optional(),
   /**
+   * Set on every step of a run no rigor planned (a merge resolution, a pass page): its steps are never planned
+   * again and no review is added to it.
+   */
+  fixedPlan: z.literal(true).optional(),
+  /**
    * The provider session that last ran this step, so a send-back can resume it. Absent until a session of
    * the step has started.
    */

@@ -118,7 +118,7 @@ describe('the model a planned step starts on', () => {
       { name: 'between planning and the start', moveAfterFirstSession: false },
       { name: 'part way through a step, between two sessions', moveAfterFirstSession: true },
     ])('is chosen again $name, and saved on the workstream', async ({ moveAfterFirstSession }) => {
-      const second = { id: null as AccountId | null };
+      const second: { id: AccountId | null } = { id: null };
       let moved = false;
       const firstSession = moveAfterFirstSession
         ? [
@@ -217,7 +217,7 @@ describe('an account whose provider has no model profiles yet', () => {
 
 describe('a step the gate sends back for another try', () => {
   it('moves up among the models of the account the lane ran on, not the account the project has moved to', async () => {
-    const second = { id: null as AccountId | null };
+    const second: { id: AccountId | null } = { id: null };
     engine = await createTestEngine(
       { Alpha: [[turn], finish('op-escalate-01')] },
       { gateCommand: 'test -f src/api/a.txt' },
@@ -290,7 +290,7 @@ describe('a send-back that would resume the step’s own session', () => {
       },
     },
   ])('runs fresh, one profile up, when $name', async ({ change }) => {
-    const there = { id: null as AccountId | null };
+    const there: { id: AccountId | null } = { id: null };
     let sessions = 0;
     engine = await createTestEngine(
       {
