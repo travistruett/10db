@@ -54,6 +54,8 @@ export interface TaskSizingState {
   readonly kindsOff: readonly string[];
   /** The fingerprint of the text last sized; null before the first sizing. */
   readonly sizedFor: string | null;
+  /** The judge calls whose answers sizing applied: the rigor call and one call per kind key. */
+  readonly sizingCalls: SizingCalls;
   /** Whether any workstream of the task exists. */
   readonly started: boolean;
 }
@@ -79,6 +81,7 @@ export function readTaskSizing(db: DbReader, taskId: TaskId): TaskSizingState | 
     kinds: row.kinds,
     kindsOff: row.kindsOff,
     sizedFor: row.sizedFor,
+    sizingCalls: row.sizingCalls,
     started: started !== undefined,
   };
 }

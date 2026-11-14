@@ -106,8 +106,12 @@ describe('readTaskSizing', () => {
       kinds: [],
       kindsOff: [],
     });
-    apply(task.id, { fingerprint: 'fp-1' });
-    expect(readTaskSizing(store.db, task.id)?.sizedFor).toBe('fp-1');
+    const rigorCall = call();
+    apply(task.id, { fingerprint: 'fp-1', sizingCalls: { rigor: rigorCall, kinds: {} } });
+    expect(readTaskSizing(store.db, task.id)).toMatchObject({
+      sizedFor: 'fp-1',
+      sizingCalls: { rigor: rigorCall, kinds: {} },
+    });
     store.write((ctx) =>
       insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
     );
