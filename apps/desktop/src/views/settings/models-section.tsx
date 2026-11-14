@@ -26,6 +26,7 @@ import { usePlaybook } from '../../daemon/playbook-queries';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
+import { OpenRouterStatusLine } from './openrouter-status-line';
 import { TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { ModelDrawer } from './model-drawer';
 import { groupByFamily } from './model-families';
@@ -154,6 +155,7 @@ export function ModelsSection() {
         <ArtificialAnalysisCredit />
       </Text>
       <ArtificialAnalysisStatusLine />
+      <OpenRouterStatusLine />
     </Stack>
   );
 

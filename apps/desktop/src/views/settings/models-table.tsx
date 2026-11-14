@@ -2,9 +2,11 @@ import { ModelStatus, type ModelRowDto } from '@10db/contracts';
 import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { pagerProps, TABLE_PAGE_SIZES, type TablePage } from '../../shell/table-pager';
 import { withColumnHeader } from '../../shell/column-header';
+import { SourcedNumber } from './sourced-number';
+import { modelSourceText } from './number-source';
 import { ModelSearchFilter, TierFilter } from './model-filters';
 import { formatCost, formatScore, NO_DATA } from './model-format';
 import type { ModelFamily } from './model-families';
@@ -144,7 +146,7 @@ export function ModelsTable({
   const numeric = (
     accessor: ModelColumn,
     title: string,
-    value: (row: ModelRowDto) => string | number,
+    value: (row: ModelRowDto) => ReactNode,
   ): DataTableColumn<ModelRowDto> =>
     head({
       accessor,
@@ -201,9 +203,27 @@ export function ModelsTable({
         </Text>
       ),
     }),
-    numeric(ModelColumn.Intelligence, 'Intelligence', (row) => formatScore(row.intelligence)),
+    numeric(ModelColumn.Intelligence, 'Intelligence', (row) => (
+      <SourcedNumber
+        text={formatScore(row.intelligence)}
+        source={
+          row.sources.intelligence === null
+            ? null
+            : modelSourceText(row.sources.intelligence, 'intelligence', null)
+        }
+      />
+    )),
     {
-      ...numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => formatCost(row.costPerTaskUsd)),
+      ...numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => (
+        <SourcedNumber
+          text={formatCost(row.costPerTaskUsd)}
+          source={
+            row.sources.costPerTask === null
+              ? null
+              : modelSourceText(row.sources.costPerTask, 'costPerTask', null)
+          }
+        />
+      )),
       title: (
         <Tooltip label={costNote} multiline maw={260} withArrow>
           <span>Cost per task</span>
