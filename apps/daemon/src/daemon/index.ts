@@ -16,4 +16,4 @@ export {
   type SandboxRoots,
 } from './sandbox-roots';
 export { WorktreeRootError } from './worktree-root';
-export { createConversationServices, type ConversationApiServices } from './conversation-services';
+export { createConversationServices } from './conversation-services';

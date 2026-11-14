@@ -7,13 +7,9 @@ import {
   type PictureLimits,
   poolBytes,
   READ_CHARGE_MAX_BYTES,
-  readAllowance,
   readBytesSpent,
   readCountedLine,
   type ReadKind,
-  readMeasuredLine,
-  readPictureCap,
-  unmeasuredRead,
 } from '../conversation';
 
 // Shape spec §5.4. A picture or PDF Claude pulls in with `Read` comes back as a tool result, and a resumed
@@ -28,11 +24,8 @@ import {
 export {
   READ_CHARGE_MAX_BYTES,
   largestReadMeasured,
-  readAllowance,
   readBytesSpent,
   readCountedLine,
-  readPictureCap,
-  unmeasuredRead,
   type ReadKind,
 };
 
@@ -242,9 +235,6 @@ export const carriedNotice = (
     : `the pictures and PDF pages in this conversation (${megabytes(over.carried)}) are more than ` +
       `${megabytes(over.allowed)}, what a resumed session can resend under ${limits.limitText}, `) +
   `so Claude starts from the digest and no longer sees them. Send a picture again to show it.`;
-
-/** The line that corrects a Read's counted charge to what its result measured. */
-export { readMeasuredLine };
 
 /**
  * Why a Read is refused, or null when it fits within `ceiling` (`readCeiling`) beside the pictures and

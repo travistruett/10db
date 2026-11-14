@@ -4,33 +4,11 @@
 
 export { heldInlineBytes } from './block-pictures';
 export { createDelivery } from './delivery';
-export {
-  ExploreEffect,
-  reduceExplore,
-  type ExploreEvent,
-  type ExploreFacts,
-  type ExploreOutcome,
-} from './explore-state';
 export { outgoingMessage, type DeliverableMessage, type OutgoingMessage } from './delivery-rules';
-export {
-  createExploreEngine,
-  IDLE_MS,
-  STOP_GRACE_MS,
-  WARM_CAP,
-  type ExploreEngine,
-  type ExploreEngineDeps,
-} from './explore-engine';
+export { createExploreEngine, type ExploreEngine, type ExploreEngineDeps } from './explore-engine';
 export { itemsWithFull, readFullOutput, writeFullOutput } from './full-output';
 export { itemDtoOf } from './item-dto';
-export type {
-  ExploreLaunch,
-  ExploreModel,
-  ExploreOwnerHooks,
-  ExploreStart,
-  ExploreWords,
-  Outgoing,
-  TurnEnd,
-} from './explore-hooks';
+export type { ExploreOwnerHooks, ExploreStart, TurnEnd } from './explore-hooks';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
 export { keepBuilderMessage, removeKeptFiles, type PastedFile } from './intake';
 export { readImageHeader, readImageSize } from './image-check';

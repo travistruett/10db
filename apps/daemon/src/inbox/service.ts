@@ -128,7 +128,7 @@ type AskInput = AskOwner & {
 /** The detail key naming the Plan conversation whose session asked a card. */
 export const SHAPE_CARD_KEY = 'shapeId';
 /** The detail key naming the conversation whose session asked a card. */
-export const CONVERSATION_CARD_KEY = 'conversationId';
+const CONVERSATION_CARD_KEY = 'conversationId';
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
 interface FlagInput {
