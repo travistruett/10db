@@ -956,7 +956,7 @@ export function createToolHandlers(
       const role = currentStep(getWorkstreamRow(db, workstreamId)).role;
       if (role !== StepRole.Plan && role !== StepRole.Implement)
         return refused('Only a plan or build session can resize its task');
-      if (task.passId !== null && task.passId !== undefined)
+      if (passHoldingTask(db, task) !== undefined)
         return refused("A Workbench page runs no rigor's steps");
       if (task.rigorSource === RigorSource.Builder)
         return refused(
@@ -983,7 +983,7 @@ export function createToolHandlers(
         projectId: task.projectId,
         workstreamId,
         title: `${task.title} was resized`,
-        body: `${role === StepRole.Plan ? 'The planner' : 'The builder agent'} resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
+        body: `${role === StepRole.Plan ? 'Plan' : 'The build'} session resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
         options: [{ label: 'Got it', description: '' }],
         recommendation: null,
         foldKey: `resize:${task.id}`,

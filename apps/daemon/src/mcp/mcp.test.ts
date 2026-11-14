@@ -2577,9 +2577,12 @@ describe('resize_task', () => {
     listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.title.includes('resized'));
   const taskOf = (s: { task: { id: TaskId } }) => getTask(state.db, s.task.id);
 
-  it.each(['implement', 'plan'] as const)(
-    'resizes the task from a %s step, pinning it as the agent’s with the reason, and tells the builder once',
-    async (role) => {
+  it.each([
+    { role: 'implement' as const, by: 'The build session' },
+    { role: 'plan' as const, by: 'Plan session' },
+  ])(
+    'resizes the task from a $role step, pinning it as the agent’s with the reason, and tells the builder once',
+    async ({ role, by }) => {
       const s = await onStep(role);
       const result = await s.call('resize_task', { opId: 'op-resize-01', rigor: 'careful', why });
       expect(result.json).toMatchObject({ resized: true });
@@ -2593,7 +2596,7 @@ describe('resize_task', () => {
       expect(cards()).toHaveLength(1);
       expect(cards()[0]).toMatchObject({
         title: expect.stringContaining('Alpha') as string,
-        body: expect.stringContaining(`Alpha to Careful: ${why}`) as string,
+        body: expect.stringContaining(`${by} resized Alpha to Careful: ${why}`) as string,
         options: [{ label: 'Got it', description: '' }],
       });
     },
