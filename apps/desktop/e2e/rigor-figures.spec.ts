@@ -49,7 +49,8 @@ test('the Rigor table shows a done Light task and a done Standard task, Standard
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
   }, projectId);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/factory');
+  // Earlier specs add projects; the panel shows for the one the Factory is narrowed to.
+  await page.goto(`/factory?project=${projectId}`);
 
   const table = page.getByRole('table', { name: 'Work per task by rigor' });
   const cells = async (rigor: string): Promise<string[]> =>

@@ -29,6 +29,8 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects/:projectId/proposals' },
   // Factory draws it: cards per task and minutes work waited on a person, per day. Database reads only.
   { route: '/projects/:projectId/human-touch' },
+  // Factory draws it: the work per done task by rigor over a period. Database reads only.
+  { route: '/projects/:projectId/rigor-figures' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
