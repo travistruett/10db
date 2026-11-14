@@ -71,6 +71,7 @@ import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
 import { KeptWork } from './kept-work';
 import { TaskPictures } from './task-pictures';
+import { TaskSkips } from './task-skips';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
@@ -434,6 +435,7 @@ export function TaskDrawer({
                 </Group>
               ) : null}
               <TaskPictures taskId={task.id} />
+              <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {onOpenConversation ? (

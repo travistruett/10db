@@ -180,6 +180,7 @@ import type {
   TeamDto,
   TeamInput,
   WorkstreamChangesDto,
+  SkippedActionDto,
   WorkstreamDto,
   WorkstreamId,
   DecisionEdit,
@@ -565,6 +566,8 @@ export interface ApiServices extends PlanRecordServices {
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
   workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
+  /** What the run skipped and the questions it was answered at once, oldest first. */
+  listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
   /** With `recent`, only that many, the most recently updated first. */
   listInbox(filter: {
     readonly states: readonly InboxState[] | null;

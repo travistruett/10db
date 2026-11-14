@@ -84,6 +84,7 @@ import {
   listRoutingRules,
   listTasks,
   listTaskThread,
+  listSkipsForWorkstream,
   listWorkstreams,
   moveTask,
   listPassTasks,
@@ -610,6 +611,10 @@ export function createServices(deps: {
       return getWorkstream(db, id);
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
+    listWorkstreamSkips(id) {
+      getWorkstream(db, id);
+      return listSkipsForWorkstream(db, id);
+    },
     retryWorkstream(id, note) {
       const ws = deps.starter.retry(id, note);
       deps.scheduler.requestTick();

@@ -31,6 +31,7 @@ import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
+import { skipKeys } from './skip-queries';
 import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -50,7 +51,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY],
-  task: [['tasks'], goalKeys.all, CANDIDATES],
+  // A run's skip is recorded under its task's event.
+  task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   // The digest's Decisions and Deviations rows.

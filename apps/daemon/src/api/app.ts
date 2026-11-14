@@ -1602,6 +1602,9 @@ export function createApp(deps: ApiDeps) {
     .get('/workstreams/:id/changes', async (c) =>
       c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),
     )
+    .get('/workstreams/:id/skips', (c) =>
+      c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
+    )
     .get(
       '/inbox',
       validator('query', (query): { state?: string; recent?: string } => ({
