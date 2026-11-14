@@ -14,7 +14,7 @@
   and is not joining a batch, under the same fingerprint and pins it was asked under; otherwise it is logged
   `stopped`. Pass pages and CI fixes are never judged. The start-up sweep sizes unsized tasks by rules and judges
   only those made in the last 24 hours.
-- **Pins.** A rigor set from the Board, the API or the builder's MCP is the builder's (`builder`); one from a
+- **Pins.** A rigor or kind set from the Board, the API or the builder's MCP is the builder's (`builder`); one from a
   proposal or `resize_task` is an agent's (`agent`); the judge never changes either. A kind the builder takes
   off is kept in `kindsOff` and never comes back by rules or judge. A builder's change of a judged value records
   the call's outcome `overridden`, counted on Settings › Decisions.
