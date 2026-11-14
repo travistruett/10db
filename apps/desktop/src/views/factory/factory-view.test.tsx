@@ -8,6 +8,7 @@ import {
   type GoalSummaryDto,
   type HumanTouchDayDto,
   type PassViewDto,
+  type RigorFiguresDto,
   type ProjectViewDto,
   type TaskDto,
   type WorkstreamDto,
@@ -1671,6 +1672,106 @@ describe('FactoryView human-touch panel', () => {
     renderApp('/factory');
 
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
+  });
+});
+
+describe('FactoryView rigor panel', () => {
+  const row = (
+    rigor: RigorFiguresDto['rows'][number]['rigor'],
+    over: Partial<RigorFiguresDto['rows'][number]> = {},
+  ): RigorFiguresDto['rows'][number] => ({
+    rigor,
+    tasksDone: 0,
+    stepsPerTask: null,
+    sessionsPerTask: null,
+    sendBacksPerTask: null,
+    pullRequestsPerGoal: null,
+    shippedWithFindings: null,
+    ...over,
+  });
+
+  const figures = (
+    period: RigorFiguresDto['period'],
+    judgeOverride: RigorFiguresDto['judgeOverride'],
+  ): RigorFiguresDto => ({
+    period,
+    rows: [
+      row('light', {
+        tasksDone: 4,
+        stepsPerTask: 1.25,
+        sessionsPerTask: 1,
+        sendBacksPerTask: 0,
+        pullRequestsPerGoal: 1.5,
+        shippedWithFindings: 0,
+      }),
+      row('standard', {
+        tasksDone: 3,
+        stepsPerTask: 3,
+        sessionsPerTask: 2.66,
+        sendBacksPerTask: 0.33,
+        pullRequestsPerGoal: null,
+        shippedWithFindings: 1 / 3,
+      }),
+      row('careful'),
+      row('critical'),
+      row('all', { tasksDone: 7, stepsPerTask: 2, sessionsPerTask: 1.7, sendBacksPerTask: 0.1 }),
+    ],
+    judgeOverride,
+  });
+
+  it('shows a row per rigor and refetches for the period chosen', async () => {
+    const asked: (string | null)[] = [];
+    serve(
+      goals(goalListDto()),
+      http.get(daemonUrl('/projects/:projectId/rigor-figures'), ({ request }) => {
+        const days = new URL(request.url).searchParams.get('days');
+        asked.push(days);
+        return HttpResponse.json(
+          days === '30' ? figures(30, null) : figures(14, { calls: 12, overridden: 3 }),
+        );
+      }),
+    );
+    renderApp('/factory');
+
+    const table = await screen.findByRole('table', { name: 'Work per task by rigor' });
+    expect(
+      within(table)
+        .getAllByRole('row')
+        .map((r) =>
+          within(r)
+            .getAllByRole(r.querySelector('th') ? 'columnheader' : 'cell')
+            .map((c) => c.textContent),
+        ),
+    ).toEqual([
+      [
+        'Rigor',
+        'Tasks done',
+        'Steps',
+        'Sessions',
+        'Send-backs',
+        'PRs per goal',
+        'Shipped with findings',
+      ],
+      ['Light', '4', '1.3', '1', '0', '1.5', '0%'],
+      ['Standard', '3', '3', '2.7', '0.3', '–', '33%'],
+      ['Careful', '0', '–', '–', '–', '–', '–'],
+      ['Critical', '0', '–', '–', '–', '–', '–'],
+      ['All', '7', '2', '1.7', '0.1', '–', '–'],
+    ]);
+    expect(
+      screen.getByText("You changed the judge's sizing 3 of 12 times (all projects)"),
+    ).toBeTruthy();
+    expect(asked).toEqual(['14']);
+
+    fireEvent.click(screen.getByLabelText('30 days'));
+
+    await waitFor(() => {
+      expect(asked).toEqual(['14', '30']);
+    });
+    // The judge made no calls in that period, so there is no override line.
+    await waitFor(() => {
+      expect(screen.queryByText(/You changed the judge's sizing/)).toBeNull();
+    });
   });
 });
 

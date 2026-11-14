@@ -60,6 +60,8 @@ import type {
   GoalId,
   GoalListDto,
   HumanTouchDto,
+  RigorFiguresDto,
+  RigorFiguresPeriod,
   InboxAnswer,
   AskSomeoneInput,
   ComposePreviewDto,
@@ -450,6 +452,11 @@ export interface ApiServices extends PlanRecordServices {
    * NotFoundError for an unknown project.
    */
   humanTouch(projectId: ProjectId): HumanTouchDto;
+  /**
+   * What the project's tasks that became done in the last `days` days took, by rigor, and how often the
+   * builder overrode the judge's sizing in the period. Throws NotFoundError for an unknown project.
+   */
+  rigorFigures(projectId: ProjectId, days: RigorFiguresPeriod): RigorFiguresDto;
   /**
    * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
    * advances to now. Throws NotFoundError for an unknown goal.

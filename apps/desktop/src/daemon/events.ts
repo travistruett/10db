@@ -14,6 +14,7 @@ import { accountKeys, accountLoginKey } from './account-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
+import { rigorFiguresKeys } from './rigor-figures-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
 import { modelKeys } from './model-queries';
@@ -50,7 +51,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY],
-  task: [['tasks'], goalKeys.all, CANDIDATES],
+  // A task becoming done, or changing rigor, moves the rigor figures.
+  task: [['tasks'], goalKeys.all, CANDIDATES, rigorFiguresKeys.all],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   // The digest's Decisions and Deviations rows.
@@ -73,12 +75,19 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // gh's login changed under a Sign In; the status and the setup check's gh row read it.
   github: [githubKeys.status, queryKeys.system],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
-  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
+  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, rigorFiguresKeys.all],
   // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
   // by a usage limit with no pass event.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all, passKeys.live],
+  workstream: [
+    ...WORK,
+    queryKeys.keepAwake,
+    CANDIDATES,
+    humanTouchKeys.all,
+    rigorFiguresKeys.all,
+    passKeys.live,
+  ],
   // A session's span says which tasks ran that day.
-  session: [...WORK, humanTouchKeys.all],
+  session: [...WORK, humanTouchKeys.all, rigorFiguresKeys.all],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
