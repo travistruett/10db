@@ -6,7 +6,7 @@ import type {
   RolePickDto,
 } from '@10db/contracts';
 import { Button, Group, Popover, Stack, Text, Title, UnstyledButton } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import { useState, type ComponentPropsWithRef, type ReactElement } from 'react';
 import { usePersonas } from '../../daemon/persona-queries';
 import { usePlaybook, useSetPlaybook } from '../../daemon/playbook-queries';
 import { formatCost } from './model-format';
@@ -43,13 +43,14 @@ export function PlaybookCellButton({
   names,
   changedHere,
   onClick,
+  ...target
 }: {
   readonly cell: PlaybookCellDto;
   readonly pick: RolePickDto | undefined;
   readonly names: ReadonlyMap<string, string>;
   readonly changedHere: boolean;
   readonly onClick: () => void;
-}) {
+} & Omit<ComponentPropsWithRef<'button'>, 'onClick'>) {
   const model =
     pick === undefined
       ? 'Reading…'
@@ -60,6 +61,8 @@ export function PlaybookCellButton({
   const detail = `${pick?.effort == null ? '' : `${pick.effort} · `}${setting}${changedHere ? ' · set here' : ''}`;
   return (
     <UnstyledButton
+      // The popover's target props: its ref, id and aria-haspopup/aria-expanded, which a button allows.
+      {...target}
       aria-label={`${rigorLabel(cell.rigor)} ${roleLabel(cell)}: ${model}, ${detail}`}
       onClick={onClick}
       style={{ display: 'block', width: '100%' }}
@@ -91,8 +94,11 @@ export function PlaybookCellEditor({
   readonly names: ReadonlyMap<string, string>;
   readonly projectId: ProjectId | null;
   readonly accountId: AccountId | null;
-  /** The button that opens the editor; it is given the open handler. */
-  readonly children: (open: () => void) => ReactNode;
+  /**
+   * The button that opens the editor; it is given the open handler. It is the popover's target itself, so it
+   * takes the ref and the aria attributes the popover gives it.
+   */
+  readonly children: (open: () => void) => ReactElement;
 }) {
   const [opened, setOpened] = useState(false);
   const personas: readonly PersonaDto[] = usePersonas().data ?? [];
@@ -114,11 +120,9 @@ export function PlaybookCellEditor({
       shadow="md"
     >
       <Popover.Target>
-        <div>
-          {children(() => {
-            setOpened((o) => !o);
-          })}
-        </div>
+        {children(() => {
+          setOpened((o) => !o);
+        })}
       </Popover.Target>
       <Popover.Dropdown>
         <Stack

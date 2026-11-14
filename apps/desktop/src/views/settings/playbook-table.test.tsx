@@ -128,6 +128,18 @@ describe('the playbook table', () => {
       expect(screen.getByRole('button', { name: `${rigor} steps` })).toBeTruthy();
   });
 
+  it('makes each cell’s own button the editor’s popover target, so the popup attributes sit on a button', async () => {
+    serve();
+    renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+    const build = await screen.findByRole('button', { name: /^Light Build:/ });
+    expect(build.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(build.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(build);
+    await waitFor(() => {
+      expect(build.getAttribute('aria-expanded')).toBe('true');
+    });
+  });
+
   it('asks the daemon for every rigor’s picks, in the project’s playbook for a project', async () => {
     const askedPicks: string[] = [];
     serve({ askedPicks });
