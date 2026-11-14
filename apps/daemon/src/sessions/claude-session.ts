@@ -259,6 +259,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
               toolName: hookInput.tool_name,
               input: hookInput.tool_input,
               cwd: hookInput.cwd,
+              toolUseId: hookInput.tool_use_id,
               // Each call carries the mode Claude Code reports with it; none is not auto mode.
               reportedMode:
                 hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,

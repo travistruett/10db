@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,6 +20,7 @@ import {
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
+  SkipSource,
   REVIEW_ROLES,
   StepRole,
   StepStatus,
@@ -62,6 +64,9 @@ import {
 } from '@10db/contracts';
 import {
   buildTrustPolicy,
+  callKey,
+  callSummary,
+  createSkipRecorder,
   deniedNoticeText,
   FloorReason,
   floorNoticeText,
@@ -135,6 +140,7 @@ import {
   type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
+  approvedCallKeys,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -194,7 +200,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
-import { judgePreToolUse, type ProtectedPath } from '../guard';
+import { answerUnattended, judgePreToolUse, stringField, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
   createPermissionBroker,
@@ -315,7 +321,11 @@ import { heldInlineBytes, pictureLimitsFor } from '../conversation';
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
+/** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
+const ToolInputRecord = z.record(z.string(), z.unknown());
+
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
+
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
@@ -2532,6 +2542,17 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
+    // A lane nobody watches never waits on a card (trust line §5): what would raise one is skipped,
+    // recorded here, and listed for the builder; the calls they approved by Run these now go on.
+    const unattended = policy.attended
+      ? null
+      : {
+          skips: createSkipRecorder(
+            { state: opts.state, log: opts.logger },
+            { workstreamId: id, sessionId: session.id },
+          ),
+          approvedKeys: approvedCallKeys(db, task.id),
+        };
     try {
       handle = opts.adapter.open({
         sessionId: session.id,
@@ -2572,7 +2593,14 @@ export function createRunner(opts: RunnerOptions): Runner {
               sayFloor(ctx, FloorReason.LeftAutoMode);
             });
           }
-          return judgePreToolUse({
+          // The hook's input is the model's own JSON: read as a record here, where it is keyed.
+          const input = ToolInputRecord.safeParse(req.input).data ?? {};
+          const key = callKey(req.toolName, input, checkout);
+          unattended?.skips.seen(req.toolUseId ?? null);
+          const verdict = judgePreToolUse({
+            attended: unattended === null,
+            dockerOn: project.sandboxDocker,
+            deployApproved: unattended?.approvedKeys.includes(key) === true,
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -2597,6 +2625,27 @@ export function createRunner(opts: RunnerOptions): Runner {
             coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
             webOn: switches.web,
           });
+          if (unattended === null) return verdict;
+          const answer = answerUnattended({
+            verdict,
+            judge,
+            callKey: key,
+            approvedKeys: unattended.approvedKeys,
+            path: stringField(input, 'file_path') ?? stringField(input, 'notebook_path'),
+            toolName: req.toolName,
+          });
+          if (answer.skip !== null)
+            unattended.skips.record({
+              toolName: req.toolName,
+              toolUseId: req.toolUseId ?? null,
+              callKey: key,
+              summary: callSummary(req.toolName, input).text,
+              kind: answer.skip.kind,
+              limit: answer.skip.limit,
+              reason: answer.skip.reason,
+              source: SkipSource.Guard,
+            });
+          return answer.verdict;
         },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
@@ -2608,6 +2657,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             signal: abort.signal,
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
+            ...(unattended === null
+              ? {}
+              : { unattended: { judge: sessionJudge, checkout, ...unattended } }),
             ...(laneSession
               ? {
                   sandbox: {

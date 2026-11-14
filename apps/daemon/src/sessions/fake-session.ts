@@ -239,11 +239,14 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
     toolName: string,
     input: Record<string, unknown>,
     reportedMode: ReportedMode | undefined,
+    toolUseId: string,
   ): GuardVerdict => {
     try {
+      // The hook names the call, as Claude Code's does.
       return spec.preToolUse({
         toolName,
         input,
+        toolUseId,
         ...(reportedMode === undefined ? {} : { reportedMode }),
       });
     } catch (error) {
@@ -327,7 +330,11 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
           for (const event of toolCalls.result(toolUseId, { isError: true, content: reason }))
             emit(event);
         };
-        const verdict = guardVerdict(step.toolName, input, step.reportedMode);
+        // The sandbox's request for a host goes to canUseTool alone: it is no tool use, so no hook runs.
+        const verdict: GuardVerdict =
+          step.toolName === 'SandboxNetworkAccess'
+            ? { decision: 'ask', reason: 'network request' }
+            : guardVerdict(step.toolName, input, step.reportedMode, toolUseId);
         if (verdict.decision === 'deny') {
           denied(DeniedBy.TenDb, verdict.reason);
           observe(index, 'denied_by_guard', { reason: verdict.reason });

@@ -974,6 +974,7 @@ describe('buildQueryOptions', () => {
       toolName: 'Write',
       input: { file_path: '/elsewhere/x' },
       cwd: '/repo',
+      toolUseId: 'toolu_1',
       reportedMode: 'other',
     });
     expect(output).toEqual({

@@ -5,6 +5,6 @@ export { buildTrustPolicy } from './policy';
 export { judgeForCall, ReportedMode, startingJudge } from './call-judge';
 export { deniedNoticeText, goAheadText, offersAllowThis, type DeniedCall } from './go-ahead';
 export { FloorReason, floorNoticeText, floorReason, floorWhy } from './floor-notice';
-export { callKey } from './call-summary';
+export { callKey, callSummary } from './call-summary';
 export { skipMessage } from './skip';
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';

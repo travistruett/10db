@@ -192,6 +192,8 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
   /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
   readonly cwd?: string | undefined;
+  /** The call's id, as the agent's hook names it; what a skip of it is recorded by. */
+  readonly toolUseId?: string | undefined;
   /**
    * The permission mode the agent reported with this call: Claude Code's `auto`, or anything else.
    * Absent where the agent reports none (Codex, the fake, a Plan session until it runs in auto mode).
