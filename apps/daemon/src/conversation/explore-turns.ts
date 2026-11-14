@@ -42,6 +42,8 @@ export interface ExploreTurns {
   storePartialNow(rt: Runtime): void;
   /** The agent has spoken in the conversation, so a fresh session lacks what it said. */
   spoke(rt: Runtime): boolean;
+  /** The session's context is strictly past the owner's limit. */
+  pastContextLimit(rt: Runtime): boolean;
   /** Strictly past the owner's limit at a turn's end, the next start is fresh from the digest. */
   freshIfFull(rt: Runtime): void;
 }
@@ -96,6 +98,12 @@ export function createTurns(core: EngineCore): ExploreTurns {
       markFilesInline(ctx, rt.id, out.blocks, false);
     });
     return true;
+  };
+
+  const pastContextLimit = (rt: Runtime): boolean => {
+    const conv = core.conversation(rt.id);
+    const pct = conv.contextPct;
+    return pct !== null && pct > core.hooksOf(conv).freshAtContextPct;
   };
 
   /** Hands the live session every starter waiting, as one message; answers them, or null on a failed send. */
@@ -161,10 +169,9 @@ export function createTurns(core: EngineCore): ExploreTurns {
       (rt.session ?? rt.lastSession)?.open.storePartial();
     },
     spoke: (rt) => hasItemOfKind(state.db, rt.id, ConversationItemKind.AgentMessage),
+    pastContextLimit,
     freshIfFull(rt) {
-      const conv = core.conversation(rt.id);
-      const pct = conv.contextPct;
-      if (rt.state === S.IdleWarm && pct !== null && pct > core.hooksOf(conv).freshAtContextPct)
+      if (rt.state === S.IdleWarm && pastContextLimit(rt))
         core.reduce(rt, { type: 'context_full' });
     },
   };

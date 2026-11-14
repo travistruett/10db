@@ -161,8 +161,8 @@ export interface Runtime {
   /** While paused: when it resumes, null when it waits on the account; and the timer that checks. */
   pausedUntil: Date | null;
   pauseTimer: Timer | null;
-  /** The Inbox card the session waits on. */
-  card: InboxItemId | null;
+  /** The Inbox cards the session waits on; the turn goes on once none is left. */
+  readonly cards: Set<InboxItemId>;
   /** A restart found the conversation paused: its account's return waits under Send now. */
   restartedWhilePaused: boolean;
   /** Why the next close of a warm session is asked for, when it is not the idle timer's. */
@@ -197,7 +197,7 @@ export function newRuntime(id: ConversationId, state: ConversationState): Runtim
     rateReset: null,
     pausedUntil: null,
     pauseTimer: null,
-    card: null,
+    cards: new Set(),
     restartedWhilePaused: false,
     closeReason: null,
     parkWait: false,

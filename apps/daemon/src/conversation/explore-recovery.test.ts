@@ -4,7 +4,7 @@ import {
   ConversationItemKind,
   type ConversationState,
 } from '@10db/contracts';
-import { insertInboxItem, insertItem, patchConversation } from '@10db/db';
+import { insertInboxItem, insertItem, listItems, patchConversation } from '@10db/db';
 import { z } from 'zod';
 import { afterEach, describe, expect, it } from 'vitest';
 import { exploreWorld, gate, type ExploreWorld } from '../../test/explore-world';
@@ -83,6 +83,20 @@ describe('the restart row', () => {
     expect(next.engine.busy()).toEqual([]);
   });
 
+  it('puts what waits under Send now at a restart under the update hold', async () => {
+    w = exploreWorld();
+    w.specGate = new Promise(() => undefined);
+    w.send('one');
+    await waitFor(() => w.starts.length === 1);
+    const next = w.restart({
+      hold: { holding: () => true, untilClear: () => new Promise(() => undefined) },
+    });
+    await next.engine.recover();
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(markers(w)).toHaveLength(1);
+    expect(next.adapter.shapeSessions).toEqual([]);
+  });
+
   it.each([
     ['a clean close', 'clean', [{ text: 'Half a sen' }], []],
     ['a crash', 'crash', [], [{ text: INTERRUPTED_NOTICE }]],
@@ -134,6 +148,43 @@ describe('the restart row', () => {
     expect(notices(w)).toEqual([{ text: INTERRUPTED_NOTICE }]);
     expect(w.stateOf()).toBe('idle_cold');
     expect(markers(w)).toHaveLength(1);
+  });
+
+  it('recovers every other conversation when one fails to', async () => {
+    w = exploreWorld();
+    const begun = hangingTurns(w);
+    w.send('one');
+    await waitFor(() => begun() === 1);
+    const card = w.state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: w.project.id,
+        kind: 'permission',
+        title: 'Allow Bash?',
+        body: 'pnpm test',
+        options: [],
+        recommendation: null,
+        category: 'access',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [],
+      }),
+    );
+    w.starts[0]?.observer.onWaitStart(card);
+    const other = w.another();
+    w.specGate = new Promise(() => undefined);
+    other.send('two');
+    await waitFor(() => w.starts.length === 2);
+    const next = w.restart({
+      withdrawCard: () => {
+        throw new Error('the card is gone');
+      },
+    });
+    await next.engine.recover();
+    expect(next.engine.view(other.conv.id).state).toBe('idle_cold');
+    expect(
+      listItems(w.state.db, other.conv.id).filter((i) => i.kind === 'turn_marker'),
+    ).toHaveLength(1);
   });
 
   it('cools a stopping conversation, saying the turn was interrupted', async () => {

@@ -158,7 +158,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
         // A card this session waits on is an item and a state (§6.6).
         onWaitStart: (item) => {
           if (self === null || rt.session !== self) return;
-          rt.card = item.id;
+          rt.cards.add(item.id);
           state.write((ctx) => {
             insertItem(ctx, rt.id, {
               author: ConversationItemAuthor.Agent,
@@ -169,8 +169,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
           core.reduce(rt, { type: 'card_raised' });
         },
         onWaitEnd: (item) => {
-          if (rt.card !== item.id) return;
-          rt.card = null;
+          if (!rt.cards.delete(item.id) || rt.cards.size > 0) return;
           core.reduce(rt, { type: 'card_settled' });
         },
       },

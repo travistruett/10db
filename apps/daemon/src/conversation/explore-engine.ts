@@ -77,6 +77,13 @@ export const CAPPED_NOTICE =
 const S = ConversationState;
 const E = ExploreEffect;
 
+/** The events whose outcome never starts a turn, so a hold does not hide the queue from them. */
+const COUNTED_UNDER_HOLD: ReadonlySet<ExploreEvent['type']> = new Set([
+  'stop',
+  'ended',
+  'daemon_restart',
+]);
+
 export interface ExploreEngine {
   register(
     kind: typeof ConversationOwnerKind.Shape | typeof ConversationOwnerKind.Chat,
@@ -156,12 +163,23 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const handed = (rt: Runtime): ConversationItemRow[] =>
     rt.session === null ? [] : listPushedTurnStarters(state.db, rt.id);
 
-  /** The reducer's facts; a hold counts nothing queued, except to a Stop, which clears a parked start. */
-  const factsOf = (rt: Runtime, event: ExploreEvent): ExploreFacts => {
+  /** The starters waiting: queued, or handed to the live session and not taken. */
+  const queuedNow = (rt: Runtime): number => unpushed(rt).length + handed(rt).length;
+
+  /**
+   * The reducer's facts. A hold counts nothing queued (call 23), except to the events whose outcome
+   * never starts a turn: a Stop, which clears a parked start, an end and a restart, which put what
+   * waits under Send now.
+   */
+  const factsOf = (
+    rt: Runtime,
+    event: ExploreEvent,
+    queued: number = queuedNow(rt),
+  ): ExploreFacts => {
     const conv = conversation(rt.id);
-    const parked = holding(rt) && event.type !== 'stop';
+    const parked = holding(rt) && !COUNTED_UNDER_HOLD.has(event.type);
     return {
-      queued: parked ? 0 : unpushed(rt).length + handed(rt).length,
+      queued: parked ? 0 : queued,
       providerSessionId: conv.providerSessionId !== null,
       restartedWhilePaused: rt.restartedWhilePaused,
       steer: capabilitiesOf(conv).steer,
@@ -206,7 +224,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         : [],
     );
     const close = warmToClose(idle, Math.max(0, warmCap - busy));
-    if (close !== null) reduce(runtimeOf(close), { type: 'idle_close' });
+    if (close === null) return;
+    // A session past its context limit closes as a full one does, so its next start is fresh.
+    const rt = runtimeOf(close);
+    reduce(rt, { type: turns.pastContextLimit(rt) ? 'context_full' : 'idle_close' });
   };
 
   const enqueue = (rt: Runtime, work: () => Promise<void> | void): void => {
@@ -222,16 +243,22 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
 
   /** Reduces `event` and applies what it says; answers the outcome. */
   const reduce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
-    const outcome = reduceExplore(rt.state, event, factsOf(rt, event));
+    const queued = queuedNow(rt);
+    const facts = factsOf(rt, event, queued);
+    const outcome = reduceExplore(rt.state, event, facts);
     if ('refused' in outcome) return outcome;
+    // What a hold kept from running (a turn's next starters, what a stop handed back) is parked, so
+    // the release runs it.
+    const parks =
+      facts.queued !== queued && takesTurn(reduceExplore(rt.state, event, { ...facts, queued }));
     // Flags a later effect reads, set now: a start under way sees its cancel at once.
     if (outcome.effects.includes(E.CancelStart)) rt.cancelled = true;
     if (outcome.effects.includes(E.DropPendingStart)) rt.parked = false;
     // What streamed is kept as it stands now: the next turn may begin streaming before the chain runs.
     if (outcome.effects.includes(E.StorePartial)) turns.storePartialNow(rt);
-    if (outcome.effects.includes(E.WithdrawCard) && rt.card !== null) {
-      deps.withdrawCard?.(rt.card);
-      rt.card = null;
+    if (outcome.effects.includes(E.WithdrawCard)) {
+      for (const card of rt.cards) deps.withdrawCard?.(card);
+      rt.cards.clear();
     }
     // A start sends what waited when it was asked for; what lands later is the next turn's.
     const taken: Taken = {
@@ -241,8 +268,24 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     };
     setState(rt, outcome.next);
     for (const effect of outcome.effects) enqueue(rt, () => apply(rt, effect, taken));
+    if (parks) park(rt);
     return outcome;
   };
+
+  /** A starter waits on a hold; the owner is told, and the release runs it. */
+  const park = (rt: Runtime): void => {
+    rt.parked = true;
+    const conv = conversation(rt.id);
+    hooksOf(conv).onParked?.(conv, true);
+    waitOutHold(rt);
+  };
+
+  /** Whether an outcome takes the queue into a turn: a start, a push, the next turn or the queue run. */
+  const takesTurn = (outcome: ExploreOutcome): boolean =>
+    'effects' in outcome &&
+    outcome.effects.some(
+      (e) => e === E.Start || e === E.Push || e === E.NextTurn || e === E.RunQueue,
+    );
 
   /** Whether an outcome sends something now: a start, a push or an injection. */
   const runs = (outcome: ExploreOutcome): boolean =>
@@ -427,10 +470,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (closed) return;
     const rt = runtimeOf(id);
     if (holding(rt)) {
-      rt.parked = true;
-      const conv = conversation(id);
-      hooksOf(conv).onParked?.(conv, true);
-      waitOutHold(rt);
+      park(rt);
       return;
     }
     const expiresAt = rt.session?.open.launch.expiresAt ?? null;
@@ -465,27 +505,38 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     });
   };
 
+  /** One conversation that can't be recovered is logged and left; the rest still recover. */
   const recover = async (): Promise<void> => {
-    for (const conv of listConversationsOfProfile(state.db, ConversationProfile.Explore)) {
-      const hooks = owners.get(conv.ownerKind);
-      if (hooks === undefined) continue;
-      const found = await settleRestart({ state, adapter, log }, conv, hooks, capabilitiesOf(conv));
-      for (const card of found.cards) deps.withdrawCard?.(card);
-      const rt = runtimeOf(conv.id);
-      // The restart row reads the state the conversation was left in.
-      rt.state = conversation(conv.id).state ?? S.IdleCold;
-      if (rt.state === S.PausedAccount) {
-        // The reset a pause waited for is not kept: it is checked again after the default pause.
-        rt.restartedWhilePaused = true;
-        rt.pausedUntil =
-          deps.accountBlocked(accountOf(conv).id, conv.projectId)?.until ??
-          new Date(clock.now().getTime() + deps.defaultPauseMs);
-        pauses.armPause(rt);
+    for (const conv of listConversationsOfProfile(state.db, ConversationProfile.Explore))
+      try {
+        await recoverOne(conv);
+      } catch (error) {
+        log.error(
+          { err: error, conversationId: conv.id },
+          'an explore conversation did not recover',
+        );
       }
-      reduce(rt, { type: 'daemon_restart' });
-      // Its Send now line is written before the API serves.
-      await rt.chain;
+  };
+
+  const recoverOne = async (conv: ConversationRow): Promise<void> => {
+    const hooks = owners.get(conv.ownerKind);
+    if (hooks === undefined) return;
+    const found = await settleRestart({ state, adapter, log }, conv, hooks, capabilitiesOf(conv));
+    for (const card of found.cards) deps.withdrawCard?.(card);
+    const rt = runtimeOf(conv.id);
+    // The restart row reads the state the conversation was left in.
+    rt.state = conversation(conv.id).state ?? S.IdleCold;
+    if (rt.state === S.PausedAccount) {
+      // The reset a pause waited for is not kept: it is checked again after the default pause.
+      rt.restartedWhilePaused = true;
+      rt.pausedUntil =
+        deps.accountBlocked(accountOf(conv).id, conv.projectId)?.until ??
+        new Date(clock.now().getTime() + deps.defaultPauseMs);
+      pauses.armPause(rt);
     }
+    reduce(rt, { type: 'daemon_restart' });
+    // Its Send now line is written before the API serves.
+    await rt.chain;
   };
 
   let closedDown: Promise<void> | null = null;

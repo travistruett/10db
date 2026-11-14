@@ -766,6 +766,25 @@ describe('cards', () => {
     await w.engine.settled(w.conv.id);
   });
 
+  it('waits while any of two cards is open, and withdraws both on Stop', async () => {
+    const withdrawn: string[] = [];
+    w = exploreWorld({ deps: { withdrawCard: (id) => withdrawn.push(id) } });
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const first = raiseCard(w);
+    const second = raiseCard(w);
+    first.settle();
+    expect(w.stateOf()).toBe('waiting_card');
+    second.settle();
+    expect(w.stateOf()).toBe('running');
+    const third = raiseCard(w);
+    const fourth = raiseCard(w);
+    await w.engine.stop(w.conv.id);
+    expect(withdrawn).toEqual([third.item.id, fourth.item.id]);
+    await w.engine.settled(w.conv.id);
+  });
+
   it('withdraws a card on Stop, and on an end', async () => {
     const withdrawn: string[] = [];
     w = exploreWorld({ deps: { withdrawCard: (id) => withdrawn.push(id) } });
@@ -812,6 +831,18 @@ describe('the warm cap', () => {
     w.send('again');
     await w.engine.settled(w.conv.id);
     expect(w.adapter.shapeSessions.at(-1)?.spec.resumeProviderSessionId).toBe('fake-shape-1');
+  });
+
+  it('starts fresh next when the cap closes a session past the context limit', async () => {
+    w = exploreWorld({ deps: { warmCap: 0 } });
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.', contextPercent: 80 });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(notices(w)).toEqual([{ text: FRESH_SESSION_NOTICE }]);
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions.at(-1)?.spec.resumeProviderSessionId).toBeNull();
   });
 
   it('never closes a running session for the cap, only an idle one', async () => {
@@ -1013,6 +1044,42 @@ describe('review round 1', () => {
     w.engine.releaseStarts(w.conv.id);
     await w.engine.settled(w.conv.id);
     expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two', 'two']);
+  });
+
+  it('puts what an end under a hold hands back under Send now', async () => {
+    w = exploreWorld();
+    const held = gate();
+    endingTurn(w, 'error', { before: held.promise });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    w.engine.holdStarts(w.conv.id);
+    held.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+    expect(sendNowLines(w)).toHaveLength(1);
+  });
+
+  it('parks what a grace stop under a hold hands back, and runs it at the release', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.adapter.shapeInterruptReceipt = () => new Promise(() => undefined);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    w.engine.holdStarts(w.conv.id);
+    await w.engine.stop(w.conv.id);
+    w.clock.advance(10_000);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+    w.engine.releaseStarts(w.conv.id);
+    await waitFor(() => gates.length === 2);
+    expect(w.adapter.shapeSessions[1]?.spec.prompt).toBe('two');
+    for (const g of gates) g.release();
+    await w.engine.settled(w.conv.id);
   });
 
   it('notes a model change only once the warm session took it', async () => {
