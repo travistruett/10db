@@ -48,7 +48,7 @@ import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
-import { raiseBuilderCheck } from '../runner';
+import { livePlanCard, raiseBuilderCheck, raisePlanApproval } from '../runner';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from './index';
 
@@ -117,7 +117,7 @@ const recover = (extra: { cleanShutdown?: boolean } = {}) =>
     ...extra,
   });
 
-const flowStep = (role: 'implement' | 'review', sessionFloor: number): WorkstreamStep => ({
+const flowStep = (role: 'plan' | 'implement' | 'review', sessionFloor: number): WorkstreamStep => ({
   role,
   personaId: null,
   personaName: role,
@@ -904,5 +904,76 @@ describe('recoverOnStartup for a project without a gate command', () => {
     waitingForCheck('CANCELLED', undefined, kept.project);
     await run();
     expect(reads).toEqual(['head', 'commitsSince']);
+  });
+});
+
+describe('recoverOnStartup for a workstream waiting for the builder to approve its plan', () => {
+  const planCards = () => listInbox(state.db, {}).filter((i) => i.kind === 'plan');
+
+  /** A WAITING_HUMAN workstream whose plan is done, parked on a plan card in `cardState`. */
+  function waitingForPlan(cardState: 'OPEN' | 'CANCELLED') {
+    const seeded = seedWorkstream(base, { repoPath: repo.path });
+    const id = seeded.workstream.id;
+    const card = state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, id, { to, fence: null });
+      const item = raisePlanApproval(ctx, {
+        workstreamId: id,
+        projectId: seeded.project.id,
+        taskTitle: seeded.task.title,
+        plan: 'PLAN: edit src/api/a.txt.',
+      });
+      if (cardState !== 'OPEN') updateInboxItem(ctx, item.id, { state: cardState });
+      const planned: WorkstreamStep = {
+        ...flowStep('plan', 0),
+        status: 'done',
+        result: {
+          summary: 'PLAN: edit src/api/a.txt.',
+          verdict: null,
+          sessionId: mintId('Session'),
+          at: new Date().toISOString(),
+        },
+      };
+      patchWorkstream(ctx, id, null, {
+        steps: [planned, { ...flowStep('implement', 0), status: 'pending' }],
+        stepIndex: 0,
+        nextAction: { kind: 'plan_approval', inboxId: item.id },
+      });
+      return item;
+    });
+    return { ...seeded, card };
+  }
+
+  it('keeps the plan card and the parked task across restarts', async () => {
+    const ws = waitingForPlan('OPEN');
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(report.requeued).toEqual([]);
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'plan_approval', inboxId: ws.card.id },
+      });
+      expect(planCards().map((c) => c.id)).toEqual([ws.card.id]);
+    }
+    expect(parked).toEqual([]);
+  });
+
+  it('raises the plan card again, once, with the plan, when the card was lost', async () => {
+    const ws = waitingForPlan('CANCELLED');
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('WAITING_HUMAN');
+    }
+    const live = planCards().filter((c) => c.state === 'OPEN');
+    expect(live).toHaveLength(1);
+    expect(live[0]?.body).toContain('PLAN: edit src/api/a.txt.');
+    expect(livePlanCard(state.db, ws.workstream.id)?.id).toBe(live[0]?.id);
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+      kind: 'plan_approval',
+      inboxId: live[0]?.id,
+    });
   });
 });

@@ -109,8 +109,8 @@ describe('migrateDatabase', () => {
 
 describe('a database that already holds a dangling reference', () => {
   it('is refused before any migration runs, naming the rows, and left as it was', () => {
-    // The last migration before the conversation copy, which would move an orphan row and drop its table.
-    migrateDatabase(db, migrationsThrough('0068_first_expediter'));
+    // The last migration before the conversations, whose copy would move an orphan row and drop its table.
+    migrateDatabase(db, migrationsThrough('0074_rigor_source_of_set_rigors'));
     db.$client.pragma('foreign_keys = OFF');
     db.$client
       .prepare(

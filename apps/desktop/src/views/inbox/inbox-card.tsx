@@ -31,6 +31,7 @@ import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
+import { PlanCard } from './plan-card';
 import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
@@ -216,6 +217,26 @@ export function InboxCard({
           </Button>
         ) : null}
       </Group>
+    );
+  }
+
+  if (item.kind === InboxKind.Plan) {
+    return (
+      <PlanCard
+        item={item}
+        note={sendBackNote}
+        onNote={onSendBackNote}
+        header={
+          <Group gap="sm" wrap="nowrap">
+            {kind}
+            {where}
+            {times}
+            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+              {item.title}
+            </Text>
+          </Group>
+        }
+      />
     );
   }
 

@@ -1,11 +1,10 @@
-import { APP_URL_IS_DAEMON, mintId } from '@10db/contracts';
+import { APP_URL_IS_DAEMON } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { projectDto } from '../../test/fixtures';
 import { checkGeneral, generalValues, type GeneralValues } from './general-values';
 
 const project = projectDto({ name: 'demo', gateCommand: 'make gate', budgetCeiling: null });
 const base = generalValues(project);
-const flowId = mintId('Flow');
 
 describe('checkGeneral', () => {
   it.each<{
@@ -182,7 +181,6 @@ describe('checkGeneral', () => {
         errors: { workspaceMode: 'A worktree per task needs pull request delivery' },
       },
     },
-    { name: 'a flow', change: { flowId }, expected: { ok: true, patch: { flowId } } },
     {
       name: 'the lane cap and wait',
       change: { maxLanes: 4, humanWaitMinutes: 30 },

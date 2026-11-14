@@ -32,8 +32,13 @@ function runGate(sandbox: GateSandbox, env: Record<string, string>) {
   const result = spawnSync('/bin/bash', [join(sandbox.dir, 'scripts/gate.sh')], {
     cwd: sandbox.dir,
     encoding: 'utf8',
-    // CI's test jobs export GATE_TEST_ARGS for their own gate, and this gate must not inherit it.
-    env: { ...envWithoutGitVariables(), GATE_TEST_ARGS: undefined, ...env },
+    // CI's test and e2e jobs export these for their own gate, and this gate must not inherit them.
+    env: {
+      ...envWithoutGitVariables(),
+      GATE_TEST_ARGS: undefined,
+      GATE_E2E_ARGS: undefined,
+      ...env,
+    },
   });
   const lines = result.stdout.trim().split('\n');
   return { status: result.status, last: lines.at(-1) ?? '', stdout: result.stdout };
@@ -221,32 +226,50 @@ describe('scripts/gate.sh', () => {
     }
   });
 
+  const TEST = 'test';
+  const E2E = '--filter @10db/desktop e2e';
   it.each([
-    { name: 'unset', env: {}, args: '' },
-    { name: 'empty', env: { GATE_TEST_ARGS: '' }, args: '' },
+    { name: 'tests, unset', step: 'test', command: TEST, env: {}, args: '' },
+    { name: 'tests, empty', step: 'test', command: TEST, env: { GATE_TEST_ARGS: '' }, args: '' },
     {
-      name: 'one shard',
+      name: 'tests, one shard',
+      step: 'test',
+      command: TEST,
       env: { GATE_TEST_ARGS: '--shard=2/4 --bail=0' },
       args: ' --shard=2/4 --bail=0',
     },
-  ])('hands GATE_TEST_ARGS to the test step and its rerun command: $name', ({ env, args }) => {
-    const fake = mkdtempSync(join(tmpdir(), '10db-fake-pnpm-'));
-    writeFileSync(join(fake, 'pnpm'), '#!/bin/sh\necho "pnpm saw: $*"\nexit 1\n');
-    chmodSync(join(fake, 'pnpm'), 0o755);
-    try {
-      const { stdout } = runGate(sandbox, {
-        ...env,
-        GATE_STEPS: 'test',
-        PATH: `${fake}:${process.env['PATH'] ?? ''}`,
-      });
-      expect(stdout).toContain(`FAILED test: pnpm test${args} (log .gate/test.log)\n`);
-      expect(readFileSync(join(sandbox.dir, '.gate/test.log'), 'utf8')).toContain(
-        `pnpm saw: -s test${args}\n`,
-      );
-    } finally {
-      rmSync(fake, { recursive: true, force: true });
-    }
-  });
+    { name: 'e2e, unset', step: 'e2e', command: E2E, env: {}, args: '' },
+    {
+      name: 'e2e, one shard',
+      step: 'e2e',
+      command: E2E,
+      env: { GATE_E2E_ARGS: '--shard=1/2' },
+      args: ' --shard=1/2',
+    },
+  ])(
+    'hands its arguments to the step and its rerun command: $name',
+    ({ step, command, env, args }) => {
+      const fake = mkdtempSync(join(tmpdir(), '10db-fake-pnpm-'));
+      writeFileSync(join(fake, 'pnpm'), '#!/bin/sh\necho "pnpm saw: $*"\nexit 1\n');
+      chmodSync(join(fake, 'pnpm'), 0o755);
+      try {
+        const { stdout } = runGate(sandbox, {
+          ...env,
+          GATE_STEPS: step,
+          TENDB_SANDBOX: '',
+          PATH: `${fake}:${process.env['PATH'] ?? ''}`,
+        });
+        expect(stdout).toContain(
+          `FAILED ${step}: pnpm ${command}${args} (log .gate/${step}.log)\n`,
+        );
+        expect(readFileSync(join(sandbox.dir, `.gate/${step}.log`), 'utf8')).toContain(
+          `pnpm saw: -s ${command}${args}\n`,
+        );
+      } finally {
+        rmSync(fake, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('names the failing step and exits non-zero', () => {
     const { status, last } = runGate(sandbox, { GATE_STEPS: 'fail-probe' });

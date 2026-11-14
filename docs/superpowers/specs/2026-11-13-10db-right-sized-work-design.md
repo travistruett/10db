@@ -468,8 +468,9 @@ and Workbench pickers, and §10.3. One vertical slice, tested through the real b
 | A persona's minimum score | the "at least N" of every cell that persona fills, when higher than the cell's |
 | A task's model setting | the task's model pin |
 
-What has no home is not dropped silently: one Inbox card lists every pattern and persona pin that was not carried
-over, with its content, and links to the playbook **(call)**.
+What has no home is not dropped silently: each affected project gets one Inbox card listing every pattern and
+persona pin that was not carried over for it, with its content; the entries that apply everywhere are kept as a note
+at the top of Settings › Models until the builder dismisses it.
 
 Removed with it: the `flows` table and API, `FlowStepDef.need`, skip rules, `routing/floors.ts`, patterns and
 their Settings section, `ROLE_NEED`, risk tags, persona `modelPin` and `minimumScore`, and `review_size`.
@@ -500,7 +501,7 @@ the judge answers from a closed list, the builder's edit pins, every call is log
 | Cells resolve to models | the account's offer | the account's offer; a Frontier cell needs a Frontier model the account can run (§6.1) | the account's offer; Frontier is OpenAI's top band |
 | Effort levels | low to max | low to max | the levels Codex offers; a cell's level snaps to the nearest |
 | Personas and kind skills | harness plugin dir | harness plugin dir | inlined in the prompt, as today |
-| Resumed build session for Standard fixes | yes | yes | yes |
+| Resumed build session for Standard fixes | yes, on the session's own model | yes, on the session's own model | yes: `thread/resume` on the thread's own model; another account or a model no longer offered fixes fresh, as on Claude |
 | Plan and Workbench pickers | the account's offer | the account's offer | the account's offer |
 | The judge sizes tasks | with a decision account | with a decision account | with a decision account |
 

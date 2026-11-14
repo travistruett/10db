@@ -8,7 +8,6 @@ import {
   IconCoin,
   IconCpu,
   IconDownload,
-  IconHierarchy,
   IconKey,
   IconLock,
   IconLayoutDashboard,
@@ -53,7 +52,6 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.Accounts]: IconKey,
   [SettingsSectionKey.Decisions]: IconBolt,
   [SettingsSectionKey.Models]: IconCpu,
-  [SettingsSectionKey.PersonasAndFlows]: IconHierarchy,
 };
 
 const SCOPE_OPTIONS = [

@@ -1,20 +1,21 @@
 import {
   isModelTier,
   JudgeKind,
+  Rigor,
   providerOf,
   runsAgents,
   StepRole,
   type AccountJudgeDto,
 } from '@10db/contracts';
 import { listAccounts, type DbReader } from '@10db/db';
-import { chooseModel, IMPLEMENT_NEED } from '../routing';
+import { chooseModel, resolveSteps } from '../routing';
 import type { AgentAdapter } from '../sessions';
-import { routingInputs } from '../team';
+import { playbookInputs, routingInputs } from '../team';
 import { floorReason, floorWhy } from '../trust';
 
 /**
  * Settings › Trust's Judge list: for each account, the model a new task's implement step gets there
- * (by the role's default, never by score, so the list never waits on a measurement), what judges that
+ * (by the Standard Build cell's rung, never by score, so the list never waits on a measurement), what judges that
  * model's calls, and why 10db's rules do when they do.
  */
 export function accountJudges(
@@ -25,13 +26,20 @@ export function accountJudges(
   return listAccounts(db).flatMap((account) => {
     const kind = account.kind;
     if (!runsAgents(kind)) return [];
+    const build = resolveSteps({
+      rigor: Rigor.Standard,
+      taskKinds: [],
+      ...playbookInputs(db, null),
+    }).find((step) => step.role === StepRole.Implement);
     const choice = chooseModel({
       ...routingInputs(db, { accountId: account.id, provider: providerOf(kind) }),
-      def: { role: StepRole.Implement, need: IMPLEMENT_NEED },
-      persona: undefined,
-      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-      project: { id: null, budgetCeiling: null },
-      stakes: { retry: false },
+      def: { role: StepRole.Implement, need: build?.need ?? 0 },
+      requirements: build?.requirements ?? [{ kind: 'automatic' }],
+      effort: build?.effort ?? null,
+      fallback: build?.fallback ?? null,
+      pinned: false,
+      task: { modelSetting: null, effortPin: null },
+      project: { budgetCeiling: null },
       byScore: false,
     });
     // A tier's name is what a choice says when the account offers no model for it.

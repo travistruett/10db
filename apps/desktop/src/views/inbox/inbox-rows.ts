@@ -59,9 +59,12 @@ export function openCount(open: readonly InboxItemDto[]): number {
   return inboxRows(open.filter((item) => item.routedBy !== RoutedBy.TriagePending)).length;
 }
 
-/** A flag with no options closes on any answer, so it can be dismissed without opening it. */
+/** A flag or a move report with no options closes on any answer, so it can be dismissed without opening it. */
 export function isDismissable(item: InboxItemDto): boolean {
-  return item.kind === InboxKind.Flag && item.options.length === 0;
+  return (
+    (item.kind === InboxKind.Flag || item.kind === InboxKind.PlaybookMoveReport) &&
+    item.options.length === 0
+  );
 }
 
 /** The pass of a Ready page's `check` item, or null for any other card. */

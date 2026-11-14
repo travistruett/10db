@@ -5,12 +5,23 @@ import {
   CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
+  JudgeStatusDto,
   mintId,
+  ModelMeasuresDto,
   ModelRowDto,
+  SUPPORTED_ACCOUNT_KINDS,
+  type AccountInput,
+  type SupportedAccountKind,
   RolePicksDto,
   type Effort,
 } from '@10db/contracts';
-import { findModelProfile, listAccountModels, replaceAccountModels } from '@10db/db';
+import {
+  findModelProfile,
+  listAccountModels,
+  replaceAccountModels,
+  replaceEndpointStats,
+  replaceOpenRouterScores,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -39,7 +50,13 @@ afterEach(async () => {
 /** A daemon whose one account lists the models given, against the committed catalogue fixture. */
 async function start(
   models: { id: string; resolvedId: string }[],
-  opts: { catalogueSync?: boolean; offline?: { value: boolean } } = {},
+  opts: {
+    catalogueSync?: boolean;
+    offline?: { value: boolean };
+    openRouterSync?: boolean;
+    judgeOff?: boolean;
+    benchmarksOff?: boolean;
+  } = {},
 ) {
   const adapter = new FakeAdapter({});
   adapter.probeSeen = {
@@ -54,6 +71,9 @@ async function start(
     logLevel: 'warn',
     ...QUIET,
     catalogueSync: opts.catalogueSync ?? true,
+    ...(opts.openRouterSync === undefined ? {} : { openRouterSync: opts.openRouterSync }),
+    ...(opts.judgeOff === true ? { judgeOff: true } : {}),
+    ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
     fetch: () => {
       fetches += 1;
       if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
@@ -71,6 +91,65 @@ async function start(
 }
 
 describe('the model list over HTTP', () => {
+  /** A daemon with a Bedrock account that offers Opus and OpenRouter's speeds for it already stored. */
+  async function withBedrockSpeeds() {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
+      openRouterSync: true,
+    });
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'bedrock',
+      label: 'Bedrock',
+      settings: { region: 'us-west-2', awsProfile: 'dev' },
+    });
+    running.state.write((ctx) => {
+      replaceAccountModels(ctx, account.id, [
+        {
+          model: 'claude-opus-5-5',
+          family: 'claude-opus',
+          launchId: 'us.anthropic.claude-opus-5-5',
+          efforts: ['high'],
+          inputPrice: null,
+          outputPrice: null,
+        },
+      ]);
+      replaceEndpointStats(
+        ctx,
+        'anthropic/claude-opus-5.5',
+        [
+          { provider: 'Amazon Bedrock', tokensPerSecond: 77, latencyMs: 150 },
+          { provider: 'Anthropic', tokensPerSecond: 44, latencyMs: 100 },
+        ],
+        new Date().toISOString(),
+      );
+    });
+    return { api, account };
+  }
+
+  it("shows OpenRouter's speed on the provider of the asked Bedrock account, once an OpenRouter account is picked for decisions", async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const { account: openRouter } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    });
+    await api.patch('/judge', JudgeStatusDto, { accountId: openRouter.id });
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: 77,
+      speedProvider: 'Amazon Bedrock',
+      sources: { speed: 'openrouter' },
+    });
+  });
+
+  it('shows none of OpenRouter’s numbers while no OpenRouter account is picked for decisions', async () => {
+    const { api, account } = await withBedrockSpeeds();
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({
+      outputTokensPerSecond: null,
+      speedProvider: null,
+      sources: { speed: null },
+    });
+  });
+
   it('answers one row per model, merging its efforts, and none for the seeded aliases', async () => {
     const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
     const rows = await api.get('/models', z.array(ModelRowDto));
@@ -130,7 +209,8 @@ describe('the model list over HTTP', () => {
 
   it('answers what routing picks for each role on an account, and refuses a bad or archived one', async () => {
     const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
-    // Invented measurements: low scores 45, high 51, so the roles that need 48 are the ones that go up.
+    // Invented measurements: low scores 45, high 51, so the roles that need more than 45 go up. A Standard review
+    // needs 40, so it stays low: "Standard reviews need at least 40 (48)" in the plan's Brief.
     measureForTests(running.state);
     const [account] = await api.get('/accounts', z.array(AccountDto));
     if (!account) throw new Error('the daemon has no default account');
@@ -140,7 +220,7 @@ describe('the model list over HTTP', () => {
       'plan:claude-opus-5-5@low',
       'plan_review:claude-opus-5-5@high',
       'implement:claude-opus-5-5@low',
-      'review:claude-opus-5-5@high',
+      'review:claude-opus-5-5@low',
       'qa:claude-opus-5-5@low',
     ]);
     expect(picks[0]).toMatchObject({ intelligence: 45, costPerTaskUsd: 1 });
@@ -232,5 +312,144 @@ describe('the model list over HTTP', () => {
     const status = await api.post('/models/refresh', CatalogueStatusDto);
     expect(status.source).toBe(CatalogueSource.Fetched);
     expect(fetches - before).toBe(1);
+  });
+});
+
+describe('a model’s stored OpenRouter rows over HTTP', () => {
+  const OPENROUTER_ID = 'anthropic/claude-opus-5.5';
+  const AT = '2026-11-13T10:00:00.000Z';
+
+  /** Inputs that create one account of each kind a builder can add. */
+  const inputs: Record<SupportedAccountKind, AccountInput> = {
+    claude_subscription: { kind: 'claude_subscription', label: 'Plan' },
+    anthropic_api_key: { kind: 'anthropic_api_key', label: 'Key' },
+    bedrock: {
+      kind: 'bedrock',
+      label: 'Bedrock',
+      settings: { region: 'us-west-2', awsProfile: 'dev' },
+    },
+    gateway: {
+      kind: 'gateway',
+      label: 'Gateway',
+      settings: { baseUrl: 'https://gateway.example' },
+    },
+    codex_signin: { kind: 'codex_signin', label: 'Codex' },
+    openrouter: { kind: 'openrouter', label: 'OpenRouter' },
+  };
+
+  /** A daemon with an OpenRouter account picked for decisions and one model's rows stored. */
+  async function withStoredRows(opts: { pick: boolean } = { pick: true }) {
+    // The sync is on because "an OpenRouter account is picked" needs it; with no key it makes no request.
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
+      openRouterSync: true,
+    });
+    running.state.write((ctx) => {
+      replaceEndpointStats(
+        ctx,
+        OPENROUTER_ID,
+        [
+          { provider: 'Amazon Bedrock', tokensPerSecond: 77, latencyMs: 150 },
+          { provider: 'Anthropic', tokensPerSecond: 44, latencyMs: 100 },
+        ],
+        AT,
+      );
+      replaceOpenRouterScores(
+        ctx,
+        [
+          {
+            id: OPENROUTER_ID,
+            source: 'openrouter',
+            intelligence: null,
+            coding: null,
+            agentic: null,
+            benchmark: 'terminal',
+            accuracy: 0.5,
+            costPerTaskUsd: 0.25,
+          },
+        ],
+        AT,
+      );
+    });
+    if (opts.pick) {
+      const { account } = await api.post('/accounts', AccountCreatedDto, {
+        ...inputs.openrouter,
+        label: 'Decisions',
+      });
+      await api.patch('/judge', JudgeStatusDto, { accountId: account.id });
+    }
+    return { api };
+  }
+
+  /** The provider each kind's speed is measured on; a new kind fails to compile until it has a row. */
+  const PROVIDER_OF_KIND = {
+    claude_subscription: 'Anthropic',
+    anthropic_api_key: 'Anthropic',
+    bedrock: 'Amazon Bedrock',
+    codex_signin: 'OpenAI',
+    gateway: null,
+    openrouter: null,
+  } satisfies Record<SupportedAccountKind, string | null>;
+
+  it.each(SUPPORTED_ACCOUNT_KINDS.map((kind) => ({ kind, provider: PROVIDER_OF_KIND[kind] })))(
+    'serves the seeded rows with $provider as the provider of a $kind account, and reaches nothing',
+    async ({ kind, provider }) => {
+      const { api } = await withStoredRows();
+      const { account } = await api.post('/accounts', AccountCreatedDto, inputs[kind]);
+      const before = fetches;
+      const out = await api.get(
+        `/models/measures?model=claude-opus-5-5&account=${account.id}`,
+        ModelMeasuresDto,
+      );
+      expect(fetches).toBe(before);
+      expect(out).toMatchObject({
+        openRouterIds: [OPENROUTER_ID],
+        accountProvider: provider,
+        evals: [{ benchmark: 'terminal', accuracy: 0.5, costPerTaskUsd: 0.25 }],
+        evalsMissing: null,
+        speedsMissing: null,
+      });
+      expect(out.speeds.map((s) => s.provider)).toEqual(['Amazon Bedrock', 'Anthropic']);
+    },
+  );
+
+  it('has no account provider without an account, and answers 404 for an unknown one', async () => {
+    const { api } = await withStoredRows();
+    const out = await api.get('/models/measures?model=claude-opus-5-5', ModelMeasuresDto);
+    expect(out.accountProvider).toBeNull();
+    await expect(
+      api.get(
+        `/models/measures?model=claude-opus-5-5&account=${mintId('Account')}`,
+        ModelMeasuresDto,
+      ),
+    ).rejects.toThrow('-> 404');
+  });
+
+  it('returns no stored row while no OpenRouter account is picked for decisions', async () => {
+    const { api } = await withStoredRows({ pick: false });
+    const out = await api.get('/models/measures?model=claude-opus-5-5', ModelMeasuresDto);
+    expect(out).toMatchObject({
+      openRouterIds: [],
+      evals: [],
+      speeds: [],
+      speedsMissing: 'Add an OpenRouter account for measured speed and eval costs.',
+    });
+  });
+
+  it.each([
+    { name: 'TENDB_JUDGE=off', off: { judgeOff: true } },
+    { name: 'TENDB_BENCHMARKS=off', off: { benchmarksOff: true } },
+  ])('returns no stored row with $name', async ({ off }) => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], off);
+    running.state.write((ctx) => {
+      replaceEndpointStats(
+        ctx,
+        OPENROUTER_ID,
+        [{ provider: 'Anthropic', tokensPerSecond: 44, latencyMs: 100 }],
+        AT,
+      );
+    });
+    const out = await api.get('/models/measures?model=claude-opus-5-5', ModelMeasuresDto);
+    expect(out.speeds).toEqual([]);
+    expect(out.speedsMissing).toContain('TENDB_JUDGE=off or TENDB_BENCHMARKS=off');
   });
 });

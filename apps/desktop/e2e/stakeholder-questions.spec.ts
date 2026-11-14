@@ -10,15 +10,16 @@ import { E2E_DATA, E2E_REPO, E2E_TOKEN } from './paths';
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 const WAITING_TASK = 'Settle the retry window';
 const QUESTION = 'How long should a customer keep access?';
-const Projects = z.array(z.object({ id: z.string() }));
+const Projects = z.array(z.object({ id: z.string(), name: z.string() }));
 
-/** The project the earlier specs left, or a new one: the question belongs to it. */
+/** The `e2e` project with the greeting area, made by an earlier spec or here: the question belongs to it. */
 async function projectId(request: APIRequestContext): Promise<string> {
   const listed = Projects.parse(
     await (await request.get(`${daemonUrl}/projects`, { headers: auth })).json(),
   );
-  const first = listed[0];
-  if (first) return first.id;
+  // Other specs in the same shard add projects of their own; this one seeds into the project with its area.
+  const own = listed.find((p) => p.name === 'e2e');
+  if (own) return own.id;
   const created = await request.post(`${daemonUrl}/projects`, {
     headers: auth,
     data: {

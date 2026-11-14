@@ -16,12 +16,17 @@ import {
   QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   REVIEW_ROLES,
+  refuseRigorBelowKinds,
+  RigorBelowKindError,
+  RigorSource,
+  rigorTitle,
   StepRole,
   ToolAccess,
   JudgeKind,
   SkipKind,
   Urgency,
   WorkspaceMode,
+  withKindsNamed,
   type McpToolInputs,
   type SessionId,
   type TaskId,
@@ -50,6 +55,7 @@ import {
   insertTaskPageReports,
   insertToolOp,
   listEvidence,
+  listKinds,
   listTaskPageReports,
   listToolOps,
   listStepToolOpResults,
@@ -60,6 +66,7 @@ import {
   patchWorkstream,
   listSkipsForWorkstream,
   releaseClaim,
+  setAgentRigor,
   searchDecisions,
   searchPrinciples,
   type ClaimRow,
@@ -78,7 +85,7 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   AnsweredAwayError,
-  carriesRiskTags,
+  carriesKinds,
   fileProposalByItself,
   proposalCardBody,
   proposalFiling,
@@ -182,7 +189,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
@@ -199,6 +206,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
   report_blocked:
     "Only in a task nobody is watching: say the step can't do its job without a call 10db or auto mode skipped. The step ends failed when your turn ends, naming your reason and the skipped calls, and the builder can run them. Use it only when carrying on without the call can't do the step's job.",
+  resize_task:
+    "Change the rigor your own task runs at, when its size is not what it was filed as: a plan or build session only. The steps still to come follow the new rigor, and the builder is told why. You can't go below what the task's kinds ask for, can't change a rigor the builder set, and a Workbench page has none to change. A refusal comes back as the result, with what to do.",
   complete_step:
     'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
@@ -507,9 +516,12 @@ export function createToolHandlers(
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
+          const declared = [...new Set([...(input.kinds ?? []), ...(input.riskTags ?? [])])];
+          const known = listKinds(ctx.tx);
+          const taskKinds = withKindsNamed([], declared, known, 'agent');
           if (draft) {
-            // Every principle gets a card, so its tags are the one thing the card must add.
-            const carries = carriesRiskTags(input.riskTags);
+            // Every principle gets a card, so its kinds are the one thing the card must add.
+            const carries = carriesKinds(declared, known);
             const { proposalId, principle } = proposePrinciple(ctx, {
               projectId: project.id,
               title: input.title,
@@ -537,15 +549,16 @@ export function createToolHandlers(
             kind: input.kind,
             title: input.title,
             body: input.body,
-            riskTags: input.riskTags,
+            kinds: declared,
+            known,
             joinsRunningBatch: input.joinsRunningBatch,
             limit: getSmallProposalLimit(ctx.tx, project.id),
             stepCapReached:
               stepFilings(ctx.tx, getWorkstreamRow(ctx.tx, workstreamId)) >= MAX_FOLLOW_UPS,
           });
           if (filing.file) {
-            // A small proposal with no risk tag: the card would guard nothing the Icebox does not.
-            const task = fileProposalByItself(ctx, proposalId);
+            // A small proposal with no kind that asks for a card would guard nothing the Icebox does not.
+            const task = fileProposalByItself(ctx, proposalId, taskKinds);
             return record(
               'propose',
               input.opId,
@@ -565,8 +578,8 @@ export function createToolHandlers(
             recommendation: null,
             category: QuestionCategory.Product,
             urgency: Urgency.Low,
-            // The declared risk tags ride on the card, so accepting it files a task that carries them.
-            detail: { proposalId, riskTags: [...new Set(input.riskTags ?? [])] },
+            // The declared kinds ride on the card, so accepting it files a task that has them.
+            detail: { proposalId, kinds: taskKinds.map((k) => k.key) },
             foldKey: null,
             targets: [],
           });
@@ -970,6 +983,50 @@ export function createToolHandlers(
           return record('report_pages', input.opId, judged, ctx);
         }),
       );
+    },
+
+    resize_task: (input) => {
+      const done = prior(input.opId, McpToolName.ResizeTask);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.resize_task.parse(done));
+      const refused = (message: string) => Promise.resolve({ resized: false, message });
+      const { task } = context();
+      const role = currentStep(getWorkstreamRow(db, workstreamId)).role;
+      if (role !== StepRole.Plan && role !== StepRole.Implement)
+        return refused('Only a plan or build session can resize its task');
+      if (passHoldingTask(db, task) !== undefined)
+        return refused("A Workbench page runs no rigor's steps");
+      if (task.rigorSource === RigorSource.Builder)
+        return refused(
+          `The builder set this task's rigor; carry on at ${rigorTitle(task.effectiveRigor)}`,
+        );
+      const kinds = listKinds(db);
+      try {
+        refuseRigorBelowKinds({ rigor: input.rigor, taskKinds: task.kinds, kinds });
+      } catch (error) {
+        if (!(error instanceof RigorBelowKindError)) throw error;
+        const label = kinds.find((k) => k.key === error.kindKey)?.label ?? error.kindKey;
+        return refused(`${label} work is at least ${rigorTitle(error.minimum)}`);
+      }
+      const reply = {
+        resized: true,
+        message: `This task now runs at ${rigorTitle(input.rigor)}; the steps still to come follow it.`,
+      };
+      deps.state.write((ctx) => {
+        setAgentRigor(ctx, task.id, input.rigor, input.why);
+        record('resize_task', input.opId, reply, ctx);
+      });
+      // A second write, so a crash between the two loses the notice; the card still shows the reason.
+      deps.inbox.flag({
+        projectId: task.projectId,
+        workstreamId,
+        title: `${task.title} was resized`,
+        body: `${role === StepRole.Plan ? 'Plan' : 'The build'} session resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
+        options: [{ label: 'Got it', description: '' }],
+        recommendation: null,
+        foldKey: `resize:${task.id}`,
+        refresh: true,
+      });
+      return Promise.resolve(reply);
     },
 
     complete_step: (input) => {

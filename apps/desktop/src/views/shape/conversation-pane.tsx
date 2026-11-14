@@ -6,7 +6,7 @@ import {
   type ShapeViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { ActionIcon, Box, Button, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Flex, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
 import { IconBooks, IconPlus } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
@@ -34,6 +34,7 @@ import { addFiles } from './dropped-files';
 import { HistoryButton } from './history-button';
 import { ModelPicker } from './model-picker';
 import { leaveLate, takeLate, useLate } from './late-outcome';
+import { PlanMeasures } from './plan-measures';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
@@ -394,7 +395,17 @@ export function ConversationPane({
         onPropose={doPropose}
         onStop={doStop}
       />
-      {shapeId === null ? <RecentConversations projectId={projectId} /> : null}
+      {shapeId === null ? (
+        <Flex
+          wrap="wrap"
+          gap="md"
+          align="flex-start"
+          style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}
+        >
+          <RecentConversations projectId={projectId} />
+          <PlanMeasures />
+        </Flex>
+      ) : null}
     </Box>
   );
 }

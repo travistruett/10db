@@ -1,7 +1,9 @@
 # 10db working rules
 
 These rules bind every contributor: people, Claude Code and Codex. Each app and package has its own
-`AGENTS.md` with local rules; read the root file and the ones for every directory you touch.
+`AGENTS.md` with local rules, and a module or view keeps its notes in an `AGENTS.md` beside its code; read the
+root file and the ones for every directory you touch, and write a note in the nearest one
+(`docs/architecture/decisions/2026-11-13-module-notes-live-beside-the-module.md`).
 `CLAUDE.md` files are not used here, and a test fails if one appears.
 
 ## What 10db is
@@ -135,6 +137,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 | plan-reviewer | fable  | review of a spec or plan                        |
 
 Every report opens with the exact model ID it ran on. The author of a change never reviews it.
+A review converges (`.claude/agents/code-reviewer.md`): round 1 lists everything, later rounds check
+only the earlier findings and what their fixes broke, findings that don't block become follow-up
+tasks, and after two fix rounds the work ships unless a finding blocks. A change with a UI is run
+against the real daemon, by a click-through or an e2e, before it is reviewed.
 `.codex/agents/*.toml` point at the same bodies. Fable is on Amazon Bedrock (inference profile
 `us.anthropic.claude-fable-5-1`), but it answers only when the account's data retention mode in the region is
 `aws_review`; on `default` every call fails with a ValidationException. Until the account is set so, dispatch

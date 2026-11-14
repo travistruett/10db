@@ -1,7 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
 import { taskDto } from '../../test/fixtures';
 import { shortTaskId } from './task-id';
 import { TaskCardMenu } from './task-card-menu';
@@ -67,10 +66,7 @@ describe('Copy ID on the card menu', () => {
 
 describe('the task ID in the drawer', () => {
   function open(task = taskDto({ title: 'Ship it' })) {
-    server.use(
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
+    server.use(...baseHandlers());
     renderWithDaemon(
       <TaskDrawer task={task} columnName="Ready" peers={new Map()} onClose={() => undefined} />,
     );

@@ -20,6 +20,7 @@ import {
   type ConversationItemId,
   type ShapeProposalId,
   type ShapeProposalKind,
+  type Effort,
   type ShapeQuestionId,
   type ShapeState,
   type TaskId,
@@ -64,6 +65,8 @@ export interface ShapePatch {
   readonly round?: number;
   /** The model alias the builder chose; null goes back to the `plan` role's. */
   readonly model?: string | null;
+  /** The effort the builder chose; null follows the model's own default. */
+  readonly effort?: Effort | null;
 }
 
 /** Changes a conversation and announces it; its session and model are kept on its conversation row. */

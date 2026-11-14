@@ -38,7 +38,6 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
       servePlanning(null);
       server.use(
         http.get(daemonUrl('/projects/:projectId/shape-jev'), () => HttpResponse.json({ enabled })),
-        http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
         ...baseHandlers(),
       );
       renderApp('/settings/planning');
@@ -52,7 +51,7 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
         expect(toggle).toHaveProperty('disabled', disabled);
       });
       const link = screen.getByRole('link', { name: 'Open Decisions' });
-      expect(link.getAttribute('href')).toBe('/settings/decisions?focus=runs-on');
+      expect(link.getAttribute('href')).toBe('/settings/decisions?focus=paid-by');
     },
   );
 
@@ -65,7 +64,6 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
         put.push(body);
         return HttpResponse.json(body);
       }),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/planning');

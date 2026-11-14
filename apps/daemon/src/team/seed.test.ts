@@ -2,18 +2,14 @@ import {
   createTestStore,
   findPersonByHandle,
   findPersonaByKey,
-  listFlows,
-  listPatterns,
   listModelProfiles,
   listPersonas,
   patchPersona,
-  setPatterns,
-  type NewPattern,
+  readLegacyRouting,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { DEFAULT_FLOWS } from '../routing';
 import { seedTeam } from './seed';
 
 let state: StateStore;
@@ -28,14 +24,16 @@ afterEach(() => {
 });
 
 describe('seedTeam', () => {
-  it('seeds the flows, the personas and the builder, and no model profile', () => {
+  it('seeds the personas and the builder, no model profile and nothing in the tables the playbook replaced', () => {
     seedTeam(state, readDefaultPersonas());
     expect(listModelProfiles(state.db)).toEqual([]);
-    expect(
-      listFlows(state.db)
-        .map((f) => f.name)
-        .sort(),
-    ).toEqual(DEFAULT_FLOWS.map((f) => f.name).sort());
+    const legacy = readLegacyRouting(state.db);
+    expect([legacy.flows, legacy.patterns, legacy.roleSettings, legacy.bindings]).toEqual([
+      [],
+      [],
+      [],
+      [],
+    ]);
     expect(listPersonas(state.db).map((p) => p.key)).toEqual([
       'implementer',
       'plan-reviewer',
@@ -59,64 +57,5 @@ describe('seedTeam', () => {
       instructions: 'Mine now.',
       archived: true,
     });
-  });
-});
-
-describe('seedTeam’s pattern', () => {
-  it('adds the high-risk pattern once', () => {
-    seedTeam(state, readDefaultPersonas());
-    expect(listPatterns(state.db)).toMatchObject([
-      {
-        projectId: null,
-        name: 'High-risk work',
-        match: {
-          roles: [],
-          riskTags: ['security', 'auth', 'migration'],
-          areas: [],
-          retryOnly: false,
-        },
-        setting: { kind: 'top_of_tier' },
-        position: 0,
-      },
-    ]);
-  });
-
-  it.each([
-    { name: 'deleted', patterns: [] },
-    {
-      name: 'edited',
-      patterns: [
-        {
-          name: 'Mine',
-          match: { roles: [], riskTags: [], areas: [], retryOnly: true },
-          setting: { kind: 'automatic' },
-        },
-      ],
-    },
-  ] satisfies { name: string; patterns: NewPattern[] }[])(
-    'does not undo a pattern the builder $name',
-    ({ patterns }) => {
-      seedTeam(state, readDefaultPersonas());
-      state.write((ctx) => {
-        setPatterns(ctx, null, patterns);
-      });
-      const kept = listPatterns(state.db).map((p) => [p.name, p.match]);
-      seedTeam(state, readDefaultPersonas());
-      expect(listPatterns(state.db).map((p) => [p.name, p.match])).toEqual(kept);
-    },
-  );
-
-  it('adds nothing beside patterns the builder already has when it first runs', () => {
-    state.write((ctx) => {
-      setPatterns(ctx, null, [
-        {
-          name: 'Mine',
-          match: { roles: [], riskTags: [], areas: [], retryOnly: false },
-          setting: { kind: 'automatic' },
-        },
-      ]);
-    });
-    seedTeam(state, readDefaultPersonas());
-    expect(listPatterns(state.db).map((p) => p.name)).toEqual(['Mine']);
   });
 });

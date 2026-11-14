@@ -8,6 +8,16 @@ import type {
   ConversationItemsPage,
   ConversationLiveDto,
   ConversationOwnerKind,
+  Effort,
+  KindDto,
+  KindId,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  PlaybookDto,
+  PlaybookInput,
+  PlaybookMoveEntry,
+  Rigor,
   PlanDocumentRevisionDto,
   PlanRecordDto,
   PlanRecordList,
@@ -47,10 +57,6 @@ import type {
   BoardColumnPatch,
   AreaProposalResult,
   DaemonEvent,
-  FlowDto,
-  FlowId,
-  FlowInput,
-  FlowPatch,
   FolderInspectResult,
   FoundHostDto,
   HazardAssessmentDto,
@@ -69,7 +75,11 @@ import type {
   InboxItemDto,
   InboxItemId,
   InboxState,
+  DecisionModelListDto,
+  DecisionStatsListDto,
   JudgeCallDto,
+  JudgeCallsPageDto,
+  JudgeCallsPageQuery,
   JudgeConfigPatch,
   JudgeStatusDto,
   JudgeTestResultDto,
@@ -83,10 +93,9 @@ import type {
   TrustSwitches,
   McpServerStatusDto,
   ModelProfileDto,
-  ModelSettingsInput,
+  ModelMeasuresDto,
   ModelRowDto,
   RolePicksDto,
-  ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
@@ -177,8 +186,6 @@ import type {
   RunNextResult,
   TaskMove,
   TaskPatch,
-  TeamDto,
-  TeamInput,
   WorkstreamChangesDto,
   SkippedActionDto,
   WorkstreamDto,
@@ -200,6 +207,7 @@ import type {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   ProvenanceDto,
+  RigorSource,
 } from '@10db/contracts';
 
 /** What starting a task made: its workstream in local delivery, the batch it runs in for pull requests. */
@@ -297,15 +305,32 @@ export interface ApiServices extends PlanRecordServices {
   testAccount(id: AccountId): Promise<JudgeTestResultDto>;
   /** The most recent calls, newest first. */
   listJudgeCalls(limit: number): JudgeCallDto[];
+  /** One page of the call log, newest first, filtered; `total` counts every call the filters match. */
+  pageJudgeCalls(query: JudgeCallsPageQuery): JudgeCallsPageDto;
+  /** What each decision's calls of the last 30 days came to. */
+  judgeDecisionStats(): DecisionStatsListDto;
+  /** OpenRouter's decision models; ConflictError with the judge off, UpstreamError when OpenRouter can't be read. */
+  listDecisionModels(): Promise<DecisionModelListDto>;
   listProjects(): ProjectViewDto[];
   /** Registers the project and allows the registries its package files name. */
   createProject(input: ProjectInput): Promise<ProjectDto>;
   listTasks(projectId: ProjectId): TaskDto[];
   /**
    * Throws InvalidError when the task's landing names a branch origin does not have, so the
-   * answer may come after asking origin.
+   * answer may come after asking origin. A rigor in `input` is pinned as `rigorSource` says: the builder's
+   * when left out, which is how the builder's own sessions (the Board, the API and the builder MCP) set it; a proposal's is the agent's.
    */
-  createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
+  createTask(
+    projectId: ProjectId,
+    input: TaskInput,
+    rigorSource?: RigorSource,
+  ): TaskDto | Promise<TaskDto>;
+  /**
+   * Resolves when the sizing in flight for these tasks has ended, or after a short wait, whichever is
+   * first; never rejects. A start from the Board, the API or the builder's MCP awaits it before it reads
+   * anything, so the rules and the judge have sized the task it starts.
+   */
+  settleSizing(taskIds: readonly TaskId[]): Promise<void>;
   /**
    * Starts a task; a held one is queued again as the run it was, in any delivery mode. A task whose
    * latest run failed in an open or failed batch runs again in that batch, keeping its commits; with
@@ -449,10 +474,11 @@ export interface ApiServices extends PlanRecordServices {
   /** Queues a Propose turn, or ignores the press while one is queued or running. */
   proposeShape(id: ShapeId): ShapeProposeResult;
   /**
-   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null. Throws
+   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null, at `effort`
+   * or, with null, the model's own default. Throws
    * InvalidError for a model the account doesn't offer and ConflictError while a turn runs.
    */
-  chooseShapeModel(id: ShapeId, model: string | null): ShapeDto;
+  chooseShapeModel(id: ShapeId, model: string | null, effort: Effort | null): ShapeDto;
   /**
    * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
    * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
@@ -560,7 +586,6 @@ export interface ApiServices extends PlanRecordServices {
   adoptGoal(projectId: ProjectId, input: GoalAdoptInput): Promise<GoalAdoptResult>;
   /** Throws NotFoundError for an unknown goal. */
   getGoal(id: GoalId): GoalDto;
-  listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
@@ -688,8 +713,6 @@ export interface ApiServices extends PlanRecordServices {
   takeBack(id: InboxItemId): Promise<InboxItemDto>;
   keepWaiting(id: InboxItemId): InboxItemDto;
   composeFor(id: InboxItemId, personIds: PersonId[]): ComposePreviewDto;
-  createFlow(input: FlowInput): FlowDto;
-  patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
   /** The sync's last outcome; whether a key is set is read from the Keychain now. */
@@ -700,22 +723,39 @@ export interface ApiServices extends PlanRecordServices {
   removeBenchmarkKey(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
-  /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */
-  getModelSettings(projectId: ProjectId | null): ModelSettingsDto;
-  /** Sets the listed roles everywhere and replaces the patterns when the input has them; answers what is in force. */
-  setGlobalModelSettings(input: ModelSettingsInput): ModelSettingsDto;
-  /** As the global one for a project; a null setting hands the role back to the global setting. */
-  setProjectModelSettings(projectId: ProjectId, input: ModelSettingsInput): ModelSettingsDto;
   /**
    * Every model any account can reach, one row each. With an account, a model it offers lists the efforts it
    * offers, priced on it. Throws NotFoundError for an unknown or archived account.
    */
   listModels(accountId?: AccountId): ModelRowDto[];
   /**
-   * What routing chooses for each role on an account at the role's starting need, for a task and a project with
-   * no settings of their own. Throws NotFoundError for an unknown or archived account.
+   * What routing chooses for each role on an account at the role's starting need, for a task with no settings
+   * of its own, from the cells of `rigor` (Standard when left out) in a project's playbook, or the global one
+   * when no project is given. Throws NotFoundError for an unknown or archived account or a missing project.
    */
-  modelPicks(accountId: AccountId): RolePicksDto;
+  modelPicks(accountId: AccountId, rigor?: Rigor, projectId?: ProjectId): RolePicksDto;
+  /**
+   * The OpenRouter rows stored for one model (a catalogue id or an OpenRouter id), with the provider an account's
+   * speed is measured on. Reads the database alone. Throws NotFoundError for an unknown or archived account.
+   */
+  modelMeasures(model: string, accountId?: AccountId): ModelMeasuresDto;
+  /**
+   * The playbook a project sees (its own overrides over the global ones over 10db's defaults), or, with null,
+   * the global one. Throws NotFoundError for a missing project.
+   */
+  getPlaybook(projectId: ProjectId | null): PlaybookDto;
+  /** Applies a form to one scope's playbook and answers what that scope now sees. */
+  setPlaybook(projectId: ProjectId | null, input: PlaybookInput): PlaybookDto;
+  /** The settings the move to the playbook could not carry over; empty once dismissed. */
+  playbookMoveReport(): PlaybookMoveEntry[];
+  dismissPlaybookMoveReport(): void;
+  listKinds(): KindDto[];
+  /** Throws ConflictError for a key another kind has. */
+  createKind(input: KindInput): KindDto;
+  patchKind(id: KindId, patch: KindPatch): KindDto;
+  deleteKind(id: KindId): void;
+  /** Puts a kind at a place in the list and answers the list. */
+  moveKind(input: KindOrderInput): KindDto[];
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */
@@ -727,11 +767,10 @@ export interface ApiServices extends PlanRecordServices {
   refreshModels(): Promise<CatalogueStatusDto>;
   /** Throws InvalidError when the default landing names a branch origin does not have, after asking origin. */
   patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
-  getTeam(projectId: ProjectId): TeamDto;
-  setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
-  patchTask(id: TaskId, patch: TaskPatch): TaskDto | Promise<TaskDto>;
+  /** A rigor in `patch` is pinned as `rigorSource` says: the builder's when left out. */
+  patchTask(id: TaskId, patch: TaskPatch, rigorSource?: RigorSource): TaskDto | Promise<TaskDto>;
   /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
   moveTask(id: TaskId, move: TaskMove): TaskDto;
   listBoardColumns(projectId: ProjectId): BoardColumnDto[];

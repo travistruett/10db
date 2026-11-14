@@ -1,8 +1,15 @@
 import { z } from 'zod';
 import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
 
+/** How long a decision waits for a model before today's rule applies. */
+export const JUDGE_TIMEOUT_MS = 4_000;
+
 /** A routine decision the daemon can ask a fast model to make. */
 export const JudgeDecision = {
+  /**
+   * Retired: a rigor decides up front whether a review runs, so this is never asked. Its logged calls still
+   * parse and show, and a stored config that holds it reads with the key dropped.
+   */
   ReviewSize: 'review_size',
   /** Shape (spec §9): has the builder said enough to propose? */
   ShapeReady: 'shape_ready',
@@ -18,6 +25,10 @@ export const JudgeDecision = {
   ReplyMatch: 'reply_match',
   /** Stakeholder questions: whether a reply approves the open proposal. */
   ApprovalRead: 'approval_read',
+  /** Sizing: how much process a task needs, one of the four rigors. */
+  TaskRigor: 'task_rigor',
+  /** Sizing: whether a task touches one kind of work, asked once per kind. */
+  TaskKinds: 'task_kinds',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -33,6 +44,8 @@ export const JudgeOutcome = {
   Stopped: 'stopped',
   /** A Shape decision in shadow (spec §9): the answer was logged to be scored, and nothing was shown. */
   Shadow: 'shadow',
+  /** The builder changed the value the judge set, so the call is counted as wrong. */
+  Overridden: 'overridden',
 } as const;
 export type JudgeOutcome = (typeof JudgeOutcome)[keyof typeof JudgeOutcome];
 
@@ -60,7 +73,6 @@ export const JudgeConfig = z.object({
   /** The OpenRouter account decisions run on; null until the builder picks one. */
   accountId: AccountId.nullable().default(null),
   decisions: z.object({
-    [JudgeDecision.ReviewSize]: JudgeDecisionConfig,
     [JudgeDecision.ShapeReady]: shapeDecision(),
     [JudgeDecision.ShapeRecord]: shapeDecision(),
     [JudgeDecision.ShapeElsewhere]: shapeDecision(),
@@ -68,15 +80,19 @@ export const JudgeConfig = z.object({
     [JudgeDecision.ThreadAnswer]: shapeDecision(),
     [JudgeDecision.ReplyMatch]: shapeDecision(),
     [JudgeDecision.ApprovalRead]: shapeDecision(),
+    [JudgeDecision.TaskRigor]: shapeDecision(),
+    [JudgeDecision.TaskKinds]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
+
+/** A decision 10db still asks a model, and so still configures: every one but the retired `review_size`. */
+export type AskedDecision = keyof JudgeConfig['decisions'];
 
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   enabled: true,
   accountId: null,
   decisions: {
-    [JudgeDecision.ReviewSize]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
@@ -84,8 +100,15 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ThreadAnswer]: { ...DEFAULT_DECISION },
     [JudgeDecision.ReplyMatch]: { ...DEFAULT_DECISION },
     [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
+    [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
+    [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
   },
 };
+
+/** Whether 10db still asks this decision, so it has a config; a retired one only labels logged calls. */
+export function isAskedDecision(decision: JudgeDecision): decision is AskedDecision {
+  return decision in DEFAULT_JUDGE_CONFIG.decisions;
+}
 
 export const JudgeStatusDto = z.object({
   config: JudgeConfig,
@@ -114,7 +137,6 @@ export const JudgeConfigPatch = z
     accountId: AccountId.nullable(),
     decisions: z
       .object({
-        [JudgeDecision.ReviewSize]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,
@@ -122,6 +144,8 @@ export const JudgeConfigPatch = z
         [JudgeDecision.ThreadAnswer]: JudgeDecisionConfigPatch,
         [JudgeDecision.ReplyMatch]: JudgeDecisionConfigPatch,
         [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
+        [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
+        [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),
@@ -157,3 +181,24 @@ export const JudgeCallDto = z.object({
   createdAt: z.iso.datetime(),
 });
 export type JudgeCallDto = z.infer<typeof JudgeCallDto>;
+
+/** `GET /judge/calls/page`: 1 to 100 calls (a larger number is read as 100, a non-number as 20), newest first. */
+export const JudgeCallsPageQuery = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .catch(20)
+    .transform((n) => Math.min(n, 100)),
+  offset: z.coerce.number().int().min(0).default(0),
+  decision: z.enum(JudgeDecision).optional(),
+  outcome: z.enum(JudgeOutcome).optional(),
+});
+export type JudgeCallsPageQuery = z.infer<typeof JudgeCallsPageQuery>;
+
+export const JudgeCallsPageDto = z.object({
+  calls: z.array(JudgeCallDto),
+  /** Every call the filters match, not just this page. */
+  total: z.int().min(0),
+});
+export type JudgeCallsPageDto = z.infer<typeof JudgeCallsPageDto>;

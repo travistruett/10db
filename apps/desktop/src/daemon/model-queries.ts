@@ -1,13 +1,23 @@
 import {
   AccountModelDto,
   CatalogueStatusDto,
+  ModelMeasuresDto,
   ModelRowDto,
+  RIGORS,
   RolePicksDto,
   type AccountId,
+  type ProjectId,
+  type Rigor,
 } from '@10db/contracts';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { z } from 'zod';
-import { readJson } from './client';
+import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
 /** Every model query; the event stream refetches them all when a profile or an account's list changes. */
@@ -40,16 +50,66 @@ export function useModels(accountId: AccountId | null, enabled = true) {
   });
 }
 
-/** What routing chooses for each role on the account; off until one is chosen. */
-export function useModelPicks(accountId: AccountId | null) {
-  const { client } = useDaemon();
-  return useQuery({
-    queryKey: [...modelKeys.all, 'picks', accountId],
+function picksQuery(
+  client: DaemonClient,
+  accountId: AccountId | null,
+  rigor: Rigor,
+  projectId: ProjectId | null,
+) {
+  return {
+    queryKey: [...modelKeys.all, 'picks', accountId, rigor, projectId ?? 'all'],
     enabled: accountId !== null,
     queryFn: async () =>
       readJson(
-        await client.models.picks.$get({ query: { account: accountId ?? '' } }),
+        await client.models.picks.$get({
+          query: {
+            account: accountId ?? '',
+            rigor,
+            ...(projectId === null ? {} : { project: projectId }),
+          },
+        }),
         RolePicksDto,
+      ),
+  };
+}
+
+/**
+ * What routing chooses for each role on the account at one rigor's cells, in a project's playbook or the
+ * global one for null; off until an account is chosen.
+ */
+export function useModelPicks(
+  accountId: AccountId | null,
+  rigor: Rigor,
+  projectId: ProjectId | null,
+) {
+  const { client } = useDaemon();
+  return useQuery(picksQuery(client, accountId, rigor, projectId));
+}
+
+/** The picks of every rigor, for the playbook table; each shares its cache entry with `useModelPicks`. */
+export function useEveryRigorPicks(accountId: AccountId | null, projectId: ProjectId | null) {
+  const { client } = useDaemon();
+  const results = useQueries({
+    queries: RIGORS.map((rigor) => picksQuery(client, accountId, rigor, projectId)),
+  });
+  return new Map(RIGORS.map((rigor, i) => [rigor, results[i]]));
+}
+
+/**
+ * The OpenRouter rows stored for one model, with the provider the account's speed is measured on; off until a
+ * model is named.
+ */
+export function useModelMeasures(model: string | null, account: AccountId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: [...modelKeys.all, 'measures', model, account],
+    enabled: model !== null,
+    queryFn: async () =>
+      readJson(
+        await client.models.measures.$get({
+          query: { model: model ?? '', ...(account === null ? {} : { account }) },
+        }),
+        ModelMeasuresDto,
       ),
   });
 }

@@ -13,12 +13,14 @@ import {
   createTestStore,
   endSession,
   getInboxItem,
+  getTask,
   getPrinciple,
   getWorkstream,
   insertBatch,
   insertDecision,
   insertPerson,
   insertEvidence,
+  insertKind,
   insertPrinciple,
   insertSession,
   insertShape,
@@ -30,6 +32,7 @@ import {
   listSkipsForWorkstream,
   listTasks,
   listToolOpResults,
+  patchTask,
   patchWorkstream,
   releaseClaims,
   schema,
@@ -54,6 +57,7 @@ import {
   type BatchId,
   type NextAction,
   type ProjectDto,
+  type TaskId,
   type WorkstreamId,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -165,6 +169,11 @@ beforeEach(async () => {
   base = test.store;
   const bus = createEventBus();
   state = createStateStore(test.store, bus);
+  // The kinds a proposal names are the builder's: the ones seeded for the words risk tags used to be.
+  state.write((ctx) => {
+    for (const key of ['security', 'auth', 'migration', 'dependency'])
+      insertKind(ctx, { key, label: key, toInbox: true });
+  });
   cancelled = [];
   inbox = createInboxService({
     state,
@@ -543,6 +552,7 @@ describe('MCP tools', () => {
       'report_deviation',
       'report_pages',
       'request_claim',
+      'resize_task',
       'write_handoff',
     ]);
   });
@@ -551,7 +561,7 @@ describe('MCP tools', () => {
     const openCards = () => listInbox(state.db, { states: ['OPEN'] });
     const small = { kind: 'new_task', title: 'Reword the criterion', body: 'It is unclear.' };
 
-    it('files a small proposal with no risk tag to the Icebox, with no card, naming the lane’s task', async () => {
+    it('files a small proposal with no kind that asks for a card to the Icebox, with no card, naming the lane’s task', async () => {
       const s = await seedSession();
       const { json } = await s.call('propose', { opId: 'op-prop-0001', ...small });
       const filed = listTasks(state.db, s.project.id).find((t) => t.title === small.title);
@@ -569,7 +579,7 @@ describe('MCP tools', () => {
     });
 
     it.each([
-      ['a risk tag', { riskTags: ['dependency'] }],
+      ['a kind that asks for a card', { kinds: ['dependency'] }],
       ['a risk named in its text', { title: 'Bump the zod dependency' }],
       ['joining a running batch', { joinsRunningBatch: true }],
       ['a size over the limit', { body: 'x'.repeat(1300) }],
@@ -587,7 +597,7 @@ describe('MCP tools', () => {
     });
 
     it.each([
-      ['a risk tag', { riskTags: ['dependency'] }, 'it carries the dependency risk tag'],
+      ['a kind', { kinds: ['dependency'] }, 'it carries the dependency kind'],
       [
         'a risk named in its text',
         { title: 'Bump the zod dependency' },
@@ -602,20 +612,40 @@ describe('MCP tools', () => {
       expect(openCards()[0]?.body).toContain(`Raised as a card because ${reason}`);
     });
 
-    it('keeps the declared risk tags on the card, and the task filed from it carries them', async () => {
+    it.each([
+      ['kinds', { kinds: ['security', 'auth'] }],
+      ['kinds named twice, once each', { kinds: ['security', 'auth', 'security'] }],
+      ['risk tags, the name an older lane still calls them', { riskTags: ['security', 'auth'] }],
+    ])(
+      'keeps the declared %s on the card, and the task filed from it has them',
+      async (_n, over) => {
+        const s = await seedSession();
+        await s.call('propose', { opId: 'op-prop-0006', ...small, ...over });
+        const card = openCards()[0];
+        if (!card) throw new Error('no card opened');
+        expect(card.body).toContain(small.body);
+        expect(card.detail).toMatchObject({ kinds: ['security', 'auth'] });
+        inbox.answer(card.id, { choice: 'accept' });
+        expect(
+          listTasks(state.db, s.project.id).find((t) => t.title === small.title),
+        ).toMatchObject({
+          kinds: [
+            { key: 'security', source: 'agent' },
+            { key: 'auth', source: 'agent' },
+          ],
+        });
+      },
+    );
+
+    it('ignores a declared key no kind has, and files a small proposal of kinds that ask for no card', async () => {
       const s = await seedSession();
-      await s.call('propose', {
-        opId: 'op-prop-0006',
-        ...small,
-        riskTags: ['security', 'auth'],
+      state.write((ctx) => {
+        insertKind(ctx, { key: 'ui', label: 'UI' });
       });
-      const card = openCards()[0];
-      if (!card) throw new Error('no card opened');
-      expect(card.body).toContain(small.body);
-      expect(card.detail).toMatchObject({ riskTags: ['security', 'auth'] });
-      inbox.answer(card.id, { choice: 'accept' });
+      await s.call('propose', { opId: 'op-prop-0009', ...small, kinds: ['ui', 'nonsense'] });
+      expect(openCards()).toEqual([]);
       expect(listTasks(state.db, s.project.id).find((t) => t.title === small.title)).toMatchObject({
-        riskTags: ['security', 'auth'],
+        kinds: [{ key: 'ui', source: 'agent' }],
       });
     });
 
@@ -628,11 +658,11 @@ describe('MCP tools', () => {
         opId: 'op-prop-0007',
         ...small,
         title: 'Tighten the security and auth checks',
-        riskTags: ['security'],
+        kinds: ['security'],
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
-        /\n\nRaised as a card because it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
+        /\n\nRaised as a card because it carries the security kind, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
       );
     });
 
@@ -643,11 +673,11 @@ describe('MCP tools', () => {
         ...small,
         kind: 'change_task',
         title: 'Tighten the security and auth checks',
-        riskTags: ['security'],
+        kinds: ['security'],
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
-        /\n\nRaised as a card because it carries the security risk tag, and it is not a new task, and it names the auth risk\.$/,
+        /\n\nRaised as a card because it carries the security kind, and it is not a new task, and it names the auth risk\.$/,
       );
     });
 
@@ -2575,7 +2605,7 @@ describe('MCP idempotence by opId', () => {
         kind: 'new_task',
         title: 'Add x',
         body: 'because',
-        riskTags: ['security'],
+        kinds: ['security'],
       },
       created: { proposals: 1, inbox: 1 },
     },
@@ -2675,6 +2705,119 @@ async function onStep(role: 'implement' | 'review' | 'plan') {
   });
   return s;
 }
+
+describe('resize_task', () => {
+  const why = 'It touches two areas and a migration';
+  const cards = () =>
+    listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.title.includes('resized'));
+  const taskOf = (s: { task: { id: TaskId } }) => getTask(state.db, s.task.id);
+
+  it.each([
+    { role: 'implement' as const, by: 'The build session' },
+    { role: 'plan' as const, by: 'Plan session' },
+  ])(
+    'resizes the task from a $role step, pinning it as the agent’s with the reason, and tells the builder once',
+    async ({ role, by }) => {
+      const s = await onStep(role);
+      const result = await s.call('resize_task', { opId: 'op-resize-01', rigor: 'careful', why });
+      expect(result.json).toMatchObject({ resized: true });
+      expect(taskOf(s)).toMatchObject({
+        rigor: 'careful',
+        rigorSource: 'agent',
+        rigorReason: why,
+        effectiveRigor: 'careful',
+        effectiveRigorSource: 'agent',
+      });
+      expect(cards()).toHaveLength(1);
+      expect(cards()[0]).toMatchObject({
+        title: expect.stringContaining('Alpha') as string,
+        body: expect.stringContaining(`${by} resized Alpha to Careful: ${why}`) as string,
+        options: [{ label: 'Got it', description: '' }],
+      });
+    },
+  );
+
+  it('answers a replayed opId with the first result and raises no second notice', async () => {
+    const s = await onStep('implement');
+    const first = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
+    const replay = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
+    expect(replay.json).toEqual(first.json);
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('folds a later resize of the task into the one open notice', async () => {
+    const s = await onStep('implement');
+    await s.call('resize_task', {
+      opId: 'op-resize-03',
+      rigor: 'light',
+      why: 'Smaller than it read',
+    });
+    await s.call('resize_task', {
+      opId: 'op-resize-04',
+      rigor: 'critical',
+      why: 'Bigger after all',
+    });
+    expect(taskOf(s).rigor).toBe('critical');
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0]?.body).toContain('Critical: Bigger after all');
+  });
+
+  it.each([
+    {
+      name: 'a review step',
+      step: 'review' as const,
+      setup: () => undefined,
+      says: 'Only a plan or build session can resize its task',
+    },
+    {
+      name: 'a rigor the builder set',
+      step: 'implement' as const,
+      setup: (id: TaskId) => state.write((ctx) => patchTask(ctx, id, { rigor: 'light' })),
+      says: "The builder set this task's rigor; carry on at Light",
+    },
+    {
+      name: 'a rigor below the kinds’ minimum',
+      step: 'implement' as const,
+      setup: (id: TaskId) => {
+        state.write((ctx) => {
+          insertKind(ctx, { key: 'floor', label: 'Floor', minimumRigor: 'careful' });
+          patchTask(ctx, id, { kinds: [{ key: 'floor', source: 'builder' }] });
+        });
+      },
+      says: 'Floor work is at least Careful',
+    },
+  ])(
+    'refuses $name as a result the agent reads, changing nothing',
+    async ({ step, setup, says }) => {
+      const s = await onStep(step);
+      setup(s.task.id);
+      const before = taskOf(s);
+      const result = await s.call('resize_task', { opId: 'op-resize-05', rigor: 'standard', why });
+      expect(result.isError).toBe(false);
+      expect(result.json).toMatchObject({
+        resized: false,
+        message: expect.stringContaining(says) as string,
+      });
+      expect(taskOf(s)).toEqual(before);
+      expect(cards()).toEqual([]);
+    },
+  );
+
+  it('may go up from the kinds’ minimum, and not below', async () => {
+    const s = await onStep('implement');
+    state.write((ctx) => {
+      insertKind(ctx, { key: 'floor', label: 'Floor', minimumRigor: 'careful' });
+      patchTask(ctx, s.task.id, { kinds: [{ key: 'floor', source: 'builder' }] });
+    });
+    expect(
+      (await s.call('resize_task', { opId: 'op-resize-06', rigor: 'light', why })).json,
+    ).toMatchObject({ resized: false });
+    expect(
+      (await s.call('resize_task', { opId: 'op-resize-07', rigor: 'critical', why })).json,
+    ).toMatchObject({ resized: true });
+    expect(taskOf(s).rigor).toBe('critical');
+  });
+});
 
 describe('file_follow_up', () => {
   const args = {
@@ -3312,7 +3455,7 @@ describe('principle proposals', () => {
     expect(searchPrinciples(base.db, s.project.id, 'pull', 5)).toEqual([]);
   });
 
-  it('names every declared risk tag on a principle proposal’s card, after the card’s own text', async () => {
+  it('names every declared kind on a principle proposal’s card, after the card’s own text', async () => {
     const s = await seedSession();
     await s.call('propose', {
       opId: 'op-propose-p5',
@@ -3320,23 +3463,23 @@ describe('principle proposals', () => {
       title: 'Never log tokens',
       body: 'One reached the logs last week.',
       principle: { statement: 'Never write a token to a log' },
-      riskTags: ['security', 'auth', 'security'],
+      kinds: ['security', 'auth', 'security'],
     });
     const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
     expect(card?.body).toContain('Never write a token to a log');
     expect(card?.body).toMatch(
-      /One reached the logs last week\.\n\nRaised as a card because it carries the security and auth risk tags\.$/,
+      /One reached the logs last week\.\n\nRaised as a card because it carries the security and auth kinds\.$/,
     );
   });
 
-  it('adds no reason to a principle proposal’s card when it declares no risk tag', async () => {
+  it('adds no reason to a principle proposal’s card when it declares no kind', async () => {
     const s = await seedSession();
     await s.call('propose', {
       opId: 'op-propose-p6',
       kind: 'principle',
       title: 'Small PRs',
       body: 'Prefer small pull requests',
-      riskTags: [],
+      kinds: [],
     });
     const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
     expect(card?.body).not.toContain('Raised as a card');

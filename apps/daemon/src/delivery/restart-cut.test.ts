@@ -105,9 +105,13 @@ describe('the batch a task started over from, while its copy is being cut', () =
 
       h.shipper.shipAnyway(batchId);
       // The cut is held until the pull request exists: the attempt is still a member as it opens.
-      await vi.waitFor(() => {
-        expect(h.gh.prCreates()).toHaveLength(1);
-      });
+      // The ship runs git and the gate first; under a loaded full suite that takes longer than a second.
+      await vi.waitFor(
+        () => {
+          expect(h.gh.prCreates()).toHaveLength(1);
+        },
+        { timeout: 20_000 },
+      );
       expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
       release();
       await h.jobs.idle();

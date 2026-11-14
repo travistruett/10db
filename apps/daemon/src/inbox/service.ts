@@ -6,6 +6,7 @@ import {
   CARD_RESOLUTION,
   ReleasedWorkstreams,
   CheckChoice,
+  PlanChoice,
   ConflictError,
   InboxAnswer,
   InboxAnswerRefused,
@@ -16,6 +17,7 @@ import {
   type PersonId,
   InvalidError,
   isParkChoice,
+  kindsOfTask,
   MCP_TOOL_GRANT_DETAIL,
   McpToolGrant,
   PermissionChoice,
@@ -57,6 +59,7 @@ import {
   insertPermissionRule,
   insertSource,
   insertTaskFromProposal,
+  listKinds,
   listInbox,
   openItemsForWorkstream,
   resolveProposal,
@@ -74,7 +77,7 @@ import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
 import { applyMcpApproval } from './mcp-approval';
-import { declaredRiskTags, taskFieldsFromProposal } from './proposal-task';
+import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
 /** The detail key, and fold key prefix, of the flag that offers to deliver a stored answer again. */
 const REDELIVER_KEY = 'redeliverCard';
@@ -461,9 +464,10 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     rationale: answer.note ?? null,
   });
   if (accepted && proposal.kind === ProposalKind.NewTask) {
-    // The task is stored with the areas of the lane that raised it, so the placement rule sees those,
-    // as it does the risk tags the lane declared, which are kept on the card and the task carries.
-    const riskTags = declaredRiskTags(item.detail);
+    // The task is stored with the areas of the lane that raised it, so the placement rule sees those, as it
+    // does the kinds the lane declared, which are kept on the card and the task has.
+    const all = listKinds(ctx.tx);
+    const kinds = declaredKinds(item.detail, all);
     const project = getProject(ctx.tx, proposal.projectId);
     insertTaskFromProposal(
       ctx,
@@ -471,11 +475,11 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
         proposalId: proposal.id,
         projectId: proposal.projectId,
         ...taskFieldsFromProposal(proposal),
-        riskTags,
+        kinds,
       },
       proposePlacement(project, {
         areas: areasForProposal(ctx.tx, proposal.id, project),
-        riskTags,
+        kinds: kindsOfTask(kinds, all),
       }),
     );
   }
@@ -492,6 +496,8 @@ export function createInboxService(deps: {
    * that write has committed. A check card closes with its answer and never reaches `onParkedAnswer`.
    */
   onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
+  /** Acts on an open plan card's answer as `onCheckAnswer` does a check card's, and closes the card the same way. */
+  onPlanAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
   /**
    * Runs inside the answer's write for a flag whose choice writes rows of its own (Run these now): a
    * throw refuses the answer and keeps the flag open. What it answers runs once the write committed.
@@ -547,7 +553,7 @@ export function createInboxService(deps: {
       transition(item.id, [InboxState.Answered], InboxState.Delivering);
     }
     // The workstream it concerns acted on the answer when it was given; there is nothing to hand on.
-    if (item.kind === InboxKind.Check) {
+    if (item.kind === InboxKind.Check || item.kind === InboxKind.Plan) {
       return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
     const live = resolveWaiters ? waiters.get(item.id) : undefined;
@@ -769,6 +775,12 @@ export function createInboxService(deps: {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
         }
       }
+      if (current.kind === InboxKind.Plan && current.state === InboxState.Open) {
+        assertKnownChoice(current, answer);
+        if (answer.choice === PlanChoice.SendBack && (answer.note ?? '').trim() === '') {
+          throw new InboxAnswerRefused('Send Back needs a note saying what to change in the plan');
+        }
+      }
       // A reply to a shared-area question is the builder's words to the agent: it needs some.
       if (
         current.kind === InboxKind.Question &&
@@ -786,6 +798,7 @@ export function createInboxService(deps: {
         }
         assertKnownChoice(item, answer);
         if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
+        if (item.kind === InboxKind.Plan) afterCommit = deps.onPlanAnswer?.(ctx, item, answer);
         // Parking ends the run, so no session is handed the answer: the card closes with it. It is
         // 10db's control over the run, not the builder's answer to the question, so it is no decision
         // either: the question and answer live only on the parked run's notice.

@@ -389,7 +389,7 @@ describe('worktree mode contracts', () => {
       handoffPct: 40,
       nudgePct: 50,
       humanWaitMinutes: 10,
-      flowId: null,
+      defaultRigor: 'standard',
       budgetCeiling: null,
       delivery: 'local',
       baseBranch: 'main',

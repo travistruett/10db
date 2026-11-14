@@ -1,4 +1,9 @@
-import type { ModelRowDto, ShapeModelOption, ShapeViewDto } from '@10db/contracts';
+import {
+  Effort,
+  type ModelRowDto,
+  type ShapeModelOption,
+  type ShapeViewDto,
+} from '@10db/contracts';
 import { Group, Select, Text, type ComboboxData } from '@mantine/core';
 import { useModels } from '../../daemon/model-queries';
 import { useChooseShapeModel } from '../../daemon/shape-queries';
@@ -26,12 +31,22 @@ function groupedByTier(
   });
 }
 
+/** The efforts a model offers, as the models list gives them; none while the list loads or lacks it. */
+function effortsOf(
+  model: string | null,
+  rows: ReadonlyMap<string, ModelRowDto>,
+): readonly Effort[] {
+  const row = model === null ? undefined : rows.get(model);
+  const offered = new Set(row?.efforts.map((e) => e.effort));
+  return Object.values(Effort).filter((e) => offered.has(e));
+}
+
 export interface ModelPickerProps {
   readonly view: ShapeViewDto;
 }
 
 /**
- * Chooses the model the conversation's next turn runs on. A change takes effect between turns, so
+ * Chooses the model, and the effort, the conversation's next turn runs on; the effort lists only what the model offers. A change takes effect between turns, so
  * the control is off while one runs or waits; the daemon's refusal shows beside it.
  */
 export function ModelPicker({ view }: ModelPickerProps) {
@@ -48,6 +63,12 @@ export function ModelPicker({ view }: ModelPickerProps) {
       ? 'Default'
       : `Default (${optionLabel(view.models.default, rows)})`;
   // A pick the account no longer offers still shows, rather than reading as the default.
+  const effort = view.shape.effort;
+  // The default model is the one the Plan role picks, so its efforts are the ones on offer.
+  const efforts = effortsOf(picked ?? view.models.default, rows);
+  const send = (model: string | null, to: Effort | null) => {
+    choose.mutate({ shapeId: view.shape.id, model, effort: to });
+  };
   const gone = picked !== null && !offered.some((option) => option.model === picked);
   const data: ComboboxData = [
     { value: DEFAULT_VALUE, label: defaultLabel },
@@ -73,7 +94,27 @@ export function ModelPicker({ view }: ModelPickerProps) {
         error={choose.error?.message ?? null}
         onChange={(value) => {
           if (value === null) return;
-          choose.mutate({ shapeId: view.shape.id, model: value === DEFAULT_VALUE ? null : value });
+          const model = value === DEFAULT_VALUE ? null : value;
+          // The effort stays while the new model offers it, else the model's own default.
+          const kept =
+            effort !== null && effortsOf(model ?? view.models.default, rows).includes(effort);
+          send(model, kept ? effort : null);
+        }}
+      />
+      <Select
+        aria-label="Effort"
+        size="xs"
+        w={120}
+        data={[
+          { value: DEFAULT_VALUE, label: 'Automatic' },
+          ...efforts.map((e) => ({ value: e, label: e })),
+        ]}
+        value={effort !== null && efforts.includes(effort) ? effort : DEFAULT_VALUE}
+        allowDeselect={false}
+        disabled={busy}
+        onChange={(value) => {
+          if (value === null) return;
+          send(picked, efforts.find((e) => e === value) ?? null);
         }}
       />
     </Group>

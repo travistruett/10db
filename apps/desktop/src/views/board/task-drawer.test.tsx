@@ -3,7 +3,6 @@ import {
   mintId,
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
-  RiskTag,
   TaskPatch,
   type BatchDto,
   type TaskDto,
@@ -14,20 +13,16 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { kindDto } from '../../test/playbook-fixtures';
 import { modelRowDto } from '../../test/model-fixtures';
-import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 import { failureLine } from './task-state';
 
 const peers = new Map();
 
 function serve(...overrides: Parameters<typeof server.use>) {
-  server.use(
-    ...overrides,
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-    ...baseHandlers(),
-  );
+  server.use(...overrides, ...baseHandlers());
 }
 
 interface Opts {
@@ -365,12 +360,112 @@ describe('TaskDrawer', () => {
     expect(within(await dialog()).queryByTestId('waits-on')).toBeNull();
   });
 
-  it('saves the five fields', async () => {
-    const flow = flowDto({ name: 'quick' });
+  it.each([
+    {
+      name: 'judged',
+      source: 'judge',
+      reason: 'judged Careful (0.86)',
+      line: 'Judged Careful (0.86)',
+      kind: 'Docs · judged',
+    },
+    {
+      name: 'raised by rules',
+      source: 'rules',
+      reason: 'at least Careful: migration',
+      line: 'At least Careful: migration',
+      kind: 'Docs · rules',
+    },
+    {
+      name: 'an agent’s',
+      source: 'agent',
+      reason: 'touches the contracts',
+      line: 'An agent: touches the contracts',
+      kind: 'Docs · agent',
+    },
+    {
+      name: 'the builder’s',
+      source: 'builder',
+      reason: null,
+      line: 'Rigor you set',
+      kind: 'Docs · you',
+    },
+  ] as const)('says who sized the rigor and each kind: $name', async (row) => {
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      ...baseHandlers(),
+    );
+    open({
+      task: {
+        rigor: 'careful',
+        effectiveRigor: 'careful',
+        effectiveRigorSource: row.source,
+        effectiveRigorReason: row.reason,
+        kinds: [{ key: 'docs', source: row.source }],
+      },
+    });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(row.line, { exact: false })).toBeTruthy();
+    expect((await within(d).findByTestId('kind-sources')).textContent).toBe(row.kind);
+  });
+
+  it('says a task sized by rules alone was, with no kinds listed', async () => {
+    serve();
+    open({ task: { sizedByRules: true } });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(/Sized by rules/)).toBeTruthy();
+    expect(within(d).queryByTestId('kind-sources')).toBeNull();
+  });
+
+  it('saves only what the builder changed: a judge answer that lands while it is open is not sent back', async () => {
+    const patched: TaskPatch[] = [];
+    const before = taskDto();
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(before);
+      }),
+      ...baseHandlers(),
+    );
+    const view = (task: TaskDto) => (
+      <TaskDrawer task={task} columnName="Ready" peers={peers} onClose={() => undefined} />
+    );
+    const { rerender } = renderWithDaemon(view(before));
+    await dialog();
+    // The judge's answer lands while the drawer is open.
+    const judged = taskDto({
+      id: before.id,
+      rigor: 'careful',
+      effectiveRigor: 'careful',
+      rigorSource: 'judge',
+      effectiveRigorSource: 'judge',
+      kinds: [{ key: 'docs', source: 'judge' }],
+      sizedByRules: false,
+    });
+    rerender(view(judged));
+    await edit('Description', 'Some words');
+    const d = await dialog();
+    // The form follows the live task, and the builder has changed neither field: no discard prompt for them.
+    expect(await within(d).findByText('Docs · judged')).toBeTruthy();
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).not.toHaveProperty('rigor');
+    expect(patched[0]).not.toHaveProperty('kinds');
+    expect(patched[0]).toMatchObject({ description: 'Some words' });
+  });
+
+  it('saves the title, description, criteria, kinds, rigor and effort', async () => {
+    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: TaskPatch[] = [];
     const task = taskDto();
     server.use(
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([flow])),
+      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
       http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
         patched.push((await request.json()) as TaskPatch);
         return HttpResponse.json(task);
@@ -382,12 +477,12 @@ describe('TaskDrawer', () => {
     await edit('Description', ' Some words ');
     await edit('Acceptance criteria', ' first \n\n second ');
     const d = await dialog();
-    fireEvent.click(within(d).getByRole('combobox', { name: 'Flow' }));
-    fireEvent.click(await screen.findByRole('option', { name: /Quick/, hidden: true }));
-    fireEvent.click(within(d).getByLabelText('Risks'));
-    fireEvent.click(
-      await screen.findByRole('option', { name: 'Database migration', hidden: true }),
-    );
+    fireEvent.click(within(d).getByLabelText('Kinds'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Security', hidden: true }));
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Rigor' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Critical', hidden: true }));
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Effort' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'high', hidden: true }));
     fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => {
@@ -397,12 +492,46 @@ describe('TaskDrawer', () => {
       title: 'New title',
       description: 'Some words',
       acceptanceCriteria: ['first', 'second'],
-      flowId: flow.id,
-      riskTags: [RiskTag.Migration],
+      rigor: 'critical',
+      kinds: [{ key: 'security', source: 'builder' }],
+      effortPin: 'high',
     });
     await waitFor(() => {
       expect(closed()).toBe(1);
     });
+  });
+
+  it('turns off the rigors below the kinds’ floor and names the kind', async () => {
+    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
+    server.use(
+      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
+      ...baseHandlers(),
+    );
+    const task = taskDto({ kinds: [{ key: 'security', source: 'agent' }] });
+    server.use(
+      http.get(daemonUrl('/projects'), () =>
+        HttpResponse.json([projectViewDto({ id: task.projectId, defaultRigor: 'standard' })]),
+      ),
+    );
+    open({ task });
+    const d = await openTab('Edit');
+    // The follow option says what the project's default comes to for this task, and what raised it.
+    await waitFor(() => {
+      expect(within(d).getByRole('combobox', { name: 'Rigor' })).toHaveProperty(
+        'value',
+        'Project default (Careful, raised by Security)',
+      );
+    });
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Rigor' }));
+    // The kinds arrive after the drawer opens; the option names the kind once they have.
+    const light = await screen.findByRole('option', {
+      name: /^Light.*Security needs/,
+      hidden: true,
+    });
+    expect(light.textContent).toBe('Light (Security needs Careful or more)');
+    expect(light.getAttribute('data-combobox-disabled')).toBe('true');
+    const careful = await screen.findByRole('option', { name: 'Careful', hidden: true });
+    expect(careful.getAttribute('data-combobox-disabled')).toBeNull();
   });
 
   it('shows the headline and why, and saves them trimmed when changed', async () => {
@@ -698,15 +827,6 @@ describe('TaskDrawer', () => {
       // The edit survived the tab switch.
       await openTab('Edit');
       expect(screen.getByLabelText<HTMLInputElement>('Title').value).toBe('Changed');
-    });
-  });
-
-  it('reads risk options in plain words', () => {
-    expect(RISK_LABEL).toEqual({
-      [RiskTag.Security]: 'Security',
-      [RiskTag.Auth]: 'Sign-in and permissions',
-      [RiskTag.Migration]: 'Database migration',
-      [RiskTag.Dependency]: 'Dependencies',
     });
   });
 
@@ -1428,7 +1548,7 @@ describe('TaskDrawer', () => {
       expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
     });
 
-    it('says a task shipped at the retry limit with open findings, and names the follow-up task', async () => {
+    it('says a task shipped when its review rounds ran out with open findings, and names the follow-up task', async () => {
       serve();
       const rejected = result(
         'reject',
@@ -1455,7 +1575,9 @@ describe('TaskDrawer', () => {
       });
       const d = await dialog();
       const notice = within(d).getByTestId('shipped-at-limit');
-      expect(notice.textContent).toContain('Shipped at the retry limit with open findings');
+      expect(notice.textContent).toContain(
+        'Shipped when its review rounds ran out with open findings',
+      );
       expect(notice.textContent).toContain('Resolve the open findings of "Add the badge"');
       expect(
         within(within(d).getByTestId('latest-review')).getByText(/^Open at the limit/),

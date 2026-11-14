@@ -23,14 +23,11 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import {
-  findFlowByName,
   getBatch,
   skipFollowUpOf,
   getEvidence,
-  getFlow,
   getProject,
   getTask,
-  getTeam,
   getWorkstream,
   getWorkstreamRow,
   insertEvidence,
@@ -50,8 +47,8 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { DEFAULT_PROJECT_FLOW, NoProfileError, planSteps } from '../routing';
-import { routingInputs } from './routing-inputs';
+import { planSteps } from '../routing';
+import { playbookInputs, routingInputs } from './routing-inputs';
 import {
   commitCoveredByRevert,
   commitAdaptsMerge,
@@ -62,29 +59,27 @@ import {
   revertedWorkNote,
   revertedWorkNotice,
 } from './reverted-work';
-import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
+import {
+  clearSendBacks,
+  restartStep,
+  retryTargetAfterRejection,
+  sendBackSteps,
+  withoutFixFresh,
+} from './step-flow';
 
-/** What starting this task would run: its flow resolved against the project's team and the catalogue. */
+/** What starting this task would run: its rigor and kinds resolved against the playbook and the catalogue. */
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
   const task = getTask(db, taskId);
   const project = getProject(db, task.projectId);
-  const flowId = task.flowId ?? project.flowId;
-  const flow = flowId ? getFlow(db, flowId) : findFlowByName(db, DEFAULT_PROJECT_FLOW);
-  if (!flow)
-    throw new InvalidError(`The ${DEFAULT_PROJECT_FLOW} flow is missing; restart 10db to seed it`);
-  try {
-    return planSteps({
-      flow,
-      task,
-      project,
-      personas: listPersonas(db),
-      bindings: getTeam(db, project.id).bindings,
-      ...routingInputs(db, project),
-    });
-  } catch (error) {
-    if (error instanceof NoProfileError) throw new InvalidError(error.message);
-    throw error;
-  }
+  return planSteps({
+    rigor: task.effectiveRigor,
+    task,
+    taskKinds: task.kinds,
+    project,
+    personas: listPersonas(db),
+    ...playbookInputs(db, project.id),
+    ...routingInputs(db, project),
+  });
 }
 
 /**
@@ -107,10 +102,10 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
       return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}: ${step?.reason ?? 'unknown'}`;
     });
     throw new InvalidError(
-      `${named.join('. ')}. Raise the ceiling, lower the need or pin a persona.`,
+      `${named.join('. ')}. Raise the ceiling or lower the need in Settings › Models.`,
     );
   }
-  if (plan.steps.length === 0) throw new InvalidError('The flow resolved to no steps');
+  if (plan.steps.length === 0) throw new InvalidError('The plan resolved to no steps');
   return plan;
 }
 
@@ -122,15 +117,16 @@ export function insertPlannedWorkstream(
   batchId: BatchId | null,
 ): WorkstreamDto {
   const [first] = plan.steps;
-  if (!first) throw new InvalidError('The flow resolved to no steps');
+  if (!first) throw new InvalidError('The plan resolved to no steps');
   const ws = insertWorkstream(ctx, taskId, {
     batchId,
     first: { model: first.model, effort: first.effort },
   });
   patchWorkstream(ctx, ws.id, null, {
-    steps: plan.steps.map((s, i) =>
-      i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
-    ),
+    steps: plan.steps.map((s, i) => {
+      const planned = plan.rigor === null ? { ...s, fixedPlan: true as const } : s;
+      return i === 0 ? { ...planned, status: 'running', startedAt: ctx.now } : planned;
+    }),
     stepIndex: 0,
   });
   return getWorkstream(ctx.tx, ws.id);
@@ -361,7 +357,7 @@ export function retryWorkstream(
           failureReason: null,
           failureKind: null,
           steps: clearSendBacks(
-            sendBackSteps(row.steps, row.stepIndex, reworkAt, reworked, {
+            sendBackSteps(row.steps, row.stepIndex, reworkAt, withoutFixFresh(reworked), {
               now: ctx.now,
               sessions: getWorkstream(ctx.tx, id).sessionCount,
             }),
@@ -371,7 +367,7 @@ export function retryWorkstream(
           effort: reworked.effort,
           nextAction: evidence
             ? { kind: 'fix', evidenceId: evidence.id }
-            : { kind: 'revise', reviewStep: row.stepIndex },
+            : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
       });

@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
+  BUILDER_CHOSE_PLACEMENT,
   createTestStore,
   currentBatch,
   getProject,
@@ -21,6 +22,7 @@ import {
   moveTask,
   patchProject,
   patchTask,
+  placementRuleMoves,
   seedProject,
   setTaskStatus,
   transitionBatch,
@@ -175,7 +177,7 @@ describe('task placement', () => {
   describe('a placement proposed again with a patch', () => {
     const proposed: Placement = { workspaceMode: 'worktree', reason: 'touches migrations' };
     const edit = (id: TaskId, placement: Placement = proposed) =>
-      store.write((ctx) => patchTask(ctx, id, { riskTags: ['migration'] }, placement)).value;
+      store.write((ctx) => patchTask(ctx, id, { headline: 'Edited' }, placement)).value;
 
     it('moves an unstarted shared task to a separate copy with the reason', () => {
       const task = addTask(project().id);
@@ -238,11 +240,11 @@ describe('task placement', () => {
         return task;
       };
 
-      it('replaces it with the reason for the new tags', () => {
+      it('replaces it with the reason for the new kinds', () => {
         const task = moved();
         const deps: Placement = { workspaceMode: 'worktree', reason: 'touches dependencies' };
         const patched = store.write((ctx) =>
-          patchTask(ctx, task.id, { riskTags: ['dependency'] }, deps),
+          patchTask(ctx, task.id, { headline: 'Edited again' }, deps),
         ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
@@ -253,7 +255,9 @@ describe('task placement', () => {
       it('returns the task to the default placement with no reason once the rule no longer matches', () => {
         const task = moved();
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({ workspaceMode: 'shared', placementReason: null });
         expect(getTask(store.db, task.id)).toMatchObject({
           workspaceMode: 'shared',
@@ -265,7 +269,9 @@ describe('task placement', () => {
         const task = moved();
         runIn(task.id, 'RUNNING');
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
           placementReason: 'touches migrations',
@@ -276,7 +282,9 @@ describe('task placement', () => {
         const task = moved();
         place(task.id, 'worktree');
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
           placementReason: 'chosen by the builder',
@@ -375,5 +383,40 @@ describe('currentBatch', () => {
     const p = project();
     newBatch(p.id, 'Copy', '/wt/copy');
     expect(currentBatch(store.db, p.id)).toBeNull();
+  });
+});
+
+describe('placementRuleMoves', () => {
+  const copy: Placement = { workspaceMode: 'worktree', reason: 'touches migrations' };
+  const plain: Placement = { workspaceMode: 'shared', reason: null };
+  it.each([
+    { name: 'no proposal', own: plain, proposed: undefined, moves: false },
+    { name: 'the same place', own: plain, proposed: plain, moves: false },
+    { name: 'a matching rule on a task with no reason', own: plain, proposed: copy, moves: true },
+    {
+      name: 'the rule no longer matching a task it sent to a copy',
+      own: copy,
+      proposed: plain,
+      moves: true,
+    },
+    {
+      name: 'a placement the builder chose, which no rule moves',
+      own: { workspaceMode: 'shared', reason: BUILDER_CHOSE_PLACEMENT },
+      proposed: copy,
+      moves: false,
+    },
+    {
+      name: 'a different mode from a reasonless default proposal, which says nothing about the task',
+      own: { workspaceMode: 'worktree', reason: null },
+      proposed: plain,
+      moves: false,
+    },
+  ] as const)('$name: $moves', ({ own, proposed, moves }) => {
+    expect(
+      placementRuleMoves(
+        { workspaceMode: own.workspaceMode, placementReason: own.reason },
+        proposed,
+      ),
+    ).toBe(moves);
   });
 });

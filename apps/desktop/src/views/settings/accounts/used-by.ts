@@ -9,7 +9,7 @@ import {
 /** What an account says it can't do yet; the text Billing and Accounts show beside it. */
 export const CANT_RUN_AGENTS = "Can't run agents yet";
 
-/** What a non-OpenRouter account says in Runs on: decisions have one provider for now. */
+/** What a non-OpenRouter account says in Paid by: decisions have one provider for now. */
 export const DECISIONS_RUN_ON_OPENROUTER = 'Decisions run on OpenRouter for now';
 
 /** "Renewals'" for a name ending in s, "Billing's" for any other. */

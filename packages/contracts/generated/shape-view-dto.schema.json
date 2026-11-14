@@ -46,6 +46,24 @@
             "null"
           ]
         },
+        "effort": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "importedAt": {
           "default": null,
           "anyOf": [

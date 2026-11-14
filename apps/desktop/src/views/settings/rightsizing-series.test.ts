@@ -200,3 +200,24 @@ describe('costTickLabel', () => {
     expect(costTickLabel(value)).toBe(want);
   });
 });
+
+describe('rightsizingSeries sources', () => {
+  it('carries each point’s Intelligence and cost sources, so a relayed score reads as relayed', () => {
+    const relayed = row('relayed', 'capable', [
+      modelEffortDto({
+        effort: 'high',
+        intelligence: 44,
+        costPerTaskUsd: 1,
+        sources: {
+          intelligence: 'aa_via_openrouter',
+          coding: null,
+          agentic: null,
+          costPerTask: 'aa',
+          speed: null,
+        },
+      }),
+    ]);
+    const [point] = build({ rows: [relayed], picks: [] }).points;
+    expect(point).toMatchObject({ intelligenceSource: 'aa_via_openrouter', costSource: 'aa' });
+  });
+});

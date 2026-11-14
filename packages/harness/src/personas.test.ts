@@ -1,13 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SKILL_NAMES } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   MAX_PERSONA_BYTES,
   PERSONA_KEYS,
   PersonaManifestError,
   readDefaultPersonas,
-  SKILL_NAMES,
 } from './index';
 
 describe('default personas', () => {

@@ -107,5 +107,135 @@
       { "do": "turn_complete", "text": "Gave the list more room." },
       { "do": "await_message", "contains": "never sent" }
     ]
+  ],
+  "Pair the device": [
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-prr-plan1",
+          "summary": "PLAN ONE: write notes/pair.txt.",
+          "verdict": null
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-pr1", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": { "file_path": "notes/pair.txt", "content": "pair\n" }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-prr-build1",
+          "paths": ["notes/pair.txt"],
+          "message": "Add notes/pair.txt"
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-rev1", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-qa1", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ]
+  ],
+  "Pair the second device": [
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-prr-plan2",
+          "summary": "PLAN FIRST: write notes/second.txt.",
+          "verdict": null
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-pr2", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-prr-plan3",
+          "summary": "PLAN REVISED: write notes/second.txt with a header.",
+          "verdict": null
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-pr3", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": { "file_path": "notes/second.txt", "content": "pair\n" }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-prr-build2",
+          "paths": ["notes/second.txt"],
+          "message": "Add notes/second.txt"
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-rev2", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": { "opId": "op-prr-qa2", "summary": "Looks right.", "verdict": "approve" }
+      },
+      { "do": "turn_complete" }
+    ]
   ]
 }

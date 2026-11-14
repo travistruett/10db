@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
+  JudgeCallsPageQuery,
   JudgeConfig,
   JudgeConfigPatch,
   JudgeTestResultDto,
@@ -30,7 +31,6 @@ describe('judge config', () => {
       enabled: true,
       accountId: null,
       decisions: {
-        review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_record: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_elsewhere: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
@@ -38,32 +38,42 @@ describe('judge config', () => {
         thread_answer: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         reply_match: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         approval_read: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        task_rigor: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        task_kinds: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
   });
 
-  it('reads a config stored before the Shape decisions with their defaults, keeping its own', () => {
+  it('reads a config that still holds the retired review_size, drops it and keeps its other decisions', () => {
     const stored = {
       enabled: false,
-      decisions: { review_size: { enabled: false, model: 'm', floor: 0.5 } },
+      decisions: {
+        review_size: { enabled: false, model: 'm', floor: 0.5 },
+        shape_ready: { enabled: false, model: 'm', floor: 0.5 },
+      },
     };
     const config = JudgeConfig.parse(stored);
     expect(config.enabled).toBe(false);
-    expect(config.decisions.review_size).toEqual({ enabled: false, model: 'm', floor: 0.5 });
+    expect(config.decisions).not.toHaveProperty('review_size');
+    expect(config.decisions.shape_ready).toEqual({ enabled: false, model: 'm', floor: 0.5 });
     expect(config.decisions.shape_record).toEqual(DEFAULT_JUDGE_CONFIG.decisions.shape_record);
   });
 
-  it.each(['question_route', 'thread_answer', 'reply_match', 'approval_read'] as const)(
-    'reads a config stored before %s with its default',
-    (decision) => {
-      const config = JudgeConfig.parse({
-        enabled: true,
-        decisions: { review_size: { enabled: true, model: 'm', floor: 0.5 } },
-      });
-      expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
-    },
-  );
+  it.each([
+    'question_route',
+    'thread_answer',
+    'reply_match',
+    'approval_read',
+    'task_rigor',
+    'task_kinds',
+  ] as const)('reads a config stored before %s with its default', (decision) => {
+    const config = JudgeConfig.parse({
+      enabled: true,
+      decisions: { shape_ready: { enabled: true, model: 'm', floor: 0.5 } },
+    });
+    expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
+  });
 
   it.each([
     ['above one', 1.01],
@@ -72,7 +82,7 @@ describe('judge config', () => {
   ])('rejects a floor %s', (_name, floor) => {
     const config = {
       enabled: true,
-      decisions: { review_size: { enabled: true, model: 'm', floor } },
+      decisions: { shape_ready: { enabled: true, model: 'm', floor } },
     };
     expect(JudgeConfig.safeParse(config).success).toBe(false);
   });
@@ -80,7 +90,7 @@ describe('judge config', () => {
   it('rejects an empty model', () => {
     const config = {
       enabled: true,
-      decisions: { review_size: { enabled: true, model: '', floor: 0.5 } },
+      decisions: { shape_ready: { enabled: true, model: '', floor: 0.5 } },
     };
     expect(JudgeConfig.safeParse(config).success).toBe(false);
   });
@@ -90,8 +100,8 @@ describe('judge config patch', () => {
   it.each([
     ['empty', {}],
     ['the master switch', { enabled: false }],
-    ['one decision field', { decisions: { review_size: { floor: 0.9 } } }],
-    ['an empty decision', { decisions: { review_size: {} } }],
+    ['one decision field', { decisions: { shape_ready: { floor: 0.9 } } }],
+    ['an empty decision', { decisions: { shape_ready: {} } }],
     ['question_route', { decisions: { question_route: { floor: 0.9 } } }],
     ['thread_answer', { decisions: { thread_answer: { enabled: false } } }],
     ['reply_match', { decisions: { reply_match: { floor: 0.9 } } }],
@@ -101,7 +111,8 @@ describe('judge config patch', () => {
   });
 
   it.each([
-    ['a floor above one', { decisions: { review_size: { floor: 2 } } }],
+    ['a floor above one', { decisions: { shape_ready: { floor: 2 } } }],
+    ['the retired review_size', { decisions: { review_size: { floor: 0.9 } } }],
     ['an unknown decision', { decisions: { mystery: { enabled: true } } }],
     ['an unknown field', { enabled: true, extra: 1 }],
   ])('rejects %s', (_name, patch) => {
@@ -135,5 +146,32 @@ describe('judge results', () => {
     };
     expect(JudgeCallDto.parse(call)).toEqual(call);
     expect(JudgeCallDto.safeParse({ ...call, outcome: 'maybe' }).success).toBe(false);
+  });
+});
+
+describe('judge calls page query', () => {
+  it.each([
+    ['nothing', {}, { limit: 20, offset: 0 }],
+    ['a limit over 100', { limit: '500' }, { limit: 100, offset: 0 }],
+    ['a limit that is not a number', { limit: 'lots' }, { limit: 20, offset: 0 }],
+    [
+      'an offset and a decision',
+      { offset: '40', decision: 'review_size' },
+      {
+        limit: 20,
+        offset: 40,
+        decision: 'review_size',
+      },
+    ],
+  ])('reads %s', (_name, input, expected) => {
+    expect(JudgeCallsPageQuery.parse(input)).toEqual(expected);
+  });
+
+  it.each([
+    ['an unknown decision', { decision: 'nope' }],
+    ['an unknown outcome', { outcome: 'nope' }],
+    ['a negative offset', { offset: '-1' }],
+  ])('rejects %s', (_name, input) => {
+    expect(JudgeCallsPageQuery.safeParse(input).success).toBe(false);
   });
 });

@@ -1,4 +1,10 @@
-import type { ModelProfileId, ModelRowDto, RolePickDto, StepRole } from '@10db/contracts';
+import type {
+  ModelProfileId,
+  ModelRowDto,
+  ModelSource,
+  RolePickDto,
+  StepRole,
+} from '@10db/contracts';
 import { paretoFrontier, type ParetoPoint } from './pareto';
 import { ROLES } from './role-labels';
 
@@ -12,6 +18,9 @@ export interface ChartPoint extends ParetoPoint {
   readonly id: number;
   readonly profileId: ModelProfileId;
   readonly name: string;
+  /** Where the Intelligence and the cost per task came from. */
+  readonly intelligenceSource: ModelSource | null;
+  readonly costSource: ModelSource | null;
 }
 
 /** The points of one colour: gray for a point, blue for one on the frontier. */
@@ -105,6 +114,8 @@ function measuredPoints(rows: readonly ModelRowDto[]): { points: ChartPoint[]; o
         effort: e.effort,
         cost: e.costPerTaskUsd,
         intelligence: e.intelligence,
+        intelligenceSource: e.sources.intelligence,
+        costSource: e.sources.costPerTask,
       });
     }
   }

@@ -5,16 +5,17 @@ import {
   PASS_FOLDER_WAIT_NOTICE_KEY,
   reviewRounds,
   SYSTEM_COLUMN_LABEL,
-  RiskTag,
   TaskStatus,
   type AccountId,
   type BatchDto,
-  type FlowId,
+  type Effort,
   type ModelSetting,
   type Notice,
+  type Rigor,
   type ShapeId,
   type TaskDto,
   type TaskId,
+  type TaskKind,
   type WorkstreamDto,
 } from '@10db/contracts';
 import {
@@ -59,7 +60,6 @@ import { closeNote } from './batch/close-note';
 import { CopyTaskId } from './copy-task-id';
 import { BatchPanel } from './batch-panel';
 import { ciLine, ciStatus } from './ci-line';
-import { FlowSelect } from './flow-select';
 import {
   draftOf,
   landingChanged,
@@ -80,7 +80,8 @@ import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
-import { RISK_LABEL } from './risk-labels';
+import { rigorSourceLine } from './sizing-source';
+import { EffortPinSelect, KindSources, KindsSelect, RigorSelect } from './task-fields';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import { HeadlineField, WhyField } from './task-words-fields';
@@ -97,9 +98,6 @@ import {
 } from './task-state';
 
 type DrawerTab = 'overview' | 'reviews' | 'edit';
-
-const RISKS: readonly RiskTag[] = Object.values(RiskTag);
-const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
 
 export interface TaskDrawerProps {
   readonly task: TaskDto;
@@ -185,8 +183,17 @@ export function TaskDrawer({
   const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
-  const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
-  const [risks, setRisks] = useState<RiskTag[]>([...task.riskTags]);
+  // Rigor and kinds follow the live task until the builder edits them, so a judge answer that lands while the
+  // drawer is open is neither hidden nor sent back as the builder's change.
+  const [rigorEdit, setRigorEdit] = useState<{ readonly value: Rigor | null } | null>(null);
+  const [kindsEdit, setKindsEdit] = useState<TaskKind[] | null>(null);
+  const rigor = rigorEdit === null ? task.rigor : rigorEdit.value;
+  const kinds = kindsEdit ?? task.kinds;
+  const [effortPin, setEffortPin] = useState<Effort | null>(task.effortPin);
+  const kindsChanged =
+    kindsEdit !== null &&
+    (kindsEdit.length !== task.kinds.length ||
+      kindsEdit.some((k) => !task.kinds.some((t) => t.key === k.key && t.source === k.source)));
   const [modelSetting, setModelSetting] = useState<ModelSetting | null>(task.modelSetting);
   const modelSettingChanged = !sameSetting(modelSetting, task.modelSetting);
   // Areas are the claims the lane takes when it starts, so they change only before then.
@@ -218,9 +225,9 @@ export function TaskDrawer({
     why !== task.why ||
     description !== task.description ||
     criteria !== initialCriteria ||
-    flowId !== task.flowId ||
-    risks.length !== task.riskTags.length ||
-    risks.some((r) => !task.riskTags.includes(r)) ||
+    rigor !== task.rigor ||
+    kindsChanged ||
+    effortPin !== task.effortPin ||
     modelSettingChanged ||
     areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
@@ -264,8 +271,9 @@ export function TaskDrawer({
           title: title.trim(),
           description: description.trim(),
           acceptanceCriteria: lines,
-          flowId,
-          riskTags: risks,
+          ...(rigor !== task.rigor ? { rigor } : {}),
+          ...(kindsChanged ? { kinds } : {}),
+          ...(effortPin !== task.effortPin ? { effortPin } : {}),
           ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
           ...(modelSettingChanged ? { modelSetting } : {}),
@@ -508,21 +516,23 @@ export function TaskDrawer({
                   setCriteria(e.currentTarget.value);
                 }}
               />
-              <FlowSelect
-                label="Flow"
-                description="The steps this task goes through."
-                placeholder="Project default"
-                clearable
-                value={flowId}
-                onChange={setFlowId}
+              <KindsSelect
+                label="Kinds"
+                description="What the work touches. A kind can raise the rigor and add steps."
+                value={kinds}
+                onChange={(next) => {
+                  setKindsEdit(next);
+                }}
               />
-              <MultiSelect
-                label="Risks"
-                description="Security, sign-in or migration work gets a review of the plan before any code."
-                data={RISKS.map((r) => ({ value: r, label: RISK_LABEL[r] }))}
-                value={risks}
-                onChange={(values) => {
-                  setRisks(values.filter(isRisk));
+              <KindSources value={kinds} />
+              <RigorSelect
+                label="Rigor"
+                description={`How much process the task gets. ${rigorSourceLine(task)}.`}
+                value={rigor}
+                projectId={task.projectId}
+                kindKeys={kinds.map((k) => k.key)}
+                onChange={(next) => {
+                  setRigorEdit({ value: next });
                 }}
               />
               {accountId === undefined ? null : (
@@ -535,6 +545,12 @@ export function TaskDrawer({
                   onChange={setModelSetting}
                 />
               )}
+              <EffortPinSelect
+                label="Effort"
+                description="The effort every step runs at. Automatic leaves it to the playbook."
+                value={effortPin}
+                onChange={setEffortPin}
+              />
               {pullRequestBase === undefined ? null : landingEditable ? (
                 <LandingField
                   baseBranch={pullRequestBase}

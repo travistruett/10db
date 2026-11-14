@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 import { FakeCamera } from './fake-camera';
 import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
@@ -254,7 +254,7 @@ describe("the daemon's own address", () => {
 
 describe('a task in Your folder', () => {
   it('has its before taken ahead of its first edit, and its after once done', async () => {
-    const p = await project({ flowId: await quickFlowId(api()) });
+    const p = await project({ defaultRigor: 'light' });
     const task = await api().post(`/projects/${p.id}/tasks`, TaskDto, {
       title: 'People: tidy',
       acceptanceCriteria: ['the page is tidy'],

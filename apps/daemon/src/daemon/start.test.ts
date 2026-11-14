@@ -39,16 +39,18 @@ import {
 import {
   findModelProfile,
   getAccount,
+  getAppSetting,
   getWorkstream,
   listAccountModels,
   listAccounts,
+  listKinds,
   patchAccount,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CATALOGUE_URL } from '../catalogue';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
-import { apiClient, quickFlowId } from '../../test/api-client';
+import { apiClient } from '../../test/api-client';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
 import { seedProfiles } from '../../test/seed-profiles';
 import { FakeGh } from '../../test/fake-gh';
@@ -118,6 +120,20 @@ describe('startDaemon', () => {
         ...QUIET,
       }),
     ).rejects.toThrow(AlreadyRunningError);
+  });
+
+  it('moves the settings made before the playbook once, after seeding the kinds', async () => {
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+    });
+    expect(getAppSetting(daemon.state.db, 'playbook.moved')).toBe(true);
+    expect(getAppSetting(daemon.state.db, 'playbook.moveReport')).toEqual([]);
+    expect(listKinds(daemon.state.db).map((k) => k.key)).toContain('security');
   });
 
   it('answers 409 for a second project on the same repository', async () => {
@@ -312,7 +328,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -358,7 +374,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -421,7 +437,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -554,7 +570,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -850,7 +866,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -901,7 +917,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(apiClient(running.url, running.token)),
+        defaultRigor: 'light',
         areas: [{ name: 'api', globs: ['src/**'] }],
       });
       const task = await call(`/projects/${project.id}/tasks`, {
@@ -1166,7 +1182,7 @@ describe('startDaemon', () => {
         name: 'wired',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'api', globs: ['src/api/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -1228,7 +1244,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const overloadCards = async () =>
@@ -1290,7 +1306,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
-        flowId: await quickFlowId(before),
+        defaultRigor: 'light',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       await waitForAsync(async () => (await overloadCards(before))[0]);
@@ -1716,7 +1732,7 @@ describe('startDaemon', () => {
           name: 'demo',
           repoPath: repo.path,
           gateCommand: 'true',
-          flowId: await quickFlowId(api),
+          defaultRigor: 'light',
           areas: [{ name: 'src', globs: ['src/**'] }],
         });
         const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -1819,7 +1835,7 @@ describe('startDaemon', () => {
         areas: ['src'],
       });
       const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
-      expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
+      expect(plan).toMatchObject({ rigor: 'standard', overBudget: [] });
       expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
         'implement:claude-sonnet-5-5@high',
         'review:claude-sonnet-5-5@high',
@@ -1937,7 +1953,7 @@ describe('startDaemon', () => {
     }
   });
 
-  it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
+  it('answers 404 for an unknown project on routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
       sandbox: null,
       dataDir: dir.path,
@@ -1962,23 +1978,15 @@ describe('startDaemon', () => {
     };
     const repo = createTempRepo();
     try {
-      const project = await api.post('/projects', ProjectDto, {
+      await api.post('/projects', ProjectDto, {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
         areas: [{ name: 'src', globs: ['src/**'] }],
       });
       const head = await api.get('/events/head', EventsHead);
-      expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/candidates?size=1`)).toBe(404);
-      expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
-      expect(
-        await send('PUT', `/projects/${project.id}/team`, {
-          bindings: [{ role: 'review', personaId: mintId('Persona') }],
-          members: [],
-        }),
-      ).toBe(400);
       expect(await api.get('/events/head', EventsHead)).toEqual(head);
     } finally {
       repo.cleanup();
@@ -1992,9 +2000,6 @@ describe('startDaemon', () => {
     };
     expect(await send('POST', '/personas', persona)).toBe(201);
     expect(await send('POST', '/people', { handle: 'sam', name: 'Sam' })).toBe(201);
-    expect(
-      await send('POST', '/flows', { name: 'mine', steps: [{ role: 'implement', need: 40 }] }),
-    ).toBe(201);
   });
 
   it('closes its log file on stop, so a start leaks no file descriptor', async () => {

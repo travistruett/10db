@@ -1,18 +1,15 @@
-import { mintId, type ProjectDto } from '@10db/contracts';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import type { ProjectDto } from '@10db/contracts';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { flowDto, projectDto } from '../../test/fixtures';
-
-const flow = flowDto({ id: mintId('Flow'), name: 'quick' });
+import { projectDto } from '../../test/fixtures';
 
 /** Serves one project and records every PATCH body; returns the recorded bodies. */
 function serve(project: ProjectDto, reply: 'ok' | 'refuse' = 'ok'): unknown[] {
   const patched: unknown[] = [];
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([flow])),
     http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
       patched.push(await request.json());
       return reply === 'ok'
@@ -30,15 +27,6 @@ const type = (name: string, value: string) => fireEvent.change(field(name), { ta
 const open = async (): Promise<void> => {
   await screen.findByLabelText('Name');
 };
-
-async function pick(select: HTMLElement, option: string | RegExp): Promise<void> {
-  fireEvent.click(select);
-  const listbox = document.getElementById(select.getAttribute('aria-controls') ?? '');
-  expect(listbox).toBeDefined();
-  fireEvent.click(
-    await within(listbox ?? document.body).findByRole('option', { name: option, hidden: true }),
-  );
-}
 
 const CHANGE_NOTE =
   'It applies to tasks made from now on and can change while work runs; tasks that already exist keep their own.';
@@ -257,14 +245,6 @@ const rows: readonly Row[] = [
     line: "When a session's memory is this full, it writes a handoff note and a fresh one carries on.",
     change: () => type('Fresh session', '30'),
     sent: { handoffPct: 30 },
-  },
-  {
-    name: 'Flow',
-    advanced: true,
-    label: 'Flow',
-    line: 'The default steps a task goes through. A task can choose its own.',
-    change: () => pick(field('Flow'), /^Quick/),
-    sent: { flowId: flow.id },
   },
   {
     name: 'Firm reminder',

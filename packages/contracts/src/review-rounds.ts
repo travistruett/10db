@@ -2,8 +2,16 @@ import { z } from 'zod';
 import { StepRole } from './states';
 import { FOLLOW_UPS_HEADING, type StepResult, type WorkstreamStep } from './steps';
 
-/** Times the work may be sent back, by a reviewer, a gate or the builder, before the workstream fails. */
+/** Times the gate or the builder may send the work back. */
 export const FIX_ATTEMPT_LIMIT = 3;
+
+/**
+ * Whether a reviewer's rejection is at the limit: the step was sent back `sentBack` times already, and
+ * this rejection would be one more than its rigor's `rounds` allow.
+ */
+export function atRoundLimit(sentBack: number, rounds: number): boolean {
+  return sentBack + 1 > rounds;
+}
 
 /** The longest headline a finding keeps; the full review has the rest. */
 const HEADLINE_CHARS = 240;
@@ -128,15 +136,6 @@ export function reviewRounds(steps: readonly WorkstreamStep[]): ReviewRound[] {
   );
   // Reversed first, so rounds stamped in the same instant stay newest first (the sort is stable).
   return rounds.reverse().sort((a, b) => b.result.at.localeCompare(a.result.at));
-}
-
-/**
- * How many times a reviewer sent the work back since the attempts last started over. Each step
- * counts its own send-backs, and a retry sets every count to 0, so neither the rounds before a retry
- * nor the gate failures that also use attempts up count here.
- */
-export function rejectionsSentBack(ws: { readonly steps: readonly WorkstreamStep[] }): number {
-  return ws.steps.reduce((sum, step) => sum + step.sentBack, 0);
 }
 
 /** The `detail` key of a failed workstream's card when a reviewer's rejection ended it. */

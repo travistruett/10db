@@ -44,7 +44,7 @@ export function RecentConversations({ projectId }: { readonly projectId: Project
   const recent = (shapes.data ?? []).slice(0, LISTED);
   if (recent.length === 0) return null;
   return (
-    <Box px="md" pb="md" style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}>
+    <Box px="md" pb="md" style={{ flex: '1 1 240px' }}>
       <Text size="xs" fw={600} c="dimmed" mb={4}>
         Recent
       </Text>

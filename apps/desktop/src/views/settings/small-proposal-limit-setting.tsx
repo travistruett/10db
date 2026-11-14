@@ -8,7 +8,7 @@ export const SMALL_PROPOSAL_LIMIT_LABEL = 'Size limit for small proposals';
 
 /**
  * How large a lane's new-task proposal can be, in characters of title and body, for 10db to file it to
- * the Icebox without an Inbox card. A proposal with a risk tag, over the limit or asking to join a
+ * the Icebox without an Inbox card. A proposal of a kind that goes to the Inbox, over the limit or asking to join a
  * running batch still raises a card, and so does every proposal when this is zero.
  */
 export function SmallProposalLimitSetting({ project }: { readonly project: ProjectDto }) {
@@ -24,7 +24,7 @@ export function SmallProposalLimitSetting({ project }: { readonly project: Proje
     <SettingsCard>
       <SettingRow
         label={SMALL_PROPOSAL_LIMIT_LABEL}
-        description="A task a lane proposes that is no longer than this many characters (title and body) and carries no risk tag (security, auth, migration, dependency) is filed to the Icebox by 10db, with no Inbox card. Anything bigger, risky, or asking to join a running batch still comes to the Inbox. Zero sends every proposal to the Inbox."
+        description="A task a lane proposes that is no longer than this many characters (title and body) and has no kind that sends its proposals to the Inbox is filed to the Icebox by 10db, with no Inbox card. Anything bigger, of such a kind, or asking to join a running batch still comes to the Inbox. Zero sends every proposal to the Inbox."
         stacked
       >
         <Stack gap="xs">

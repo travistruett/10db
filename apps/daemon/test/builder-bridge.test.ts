@@ -102,7 +102,7 @@ describe('the builder bridge over stdio, against a real daemon', () => {
     await initialize(rpc);
     await daemon?.stop();
     daemon = null;
-    const called = await callTool('list_flows', {});
+    const called = await callTool('list_kinds', {});
     expect(called.message.id).toBe(called.id);
     expect(called.message.error?.message).toContain('10db is not running');
     // The tool list still works without a daemon.
@@ -111,13 +111,13 @@ describe('the builder bridge over stdio, against a real daemon', () => {
 
   it('works again on the new port after the daemon restarts', async () => {
     await initialize(rpc);
-    const first = await callTool('list_flows', {});
+    const first = await callTool('list_kinds', {});
     expect(first.message.error).toBeUndefined();
     const oldPort = daemon?.port;
     await daemon?.stop();
     daemon = await startDaemon(startOptions());
     expect(daemon.port).not.toBe(oldPort);
-    const again = await callTool('list_flows', {});
+    const again = await callTool('list_kinds', {});
     expect(again.message.id).toBe(again.id);
     expect(again.message.error).toBeUndefined();
   });
@@ -125,7 +125,7 @@ describe('the builder bridge over stdio, against a real daemon', () => {
   it('answers an error with the request id when the token is wrong', async () => {
     await initialize(rpc);
     writeFileSync(join(data.path, 'ui-token'), 'not-the-token');
-    const called = await callTool('list_flows', {});
+    const called = await callTool('list_kinds', {});
     expect(called.message.id).toBe(called.id);
     expect(called.message.error?.message).toContain('refused');
   });
@@ -133,7 +133,7 @@ describe('the builder bridge over stdio, against a real daemon', () => {
   it('answers not running when daemon.json is gone', async () => {
     await initialize(rpc);
     rmSync(join(data.path, 'daemon.json'));
-    const called = await callTool('list_flows', {});
+    const called = await callTool('list_kinds', {});
     expect(called.message.error?.message).toContain('10db is not running');
   });
 });

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@10db/contracts": "workspace:*",
     "zod": "4.6.7"
   }
 }

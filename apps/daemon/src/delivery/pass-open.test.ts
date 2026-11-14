@@ -11,6 +11,8 @@ import { dirname, join, relative } from 'node:path';
 import {
   BranchName,
   mintId,
+  Rigor,
+  TaskKindSource,
   WorkstreamState,
   type BatchId,
   type ProjectInput,
@@ -19,7 +21,6 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
-  findFlowByName,
   getBatch,
   getTask,
   getWorkstream,
@@ -488,7 +489,6 @@ describe('opening a pass', () => {
 describe("a pass task's plan and its saved work", () => {
   it("runs only the project's implement step, and puts back each task's saved work once the pass is open", async () => {
     harness();
-    const full = findFlowByName(h.store.db, 'full');
     const criteria = ['one', 'two', 'three', 'four'];
     const settings = h.addTask('Settings: UI work', {
       areas: ['settings'],
@@ -496,7 +496,10 @@ describe("a pass task's plan and its saved work", () => {
     });
     const people = page('People: UI work', ['people']);
     h.state.write((w) => {
-      patchTask(w, settings.id, { flowId: full?.id ?? null, riskTags: ['migration'] });
+      patchTask(w, settings.id, {
+        rigor: Rigor.Careful,
+        kinds: [{ key: 'migration', source: TaskKindSource.Builder }],
+      });
       setTaskKeptWork(w, people.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
     });
     const putBacks: { repo: string; taskId: string; head: string; inPass: boolean }[] = [];

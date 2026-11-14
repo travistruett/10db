@@ -106,7 +106,7 @@ describe('the listings backfill', () => {
     const journalPath = join(older, 'meta/_journal.json');
     // The journal this test just copied from the shipped migrations; the shape is known.
     const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: { tag: string }[] };
-    const end = journal.entries.findIndex((e) => e.tag === '0076_skip_listings');
+    const end = journal.entries.findIndex((e) => e.tag === '0082_skip_listings');
     for (const later of journal.entries.splice(end + 1)) rmSync(join(older, `${later.tag}.sql`));
     writeFileSync(journalPath, JSON.stringify(journal, null, 2));
     const db = openDatabase(join(dir, '10db.sqlite'));

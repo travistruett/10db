@@ -11,11 +11,14 @@ export interface TaskGroup {
  * nothing makes them wait on each other. Groups come in the order of their first task, and tasks
  * keep the set's order within a group. A group is titled after its first task in set order with no
  * dependency inside the set, unless it holds a task of a landing named in `landingTitles`, which
- * then names it (the first such task's landing). With no landing groups it groups by dependency alone.
+ * then names it (the first such task's landing). `links` are pairs of tasks that share a group too, as
+ * tasks of one goal that ship with it do; a pair naming a task outside the set is ignored. With no landing
+ * groups and no links it groups by dependency alone.
  */
 export function groupByDependency(
   tasks: readonly TaskDto[],
   landingTitles: ReadonlyMap<LandingGroupId, string> = new Map(),
+  links: readonly (readonly [TaskId, TaskId])[] = [],
 ): TaskGroup[] {
   const parent = new Map<TaskId, TaskId>(tasks.map((t) => [t.id, t.id]));
   const rootOf = (id: TaskId): TaskId => {
@@ -44,6 +47,12 @@ export function groupByDependency(
     }
     const a = rootOf(task.id);
     const b = rootOf(first);
+    if (a !== b) parent.set(a, b);
+  }
+  for (const [x, y] of links) {
+    if (!parent.has(x) || !parent.has(y)) continue;
+    const a = rootOf(x);
+    const b = rootOf(y);
     if (a !== b) parent.set(a, b);
   }
   const groups = new Map<TaskId, TaskDto[]>();

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
+import { Rigor } from './rigor';
 import { Effort, StepRole, StepStatus, ToolAccess, Verdict } from './states';
 
 /** Longest result a step may record: a plan or a review's notes. */
@@ -27,6 +28,13 @@ export const ShippedAtLimit = z.object({
   followUpTitle: z.string().min(1),
 });
 export type ShippedAtLimit = z.infer<typeof ShippedAtLimit>;
+
+/**
+ * Whether the fresh session a send-back falls back to still has to step up a model rung: `pending` when the
+ * send-back meant to resume the step's own session, `done` once the step was escalated for it.
+ */
+export const FixFresh = { Pending: 'pending', Done: 'done' } as const;
+export type FixFresh = (typeof FixFresh)[keyof typeof FixFresh];
 
 /** One step of a workstream's resolved plan, fixed when the task starts. */
 export const WorkstreamStep = z.object({
@@ -62,6 +70,23 @@ export const WorkstreamStep = z.object({
   /** Times this step's rejection sent the work back since the attempts last started over; a retry sets it to 0. */
   sentBack: z.int().min(0).default(0),
   /**
+   * The review rounds the task's rigor allowed when this reviewing step was last written, for the card's
+   * "sent back N of R". The limit itself is read live at each rejection. Absent on a step stored without it.
+   */
+  reviewRounds: z.int().min(0).max(3).optional(),
+  /**
+   * Set on every step of a run no rigor planned (a merge resolution, a pass page): its steps are never planned
+   * again and no review is added to it.
+   */
+  fixedPlan: z.literal(true).optional(),
+  /**
+   * The provider session that last ran this step, so a send-back can resume it. Absent until a session of
+   * the step has started.
+   */
+  providerSessionId: z.string().min(1).optional(),
+  /** Set when a reviewer's send-back targets this step; see `FixFresh`. Absent otherwise. */
+  fixFresh: z.enum(FixFresh).optional(),
+  /**
    * Set on a review or QA step whose rejection used up the retry limit and shipped the work anyway:
    * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.
    */
@@ -71,7 +96,8 @@ export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 
 /** What starting a task would run, before it runs (the M2b approval sheet edits this). */
 export const StepPlanDto = z.object({
-  flowName: z.string(),
+  /** The rigor the steps came from; null for a plan no rigor made, such as a merge fix. */
+  rigor: z.enum(Rigor).nullable(),
   steps: z.array(WorkstreamStep),
   /** Steps whose need no profile within the budget ceiling meets; starting is refused while any remain. */
   overBudget: z.array(z.int().min(0)),

@@ -136,7 +136,7 @@ export function batchLanding(batch: Pick<BatchDto, 'baseBranch' | 'autoMerge'>):
   return { baseBranch: batch.baseBranch, autoMerge: batch.autoMerge };
 }
 
-const same = (a: LandingTarget, b: LandingTarget): boolean =>
+export const same = (a: LandingTarget, b: LandingTarget): boolean =>
   a.baseBranch === b.baseBranch && a.autoMerge === b.autoMerge;
 
 /** How a landing reads in a refusal: "merges into main when checks pass". */

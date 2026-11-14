@@ -18,7 +18,9 @@
         "proposal",
         "review",
         "flag",
-        "check"
+        "check",
+        "plan",
+        "playbook_move_report"
       ]
     },
     "state": {

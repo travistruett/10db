@@ -1,5 +1,6 @@
 export { createLiveSessions, type LiveSessions } from './live-sessions';
 export { outstandingFixEvidence } from './fix-evidence';
+export { applyPlanAnswer } from './plan-answer';
 export { applyCheckAnswer, RunnerNotStartedError, type StartSignOff } from './check-answer';
 export { nextActionAfterCrash, nextActionOnAnotherAccount, withUndelivered } from './next-action';
 export {
@@ -11,6 +12,7 @@ export {
   type StopPassLane,
 } from './runner';
 export { liveCheckCard, raiseBuilderCheck } from './builder-check';
+export { livePlanCard, planOf, raisePlanApproval } from './plan-approval';
 export { untakenMessages } from './lane-messages';
 export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from './pass-turn';
 export { raisePassCheck, raiseTurnFailed } from './pass-check';

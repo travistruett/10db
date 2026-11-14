@@ -4,7 +4,7 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
-import { modelRowDto } from '../../test/model-fixtures';
+import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
 import { shapeDto, shapeMessageDto, shapeViewDto } from '../../test/shape-fixtures';
 
 const project = projectViewDto();
@@ -42,9 +42,9 @@ async function openList(): Promise<HTMLElement> {
 /** Records each model sent to the daemon and answers with the conversation. */
 function acceptModels(view: ShapeViewDto, sent: unknown[]): RequestHandler {
   return http.put(daemonUrl('/shapes/:shapeId/model'), async ({ request }) => {
-    const body = (await request.json()) as { model: string | null };
+    const body = (await request.json()) as { model: string | null; effort: string | null };
     sent.push(body);
-    return HttpResponse.json({ ...view.shape, model: body.model });
+    return HttpResponse.json({ ...view.shape, model: body.model, effort: body.effort });
   });
 }
 
@@ -133,7 +133,7 @@ describe('the Plan conversation model picker', () => {
       within(await openList()).getByRole('option', { name: 'claude-fable-5-1', hidden: true }),
     );
     await waitFor(() => {
-      expect(sent).toEqual([{ model: 'claude-fable-5-1' }]);
+      expect(sent).toEqual([{ model: 'claude-fable-5-1', effort: null }]);
     });
     fireEvent.click(
       within(await openList()).getByRole('option', {
@@ -142,7 +142,10 @@ describe('the Plan conversation model picker', () => {
       }),
     );
     await waitFor(() => {
-      expect(sent).toEqual([{ model: 'claude-fable-5-1' }, { model: null }]);
+      expect(sent).toEqual([
+        { model: 'claude-fable-5-1', effort: null },
+        { model: null, effort: null },
+      ]);
     });
   });
 
@@ -189,5 +192,72 @@ describe('the Plan conversation model picker', () => {
     renderApp(`/shape/${view.shape.id}`);
     await screen.findByRole('textbox', { name: 'Message' });
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
+  });
+
+  describe('effort', () => {
+    const rows = [
+      modelRowDto({
+        model: 'claude-sonnet-5-5',
+        efforts: [modelEffortDto({ effort: 'high' }), modelEffortDto({ effort: 'low' })],
+      }),
+      modelRowDto({
+        model: 'claude-fable-5-1',
+        efforts: [
+          modelEffortDto({ effort: 'max' }),
+          modelEffortDto({ effort: 'high' }),
+          modelEffortDto({ effort: 'medium' }),
+        ],
+      }),
+    ];
+
+    async function effortOptions(): Promise<string[]> {
+      const input = await screen.findByRole('combobox', { name: 'Effort' });
+      fireEvent.click(input);
+      const list = await waitFor(() => {
+        const id = input.getAttribute('aria-controls');
+        const found = id === null ? null : document.getElementById(id);
+        expect(found).not.toBeNull();
+        return found ?? document.body;
+      });
+      return within(list)
+        .getAllByRole('option', { hidden: true })
+        .map((o) => o.textContent);
+    }
+
+    it('lists Automatic and only the chosen model’s efforts', async () => {
+      const view = conversation({}, 'claude-sonnet-5-5');
+      serve(
+        view,
+        http.get(daemonUrl('/models'), () => HttpResponse.json(rows)),
+      );
+      renderApp(`/shape/${view.shape.id}`);
+      await waitFor(async () => {
+        expect(await effortOptions()).toEqual(['Automatic', 'low', 'high']);
+      });
+    });
+
+    it('sends the effort with the model, and clears one the new model lacks', async () => {
+      const view = conversation({}, 'claude-fable-5-1');
+      const sent: unknown[] = [];
+      serve(
+        view,
+        http.get(daemonUrl('/models'), () => HttpResponse.json(rows)),
+        acceptModels(view, sent),
+      );
+      renderApp(`/shape/${view.shape.id}`);
+      await waitFor(async () => {
+        expect(await effortOptions()).toContain('max');
+      });
+      fireEvent.click(await screen.findByRole('option', { name: 'max', hidden: true }));
+      await waitFor(() => {
+        expect(sent).toEqual([{ model: 'claude-fable-5-1', effort: 'max' }]);
+      });
+      fireEvent.click(
+        within(await openList()).getByRole('option', { name: 'claude-sonnet-5-5', hidden: true }),
+      );
+      await waitFor(() => {
+        expect(sent.at(-1)).toEqual({ model: 'claude-sonnet-5-5', effort: null });
+      });
+    });
   });
 });

@@ -1,0 +1,3 @@
+# apps/daemon/src/priority
+
+- `priority/` (`atPriority`, `decisions/2026-10-30-lane-and-gate-priority.md`) sets the CPU priority of the two processes the daemon spawns for lane work: a lane's `claude` runs at background (`taskpolicy -b`; `nice -n 19` off macOS) and a gate's process group at `taskpolicy -c utility` (`nice -n 10`), between lanes and the builder's apps. It wraps the spawn, the wrapper execs the program, and a priority is inherited, so every lane command, repo MCP server and orphan keeps it and no child starts at normal priority. No setting; a new spawn of a lane's `claude` or of a gate goes through it. A test inside a sandbox can't run `taskpolicy -b` (Seatbelt refuses it), so claude-adapter tests mock `../priority`.

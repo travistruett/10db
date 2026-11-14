@@ -3,6 +3,12 @@ import { join } from 'node:path';
 import {
   ACTIVE_STATES,
   AreaRole,
+  JudgeOutcome,
+  RigorSource,
+  TaskKindSource,
+  type Rigor,
+  type TaskDto,
+  type TaskKind,
   CatalogueAttempt,
   type AccountDto,
   type AccountId,
@@ -16,6 +22,8 @@ import {
   NotFoundError,
   providerOf,
   isDaemonAddress,
+  kindsOfTask,
+  refuseRigorBelowKinds,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
@@ -38,7 +46,6 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  BUILDER_CHOSE_PLACEMENT,
   cancelTask,
   closeTask,
   reopenTask,
@@ -51,17 +58,16 @@ import {
   getPass,
   getPassProgress,
   getTask,
-  getTeam,
   getWorkstream,
   holdTask,
   insertBoardColumn,
   insertBuilderMessage,
-  insertFlow,
   insertPerson,
   insertPersona,
   insertProject,
   insertTask,
   latestEventSeq,
+  listKinds,
   humanTouchDays,
   latestWorkstreamOf,
   openGoalDigest,
@@ -69,11 +75,11 @@ import {
   getAccount,
   type DbReader,
   listAccountModels,
+  listOpenRouterMeasures,
   listAccounts,
   listBatches,
   listBoardColumns,
   listEventsAfter,
-  listFlows,
   listGoalSummaries,
   listInbox,
   listModelProfiles,
@@ -91,16 +97,19 @@ import {
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
-  patchFlow,
   patchModelProfile,
   patchPersona,
   patchProject,
   patchTask,
+  placementRuleMoves,
+  judgeCallAnswer,
+  readTaskSizing,
+  recordJudgeOutcome,
+  type WriteContext,
   renamePass,
   resumeTask,
   runNext,
   setRoutingRules,
-  setTeam,
   takeOffer,
   undoHazardAddition,
   isAllowThisOffer,
@@ -112,8 +121,15 @@ import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
-import { buildModelRows, type CatalogueSync } from '../catalogue';
-import { proposePlacement } from '../placement';
+import {
+  buildModelRows,
+  groupMeasuresByModel,
+  modelMeasures,
+  speedProviderFor,
+  type CatalogueSync,
+} from '../catalogue';
+import { placementAfterEdit, proposePlacement } from '../placement';
+import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
@@ -161,7 +177,13 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { rolePicks } from '../routing';
-import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } from '../team';
+import {
+  playbookInputs,
+  proposeCandidates,
+  resolveStepPlan,
+  routingInputs,
+  startTaskWithPlan,
+} from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
@@ -170,7 +192,7 @@ import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
-import { createModelSettingsServices } from './model-settings-services';
+import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { ConversationApiServices } from './conversation-services';
 import type { PlanRecordServices } from '../api';
@@ -185,6 +207,56 @@ function liveAccount(db: DbReader, id: AccountId): AccountDto {
   const account = getAccount(db, id);
   if (account.archived) throw new NotFoundError('account', id);
   return account;
+}
+
+/**
+ * The keys the builder has taken off the task once it has `kinds`: those it held and no longer does join
+ * `kindsOff`, and one it has put back leaves it.
+ */
+function kindsOffAfter(task: TaskDto, kinds: readonly TaskKind[]): string[] {
+  const now = new Set(kinds.map((k) => k.key));
+  const removed = task.kinds.map((k) => k.key).filter((key) => !now.has(key));
+  return [...new Set([...task.kindsOff.filter((key) => !now.has(key)), ...removed])];
+}
+
+/**
+ * Records, in the builder's write, that the builder changed what the judge set: the rigor it chose, a kind
+ * it added that the builder took off, or one it said no to that the builder added.
+ */
+function recordOverrides(
+  ctx: WriteContext,
+  task: TaskDto,
+  rigor: Rigor | null | undefined,
+  kinds: readonly TaskKind[] | undefined,
+): void {
+  const calls = readTaskSizing(ctx.tx, task.id)?.sizingCalls;
+  if (calls === undefined) return;
+  if (
+    rigor !== undefined &&
+    task.rigorSource === RigorSource.Judge &&
+    task.rigor !== rigor &&
+    calls.rigor !== null
+  )
+    recordJudgeOutcome(ctx, calls.rigor, JudgeOutcome.Overridden);
+  if (kinds === undefined) return;
+  const now = new Set(kinds.map((k) => k.key));
+  const held = new Set(task.kinds.map((k) => k.key));
+  for (const kind of task.kinds) {
+    const call = calls.kinds[kind.key];
+    if (kind.source === TaskKindSource.Judge && !now.has(kind.key) && call !== undefined)
+      recordJudgeOutcome(ctx, call, JudgeOutcome.Overridden);
+  }
+  for (const key of now) {
+    const call = calls.kinds[key];
+    // Only a kind the judge answered `no` to: one an agent took off was put back, not argued with.
+    if (
+      !held.has(key) &&
+      !task.kindsOff.includes(key) &&
+      call !== undefined &&
+      judgeCallAnswer(ctx.tx, call) === 'no'
+    )
+      recordJudgeOutcome(ctx, call, JudgeOutcome.Overridden);
+  }
 }
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -210,6 +282,10 @@ export function createServices(deps: {
   readonly refreshModels: (opts: { readonly force: boolean }) => Promise<void>;
   /** Whether this daemon fetches the catalogue at all; off, the status says so. */
   readonly catalogueOn: boolean;
+  /** Whether OpenRouter's measures may show: an OpenRouter account is picked for decisions and no kill switch is on. */
+  readonly openRouterOn: () => boolean;
+  /** `TENDB_JUDGE=off` or `TENDB_BENCHMARKS=off`: OpenRouter is never read. */
+  readonly openRouterOff: boolean;
   readonly judge: JudgeApiServices;
   /** gh's login and the Sign In that changes it. */
   readonly github: GithubApiServices;
@@ -228,6 +304,10 @@ export function createServices(deps: {
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** The sizing in flight, which a start from the Board, the API or the builder's MCP waits for. */
+  readonly sizing: Pick<SizingService, 'settled'>;
+  /** How long that wait is at most. */
+  readonly sizingWaitMs: number;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
@@ -355,24 +435,29 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    async createTask(projectId, input) {
+    async createTask(projectId, input, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) =>
-        insertTask(
+      const task = deps.state.write((ctx) => {
+        const known = listKinds(ctx.tx);
+        const kinds = input.kinds ?? [];
+        refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
+        return insertTask(
           ctx,
           projectId,
-          input,
+          { ...input, kinds },
           proposePlacement(getProject(ctx.tx, projectId), {
             areas: input.areas,
-            riskTags: input.riskTags ?? [],
+            kinds: kindsOfTask(kinds, known),
             workspaceMode: input.workspaceMode,
           }),
-        ),
-      );
+          rigorSource,
+        );
+      });
       deps.scheduler.requestTick();
       return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
+    settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
@@ -604,7 +689,6 @@ export function createServices(deps: {
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
     getGoal: (id) => getGoal(db, id),
-    listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
@@ -700,15 +784,13 @@ export function createServices(deps: {
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
     listPeople: () => listPeople(db),
     createPerson: (input) => deps.state.write((ctx) => insertPerson(ctx, input)),
-    createFlow: (input) => deps.state.write((ctx) => insertFlow(ctx, input)),
-    patchFlow: (id, patch) => deps.state.write((ctx) => patchFlow(ctx, id, patch)),
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
     ...deps.github,
     ...deps.stakeholders,
     ...deps.trust,
-    ...createModelSettingsServices(deps.state),
+    ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.conversation,
     ...deps.planRecord,
@@ -729,16 +811,36 @@ export function createServices(deps: {
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
+        openRouter: groupMeasuresByModel(
+          deps.openRouterOn() ? listOpenRouterMeasures(db) : [],
+          deps.catalogue.catalogue(),
+        ),
+        now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
-    modelPicks: (accountId) => {
+    modelMeasures: (model, accountId) =>
+      modelMeasures({
+        model,
+        rows: listOpenRouterMeasures(db),
+        catalogue: deps.catalogue.catalogue(),
+        keyed: deps.openRouterOn(),
+        off: deps.openRouterOff,
+        accountProvider:
+          accountId === undefined ? null : speedProviderFor(liveAccount(db, accountId).kind),
+      }),
+    modelPicks: (accountId, rigor, projectId) => {
       const account = liveAccount(db, accountId);
+      // A missing project is a 404, not the global playbook.
+      if (projectId !== undefined) getProject(db, projectId);
       return {
         accountId,
-        picks: rolePicks({
-          ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
-          personas: listPersonas(db),
-        }),
+        picks: rolePicks(
+          {
+            ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
+            playbook: playbookInputs(db, projectId ?? null).playbook,
+          },
+          rigor,
+        ),
       };
     },
     listAccountOffers: () => listAccountModels(db),
@@ -772,11 +874,6 @@ export function createServices(deps: {
     accountUsage: (id, month) => deps.accounts.usage(id, month),
     listAccountPauses: () => deps.accounts.pauses(),
     resumeAccount: (id) => deps.accounts.resume(id),
-    getTeam(projectId) {
-      getProject(db, projectId);
-      return getTeam(db, projectId);
-    },
-    setTeam: (projectId, input) => deps.state.write((ctx) => setTeam(ctx, projectId, input)),
     listRoutingRules(projectId) {
       getProject(db, projectId);
       return listRoutingRules(db, projectId);
@@ -799,33 +896,67 @@ export function createServices(deps: {
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
-    async patchTask(id, patch) {
+    async patchTask(id, patch, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
         deps.starter.refuseIfJoining(id);
-      // The areas or risk tags can now match the placement rule. The store moves the task to a separate
+      // The areas or kinds can now match the placement rule. The store moves the task to a separate
       // copy only if it hasn't started and the builder hasn't placed it.
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
-        const proposed =
-          patch.areas === undefined && patch.riskTags === undefined
+        const known = listKinds(ctx.tx);
+        // A change from the Board or the API is the builder's; the builder's MCP says it is an agent's.
+        const byBuilder = rigorSource === undefined || rigorSource === RigorSource.Builder;
+        // A kind the builder adds is theirs, whatever source the form carried; one the task holds keeps its own.
+        const patched =
+          patch.kinds === undefined
             ? undefined
-            : proposePlacement(getProject(ctx.tx, task.projectId), {
+            : byBuilder
+              ? patch.kinds.map(
+                  (k) =>
+                    task.kinds.find((held) => held.key === k.key) ?? {
+                      key: k.key,
+                      source: TaskKindSource.Builder,
+                    },
+                )
+              : patch.kinds;
+        const kinds = patched ?? task.kinds;
+        // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
+        if (patch.rigor !== undefined || patch.kinds !== undefined)
+          refuseRigorBelowKinds({
+            rigor: patch.rigor === undefined ? task.rigor : patch.rigor,
+            taskKinds: kinds,
+            kinds: known,
+          });
+        // The areas or kinds can now match the placement rule, so it is asked again.
+        const proposed =
+          patch.areas === undefined && patch.kinds === undefined
+            ? undefined
+            : placementAfterEdit({
+                project: getProject(ctx.tx, task.projectId),
                 areas: patch.areas ?? task.areas,
-                riskTags: patch.riskTags ?? task.riskTags,
+                kinds,
+                known,
               });
-        // A join still pending has not written yet, so the move would collide with it.
-        // The same holds for any move the rule makes: a task the builder placed never moves, and one with
-        // no reason moves only when the rule matched.
-        if (
-          proposed !== undefined &&
-          proposed.workspaceMode !== task.workspaceMode &&
-          task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
-          (task.placementReason !== null || proposed.reason !== null)
-        )
-          deps.starter.refuseIfJoining(id);
-        return patchTask(ctx, id, patch, proposed);
+        // A join still pending has not written yet, so a move the rule would make would collide with it.
+        if (placementRuleMoves(task, proposed)) deps.starter.refuseIfJoining(id);
+        if (byBuilder) recordOverrides(ctx, task, patch.rigor, patched);
+        const kindsOff =
+          byBuilder && patched !== undefined && patch.kindsOff === undefined
+            ? kindsOffAfter(task, patched)
+            : patch.kindsOff;
+        return patchTask(
+          ctx,
+          id,
+          {
+            ...patch,
+            ...(patched === undefined ? {} : { kinds: patched }),
+            ...(kindsOff === undefined ? {} : { kindsOff }),
+          },
+          proposed,
+          rigorSource,
+        );
       });
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

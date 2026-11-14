@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { SKILL_NAMES } from '@10db/contracts';
 import { z } from 'zod';
 
 /** The plugin directory injected into managed sessions. */
@@ -16,15 +17,6 @@ export function readPluginManifest(dir: string = HARNESS_PLUGIN_DIR): PluginMani
   const text = readFileSync(join(dir, '.claude-plugin', 'plugin.json'), 'utf8');
   return PluginManifest.parse(JSON.parse(text));
 }
-
-/** The craft skills every managed session loads (spec §11.3). */
-export const SKILL_NAMES = [
-  'planning',
-  'test-first',
-  'review-checklist',
-  'brainstorming',
-  'handoff',
-] as const;
 
 /** Skills load into every session's context, so each one stays small. */
 export const MAX_SKILL_BYTES = 2048;

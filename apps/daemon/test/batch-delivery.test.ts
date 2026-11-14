@@ -13,7 +13,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { CODEX_VERIFIED_ON } from '../src/environment';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { FakeGh } from './fake-gh';
 import {
   createTempRepoWithOrigin,
@@ -96,7 +96,7 @@ async function start(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs
     name: 'shop',
     repoPath: remote.repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     areas: [
       { name: 'api', globs: ['src/api/**'] },
       { name: 'ui', globs: ['src/ui/**'] },
@@ -267,7 +267,7 @@ describe('batch delivery through the daemon', () => {
       name: 'local',
       repoPath: remote.repo.path,
       gateCommand: 'true',
-      flowId: await quickFlowId(api),
+      defaultRigor: 'light',
       areas: [{ name: 'api', globs: ['src/api/**'] }],
     });
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

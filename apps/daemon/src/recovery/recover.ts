@@ -38,9 +38,12 @@ import type { Clock } from '../clock';
 import {
   outstandingFixEvidence,
   liveCheckCard,
+  livePlanCard,
   nextActionAfterCrash,
   passOfWorkstream,
+  planOf,
   raiseBuilderCheck,
+  raisePlanApproval,
   untakenMessages,
   withUndelivered,
 } from '../runner';
@@ -168,9 +171,32 @@ export async function recoverOnStartup(opts: {
       report.parked.push(ws.id);
       continue;
     }
-    // A check card is not an agent's question: it is answered by its own handler.
+    // Work that waits for the builder's approval of its plan keeps its card the same way.
+    if (waiting && row.nextAction.kind === 'plan_approval') {
+      const card = opts.state.write((ctx) => {
+        const kept =
+          livePlanCard(ctx.tx, ws.id) ??
+          raisePlanApproval(ctx, {
+            workstreamId: ws.id,
+            projectId: project.id,
+            taskTitle: getTask(ctx.tx, row.taskId).title,
+            plan: planOf(row),
+          });
+        patchWorkstream(ctx, ws.id, null, {
+          nextAction: { kind: 'plan_approval', inboxId: kept.id },
+        });
+        return kept;
+      });
+      opts.logger.info(
+        { workstreamId: ws.id, inboxId: card.id },
+        'still waiting for the builder to approve the plan',
+      );
+      report.parked.push(ws.id);
+      continue;
+    }
+    // A check or plan card is not an agent's question: it is answered by its own handler.
     const open = waiting
-      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check')
+      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check' && i.kind !== 'plan')
       : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };

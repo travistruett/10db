@@ -18,7 +18,6 @@ describe('what a render token may do', () => {
       '/tasks/tsk_1/shape',
       '/tasks/tsk_1/step-plan',
       '/shapes/shp_1',
-      '/flows',
       '/workstreams',
       '/inbox',
     ])

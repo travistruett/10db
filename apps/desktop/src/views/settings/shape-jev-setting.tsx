@@ -51,7 +51,7 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
                     {...props}
                     to="/settings/$section"
                     params={{ section: SettingsSectionKey.Decisions }}
-                    search={{ focus: 'runs-on' }}
+                    search={{ focus: 'paid-by' }}
                   />
                 )}
               >

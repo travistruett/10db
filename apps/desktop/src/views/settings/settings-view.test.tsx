@@ -56,7 +56,7 @@ describe('SettingsView', () => {
     for (const label of ['Who Answers', 'Models by role'])
       expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
     fireEvent.click(within(nav).getByRole('radio', { name: 'All projects' }));
-    for (const label of ['People', 'Models by role', 'Models'])
+    for (const label of ['People', 'Models'])
       expect(await within(nav).findByRole('link', { name: label })).toBeTruthy();
   });
 
@@ -88,11 +88,7 @@ describe('SettingsView', () => {
     },
     {
       path: '/settings/team',
-      line: 'For Renewals only. Use global follows All projects › Models by role.',
-    },
-    {
-      path: '/settings/personas-and-flows',
-      line: 'For every project. A project can override this in its own Models by role.',
+      line: 'For Renewals only. Use global follows All projects › Models.',
     },
   ])('says its scope under the title at $path', async ({ path, line }) => {
     server.use(
@@ -120,27 +116,24 @@ describe('SettingsView', () => {
     });
   });
 
-  it.each([
-    {
-      path: '/settings/team',
-      model: 'Review model',
-      remainder: /Not built yet: which persona runs each role/,
-    },
-    {
-      path: '/settings/personas-and-flows',
-      model: 'Review model',
-      remainder: /Not built yet: personas, their instructions/,
-    },
-  ])(
-    'shows $path: its model form, and the rest as a note without "Still to come"',
-    async ({ path, model, remainder }) => {
-      server.use(...baseHandlers());
-      renderApp(path);
-      expect(await screen.findByRole('combobox', { name: model })).toBeTruthy();
-      expect(screen.getByText(remainder)).toBeTruthy();
-      expect(screen.queryByText(/Still to come/)).toBeNull();
-    },
-  );
+  it('shows the project playbook at /settings/team, with the human-members remainder as a note without "Still to come"', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/team');
+    expect(await screen.findByRole('combobox', { name: 'Default rigor' })).toBeTruthy();
+    expect(screen.getByText("Not built yet: the project's human members.")).toBeTruthy();
+    expect(screen.queryByText(/Still to come/)).toBeNull();
+  });
+
+  it('sends the retired Models by role address to Models', async () => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/settings/personas-and-flows');
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/settings/models');
+    });
+  });
 
   it('asks for a project before showing a project section', async () => {
     server.use(...baseHandlers());
@@ -421,7 +414,6 @@ describe('SettingsView', () => {
     const patched: unknown[] = [];
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
         patched.push(await request.json());
         return HttpResponse.json(project);
@@ -444,7 +436,6 @@ describe('SettingsView', () => {
     let calls = 0;
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), () => {
         calls += 1;
         return HttpResponse.json({}, { status: 500 });
@@ -464,7 +455,6 @@ describe('SettingsView', () => {
     const project = projectDto();
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), () =>
         HttpResponse.json({ error: 'not_found', message: 'flow flw_x not found' }, { status: 404 }),
       ),
@@ -481,7 +471,6 @@ describe('SettingsView', () => {
     const project = projectDto();
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/general');
@@ -495,7 +484,6 @@ describe('SettingsView', () => {
     const patched: unknown[] = [];
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
         patched.push(await request.json());
         return HttpResponse.json(
@@ -525,7 +513,6 @@ describe('SettingsView', () => {
     let current = first;
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([current])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     const { queryClient } = renderApp('/settings/general');

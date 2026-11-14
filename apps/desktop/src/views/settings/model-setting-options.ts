@@ -53,6 +53,39 @@ function plainLabel(setting: ModelSetting): string {
   }
 }
 
+/**
+ * A setting in a few words, for a cell that cannot show the whole select: Auto, with its minimum when it has
+ * one, a tier, the top of a tier, or a model by its name (its ID when `names` does not know it).
+ */
+export function settingSummary(
+  setting: ModelSetting,
+  names: ReadonlyMap<string, string> = new Map(),
+): string {
+  switch (setting.kind) {
+    case 'automatic':
+      return setting.minimum === undefined ? 'Auto' : `Auto, at least ${String(setting.minimum)}`;
+    case 'tier':
+      return TIER_LABEL[setting.tier];
+    case 'top_of_tier':
+      return setting.tier === undefined ? 'Top of tier' : `Top of ${TIER_LABEL[setting.tier]}`;
+    case 'model':
+      return names.get(setting.model) ?? setting.model;
+  }
+}
+
+/** Automatic with a minimum Intelligence, or with none for null. */
+export function automaticAtLeast(minimum: number | null): ModelSetting {
+  return minimum === null ? { kind: 'automatic' } : { kind: 'automatic', minimum };
+}
+
+/** The top of one tier, or of whichever the router finds best for null. */
+export function topOfTier(tier: ModelTier | null): ModelSetting {
+  return tier === null ? { kind: 'top_of_tier' } : { kind: 'top_of_tier', tier };
+}
+
+/** The tiers a Top of tier setting can name, in the order lists show them. */
+export const TOP_OF_TIERS: readonly ModelTier[] = TIER_ORDER;
+
 const GENERAL: readonly ModelSetting[] = [
   { kind: 'automatic' },
   ...TIER_ORDER.map((tier): ModelSetting => ({ kind: 'tier', tier })),
