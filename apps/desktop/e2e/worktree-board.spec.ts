@@ -300,7 +300,8 @@ test.describe('the Board with several open batches', () => {
       await page.addInitScript((id: string) => {
         window.localStorage.setItem('tendb.project', JSON.stringify(id));
       }, projectId);
-      await page.goto('/factory');
+      // Factory lists every project's work; this one's alone, whatever earlier specs left behind.
+      await page.goto(`/factory?project=${projectId}`);
       await expect(page.getByRole('heading', { name: 'Factory', level: 2 })).toBeVisible();
 
       // Every row starts collapsed. The queued task is not running: only two of the three count.
