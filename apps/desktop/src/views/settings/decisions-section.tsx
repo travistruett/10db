@@ -11,6 +11,7 @@ import {
 } from '../../daemon/judge-queries';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { DecisionDrawer } from './decision-drawer';
+import { statsFor } from './decision-numbers';
 import { DecisionsTable } from './decisions-table';
 import { PaidBy } from './paid-by';
 import { RecentDecisions } from './recent-decisions';
@@ -166,6 +167,10 @@ export function DecisionsSection() {
       <RecentDecisions {...(modelList === undefined ? {} : { models: modelList })} />
       <DecisionDrawer
         decision={open}
+        status={status.data}
+        stats={open === null ? undefined : statsFor(stats.data, open)}
+        shadow={shadow.data?.shadow.find((a) => a.decision === open)}
+        models={modelList}
         onClose={() => {
           setOpen(null);
         }}
