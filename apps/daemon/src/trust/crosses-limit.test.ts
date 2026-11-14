@@ -85,6 +85,7 @@ function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface 
       gateCommand: 'make gate',
       liveSystems: [],
       switches: TRUST_DEFAULTS,
+      grants: [],
     }),
     allow: [],
     preExisting: [],

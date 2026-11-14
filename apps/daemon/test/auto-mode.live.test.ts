@@ -159,6 +159,7 @@ function policyFor(surface: TrustSurface, checkout: string): TrustPolicy {
     gateCommand: null,
     liveSystems: [],
     switches: TRUST_DEFAULTS,
+    grants: [],
   });
 }
 

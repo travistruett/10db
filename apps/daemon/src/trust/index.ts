@@ -27,3 +27,4 @@ export {
   type LimitAt,
   type LimitVerdict,
 } from './crosses-limit';
+export { grantLine, grantTargetOf, projectGrantLines } from './grants';

@@ -82,6 +82,7 @@ import {
   skipMessage,
   startingJudge,
   stoppedBySkip,
+  projectGrantLines,
 } from '../trust';
 import {
   activeClaims,
@@ -2474,6 +2475,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       }),
       switches,
       approved,
+      grants: projectGrantLines(db, project.id),
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.

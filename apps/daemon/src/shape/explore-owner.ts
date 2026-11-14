@@ -63,7 +63,7 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { expandHome } from '../sandbox';
 import type { ShapeImage, ShapeToolRequest, ShapeVerdict } from '../sessions';
-import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import { buildTrustPolicy, projectGrantLines, projectLiveSystems } from '../trust';
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertedStateNote } from './converted-state';
 import { buildDigest } from './digest';
@@ -529,6 +529,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           );
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+        grants: projectGrantLines(state.db, project.id),
       });
       return {
         spec: {
