@@ -74,6 +74,11 @@ export interface HookJudgeContext {
   readonly allowLines: () => readonly string[];
   /** The judge of this call: only a `tendb` call is 10db's judge's. */
   readonly judgeNow: (req: JudgedCallRequest) => JudgeKind;
+  /**
+   * Whether the builder's own allowed commands (the project's, never a step's base list) cover the call: it is
+   * settled before any judge reads it, as Claude Code's allow rule settles it on native.
+   */
+  readonly coveredByBuilderRule: (req: JudgedCallRequest) => boolean;
   /** The session's own answer on the `rules` floor, T4's unattended answer and skip included in a lane. */
   readonly floorVerdict: (req: JudgedCallRequest) => GuardVerdict;
   /** A lane's skip recorder; null where the builder is in the session. */
@@ -86,6 +91,7 @@ export interface HookJudgeContext {
 
 const FAST_PATH_SETTLED = 'A read, an edit or a read-only command that reaches no secret';
 const MODEL_SETTLED = "Allowed by 10db's judge";
+const RULE_SETTLED = "The builder's allow rule covers this call, so it runs, as in Claude Code.";
 
 const InputRecord = z.record(z.string(), z.unknown());
 
@@ -113,6 +119,7 @@ export function createHookJudge(
     if (ctx.judgeNow(req) !== JudgeKind.Tendb) return { decision: 'allow' };
     // A question is the builder's to answer, whatever any judge thinks of it.
     if (req.toolName === 'AskUserQuestion') return { decision: 'allow' };
+    if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
     const now = ctx.clock.now().getTime();
     if (downAt !== null && now - downAt.ms < FLOOR_BACKOFF_MS) return floor(req, downAt.detail);
     const verdict = await crossesLimit(

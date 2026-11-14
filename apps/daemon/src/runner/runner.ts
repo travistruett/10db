@@ -2968,6 +2968,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       return answer.verdict;
     };
     const limitNotes = createLimitNotes();
+    // The entries of the session's allow list the builder added: never the step's own reads, so `Bash(cat:*)`
+    // can't settle `cat .env` before 10db's judge reads it.
+    const builderRules = allowedTools.filter((tool) =>
+      project.allowedCommands.some((command) => tool === `Bash(${command}:*)`),
+    );
     let saidUnavailable = false;
     // 10db's judge, for the calls the guard leaves open: on a tendb session, and on a native one for a call
     // outside auto mode (call 6). A session on the rules has none.
@@ -2994,6 +2999,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                 ]),
               ],
               judgeNow: (req) => judgeForCall(sessionJudge, req.reportedMode ?? null, tendbReady),
+              coveredByBuilderRule: (req) =>
+                matchesAllowedTool(req.toolName, req.input, builderRules, checkout),
               floorVerdict: (req) => laneVerdict(req, JudgeKind.Rules),
               skips: unattended?.skips ?? null,
               limits: limitNotes,

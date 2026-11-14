@@ -5810,11 +5810,14 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         ),
       );
     };
-    const start = async (setup: Parameters<typeof createTestEngine>[3] = GATEWAY) => {
+    const start = async (
+      setup: Parameters<typeof createTestEngine>[3] = GATEWAY,
+      project: Parameters<typeof createTestEngine>[1] = {},
+    ) => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
         { Alpha: [[turn]] },
-        {},
+        project,
         { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
         { ...setup, openRouter: { fetch: judgeFetch } },
       );
@@ -5869,6 +5872,19 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       });
       expect(states).toHaveLength(1);
       expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      await engine.runner.idle();
+    });
+
+    it("a gateway lane's call the project's allowed commands cover runs with no model; the step's own list settles nothing", async () => {
+      const { spec, judgeCall } = await start(GATEWAY, { allowedCommands: ['psql'] });
+      expect(await hook(spec, judgeCall, bash('psql -c "select 1"', 'toolu_20'))).toEqual({
+        decision: 'allow',
+        settled: "The builder's allow rule covers this call, so it runs, as in Claude Code.",
+      });
+      expect(states).toEqual([]);
+      // The step's own list (`Bash(git log:*)`) is not the builder's: its call still reaches the model.
+      await hook(spec, judgeCall, bash('git log -p', 'toolu_21'));
+      expect(states).toHaveLength(1);
       await engine.runner.idle();
     });
 

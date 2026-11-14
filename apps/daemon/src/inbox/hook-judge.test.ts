@@ -124,6 +124,7 @@ function hookJudge(
     readonly surface?: TrustSurface;
     readonly skips?: SkipRecorder | null;
   } = {},
+  allowedCommand: string | null = null,
 ) {
   const surface = opts.surface ?? 'pass';
   const project = seedProject(store);
@@ -146,6 +147,10 @@ function hookJudge(
       preExisting: [],
       allowLines: () => grants,
       judgeNow: () => opts.now ?? JudgeKind.Tendb,
+      coveredByBuilderRule: (req) =>
+        allowedCommand !== null &&
+        req.toolName === 'Bash' &&
+        JSON.stringify(req.input).includes(allowedCommand),
       floorVerdict: (req) => rulesVerdict(req, surface !== 'lane'),
       skips: opts.skips ?? null,
       limits,
@@ -252,6 +257,17 @@ describe('the hook judge, attended', () => {
     expect(await run(hookJudge({ now }), req)).toEqual(verdict);
     expect(sent).toHaveLength(answer === null ? 0 : 1);
     expect(limits.take('toolu_1')).toEqual(noted);
+  });
+
+  it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {
+    for (const surface of ['pass', 'lane'] as const) {
+      model = null;
+      expect(await run(hookJudge({ surface }, 'psql'), bash('psql -c "select 1"'))).toEqual({
+        decision: 'allow',
+        settled: "The builder's allow rule covers this call, so it runs, as in Claude Code.",
+      });
+      expect(sent).toEqual([]);
+    }
   });
 
   it.each<[string, JudgedCallRequest, Model]>([

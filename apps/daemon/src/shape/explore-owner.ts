@@ -606,6 +606,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
                     preExisting: [],
                     allowLines: () => projectGrantLines(state.db, project.id),
                     judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+                    // Plan's allow list holds none of the project's allowed commands, on native too.
+                    coveredByBuilderRule: () => false,
                     floorVerdict: (req) => {
                       const floor = preToolUse(
                         shapeId,
