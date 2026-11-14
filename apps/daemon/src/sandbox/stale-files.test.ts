@@ -174,6 +174,27 @@ describe('claimSandboxTempRoot', () => {
     expect(existsSync(join(root, `10db-daemon-${String(process.pid)}`))).toBe(false);
   });
 
+  it.each([
+    ['a dead daemon’s is swept from the files root', 'setup', 'dead', 'files', false],
+    ['a live daemon’s is kept', 'setup', 'live', 'files', true],
+    ['one in a temp root, which lanes write, is never touched', 'setup', 'dead', 'temp', true],
+    ['a dead daemon’s secret reads are swept from the files root', 'read', 'dead', 'files', false],
+    ['secret reads in a temp root are never touched', 'read', 'dead', 'temp', true],
+  ] as const)('a 10db session dir: %s', async (_name, prefix, daemon, kind, kept) => {
+    const setup = join(root, `10db-${prefix}-0123456789ab`);
+    mkdirSync(join(setup, 'yours/skills'), { recursive: true });
+    symlinkSync(outside, join(setup, 'yours/skills/s'));
+    const owner = daemon === 'dead' ? await deadPid() : liveProcess();
+    writeFileSync(join(root, `10db-daemon-${String(owner)}`), '', { mode: 0o400 });
+    const claim = claimSandboxTempRoot(root, process.pid, kind);
+    try {
+      expect(existsSync(setup)).toBe(kept);
+      expect(readdirSync(outside)).toEqual(['keep.txt']);
+    } finally {
+      claim.release();
+    }
+  });
+
   it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
     // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
     writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');
@@ -215,7 +236,7 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
     leaveStaleFiles(files);
     for (const name of LEDGERS) writeFileSync(join(files, name), '{"version":1,"members":[]}');
     const mark = `10db-daemon-${String(process.pid)}`;
-    const claim = claimSandboxRoots([temp, lanes, files], process.pid);
+    const claim = claimSandboxRoots({ temps: [temp, lanes], files }, process.pid);
     try {
       // Eight in the temp root, one in the lanes root, eight in the files root.
       expect(claim).toMatchObject({ removed: 17, failed: 0, sharedWith: null });

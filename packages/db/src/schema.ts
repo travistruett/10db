@@ -1,6 +1,8 @@
 import type {
   AaModelDto,
+  AbandonStep,
   AccountId,
+  AppUrl,
   AccountSettings,
   AreaDef,
   BatchFailure,
@@ -31,7 +33,7 @@ import type {
   HandoffId,
   HandoffInput,
   HazardDef,
-  InboxAnswer,
+  RecordedAnswer,
   InboxItemId,
   InboxKind,
   InboxOption,
@@ -47,6 +49,18 @@ import type {
   ModelSetting,
   ModelStatus,
   ModelTier,
+  CloseStep,
+  PassCloseRequest,
+  PassId,
+  PassNotice,
+  PassPreview,
+  PassPreviewMarkId,
+  PassState,
+  PassTurnCheck,
+  PassTurnEnding,
+  PassTurnId,
+  TakeOutStep,
+  TaskPageReportId,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -55,6 +69,12 @@ import type {
   PermissionRuleId,
   PersonaId,
   PersonId,
+  PersonContactId,
+  RoutedBy,
+  SendMode,
+  SendState,
+  StakeholderSendId,
+  OutboundHit,
   PrincipleId,
   PrincipleKind,
   PrincipleStatus,
@@ -78,7 +98,17 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
+  TaskFileId,
+  TaskScreenId,
+  ScreenKind,
+  ScreenTheme,
+  ScreenViewport,
+  ScreensMatrix,
   TaskLanding,
+  TaskMessageAuthor,
+  TaskMessageId,
+  TaskMessageKind,
+  TaskPictureKind,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -87,7 +117,18 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  AnchorResult,
+  BundleOrigin,
+  PlanAnchor,
+  PlanEntryKind,
+  PlanEntryState,
+  SectionIndexEntry,
   ShapeAttachmentId,
+  ShapeAttachmentRevisionId,
+  ShapeEntryId,
+  ShapeEntryVersionId,
+  ShapeFindingReviewer,
+  TaskContextCheckId,
   ShapeFileId,
   ShapeFindingId,
   ShapeFindingKind,
@@ -95,7 +136,6 @@ import type {
   ShapeFindingState,
   ShapeId,
   ShapeLinkId,
-  ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
   ShapeQuestionId,
@@ -231,6 +271,8 @@ export const projects = sqliteTable('projects', {
   /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
   landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
+  /** A pass's pull request shows each signed-off page's before and after pictures; off by default. */
+  prPictures: integer('pr_pictures', { mode: 'boolean' }).notNull().default(false),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
     .$type<string[]>()
@@ -248,6 +290,17 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'["migrations","deps"]'`),
+  /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
+  appUrl: text('app_url').$type<AppUrl>(),
+  /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */
+  devLoginCommand: text('dev_login_command'),
+  /** Serves the app at its address while a pass is open; null when the builder runs it. */
+  previewCommand: text('preview_command'),
+  /** The viewports and themes a page's pictures are taken in. */
+  screens: text('screens', { mode: 'json' })
+    .$type<ScreensMatrix>()
+    .notNull()
+    .default(sql`'{"viewports":[{"width":1440,"height":900}],"themes":["default"]}'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -276,6 +329,8 @@ export const batches = sqliteTable(
     /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
     repo: text('repo'),
     prUrl: text('pr_url'),
+    /** Whether the pull request is a draft, as made or last read; null until then. A pass's opens as one. */
+    prDraft: integer('pr_draft', { mode: 'boolean' }),
     gateExitCode: integer('gate_exit_code'),
     gateLogPath: text('gate_log_path'),
     /** The shipping gate's process-group leader and its OS start time, so recovery can kill an orphaned gate. */
@@ -314,6 +369,10 @@ export const batches = sqliteTable(
     ciFixHead: text('ci_fix_head'),
     /** Why 10db stopped fixing the pull request's failing checks. */
     ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** The Workbench pass whose batch this is; null for any other batch. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
     /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
     notices: text('notices', { mode: 'json' })
       .$type<Notice[]>()
@@ -331,6 +390,9 @@ export const batches = sqliteTable(
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
+    uniqueIndex('batches_pass_idx')
+      .on(t.passId)
+      .where(sql`pass_id IS NOT NULL`),
   ],
 );
 
@@ -404,6 +466,14 @@ export const tasks = sqliteTable(
       .references((): AnySQLiteColumn => landingGroups.id),
     /** The builder's own model setting for the task; null is no override. */
     modelSetting: text('model_setting', { mode: 'json' }).$type<ModelSetting>(),
+    /** The Workbench pass the task is in; null for a task outside every pass. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    /** A task taken out of a pass: its saved work, at `refs/10db/kept/<task id>`; null with none. */
+    keptWorkSha: text('kept_work_sha'),
+    /** The pass branch tip that saved work was kept on; set with `kept_work_sha`. */
+    keptBaseSha: text('kept_base_sha'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -675,8 +745,17 @@ export const inboxItems = sqliteTable(
     category: text('category').$type<QuestionCategory>().notNull(),
     urgency: text('urgency').$type<Urgency>().notNull(),
     assignee: text('assignee').notNull(),
+    /** Every handle the card is routed to, in routing order; `assignee` is the first. */
+    assignees: text('assignees', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** What the rules alone gave when the card was made, so a fold compares like with like. */
+    ruleAssignees: text('rule_assignees', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    routedBy: text('routed_by').$type<RoutedBy>().notNull().default('rule'),
+    routeSuggestion: text('route_suggestion', { mode: 'json' }).$type<{
+      personIds: PersonId[];
+      confidence: number;
+    }>(),
     detail: text('detail', { mode: 'json' }).$type<Record<string, Json>>(),
-    answer: text('answer', { mode: 'json' }).$type<InboxAnswer>(),
+    answer: text('answer', { mode: 'json' }).$type<RecordedAnswer>(),
     foldKey: text('fold_key'),
     targets: text('targets', { mode: 'json' }).$type<InboxTarget[]>().notNull(),
     createdAt: createdAt(),
@@ -945,8 +1024,16 @@ export const routingRules = sqliteTable(
       .$type<ProjectId>()
       .notNull()
       .references(() => projects.id),
-    category: text('category').$type<QuestionCategory>().notNull(),
+    /** Null on a topic route, which names `topic` instead. */
+    category: text('category').$type<QuestionCategory>(),
     area: text('area'),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    topic: text('topic'),
     personId: text('person_id')
       .$type<PersonId>()
       .notNull()
@@ -954,7 +1041,123 @@ export const routingRules = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('routing_rules_project_idx').on(t.projectId)],
+  (t) => [
+    index('routing_rules_project_idx').on(t.projectId),
+    check(
+      'routing_rules_scope',
+      sql`(${t.category} IS NULL) <> (${t.topic} IS NULL)
+        AND (${t.goalId} IS NULL OR ${t.taskId} IS NULL)
+        AND (${t.topic} IS NULL OR (${t.goalId} IS NULL AND ${t.taskId} IS NULL AND ${t.area} IS NULL))
+        AND (${t.taskId} IS NULL OR ${t.area} IS NULL)`,
+    ),
+  ],
+);
+
+/** How to reach a person in Slack, one row per person (stakeholder questions spec §5). */
+export const personContacts = sqliteTable('person_contacts', {
+  id: text('id').$type<PersonContactId>().primaryKey(),
+  personId: text('person_id')
+    .$type<PersonId>()
+    .notNull()
+    .unique()
+    .references(() => people.id),
+  teamId: text('team_id').notNull(),
+  userId: text('user_id').notNull(),
+  dmChannelId: text('dm_channel_id'),
+  sendMode: text('send_mode').$type<SendMode>().notNull(),
+  /** New questions a day; null is no limit. */
+  dailyLimit: integer('daily_limit'),
+  /** The `ts` the reply watch has read this person's DM through. */
+  dmCursor: text('dm_cursor'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** One question card's conversation in Slack: its draft, its message, and what came back. */
+export const stakeholderSends = sqliteTable(
+  'stakeholder_sends',
+  {
+    id: text('id').$type<StakeholderSendId>().primaryKey(),
+    inboxItemId: text('inbox_item_id')
+      .$type<InboxItemId>()
+      .notNull()
+      .references(() => inboxItems.id),
+    state: text('state').$type<SendState>().notNull(),
+    text: text('text').notNull(),
+    hits: text('hits', { mode: 'json' }).$type<OutboundHit[]>().notNull(),
+    /** Set when the builder released a hold, so its thread's follow-ups skip review. */
+    reviewed: integer('reviewed', { mode: 'boolean' }).notNull().default(false),
+    heldBy: text('held_by').$type<'review' | 'first_send' | 'limit' | 'scan'>(),
+    textSha256: text('text_sha256'),
+    channelId: text('channel_id'),
+    threadTs: text('thread_ts'),
+    messageTs: text('message_ts'),
+    permalink: text('permalink'),
+    /** Whether this send opened a thread of its own, which is what the daily limit counts. */
+    newThread: integer('new_thread', { mode: 'boolean' }).notNull().default(false),
+    startedAt: text('started_at'),
+    sentAt: text('sent_at'),
+    lastReadTs: text('last_read_ts'),
+    waitStartedAt: text('wait_started_at'),
+    remindedAt: text('reminded_at'),
+    returnedAt: text('returned_at'),
+    returnedReason: text('returned_reason').$type<'timer' | 'disagreed'>(),
+    settledThroughTs: text('settled_through_ts'),
+    askedWhichWayAt: text('asked_which_way_at'),
+    askedWhichWayTs: text('asked_which_way_ts'),
+    approvalSeenAt: text('approval_seen_at'),
+    approvalBy: text('approval_by').$type<PersonId>(),
+    loneReplyPendingSince: text('lone_reply_pending_since'),
+    proposal: text('proposal', { mode: 'json' }).$type<{
+      choice: string;
+      confidence: number;
+      ts: string | null;
+    }>(),
+    /** The channel, thread, question and cursor a moved question left behind. */
+    movedFrom: text('moved_from', { mode: 'json' }).$type<{
+      channelId: string;
+      threadTs: string;
+      /** The `ts` of the question's own message there, where its part of the thread begins. */
+      messageTs: string;
+      lastReadTs: string | null;
+    }>(),
+    reply: text('reply', { mode: 'json' }).$type<{ text: string; userId: string; ts: string }>(),
+    replyVia: text('reply_via').$type<'thread' | 'top_level'>(),
+    readAs: text('read_as').$type<'option' | 'own_words' | 'approved'>(),
+    answeredBy: text('answered_by').$type<PersonId>(),
+    answeredAt: text('answered_at'),
+    closedReason: text('closed_reason').$type<'builder' | 'taken_back' | 'cancelled'>(),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('stakeholder_sends_state_idx').on(t.state),
+    index('stakeholder_sends_card_idx').on(t.inboxItemId),
+    // A card has one live send; after a Take Back or a failure it may get a new one.
+    uniqueIndex('stakeholder_sends_live_card')
+      .on(t.inboxItemId)
+      .where(sql`${t.state} IN ('draft', 'sending', 'sent')`),
+  ],
+);
+
+/** Who a send went to, and who joined its conversation. */
+export const stakeholderSendPeople = sqliteTable(
+  'stakeholder_send_people',
+  {
+    sendId: text('send_id')
+      .$type<StakeholderSendId>()
+      .notNull()
+      .references(() => stakeholderSends.id),
+    userId: text('user_id').notNull(),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .references(() => people.id),
+    name: text('name').notNull(),
+    recipient: integer('recipient', { mode: 'boolean' }).notNull(),
+    position: integer('position').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.sendId, t.userId] })],
 );
 
 export const modelProfiles = sqliteTable(
@@ -966,8 +1169,6 @@ export const modelProfiles = sqliteTable(
     effort: text('effort').$type<Effort>().notNull(),
     aaSlug: text('aa_slug'),
     intelligence: real('intelligence'),
-    coding: real('coding'),
-    agentic: real('agentic'),
     costPerTaskUsd: real('cost_per_task_usd'),
     outputTokensPerSecond: real('output_tokens_per_second'),
     source: text('source').$type<ProfileSource>().notNull(),
@@ -1191,10 +1392,19 @@ export const shapes = sqliteTable(
     round: integer('round').notNull().default(0),
     /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
     model: text('model'),
+    /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
+    bundleId: text('bundle_id'),
+    bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),
+    importedAt: text('imported_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('shapes_project_idx').on(t.projectId)],
+  (t) => [
+    index('shapes_project_idx').on(t.projectId),
+    uniqueIndex('shapes_bundle_unique')
+      .on(t.projectId, t.bundleId)
+      .where(sql`${t.bundleId} IS NOT NULL`),
+  ],
 );
 
 /** The conversation's transcript (§5.3): append-only, so it renders and reopens however old it is. */
@@ -1293,6 +1503,64 @@ export const shapeFiles = sqliteTable(
 );
 
 /**
+ * A task's thread (Workbench spec §4.3, §6.3): the builder's messages, the agent's replies and the
+ * notices, oldest first by id.
+ */
+export const taskMessages = sqliteTable(
+  'task_messages',
+  {
+    id: text('id').$type<TaskMessageId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    author: text('author').$type<TaskMessageAuthor>().notNull(),
+    kind: text('kind').$type<TaskMessageKind>().notNull(),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+    /** When it was handed to the session; that alone proves nothing reached a turn. */
+    pushedAt: text('pushed_at'),
+    /** When a turn took it in; a message pushed and not delivered is sent again. */
+    deliveredAt: text('delivered_at'),
+    /**
+     * Every client uuid a push of it went under, oldest first: after a restart, a conversation that
+     * holds one of them took the message (Workbench spec §12).
+     */
+    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references((): AnySQLiteColumn => passTurns.id),
+  },
+  (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
+);
+
+/** A picture the builder pasted into a task's thread, kept under the data directory by its hash. */
+export const taskFiles = sqliteTable(
+  'task_files',
+  {
+    id: text('id').$type<TaskFileId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .notNull()
+      .references(() => taskMessages.id),
+    name: text('name').notNull(),
+    mediaType: text('media_type').$type<TaskPictureKind>().notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** Whether the live session's history holds it as an image block, as `shape_files.inline_sent`. */
+    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_files_task_idx').on(t.taskId, t.id)],
+);
+
+/**
  * What Convert made from a proposal: one created goal, task or decision per row. `key` is the
  * proposal's own key, or the task key inside a goal, so a later Convert resolves it to its task.
  */
@@ -1387,7 +1655,7 @@ export const shapeFindings = sqliteTable(
       .references(() => shapes.id),
     effortKey: text('effort_key').notNull(),
     taskKey: text('task_key'),
-    reviewer: text('reviewer').$type<ShapeReviewer>().notNull(),
+    reviewer: text('reviewer').$type<ShapeFindingReviewer>().notNull(),
     kind: text('kind').$type<ShapeFindingKind>().notNull(),
     severity: text('severity').$type<ShapeFindingSeverity>(),
     text: text('text').notNull(),
@@ -1395,10 +1663,27 @@ export const shapeFindings = sqliteTable(
     how: text('how'),
     round: integer('round').notNull(),
     taskHash: text('task_hash'),
+    /** An imported finding's document revision and section. */
+    revisionId: text('revision_id')
+      .$type<ShapeAttachmentRevisionId>()
+      .references(() => shapeAttachmentRevisions.id),
+    section: text('section'),
+    /** An imported finding's reviewer, severity, outcome and full how, in the review's own words. */
+    reviewerName: text('reviewer_name'),
+    severityText: text('severity_text'),
+    outcomeText: text('outcome_text'),
+    howDetail: text('how_detail'),
+    /** The bundle's key for an imported finding; a re-import upserts by it. */
+    bundleKey: text('bundle_key'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('shape_findings_shape_idx').on(t.shapeId, t.id)],
+  (t) => [
+    index('shape_findings_shape_idx').on(t.shapeId, t.id),
+    uniqueIndex('shape_findings_bundle_key_unique')
+      .on(t.shapeId, t.bundleKey)
+      .where(sql`${t.bundleKey} IS NOT NULL`),
+  ],
 );
 
 /**
@@ -1433,8 +1718,14 @@ export const shapeAttachments = sqliteTable(
       .$type<ShapeId>()
       .notNull()
       .references(() => shapes.id),
-    kind: text('kind').$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval'>().notNull(),
+    kind: text('kind')
+      .$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval' | 'research' | 'plan' | 'guide'>()
+      .notNull(),
     key: text('key').notNull(),
+    /** A record document's key (`p1`); null for an app spec or eval, whose document key is `key`. */
+    docKey: text('doc_key'),
+    title: text('title'),
+    /** The latest revision's text. */
     body: text('body').notNull(),
     goalId: text('goal_id')
       .$type<GoalId>()
@@ -1450,6 +1741,144 @@ export const shapeAttachments = sqliteTable(
     uniqueIndex('shape_attachments_one_spec')
       .on(t.shapeId, t.key, t.kind)
       .where(sql`${t.kind} IN ('spec', 'eval')`),
+    uniqueIndex('shape_attachments_doc_key_unique')
+      .on(t.shapeId, t.docKey)
+      .where(sql`${t.docKey} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Every revision of a record document, an app spec or an eval. A revision's text never changes; a new
+ * text is the next number. `bundle_number` is the importing bundle's own number for it.
+ */
+export const shapeAttachmentRevisions = sqliteTable(
+  'shape_attachment_revisions',
+  {
+    id: text('id').$type<ShapeAttachmentRevisionId>().primaryKey(),
+    attachmentId: text('attachment_id')
+      .$type<ShapeAttachmentId>()
+      .notNull()
+      .references(() => shapeAttachments.id),
+    number: integer('number').notNull(),
+    body: text('body').notNull(),
+    /** Hex SHA-256 of the body's UTF-8 bytes. */
+    sha256: text('sha256').notNull(),
+    note: text('note'),
+    author: text('author'),
+    /** The body's sections (`SectionIndexEntry[]`), read on write. */
+    sections: text('sections', { mode: 'json' }).$type<SectionIndexEntry[]>().notNull(),
+    bundleNumber: integer('bundle_number'),
+    authoredAt: text('authored_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('shape_attachment_revisions_number_unique').on(t.attachmentId, t.number),
+    uniqueIndex('shape_attachment_revisions_bundle_number_unique')
+      .on(t.attachmentId, t.bundleNumber)
+      .where(sql`${t.bundleNumber} IS NOT NULL`),
+  ],
+);
+
+/** A record entry of a Plan: intent, a fact, an experiment or a name, keyed within its Plan. */
+export const shapeEntries = sqliteTable(
+  'shape_entries',
+  {
+    id: text('id').$type<ShapeEntryId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    key: text('key').notNull(),
+    kind: text('kind').$type<PlanEntryKind>().notNull(),
+    title: text('title').notNull(),
+    /** The kind's `PlanEntryBody`, as JSON. */
+    body: text('body', { mode: 'json' }).$type<Json>().notNull(),
+    anchors: text('anchors', { mode: 'json' }).$type<PlanAnchor[]>().notNull(),
+    sources: text('sources', { mode: 'json' }).$type<string[]>().notNull(),
+    verified: integer('verified', { mode: 'boolean' }).notNull(),
+    checkedAt: text('checked_at'),
+    state: text('state').$type<PlanEntryState>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('shape_entries_key_unique').on(t.shapeId, t.key)],
+);
+
+/** Each content an entry has had, numbered from 1. Append-only. */
+export const shapeEntryVersions = sqliteTable(
+  'shape_entry_versions',
+  {
+    id: text('id').$type<ShapeEntryVersionId>().primaryKey(),
+    entryId: text('entry_id')
+      .$type<ShapeEntryId>()
+      .notNull()
+      .references(() => shapeEntries.id),
+    number: integer('number').notNull(),
+    /** The entry's content fields at this version, as JSON. */
+    snapshot: text('snapshot', { mode: 'json' }).$type<Json>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('shape_entry_versions_number_unique').on(t.entryId, t.number)],
+);
+
+/**
+ * A task made from a Plan: the revision and section it was made from, the shared sections and the
+ * record items it cites. The packed columns hold the Plan block its last lane brief carried, verbatim.
+ */
+export const taskContext = sqliteTable('task_context', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  shapeId: text('shape_id')
+    .$type<ShapeId>()
+    .notNull()
+    .references(() => shapes.id),
+  revisionId: text('revision_id')
+    .$type<ShapeAttachmentRevisionId>()
+    .notNull()
+    .references(() => shapeAttachmentRevisions.id),
+  section: text('section').notNull(),
+  shared: text('shared', { mode: 'json' }).$type<string[]>().notNull(),
+  cites: text('cites', { mode: 'json' }).$type<string[]>().notNull(),
+  packedText: text('packed_text'),
+  packedAt: text('packed_at'),
+  packedWorkstreamId: text('packed_workstream_id')
+    .$type<WorkstreamId>()
+    .references(() => workstreams.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One check of one anchor of a fact a task cites, by a workstream at the base commit it read.
+ * Append-only: a later check of a new base or version adds rows.
+ */
+export const taskContextChecks = sqliteTable(
+  'task_context_checks',
+  {
+    id: text('id').$type<TaskContextCheckId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    entryKey: text('entry_key').notNull(),
+    entryVersion: integer('entry_version').notNull(),
+    anchorIndex: integer('anchor_index').notNull(),
+    result: text('result').$type<AnchorResult>().notNull(),
+    line: integer('line'),
+    checkedCommit: text('checked_commit').notNull(),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('task_context_checks_workstream_idx').on(t.workstreamId, t.checkedCommit),
+    index('task_context_checks_task_idx').on(t.taskId),
   ],
 );
 
@@ -1500,4 +1929,383 @@ export const shapeShadowAnswers = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.decision] })],
+);
+
+/**
+ * A Workbench pass (spec §5, §11): the builder works through pages with the agents, live in Your
+ * folder, on a branch of its own made at the folder's HEAD. Its one batch carries the branch, the
+ * base commit and the pull request. One pass per project is open, closing or abandoning at a time.
+ */
+export const passes = sqliteTable(
+  'passes',
+  {
+    id: text('id').$type<PassId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    name: text('name').notNull(),
+    state: text('state').$type<PassState>().notNull(),
+    /** Written in the same write as the pass, once its batch row exists; null only inside that write. */
+    batchId: text('batch_id')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    /** How many pages the pass holds, and so how many of its lanes run (W11). */
+    pageCap: integer('page_cap').notNull().default(4),
+    /** The branch HEAD named when the pass opened. */
+    returnBranch: text('return_branch').notNull(),
+    /** The commit HEAD was at when the pass opened; the pass's branch starts here. */
+    startSha: text('start_sha').notNull(),
+    /** The last step of its Abandon that finished; null while it is not abandoning. */
+    abandonStep: integer('abandon_step').$type<AbandonStep>(),
+    /** The highest shared-change number the pass's branch has landed, or passed over; 0 for none. */
+    sharedLanded: integer('shared_landed').notNull().default(0),
+    /** The last step of its close that finished; null while it is not closing. */
+    closeStep: integer('close_step').$type<CloseStep>(),
+    /** The lists the builder confirmed at Close Pass, so a restart runs the same close. */
+    closePlan: text('close_plan', { mode: 'json' }).$type<PassCloseRequest>(),
+    /** The closed, unsettled pass this one was opened on (D24); null for none. */
+    stackedOn: text('stacked_on')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    closedAt: text('closed_at'),
+    settledAt: text('settled_at'),
+    /** The tip the pass's one review last read (D21). */
+    reviewedSha: text('reviewed_sha'),
+    /** What the pass's header shows: failing checks, findings, a stack that did not merge. */
+    notices: text('notices', { mode: 'json' })
+      .$type<PassNotice[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The process group of the changed-files check running after a turn, and its start time. */
+    checkPid: integer('check_pid'),
+    checkPidStart: text('check_pid_start'),
+    /** How the pass's last judged page load went (spec §8.2); null before any. */
+    preview: text('preview').$type<PassPreview>(),
+    openedAt: text('opened_at').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('passes_project_idx').on(t.projectId),
+    uniqueIndex('passes_one_open')
+      .on(t.projectId)
+      .where(sql`state IN ('OPEN', 'CLOSING', 'ABANDONING')`),
+  ],
+);
+
+/**
+ * The folder's dirt when a pass opened: each path that differed from its start, with the hash of its
+ * content on disk, or null for a file deleted from the folder. The content itself is held by an
+ * unsigned commit at `refs/10db/passes/<pass id>/dirt`. A record, written once.
+ */
+export const passDirt = sqliteTable(
+  'pass_dirt',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.path] })],
+);
+
+/**
+ * One turn of a pass task (Workbench spec §6.2, §11): from the builder message that started it to the
+ * end of the agent's work on it. `ended_at` and `ending` are written together, and `settled_at` once
+ * the end has been carried through, so a restart between the two finishes the turn by its `ending`.
+ */
+export const passTurns = sqliteTable(
+  'pass_turns',
+  {
+    id: text('id').$type<PassTurnId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    /** The task's turn number, from 1. */
+    seq: integer('seq').notNull(),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .references((): AnySQLiteColumn => taskMessages.id),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    ending: text('ending').$type<PassTurnEnding>(),
+    settledAt: text('settled_at'),
+    /** The task's kept commit after the turn; may stay null while the task never changed a page file. */
+    keptSha: text('kept_sha'),
+    /** The pass branch tip the work was compared with; null until the turn's work is kept. */
+    keptBaseSha: text('kept_base_sha'),
+    /** The highest shared-change number granted in the pass when the turn ended; null with none. */
+    sharedSeq: integer('shared_seq'),
+    check: text('check').$type<PassTurnCheck>().notNull().default('none'),
+    readyAt: text('ready_at'),
+    openedAt: text('opened_at'),
+    answeredAt: text('answered_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_turns_task_seq').on(t.taskId, t.seq),
+    index('pass_turns_workstream_idx').on(t.workstreamId),
+    uniqueIndex('pass_turns_one_open')
+      .on(t.taskId)
+      .where(sql`ended_at IS NULL`),
+  ],
+);
+
+/**
+ * A take-out of a task from a pass (Workbench spec §5.4), one row per task and pass: the last step that
+ * finished, so a restart goes on from the next; the kept commit it made; the files the put-back left;
+ * and the shared changes chosen Drop.
+ */
+export const passTakeOuts = sqliteTable(
+  'pass_take_outs',
+  {
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    step: integer('step').$type<TakeOutStep>().notNull(),
+    /** How many times steps 1 to 3 have run: three at most. */
+    tries: integer('tries').notNull().default(0),
+    keptSha: text('kept_sha'),
+    keptBaseSha: text('kept_base_sha'),
+    /** Files the put-back did not write, because they changed after they were checked. */
+    left: text('left', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The shared-change numbers chosen Drop. */
+    drops: text('drops', { mode: 'json' })
+      .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.passId] })],
+);
+
+/**
+ * A pass task's hold on a shared area for one turn (Workbench spec §7.2, §11), one per shared grant:
+ * its number on the pass's chain, given in the grant's own write, and the commit at
+ * `refs/10db/passes/<pass id>/holds/<claim id>` that holds the content of the record. `closed_at` is
+ * written when the turn's end keeps it, with `empty` when it changed nothing.
+ */
+export const passHolds = sqliteTable(
+  'pass_holds',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .primaryKey()
+      .references(() => claims.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    area: text('area').notNull(),
+    seq: integer('seq').notNull(),
+    recordSha: text('record_sha').notNull(),
+    grantedAt: text('granted_at').notNull(),
+    closedAt: text('closed_at'),
+    empty: integer('empty', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('pass_holds_pass_seq').on(t.passId, t.seq)],
+);
+
+/**
+ * A hold's record, taken at its grant: each path of the area that differed from the chain's tip, with
+ * the hash of its content on disk, or null for a deleted file. A record, written once.
+ */
+export const passHoldPaths = sqliteTable(
+  'pass_hold_paths',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .notNull()
+      .references(() => passHolds.claimId),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.claimId, t.path] })],
+);
+
+/**
+ * One commit of a pass's shared chain (Workbench spec §7.2, §11), numbered as its hold: the paths it
+ * sets and their content, replaced while the hold is open. A drop is a row of its own (`drop_of`), and
+ * the change it puts back names it (`dropped_by`).
+ */
+export const passSharedChanges = sqliteTable(
+  'pass_shared_changes',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    seq: integer('seq').notNull(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    sha: text('sha').notNull(),
+    paths: text('paths', { mode: 'json' }).$type<string[]>().notNull(),
+    blobs: text('blobs', { mode: 'json' }).$type<Record<string, string | null>>().notNull(),
+    dirtyKept: integer('dirty_kept', { mode: 'boolean' }).notNull().default(false),
+    landedSha: text('landed_sha'),
+    droppedBy: integer('dropped_by'),
+    dropOf: integer('drop_of'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.seq] })],
+);
+
+/**
+ * A sign-off that waits for another page's hold to close (Workbench spec §9.2 step 0), one per task,
+ * so a restart finds it and lands at once, or waits again.
+ */
+export const passSignOffs = sqliteTable('pass_sign_offs', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  passId: text('pass_id')
+    .$type<PassId>()
+    .notNull()
+    .references(() => passes.id),
+  waitsFor: text('waits_for')
+    .$type<ClaimId>()
+    .notNull()
+    .references(() => passHolds.claimId),
+  askedAt: text('asked_at').notNull(),
+});
+
+/**
+ * A picture of the builder's app taken for a task (Workbench spec §10, §11): its file lies under the data
+ * directory by its hash, and a file no unpruned row names is deleted. A pruned row keeps its record.
+ */
+export const taskScreens = sqliteTable(
+  'task_screens',
+  {
+    id: text('id').$type<TaskScreenId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    kind: text('kind').$type<ScreenKind>().notNull(),
+    route: text('route').notNull(),
+    viewport: text('viewport', { mode: 'json' }).$type<ScreenViewport>().notNull(),
+    theme: text('theme').$type<ScreenTheme>().notNull(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** The pass turn's kept commit, or the folder's HEAD, the picture was taken at. */
+    keptSha: text('kept_sha'),
+    createdAt: createdAt(),
+    prunedAt: text('pruned_at'),
+  },
+  (t) => [
+    index('task_screens_task_idx').on(t.taskId, t.createdAt),
+    index('task_screens_sha_idx').on(t.sha256),
+  ],
+);
+
+/**
+ * A page whose turn broke the pass's preview (Workbench spec §8.2, §11): the route it loaded, what the
+ * error overlay said, the turn that broke it, how many turns running it stayed broken, the Move card it
+ * raised and the thread notice that offers it to the agent. One open mark per pass and page; a turn of
+ * the page that loads cleanly mends it.
+ */
+export const passPreviewMarks = sqliteTable(
+  'pass_preview_marks',
+  {
+    id: text('id').$type<PassPreviewMarkId>().primaryKey(),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    route: text('route').notNull(),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .notNull()
+      .references(() => passTurns.id),
+    /** The error overlay's text; null when the document itself failed to load. */
+    overlay: text('overlay'),
+    brokenAt: text('broken_at').notNull(),
+    turns: integer('turns').notNull().default(1),
+    mendedAt: text('mended_at'),
+    cardId: text('card_id')
+      .$type<InboxItemId>()
+      .references(() => inboxItems.id),
+    noticeId: text('notice_id')
+      .$type<TaskMessageId>()
+      .references(() => taskMessages.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_preview_marks_one_open')
+      .on(t.passId, t.taskId)
+      .where(sql`mended_at IS NULL`),
+  ],
+);
+
+/**
+ * A route an agent named with `report_pages` (Workbench spec §10), kept for the pictures of its turn
+ * (a pass page) or its run (a task outside a pass). A record, written once.
+ */
+export const taskPageReports = sqliteTable(
+  'task_page_reports',
+  {
+    id: text('id').$type<TaskPageReportId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    route: text('route').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_page_reports_task_idx').on(t.taskId, t.workstreamId)],
 );

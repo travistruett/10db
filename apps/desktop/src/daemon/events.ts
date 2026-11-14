@@ -1,18 +1,35 @@
-import { AccountLoginEndedData, DaemonEvent, EventsHead, EventType } from '@10db/contracts';
+import {
+  AccountLoginEndedData,
+  DaemonEvent,
+  EventsHead,
+  EventType,
+  GithubLoginEndedData,
+} from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { modelKeys } from './model-queries';
 import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import {
+  PEOPLE_KEY,
+  QUESTION_ROUTES_KEY,
+  ROUTING_RULES_KEY,
+  SLACK_KEY,
+  TIMERS_KEY,
+} from './people';
+import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
+import { screenKeys } from './screen-queries';
+import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -46,33 +63,44 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   proposal: KNOWLEDGE,
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
+  // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
+  // the pass and its pages' turns.
+  pass: [passKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
+  // gh's login changed under a Sign In; the status and the setup check's gh row read it.
+  github: [githubKeys.status, queryKeys.system],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
-  // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all],
+  // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
+  // by a usage limit with no pass event.
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all, passKeys.live],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
-  account: [accountKeys.all],
+  account: [accountKeys.all, modelKeys.all],
   inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
   app_setting: [queryKeys.keepAwake],
-  // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
-  persona: [CANDIDATES],
-  person: [],
+  // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
+  // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
+  // and so do the Models page's picks.
+  persona: [CANDIDATES, modelKeys.all],
+  person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
+  slack: [SLACK_KEY],
+  stakeholder_timers: [TIMERS_KEY],
+  stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all],
   flow: [queryKeys.flows, CANDIDATES],
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
-  // Settings › Team and Personas and flows read a role's setting and the patterns.
-  role_setting: [modelSettingKeys.all],
-  pattern: [modelSettingKeys.all],
+  // Settings › Team and Personas and flows read a role's setting and the patterns, and so do the Models page's picks.
+  role_setting: [modelSettingKeys.all, modelKeys.all],
+  pattern: [modelSettingKeys.all, modelKeys.all],
   team: [CANDIDATES],
-  routing_rules: [CANDIDATES],
+  routing_rules: [CANDIDATES, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   benchmarks: [CANDIDATES],
 };
 
@@ -80,6 +108,11 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
 export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
   // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
   'session.ended': [accountKeys.usage],
+  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn, and a
+  // message to a page makes it working before its turn starts.
+  'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
+  // A picture of a task's page was kept: its thread and its drawer show it.
+  'task.screen_added': [screenKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -136,6 +169,12 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         if (ended.success)
           queryClient.setQueryData(accountLoginKey(ended.data.accountId), ended.data);
       }
+      if (event.type === EventType.GithubLoginEnded) {
+        const ended = GithubLoginEndedData.safeParse(event.data);
+        if (ended.success) queryClient.setQueryData(githubKeys.loginEnd, ended.data);
+      }
+      // One arrives per tool call: a pass lane's is written into its page, never refetched.
+      if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
     }
 

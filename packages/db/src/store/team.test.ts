@@ -4,14 +4,26 @@ import {
   InvalidError,
   mintId,
   NotFoundError,
+  CriterionCheck,
   type PersonaId,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as schema from '../schema';
 import { listEventsAfter } from './events';
+import { insertGoal } from './goals';
+import { getStakeholderTimers, setStakeholderTimers } from './stakeholder-timers';
+import { insertTask } from './tasks';
 import { listRoutingRules, setRoutingRules } from './routing-rules';
 import type { Store } from './store';
 import {
   findPersonByHandle,
+  getDmCursor,
+  getPerson,
+  listPeople,
+  removePerson,
+  setDmChannel,
+  setDmCursor,
+  updatePerson,
   findPersonaByKey,
   getTeam,
   insertPerson,
@@ -209,5 +221,228 @@ describe('people and routing rules', () => {
         }),
       ),
     ).toThrow(InvalidError);
+  });
+});
+
+const contact = { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 } as const;
+
+describe('person contacts', () => {
+  it('stores a contact, a null daily limit, and learns the DM channel and cursor', () => {
+    const mark = store.write((ctx) =>
+      insertPerson(ctx, { handle: 'mark', name: 'Mark', slack: { ...contact, dailyLimit: null } }),
+    ).value;
+    expect(mark.slack).toEqual({ ...contact, dailyLimit: null, dmChannelId: null });
+    store.write((ctx) => {
+      setDmChannel(ctx, mark.id, 'D1');
+    });
+    expect(getPerson(store.db, mark.id).slack?.dmChannelId).toBe('D1');
+    expect(getDmCursor(store.db, mark.id)).toBeNull();
+    store.write((ctx) => {
+      setDmCursor(ctx, mark.id, '55.1');
+    });
+    expect(getDmCursor(store.db, mark.id)).toBe('55.1');
+    expect(listPeople(store.db).map((p) => p.slack?.userId)).toEqual(['U1']);
+  });
+
+  it('updates a person, adds and removes the contact, and keeps the DM channel across a user change of nothing', () => {
+    const mark = store.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' })).value;
+    expect(mark.slack).toBeNull();
+    store.write((ctx) =>
+      updatePerson(ctx, mark.id, { handle: 'mark', name: 'Marcus', slack: contact }),
+    );
+    store.write((ctx) => {
+      setDmChannel(ctx, mark.id, 'D1');
+    });
+    store.write((ctx) =>
+      updatePerson(ctx, mark.id, {
+        handle: 'mark',
+        name: 'Marcus',
+        slack: { ...contact, sendMode: 'auto' },
+      }),
+    );
+    expect(getPerson(store.db, mark.id)).toMatchObject({
+      name: 'Marcus',
+      slack: { sendMode: 'auto', dmChannelId: 'D1' },
+    });
+    store.write((ctx) =>
+      updatePerson(ctx, mark.id, { handle: 'mark', name: 'Marcus', slack: null }),
+    );
+    expect(getPerson(store.db, mark.id).slack).toBeNull();
+  });
+
+  it('forgets the DM channel when the Slack user changes', () => {
+    const mark = store.write((ctx) =>
+      insertPerson(ctx, { handle: 'mark', name: 'Mark', slack: contact }),
+    ).value;
+    store.write((ctx) => {
+      setDmChannel(ctx, mark.id, 'D1');
+    });
+    store.write((ctx) =>
+      updatePerson(ctx, mark.id, {
+        handle: 'mark',
+        name: 'Mark',
+        slack: { ...contact, userId: 'U9' },
+      }),
+    );
+    expect(getPerson(store.db, mark.id).slack).toMatchObject({ userId: 'U9', dmChannelId: null });
+  });
+});
+
+describe('removePerson', () => {
+  it('removes a person with their team rows and contact', () => {
+    const project = seedProject(store);
+    const sam = store.write((ctx) =>
+      insertPerson(ctx, { handle: 'sam', name: 'Sam', slack: contact }),
+    ).value;
+    store.write((ctx) => setTeam(ctx, project.id, { bindings: [], members: [sam.id] }));
+    const { events } = store.write((ctx) => {
+      removePerson(ctx, sam.id);
+    });
+    expect(events.map((e) => e.type)).toContain(EventType.PersonRemoved);
+    expect(getTeam(store.db, project.id).members).toEqual([]);
+    expect(findPersonByHandle(store.db, 'sam')).toBeUndefined();
+    expect(store.db.select().from(schema.personContacts).all()).toEqual([]);
+  });
+
+  it('refuses the builder', () => {
+    const me = store.write((ctx) =>
+      insertPerson(ctx, { handle: 'me', name: 'You', isBuilder: true }),
+    ).value;
+    expect(() =>
+      store.write((ctx) => {
+        removePerson(ctx, me.id);
+      }),
+    ).toThrow(/builder/);
+  });
+
+  it('refuses a goal owner, a person on a goal criterion, and a person a route names', () => {
+    const project = seedProject(store);
+    const me = store.write((ctx) =>
+      insertPerson(ctx, { handle: 'me', name: 'You', isBuilder: true }),
+    ).value;
+    const owner = store.write((ctx) => insertPerson(ctx, { handle: 'own', name: 'Own' })).value;
+    const judge = store.write((ctx) => insertPerson(ctx, { handle: 'jud', name: 'Jud' })).value;
+    const routed = store.write((ctx) => insertPerson(ctx, { handle: 'rte', name: 'Rte' })).value;
+    store.write((ctx) =>
+      insertGoal(ctx, project.id, {
+        ownerId: owner.id,
+        brief: {
+          title: 'G',
+          objective: 'o',
+          criteria: [{ text: 'ok', check: CriterionCheck.Accept, person: 'jud' }],
+          people: [],
+          tasks: [{ key: 'a', title: 'A', areas: ['api'], criteria: ['x'], depends_on: [] }],
+        },
+      }),
+    );
+    store.write((ctx) =>
+      setRoutingRules(ctx, project.id, {
+        rules: [{ category: 'design', area: null, personId: routed.id }],
+      }),
+    );
+    expect(me.isBuilder).toBe(true);
+    for (const [who, word] of [
+      [owner, /goal/],
+      [judge, /criterion/],
+      [routed, /route/],
+    ] as const) {
+      expect(() =>
+        store.write((ctx) => {
+          removePerson(ctx, who.id);
+        }),
+      ).toThrow(ConflictError);
+      expect(() =>
+        store.write((ctx) => {
+          removePerson(ctx, who.id);
+        }),
+      ).toThrow(word);
+    }
+    expect(listPeople(store.db)).toHaveLength(4);
+  });
+});
+
+describe('scoped and topic routes', () => {
+  function seed() {
+    const project = seedProject(store);
+    const other = seedProject(store, { name: 'Other', repoPath: '/tmp/other-repo' });
+    const sam = store.write((ctx) => insertPerson(ctx, { handle: 'sam', name: 'Sam' })).value;
+    const goal = store.write((ctx) =>
+      insertGoal(ctx, project.id, {
+        ownerId: sam.id,
+        brief: {
+          title: 'G',
+          objective: 'o',
+          criteria: [{ text: 'ok', check: CriterionCheck.Command }],
+          people: [],
+          tasks: [{ key: 'a', title: 'A', areas: ['api'], criteria: ['x'], depends_on: [] }],
+        },
+      }),
+    ).value.goal;
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['ui'] }),
+    ).value;
+    return { project, other, sam, goal, task };
+  }
+
+  it('round-trips a goal, a task and a topic route', () => {
+    const { project, sam, goal, task } = seed();
+    store.write((ctx) =>
+      setRoutingRules(ctx, project.id, {
+        rules: [
+          { category: 'product', area: null, goalId: goal.id, personId: sam.id },
+          { category: 'design', area: null, taskId: task.id, personId: sam.id },
+          { category: null, area: null, topic: 'billing', personId: sam.id },
+        ],
+      }),
+    );
+    expect(listRoutingRules(store.db, project.id)).toMatchObject([
+      { category: 'product', goalId: goal.id, taskId: null, topic: null },
+      { category: 'design', goalId: null, taskId: task.id, topic: null },
+      { category: null, goalId: null, taskId: null, topic: 'billing' },
+    ]);
+  });
+
+  it("refuses another project's goal or task", () => {
+    const { other, sam, goal, task } = seed();
+    for (const scope of [{ goalId: goal.id }, { taskId: task.id }])
+      expect(() =>
+        store.write((ctx) =>
+          setRoutingRules(ctx, other.id, {
+            rules: [{ category: 'product', area: null, personId: sam.id, ...scope }],
+          }),
+        ),
+      ).toThrow(InvalidError);
+  });
+
+  it.each([
+    ['both ids', "'product', NULL, @g, @t, NULL"],
+    ['a category and a topic', "'product', NULL, NULL, NULL, 'billing'"],
+    ['neither', 'NULL, NULL, NULL, NULL, NULL'],
+    ['a topic with a goal', "NULL, NULL, @g, NULL, 'billing'"],
+    ['a task with an area', "'product', 'ui', NULL, @t, NULL"],
+  ])('the table refuses %s', (_name, values) => {
+    const { project, sam, goal, task } = seed();
+    const insert = store.db.$client.prepare(
+      `INSERT INTO routing_rules (id, project_id, category, area, goal_id, task_id, topic, person_id, created_at, updated_at)
+       VALUES ('r1', @p, ${values}, @s, 'x', 'x')`,
+    );
+    expect(() => insert.run({ p: project.id, s: sam.id, g: goal.id, t: task.id })).toThrow(/CHECK/);
+  });
+});
+
+describe('stakeholder timers', () => {
+  it('reads 4 and 8 hours with nothing stored, and round-trips', () => {
+    expect(getStakeholderTimers(store.db)).toEqual({ remindAfterHours: 4, returnAfterHours: 8 });
+    store.write((ctx) =>
+      setStakeholderTimers(ctx, { remindAfterHours: null, returnAfterHours: 12 }),
+    );
+    expect(getStakeholderTimers(store.db)).toEqual({
+      remindAfterHours: null,
+      returnAfterHours: 12,
+    });
+    const { events } = store.write((ctx) =>
+      setStakeholderTimers(ctx, { remindAfterHours: 2, returnAfterHours: 6 }),
+    );
+    expect(events.map((e) => e.type)).toContain(EventType.StakeholderTimersChanged);
   });
 });

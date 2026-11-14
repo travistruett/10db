@@ -85,7 +85,7 @@ describe('planSteps', () => {
         'plan_review:plan-reviewer:big@max',
         'implement:implementer:mid@high',
         'review:reviewer:big@max',
-        'qa:qa:mid@high',
+        'qa:qa:mid@low',
       ],
     },
     {
@@ -94,18 +94,18 @@ describe('planSteps', () => {
       want: ['implement:implementer:mid@high', 'review:reviewer:big@max'],
     },
     {
-      name: 'a migration raises the implement step',
+      name: 'a migration floors the implement step, which mid already clears on intelligence',
       over: { flow: flow('quick'), task: task(['migration']) },
-      want: ['implement:implementer:big@high'],
+      want: ['implement:implementer:mid@high'],
     },
   ])('$name', ({ over, want }) => {
     expect(summary(planSteps(input(over)))).toEqual(want);
   });
 
-  const measured = (
-    scores: { intelligence: number | null; coding: number | null; agentic: number | null },
-    costPerTaskUsd: number | null,
-  ) => ({ scores, costPerTaskUsd });
+  const measured = (scores: { intelligence: number | null }, costPerTaskUsd: number | null) => ({
+    scores,
+    costPerTaskUsd,
+  });
   const chosenBy = (reason: string) =>
     reason.startsWith('by role default:')
       ? 'default'
@@ -126,8 +126,8 @@ describe('planSteps', () => {
     {
       name: 'scores but no costs: every step on its role default',
       profiles: unscoredCatalogue({
-        'mid@high': measured({ intelligence: 46, coding: 42, agentic: 40 }, null),
-        'big@high': measured({ intelligence: 51, coding: 50, agentic: 48 }, null),
+        'mid@high': measured({ intelligence: 46 }, null),
+        'big@high': measured({ intelligence: 51 }, null),
       }),
       want: [
         'plan:big@high:default',
@@ -139,26 +139,14 @@ describe('planSteps', () => {
     {
       name: 'partial: two profiles measured, every step routed among them by score',
       profiles: unscoredCatalogue({
-        'mid@high': measured({ intelligence: 46, coding: 42, agentic: null }, 0.75),
-        'big@high': measured({ intelligence: 51, coding: 50, agentic: null }, 2.5),
+        'mid@high': measured({ intelligence: 46 }, 0.75),
+        'big@high': measured({ intelligence: 51 }, 2.5),
       }),
       want: [
         'plan:mid@high:score',
         'implement:mid@high:score',
         'review:big@high:score',
         'qa:mid@high:score',
-      ],
-    },
-    {
-      name: 'partial: only an agentic score, so QA routes by score and the rest by role',
-      profiles: unscoredCatalogue({
-        'small@medium': measured({ intelligence: null, coding: null, agentic: 36 }, 0.08),
-      }),
-      want: [
-        'plan:big@high:default',
-        'implement:mid@high:default',
-        'review:big@high:default',
-        'qa:small@medium:score',
       ],
     },
     {
@@ -168,7 +156,7 @@ describe('planSteps', () => {
         'plan:mid@high:score',
         'implement:mid@high:score',
         'review:big@high:score',
-        'qa:mid@high:score',
+        'qa:mid@low:score',
       ],
     },
   ])('routes with $name', ({ profiles, want }) => {
@@ -178,11 +166,11 @@ describe('planSteps', () => {
     );
   });
 
-  it('records each step’s score kind and starts it pending', () => {
+  it('starts each step pending', () => {
     const plan = planSteps(input());
-    expect(plan.steps.map((s) => [s.score, s.status, s.attempts, s.startedAt, s.result])).toEqual([
-      ['coding', 'pending', 0, null, null],
-      ['intelligence', 'pending', 0, null, null],
+    expect(plan.steps.map((s) => [s.status, s.attempts, s.startedAt, s.result])).toEqual([
+      ['pending', 0, null, null],
+      ['pending', 0, null, null],
     ]);
   });
 
@@ -254,15 +242,6 @@ describe('planSteps', () => {
     });
   });
 
-  it('routes an implement step on intelligence when AA gives no coding score', () => {
-    const noCoding = testCatalogue().map((p) => ({ ...p, scores: { ...p.scores, coding: null } }));
-    const plan = planSteps(input({ profiles: noCoding }));
-    const implement = plan.steps[0];
-    expect(implement).toMatchObject({ role: 'implement', score: 'intelligence', pinned: false });
-    expect(implement?.profileId).not.toBeNull();
-    expect(implement?.reason).toContain('AA gives no coding score; compared on intelligence');
-  });
-
   it('says which source chose a model without scores, and runs a role default unpinned', () => {
     const plan = planSteps(input({ profiles: unscoredCatalogue() }));
     expect(plan.steps.map((s) => [s.model, s.effort, s.pinned, s.profileId === null])).toEqual([
@@ -270,10 +249,10 @@ describe('planSteps', () => {
       ['big', 'high', false, false],
     ]);
     expect(plan.steps[0]?.reason).toBe(
-      'by role default: the cheapest model of the balanced tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)',
+      'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.steps[1]?.reason).toBe(
-      'by role default: the cheapest model of the strongest tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
+      'by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.overBudget).toEqual([]);
   });
@@ -311,10 +290,10 @@ describe('planSteps', () => {
       ],
       [
         'review',
-        'strongest',
+        'capable',
         null,
         { kind: 'automatic' },
-        'no model offered for the strongest tier',
+        'no model offered for the capable tier',
         false,
       ],
     ]);
@@ -324,13 +303,13 @@ describe('planSteps', () => {
     const plan = planSteps(
       input({
         roleSettings: [
-          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'fast' } },
+          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'efficient' } },
         ],
       }),
     );
     expect(plan.steps.map((s) => s.setting)).toEqual([
       { kind: 'automatic' },
-      { kind: 'tier', tier: 'fast' },
+      { kind: 'tier', tier: 'efficient' },
     ]);
     expect(plan.steps[1]?.model).toBe('small');
   });

@@ -862,10 +862,15 @@ describe('gh unavailable', () => {
     expect(polls()).toBe(1);
     const card = h.only(h.cards());
     expect(card.projectId).toBe(h.project.id);
-    expect(card.body).toContain('gh auth login');
+    expect(card.body).toContain('Settings › Integrations');
     expect(card.body).toContain('unknown');
     // No link: the desktop's Open on GitHub would open one pull request, which says nothing about gh.
-    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl, ghCheck: true });
+    expect(card.detail).toEqual({
+      batchId: a.id,
+      prUrl: a.prUrl,
+      ghCheck: true,
+      openIntegrations: 'github',
+    });
 
     await round(w);
     expect(polls()).toBe(2);
@@ -933,9 +938,10 @@ describe('gh unavailable', () => {
     const card = h.only(h.cards());
     expect(card.id).toBe(first.id);
     expect(card.title).toBe('Pull request status unknown: gh is signed out');
-    expect(card.body).toContain('gh auth login');
+    expect(card.body).toContain('Settings › Integrations');
     expect(card.body).not.toContain('gave no answer');
-    expect(card.detail).toEqual(first.detail);
+    // The rewrite keeps the batch's keys and adds the link to the sign-in card.
+    expect(card.detail).toEqual({ ...first.detail, openIntegrations: 'github' });
 
     const writes = () =>
       listEventsAfter(h.store.db, 0, 10_000).filter(
@@ -1268,6 +1274,7 @@ describe('gh unavailable', () => {
     const offline: Gh = {
       authStatus: () => h.gh.authStatus(),
       authLogin: () => h.gh.authLogin(),
+      noreplyEmail: () => h.gh.noreplyEmail(),
       prView: (input) => h.gh.prView(input),
       prCreate: (input) => h.gh.prCreate(input),
       repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
@@ -1278,6 +1285,9 @@ describe('gh unavailable', () => {
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
+      prReady: (input) => h.gh.prReady(input),
+      prEditBase: (input) => h.gh.prEditBase(input),
+      prEditBody: (input) => h.gh.prEditBody(input),
       prStatus: () => Promise.reject(new GhError('failed', 'HTTP 502')),
     };
     const w = watcher({ ...h.ctx, gh: offline });
@@ -1367,6 +1377,7 @@ describe('restart and stop', () => {
     const hanging: Gh = {
       authStatus: () => h.gh.authStatus(),
       authLogin: () => h.gh.authLogin(),
+      noreplyEmail: () => h.gh.noreplyEmail(),
       prView: (input) => h.gh.prView(input),
       prCreate: (input) => h.gh.prCreate(input),
       repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
@@ -1377,6 +1388,9 @@ describe('restart and stop', () => {
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
+      prReady: (input) => h.gh.prReady(input),
+      prEditBase: (input) => h.gh.prEditBase(input),
+      prEditBody: (input) => h.gh.prEditBody(input),
       prStatus: (_input, call) =>
         new Promise((_resolve, reject) => {
           entered = true;

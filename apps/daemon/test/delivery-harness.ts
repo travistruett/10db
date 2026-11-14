@@ -61,6 +61,7 @@ import { seedTeam } from '../src/team';
 import { createGateRunner, type GateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
+import { putBackKeptWork } from '../src/pass';
 import { FakeGh } from './fake-gh';
 import { captureLogs, type LogCapture } from './log-capture';
 import {
@@ -72,7 +73,8 @@ import {
   tempDir,
 } from './fixtures';
 
-type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING' | 'TAKEN_OVER';
+/** A state a test moves a workstream to, along the shortest run of allowed transitions. */
+type Settled = WorkstreamState;
 
 /** A `pnpm` on its own PATH directory, recording calls and failing on request. */
 function fakePnpm(root: string): FakePnpm {
@@ -362,6 +364,9 @@ export function createDeliveryHarness(
     onWorkQueued: () => {
       ticks.count += 1;
     },
+    // The daemon's own put-back of a taken-out task's saved work, as a start runs it.
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs, logger: logs.logger, clock: installClock }, input),
     worktreeRoot,
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),

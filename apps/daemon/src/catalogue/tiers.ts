@@ -1,10 +1,12 @@
 import { ModelStatus, ModelTier } from '@10db/contracts';
 import type { CatalogueModel } from './source';
 
-/** A tier is this share of the maker's top output price, or more. */
-const STRONGEST_FROM = 0.3;
-/** A tier is this share of the maker's top output price, or less. */
-const FAST_UP_TO = 0.1;
+/** A model at this share of the maker's top output price or more is Frontier, so two listings of one model stay together. */
+const FRONTIER_FROM = 0.9;
+/** A model at this share of the maker's top output price or more, below the top band, is Capable. */
+const CAPABLE_FROM = 0.3;
+/** A model at this share of the maker's top output price or less is Efficient. */
+const EFFICIENT_UP_TO = 0.1;
 
 export interface DerivedTier {
   tier: ModelTier | null;
@@ -18,7 +20,7 @@ const rankable = (m: CatalogueModel): m is Ranked =>
   m.maker !== null && m.outputPrice !== null && m.outputPrice > 0;
 
 /**
- * Tiers from output price, for the offered models only. Within a maker's family only the newest model is
+ * Rungs from output price, for the offered models only. Within a maker's family only the newest model is
  * ranked, the older ones are Superseded; the rest are compared with the maker's most expensive model
  * left. A model with no price is Unknown and a deprecated one is Retired; neither is ranked.
  */
@@ -58,11 +60,13 @@ export function deriveTiers(
   for (const m of ranked) {
     const share = m.outputPrice / (topByMaker.get(m.maker) ?? m.outputPrice);
     const tier =
-      share >= STRONGEST_FROM
-        ? ModelTier.Strongest
-        : share <= FAST_UP_TO
-          ? ModelTier.Fast
-          : ModelTier.Balanced;
+      share >= FRONTIER_FROM
+        ? ModelTier.Frontier
+        : share >= CAPABLE_FROM
+          ? ModelTier.Capable
+          : share <= EFFICIENT_UP_TO
+            ? ModelTier.Efficient
+            : ModelTier.Balanced;
     result.set(m.id, { tier, status: ModelStatus.Current });
   }
   return result;

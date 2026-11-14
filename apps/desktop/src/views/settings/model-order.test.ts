@@ -17,10 +17,10 @@ const B = someAccountId();
 const rows = [
   modelRowDto({
     model: 'm-low',
-    tier: ModelTier.Fast,
+    tier: ModelTier.Efficient,
     availableOn: [A],
     intelligence: 20,
-    coding: 30,
+    costPerTaskUsd: 0.1,
     outputTokensPerSecond: 200,
     inputPrice: 1,
     outputPrice: 2,
@@ -31,7 +31,7 @@ const rows = [
     tier: ModelTier.Balanced,
     availableOn: [A, B],
     intelligence: 40,
-    coding: 10,
+    costPerTaskUsd: 1,
     outputTokensPerSecond: 100,
     inputPrice: 3,
     outputPrice: 4,
@@ -39,10 +39,10 @@ const rows = [
   }),
   modelRowDto({
     model: 'm-top',
-    tier: ModelTier.Strongest,
+    tier: ModelTier.Capable,
     availableOn: [B],
     intelligence: 60,
-    coding: 20,
+    costPerTaskUsd: 5,
     outputTokensPerSecond: 50,
     inputPrice: 5,
     outputPrice: 6,
@@ -58,12 +58,8 @@ describe('sorting the model list', () => {
   it.each([
     { column: ModelColumn.Name, up: ['m-blank', 'm-low', 'm-mid', 'm-top'] },
     { column: ModelColumn.Tier, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.AvailableOn, up: ['m-blank', 'm-low', 'm-top', 'm-mid'] },
     { column: ModelColumn.Intelligence, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.Coding, up: ['m-mid', 'm-top', 'm-low', 'm-blank'] },
-    { column: ModelColumn.Speed, up: ['m-top', 'm-mid', 'm-low', 'm-blank'] },
-    { column: ModelColumn.InputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
-    { column: ModelColumn.OutputPrice, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
+    { column: ModelColumn.CostPerTask, up: ['m-low', 'm-mid', 'm-top', 'm-blank'] },
     { column: ModelColumn.StepsRun, up: ['m-blank', 'm-top', 'm-mid', 'm-low'] },
   ])('orders by $column, no data after the data, Unknown after everything', ({ column, up }) => {
     expect(order(column, SortDirection.Ascending)).toEqual([...up, 'm-unknown']);
@@ -81,13 +77,57 @@ describe('sorting the model list', () => {
 
 describe('filtering the model list', () => {
   it.each([
-    { name: 'no filter keeps all', tier: null, account: null, expected: 5 },
-    { name: 'a tier keeps only that tier', tier: ModelTier.Fast, account: null, expected: 1 },
-    { name: 'an account keeps what it offers', tier: null, account: A, expected: 2 },
-    { name: 'both narrow together', tier: ModelTier.Balanced, account: B, expected: 1 },
-    { name: 'a tier nothing has is empty', tier: ModelTier.Strongest, account: A, expected: 0 },
-  ])('$name', ({ tier, account, expected }) => {
-    expect(filterModels(rows, { tier, accountId: account })).toHaveLength(expected);
+    { name: 'no filter keeps all', query: '', tiers: [], account: null, expected: 5 },
+    {
+      name: 'a tier keeps only that tier',
+      query: '',
+      tiers: [ModelTier.Efficient],
+      account: null,
+      expected: 1,
+    },
+    {
+      name: 'several tiers keep each',
+      query: '',
+      tiers: [ModelTier.Efficient, ModelTier.Capable],
+      account: null,
+      expected: 2,
+    },
+    { name: 'an account keeps what it offers', query: '', tiers: [], account: A, expected: 2 },
+    {
+      name: 'both narrow together',
+      query: '',
+      tiers: [ModelTier.Balanced],
+      account: B,
+      expected: 1,
+    },
+    {
+      name: 'a tier nothing has is empty',
+      query: '',
+      tiers: [ModelTier.Capable],
+      account: A,
+      expected: 0,
+    },
+    { name: 'a search matches the model ID', query: 'm-to', tiers: [], account: null, expected: 1 },
+    {
+      name: 'a search ignores case and spaces around it',
+      query: ' M-LOW ',
+      tiers: [],
+      account: null,
+      expected: 1,
+    },
+    { name: 'a blank search keeps all', query: '   ', tiers: [], account: null, expected: 5 },
+  ])('$name', ({ query, tiers, account, expected }) => {
+    expect(filterModels(rows, { query, tiers, accountId: account })).toHaveLength(expected);
+  });
+
+  it('matches a search on the name too', () => {
+    const named = [
+      modelRowDto({ model: 'x-1', name: 'Zephyr Large' }),
+      modelRowDto({ model: 'x-2' }),
+    ];
+    expect(
+      filterModels(named, { query: 'zephyr', tiers: [], accountId: null }).map((r) => r.model),
+    ).toEqual(['x-1']);
   });
 });
 

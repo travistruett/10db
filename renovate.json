@@ -52,7 +52,8 @@
       "matchPackageNames": ["@openai/codex"],
       "groupName": "Codex CLI",
       "prBodyNotes": [
-        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
+        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it.",
+        "Then, on a Mac, run `pnpm --filter @10db/daemon generate:codex` and commit `apps/daemon/src/sessions/codex-generated/`: the drift check fails until its STAMP names this release."
       ]
     },
     {
@@ -64,8 +65,21 @@
       ]
     },
     {
-      "description": "Every update that isn't a major version lands in one weekly PR, except the agent CLIs', which need their live tests.",
-      "matchPackageNames": ["*", "!@openai/codex", "!@anthropic-ai/claude-code"],
+      "description": "playwright-core drives the pinned Chromium headless shell that takes the Workbench's pictures (BROWSER_PIN in apps/daemon/src/pictures/browser-pin.ts), which must be the build the new release's browsers.json names. Its bump is a PR of its own that moves BROWSER_PIN with it, because only the live test, which CI never runs, can verify the pair.",
+      "matchPackageNames": ["playwright-core"],
+      "groupName": "Playwright for pictures",
+      "prBodyNotes": [
+        "Before merging: set BROWSER_PIN's version and URL to the chromium-headless-shell build in the new playwright-core's browsers.json, download that zip and record its sha512 (`sha512-` and the base64 digest), then run `TENDB_LIVE_BROWSER=1 pnpm --filter @10db/daemon exec vitest run src/pictures/browser.live.test.ts`. It fetches the build into the live tests' own folder, checks it against the checksum in this PR, and proves the proxy, the sandbox and the overlays on it. It must pass; CI never runs it."
+      ]
+    },
+    {
+      "description": "Every update that isn't a major version lands in one weekly PR, except the agent CLIs' and the pictures' browser driver, which need their live tests.",
+      "matchPackageNames": [
+        "*",
+        "!@openai/codex",
+        "!@anthropic-ai/claude-code",
+        "!playwright-core"
+      ],
       "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
       "groupName": "all non-major dependencies"
     },

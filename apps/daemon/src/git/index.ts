@@ -9,11 +9,20 @@ export { comparablePath, existsAsEntry } from './path-entries';
 export { withDaemonGitConfig } from './daemon-config';
 export {
   createGit,
+  KeptRefMovedError,
+  PassFolderOffBranchError,
   WorktreeNotOursError,
   type BranchMerge,
+  type ChainCommit,
+  type ChainCommitInput,
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  OVER_BUDGET_REFUSAL,
+  type SurveyTexts,
+  type KeptCommit,
+  type LandedPaths,
+  type PassDirtRecord,
   type ResolvedConflict,
   type SwitchBack,
 } from './git';
@@ -27,6 +36,7 @@ export {
   worktreeRemovalCommand,
   worktreeRestoreCommand,
 } from './trust-card';
+export { shellWord } from './shell-word';
 export { GitTrustError, GitTrustFailure } from './trust-error';
 export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';
 export { GitVersionError, resolveGit } from './version';
@@ -36,3 +46,10 @@ export {
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
 } from './worktree-list';
+export {
+  builderCommandLine,
+  createPassGitSession,
+  runPassGit,
+  type BuilderRefusal,
+  type BuilderRun,
+} from './run-as-builder';

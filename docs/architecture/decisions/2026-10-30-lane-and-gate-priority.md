@@ -14,7 +14,7 @@ Three CPU priorities, highest first, with no setting and the same in every proje
 | A lane session (`claude`) and everything it starts                            | background, below everything else | `taskpolicy -b`         | `nice -n 19`          |
 
 - **Where it is set.** `atPriority` (`src/priority/index.ts`) wraps the one process 10db spawns: the
-  `claude` process a lane session starts (`spawnClaude` in `sessions/claude-adapter.ts`) and the gate's
+  `claude` process a lane session starts (`spawnClaude` in `sessions/claude-session.ts`) and the gate's
   process group leader (`runGroup` in `verify/gate-runner.ts`, which every gate and shipping gate goes
   through). `taskpolicy` and `nice` set the policy and then exec the program, so the pid, the process group
   and the signals 10db sends are the program's own.

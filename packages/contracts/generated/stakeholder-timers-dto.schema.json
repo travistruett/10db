@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "remindAfterHours": {
+      "default": 4,
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 72
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "returnAfterHours": {
+      "default": 8,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 168
+    }
+  }
+}

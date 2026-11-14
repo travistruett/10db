@@ -9,6 +9,7 @@ export {
   parseRequiredChecks,
   PrMergeable,
   PrState,
+  SIGN_IN_IN_SETTINGS,
   createSystemGhExec,
   summariseChecks,
   UNREADABLE_CHECK,
@@ -18,10 +19,13 @@ export {
   type GhCall,
   type GhExec,
   type GhOutput,
+  type GhTools,
   type JobLog,
   type PullRequest,
   type PullRequestStatus,
   type RequiredChecks,
 } from './gh';
+export { createGithubLogin, type GhLoginChild, type GhLoginSpawn } from './login';
+export { spawnGhLogin } from './spawn-login';
 export { githubRepoOf } from './repo-name';
 export { resolveGh } from './resolve-gh';

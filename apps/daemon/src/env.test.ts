@@ -53,6 +53,11 @@ describe('loadEnv', () => {
     ['port out of range', { TENDB_PORT: '70000' }, 'TENDB_PORT'],
     ['unknown log level', { TENDB_LOG_LEVEL: 'loud' }, 'TENDB_LOG_LEVEL'],
     ['a live Codex switch other than 0 or 1', { TENDB_LIVE_CODEX: 'yes' }, 'TENDB_LIVE_CODEX'],
+    [
+      'a live browser switch other than 0 or 1',
+      { TENDB_LIVE_BROWSER: 'yes' },
+      'TENDB_LIVE_BROWSER',
+    ],
   ])('rejects %s, naming the variable', (_name, source, variable) => {
     expect(() => loadEnv(source)).toThrow(EnvError);
     expect(() => loadEnv(source)).toThrow(variable);
@@ -194,6 +199,24 @@ describe('loadEnv', () => {
   ])('rejects TENDB_JUDGE as %s, naming the variable and not the value', (_name, value) => {
     expect(() => loadEnv({ TENDB_JUDGE: value })).toThrow('TENDB_JUDGE');
     expect(() => loadEnv({ TENDB_JUDGE: value })).not.toThrow(`: ${value}`);
+  });
+
+  it.each([
+    ['on', 'on'],
+    ['off', 'off'],
+    ['absent', undefined],
+    ['empty, which means unset', undefined],
+  ])('reads TENDB_SLACK when it is %s', (name, expected) => {
+    const source = name === 'absent' ? {} : { TENDB_SLACK: name.startsWith('empty') ? '' : name };
+    expect(loadEnv(source).TENDB_SLACK).toBe(expected);
+  });
+
+  it.each([
+    ['uppercase', 'OFF'],
+    ['a boolean word', 'false'],
+  ])('rejects TENDB_SLACK as %s, naming the variable and not the value', (_name, value) => {
+    expect(() => loadEnv({ TENDB_SLACK: value })).toThrow('TENDB_SLACK');
+    expect(() => loadEnv({ TENDB_SLACK: value })).not.toThrow(`: ${value}`);
   });
 
   it('never puts a value in the error message', () => {

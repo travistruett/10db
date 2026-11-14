@@ -14,6 +14,10 @@ export type FakeStep = { readonly js: string } | { readonly say: string };
 export interface FakeRequest {
   /** The text of every user message in the input, the whole thread's. */
   readonly userTexts: readonly string[];
+  /** The request's `instructions` and the text of every developer message in its input. */
+  readonly developerTexts: readonly string[];
+  /** How many pictures the user messages of the input carry, the whole thread's. */
+  readonly images: number;
   /** The text each `exec` call returned since the script's prompt, in order. */
   readonly outputs: readonly string[];
   /**
@@ -42,6 +46,12 @@ const Content = z.union([
   z.string(),
   z.array(z.looseObject({ type: z.string().optional(), text: z.string().optional() })),
 ]);
+
+/** The pictures in a message's content: its `input_image` parts. */
+function imagesOf(content: z.infer<typeof Content> | undefined): number {
+  if (content === undefined || typeof content === 'string') return 0;
+  return content.filter((part) => part.type === 'input_image').length;
+}
 const InputItem = z.looseObject({
   type: z.string().optional(),
   role: z.string().optional(),
@@ -63,6 +73,7 @@ const Tool: z.ZodType<Tool> = z.lazy(() =>
   }),
 );
 const ResponsesBody = z.looseObject({
+  instructions: z.string().optional(),
   input: z.array(InputItem).default([]),
   tools: z.array(Tool).default([]),
 });
@@ -95,9 +106,12 @@ function textOf(content: z.infer<typeof Content> | undefined): string {
 const isUserMessage = (item: InputItem): boolean =>
   (item.type === undefined || item.type === 'message') && item.role === 'user';
 
+const isDeveloperMessage = (item: InputItem): boolean =>
+  (item.type === undefined || item.type === 'message') && item.role === 'developer';
+
 const isCallOutput = (item: InputItem): boolean => item.type?.endsWith('_call_output') === true;
 
-/** The SSE stream of one response: the step's item, then a completion with token usage. */
+/** The SSE stream of one response: the step's item (a message in pieces), then a completion with token usage. */
 function answer(res: ServerResponse, step: FakeStep, n: number): void {
   const send = (event: Record<string, unknown> & { readonly type: string }): void => {
     res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
@@ -120,6 +134,20 @@ function answer(res: ServerResponse, step: FakeStep, n: number): void {
           id: `msg_${String(n)}`,
           content: [{ type: 'output_text', text: step.say }],
         };
+  if (!('js' in step)) {
+    // A message streams as the Responses API sends it: the item, its text in two pieces, then the item done.
+    send({ type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } });
+    const half = Math.floor(step.say.length / 2);
+    for (const delta of [step.say.slice(0, half), step.say.slice(half)])
+      if (delta !== '')
+        send({
+          type: 'response.output_text.delta',
+          item_id: item.id,
+          output_index: 0,
+          content_index: 0,
+          delta,
+        });
+  }
   send({ type: 'response.output_item.done', item });
   send({
     type: 'response.completed',
@@ -188,6 +216,13 @@ export async function startFakeResponses(): Promise<FakeResponses> {
     if (marker !== null) {
       latest.set(marker, {
         userTexts: items.filter(isUserMessage).map((item) => textOf(item.content)),
+        developerTexts: [
+          ...(parsed.success && parsed.data.instructions !== undefined
+            ? [parsed.data.instructions]
+            : []),
+          ...items.filter(isDeveloperMessage).map((item) => textOf(item.content)),
+        ],
+        images: items.filter(isUserMessage).reduce((sum, item) => sum + imagesOf(item.content), 0),
         outputs,
         tools: offered.map(({ name }) => name).sort(),
         execTools: execToolsOf(offered.map(({ tool }) => tool)).sort(),

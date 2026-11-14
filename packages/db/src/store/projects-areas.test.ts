@@ -1,4 +1,10 @@
-import { ConflictError, InvalidError, ProjectPatch, type ProjectId } from '@10db/contracts';
+import {
+  ConflictError,
+  InvalidError,
+  ProjectPatch,
+  type AreaDef,
+  type ProjectId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { acquireClaims } from './claims';
 import { getProject, patchProject } from './projects';
@@ -77,6 +83,23 @@ describe('patching areas and hazards', () => {
       { name: 'root', globs: ['*'] },
     ]);
     expect(set([{ name: 'api', globs: ['api/**'] }])).toEqual([{ name: 'api', globs: ['api/**'] }]);
+  });
+
+  it('keeps each area role and route on insert and on patch', () => {
+    const pages: AreaDef[] = [
+      { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+      { name: 'components', globs: ['components/**'], role: 'shared' },
+      { name: 'rest', globs: ['*'] },
+    ];
+    const project = seedProject(store, { areas: pages });
+    expect(getProject(store.db, project.id).areas).toEqual(pages);
+    const patched: AreaDef[] = [
+      { name: 'people', globs: ['app/people/**'], role: 'page' },
+      { name: 'settings', globs: ['app/settings/**'], role: 'page', route: '/settings' },
+      { name: 'components', globs: ['components/**'] },
+    ];
+    store.write((ctx) => patchProject(ctx, project.id, { areas: patched }));
+    expect(getProject(store.db, project.id).areas).toEqual(patched);
   });
 
   it.each([

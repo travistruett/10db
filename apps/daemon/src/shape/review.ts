@@ -30,6 +30,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { z } from 'zod';
+import { appendRevision } from '../plan-record';
 
 // Shape spec §7. Reviewers report findings under an effort or one of its tasks; the rehearsal reads
 // each task as its implementer and reports the questions it would have to ask. The session resolves a
@@ -321,11 +322,18 @@ export function writeSpec(
   input: { readonly effortKey: string; readonly markdown: string },
 ): { readonly written: true } {
   effortOf(ctx, shapeId, input.effortKey);
-  upsertShapeAttachment(ctx, {
+  const specId = upsertShapeAttachment(ctx, {
     shapeId,
     kind: 'spec',
     key: input.effortKey,
     body: input.markdown,
+  });
+  // Every text the spec has had is kept; the same text again adds nothing.
+  appendRevision(ctx, specId, input.markdown, {
+    note: null,
+    author: null,
+    bundleNumber: null,
+    authoredAt: null,
   });
   line(ctx, shapeId, `write_spec · ${input.effortKey}`);
   return { written: true };

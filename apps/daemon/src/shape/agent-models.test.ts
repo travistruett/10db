@@ -1,11 +1,11 @@
-import type { SupportedAccountKind } from '@10db/contracts';
+import type { AgentAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { SHAPE_AGENT_MODELS } from './confinement';
 import { shapeAgentModels } from './agent-models';
 import { shapeSystemPrompt } from './policy';
 
 describe('the models a Plan session may launch an agent on', () => {
-  it.each<{ kind: SupportedAccountKind; models: readonly string[] }>([
+  it.each<{ kind: AgentAccountKind; models: readonly string[] }>([
     { kind: 'claude_subscription', models: SHAPE_AGENT_MODELS },
     { kind: 'anthropic_api_key', models: SHAPE_AGENT_MODELS },
     // On these the aliases resolve to older models than the account lists, so an agent runs on the session's.

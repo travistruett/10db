@@ -1,31 +1,12 @@
 import { Box, Group, ScrollArea } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
+import { EdgeFade } from './edge-fade';
 
 const SCROLLBAR = 12;
 /** Room between the columns and the scrollbar under them. */
 const GAP = 12;
-
-/** Stays mounted and eases its opacity, so the fade settles in rather than snapping. */
-function Fade({ side, shown }: { readonly side: 'left' | 'right'; readonly shown: boolean }) {
-  return (
-    <Box
-      aria-hidden="true"
-      data-fade={side}
-      pos="absolute"
-      top={0}
-      bottom={SCROLLBAR + GAP}
-      w={56}
-      style={{
-        [side]: 0,
-        pointerEvents: 'none',
-        opacity: shown ? 1 : 0,
-        transition: 'opacity 200ms ease',
-        background: `linear-gradient(to ${side}, transparent, var(--mantine-color-body))`,
-      }}
-    />
-  );
-}
+const FADE = { color: 'var(--mantine-color-body)', depth: 56, inset: { end: SCROLLBAR + GAP } };
 
 /**
  * The board's columns in a horizontal scroll area. The scrollbar shows on hover in its own strip
@@ -51,8 +32,8 @@ export function BoardScroll({ children }: { readonly children: ReactNode }) {
           {children}
         </Group>
       </ScrollArea>
-      <Fade side="left" shown={edges.left} />
-      <Fade side="right" shown={edges.right} />
+      <EdgeFade side="left" shown={edges.left} {...FADE} />
+      <EdgeFade side="right" shown={edges.right} {...FADE} />
     </Box>
   );
 }

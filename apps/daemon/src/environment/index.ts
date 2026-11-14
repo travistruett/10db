@@ -1,9 +1,11 @@
+export { readAccountSecretAsync, type AccountSecret } from './account-secret';
 export {
   AA_KEY_ACCOUNT,
   execFileAsync,
   KeychainError,
   keychainWith,
   OPENROUTER_KEY_ACCOUNT,
+  SLACK_BOT_ACCOUNT,
   secretFingerprint,
   systemKeychain,
   unavailableKeychain,
@@ -36,8 +38,8 @@ export {
   type GhLoginProbe,
   type ResolvedTools,
 } from './system-check';
-export { AgentTool, CODEX_VERIFIED_ON } from './agent-pins';
-export { pinnedToolsRoot } from './pinned-install';
+export { AgentTool, CODEX_VERIFIED_ON, type PinnedRelease } from './agent-pins';
+export { downloadFile, ensurePinned, extractZipWithTar, pinnedToolsRoot } from './pinned-install';
 export {
   AUTOUPDATE_OFF,
   AgentState,

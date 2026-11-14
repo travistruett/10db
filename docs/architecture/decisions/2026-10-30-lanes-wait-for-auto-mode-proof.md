@@ -15,7 +15,7 @@ What is built:
 - `createClaudeAdapter` takes `lanePermissionMode` (`'default'` or `'auto'`). It applies only to a
   sandboxed session. An unsandboxed one, which only scripted tests start, always runs in `default`.
   When it is unset, the adapter uses `LANE_PERMISSION_MODE` in
-  `apps/daemon/src/sessions/claude-adapter.ts`, which is `'default'`. Only the live test sets it.
+  `apps/daemon/src/sessions/claude-session.ts`, which is `'default'`. Only the live test sets it.
 - The PreToolUse hook answers with `judgePreToolUse` (`apps/daemon/src/guard/pre-tool-use.ts`), in
   every mode. It gives the guard's verdict, and `ask` for a call the guard allows that the broker
   must still see:

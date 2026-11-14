@@ -5,6 +5,7 @@ import {
   GoalListDto,
   HazardAssessmentDto,
   HazardLookAgainResult,
+  DevUiConnectionDto,
   HealthResponse,
   HumanTouchDto,
   InvalidError,
@@ -14,169 +15,21 @@ import {
   PROTOCOL_VERSION,
   WorkstreamDto,
   type AreaProposalResult,
-  type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { devUiMayRead } from '../screens';
 import { createApp, MAX_BODY_BYTES } from './app';
-import type { ApiServices } from './services';
 import { CODEX_VERIFIED_ON } from '../environment';
 
 const TOKEN = 'ui-token-for-tests';
 const startedAt = new Date('2026-10-13T12:00:00.000Z');
 
-const reached: string[] = [];
+import { reached, stubServices, track } from '../../test/api-stub';
+
 beforeEach(() => {
   reached.length = 0;
 });
-/** A stub that records the call and throws, so the route answers 500 after reaching the right service. */
-const track = (name: string) => (): never => {
-  reached.push(name);
-  throw new Error(`reached ${name}`);
-};
-
-function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
-  const none = (): never => {
-    throw new Error('not stubbed');
-  };
-  return {
-    listProjects: () => [],
-    createProject: none,
-    listTasks: () => [],
-    createTask: none,
-    startTask: none,
-    holdTask: none,
-    runNext: none,
-    adoptGoal: none,
-    getGoal: none,
-    listFlows: () => [],
-    listWorkstreams: () => [],
-    cancelWorkstream: none,
-    retryWorkstream: none,
-    workstreamChanges: none,
-    listInbox: () => [],
-    answerInbox: none,
-    eventsAfter: () => [] as DaemonEvent[],
-    subscribe: () => () => undefined,
-    systemCheck: none,
-    keepAwake: () => ({ mode: 'while_running', active: false }),
-    setKeepAwake: none,
-    lanePermissions: () => ({ autoMode: true }),
-    setLanePermissions: none,
-    eventsHead: () => 0,
-    reviewProjectMcp: none,
-    inspectFolder: none,
-    proposeAreas: none,
-    listNetworkHosts: none,
-    allowNetworkHost: none,
-    removeNetworkHost: none,
-    scanNetworkHosts: none,
-    getHazardAssessment: none,
-    lookAgainAtHazards: none,
-    undoHazardAddition: none,
-    listPersonas: track('listPersonas'),
-    createPersona: track('createPersona'),
-    patchPersona: track('patchPersona'),
-    listPeople: track('listPeople'),
-    createPerson: track('createPerson'),
-    createFlow: track('createFlow'),
-    patchFlow: track('patchFlow'),
-    listModelProfiles: track('listModelProfiles'),
-    patchModelProfile: track('patchModelProfile'),
-    judgeStatus: track('judgeStatus'),
-    patchJudge: track('patchJudge'),
-    setJudgeKey: track('setJudgeKey'),
-    removeJudgeKey: track('removeJudgeKey'),
-    testJudge: track('testJudge'),
-    listJudgeCalls: track('listJudgeCalls'),
-    benchmarkStatus: track('benchmarkStatus'),
-    syncBenchmarks: track('syncBenchmarks'),
-    listAaModels: track('listAaModels'),
-    getModelSettings: track('getModelSettings'),
-    setGlobalModelSettings: track('setGlobalModelSettings'),
-    setProjectModelSettings: track('setProjectModelSettings'),
-    listModels: track('listModels'),
-    listAccountOffers: track('listAccountOffers'),
-    catalogueStatus: track('catalogueStatus'),
-    refreshModels: track('refreshModels'),
-    patchProject: track('patchProject'),
-    getTeam: track('getTeam'),
-    setTeam: track('setTeam'),
-    listRoutingRules: track('listRoutingRules'),
-    setRoutingRules: track('setRoutingRules'),
-    patchTask: track('patchTask'),
-    stepPlan: track('stepPlan'),
-    startBatch: track('startBatch'),
-    listBatches: track('listBatches'),
-    listGoals: track('listGoals'),
-    humanTouch: track('humanTouch'),
-    openGoalDigest: track('openGoalDigest'),
-    listShapes: track('listShapes'),
-    createShape: track('createShape'),
-    getShapeView: track('getShapeView'),
-    sendShapeMessage: track('sendShapeMessage'),
-    proposeShape: track('proposeShape'),
-    stopShape: track('stopShape'),
-    chooseShapeModel: track('chooseShapeModel'),
-    convertShape: track('convertShape'),
-    removeDraftGoal: track('removeDraftGoal'),
-    withdrawShapeDecision: track('withdrawShapeDecision'),
-    withdrawShapePrinciple: track('withdrawShapePrinciple'),
-    resumeShape: track('resumeShape'),
-    getGoalShape: track('getGoalShape'),
-    getTaskShape: track('getTaskShape'),
-    editShapeProposal: track('editShapeProposal'),
-    unpinShapeProposal: track('unpinShapeProposal'),
-    restoreShapeProposal: track('restoreShapeProposal'),
-    dropShapeProposal: track('dropShapeProposal'),
-    addShapeFile: track('addShapeFile'),
-    startShape: track('startShape'),
-    shapeMeasures: track('shapeMeasures'),
-    getShapeJev: track('getShapeJev'),
-    setShapeJev: track('setShapeJev'),
-    getOneWayPaths: track('getOneWayPaths'),
-    setOneWayPaths: track('setOneWayPaths'),
-    getSmallProposalLimit: track('getSmallProposalLimit'),
-    setSmallProposalLimit: track('setSmallProposalLimit'),
-    rehearseShape: track('rehearseShape'),
-    dismissShapeFinding: track('dismissShapeFinding'),
-    listKnowledge: track('listKnowledge'),
-    recordDecision: track('recordDecision'),
-    supersedeDecision: track('supersedeDecision'),
-    withdrawDecision: track('withdrawDecision'),
-    decisionProvenance: track('decisionProvenance'),
-    createPrinciple: track('createPrinciple'),
-    supersedePrinciple: track('supersedePrinciple'),
-    retirePrinciple: track('retirePrinciple'),
-    withdrawPrinciple: track('withdrawPrinciple'),
-    principleProvenance: track('principleProvenance'),
-    listProposals: track('listProposals'),
-    acceptProposal: track('acceptProposal'),
-    rejectProposal: track('rejectProposal'),
-    shipBatch: track('shipBatch'),
-    abandonBatch: track('abandonBatch'),
-    moveTask: track('moveTask'),
-    listBoardColumns: track('listBoardColumns'),
-    createBoardColumn: track('createBoardColumn'),
-    patchBoardColumn: track('patchBoardColumn'),
-    deleteBoardColumn: track('deleteBoardColumn'),
-    proposeCandidates: track('proposeCandidates'),
-    listAccounts: () => [],
-    createAccount: track('createAccount'),
-    patchAccount: track('patchAccount'),
-    archiveAccount: track('archiveAccount'),
-    setAccountSecret: track('setAccountSecret'),
-    accountSignIn: track('accountSignIn'),
-    accountIdentity: track('accountIdentity'),
-    connectingAccount: () => null,
-    connectAccount: track('connectAccount'),
-    cancelAccountConnect: track('cancelAccountConnect'),
-    accountUsage: track('accountUsage'),
-    listAccountPauses: track('listAccountPauses'),
-    resumeAccount: track('resumeAccount'),
-    ...overrides,
-  };
-}
 
 // A helper that never upgrades: it answers 426 so a test can tell the route was reached.
 const noUpgrade = defineWebSocketHelper(() => new Response(null, { status: 426 }));
@@ -316,6 +169,70 @@ describe('API', () => {
       protocolVersion: PROTOCOL_VERSION,
       startedAt: startedAt.toISOString(),
       commit: null,
+      devUiOrigin: null,
+    });
+  });
+
+  it("names on /health the dev UI origin the builder opted in, for Open Page's hand-off", async () => {
+    const res = await createApp({
+      startedAt,
+      allowedOrigins: ['http://localhost:1420'],
+      devUiOrigin: 'http://localhost:1420',
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      onUnexpectedError: () => undefined,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    }).request('/health');
+    expect(HealthResponse.parse(await res.json()).devUiOrigin).toBe('http://localhost:1420');
+  });
+
+  describe("the dev UI's read-only token", () => {
+    const DEV_TOKEN = 'dev-ui-token-for-tests';
+    const devApp = (devUiToken: string | null) =>
+      createApp({
+        startedAt,
+        allowedOrigins: ['http://localhost:1420'],
+        devUiOrigin: devUiToken === null ? null : 'http://localhost:1420',
+        devUi: devUiToken === null ? null : { token: devUiToken, mayRead: devUiMayRead },
+        token: TOKEN,
+        services: stubServices(),
+        upgradeWebSocket: noUpgrade,
+        onUnexpectedError: () => undefined,
+        mcp: () => Promise.resolve(new Response('mcp')),
+      });
+    const as = (token: string, method = 'GET') => ({
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    it.each([
+      { name: 'a read of what a page shows', path: '/projects', method: 'GET', status: 200 },
+      { name: 'any write', path: '/projects', method: 'POST', status: 403 },
+      {
+        name: "a read that moves a goal's mark",
+        path: `/goals/${mintId('Goal')}/digest`,
+        method: 'GET',
+        status: 403,
+      },
+      { name: 'a read that runs a command', path: '/system', method: 'GET', status: 403 },
+      { name: 'its own connection', path: '/dev-ui/connection', method: 'GET', status: 403 },
+      { name: "the builder's trust settings", path: '/settings/trust', method: 'GET', status: 403 },
+      {
+        name: "a project's trust preview",
+        path: `/projects/${mintId('Project')}/trust`,
+        method: 'GET',
+        status: 403,
+      },
+    ])('$name: $status', async ({ path, method, status }) => {
+      expect((await devApp(DEV_TOKEN).request(path, as(DEV_TOKEN, method))).status).toBe(status);
+    });
+
+    it('is handed to the app over its full token only, and exists only with a dev UI origin', async () => {
+      const res = await devApp(DEV_TOKEN).request('/dev-ui/connection', auth);
+      expect(DevUiConnectionDto.parse(await res.json())).toEqual({ token: DEV_TOKEN });
+      expect((await devApp(null).request('/dev-ui/connection', auth)).status).toBe(404);
+      expect((await devApp(null).request('/projects', as(DEV_TOKEN))).status).toBe(401);
     });
   });
 
@@ -504,6 +421,63 @@ describe('API', () => {
     expect(await res.text()).toContain('Fix login');
   });
 
+  it("passes a project's app address to the patch, and refuses one that is not on this Mac", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (appUrl: string | null) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify({ appUrl }),
+      });
+    expect((await patch('http://localhost:5173')).status).toBe(409);
+    expect((await patch(null)).status).toBe(409);
+    const refused = await patch('http://example.com');
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain('An app address is an http origin on this Mac');
+    expect(sent).toEqual([{ appUrl: 'http://localhost:5173' }, { appUrl: null }]);
+  });
+
+  it("passes a project's picture settings to the patch: a blank dev login is none, and a matrix over the cap is refused", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (body: unknown) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ devLoginCommand: '  \n ' })).status).toBe(409);
+    expect((await patch({ devLoginCommand: 'uv run manage.py dev_login' })).status).toBe(409);
+    const viewport = (width: number) => ({ width, height: 900 });
+    const over = await patch({
+      screens: {
+        viewports: [viewport(1440), viewport(768), viewport(390)],
+        themes: ['light', 'dark'],
+      },
+    });
+    expect(over.status).toBe(400);
+    const refusal = await over.text();
+    expect(refusal).toContain('screens');
+    expect(refusal).toContain('at most 4 pictures');
+    expect(sent).toEqual([
+      { devLoginCommand: null },
+      { devLoginCommand: 'uv run manage.py dev_login' },
+    ]);
+  });
+
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
     const boom = new Error('boom');
     const seen: unknown[] = [];
@@ -674,6 +648,20 @@ describe('team, routing and benchmark routes', () => {
       service: 'syncBenchmarks',
     },
     {
+      name: 'PUT /benchmarks/key',
+      method: 'PUT',
+      path: '/benchmarks/key',
+      body: { key: 'aa-key' },
+      service: 'setBenchmarkKey',
+    },
+    {
+      name: 'DELETE /benchmarks/key',
+      method: 'DELETE',
+      path: '/benchmarks/key',
+      body: undefined,
+      service: 'removeBenchmarkKey',
+    },
+    {
       name: 'GET /benchmarks/models',
       method: 'GET',
       path: '/benchmarks/models',
@@ -681,6 +669,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'listAaModels',
     },
     { name: 'GET /models', method: 'GET', path: '/models', body: undefined, service: 'listModels' },
+    {
+      name: 'GET /models/picks',
+      method: 'GET',
+      path: `/models/picks?account=${mintId('Account')}`,
+      body: undefined,
+      service: 'modelPicks',
+    },
     {
       name: 'GET /models/offers',
       method: 'GET',
@@ -774,6 +769,83 @@ describe('team, routing and benchmark routes', () => {
       path: `/tasks/${taskId}`,
       body: { riskTags: ['auth'] },
       service: 'patchTask',
+    },
+    {
+      name: 'GET /passes/:id/tasks/:id/take-out',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/take-out`,
+      body: undefined,
+      service: 'takeOutPreview',
+    },
+    {
+      name: 'POST /passes/:id/tasks/:id/take-out',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/take-out`,
+      body: { shared: [{ seq: 0, choice: 'keep' }] },
+      service: 'takeOutPage',
+    },
+    {
+      name: 'POST /passes/:id/abandon',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/abandon`,
+      body: undefined,
+      service: 'abandonPass',
+    },
+    {
+      name: 'GET /passes/:id/close',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/close`,
+      body: undefined,
+      service: 'passClosePreview',
+    },
+    {
+      name: 'POST /passes/:id/close',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/close`,
+      body: { token: 't', pages: [], files: [], shared: [] },
+      service: 'closePass',
+    },
+    {
+      name: 'POST /passes/:id/close/continue',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/close/continue`,
+      body: undefined,
+      service: 'continueClose',
+    },
+    {
+      name: 'POST /passes/:id/tasks/:id/sign-off',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/sign-off`,
+      body: {},
+      service: 'signOffPage',
+    },
+    {
+      name: 'DELETE /passes/:id/tasks/:id/sign-off',
+      method: 'DELETE',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/sign-off`,
+      body: undefined,
+      service: 'cancelSignOff',
+    },
+    {
+      name: 'GET /passes/:id/pull-request',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/pull-request`,
+      body: undefined,
+      service: 'passPullRequest',
+    },
+    {
+      name: 'POST /passes/:id/pull-request',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/pull-request`,
+      body: undefined,
+      service: 'openPassPullRequest',
+    },
+    {
+      name: 'POST /tasks/:id/thread/:id/send-to-agent',
+      method: 'POST',
+      path: `/tasks/${taskId}/thread/checks/send-to-agent`,
+      body: undefined,
+      service: 'sendToAgent',
     },
     {
       name: 'GET /tasks/:id/step-plan',
@@ -873,6 +945,27 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { allowedCommands: ['node'] },
+    },
+    {
+      name: 'two page areas that can share a file',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: {
+        areas: [
+          { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+          { name: 'pages', globs: ['app/**/page.tsx'], role: 'page' },
+        ],
+      },
+    },
+    {
+      name: 'a route on an area that is not a page',
+      method: 'POST',
+      path: '/projects',
+      body: {
+        name: 'demo',
+        repoPath: '/tmp/demo',
+        areas: [{ name: 'ui', globs: ['ui/**'], role: 'shared', route: '/' }],
+      },
     },
     {
       name: 'a PATCH /projects/:id seed name with a slash',
@@ -1193,6 +1286,7 @@ describe('shape routes', () => {
     proposeUnlocked: false,
     round: 0,
     model: null,
+    importedAt: null,
     createdAt: AT,
     updatedAt: AT,
   } as const;
@@ -1252,13 +1346,14 @@ describe('shape routes', () => {
     const goalId = mintId('Goal');
     const taskId = mintId('Task');
     const services = stubServices({
-      getGoalShape: (id) => ({ shapeId: id === goalId ? shapeId : null }),
-      getTaskShape: () => ({ shapeId: null }),
+      getGoalShape: (id) =>
+        id === goalId ? { shapeId, title: 'Remote host' } : { shapeId: null, title: null },
+      getTaskShape: () => ({ shapeId: null, title: null }),
     });
     const goal = await app(services).request(`/goals/${goalId}/shape`, auth);
-    expect(await goal.json()).toEqual({ shapeId });
+    expect(await goal.json()).toEqual({ shapeId, title: 'Remote host' });
     const task = await app(services).request(`/tasks/${taskId}/shape`, auth);
-    expect(await task.json()).toEqual({ shapeId: null });
+    expect(await task.json()).toEqual({ shapeId: null, title: null });
   });
 
   it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {
@@ -1363,7 +1458,7 @@ describe('shape routes', () => {
       shape,
       models: {
         default: 'claude-opus-5-5',
-        offered: [{ model: 'claude-opus-5-5', tier: 'strongest' as const }],
+        offered: [{ model: 'claude-opus-5-5', tier: 'capable' as const }],
       },
       messages: [],
       proposals: [],
@@ -2058,15 +2153,18 @@ describe('judge routes', () => {
       service: 'patchJudge',
     },
     {
-      route: 'PUT /judge/key',
-      method: 'PUT',
-      path: '/judge/key',
-      body: { key: 'a-key' },
-      service: 'setJudgeKey',
+      route: 'POST /accounts/:id/test',
+      method: 'POST',
+      path: `/accounts/${mintId('Account')}/test`,
+      service: 'testAccount',
     },
-    { route: 'DELETE /judge/key', method: 'DELETE', path: '/judge/key', service: 'removeJudgeKey' },
-    { route: 'POST /judge/test', method: 'POST', path: '/judge/test', service: 'testJudge' },
     { route: 'GET /judge/calls', method: 'GET', path: '/judge/calls', service: 'listJudgeCalls' },
+    {
+      route: 'GET /judge/models',
+      method: 'GET',
+      path: '/judge/models',
+      service: 'listDecisionModels',
+    },
   ])('$route reaches $service behind the token', async ({ method, path, body, service }) => {
     const init = { ...json, method, ...(body ? { body: JSON.stringify(body) } : {}) };
     expect((await app().request(path, { method })).status).toBe(401);
@@ -2082,9 +2180,7 @@ describe('judge routes', () => {
       '/judge',
       { decisions: { review_size: { floor: 2 } } },
     ],
-    ['PUT /judge/key with an empty key', 'PUT', '/judge/key', { key: '' }],
-    ['PUT /judge/key with a space in the key', 'PUT', '/judge/key', { key: 'a b' }],
-    ['PUT /judge/key with an extra field', 'PUT', '/judge/key', { key: 'a-key', more: 1 }],
+    ['PATCH /judge with an account that is no id', 'PATCH', '/judge', { accountId: 'nope' }],
   ])('answers 400 for %s without reaching a service', async (_name, method, path, body) => {
     const res = await app().request(path, { ...json, method, body: JSON.stringify(body) });
     expect(res.status).toBe(400);

@@ -1,4 +1,4 @@
-import { AccountKind, type Effort, type SupportedAccountKind } from '@10db/contracts';
+import { AccountKind, type Effort, type AgentAccountKind } from '@10db/contracts';
 import type { NewAccountModel } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
@@ -59,7 +59,7 @@ const row = (
 
 interface Case {
   name: string;
-  kind: SupportedAccountKind;
+  kind: AgentAccountKind;
   models: SeenModel[];
   catalogue?: Catalogue;
   expected: NewAccountModel[];

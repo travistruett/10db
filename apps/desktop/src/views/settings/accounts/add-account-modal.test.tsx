@@ -10,15 +10,46 @@ import {
   DEFAULT_ACCOUNT,
 } from '../../../test/account-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
+import { judgeStatusDto, serveJudge } from '../../../test/judge-fixtures';
 
 interface Served {
   readonly posts: unknown[];
+  /** The key requests, each as sent. */
+  readonly after: string[];
+  readonly judgeRequests: readonly { method: string; body: unknown }[];
 }
 
-function serve(refusal?: { status: number; message: string }): Served {
+function serve(
+  refusal?: { status: number; message: string },
+  opts: {
+    judgeAccountId?: AccountId | null;
+    /** False: the judge names an account the daemon no longer resolves, so its status has none. */
+    judgeAccountResolves?: boolean;
+    secretRefusal?: string;
+  } = {},
+): Served {
   const posts: unknown[] = [];
+  const after: string[] = [];
   const live: AccountDto[] = [DEFAULT_ACCOUNT];
+  const judgeRequests = serveJudge({
+    status: judgeStatusDto({
+      config: { ...judgeStatusDto().config, accountId: opts.judgeAccountId ?? null },
+      account:
+        opts.judgeAccountId == null || opts.judgeAccountResolves === false
+          ? null
+          : { id: opts.judgeAccountId, label: 'Other', secretSet: true, secretState: 'set' },
+    }),
+    accounts: live,
+  });
   server.use(
+    http.put(daemonUrl('/accounts/:accountId/secret'), async ({ request, params }) => {
+      after.push(`PUT secret ${JSON.stringify(await request.json())}`);
+      if (opts.secretRefusal !== undefined)
+        return HttpResponse.json({ message: opts.secretRefusal }, { status: 409 });
+      const account = live.find((a) => a.id === params['accountId']);
+      if (!account) return HttpResponse.json({ message: 'unknown' }, { status: 404 });
+      return HttpResponse.json({ ...account, secretSet: true });
+    }),
     http.get(daemonUrl('/accounts'), () => HttpResponse.json(live)),
     http.post(daemonUrl('/accounts'), async ({ request }) => {
       const body: unknown = await request.json();
@@ -29,7 +60,7 @@ function serve(refusal?: { status: number; message: string }): Served {
       const account = accountDto({
         kind: input.kind,
         label: input.label,
-        settings: input.settings,
+        settings: 'settings' in input ? input.settings : {},
       });
       live.push(account);
       return HttpResponse.json(
@@ -52,7 +83,7 @@ function serve(refusal?: { status: number; message: string }): Served {
     ...baseHandlers(),
   );
   renderApp('/settings/accounts');
-  return { posts };
+  return { posts, after, judgeRequests };
 }
 
 async function openModal(kindLabel: string) {
@@ -157,6 +188,132 @@ describe('AddAccountModal', () => {
     fireEvent.keyDown(drawer, { key: 'Escape' });
     await waitFor(() => {
       expect(document.activeElement).toBe(add);
+    });
+  });
+
+  describe('an OpenRouter key', () => {
+    const KEY = 'sk-or-v1-the-key-typed-here';
+    const typeKey = (dialog: HTMLElement) => {
+      fireEvent.change(within(dialog).getByLabelText('OpenRouter key', { selector: 'input' }), {
+        target: { value: KEY },
+      });
+    };
+    const patches = (served: Served) => served.judgeRequests.filter((r) => r.method === 'PATCH');
+
+    it('says what the account pays for in place of sessions', async () => {
+      serve();
+      const dialog = await openModal('OpenRouter key');
+      expect(within(dialog).getByText("Pays for decisions. Can't run agents yet.")).toBeTruthy();
+      expect(within(dialog).queryByText('What pays for the sessions.')).toBeNull();
+    });
+
+    it('takes a label, a payer and a key only, then runs decisions on it when they run on none', async () => {
+      const served = serve();
+      const dialog = await openModal('OpenRouter key');
+      expect(within(dialog).queryByRole('textbox', { name: 'Lane cap' })).toBeNull();
+      const run = within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' });
+      await waitFor(() => {
+        expect(run).toHaveProperty('checked', true);
+      });
+      type(dialog, 'Label', 'OpenRouter');
+      typeKey(dialog);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      await screen.findByRole('dialog', { name: /OpenRouter/ });
+      expect(served.posts).toEqual([{ kind: 'openrouter', label: 'OpenRouter', payer: '' }]);
+      expect(served.after).toEqual([`PUT secret ${JSON.stringify({ secret: KEY })}`]);
+      await waitFor(() => {
+        expect(patches(served)).toEqual([
+          expect.objectContaining({ body: { accountId: expect.any(String) as unknown } }),
+        ]);
+      });
+    });
+
+    it('leaves decisions where they are when the box is off or decisions already run on an account', async () => {
+      const other = AccountId.parse(accountDto({ kind: 'openrouter', label: 'Other' }).id);
+      const served = serve(undefined, { judgeAccountId: other });
+      const dialog = await openModal('OpenRouter key');
+      const run = within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' });
+      await waitFor(() => {
+        expect(run).toHaveProperty('checked', false);
+      });
+      type(dialog, 'Label', 'Spare');
+      typeKey(dialog);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      await screen.findByRole('dialog', { name: /Spare/ });
+      expect(served.after).toHaveLength(1);
+      expect(patches(served)).toEqual([]);
+    });
+
+    it('keeps the account and says the key was not saved, without touching decisions', async () => {
+      const served = serve(undefined, { secretRefusal: 'The Keychain refused the write' });
+      const dialog = await openModal('OpenRouter key');
+      await waitFor(() => {
+        expect(
+          within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' }),
+        ).toHaveProperty('checked', true);
+      });
+      type(dialog, 'Label', 'OpenRouter');
+      typeKey(dialog);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      expect(await within(dialog).findByText(/key wasn.t saved.*Keychain refused/)).toBeTruthy();
+      expect(patches(served)).toEqual([]);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Open Account' }));
+      const drawer = await screen.findByRole('dialog', { name: /OpenRouter/ });
+      expect(await within(drawer).findByText('No secret yet')).toBeTruthy();
+      expect(served.posts).toHaveLength(1);
+    });
+
+    it('trims the key before sending it', async () => {
+      const served = serve();
+      const dialog = await openModal('OpenRouter key');
+      type(dialog, 'Label', 'OpenRouter');
+      fireEvent.change(within(dialog).getByLabelText('OpenRouter key', { selector: 'input' }), {
+        target: { value: `  ${KEY}\n` },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      await screen.findByRole('dialog', { name: /OpenRouter/ });
+      expect(served.after).toEqual([`PUT secret ${JSON.stringify({ secret: KEY })}`]);
+    });
+
+    it('defaults the box on when the account decisions name no longer resolves', async () => {
+      const gone = AccountId.parse(accountDto({ kind: 'openrouter' }).id);
+      serve(undefined, { judgeAccountId: gone, judgeAccountResolves: false });
+      const dialog = await openModal('OpenRouter key');
+      const run = within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' });
+      await waitFor(() => {
+        expect(run).toHaveProperty('checked', true);
+      });
+    });
+
+    it('says the key was saved when only switching decisions over failed', async () => {
+      serve();
+      server.use(
+        http.patch(daemonUrl('/judge'), () =>
+          HttpResponse.json({ message: 'Account is archived' }, { status: 400 }),
+        ),
+      );
+      const dialog = await openModal('OpenRouter key');
+      await waitFor(() => {
+        expect(
+          within(dialog).getByRole('checkbox', { name: 'Run decisions on this account' }),
+        ).toHaveProperty('checked', true);
+      });
+      type(dialog, 'Label', 'OpenRouter');
+      typeKey(dialog);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      expect(
+        await within(dialog).findByText(/key was saved.*decisions weren.t switched.*archived/),
+      ).toBeTruthy();
+    });
+
+    it('clears the key field before the request answers', async () => {
+      serve();
+      const dialog = await openModal('OpenRouter key');
+      type(dialog, 'Label', 'OpenRouter');
+      typeKey(dialog);
+      const field = within(dialog).getByLabelText('OpenRouter key', { selector: 'input' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      expect((field as HTMLInputElement).value).toBe('');
     });
   });
 });

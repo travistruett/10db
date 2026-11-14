@@ -1,4 +1,4 @@
-import { GoalId, PrincipleId, ShapeId, TaskId } from '@10db/contracts';
+import { GoalId, PrincipleId, ProjectId, ShapeId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -13,9 +13,14 @@ import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
+import { recordSearch } from './views/shape/record/record-tabs';
+import { RecordView } from './views/shape/record/record-view';
 import { ShapeView } from './views/shape/shape-view';
+import { settingsSearch } from './views/settings/focus-target';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
+import { workbenchSearch } from './views/workbench/workbench-search';
+import { WorkbenchView } from './views/workbench/workbench-view';
 
 function FactoryPage() {
   return (
@@ -49,6 +54,14 @@ function BoardPage() {
   );
 }
 
+function WorkbenchPage() {
+  return (
+    <ViewBoundary name="UI Workbench">
+      <WorkbenchView />
+    </ViewBoundary>
+  );
+}
+
 function SettingsPage() {
   return (
     <ViewBoundary name="Settings">
@@ -75,6 +88,26 @@ function ShapePage() {
   );
 }
 
+function RecordPage() {
+  const { shapeId } = recordRoute.useParams();
+  const search = recordRoute.useSearch();
+  const navigate = recordRoute.useNavigate();
+  const id = ShapeId.safeParse(shapeId);
+  return (
+    <ViewBoundary name="Record">
+      {id.success ? (
+        <RecordView
+          shapeId={id.data}
+          search={search}
+          onSearch={(next) => {
+            void navigate({ search: next });
+          }}
+        />
+      ) : null}
+    </ViewBoundary>
+  );
+}
+
 const rootRoute = createRootRoute({ component: AppLayout, errorComponent: AppError });
 
 const indexRoute = createRoute({
@@ -86,13 +119,19 @@ const indexRoute = createRoute({
     throw redirect({ to: '/factory' });
   },
 });
+/** A global view's project filter: absent shows every project. */
+function projectFilter(search: Record<string, unknown>): { project?: ProjectId } {
+  const project = ProjectId.safeParse(search['project']);
+  return project.success ? { project: project.data } : {};
+}
+
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
   // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
-  validateSearch: (search: Record<string, unknown>): { goal?: GoalId } => {
+  validateSearch: (search: Record<string, unknown>): { goal?: GoalId; project?: ProjectId } => {
     const goal = GoalId.safeParse(search['goal']);
-    return goal.success ? { goal: goal.data } : {};
+    return { ...(goal.success ? { goal: goal.data } : {}), ...projectFilter(search) };
   },
   component: FactoryPage,
 });
@@ -112,10 +151,28 @@ const shapeRoute = createRoute({
   },
   component: ShapePage,
 });
+// A Plan's record: `tab`, `doc`, `rev` and `section` say what is open, each kept only when it parses.
+const recordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/shape/$shapeId/record',
+  beforeLoad: ({ params }) => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    if (!ShapeId.safeParse(params.shapeId).success) throw redirect({ to: '/shape' });
+  },
+  validateSearch: recordSearch,
+  component: RecordPage,
+});
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
+  validateSearch: projectFilter,
   component: InboxPage,
+});
+const workbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workbench',
+  validateSearch: workbenchSearch,
+  component: WorkbenchPage,
 });
 const knowledgeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -164,6 +221,8 @@ const settingsIndexRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings/$section',
+  // `focus` names the card to scroll to and focus, so a link from elsewhere lands on it.
+  validateSearch: settingsSearch,
   beforeLoad: ({ params }) => {
     if (!isSettingsSectionKey(params.section))
       // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
@@ -178,7 +237,9 @@ const routeTree = rootRoute.addChildren([
   factoryRoute,
   newShapeRoute,
   shapeRoute,
+  recordRoute,
   inboxRoute,
+  workbenchRoute,
   knowledgeRoute,
   tasksRoute,
   settingsIndexRoute,

@@ -463,6 +463,37 @@ describe('accounts over HTTP', () => {
   });
 });
 
+describe('an OpenRouter account over HTTP', () => {
+  it('has no directory and no lanes, and no project may run agents or back up on it', async () => {
+    const repo = createTempRepo();
+    try {
+      const { api } = await start();
+      const { account, signIn } = await api.post('/accounts', AccountCreatedDto, {
+        kind: 'openrouter',
+        label: 'OpenRouter',
+      });
+      expect(signIn).toBeNull();
+      expect(account).toMatchObject({ kind: 'openrouter', configDir: null, laneCap: 0 });
+      expect(existsSync(join(data.path, 'accounts', account.id))).toBe(false);
+      const project = await api.post('/projects', ProjectDto, projectBody(repo.path));
+      for (const body of [{ accountId: account.id }, { fallbackAccountId: account.id }]) {
+        const res = await fetch(`${daemon?.url ?? ''}/projects/${project.id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${daemon?.token ?? ''}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("OpenRouter can't run agents yet");
+      }
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe('account identity over HTTP', () => {
   const identityOf = async (api: Api, id: string) =>
     api.get(`/accounts/${id}/identity`, AccountIdentityDto);

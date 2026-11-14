@@ -56,6 +56,10 @@ export type PrMergeable = (typeof PrMergeable)[keyof typeof PrMergeable];
 export interface PullRequest {
   readonly url: string;
   readonly state: PrState;
+  /** Whether the pull request is a draft; null when gh gives none. */
+  readonly isDraft: boolean | null;
+  /** The branch it targets; null when gh gives none. */
+  readonly baseRef: string | null;
 }
 
 /**
@@ -83,6 +87,10 @@ export interface PullRequestStatus {
    * whose runs never started from a base that has no CI.
    */
   readonly blockedOnChecks: boolean;
+  /** Whether the pull request is a draft; null when gh gives none. */
+  readonly isDraft: boolean | null;
+  /** The branch it targets; null when gh gives none. */
+  readonly baseRef: string | null;
 }
 
 export const MergeBlocked = { Conflicts: 'conflicts', Behind: 'behind' } as const;
@@ -123,6 +131,11 @@ export interface Gh {
   authStatus(call: GhCall): Promise<void>;
   /** The signed-in login, or null when gh is signed out. Throws on anything else (no network, a timeout). */
   authLogin(call: GhCall): Promise<string | null>;
+  /**
+   * The signed-in account's no-reply commit address, `<id>+<login>@users.noreply.github.com`, which a
+   * push GitHub's email privacy guards accepts. Throws a GhError when it can't be read.
+   */
+  noreplyEmail(call: GhCall): Promise<string>;
   prView(
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
@@ -171,9 +184,29 @@ export interface Gh {
       readonly head: string;
       readonly title: string;
       readonly bodyFile: string;
+      /** Opens it as a draft, as a Workbench pass's pull request opens before the pass closes. */
+      readonly draft?: boolean;
     },
     call: GhCall,
   ): Promise<string>;
+  /** Marks a draft pull request ready for review. Throws a GhError with GitHub's reason when it refuses. */
+  prReady(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
+  /**
+   * Moves the pull request onto another base branch, as a stacked pass's does once the pass it was
+   * based on merges (D24). Throws a GhError with GitHub's reason when it refuses.
+   */
+  prEditBase(
+    input: { readonly repo: string; readonly url: string; readonly base: string },
+    call: GhCall,
+  ): Promise<void>;
+  /**
+   * Rewrites the pull request's body from a file, as a Workbench pass's does once its gate has run.
+   * Throws a GhError with GitHub's reason when it refuses.
+   */
+  prEditBody(
+    input: { readonly repo: string; readonly url: string; readonly bodyFile: string },
+    call: GhCall,
+  ): Promise<void>;
   /**
    * Whether the open pull request waits in its base's merge queue. A push to its branch takes it out
    * of the queue, so 10db pushes nothing to one that does. Throws a GhError, never answers `false`,
@@ -218,7 +251,7 @@ const NO_PR = /no pull requests found/i;
  * 'owner/name'. (repository)` when the repository is gone or closed to the account.
  */
 const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
-const SIGNED_OUT = /gh auth login|not logged in/i;
+const SIGNED_OUT = /gh auth login|not logged in|HTTP 401|Bad credentials/i;
 /**
  * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
  * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out, a
@@ -242,11 +275,34 @@ export interface GhTools {
   readonly git: string;
 }
 
+/** What a builder does about a signed-out gh: the card in Settings runs the login, no terminal. */
+export const SIGN_IN_IN_SETTINGS = 'Sign in to GitHub in Settings › Integrations.';
+
 const notInstalled = (): GhError =>
   new GhError(
     GhFailure.NotInstalled,
-    `10db found no gh in ${INSTALL_PREFIXES_TEXT}. Install the GitHub CLI (brew install gh) and sign in with gh auth login.`,
+    `10db found no gh in ${INSTALL_PREFIXES_TEXT}. Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS}`,
   );
+
+/**
+ * The environment every gh the daemon runs gets: the login environment without a hook's `GIT_DIR` or
+ * anything that steers Xcode's shim, prompts off, the daemon's own git first on PATH and its own git
+ * config.
+ */
+export function ghEnvironment(
+  tools: Pick<GhTools, 'git'>,
+  login: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const given = Object.fromEntries(
+    Object.entries(withoutGitRepoEnv(login)).filter(([name]) => !XCODE_SELECTORS.includes(name)),
+  );
+  const loginPath = given['PATH'];
+  return withDaemonGitConfig({
+    ...given,
+    ...NO_PROMPTS,
+    PATH: loginPath ? `${dirname(tools.git)}${delimiter}${loginPath}` : dirname(tools.git),
+  });
+}
 
 /**
  * Runs `tools.gh` in an empty directory of its own, so it finds no repository and runs no git in a
@@ -265,17 +321,7 @@ export function createSystemGhExec(tools: GhTools): GhExec {
       const done = (): void => {
         rmSync(cwd, { recursive: true, force: true });
       };
-      const given = Object.fromEntries(
-        Object.entries(withoutGitRepoEnv(call.env)).filter(
-          ([name]) => !XCODE_SELECTORS.includes(name),
-        ),
-      );
-      const loginPath = given['PATH'];
-      const env = withDaemonGitConfig({
-        ...given,
-        ...NO_PROMPTS,
-        PATH: loginPath ? `${dirname(tools.git)}${delimiter}${loginPath}` : dirname(tools.git),
-      });
+      const env = ghEnvironment(tools, call.env);
       execFile(
         gh,
         [...args],
@@ -328,7 +374,16 @@ export function createSystemGhExec(tools: GhTools): GhExec {
     });
 }
 
-const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
+/** A field gh may leave out or print empty reads as null. */
+const nullIfAbsent = <T>(value: T | null | undefined): T | null =>
+  value === undefined || value === null || value === '' ? null : value;
+
+const PrView = z.object({
+  url: z.url(),
+  state: z.enum(PrState),
+  isDraft: z.boolean().nullish().transform(nullIfAbsent),
+  baseRefName: z.string().nullish().transform(nullIfAbsent),
+});
 /** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
 const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
 
@@ -435,6 +490,8 @@ const PrStatusView = z.object({
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
   mergeStateStatus: z.string().nullish(),
   reviewDecision: z.string().nullish(),
+  isDraft: z.boolean().nullish().transform(nullIfAbsent),
+  baseRefName: z.string().nullish().transform(nullIfAbsent),
 });
 
 /** Review decisions that make a BLOCKED pull request wait for a person, not for a check. */
@@ -500,10 +557,7 @@ export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
 export { failure as ghFailureOf };
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
-    return new GhError(
-      GhFailure.SignedOut,
-      'gh is not signed in. Run gh auth login in a terminal.',
-    );
+    return new GhError(GhFailure.SignedOut, `gh is not signed in. ${SIGN_IN_IN_SETTINGS}`);
   return new GhError(
     UNREACHABLE.test(out.stderr) ? GhFailure.Unreachable : GhFailure.Failed,
     `gh ${args.slice(0, 2).join(' ')} failed (exit ${String(out.exitCode)}): ${out.stderr.trim().slice(0, 500)}`,
@@ -604,6 +658,9 @@ function actionsId(kind: string, id: string, args: readonly string[]): void {
     );
 }
 
+/** GitHub's no-reply commit address: the account's number and its login. */
+const NoreplyEmail = z.string().regex(/^\d+\+[A-Za-z0-9-]+@users\.noreply\.github\.com$/);
+
 /** A login is one word of letters, digits, hyphens and underscores; gh prints `null` for none. */
 const GithubLogin = z
   .string()
@@ -644,10 +701,7 @@ export function createGh(exec: GhExec): Gh {
     async authStatus(call) {
       const out = await exec(['auth', 'status', '--active'], call);
       if (out.exitCode !== 0)
-        throw new GhError(
-          GhFailure.SignedOut,
-          'gh is not signed in. Run gh auth login in a terminal.',
-        );
+        throw new GhError(GhFailure.SignedOut, `gh is not signed in. ${SIGN_IN_IN_SETTINGS}`);
     },
     async authLogin(call) {
       const args = ['api', 'user', '--jq', '.login'];
@@ -663,12 +717,22 @@ export function createGh(exec: GhExec): Gh {
         throw new GhError(GhFailure.Failed, "gh api user printed a login 10db can't read");
       return login.data;
     },
+    async noreplyEmail(call) {
+      const args = ['api', 'user', '--jq', '"\\(.id)+\\(.login)@users.noreply.github.com"'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0) throw failure(args, out);
+      const email = NoreplyEmail.safeParse(out.stdout.trim());
+      if (!email.success)
+        throw new GhError(GhFailure.Failed, "gh api user printed an account 10db can't read");
+      return email.data;
+    },
     async prView({ repo, ref }, call) {
-      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state'];
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,isDraft,baseRefName'];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
       if (out.exitCode !== 0) throw failure(args, out);
-      return parseOutput(PrView, args, out.stdout);
+      const view = parseOutput(PrView, args, out.stdout);
+      return { url: view.url, state: view.state, isDraft: view.isDraft, baseRef: view.baseRefName };
     },
     async prStatus({ repo, ref }, call) {
       const args = [
@@ -678,7 +742,7 @@ export function createGh(exec: GhExec): Gh {
         '-R',
         repo,
         '--json',
-        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision',
+        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision,isDraft,baseRefName',
       ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
@@ -693,6 +757,8 @@ export function createGh(exec: GhExec): Gh {
         blockedOnChecks:
           view.mergeStateStatus === 'BLOCKED' && !REVIEW_PENDING.has(view.reviewDecision ?? ''),
         mergeable: view.mergeable,
+        isDraft: view.isDraft,
+        baseRef: view.baseRefName,
         ...summariseChecks(view.statusCheckRollup ?? []),
       };
     },
@@ -731,7 +797,7 @@ export function createGh(exec: GhExec): Gh {
       const notes = parseOutput(AnnotationsView, noteArgs, await ok(noteArgs, call));
       return notes.some((note) => NOT_ACQUIRED.test(note.message ?? ''));
     },
-    async prCreate({ repo, base, head, title, bodyFile }, call) {
+    async prCreate({ repo, base, head, title, bodyFile, draft }, call) {
       const args = [
         'pr',
         'create',
@@ -745,6 +811,7 @@ export function createGh(exec: GhExec): Gh {
         title,
         '--body-file',
         bodyFile,
+        ...(draft === true ? ['--draft'] : []),
       ];
       // gh prints the new pull request's URL last; parse it, so a notice line is never recorded.
       const prUrl = prUrlIn(repo);
@@ -788,6 +855,15 @@ export function createGh(exec: GhExec): Gh {
     },
     async prMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--squash'], call);
+    },
+    async prReady({ repo, url }, call) {
+      await ok(['pr', 'ready', url, '-R', repo], call);
+    },
+    async prEditBase({ repo, url, base }, call) {
+      await ok(['pr', 'edit', url, '-R', repo, '--base', base], call);
+    },
+    async prEditBody({ repo, url, bodyFile }, call) {
+      await ok(['pr', 'edit', url, '-R', repo, '--body-file', bodyFile], call);
     },
   };
 }

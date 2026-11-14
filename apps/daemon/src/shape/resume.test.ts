@@ -250,12 +250,12 @@ describe('telling a reopened conversation which tasks mis-sized', () => {
     const off = must(convertTasks('a')[0], 'task');
     finishTask(off, 300);
     storeSdkSession();
-    const startShape = f.adapter.startShape.bind(f.adapter);
-    f.adapter.startShape = (): never => {
+    const realOpen = f.adapter.open.bind(f.adapter);
+    f.adapter.open = (): never => {
       throw new Error('Claude is not available');
     };
     await send('First.');
-    f.adapter.startShape = startShape;
+    f.adapter.open = realOpen;
 
     await f.restart();
     await send('Second.');
@@ -405,12 +405,12 @@ describe('telling a reopened conversation what Convert made', () => {
       patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
     });
     f.service.resume(shapeId(), 'Task a is done.');
-    const startShape = f.adapter.startShape.bind(f.adapter);
-    f.adapter.startShape = (): never => {
+    const realOpen = f.adapter.open.bind(f.adapter);
+    f.adapter.open = (): never => {
       throw new Error('Claude is not available');
     };
     await send('First.');
-    f.adapter.startShape = startShape;
+    f.adapter.open = realOpen;
 
     write((ctx) =>
       insertWorkstream(ctx, must(first, 'task'), {

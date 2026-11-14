@@ -27,8 +27,8 @@ import { createDrain } from '../self-update';
 import {
   FakeAdapter,
   type FakeShapeBehaviour,
+  type AgentSessionSpec,
   type FakeShapeTurn,
-  type ShapeSessionSpec,
 } from '../sessions';
 import {
   looseDraft,
@@ -148,10 +148,18 @@ describe('a message', () => {
     const session = must(adapter.shapeSessions[0], 'a session');
     expect(session.spec.prompt).toBe(`[m:${sent.id}] Make the board denser.`);
     expect(session.spec.resumeProviderSessionId).toBeNull();
-    expect(session.spec.shapeId).toBe(shapeId);
-    expect(session.spec.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent', 'WebSearch', 'WebFetch']);
-    expect(session.spec.disallowedTools).toContain('Bash');
-    expect(session.spec.systemPrompt).toMatch(/note_heard/);
+    expect(session.spec.profile.shapeId).toBe(shapeId);
+    expect(session.spec.profile.tools).toEqual([
+      'Read',
+      'Grep',
+      'Glob',
+      'Agent',
+      'WebSearch',
+      'WebFetch',
+      'Skill',
+    ]);
+    expect(session.spec.profile.disallowedTools).toContain('Bash');
+    expect(session.spec.profile.systemPrompt).toMatch(/note_heard/);
     const row = getSession(c.store.db, session.spec.sessionId);
     expect(row).toMatchObject({ shapeId, workstreamId: null, endedAt: null });
     reply.open();
@@ -274,14 +282,14 @@ describe('a message', () => {
   });
 
   it('ends the session row, so its token no longer works, when the adapter fails to start', async () => {
-    let spec: ShapeSessionSpec | null = null;
-    adapter.startShape = (s: ShapeSessionSpec): never => {
+    let spec: AgentSessionSpec | null = null;
+    adapter.open = (s: AgentSessionSpec): never => {
       spec = s;
       throw new Error('Claude is not available');
     };
     service.send(shapeId, 'Make the board denser.');
     await service.settled(shapeId);
-    const started = must(spec as ShapeSessionSpec | null, 'the spec startShape was given');
+    const started = must(spec as AgentSessionSpec | null, 'the spec open was given');
     const row = getSession(c.store.db, started.sessionId);
     expect(row.endedAt).not.toBeNull();
     expect(row.exitReason).toBe('start_failed');

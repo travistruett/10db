@@ -4,7 +4,7 @@ import { useFlows } from '../../daemon/queries';
 
 const ROLE_LABEL: Readonly<Record<StepRole, string>> = {
   [StepRole.Plan]: 'Plan',
-  [StepRole.PlanReview]: 'Plan review',
+  [StepRole.PlanReview]: 'Plan Review',
   [StepRole.Implement]: 'Build',
   [StepRole.Review]: 'Review',
   [StepRole.Qa]: 'QA',

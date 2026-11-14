@@ -26,7 +26,7 @@ const access: ShapeAccess = {
 };
 
 describe('the tool lists of a Shape session', () => {
-  it('offers only built-in tools that read, the Agent tool, and the two web tools only the researcher may call', () => {
+  it('offers only built-in tools that read, the Agent tool, the two web tools only the researcher may call, and Skill', () => {
     expect([...SHAPE_BUILT_IN_TOOLS]).toEqual([
       'Read',
       'Grep',
@@ -34,6 +34,7 @@ describe('the tool lists of a Shape session', () => {
       'Agent',
       'WebSearch',
       'WebFetch',
+      'Skill',
     ]);
   });
 

@@ -65,6 +65,8 @@ describe('load tolerance', () => {
   const REVIEWED_SHOULD_ADVANCE_TIME = new Set([
     // 2 s of slack before the second save and 1.5 s after it, around the 4 s "Saved" timer.
     'views/settings/project-general-form.test.tsx',
+    // The 60 s "just now" timer is advanced by hand past its end; real time adds seconds at most.
+    'views/settings/integrations/github-card.test.tsx',
   ]);
 
   it('every test that lets real time move fake timers is reviewed for slack', () => {

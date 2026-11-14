@@ -1,13 +1,16 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  TrustSurface,
   ClaimKind,
   ConflictError,
   currentStep,
   EventType,
+  type SessionActivityData,
   findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  RoutedBy,
   isModelTier,
   JudgeCallId,
   JudgeDecision,
@@ -30,6 +33,7 @@ import {
   type AccountModelDto,
   type AccountRefusal,
   type HandoffId,
+  type InboxAnswer,
   type InboxItemDto,
   type InboxItemId,
   type InboxTarget,
@@ -37,13 +41,37 @@ import {
   type ProjectId,
   type ReviewCardDetail,
   type SessionId,
+  type TaskMessageId,
   type WorkstreamId,
   type WorkstreamStep,
+  InvalidError,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  PASS_RETRY_TURN_CHOICE,
+  PassState,
+  PassTurnEnding,
+  PassTurnId,
+  JudgeKind,
   Provider,
+  agentKind,
   providerOf,
+  TakeOutStep,
+  type PassId,
+  type TaskId,
+  type TaskDto,
 } from '@10db/contracts';
+import {
+  buildTrustPolicy,
+  deniedNoticeText,
+  FloorReason,
+  floorNoticeText,
+  floorReason,
+  goAheadText,
+  judgeForCall,
+  offersAllowThis,
+  projectLiveSystems,
+  startingJudge,
+} from '../trust';
 import {
   activeClaims,
   clearLease,
@@ -52,31 +80,48 @@ import {
   getBatch,
   getJudgeConfig,
   getEvidence,
+  BUILDER_HANDLE,
   getInboxItem,
   getPersona,
   getProject,
   getSessionByProviderId,
   getTask,
+  getPassTurn,
+  getTaskMessageRow,
   getWorkstream,
   getWorkstreamRow,
   handoffForSession,
   insertDeviation,
   insertEvidence,
   insertRetryLimitFollowUp,
+  insertPassTurn,
   insertSession,
   insertSource,
+  insertSystemNotice,
+  listTaskThread,
+  offerAllowThis,
+  deleteSignOffWait,
+  lastTakeOut,
   listAccountModels,
   listModelProfiles,
   latestHandoffForStep,
+  latestPassTurn,
   latestToolOp,
   listPermissionRules,
   listSessions,
   listEvidence,
+  listTaskFileRows,
+  listUndeliveredTaskMessages,
   markSessionStarted,
+  markTaskFilesInline,
+  markTaskMessagePushedUnder,
   answeredCardsForTask,
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
+  openPassTurn,
+  passPageAreas,
   patchWorkstream,
+  questionRoutesForTask,
   recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
@@ -107,6 +152,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   PackReason,
+  recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
@@ -134,6 +180,7 @@ import {
   uncarriedSaid,
   type BaseUpdate,
   type BaseUpdates,
+  type DeliveryJobs,
   type FlakyTest,
   type MigrationsBase,
 } from '../delivery';
@@ -146,7 +193,7 @@ import {
   type Launcher,
   type SessionLaunch,
 } from '../environment';
-import type { Git } from '../git';
+import { createPassGitSession, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
@@ -159,7 +206,28 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
+import {
+  closeHoldsOf,
+  foldHandEdits,
+  keepTurnWork,
+  passFolderOn,
+  reopenSignedOffPage,
+  type PassWorkDeps,
+} from '../pass';
+import {
+  allowedToolsFor,
+  laneAutoMode,
+  matchesAllowedTool,
+  storableRule,
+  trustSwitchesFor,
+  warnInvalidTrust,
+} from '../permissions';
+import {
+  leftOutNote,
+  loadedLine,
+  planSessionSetup,
+  projectInstructionsLoaded,
+} from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
 import { resolveStep } from './resolve-step';
@@ -167,6 +235,7 @@ import {
   fileAccessJudge,
   SandboxProfileError,
   SandboxTempDirError,
+  type GateSandbox,
   type LaneSandbox,
   type LaneSession,
 } from '../sandbox';
@@ -174,8 +243,12 @@ import {
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
-  type SessionAdapter,
+  streamEventLogFields,
+  toolCallActivity,
+  type LanePermissionMode,
+  type AgentAdapter,
   type SessionHandle,
+  type ToolTarget,
   type TurnResult,
 } from '../sessions';
 import {
@@ -196,6 +269,8 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
+import { pictureLimitsFor } from '../screens';
+import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -207,7 +282,32 @@ import {
   reviewSizeRule,
   reviewSizeState,
 } from './review-size';
-import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
+import {
+  createLaneMessages,
+  outgoingMessage,
+  untakenMessages,
+  type LaneMessages,
+} from './lane-messages';
+import { PASS_TURN_DETAIL } from './pass-check';
+import {
+  endTurnSteps,
+  finishEndedTurn,
+  passOfWorkstream,
+  queueUntaken,
+  startTurn,
+} from './pass-turn';
+import { filesTouched, turnFilesSoFar } from './turn-files';
+import {
+  keepingFeedback,
+  nextActionAfterCrash,
+  nextActionOnAnotherAccount,
+  resumedSessionOf,
+  withUndelivered,
+} from './next-action';
+import { readBackThread, type ReadBack } from './read-back';
+import { takesPictures } from '../pictures';
+import { checkTaskAnchors } from '../plan-record';
+import { threadInlineBytes } from './thread-pictures';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -216,7 +316,8 @@ import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action'
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
-export type StopReason = 'cancelled' | 'paused' | 'shutdown';
+/** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
+export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
   readonly maxRecoveryAttempts: number;
@@ -229,6 +330,11 @@ export interface RunnerLimits {
   readonly backgroundMs: number;
   /** Gates running at once across the whole daemon. */
   readonly gateSlots: number;
+  /**
+   * How long a pass task's session waits after a turn ends with nothing more from the agent before
+   * it closes and frees its lane; the next message resumes it (Workbench spec §6.3, W14).
+   */
+  readonly warmIdleMs: number;
 }
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
@@ -238,22 +344,32 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   backgroundMs: 15 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
+  warmIdleMs: 10 * 60_000,
 };
 
 export interface RunnerOptions {
+  /** The daemon's resolved git and gh, which run a pass's commit, push or merge the builder allowed. */
+  readonly gitTools: { readonly git: string; readonly gh: string | null };
   /** Paths no session tool or command may touch. */
   readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly inbox: InboxService;
   /** Told when a step finds no model profile for its account, so the scheduler leaves that account's work alone. */
   readonly modelWait?: Pick<ModelListWait, 'hold'>;
   readonly git: Git;
+  /** The daemon's delivery jobs, which a pass task's kept work is written beside. */
+  readonly jobs: DeliveryJobs;
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
   /** Asked whether a review that is next in line is needed. */
   readonly judge: Judge;
+  /**
+   * A task's first launch waits here for its before picture (Workbench spec §10), for at most the
+   * pictures' own bound; absent, a launch waits for none.
+   */
+  readonly awaitBeforePicture?: (task: TaskDto, signal: AbortSignal) => Promise<void>;
   /**
    * Brings a task's base into its branch before a run that holds the migrations hazard from its
    * start; absent, it isn't.
@@ -270,7 +386,7 @@ export interface RunnerOptions {
   /** A craft skill's text, for a session that has no plugin to load it from; null when there is none. */
   skillBody(name: string): string | null;
   /** Builds each session's launch, and the env the gate runs in. */
-  readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
+  readonly launcher: Pick<Launcher, 'projectEnv' | 'session' | 'probe'>;
   /** Usage limits, refusals and the monthly cap, per account. */
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'> &
     Pick<AccountPreparer, 'prepare'> &
@@ -285,12 +401,21 @@ export interface RunnerOptions {
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
   /**
+   * The gate's sandbox, where a pass's commit or merge the builder allowed runs so its hooks are
+   * contained; absent or null, 10db runs no such commit or merge.
+   */
+  readonly gateSandbox?: GateSandbox | null;
+  /**
    * Where a ChatGPT lane's temp dir is made (`codexLaneTempRoot` of the home, as the daemon made it
    * private), apart from Claude lanes' and outside `/private/tmp`, which Codex opens to every lane.
    */
   readonly codexLaneTempRoot: string;
   /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
   readonly worktreeRoot: string;
+  /** The builder's home, whose instructions, skills and plugins come along into each session (Settings › Trust). */
+  readonly builderHome: string;
+  /** The roots lanes write outside their checkouts (their temp roots): no setup comes along from them. */
+  readonly laneWritableRoots: readonly string[];
   /**
    * While this holds (the Mac is overloaded, or an update drains the factory) no session or task gate
    * starts: each waits here, before anything is built or launched and before a gate takes its batch's
@@ -331,6 +456,12 @@ export interface Runner {
   idle(): Promise<void>;
   deliverParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
   /**
+   * Parks every live session with a wait on the card, including the sessions whose identical asks
+   * folded into it: a question routed to someone else is answered through its card, and the person's
+   * words never reach a running `ask_human` call. A session with no wait on it is left alone.
+   */
+  parkFor(inboxId: InboxItemId): void;
+  /**
    * The builder approved the work a gate-less task finished: it is done, with no session and no review
    * card. Runs inside the write that closes the card, and throws `ConflictError` for a workstream that
    * is not waiting for its check. The result runs once that write has committed.
@@ -343,7 +474,37 @@ export interface Runner {
    * check. The result runs once that write has committed.
    */
   sendBack(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
+  /**
+   * Hands the builder's message to a page of a pass (Workbench spec §6.3). A live session gets it at
+   * once, after the builder's hand edits are kept and named ahead of it, starting a turn unless one
+   * is open; with no session the page is queued to start one with it. The message's row is written.
+   */
+  deliverMessage(
+    taskId: TaskId,
+    messageId: TaskMessageId,
+    opts: { readonly redo: boolean },
+  ): Promise<void>;
+  /**
+   * The builder chose Retry Turn on a pass task's failed turn: a new turn starts from the failed
+   * one's message, in a fresh session. A flag that is not the page's failed turn is left alone.
+   */
+  retryTurn(item: InboxItemDto, answer: InboxAnswer): void;
+  /**
+   * Closes a pass task's warm session, freeing its lane, if the page is still Ready and no message
+   * waits for a turn: decided in one write, so a message that arrives first keeps it open.
+   */
+  closeWarm(id: WorkstreamId): Promise<void>;
+  /**
+   * Ends a pass lane's session, if any (Workbench spec §5.4, §6.3): a working turn is stopped as a
+   * stop does and closes as `stopped`, its work kept, with no Ready item and no notification; the
+   * page goes back to the queue resuming that session, and runs nothing until the builder writes.
+   * Resolves at once with no session.
+   */
+  stopPassLane(id: WorkstreamId): Promise<void>;
 }
+
+/** What the pass module is given to end a pass lane's session. */
+export type StopPassLane = Runner['stopPassLane'];
 
 type Outcome =
   | { readonly kind: 'handoff'; readonly handoffId: HandoffId }
@@ -422,6 +583,11 @@ type Outcome =
       readonly kind: 'stopped';
       readonly reason: StopReason;
       readonly providerSessionId: string | null;
+    }
+  | {
+      /** A pass task's session ended between its turns: the page waits for the builder as it was. */
+      readonly kind: 'closed';
+      readonly providerSessionId: string | null;
     };
 
 type Terminal = Exclude<
@@ -441,6 +607,24 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
 };
 
 /** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
+/**
+ * Whether a question card, read afresh, goes to someone other than the builder. A card still waiting
+ * for triage is the builder's until it is routed.
+ */
+function routedAwayFromBuilder(db: DbReader, item: InboxItemDto): boolean {
+  let card = item;
+  try {
+    card = getInboxItem(db, item.id);
+  } catch {
+    // A card gone from the store is judged by the copy the ask returned.
+  }
+  return (
+    card.kind === InboxKind.Question &&
+    card.routedBy !== RoutedBy.TriagePending &&
+    card.assignees.some((handle) => handle !== BUILDER_HANDLE)
+  );
+}
+
 function needsOneTimeAllowance(choice: string, toolName: string, summary: string): boolean {
   if (choice === PermissionChoice.AllowOnce) return true;
   const stored =
@@ -548,11 +732,19 @@ interface Control {
   parked: boolean;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
+  /** Set while a session runs: parks it at once if it waits on this card. */
+  parkOn: ((inboxId: InboxItemId) => void) | null;
   /**
    * The step's run of handoffs nobody asked for with no commit between them. Any other session ending
    * clears it; a move, which starts no session, and a refused model leave it, so the run only grows.
    */
   unaskedHandoffs: UnaskedRun | null;
+  /** Set while a pass task's session runs: the builder messages it was handed. */
+  messages: LaneMessages | null;
+  /** The builder stopped the pass task's turn: it closes as stopped. */
+  builderStop: boolean;
+  /** Closes a pass task's session once it has been idle since its last turn ended. */
+  idleTimer: Timer | null;
   done: Promise<void>;
 }
 
@@ -638,6 +830,17 @@ function describeEnding(
   return `${how}${context}.`;
 }
 
+/**
+ * A pass task's session that would start bare while a turn is open: it cannot resume the turn's
+ * conversation, so it starts fresh from the thread's digest and the message the turn began with,
+ * as Retry Turn does (Workbench spec §6.3).
+ */
+function turnMessageFirst(reader: DbReader, taskId: TaskId, action: NextAction): NextAction {
+  if (action.kind !== 'start') return action;
+  const messageId = openPassTurn(reader, taskId)?.messageId ?? null;
+  return messageId === null ? action : { kind: 'feedback', messageId, providerSessionId: null };
+}
+
 /** A review that ends without a verdict is rerun once by itself; a second such ending fails the task. */
 const NO_VERDICT_ENDINGS_ALLOWED = 2;
 
@@ -686,9 +889,85 @@ export function createRunner(opts: RunnerOptions): Runner {
   const identify = (pid: number | null): Promise<string | null> =>
     pid === null || !opts.identifyProcess ? Promise.resolve(null) : opts.identifyProcess(pid);
 
+  /** What a pass task's turns keep their work and raise their items with. */
+  const passWork: PassWorkDeps = {
+    state: opts.state,
+    git: opts.git,
+    inbox: opts.inbox,
+    jobs: opts.jobs,
+    logger: opts.logger,
+    clock: opts.clock,
+  };
+
+  /** Closes the pass task's session once it has been idle `warmIdleMs` since a turn ended. */
+  function armIdleClose(id: WorkstreamId, ctl: Control): void {
+    ctl.idleTimer?.cancel();
+    ctl.idleTimer = opts.clock.setTimeout(() => {
+      ctl.idleTimer = null;
+      runner.closeWarm(id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'a warm session did not close when idle',
+        );
+      });
+    }, opts.limits.warmIdleMs);
+  }
+
+  function disarmIdleClose(ctl: Control): void {
+    ctl.idleTimer?.cancel();
+    ctl.idleTimer = null;
+  }
+
+  /**
+   * Keeps what the builder changed by hand since the page's last turn with the page (Workbench spec
+   * §6.4), before a turn opens, and answers what the agent's next message starts with. An edit that
+   * cannot be kept now (Your folder off the pass's branch) is kept with the turn's work instead, and
+   * the message goes without its note.
+   */
+  async function foldForTurn(id: WorkstreamId): Promise<string | null> {
+    try {
+      return (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        "the builder's hand edits were not folded; the message goes without its note",
+      );
+      return null;
+    }
+  }
+
+  /** The provider session the workstream's last session ran, or null when none started. */
+  function lastProviderSession(id: WorkstreamId): string | null {
+    return (
+      [...listSessions(db, id)].reverse().find((s) => s.providerSessionId !== null)
+        ?.providerSessionId ?? null
+    );
+  }
+
   function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
     const latest = latestHandoffForStep(reader, getWorkstreamRow(reader, id));
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
+  }
+
+  /**
+   * The oldest builder message a session of the workstream was handed and no turn took, or null.
+   * The builder writes to the task's implementer, so only an implement step's sessions are handed
+   * messages and held to them (Workbench spec §6.3).
+   */
+  function untakenMessage(reader: DbReader, id: WorkstreamId): TaskMessageId | null {
+    const row = getWorkstreamRow(reader, id);
+    // A pass task's message waits for a turn whether or not a session was ever handed it.
+    if (passOfWorkstream(reader, id)) return untakenMessages(reader, row.taskId)[0] ?? null;
+    if (currentStep(row).role !== StepRole.Implement) return null;
+    return listUndeliveredTaskMessages(reader, row.taskId)[0]?.id ?? null;
+  }
+
+  /**
+   * `next`, once a session of the workstream has ended: a builder message it was handed and no turn
+   * took starts the next session as `feedback`, so it is not lost (Workbench spec §6.3).
+   */
+  function carryingUndelivered(reader: DbReader, id: WorkstreamId, next: NextAction): NextAction {
+    return withUndelivered(next, untakenMessage(reader, id));
   }
 
   /**
@@ -703,8 +982,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
   ): NextAction | null {
     const action = row.nextAction;
-    const resumeId =
-      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    const resumeId = resumedSessionOf(action);
     if (resumeId === null) return null;
     const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
     if (ranOn === undefined || ranOn === ctl.accountId) return null;
@@ -1260,13 +1538,20 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         return;
       case 'paused': {
-        const nextAction: NextAction = outcome.providerSessionId
-          ? {
-              kind: 'resume',
-              providerSessionId: outcome.providerSessionId,
-              reason: 'the usage limit reset',
-            }
-          : freshAction(db, id);
+        const nextAction = carryingUndelivered(
+          db,
+          id,
+          keepingFeedback(
+            row.nextAction,
+            outcome.providerSessionId
+              ? {
+                  kind: 'resume',
+                  providerSessionId: outcome.providerSessionId,
+                  reason: 'the usage limit reset',
+                }
+              : freshAction(db, id),
+          ),
+        );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
             to: S.PausedLimit,
@@ -1286,15 +1571,20 @@ export function createRunner(opts: RunnerOptions): Runner {
             // The next action is kept: the lane resumes exactly where it stopped once the account does.
             patch: {
               pausedUntil: outcome.until?.toISOString() ?? null,
-              ...(outcome.providerSessionId
-                ? {
-                    nextAction: {
-                      kind: 'resume',
-                      providerSessionId: outcome.providerSessionId,
-                      reason: 'the account resumed',
-                    },
-                  }
-                : {}),
+              nextAction: carryingUndelivered(
+                ctx.tx,
+                id,
+                keepingFeedback(
+                  getWorkstreamRow(ctx.tx, id).nextAction,
+                  outcome.providerSessionId
+                    ? {
+                        kind: 'resume',
+                        providerSessionId: outcome.providerSessionId,
+                        reason: 'the account resumed',
+                      }
+                    : getWorkstreamRow(ctx.tx, id).nextAction,
+                ),
+              ),
             },
             reason: outcome.refusal
               ? `account refused: ${outcome.refusal.problem}`
@@ -1328,6 +1618,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
+      case 'closed':
+        // Only a pass task's session closes; one that is no longer a page's is retried as after a crash.
+        settle(id, ctl, {
+          kind: 'crashed',
+          message: 'the session closed',
+          providerSessionId: outcome.providerSessionId,
+        });
+        return;
       case 'refused':
       case 'background_hung':
         // A retry would hang the same way, and the work it left is for the builder to see.
@@ -1342,10 +1640,14 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return;
         }
-        const nextAction = nextActionAfterCrash(
-          row.nextAction,
-          outcome.providerSessionId,
-          latestHandoffForStep(db, row),
+        const nextAction = carryingUndelivered(
+          db,
+          id,
+          nextActionAfterCrash(
+            row.nextAction,
+            outcome.providerSessionId,
+            latestHandoffForStep(db, row),
+          ),
         );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
@@ -1363,6 +1665,121 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       }
     }
+  }
+
+  /**
+   * A pass task's session ended between turns (Workbench spec §6.3): a message no turn took queues the
+   * page to start a turn with it, resuming the session that ended, and withdraws its item; otherwise
+   * the page waits for the builder as it was, its lane freed.
+   */
+  function closeBetweenTurns(
+    id: WorkstreamId,
+    ctl: Control,
+    providerSessionId: string | null,
+  ): void {
+    opts.state.write((ctx) => {
+      queueUntaken(ctx, id, ctl.fence, providerSessionId);
+      clearLease(ctx, id);
+    });
+  }
+
+  /**
+   * Settles how a pass task's session ended, where that differs from any other lane's; false leaves
+   * it to `settle`. A page between turns, Ready or on its failed turn's flag, keeps waiting for the
+   * builder whatever ended its session, but a cancel.
+   */
+  async function settlePage(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<boolean> {
+    if (!passOfWorkstream(db, id)) return false;
+    if (outcome.kind === 'stopped' && outcome.reason === 'cancelled') return false;
+    if (ctl.builderStop)
+      await stopTurn(id, ctl.fence, outcome.providerSessionId ?? lastProviderSession(id));
+    const row = getWorkstreamRow(db, id);
+    if (ctl.builderStop && row.state === S.Queued) {
+      opts.state.write((ctx) => {
+        clearLease(ctx, id);
+      });
+      return true;
+    }
+    if (row.state === S.WaitingHuman && row.nextAction.kind === 'pass_review') {
+      closeBetweenTurns(id, ctl, outcome.providerSessionId);
+      return true;
+    }
+    const attempts = row.recoveryAttempts + 1;
+    const failure =
+      outcome.kind === 'refused' || outcome.kind === 'background_hung'
+        ? outcome.message
+        : outcome.kind === 'crashed' && attempts > opts.limits.maxRecoveryAttempts
+          ? `The session failed ${String(attempts)} times; last error: ${outcome.message}`
+          : null;
+    if (failure !== null) {
+      await failTurn(id, ctl, failure, outcome.providerSessionId);
+      return true;
+    }
+    // A session the runner closed with its turn still open goes on from that turn.
+    if (outcome.kind === 'stopped' && outcome.reason === 'closed')
+      settle(id, ctl, {
+        kind: 'crashed',
+        message: 'the session was closed during its turn',
+        providerSessionId: outcome.providerSessionId,
+      });
+    else return false;
+    return true;
+  }
+
+  /** Closes the page's open turn as stopped, if one is open: its work kept, and nothing Ready. */
+  async function stopTurn(
+    id: WorkstreamId,
+    fence: number | null,
+    providerSessionId: string | null,
+  ): Promise<void> {
+    await endTurnSteps(passWork, {
+      workstreamId: id,
+      ending: PassTurnEnding.Stopped,
+      reply: null,
+      fence,
+      providerSessionId,
+      reason: '',
+    });
+  }
+
+  /**
+   * A pass task's turn that cannot go on (Workbench spec §6.2): it closes as failed, its work kept
+   * and its page still claimed, and the page waits on a flag whose Retry Turn sends the builder's
+   * message again. A pass lane never fails.
+   */
+  async function failTurn(
+    id: WorkstreamId,
+    ctl: Control,
+    reason: string,
+    providerSessionId: string | null,
+  ): Promise<void> {
+    await endTurnSteps(passWork, {
+      workstreamId: id,
+      ending: PassTurnEnding.Failed,
+      reply: null,
+      fence: ctl.fence,
+      providerSessionId,
+      reason,
+    });
+  }
+
+  /** Settles the lane's ending: a pass task's own way first, else as any lane's. */
+  async function settleLane(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<void> {
+    if (await settlePage(id, ctl, outcome)) return;
+    const pausing =
+      outcome.kind === 'paused' ||
+      outcome.kind === 'held' ||
+      (outcome.kind === 'stopped' && outcome.reason === 'paused');
+    // A pass turn holds no shared area across a usage pause: what it changed is kept on the chain
+    // and the area released, and the resumed turn asks for it again.
+    if (pausing && passOfWorkstream(db, id))
+      await closeHoldsOf(passWork, id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'the paused turn’s shared changes were not kept; start-up keeps them',
+        );
+      });
+    settle(id, ctl, outcome);
   }
 
   /**
@@ -1460,6 +1877,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       foldKey: `model-refused:${account.id}:${outcome.model}`,
     });
     if (retry) return 'retry';
+    // A pass task's turn fails in its own way, and the lane never does.
+    if (passOfWorkstream(db, id)) return 'stop';
     opts.state.write((ctx) => {
       failIn(ctx, id, ctl.fence, row, {
         kind: WorkstreamFailure.SessionFailed,
@@ -1474,8 +1893,54 @@ export function createRunner(opts: RunnerOptions): Runner {
     const project = getProject(db, row.projectId);
     const checkout = checkoutOf(db, row);
     const task = getTask(db, row.taskId);
+    // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
+    const pass = passOfWorkstream(db, id) ?? null;
     const fresh = actionOnAnotherAccount(id, ctl, row);
-    const action = fresh ?? row.nextAction;
+    // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
+    // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
+    // can't be read gives way to a fresh session, which is sent the message again. A stop ends the read.
+    let readBack: ReadBack | null = null;
+    if (fresh === null) {
+      const reading = new AbortController();
+      ctl.holdAbort = reading;
+      try {
+        readBack = await readBackThread(
+          { state: opts.state, adapter: opts.adapter, launcher: opts.launcher },
+          {
+            workstreamId: id,
+            fence: ctl.fence,
+            taskId: task.id,
+            account: getAccountRow(db, ctl.accountId),
+            cwd: checkout,
+            action: row.nextAction,
+            onUnread: nextActionOnAnotherAccount(
+              row.nextAction,
+              latestHandoffForStep(db, row),
+              outstandingFixEvidence(db, row),
+            ),
+            signal: reading.signal,
+          },
+        );
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedReading = stopRequested(ctl);
+      if (stoppedReading || readBack.kind === 'stopped')
+        return {
+          kind: 'stopped',
+          reason: stoppedReading ?? 'closed',
+          providerSessionId: resumedSessionOf(row.nextAction),
+        };
+    }
+    const planned = fresh ?? (readBack?.kind === 'read' ? readBack.action : row.nextAction);
+    // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
+    const action = pass
+      ? turnMessageFirst(
+          db,
+          task.id,
+          withUndelivered(planned, untakenMessages(db, task.id)[0] ?? null),
+        )
+      : planned;
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
     const priorResults = row.steps.flatMap((s, i) =>
@@ -1495,13 +1960,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
+    // The task's cited plan anchors are checked against this base before the pack reads them; a
+    // failure leaves them "not checked yet" in the brief and never stops the session.
+    await checkTaskAnchors(
+      { git: opts.git, state: opts.state },
+      { workstreamId: id, taskId: task.id, repo: checkout, rev: baseHead },
+    ).catch((error: unknown) => {
+      opts.logger.warn({ workstreamId: id, err: error }, 'the plan anchor check failed');
+    });
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
-    const savedResumeId =
-      row.nextAction.kind === 'resume' || row.nextAction.kind === 'answer'
-        ? row.nextAction.providerSessionId
-        : null;
+    const savedResumeId = resumedSessionOf(row.nextAction);
     if (ctl.stopReason)
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
@@ -1522,13 +1992,28 @@ export function createRunner(opts: RunnerOptions): Runner {
         return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
       if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     }
+    // The page's before picture is taken before the session can edit it, unless a stop ends the wait.
+    if (opts.awaitBeforePicture) {
+      const waiting = new AbortController();
+      ctl.holdAbort = waiting;
+      try {
+        await opts.awaitBeforePicture(task, waiting.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileWaiting = stopRequested(ctl);
+      if (stoppedWhileWaiting)
+        return { kind: 'stopped', reason: stoppedWhileWaiting, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
-    const resumeId =
-      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    const resumeId = resumedSessionOf(action);
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
-    const contextPack = buildContextPack(db, getWorkstream(db, id));
+    const contextPack = buildContextPack(db, getWorkstream(db, id), undefined, {
+      base: baseHead,
+    });
     // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
     const evidenceId =
       action.kind === 'fix'
@@ -1549,56 +2034,23 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read before the briefing: the briefing follows the account this session runs on, which can
     // differ from the last session's when the project moved. Reading has no side effects.
     const account = getAccountRow(db, ctl.accountId);
-    const provider = providerOf(account.kind);
+    const provider = providerOf(agentKind(account.kind));
     const skills = persona?.skills ?? [];
-    const prompt = buildSessionPrompt({
-      provider,
-      sandboxed: Boolean(opts.laneSandbox),
-      denials: denialsToTell(),
-      answeredCards: answeredCardsForTask(db, row.taskId),
-      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
-      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
-      task,
-      claims: claims(),
-      action,
-      handoff: contextPack.handoff,
-      answer: permission?.prompt ?? contextPack.pendingAnswer,
-      contextPack,
-      step: {
-        index: row.stepIndex,
-        count: Math.max(row.steps.length, 1),
-        role: step.role,
-        personaName: step.personaName,
-        instructions: persona?.instructions ?? null,
-        skills,
-        // A Codex session has no plugin to load a skill from.
-        ...(provider === Provider.Codex
-          ? {
-              skillBodies: skills.flatMap((name) => {
-                const body = opts.skillBody(name);
-                if (body === null) {
-                  opts.logger.warn(
-                    { workstreamId: id, skill: name },
-                    'a skill has no text to brief a Codex session with',
-                  );
-                  return [];
-                }
-                return [body];
-              }),
-            }
-          : {}),
-        tools: step.tools,
-      },
-      priorResults,
-      previousResult: readOnly ? step.result : null,
-      earlierResults: step.earlier,
-      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
-      evidence,
-      recovery:
-        action.kind === 'resume'
-          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
-          : null,
-    });
+    // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
+    // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
+    // blocks while they fit the account's limits and what the thread's budget has left.
+    const limits = pictureLimitsFor(account.kind);
+    // A Codex lane can open no stored picture by its path (its guard refuses `view_image`, its
+    // sandbox the data directory), so Codex is sent every picture as its file, every time.
+    const readsPictureFiles = provider === Provider.Codex;
+    const feedback = action.kind === 'feedback' ? getTaskMessageRow(db, action.messageId) : null;
+    // The builder writes to the task's implementer: only an implement step's sessions are handed what
+    // an earlier session was handed and no turn took (§12).
+    // A pass task's are read once its session is there to take them (below).
+    const untaken =
+      step.role === StepRole.Implement && !pass
+        ? listUndeliveredTaskMessages(db, task.id).filter((m) => m.id !== feedback?.id)
+        : [];
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
@@ -1655,17 +2107,27 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? (resumed?.briefed ?? false)
       : briefedFromHandoff(action, contextPack.handoff, evidence);
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
+    // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
+    // Read before the start slot is taken, so nothing it throws can hold the slot.
+    const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
+    const setupPlan = planSessionSetup({
+      home: opts.builderHome,
+      checkout,
+      switches,
+      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+    });
     // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
     const releaseStart =
       account.kind === AccountKind.ClaudeSubscription
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
+    const configDir = sessionConfigDir(agentKind(account.kind), launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
+          setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
           rules: listPermissionRules(db, project.id, id),
@@ -1674,6 +2136,9 @@ export function createRunner(opts: RunnerOptions): Runner {
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
           provider,
+          taskFiles: taskFilesDir(opts.dataDir, task.id),
+          // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
+          attended: pass !== null,
           ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
@@ -1697,6 +2162,71 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    const setupLeftOut = [...setupPlan.leftOut, ...(laneSession?.setup.leftOut ?? [])];
+    if (setupLeftOut.length > 0)
+      opts.logger.info({ workstreamId: id, leftOut: setupLeftOut }, 'session setup left out');
+    const setupNote = leftOutNote(setupLeftOut);
+    // Only a sandboxed lane runs in auto mode, read from the app-wide setting as each session starts.
+    const lanePermissionMode: LanePermissionMode | null =
+      laneSession === null
+        ? null
+        : laneAutoMode(db, (stored) => {
+              opts.logger.warn(
+                { stored },
+                'the lane auto mode setting is not a boolean; using default mode',
+              );
+            })
+          ? 'auto'
+          : 'default';
+    const policy = buildTrustPolicy({
+      surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
+      projectName: project.name,
+      checkout,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(db, project.id, (stored) => {
+        opts.logger.warn(
+          { stored },
+          'the stored live systems are not a list 10db reads, so it reads none',
+        );
+      }),
+      switches,
+    });
+    // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
+    // starts on 10db's rules.
+    const capability = opts.adapter.capabilities(launch.expect, launch.model);
+    const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto');
+    const judged = sessionJudge !== JudgeKind.Rules;
+    const startFloor =
+      laneSession === null
+        ? null
+        : floorReason({
+            kind: agentKind(account.kind),
+            model: launch.model,
+            autoMode: lanePermissionMode === 'auto',
+          });
+    // The allow list the session runs with, which the guard also reads: an allow rule settles a call
+    // before a judge sees it.
+    const allowedTools = allowedToolsFor(
+      project,
+      step.tools,
+      laneSession ? { sandboxed: { checkout } } : {},
+    );
+    opts.logger.info(
+      {
+        workstreamId: id,
+        surface: policy.surface,
+        judge: sessionJudge,
+        environment: policy.environment,
+      },
+      'trust policy',
+    );
+    /** Says in the task's thread that the session is on the rules floor, unless the thread already says it. */
+    const sayFloor = (ctx: WriteContext, reason: FloorReason): void => {
+      const text = floorNoticeText(reason, launch.model);
+      if (listTaskThread(ctx.tx, task.id).some((message) => message.body === text)) return;
+      insertSystemNotice(ctx, task.id, text);
+    };
+    let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -1722,12 +2252,125 @@ export function createRunner(opts: RunnerOptions): Runner {
       releaseStart();
       return { kind: 'moved' };
     }
+    // A turn this session opens folds the builder's hand edits first, as a message into a warm
+    // session does; a turn already open folds nothing, since an edit then is kept with the turn.
+    // It runs after every refusal of the launch, so the fold's note goes with the session it was
+    // made for: a later launch would find nothing left to fold.
+    const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
+    const stoppedFolding = stopRequested(ctl);
+    if (stoppedFolding) {
+      dispose();
+      releaseStart();
+      return { kind: 'stopped', reason: stoppedFolding, providerSessionId: savedResumeId };
+    }
+    const fed =
+      feedback === null
+        ? null
+        : resumeId === null
+          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
+            outgoingMessage(
+              {
+                ...feedback,
+                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
+              },
+              0,
+              limits,
+              readsPictureFiles,
+            )
+          : outgoingMessage(
+              feedback,
+              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              limits,
+              readsPictureFiles,
+            );
+    const digest =
+      feedback === null || resumeId !== null
+        ? null
+        : buildThreadDigest(db, task, {
+            after:
+              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
+                ? contextPack.handoff.createdAt
+                : null,
+            before: feedback.id,
+          });
+    const prompt = buildSessionPrompt({
+      provider,
+      inPass: pass !== null,
+      pictures: project.appUrl !== null && takesPictures(project, task),
+      sandboxed: Boolean(opts.laneSandbox),
+      instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
+      judged,
+      webJudged: judged && switches.web,
+      setupLine:
+        laneSession === null
+          ? null
+          : loadedLine({
+              provider,
+              skills: laneSession.setup.loaded.skills,
+              plugins: laneSession.setup.loaded.plugins,
+              projectFiles: setupPlan.input.projectFiles,
+              leftOut: setupLeftOut,
+            }),
+      denials: denialsToTell(),
+      answeredCards: answeredCardsForTask(db, row.taskId),
+      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
+      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
+      task,
+      claims: claims(),
+      action,
+      handoff: contextPack.handoff,
+      answer: permission?.prompt ?? contextPack.pendingAnswer,
+      contextPack,
+      questionRoutes: questionRoutesForTask(db, row.taskId),
+      step: {
+        index: row.stepIndex,
+        count: Math.max(row.steps.length, 1),
+        role: step.role,
+        personaName: step.personaName,
+        instructions: persona?.instructions ?? null,
+        skills,
+        // A Codex session has no plugin to load a skill from.
+        ...(provider === Provider.Codex
+          ? {
+              skillBodies: skills.flatMap((name) => {
+                const body = opts.skillBody(name);
+                if (body === null) {
+                  opts.logger.warn(
+                    { workstreamId: id, skill: name },
+                    'a skill has no text to brief a Codex session with',
+                  );
+                  return [];
+                }
+                return [body];
+              }),
+            }
+          : {}),
+        tools: step.tools,
+      },
+      priorResults,
+      previousResult: readOnly ? step.result : null,
+      earlierResults: step.earlier,
+      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
+      evidence,
+      recovery:
+        action.kind === 'resume'
+          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
+          : null,
+      ...(fed === null
+        ? {}
+        : {
+            feedback: {
+              message: handNote === null ? fed.text : `${handNote}\n\n${fed.text}`,
+              digest,
+            },
+          }),
+    });
     let session: ReturnType<typeof insertSession>;
     try {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: providerOf(account.kind),
+          provider: providerOf(agentKind(account.kind)),
           model: launchStep.model,
           effort: launchStep.effort,
           mode: 'managed',
@@ -1739,9 +2382,20 @@ export function createRunner(opts: RunnerOptions): Runner {
         patchWorkstream(ctx, id, ctl.fence, {
           currentSessionId: s.id,
           baseHead,
-          ...(fresh ? { nextAction: fresh } : {}),
+          ...(action !== row.nextAction ? { nextAction: action } : {}),
         });
+        // The message the session starts from starts the page's turn, unless one is open.
+        if (pass)
+          startTurn(ctx, {
+            workstreamId: id,
+            sessionId: s.id,
+            messageId: feedback?.id ?? null,
+            fence: ctl.fence,
+          });
+        // A fresh session holds no picture an earlier one was sent.
+        if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
+        recordPlanPacked(ctx, task.id, id, contextPack);
         ctx.emit(
           contextPackedEvent(
             s.id,
@@ -1804,6 +2458,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       abort.abort();
     };
     ctl.endWaits = endWaits;
+    /** Parks the session on its oldest open card now: the waits end, then the process stops. */
+    const parkNow = (fallback: InboxItemId): void => {
+      st.parkedFor = firstOpen() ?? fallback;
+      st.waitTimer?.cancel();
+      st.waitTimer = null;
+      // Abort the waits first: an answer that arrives while the session is still stopping then goes
+      // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
+      abort.abort();
+      void handle?.stop();
+    };
+    ctl.parkOn = (inboxId) => {
+      if (st.waitingOn.has(inboxId)) parkNow(inboxId);
+    };
     const stopWaitingOnBackground = (): void => {
       st.heldForBackground = false;
       st.backgroundTimer?.cancel();
@@ -1813,7 +2480,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const observer: WaitObserver = {
       onWaitStart(item) {
         st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
-        if (openWaits() > 1) return;
+        // Triage or Ask Someone may have routed the card since the ask: read it again.
+        const routedAway = routedAwayFromBuilder(db, item);
+        if (openWaits() > 1) {
+          // A second wait on a card for someone else parks the session now; one for the builder
+          // keeps the timer the first wait armed.
+          if (routedAway) parkNow(item.id);
+          return;
+        }
         opts.state.write((ctx) => {
           // A session can ask before its `started` event is processed; STARTING has no edge to WAITING_HUMAN.
           if (getWorkstreamRow(ctx.tx, id).state === S.Starting)
@@ -1824,12 +2498,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             reason: `waiting on ${item.id}`,
           });
         });
+        // A question for someone else is never held live: their words must not reach a running call.
+        if (routedAway) {
+          parkNow(item.id);
+          return;
+        }
         st.waitTimer = opts.clock.setTimeout(() => {
-          st.parkedFor = firstOpen() ?? item.id;
-          // Abort the waits first: an answer that arrives while the session is still stopping then goes
-          // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
-          abort.abort();
-          void handle?.stop();
+          parkNow(item.id);
         }, project.humanWaitMinutes * 60_000);
       },
       onWaitEnd(item) {
@@ -1859,12 +2534,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
-      handle = opts.adapter.start({
+      handle = opts.adapter.open({
         sessionId: session.id,
-        workstreamId: id,
-        sequence: session.sequence,
+        policy,
         cwd: checkout,
-        prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
+        ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
         model: launch.model,
         effort: launchStep.effort,
         resumeProviderSessionId: resumeId,
@@ -1872,26 +2547,32 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        instructions: setupPlan.instructions.text,
         ...(laneSession
           ? {
-              lanePermissionMode: laneAutoMode(db, (stored) => {
-                opts.logger.warn(
-                  { stored },
-                  'the lane auto mode setting is not a boolean; using default mode',
-                );
-              })
-                ? 'auto'
-                : 'default',
+              setup: {
+                plugins: laneSession.setup.pluginDirs,
+                skillRoots: laneSession.setup.skillRoots,
+              },
             }
           : {}),
-        allowedTools: allowedToolsFor(
-          project,
-          step.tools,
-          laneSession ? { sandboxed: { checkout } } : {},
-        ),
+        profile: {
+          kind: 'lane',
+          workstreamId: id,
+          sequence: session.sequence,
+          allowedTools,
+          ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
+        },
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-        preToolUse: (req) =>
-          judgePreToolUse({
+        preToolUse: (req) => {
+          const judge = judgeForCall(sessionJudge, req.reportedMode ?? null);
+          if (judged && judge === JudgeKind.Rules && !saidLeftAutoMode) {
+            saidLeftAutoMode = true;
+            opts.state.write((ctx) => {
+              sayFloor(ctx, FloorReason.LeftAutoMode);
+            });
+          }
+          return judgePreToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -1902,12 +2583,21 @@ export function createRunner(opts: RunnerOptions): Runner {
             readOnly,
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
+            // Every page of the pass is a page here: another task's is never written.
+            ...(pass
+              ? { inPass: { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch } }
+              : {}),
             ownSession: {
               configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
+              filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
-          }),
+            judge,
+            coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
+            webOn: switches.web,
+          });
+        },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
@@ -1919,7 +2609,48 @@ export function createRunner(opts: RunnerOptions): Runner {
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
             ...(laneSession
-              ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
+              ? {
+                  sandbox: {
+                    fileAccess: laneSession.fileAccess,
+                    hazards: project.hazards,
+                    ...(laneSession.secretReadsDir === null
+                      ? {}
+                      : { secretReadsDir: laneSession.secretReadsDir }),
+                  },
+                }
+              : {}),
+            ...(pass
+              ? {
+                  passGit: {
+                    baseBranch: project.baseBranch,
+                    // One per session: a call that moved HEAD holds the next until it is back.
+                    run: createPassGitSession(() => {
+                      // The project env: the login shell's, never the account's credentials.
+                      const env = opts.launcher.projectEnv();
+                      const gate = opts.gateSandbox ?? null;
+                      return {
+                        checkout,
+                        baseBranch: project.baseBranch,
+                        env,
+                        signal: abort.signal,
+                        bins: opts.gitTools,
+                        sandbox:
+                          gate === null
+                            ? null
+                            : {
+                                gate,
+                                input: {
+                                  project: projectAtCheckout(project, checkout),
+                                  env,
+                                  rules: listPermissionRules(db, project.id, id),
+                                  checkouts: allCheckouts(db),
+                                },
+                                home: opts.builderHome,
+                              },
+                      };
+                    }),
+                  },
+                }
               : {}),
           },
         ),
@@ -1930,9 +2661,116 @@ export function createRunner(opts: RunnerOptions): Runner {
       throw error;
     }
     ctl.handle = handle;
+    const messages = createLaneMessages({
+      state: opts.state,
+      taskId: task.id,
+      handle,
+      limits,
+      readsPictureFiles,
+      ...(feedback !== null && fed !== null
+        ? { prompt: { uuid: fed.uuid, messageId: feedback.id } }
+        : {}),
+    });
+    if (feedback !== null && fed !== null)
+      opts.state.write((ctx) => {
+        markTaskMessagePushedUnder(ctx, feedback.id, fed.uuid);
+        markTaskFilesInline(ctx, task.id, fed.blocks, false);
+      });
+    // A message an earlier session was handed and no turn took goes to this one too (§12). A pass
+    // task's session takes every message no turn has taken, read now: from here on one the builder
+    // writes is handed to it at once.
+    for (const message of untaken) messages.push(message);
+    if (pass) {
+      messages.pushUntaken(fed === null ? handNote : null);
+      ctl.messages = messages;
+    }
+    /**
+     * A pass task's turn end with a handoff (Workbench spec §6.2): one that stands continues the same
+     * turn in a fresh session. A run of handoffs nobody asked for is keyed by the task's kept work,
+     * since a pass turn never moves the branch, so a long turn that keeps work between them goes on.
+     * One asked for and not written gets the firm nudge. True when the turn goes on.
+     */
+    const passHandoff = async (): Promise<boolean> => {
+      const turn = openPassTurn(db, task.id);
+      const recorded = handoffForSession(db, session.id);
+      const asked = st.handoffRequested || st.handoffAskedByTool;
+      if (recorded && turn && recorded.createdAt >= turn.startedAt) {
+        const stands = handoffStands({
+          asked,
+          readOnly: false,
+          resultRecorded: false,
+          leftNamed: workLeftIn(recorded).length > 0,
+          uncommitted: false,
+        });
+        if (!stands) return false;
+        if (!asked) {
+          const kept = await keepTurnWork(passWork, { workstreamId: id, turnId: null });
+          const unasked = nextUnaskedRun(ctl.unaskedHandoffs, kept.keptSha ?? kept.keptBaseSha);
+          if (unasked.atLimit) {
+            log.warn({ handoffs: unasked.run.count }, 'turn ended after handoffs nobody asked for');
+            return false;
+          }
+          ctl.unaskedHandoffs = unasked.run;
+        }
+        st.outcome = { kind: 'handoff', handoffId: recorded.id };
+        await handle.stop();
+        return true;
+      }
+      if (st.handoffRequested && !st.firmSent && turn) {
+        st.firmSent = true;
+        handle.send(NUDGES[st.handoffCause].firm);
+        return true;
+      }
+      return false;
+    };
+    /**
+     * A pass task's turn ended (Workbench spec §6.2). A builder message no turn took means it is
+     * not over: the agent is about to see it, and the next completion decides. Otherwise the turn
+     * ends Ready, and the session stays open for the builder's next message.
+     */
+    const passTurnComplete = async (text: string | null): Promise<void> => {
+      armIdleClose(id, ctl);
+      try {
+        const ended = await endTurnSteps(passWork, {
+          workstreamId: id,
+          ending: PassTurnEnding.Ready,
+          reply: text,
+          fence: ctl.fence,
+          providerSessionId: st.providerSessionId,
+          reason: '',
+        });
+        // A handoff asked of the turn ends with it: the next ask, for the session between turns
+        // or for a later turn, is a new one.
+        if (ended) {
+          st.handoffRequested = false;
+          st.firmSent = false;
+        }
+      } catch (error) {
+        if (error instanceof StaleFenceError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn({ err: message }, "the turn's work could not be kept");
+        st.outcome = {
+          kind: 'crashed',
+          message: `The turn's work could not be kept: ${message}`,
+          providerSessionId: st.providerSessionId,
+        };
+        await handle.stop();
+      }
+    };
+    /** Whether the thread has been told this fresh session began. */
+    let noticed = false;
     /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
     const requestHandoff = (cause: HandoffCause, reason: string): void => {
       if (st.handoffRequested || st.outcome) return;
+      // A pass task's session between turns is closed, not nudged: a nudge would be a turn nobody
+      // wrote. Its next message starts a session where the project is then (Workbench spec §6.2).
+      if (pass && !openPassTurn(db, task.id)) {
+        if (ctl.stopReason !== null) return;
+        ctl.stopReason = 'closed';
+        log.info({ reason }, 'warm session closed for a handoff');
+        void handle.stop();
+        return;
+      }
       st.handoffRequested = true;
       st.handoffCause = cause;
       opts.state.write((ctx) => {
@@ -1943,6 +2781,47 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     ctl.requestHandoff = requestHandoff;
 
+    /** Ids of the tool calls the live line has named, so each is named once; the newest are kept. */
+    const seenCalls = new Set<string>();
+    const SEEN_CALLS_KEPT = 1_024;
+    /** The session is working: the live line names what it does, and a page's turn its files so far. */
+    const noteActivity = (
+      kind: 'text' | 'tool',
+      summary: string,
+      tool: ToolTarget | null,
+    ): void => {
+      // The session is working again (Claude Code woke it, or an answer did): it is not idle.
+      stopWaitingOnBackground();
+      disarmIdleClose(ctl);
+      opts.state.write((ctx) => {
+        patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
+        // A page's working turn carries the files it has written so far (Workbench spec §4.3).
+        const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
+        const data: SessionActivityData = {
+          workstreamId: id,
+          kind,
+          summary: summary.slice(0, 500),
+          tool: tool === null ? null : { name: tool.name, target: tool.target },
+          turn:
+            turn === undefined
+              ? null
+              : {
+                  id: turn.id,
+                  filesTouched: filesTouched(
+                    turnFilesSoFar(ctx.tx, turn),
+                    tool?.written ?? [],
+                    checkout,
+                  ),
+                },
+        };
+        ctx.emit({
+          type: EventType.SessionActivity,
+          entityType: 'session',
+          entityId: session.id,
+          data,
+        });
+      });
+    };
     let outcome: Outcome;
     try {
       for await (const event of handle.events) {
@@ -1958,6 +2837,12 @@ export function createRunner(opts: RunnerOptions): Runner {
             if (laneSession !== null) watchLaneProcesses(laneSession, event.pid, pidStart, log);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
+              // The thread says a fresh session began for the builder's message, once it has.
+              if (feedback !== null && resumeId === null && !noticed) {
+                noticed = true;
+                insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
+              }
+              if (startFloor !== null) sayFloor(ctx, startFloor);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')
@@ -1978,7 +2863,42 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           }
+          case 'judge_denied': {
+            const denied = event.call;
+            // A lane has no thread to show it on; the lane's recorded skips are where it will show.
+            if (!pass) {
+              log.info(
+                { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },
+                'auto mode denied a call',
+              );
+              break;
+            }
+            // The notice and its offer are one write, so a notice never shows a button with no offer.
+            const offers = offersAllowThis(denied);
+            opts.state.write((ctx) => {
+              const notice = insertSystemNotice(ctx, task.id, deniedNoticeText(denied, offers));
+              if (offers) offerAllowThis(ctx, notice.id, goAheadText(denied));
+            });
+            break;
+          }
           case 'background_tasks': {
+            if (pass) {
+              // A command a turn left running never holds the page or wakes the session: its
+              // finishing is a notice on the thread, read once the builder looks.
+              const finished = st.backgroundTasks.filter(
+                (t) => !event.tasks.some((n) => n.id === t.id),
+              );
+              st.backgroundTasks = event.tasks;
+              if (finished.length > 0 && !openPassTurn(db, task.id))
+                opts.state.write((ctx) => {
+                  insertSystemNotice(
+                    ctx,
+                    task.id,
+                    `A command the agent left running finished: ${finished.map((t) => `"${t.description}"`).join(', ')}`,
+                  );
+                });
+              break;
+            }
             st.backgroundTasks = event.tasks;
             if (event.tasks.length > 0 || !st.heldForBackground) break;
             // The commands the turn ended on have finished. A session that ended its turn is not woken
@@ -1988,17 +2908,27 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           }
           case 'activity':
-            // The session is working again (Claude Code woke it, or an answer did): it is not idle.
-            stopWaitingOnBackground();
-            opts.state.write((ctx) => {
-              patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
-              ctx.emit({
-                type: EventType.SessionActivity,
-                entityType: 'session',
-                entityId: session.id,
-                data: { workstreamId: id, kind: event.kind, summary: event.summary.slice(0, 500) },
-              });
-            });
+            noteActivity('text', event.summary, null);
+            break;
+          case 'tool_call': {
+            log.debug(streamEventLogFields(event), 'session stream event');
+            // A call is the live line's once, when first seen: a Codex command reports each piece of output.
+            if (seenCalls.has(event.call.id)) break;
+            seenCalls.add(event.call.id);
+            if (seenCalls.size > SEEN_CALLS_KEPT) {
+              const oldest = seenCalls.values().next();
+              if (oldest.done !== true) seenCalls.delete(oldest.value);
+            }
+            const { summary, tool } = toolCallActivity(event.call);
+            noteActivity('tool', summary, tool);
+            break;
+          }
+          case 'text_delta':
+          case 'reasoning_delta':
+          case 'message':
+          case 'commands':
+          case 'plan_update':
+            log.debug(streamEventLogFields(event), 'session stream event');
             break;
           case 'context': {
             st.contextPct = event.percentage;
@@ -2040,6 +2970,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           }
+          case 'consumed': {
+            const taken = messages.consumed(event.uuids);
+            if (taken.length === 0) break;
+            // The message this session was started for is taken: a crash from here resumes the
+            // session without handing it the message again.
+            opts.state.write((ctx) => {
+              const next = getWorkstreamRow(ctx.tx, id).nextAction;
+              if (next.kind === 'feedback' && taken.includes(next.messageId))
+                patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
+            });
+            break;
+          }
           case 'compacted': {
             const pack = buildContextPack(db, getWorkstream(db, id));
             opts.state.write((ctx) => {
@@ -2052,6 +2994,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 signedReason: 'Context ran out before a handoff (10db)',
                 sourceId,
               });
+              recordPlanPacked(ctx, row.taskId, id, pack);
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
             handle.send(
@@ -2102,6 +3045,24 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
+            if (pass) {
+              // A Codex turn that ended without taking a message it was handed dropped it: the
+              // message goes back to 10db's queue and the turn fails, so Retry Turn or the builder's
+              // next message sends it (Workbench spec §6.3).
+              const handedBack = messages.handBack(event.dropped ?? []);
+              if (handedBack.length > 0) {
+                st.outcome = {
+                  kind: 'refused',
+                  message: `Codex ended the turn without taking ${handedBack.length === 1 ? "the builder's message" : `${String(handedBack.length)} of the builder's messages`}; Retry Turn sends ${handedBack.length === 1 ? 'it' : 'them'} again.`,
+                  providerSessionId: st.providerSessionId,
+                };
+                await handle.stop();
+                break;
+              }
+              if (await passHandoff()) break;
+              await passTurnComplete(event.text ?? null);
+              break;
+            }
             const recorded = handoffForSession(db, session.id);
             const resultRecorded = () =>
               currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
@@ -2267,6 +3228,19 @@ export function createRunner(opts: RunnerOptions): Runner {
                   };
                   break;
               }
+              // A pass task's session that ends between turns has closed; one that ends mid-turn
+              // is resumed, whatever ended it.
+              if (pass && (st.outcome.kind === 'step_done' || st.outcome.kind === 'crashed'))
+                st.outcome = openPassTurn(db, task.id)
+                  ? {
+                      kind: 'crashed',
+                      message:
+                        st.outcome.kind === 'crashed'
+                          ? st.outcome.message
+                          : 'the session ended in the middle of a turn',
+                      providerSessionId: st.providerSessionId,
+                    }
+                  : { kind: 'closed', providerSessionId: st.providerSessionId };
             }
             break;
           }
@@ -2289,6 +3263,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.handle = null;
       ctl.requestHandoff = null;
       ctl.endWaits = null;
+      ctl.parkOn = null;
+      ctl.messages = null;
+      disarmIdleClose(ctl);
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
       // is delivered, the lane is freed and the session's MCP token stops working.
       outcome = finishSession(id, ctl, session.id, st);
@@ -2312,11 +3289,23 @@ export function createRunner(opts: RunnerOptions): Runner {
     sessionId: SessionId,
     st: SessionState,
   ): Outcome {
-    const ended: Outcome = st.outcome ?? {
+    const reported: Outcome = st.outcome ?? {
       kind: 'crashed',
       message: 'the session ended without an outcome',
       providerSessionId: st.providerSessionId,
     };
+    // A step that ends with a builder message no turn took has not done what the builder asked: it
+    // runs again with the message, as after a crash, and counts toward the same limit (Workbench spec
+    // §6.3), so a message that is never taken cannot keep a lane running sessions.
+    const untaken = reported.kind === 'step_done' ? untakenMessage(db, id) : null;
+    const ended: Outcome =
+      untaken === null
+        ? reported
+        : {
+            kind: 'crashed',
+            message: `the session ended its step without taking the builder's message ${untaken}`,
+            providerSessionId: st.providerSessionId,
+          };
     // A session whose wait timer fired parks even if it was also limited or stopped meanwhile, so the
     // card (open or already answered) is never orphaned.
     const parkedAfterWait =
@@ -2343,7 +3332,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         // Progress resets the crash count, so the limit counts consecutive failures (spec §5.4).
         ...(progressed ? { recoveryAttempts: 0 } : {}),
         ...(outcome.kind === 'handoff'
-          ? { nextAction: { kind: 'continue_from_handoff', handoffId: outcome.handoffId } }
+          ? {
+              nextAction: carryingUndelivered(ctx.tx, id, {
+                kind: 'continue_from_handoff',
+                handoffId: outcome.handoffId,
+              }),
+            }
           : {}),
       });
     });
@@ -2947,14 +3941,39 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
-      await baseFirst(id, ctl);
-      await migrationsBaseFirst(id, ctl);
+      const pass = passOfWorkstream(db, id);
+      if (pass) {
+        // A turn that ended and was not carried through (its work not kept, a restart between) is
+        // finished first, and nothing is resumed (Workbench spec §12).
+        const latest = latestPassTurn(db, getWorkstreamRow(db, id).taskId);
+        if (latest && latest.endedAt !== null && latest.settledAt === null) {
+          const providerSessionId = lastProviderSession(id);
+          await finishEndedTurn(passWork, latest, {
+            fence: ctl.fence,
+            providerSessionId,
+            reason: 'The turn ended while 10db was stopping, and its session is gone',
+          });
+          opts.state.write((ctx) => {
+            queueUntaken(ctx, id, ctl.fence, providerSessionId);
+            clearLease(ctx, id);
+          });
+          return;
+        }
+      } else {
+        // A pass's branch takes no base and runs no migrations step: its work lands at its close.
+        await baseFirst(id, ctl);
+        await migrationsBaseFirst(id, ctl);
+      }
       for (;;) {
         const row = getWorkstreamRow(db, id);
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
         // A pause only stops sessions; verification doesn't use the provider, so it carries on.
         if (ctl.stopReason && !(ctl.stopReason === 'paused' && verifying)) {
-          settle(id, ctl, { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null });
+          await settleLane(id, ctl, {
+            kind: 'stopped',
+            reason: ctl.stopReason,
+            providerSessionId: null,
+          });
           return;
         }
         if (verifying) {
@@ -2986,6 +4005,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'model_refused') {
           if (refuseModel(id, ctl, outcome) === 'retry') continue;
+          if (pass) await failTurn(id, ctl, outcome.message, null);
           return;
         }
         if (outcome.kind === 'step_done') {
@@ -3036,7 +4056,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           );
           continue;
         }
-        settle(id, ctl, outcome);
+        await settleLane(id, ctl, outcome);
         return;
       }
     } catch (error) {
@@ -3050,7 +4070,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         'runner failed',
       );
       try {
-        settle(id, ctl, {
+        await settleLane(id, ctl, {
           kind: 'crashed',
           message: error instanceof Error ? error.message : String(error),
           providerSessionId: null,
@@ -3079,7 +4099,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         holdAbort: null,
         parked: false,
         endWaits: null,
+        parkOn: null,
         unaskedHandoffs: null,
+        messages: null,
+        builderStop: false,
+        idleTimer: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -3124,12 +4148,15 @@ export function createRunner(opts: RunnerOptions): Runner {
           c.requestHandoff?.('account', reason);
     },
     idle: () => (active.size === 0 ? Promise.resolve() : new Promise((r) => idleWaiters.push(r))),
+    parkFor(inboxId) {
+      for (const ctl of active.values()) ctl.parkOn?.(inboxId);
+    },
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;
       // The workstream waits for the builder's check, not for this card; only the check card's own
-      // answer moves it.
-      if (row.nextAction.kind === 'builder_review') return;
+      // answer moves it. A Ready pass page waits for the builder's next message.
+      if (row.nextAction.kind === 'builder_review' || row.nextAction.kind === 'pass_review') return;
       const providerSessionId =
         row.nextAction.kind === 'answer' ? row.nextAction.providerSessionId : null;
       opts.state.write((ctx) =>
@@ -3140,6 +4167,196 @@ export function createRunner(opts: RunnerOptions): Runner {
           reason: 'answer arrived',
         }),
       );
+      opts.onLaneFreed();
+    },
+    async deliverMessage(taskId, messageId, { redo }) {
+      const id = getTask(db, taskId).workstreamId;
+      if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
+      /**
+       * A page takes a message only while its pass holds it and is open and the page is not being
+       * taken out, read again after each wait: one leaving meanwhile takes none, whatever was kept
+       * for it, and the thread takes the message back.
+       */
+      const stillAPage = (): void => {
+        const pass = passOfWorkstream(db, id);
+        const title = getTask(db, taskId).title;
+        if (!pass) throw new ConflictError(`${title} is no longer in a UI Workbench pass`);
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `UI Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+          );
+        const takeOut = lastTakeOut(db, taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(`${title} is being taken out of its pass`);
+      };
+      stillAPage();
+      // A message to a page whose sign-off waits for another page's turn takes the sign-off back.
+      opts.state.write((ctx) => {
+        if (deleteSignOffWait(ctx, taskId))
+          insertSystemNotice(ctx, taskId, 'Sign-off cancelled: the page took a message.');
+      });
+      // A signed-off page is reopened by its message: a new run of the task takes it.
+      if (opts.state.write((ctx) => reopenSignedOffPage(ctx, taskId, messageId)) !== null) {
+        opts.onLaneFreed();
+        return;
+      }
+      const ctl = active.get(id);
+      const lane = ctl?.messages ?? null;
+      if (ctl && lane && ctl.stopReason === null) {
+        disarmIdleClose(ctl);
+        // A turn starts only while Your folder is on the pass's branch: off it, the page's warm
+        // session closes and the message waits untaken, queued with the pass's folder card, so the
+        // page goes on by itself once the folder is back (Workbench spec §5.1, §12).
+        const pass = passOfWorkstream(db, id);
+        // A folder that cannot be read is left to the turn's own keep, which refuses off the branch.
+        const folderOn = (passId: PassId): Promise<boolean> =>
+          passFolderOn(passWork, passId).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "Your folder's branch could not be read; the message goes on",
+            );
+            return true;
+          });
+        if (pass && !openPassTurn(db, taskId) && !(await folderOn(pass.id))) {
+          // A stop that landed while the branch was read closes the session already.
+          if (stopRequested(ctl) === null) {
+            ctl.stopReason = 'closed';
+            opts.logger.info(
+              { workstreamId: id },
+              'warm session closed: Your folder is off the pass',
+            );
+            await ctl.handle?.stop();
+          }
+          await ctl.done;
+          stillAPage();
+          return;
+        }
+        // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as
+        // no turn's is while the message waits untaken.
+        if (redo && openPassTurn(db, taskId)) await lane.interrupt();
+        const note = await foldForTurn(id);
+        stillAPage();
+        // A stop that landed meanwhile (the builder's, a take-out's, an idle close) ends this
+        // session: the message stays untaken for the next one.
+        if (ctl.messages === lane && stopRequested(ctl) === null) {
+          opts.state.write((ctx) => {
+            // A Ready page's new turn resumes this session with the message if it ends untaken.
+            if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
+              patchWorkstream(ctx, id, ctl.fence, {
+                nextAction: {
+                  kind: 'feedback',
+                  messageId,
+                  providerSessionId: lastProviderSession(id),
+                },
+              });
+            startTurn(ctx, {
+              workstreamId: id,
+              sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
+              messageId,
+              fence: ctl.fence,
+            });
+          });
+          // Every message no turn took goes with it, so none is left behind for the lane to wait on.
+          lane.pushUntaken(note);
+          return;
+        }
+      }
+      // A lane starting its session hands it every message no turn has taken once it is there.
+      if (active.has(id)) return;
+      // A page with no session starts its next turn from the oldest message no turn took.
+      opts.state.write((ctx) => queueUntaken(ctx, id, null, lastProviderSession(id)));
+      opts.onLaneFreed();
+    },
+    async closeWarm(id) {
+      const ctl = active.get(id);
+      if (!ctl?.handle || ctl.stopReason !== null) return;
+      const closes = opts.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, id);
+        const still =
+          row.state === S.WaitingHuman &&
+          row.nextAction.kind === 'pass_review' &&
+          untakenMessages(ctx.tx, row.taskId).length === 0 &&
+          !openPassTurn(ctx.tx, row.taskId);
+        if (still) ctl.stopReason = 'closed';
+        return still;
+      });
+      if (!closes) return;
+      opts.logger.info({ workstreamId: id }, 'warm session closed');
+      await ctl.handle.stop();
+      await ctl.done;
+    },
+    async stopPassLane(id) {
+      const ctl = active.get(id);
+      if (!ctl) {
+        if (openPassTurn(db, getWorkstreamRow(db, id).taskId))
+          await stopTurn(id, null, lastProviderSession(id));
+        return;
+      }
+      ctl.builderStop = true;
+      ctl.stopReason = 'closed';
+      ctl.holdAbort?.abort();
+      ctl.endWaits?.();
+      await ctl.handle?.stop();
+      await ctl.done;
+    },
+    retryTurn(item, answer) {
+      const turnId = PassTurnId.safeParse(item.detail?.[PASS_TURN_DETAIL]);
+      const target = item.targets[0];
+      // Another flag is another handler's.
+      if (!turnId.success || !target) return;
+      // A failed turn's flag is answered by Retry Turn alone; any other answer leaves it open.
+      if (answer.choice !== PASS_RETRY_TURN_CHOICE)
+        throw new InvalidError(`A failed turn is answered with ${PASS_RETRY_TURN_CHOICE}`);
+      const id = target.workstreamId;
+      const providerSessionId = lastProviderSession(id);
+      opts.state.write((ctx) => {
+        const pass = passOfWorkstream(ctx.tx, id);
+        if (!pass)
+          throw new ConflictError(
+            'The task is no longer in a UI Workbench pass, so its turn is not retried',
+          );
+        // A turn opened now would leave with the task, and run in its next pass unasked.
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `UI Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its turns are not retried`,
+          );
+        const row = getWorkstreamRow(ctx.tx, id);
+        const takeOut = lastTakeOut(ctx.tx, row.taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(
+            'The page is being taken out of its pass, so its turn is not retried',
+          );
+        if (
+          row.state !== S.WaitingHuman ||
+          row.nextAction.kind !== 'pass_review' ||
+          row.nextAction.inboxId !== item.id
+        )
+          throw new ConflictError('The page is no longer waiting on this failed turn');
+        const failed = getPassTurn(ctx.tx, turnId.data);
+        insertPassTurn(ctx, {
+          taskId: row.taskId,
+          workstreamId: id,
+          sessionId: null,
+          messageId: failed.messageId,
+        });
+        // The message goes to the session the turn failed in when it can be resumed, else to a
+        // fresh one that starts from the thread's digest.
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: null,
+          patch: {
+            nextAction:
+              failed.messageId === null
+                ? providerSessionId === null
+                  ? { kind: 'start' }
+                  : { kind: 'resume', providerSessionId, reason: 'the builder retried the turn' }
+                : { kind: 'feedback', messageId: failed.messageId, providerSessionId },
+            failureKind: null,
+            failureReason: null,
+          },
+          reason: 'the builder retried the turn',
+        });
+      });
       opts.onLaneFreed();
     },
     approveCheck(ctx, id) {

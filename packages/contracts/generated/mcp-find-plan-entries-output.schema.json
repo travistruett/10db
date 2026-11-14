@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "intent",
+              "fact",
+              "experiment",
+              "name",
+              "decision",
+              "question",
+              "finding",
+              "section"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "key",
+          "title",
+          "snippet",
+          "revision"
+        ]
+      }
+    },
+    "empty": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "hits",
+    "empty"
+  ]
+}

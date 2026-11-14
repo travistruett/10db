@@ -82,6 +82,7 @@ export function cardSummary(
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     placement ? `Runs in ${placement}.` : null,
+    batch?.passId != null ? 'A page open in the UI Workbench.' : null,
     sharedWith > 1
       ? `Shares its branch with ${String(sharedWith - 1)} other ${sharedWith === 2 ? 'task' : 'tasks'}.`
       : null,
@@ -136,6 +137,14 @@ function indicatorsOf(
           tooltip: goalTitle,
         }
       : null,
+    batch?.passId != null
+      ? {
+          kind: 'workbench',
+          label: 'UI Workbench',
+          color: 'gray',
+          tooltip: 'A page open in the UI Workbench, worked on there',
+        }
+      : null,
     sharedWith > 1
       ? {
           kind: 'shared-branch',
@@ -183,8 +192,8 @@ export function TaskCard({
     : taskState(workstream, batch, gateCommand, place, batches, task);
   // The border takes the state's DESIGN.md color whatever the line says, thicker when it is the builder's
   // turn: no fill, no stripe, no animation. Queued keeps the plain border.
-  const colored = state !== null && state.color !== 'gray';
-  const waiting = state?.color === 'yellow';
+  const colored = state !== null && state.color !== 'gray' && state.plainBorder !== true;
+  const waiting = colored && state.color === 'yellow';
   const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
   const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount, goalTitle);
   return (
@@ -192,6 +201,8 @@ export function TaskCard({
       withBorder
       radius="md"
       p="sm"
+      shadow="xs"
+      bg="var(--tendb-color-card)"
       data-testid="task-card"
       {...(colored ? { 'data-state-color': state.color } : {})}
       style={
@@ -200,7 +211,8 @@ export function TaskCard({
               borderColor: `var(--mantine-color-${state.color}-filled)`,
               borderWidth: waiting ? 2 : 1,
             }
-          : { borderWidth: 1 }
+          : // A queued card's border is its own fill: the tone lifts it off the column, not a line.
+            { borderColor: 'var(--tendb-color-card)', borderWidth: 1 }
       }
     >
       <Stack gap="xs">

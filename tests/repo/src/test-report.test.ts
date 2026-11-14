@@ -47,6 +47,7 @@ describe('classifyPath', () => {
     ['generated contracts', 'packages/contracts/generated/schema.ts', 'other'],
     ['generated migrations', 'packages/db/drizzle/0000_baseline.sql', 'other'],
     ['generated migration metadata', 'packages/db/drizzle/meta/_journal.json', 'other'],
+    ['generated codex types', 'apps/daemon/src/sessions/codex-generated/ts/v2/Account.ts', 'other'],
     ['a workflow', '.github/workflows/ci.yml', 'other'],
     ['a manifest beside the tests', 'tests/repo/package.json', 'other'],
     ['test data', 'apps/desktop/e2e/script-book.json', 'other'],

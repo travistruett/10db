@@ -59,12 +59,17 @@ const runner: GateRunner = {
   },
 };
 
+/** The commit the fake remote-tracking branch is at. */
+const ORIGIN_BASE = 'a'.repeat(40);
+const originBase = () => Promise.resolve(ORIGIN_BASE);
+
 const wrapped = () =>
   autoDocker(runner, {
     state,
     inbox,
     logger: silentLogger,
-    readBase: (_repo, _ref, path) => Promise.resolve(base[path] ?? null),
+    baseCommit: originBase,
+    readBase: (_repo, _commit, path) => Promise.resolve(base[path] ?? null),
   });
 
 function request(command: string, extra: Partial<GateRequest['project']> = {}): GateRequest {
@@ -116,7 +121,8 @@ describe('a gate that is seen to call docker', () => {
       state,
       inbox,
       logger: silentLogger,
-      readBase: () => Promise.reject(new Error('no such ref')),
+      baseCommit: originBase,
+      readBase: () => Promise.reject(new Error('no such object')),
     });
     await failing.run(request('make gate'));
     expect(seen).toHaveLength(1);
@@ -220,12 +226,13 @@ describe('a gate that fails because Docker was refused', () => {
 });
 
 describe('where the base is read from', () => {
-  it('reads origin/<base> only, never the local base branch', async () => {
+  it("reads the remote-tracking branch's commit only, never the local base branch", async () => {
     const refs: string[] = [];
     const reading = autoDocker(runner, {
       state,
       inbox,
       logger: silentLogger,
+      baseCommit: originBase,
       readBase: (_repo, ref, path) => {
         refs.push(ref);
         // A file only the local branch has, as a lane commits to it in a local-delivery project.
@@ -238,7 +245,7 @@ describe('where the base is read from', () => {
     });
     await reading.run(request('make gate'));
     expect(refs.length).toBeGreaterThan(0);
-    expect(new Set(refs)).toEqual(new Set([`origin/${project.baseBranch}`]));
+    expect(new Set(refs)).toEqual(new Set([ORIGIN_BASE]));
     expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
     expect(notes()).toEqual([]);
   });
@@ -248,16 +255,46 @@ describe('where the base is read from', () => {
       state,
       inbox,
       logger: silentLogger,
+      baseCommit: originBase,
       readBase: (_repo, ref, path) =>
         Promise.resolve(
-          ref === `origin/${project.baseBranch}` && path === 'Makefile'
-            ? 'gate:\n\tdocker compose run t\n'
-            : null,
+          ref === ORIGIN_BASE && path === 'Makefile' ? 'gate:\n\tdocker compose run t\n' : null,
         ),
     });
     await reading.run(request('make gate'));
     expect(seen[0]?.project.sandboxDocker).toBe(true);
     expect(notes()).toHaveLength(1);
+  });
+});
+
+describe('with no remote-tracking branch', () => {
+  it('reads no file, so a Makefile call turns nothing on', async () => {
+    let reads = 0;
+    const reading = autoDocker(runner, {
+      state,
+      inbox,
+      logger: silentLogger,
+      baseCommit: () => Promise.resolve(null),
+      readBase: () => {
+        reads++;
+        return Promise.resolve('gate:\n\tdocker compose run t\n');
+      },
+    });
+    await reading.run(request('make gate'));
+    expect(reads).toBe(0);
+    expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+  });
+
+  it("still reads the gate command's own text, which the builder wrote", async () => {
+    const reading = autoDocker(runner, {
+      state,
+      inbox,
+      logger: silentLogger,
+      baseCommit: () => Promise.resolve(null),
+      readBase: () => Promise.resolve(null),
+    });
+    await reading.run(request('docker compose run --rm t'));
+    expect(seen[0]?.project.sandboxDocker).toBe(true);
   });
 });
 

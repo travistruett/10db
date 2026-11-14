@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { SMALL_PROPOSAL_LIMIT_LABEL } from './small-proposal-limit-setting';
 
-describe('Settings › General › Small proposals', () => {
+describe('Settings › Planning › Small proposals', () => {
   it('shows the saved limit and sends the edited one, zero included', async () => {
     const put: unknown[] = [];
     server.use(
@@ -20,12 +20,12 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     expect(save).toHaveProperty('disabled', true);
     fireEvent.change(box, { target: { value: '0' } });
     fireEvent.click(save);
@@ -48,12 +48,12 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', '1200');
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: '5' } });
     expect(box).toHaveProperty('value', '5');
@@ -92,12 +92,12 @@ describe('Settings › General › Small proposals', () => {
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
-    renderApp('/settings/general');
+    renderApp('/settings/planning');
     const box = await screen.findByRole('textbox', { name: SMALL_PROPOSAL_LIMIT_LABEL });
     await waitFor(() => {
       expect(box).toHaveProperty('value', String(saved));
     });
-    const save = screen.getByRole('button', { name: 'Save proposal limit' });
+    const save = screen.getByRole('button', { name: 'Save Proposal Limit' });
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: typed } });
     expect(box).not.toHaveProperty('value', '');

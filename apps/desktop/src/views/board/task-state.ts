@@ -23,6 +23,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
+import { joinNames } from '../inbox/route-line';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { FAILURE_LABELS } from './batch-labels';
 import { ciLine, type CiLink } from './ci-line';
@@ -38,12 +39,22 @@ export interface TaskState {
   readonly link?: CiLink | null;
   /** A failure's raw reason, behind the plain line: the card's tooltip. */
   readonly detail?: string | null;
+  /** The card keeps its plain border: the line and its dot say the state, because nothing is asked of the builder. */
+  readonly plainBorder?: boolean;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */
 function lowerFirst(text: string): string {
   const [first = '', second = ''] = text;
   return second === second.toLowerCase() ? first.toLowerCase() + text.slice(1) : text;
+}
+
+/** How long ago, in the largest whole unit: "12m", "3h", "2d". */
+export function elapsedWords(since: string, now: number = Date.now()): string {
+  const minutes = Math.max(0, Math.floor((now - new Date(since).getTime()) / 60_000));
+  if (minutes >= 24 * 60) return `${String(Math.floor(minutes / (24 * 60)))}d`;
+  if (minutes >= 60) return `${String(Math.floor(minutes / 60))}h`;
+  return `${String(minutes)}m`;
 }
 
 /** A step as a failure line names it. */
@@ -156,6 +167,18 @@ export function failureLine(
   const happened = whatHappened(workstream.failureKind, step);
   if (!retryable) return happened;
   return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null, workstream.revertTold ?? false)}`;
+}
+
+/** What Retry Turn does on a failed Workbench turn: it answers the turn's flag. */
+const RETRY_TURN_LINE = 'Retry Turn sends your last message again.';
+
+/**
+ * A failed Workbench turn's line: what happened, in a run's words, and what Retry Turn does. A pass
+ * lane never fails as a run does: its failed turn waits on a flag whose one answer is Retry Turn.
+ */
+export function passTurnFailureLine(failureKind: string | null): string {
+  const happened = failureKind === null ? 'The turn failed.' : whatHappened(failureKind, null);
+  return `${happened} ${RETRY_TURN_LINE}`;
 }
 
 function building(workstream: WorkstreamDto): string {
@@ -447,7 +470,17 @@ function stateOf(
     case S.Verifying:
       return { line: gateCommand ? `Checking: ${gateCommand}` : 'Checking', color: 'blue' };
     case S.WaitingHuman:
-      return { line: 'Waiting on you: answer in Inbox', color: 'yellow' };
+      // A question out with someone else needs nothing from the builder: a line and a dot, no yellow border.
+      if (workstream.waitingOn)
+        return {
+          line: `Waiting on ${joinNames(workstream.waitingOn.names)} in Slack · ${elapsedWords(workstream.waitingOn.since)}`,
+          color: 'yellow',
+          plainBorder: true,
+        };
+      // A pass's page is answered and signed off in the Workbench.
+      return batch?.passId == null
+        ? { line: 'Waiting on you: answer in Inbox', color: 'yellow' }
+        : { line: 'Waiting on you in the UI Workbench', color: 'yellow' };
     case S.PausedLimit:
       return { line: 'Paused: usage limit', color: 'orange' };
     case S.Recovering:

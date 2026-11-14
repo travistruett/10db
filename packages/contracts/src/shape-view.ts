@@ -42,7 +42,7 @@ export const ShapeConvertedDto = z.object({
   principleId: PrincipleId.nullable().optional(),
   /** The question Convert stored; absent for every other kind. */
   questionId: ShapeQuestionId.nullable().optional(),
-  /** The converted decision or principle was withdrawn (Withdraw Decision…, Withdraw Principle…); absent for every other kind. */
+  /** The converted decision or principle was withdrawn (Withdraw Decision, Withdraw Principle); absent for every other kind. */
   withdrawn: z.boolean().optional(),
   /** The converted decision or principle was replaced by a later one that still stands; absent for every other kind. */
   superseded: z.boolean().optional(),
@@ -268,10 +268,16 @@ export type ShapeUnpinInput = z.infer<typeof ShapeUnpinInput>;
 export const ShapeResumeInput = z.object({ event: z.string().min(1).max(2000) });
 export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
 
-/** The conversation that made a goal or a task, for its drawer's Open conversation; null when none did. */
-export const ShapeOfDto = z.object({ shapeId: ShapeId.nullable() });
+/**
+ * The conversation that made a goal or a task, for its drawer's Open conversation and "Planned in";
+ * null when none did. `title` is that Plan's title.
+ */
+export const ShapeOfDto = z.object({
+  shapeId: ShapeId.nullable(),
+  title: z.string().nullable().default(null),
+});
 export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 
-/** Withdraw Decision…: the builder's reason is required. */
+/** Withdraw Decision: the builder's reason is required. */
 export const ShapeWithdrawInput = z.object({ reason: z.string().min(1).max(2000) });
 export type ShapeWithdrawInput = z.infer<typeof ShapeWithdrawInput>;

@@ -322,7 +322,7 @@ test.describe('the Board with several open batches', () => {
         await goal.click();
         const goalRegion = page.getByRole('region', { name: GOAL_TITLE });
         await expect(goalRegion.getByText('Tasks', { exact: true })).toBeVisible();
-        await expect(goalRegion.getByRole('button', { name: 'Start Ready Tasks…' })).toBeVisible();
+        await expect(goalRegion.getByRole('button', { name: 'Start Ready Tasks' })).toBeVisible();
         // The window has loaded once its summary is on the Since you last looked line.
         await expect(
           goalRegion.getByRole('button', { name: /^Since you last looked.+/ }),
@@ -453,7 +453,7 @@ test.describe('the Board with three goals', () => {
       await page.getByRole('option', { name: GOAL_TITLES[0] }).click();
       const line = page.getByTestId('goal-line');
       await expect(line).toBeVisible();
-      await expect(line.getByRole('button', { name: 'Start Ready…' })).toBeVisible();
+      await expect(line.getByRole('button', { name: 'Start Ready' })).toBeVisible();
       await expect(page.getByRole('dialog', { name: 'Goal' })).toHaveCount(0);
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-board-goals-${String(size.width)}.png`) });

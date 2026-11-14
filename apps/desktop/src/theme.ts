@@ -147,6 +147,27 @@ function colorVariables(name: string, variant: SelenizedVariant): [string, strin
   ];
 }
 
+/**
+ * The Board's surfaces. A card is always the raised tone and its column the recessed one, so the
+ * pair swaps between schemes: Selenized dark lightens from bg_0 to bg_2, Selenized light darkens.
+ */
+function boardVariables(
+  variant: SelenizedVariant,
+  scheme: 'light' | 'dark',
+): Record<string, string> {
+  return {
+    '--tendb-color-column': scheme === 'dark' ? variant.bg0 : variant.bg1,
+    '--tendb-color-column-header': scheme === 'dark' ? variant.bg1 : variant.bg2,
+    '--tendb-color-column-border': variant.bg1,
+    '--tendb-color-card': scheme === 'dark' ? variant.bg1 : variant.bg0,
+  };
+}
+
+/** The raised tone a page's tables and charts sit on, one step off the body in either scheme. */
+function panelVariables(variant: SelenizedVariant): Record<string, string> {
+  return { '--tendb-color-panel': variant.bg1 };
+}
+
 /** Mantine's scheme variables, each one a value from `variant`. */
 function schemeVariables(
   names: readonly string[],
@@ -177,7 +198,15 @@ export const cssVariablesResolver: CSSVariablesResolver = (t) => {
   const names = Object.keys(t.colors);
   return {
     variables: {},
-    light: schemeVariables(names, SelenizedLight),
-    dark: schemeVariables(names, SelenizedDark),
+    light: {
+      ...schemeVariables(names, SelenizedLight),
+      ...boardVariables(SelenizedLight, 'light'),
+      ...panelVariables(SelenizedLight),
+    },
+    dark: {
+      ...schemeVariables(names, SelenizedDark),
+      ...boardVariables(SelenizedDark, 'dark'),
+      ...panelVariables(SelenizedDark),
+    },
   };
 };

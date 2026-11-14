@@ -4,6 +4,7 @@ import {
   aaKeyReaderFromEnv,
   catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
+  slackOnFromEnv,
 } from './options-from-env';
 
 describe('daemonOptionsFromEnv', () => {
@@ -15,6 +16,10 @@ describe('daemonOptionsFromEnv', () => {
     expect(
       daemonOptionsFromEnv(loadEnv({ TENDB_FAKE_SCRIPTS: '/tmp/book.json' })).sandbox,
     ).toBeNull();
+  });
+
+  it("takes pictures with the pinned browser, which a daemon whose sandbox's roots are refused never launches", () => {
+    expect(daemonOptionsFromEnv(loadEnv({})).pictures).toEqual({ kind: 'pinned' });
   });
 
   it.each([
@@ -33,6 +38,14 @@ describe('daemonOptionsFromEnv', () => {
     ['off', { TENDB_CATALOGUE: 'off' }, false],
   ])('syncs the catalogue when TENDB_CATALOGUE is %s: %s', (_name, source, expected) => {
     expect(daemonOptionsFromEnv(loadEnv(source)).catalogueSync).toBe(expected);
+  });
+
+  it.each([
+    ['absent', {}, undefined],
+    ['on', { TENDB_BENCHMARKS: 'on' }, undefined],
+    ['off', { TENDB_BENCHMARKS: 'off' }, true],
+  ])('reports the benchmarks switch when TENDB_BENCHMARKS is %s', (_name, source, expected) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).benchmarksOff).toBe(expected);
   });
 
   it.each([
@@ -63,9 +76,11 @@ describe('daemonOptionsFromEnv', () => {
       port: 0,
       logLevel: 'warn',
       sandbox: {},
+      slack: true,
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
       catalogueSync: true,
+      pictures: { kind: 'pinned' },
     });
   });
 
@@ -108,5 +123,16 @@ describe('judgeOff', () => {
     ['unset', {}, false],
   ])('is %s -> %s for TENDB_JUDGE', (_name, source, off) => {
     expect(daemonOptionsFromEnv(loadEnv(source)).judgeOff ?? false).toBe(off);
+  });
+});
+
+describe('slackOnFromEnv', () => {
+  it.each([
+    ['off', { TENDB_SLACK: 'off' }, false],
+    ['on', { TENDB_SLACK: 'on' }, true],
+    ['unset, the installed app', {}, true],
+  ])('is %s -> %s for TENDB_SLACK', (_name, source, on) => {
+    expect(slackOnFromEnv(loadEnv(source))).toBe(on);
+    expect(daemonOptionsFromEnv(loadEnv(source)).slack).toBe(on);
   });
 });

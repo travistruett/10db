@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "reverted": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      }
+    },
+    "stays": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      }
+    },
+    "left": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "page"
+        ]
+      }
+    },
+    "folder": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "returned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "branch",
+        "returned"
+      ]
+    },
+    "droppedShared": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "seq",
+          "paths"
+        ]
+      }
+    },
+    "pullRequestLeftOpen": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "reverted",
+    "stays",
+    "left",
+    "folder",
+    "droppedShared",
+    "pullRequestLeftOpen"
+  ]
+}

@@ -3,11 +3,9 @@ import { ModelStatus, ModelTier } from './catalogue';
 import { ModelProfileId } from './ids';
 import { Effort, ProfileSource, Provider } from './states';
 
-/** One Artificial Analysis index per score kind, 0–100; null when nobody has measured it. */
+/** The Artificial Analysis Intelligence Index, 0–100, that every role routes on; null when nobody has measured it. */
 export const ProfileScores = z.object({
   intelligence: z.number().min(0).max(100).nullable(),
-  coding: z.number().min(0).max(100).nullable(),
-  agentic: z.number().min(0).max(100).nullable(),
 });
 export type ProfileScores = z.infer<typeof ProfileScores>;
 

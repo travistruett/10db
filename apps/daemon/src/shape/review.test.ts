@@ -7,6 +7,8 @@ import {
   type ShapeToolName,
 } from '@10db/contracts';
 import {
+  findDocument,
+  listAttachmentRevisions,
   listRehearsals,
   listShapeAttachments,
   listShapeFindings,
@@ -382,6 +384,24 @@ describe('write_spec', () => {
     expect(
       listShapeAttachments(c.store.db, c.shape.id).map((a) => [a.kind, a.key, a.body]),
     ).toEqual([['spec', 'density', '# v2']]);
+  });
+
+  it('write_spec twice keeps two revisions', async () => {
+    await planned();
+    await call('write_spec', { effortKey: 'density', markdown: '# v1\n## Scope\n' });
+    await call('write_spec', { effortKey: 'density', markdown: '# v1\n## Scope\n' });
+    await call('write_spec', { effortKey: 'density', markdown: '# v2\n' });
+    const spec = must(findDocument(c.store.db, c.shape.id, 'density'), 'the spec');
+    expect(
+      listAttachmentRevisions(c.store.db, spec.id).map((r) => [
+        r.number,
+        r.body,
+        r.sections.map((s) => s.slug),
+      ]),
+    ).toEqual([
+      [1, '# v1\n## Scope\n', ['v1', 'scope']],
+      [2, '# v2\n', ['v2']],
+    ]);
   });
 
   it('refuses an effort that is not in the plan, naming it', async () => {

@@ -4,21 +4,26 @@ import { AccountsSection } from './accounts/accounts-section';
 import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
+import { IntegrationsSection } from './integrations/integrations-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
+import { PeopleSection } from './people/people-section';
 import { PatternsSection } from './patterns-section';
-import { PlannedRemainder, PlannedSection } from './planned-section';
+import { PlannedRemainder } from './planned-section';
+import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
-import { OneWayPathsSetting } from './one-way-paths-setting';
-import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
+import { OverviewSection } from './overview-section';
+import { PlanningSection } from './planning-section';
+import { ScopeLine } from './scope-line';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
+import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsSectionKey } from './sections';
 import { RoleSettings } from './role-settings';
 import { SelfUpdateSection } from './self-update-section';
-import { ShapeJevSetting } from './shape-jev-setting';
+import { TrustSection } from './trust-section';
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -41,13 +46,24 @@ export function SectionBody({
           {project ? (
             <>
               <ProjectGeneralForm key={project.id} project={project} />
-              <ShapeJevSetting key={`jev-${project.id}`} project={project} />
-              <OneWayPathsSetting key={`one-way-${project.id}`} project={project} />
-              <SmallProposalLimitSetting key={`small-proposals-${project.id}`} project={project} />
             </>
           ) : (
             <NoProject />
           )}
+        </>
+      );
+    case SettingsSectionKey.Overview:
+      return (
+        <>
+          {heading}
+          <OverviewSection />
+        </>
+      );
+    case SettingsSectionKey.Planning:
+      return (
+        <>
+          {heading}
+          {project ? <PlanningSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.BoardColumns:
@@ -76,6 +92,40 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectBilling key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Integrations:
+      return (
+        <>
+          {heading}
+          <IntegrationsSection />
+        </>
+      );
+    case SettingsSectionKey.People:
+      return (
+        <>
+          {heading}
+          <PeopleSection />
+        </>
+      );
+    case SettingsSectionKey.ProjectTrust:
+      return (
+        <>
+          {heading}
+          {project ? (
+            <ScopeLine>
+              {`For ${project.name} only. Anything set to As app follows All projects › Trust.`}
+            </ScopeLine>
+          ) : null}
+          {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Trust:
+      return (
+        <>
+          {heading}
+          <ScopeLine>For every project. A project can override this in its own Trust.</ScopeLine>
+          <TrustSection />
         </>
       );
     case SettingsSectionKey.KeepAwake:
@@ -115,16 +165,17 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Models:
-      return (
-        <>
-          {heading}
-          <ModelsSection />
-        </>
-      );
+      // The page carries its own title, so the Account select and the refresh button sit beside it.
+      return <ModelsSection />;
     case SettingsSectionKey.Team:
       return (
         <>
           {heading}
+          {project ? (
+            <ScopeLine>
+              {`For ${project.name} only. Use global follows All projects › Models by role.`}
+            </ScopeLine>
+          ) : null}
           {project ? (
             <>
               <RoleSettings key={`roles-${project.id}`} project={project} />
@@ -140,6 +191,9 @@ export function SectionBody({
       return (
         <>
           {heading}
+          <ScopeLine>
+            For every project. A project can override this in its own Models by role.
+          </ScopeLine>
           <RoleSettings project={null} />
           <PatternsSection project={null} />
           <PlannedRemainder section={section} />
@@ -149,7 +203,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <PlannedSection section={section} />
+          {project ? <WhoAnswersSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
   }

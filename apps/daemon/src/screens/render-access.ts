@@ -47,7 +47,25 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
+  '/tasks/:taskId/thread':
+    "A task's thread is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/tasks/:taskId/screens':
+    "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
+  '/screens/:screenId':
+    "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
+  '/projects/:projectId/pictures':
+    "The browser for pictures and its sign-in are Settings' own line, and no screen Plan draws shows them.",
+  '/tasks/:taskId/thread/pictures/:fileId':
+    "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
+  '/shapes/:shapeId/record':
+    "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
+  '/shapes/:shapeId/record/:list':
+    "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
+  '/shapes/:shapeId/documents/:documentId/revisions/:number':
+    "A Plan's documents are read in the Record view, and no screen Plan draws shows them.",
+  '/tasks/:taskId/plan-context':
+    "What a lane's brief carried is for the task drawer, and no screen Plan draws shows it.",
   '/events/head': 'The event log is not a screen; the window draws once and does not follow it.',
   '/events/stream':
     'The live stream is not a screen; the window draws once and does not follow it.',
@@ -59,6 +77,20 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/team': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
+  '/passes/:passId': 'Only the UI Workbench draws a pass, and it is not a screen.',
+  '/passes': 'Only the UI Workbench draws a pass, and it is not a screen.',
+  '/pass-turns/:turnId/activity': 'Only the UI Workbench draws a pass, and it is not a screen.',
+  '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
+  '/tasks/:taskId/turns':
+    "A page's turns list the files each changed, read from its kept commits with git.",
+  '/projects/:projectId/pass-start':
+    "Start Pass's preview reads Your folder with git: its changed files, its branch and the base.",
+  '/passes/:passId/tasks/:taskId/take-out':
+    "A take-out's shared changes are read by running git in Your folder, and no screen draws them.",
+  '/passes/:passId/close':
+    "A pass's close lists are read by running git in Your folder, and only the UI Workbench draws them.",
+  '/passes/:passId/pull-request':
+    "Reading a pass's pull request asks gh whether it is signed in, and only the UI Workbench draws it.",
   '/shape-measures': 'No screen draws a measure.',
   '/accounts': 'No screen draws an account.',
   '/accounts/pauses': 'No screen draws an account.',
@@ -66,20 +98,32 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/accounts/:accountId/usage': 'No screen draws an account.',
   '/personas': 'No screen draws a setting.',
   '/people': 'No screen draws a setting.',
+  '/github': 'No screen draws a setting.',
+  '/slack': 'No screen draws a setting.',
+  '/slack/members': "The workspace's people are read from Slack, and no screen draws them.",
+  '/stakeholders/timers': 'No screen draws a setting.',
+  '/tasks/:taskId/question-routes': 'No screen draws who answers a task.',
+  '/inbox/:id/compose': "A drafted message is for the builder's own window, not for a screen.",
   '/model-profiles': 'No screen draws a setting.',
   '/model-settings': 'No screen draws a setting.',
   '/projects/:projectId/model-settings': 'No screen draws a setting.',
   '/judge': 'No screen draws a setting.',
   '/judge/calls': 'No screen draws a setting.',
+  '/judge/models': 'No screen draws a setting.',
   '/benchmarks/status': 'No screen draws a benchmark.',
   '/benchmarks/models': 'No screen draws a benchmark.',
   '/models': 'No screen draws the model list.',
+  '/models/picks': 'No screen draws the model list.',
   '/models/offers': 'No screen draws the model list.',
   '/models/status': 'No screen draws the model list.',
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/lane-permissions': 'No screen draws a setting.',
+  '/settings/trust': 'No screen draws a setting.',
+  '/projects/:projectId/trust': 'No screen draws a setting.',
+  '/projects/:projectId/live-systems': 'No screen draws a setting.',
   '/settings/self-update': 'No screen draws a setting.',
   '/projects/:projectId/knowledge': 'Only the Knowledge view draws it, and it is not a screen.',
+  '/dev-ui/connection': "The dev UI's token is for the app's Open Page, not for a screen.",
   '/decisions/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
   '/principles/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
 };

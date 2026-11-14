@@ -17,7 +17,10 @@ import { dirname, join } from 'node:path';
 import {
   BenchmarkStatusDto,
   BoardColumnDto,
+  DaemonEvent,
   EventsHead,
+  GithubSigninDto,
+  GithubStatusDto,
   FolderInspectResult,
   InboxItemDto,
   KeepAwakeStatus,
@@ -62,7 +65,7 @@ import { ManualClock } from '../clock';
 import { loadEnv } from '../env';
 import { CODEX_VERIFIED_ON, type AgentStatus, type ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
-import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
+import { FakeAdapter, type FakeScriptBook, type LaneSessionSpec } from '../sessions';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
@@ -336,7 +339,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-      const specs: SessionSpec[] = [];
+      const specs: LaneSessionSpec[] = [];
       adapter.seen = (spec) => {
         specs.push(spec);
         return {};
@@ -396,7 +399,7 @@ describe('startDaemon', () => {
       for (const dir of roots.systemTempRoots) mkdirSync(dir);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-        const specs: SessionSpec[] = [];
+        const specs: LaneSessionSpec[] = [];
         adapter.seen = (spec) => {
           specs.push(spec);
           return {};
@@ -1193,7 +1196,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     let load = 100;
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-    const specs: SessionSpec[] = [];
+    const specs: LaneSessionSpec[] = [];
     adapter.seen = (spec) => {
       specs.push(spec);
       return {};
@@ -1348,6 +1351,72 @@ describe('startDaemon', () => {
       expect(probes()).toBe(2);
       expect(await login('/system')).toBeNull();
       expect(probes()).toBe(2);
+    });
+  });
+
+  describe('GitHub Sign In', () => {
+    it('reads gh through the daemon, runs the sign-in child, and announces its end after the login is cached', async () => {
+      const gh = new FakeGh();
+      gh.auth = 'signed_out';
+      let print: (text: string) => void = () => undefined;
+      let exit: (code: number | null) => void = () => undefined;
+      let started: () => void = () => undefined;
+      const spawnedChild = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        gh,
+        githubLoginSpawn: () => {
+          started();
+          return {
+            onOutput: (listener) => {
+              print = (text) => {
+                listener('stderr', text);
+              };
+            },
+            onExit: (listener) => {
+              exit = listener;
+            },
+            kill: () => undefined,
+          };
+        },
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        state: 'signed_out',
+        login: null,
+        signingIn: null,
+      });
+
+      const post = api.post('/github/signin', GithubSigninDto);
+      await spawnedChild;
+      print(
+        '! First copy your one-time code: ABCD-1234\nOpen this URL to continue in your web browser: https://github.com/login/device\n',
+      );
+      expect(await post).toEqual({ code: 'ABCD-1234', url: 'https://github.com/login/device' });
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        signingIn: { code: 'ABCD-1234' },
+      });
+
+      gh.auth = 'ok';
+      exit(0);
+      const ended = await waitForAsync(async () =>
+        (await api.get('/events?after=0', z.array(DaemonEvent))).find(
+          (e) => e.type === 'github.login_ended',
+        ),
+      );
+      expect(ended.data).toEqual({ ok: true, login: 'octocat', message: null, cancelled: false });
+      expect(await api.get('/github', GithubStatusDto)).toMatchObject({
+        state: 'signed_in',
+        login: 'octocat',
+        signingIn: null,
+      });
     });
   });
 
@@ -1548,7 +1617,7 @@ describe('startDaemon', () => {
       expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
       expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
         enabled: true,
-        tier: 'strongest',
+        tier: 'frontier',
         outputPrice: 20,
       });
 
@@ -1734,7 +1803,7 @@ describe('startDaemon', () => {
       // Hand-set (invented) scores: the profile becomes manual and the only measured one.
       expect(
         await api.patch(`/model-profiles/${sonnetHigh.id}`, ModelProfileDto, {
-          scores: { intelligence: 50, coding: 50, agentic: 50 },
+          scores: { intelligence: 50 },
           costPerTaskUsd: 2,
         }),
       ).toMatchObject({ source: 'manual' });

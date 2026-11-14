@@ -1,5 +1,71 @@
 import { z } from 'zod';
 import {
+  PicturesStatusDto,
+  ScreensMatrix,
+  TaskScreenAddedData,
+  TaskScreenDto,
+  TaskScreensDto,
+} from './task-screens';
+import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
+import {
+  PassAbandonedDto,
+  PassCheckDetail,
+  PassDto,
+  PassOpenedDto,
+  PassOpenRequest,
+  PassTurnDto,
+  PassViewDto,
+  SharedChoice,
+  TakeOutResultDto,
+} from './passes';
+import { SessionActivityData, TurnActivityDto } from './pass-activity';
+import {
+  GoalPassPagesDto,
+  PassJoinRequest,
+  PassRename,
+  PassStartDto,
+  PassTurnWithFilesDto,
+} from './pass-view';
+import { PassCardDetail } from './pass-cards';
+import { WorkbenchSetupDto } from './workbench-setup';
+import {
+  PlanBundle,
+  PlanExportInput,
+  PlanExportResult,
+  PlanImportError,
+  PlanImportInput,
+  PlanImportPreview,
+  PlanImportResult,
+} from './plan-bundle';
+import { AnchorCheckDto, PlanAnchor, PlanContext, PlanRef, SectionIndexEntry } from './plan-record';
+import {
+  PlanDocumentRevisionDto,
+  PlanRecordDto,
+  PlanRecordPage,
+  PlanRecordQuery,
+  TaskPlanContextDto,
+} from './plan-record-view';
+import {
+  PassCloseAnswerDto,
+  PassCloseContinueDto,
+  PassClosePreviewDto,
+  PassCloseRequest,
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
+  PassSignOffDto,
+  TakeOutPreviewDto,
+  TakeOutRequest,
+} from './pass-close';
+import {
+  PassClosedData,
+  PassPageSignedOffData,
+  PassPreviewBrokenData,
+  PassPreviewMendedData,
+  PassSettledData,
+  PassSharedChangedData,
+} from './pass-events';
+import { PassHoldDto, PassSharedChangeDto } from './pass-shared';
+import {
   BatchDto,
   BatchStartInput,
   BatchStartResult,
@@ -19,19 +85,20 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
-import {
-  JudgeCallDto,
-  JudgeConfigPatch,
-  JudgeKeyInput,
-  JudgeStatusDto,
-  JudgeTestResultDto,
-} from './judge';
+import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import { GithubSigninDto, GithubStatusDto } from './github';
+import { DecisionModelListDto } from './decision-models';
+import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
   ModelSettingsInput,
+  ModelEffortDto,
   ModelRowDto,
+  ModelPicksQuery,
+  ModelsQuery,
+  RolePickDto,
+  RolePicksDto,
   ModelSetting,
   ModelSettingsDto,
   PatternDto,
@@ -135,6 +202,16 @@ import {
   ShapeRehearseResult,
   SmallProposalLimitDto,
 } from './shape-review';
+import {
+  AskSomeoneInput,
+  ComposePreviewDto,
+  QuestionRouteDto,
+  SendInput,
+  SlackConnectionDto,
+  SlackMemberDto,
+  SlackTokenInput,
+  StakeholderSendDto,
+} from './slack';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -145,6 +222,7 @@ import {
   PersonInput,
   RoutingRuleDto,
   RoutingRulesInput,
+  StakeholderTimersDto,
   TeamDto,
   TeamInput,
 } from './team';
@@ -157,6 +235,17 @@ import {
   McpServerStatusDto,
   SystemCheckDto,
 } from './system';
+import { AgentCapabilitiesDto } from './agent-capabilities';
+import {
+  InstalledPluginDto,
+  ProjectTrustDto,
+  SetupPreviewDto,
+  TrustOverrides,
+  TrustSettingsDto,
+  TrustSwitches,
+} from './trust';
+import { LiveSystemsDto } from './trust-policy';
+import { ToolCallView } from './tool-call-view';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
@@ -182,6 +271,7 @@ const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
+  'agent-capabilities-dto': AgentCapabilitiesDto,
   'account-created-dto': AccountCreatedDto,
   'account-dto': AccountDto,
   'account-identity-dto': AccountIdentityDto,
@@ -214,13 +304,24 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'self-update-status-dto': SelfUpdateStatusDto,
   'self-update-wait-input': SelfUpdateWaitInput,
   'lane-permissions-dto': LanePermissionsDto,
+  'trust-switches': TrustSwitches,
+  'live-systems-dto': LiveSystemsDto,
+  'tool-call-view': ToolCallView,
+  'trust-overrides': TrustOverrides,
+  'trust-settings-dto': TrustSettingsDto,
+  'project-trust-dto': ProjectTrustDto,
+  'setup-preview-dto': SetupPreviewDto,
+  'installed-plugin-dto': InstalledPluginDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
+  'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'github-signin-dto': GithubSigninDto,
+  'github-status-dto': GithubStatusDto,
+  'decision-model-list-dto': DecisionModelListDto,
   'judge-call-dto': JudgeCallDto,
   'judge-config-patch': JudgeConfigPatch,
-  'judge-key-input': JudgeKeyInput,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,
   'board-column-delete': BoardColumnDelete,
@@ -239,7 +340,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'area-proposal-result': AreaProposalResult,
   'account-model-dto': AccountModelDto,
   'catalogue-status-dto': CatalogueStatusDto,
+  'model-effort-dto': ModelEffortDto,
   'model-row-dto': ModelRowDto,
+  'models-query': ModelsQuery,
+  'model-picks-query': ModelPicksQuery,
+  'role-pick-dto': RolePickDto,
+  'role-picks-dto': RolePicksDto,
   'model-setting': ModelSetting,
   'pattern-dto': PatternDto,
   'pattern-match': PatternMatch,
@@ -277,6 +383,15 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'persona-patch': PersonaPatch,
   'routing-rule-dto': RoutingRuleDto,
   'routing-rules-input': RoutingRulesInput,
+  'stakeholder-timers-dto': StakeholderTimersDto,
+  'stakeholder-send-dto': StakeholderSendDto,
+  'send-input': SendInput,
+  'ask-someone-input': AskSomeoneInput,
+  'question-route-dto': QuestionRouteDto,
+  'slack-connection-dto': SlackConnectionDto,
+  'slack-member-dto': SlackMemberDto,
+  'slack-token-input': SlackTokenInput,
+  'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
   'team-dto': TeamDto,
   'team-input': TeamInput,
@@ -313,6 +428,67 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-dismiss-input': ShapeDismissInput,
   'shape-model-input': ShapeModelInput,
   'shape-models-dto': ShapeModelsDto,
+  'plan-bundle': PlanBundle,
+  'plan-import-input': PlanImportInput,
+  'plan-import-error': PlanImportError,
+  'plan-import-preview': PlanImportPreview,
+  'plan-import-result': PlanImportResult,
+  'plan-export-input': PlanExportInput,
+  'plan-export-result': PlanExportResult,
+  'plan-anchor': PlanAnchor,
+  'plan-ref': PlanRef,
+  'section-index-entry': SectionIndexEntry,
+  'anchor-check-dto': AnchorCheckDto,
+  'plan-context': PlanContext,
+  'plan-record-dto': PlanRecordDto,
+  'plan-document-revision-dto': PlanDocumentRevisionDto,
+  'plan-record-query': PlanRecordQuery,
+  'plan-record-page': PlanRecordPage,
+  'task-plan-context-dto': TaskPlanContextDto,
+  'task-file-dto': TaskFileDto,
+  'task-message-dto': TaskMessageDto,
+  'task-message-input': TaskMessageInput,
+  'task-thread-dto': TaskThreadDto,
+  'task-screen-dto': TaskScreenDto,
+  'task-screens-dto': TaskScreensDto,
+  'task-screen-added-data': TaskScreenAddedData,
+  'screens-matrix': ScreensMatrix,
+  'pictures-status-dto': PicturesStatusDto,
+  'pass-dto': PassDto,
+  'pass-view-dto': PassViewDto,
+  'pass-turn-dto': PassTurnDto,
+  'pass-check-detail': PassCheckDetail,
+  'pass-open-request': PassOpenRequest,
+  'pass-opened-dto': PassOpenedDto,
+  'take-out-result-dto': TakeOutResultDto,
+  'pass-abandoned-dto': PassAbandonedDto,
+  'shared-choice': SharedChoice,
+  'pass-start-dto': PassStartDto,
+  'pass-join-request': PassJoinRequest,
+  'pass-rename': PassRename,
+  'workbench-setup-dto': WorkbenchSetupDto,
+  'goal-pass-pages-dto': GoalPassPagesDto,
+  'pass-turn-with-files-dto': PassTurnWithFilesDto,
+  'turn-activity-dto': TurnActivityDto,
+  'session-activity-data': SessionActivityData,
+  'pass-hold-dto': PassHoldDto,
+  'pass-shared-change-dto': PassSharedChangeDto,
+  'pass-card-detail': PassCardDetail,
+  'pass-sign-off-dto': PassSignOffDto,
+  'pass-pull-request-preview-dto': PassPullRequestPreviewDto,
+  'pass-pull-request-dto': PassPullRequestDto,
+  'take-out-preview-dto': TakeOutPreviewDto,
+  'take-out-request': TakeOutRequest,
+  'pass-close-preview-dto': PassClosePreviewDto,
+  'pass-close-request': PassCloseRequest,
+  'pass-close-answer-dto': PassCloseAnswerDto,
+  'pass-close-continue-dto': PassCloseContinueDto,
+  'pass-shared-changed-data': PassSharedChangedData,
+  'pass-page-signed-off-data': PassPageSignedOffData,
+  'pass-closed-data': PassClosedData,
+  'pass-settled-data': PassSettledData,
+  'pass-preview-broken-data': PassPreviewBrokenData,
+  'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

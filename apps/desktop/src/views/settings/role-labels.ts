@@ -9,7 +9,7 @@ export const ROLES: readonly {
   { role: StepRole.Plan, label: 'Plan', about: 'Plans the task before any code is written.' },
   {
     role: StepRole.PlanReview,
-    label: 'Plan review',
+    label: 'Plan Review',
     about: 'Reads the plan before work starts.',
   },
   { role: StepRole.Implement, label: 'Build', about: 'Writes the code.' },

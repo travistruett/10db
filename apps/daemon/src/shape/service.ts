@@ -1,6 +1,8 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
+  DeniedBy,
+  TrustSurface,
   ConflictError,
   EventType,
   InvalidError,
@@ -31,8 +33,10 @@ import {
   type ShapeViewDto,
   type SessionId,
   type StartShapeInput,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
+import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import {
   countShapeFiles,
   endSession,
@@ -70,18 +74,19 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
-import { expandHome, type LaneSandboxSpec } from '../sandbox';
+import { expandHome, type LaneSandboxSpec, type SessionSetup } from '../sandbox';
 import { stringField } from '../guard';
 import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
+import { streamEventLogFields } from '../sessions';
 import type {
-  SessionAdapter,
+  AgentAdapter,
+  ExploreSessionSpec,
   SessionEvent,
+  SessionHandle,
   SessionMcpServer,
   ShapeImage,
-  ShapeSessionHandle,
-  ShapeSessionSpec,
   ShapeVerdict,
   ToolDecision,
   ToolRequest,
@@ -188,7 +193,7 @@ export interface ShapePrepareInput {
   readonly shapeId: ShapeId;
   readonly sessionId: SessionId;
   /** The kind of the account the session runs on, which names where its login is kept. */
-  readonly accountKind: SupportedAccountKind;
+  readonly accountKind: AgentAccountKind;
   /** The session's launch env, which the sandbox and the project's servers are built from. */
   readonly env: Readonly<Record<string, string>>;
   readonly resumeProviderSessionId: string | null;
@@ -209,6 +214,10 @@ export interface ShapePrepared {
   readonly note: string | null;
   /** When the first AWS credentials a server was given expire (ISO), or null: the session moves on before. */
   readonly credentialsExpireAt: string | null;
+  /** The project's and the builder's instructions, read when the session was prepared; null when none. */
+  readonly instructions: string | null;
+  /** What the sandbox kept of the session's setup (Settings › Trust); empty with no sandbox. */
+  readonly setup: SessionSetup;
   /** The lanes' permission broker, for this conversation. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Watches what runs under the session's Claude Code process, so its commands end with it. */
@@ -219,7 +228,7 @@ export interface ShapePrepared {
 
 export interface ShapeServiceDeps {
   readonly state: StateStore;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly clock: Clock;
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
@@ -346,10 +355,10 @@ export interface ShapeService {
    * InvalidError for a goal no conversation made and ConflictError once a task has started.
    */
   removeDraftGoal(goalId: GoalId): void;
-  /** Withdraw Decision…: a decision the conversation wrote, with the builder's reason. */
+  /** Withdraw Decision: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
-   * Withdraw Principle…: a principle the conversation wrote, with the builder's reason; the same
+   * Withdraw Principle: a principle the conversation wrote, with the builder's reason; the same
    * withdrawal the knowledge routes make. Throws ConflictError once a later principle replaced it.
    */
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
@@ -474,7 +483,7 @@ type TurnEnd =
   | { readonly kind: 'ended' };
 
 interface Live {
-  readonly handle: ShapeSessionHandle;
+  readonly handle: SessionHandle;
   readonly sessionId: SessionId;
   /**
    * Ends what the session was prepared with: its cards are withdrawn, what its commands left running is
@@ -760,9 +769,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
         break;
+      case 'text_delta':
+      case 'reasoning_delta':
+      case 'message':
+      case 'tool_call':
+      case 'commands':
+      case 'plan_update':
+        log.debug({ shapeId, ...streamEventLogFields(event) }, 'session stream event');
+        break;
+      // Plan runs in default mode, so auto mode never denies one of its calls (`judge_denied`).
       case 'activity':
       case 'compacted':
       case 'background_tasks':
+      case 'consumed':
+      case 'judge_denied':
         break;
     }
   };
@@ -1118,15 +1138,49 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       throw isClosed() ? new ShapeClosedError() : new ShapeStoppedError();
     }
     const commands = ready?.commands;
-    const access: ShapeAccess = commands === undefined ? fileAccess : { ...fileAccess, commands };
+    // The setup's folders are read as the sandbox opened them, and a `.env*` inside them stays closed.
+    const setup = ready?.setup ?? null;
+    const withSetup: ShapeAccess =
+      setup === null || setup.reads.length === 0
+        ? fileAccess
+        : {
+            ...fileAccess,
+            setupReads: setup.reads,
+            secretFiles: [...(fileAccess.secretFiles ?? []), ...setup.secretFiles],
+          };
+    const access: ShapeAccess = commands === undefined ? withSetup : { ...withSetup, commands };
     const toolset = shapeToolset(commands !== undefined);
     // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
     const skipped = ready?.note ?? null;
-    const spec: ShapeSessionSpec = {
+    const project = getProject(state.db, shape.projectId);
+    // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next one.
+    const policy = buildTrustPolicy({
+      surface: TrustSurface.Plan,
+      projectName: project.name,
+      checkout: launch.cwd,
+      gateCommand: project.gateCommand,
+      liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
+        log.warn({ stored }, 'the stored live systems are not a list 10db reads, so it reads none');
+      }),
+      switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+    });
+    const spec: ExploreSessionSpec = {
       sessionId: row.id,
-      shapeId,
+      policy,
+      profile: {
+        kind: 'explore',
+        shapeId,
+        systemPrompt: shapeSystemPrompt(launch.agentModels),
+        tools: [...toolset.tools],
+        allowedTools: SHAPE_ALLOWED_TOOLS,
+        disallowedTools: [...toolset.disallowedTools],
+        agents: toolset.agents,
+      },
       cwd: launch.cwd,
-      systemPrompt: shapeSystemPrompt(launch.agentModels),
+      instructions: ready?.instructions ?? null,
+      ...(setup === null
+        ? {}
+        : { setup: { plugins: setup.pluginDirs, skillRoots: setup.skillRoots } }),
       prompt: skipped === null ? prompt : `${skipped}\n\n${prompt}`,
       ...(images.length === 0 ? {} : { images }),
       model: launch.model,
@@ -1134,16 +1188,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       resumeProviderSessionId: resumeId,
       env: launch.env,
       account: launch.account,
-      tools: [...toolset.tools],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...toolset.disallowedTools],
-      agents: toolset.agents,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       sandbox: ready?.sandbox ?? null,
       projectMcpServers: ready?.projectMcpServers ?? {},
       canUseTool: (req) =>
         ready === null
-          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK })
+          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
           : ready.canUseTool(req),
       preToolUse: (req) => {
         let verdict: ShapeVerdict = judgeShapeCall(
@@ -1261,9 +1311,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       },
     };
-    let handle: ShapeSessionHandle;
+    let handle: SessionHandle;
     try {
-      handle = adapter.startShape(spec);
+      handle = adapter.open(spec);
     } catch (error) {
       // The row was written with its token hash before the adapter ran; end it so no live row
       // keeps a token that getLiveSessionByTokenHash would accept.

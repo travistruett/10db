@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "userId": {
+      "type": "string"
+    },
+    "teamId": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "realName": {
+      "type": "string"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "avatarUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "userId",
+    "teamId",
+    "name",
+    "realName",
+    "title",
+    "email",
+    "avatarUrl"
+  ]
+}

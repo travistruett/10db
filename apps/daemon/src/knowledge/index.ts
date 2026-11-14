@@ -4,7 +4,12 @@ export { proposeStandingRules, recordAnswerDecision } from './capture';
 export { decisionHit, principleHit } from './hits';
 export { repairKnowledgeIndex } from './index-health';
 export { decisionItem, draftOf, principleItem } from './items';
-export { CONTEXT_PACK_BUDGET_TOKENS, PACK_SEARCH_LIMIT, packKnowledge } from './pack';
+export {
+  CHARS_PER_TOKEN,
+  CONTEXT_PACK_BUDGET_TOKENS,
+  PACK_SEARCH_LIMIT,
+  packKnowledge,
+} from './pack';
 export {
   acceptProposal,
   applyPrincipleCard,
@@ -12,6 +17,7 @@ export {
   proposePrinciple,
   rejectProposal,
 } from './proposals';
+export { quotedWords } from './quoted-words';
 export { decisionProvenance, principleProvenance } from './provenance';
 export {
   actionSourceFor,

@@ -162,6 +162,22 @@ describe('why the app cannot update itself, in Settings', () => {
     expect(alert.textContent).toContain(message);
   });
 
+  it.each([
+    {
+      name: 'a reason that sends the builder to sign in',
+      message: 'gh is signed out. Sign in to GitHub in Settings › Integrations.',
+      href: '/settings/integrations?focus=github',
+    },
+    { name: 'a reason that does not', message: 'The update failed: connection reset.', href: null },
+  ])('links $name to the GitHub card', async ({ message, href }) => {
+    serving(status({ blocker: { kind: 'unreachable', message } }));
+    renderApp('/settings/updates');
+    await screen.findByRole('alert', { name: 'Why 10db will not update itself' });
+    const link = screen.queryByRole('link', { name: 'Open Integrations' });
+    if (href === null) expect(link).toBeNull();
+    else expect(link?.getAttribute('href')).toBe(href);
+  });
+
   it('insets the reason like the rows around it, since the card adds no padding', async () => {
     serving(status({ blocker: { kind: 'gh-missing', message: 'gh is not installed.' } }));
     renderApp('/settings/updates');

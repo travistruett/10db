@@ -123,6 +123,15 @@ describe('projects', () => {
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
   });
 
+  it('starts a project with no app address, keeps a patched one and clears it', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).appUrl).toBeNull();
+    store.write((ctx) => patchProject(ctx, project.id, { appUrl: 'http://localhost:5173' }));
+    expect(getProject(store.db, project.id).appUrl).toBe('http://localhost:5173');
+    store.write((ctx) => patchProject(ctx, project.id, { appUrl: null }));
+    expect(getProject(store.db, project.id).appUrl).toBeNull();
+  });
+
   it('starts a project without localhost and keeps a patched switch', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).sandboxLoopback).toBe(false);
@@ -393,6 +402,36 @@ describe('deriveBoardStatus', () => {
       'cancelled run',
       { taskStatus: 'open', depsDone: true, workstreamState: 'CANCELLED' },
       BoardStatus.Ready,
+    ],
+    [
+      'a Ready page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'WAITING_HUMAN', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a failed page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'FAILED', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a page of a pass paused by a usage limit, blocked as any run',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'PAUSED_LIMIT', inPass: true },
+      BoardStatus.Blocked,
+    ],
+    [
+      'a held page of a pass, blocked as any run',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'HELD', inPass: true },
+      BoardStatus.Blocked,
+    ],
+    [
+      'a page of a pass with no run yet, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: null, inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a page of a pass whose run was cancelled, while the pass still holds it',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'CANCELLED', inPass: true },
+      BoardStatus.InProgress,
     ],
     [
       'done in a batch that is shipping',

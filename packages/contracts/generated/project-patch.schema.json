@@ -126,6 +126,9 @@
         }
       ]
     },
+    "prPictures": {
+      "type": "boolean"
+    },
     "areas": {
       "minItems": 1,
       "type": "array",
@@ -146,6 +149,19 @@
           },
           "catchAll": {
             "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "page",
+              "shared"
+            ]
+          },
+          "route": {
+            "type": "string",
+            "maxLength": 500,
+            "format": "starts_with",
+            "pattern": "^\\/.*"
           }
         },
         "required": [
@@ -249,6 +265,80 @@
         "type": "string",
         "pattern": "^[a-z][a-z0-9-]*$"
       }
+    },
+    "appUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "devLoginCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "previewCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "screens": {
+      "type": "object",
+      "properties": {
+        "viewports": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 3840
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 2400
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ]
+          }
+        },
+        "themes": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "default",
+              "light",
+              "dark"
+            ]
+          }
+        }
+      },
+      "required": [
+        "viewports",
+        "themes"
+      ]
     }
   }
 }

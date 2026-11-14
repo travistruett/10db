@@ -1,10 +1,9 @@
-import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpHost } from '@10db/contracts';
 import { z } from 'zod';
 import { describeIssues } from './config-issues';
 import { McpServerName } from './mcp-server-name';
-import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
+import { readRepoConfigFileIn, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own config directory in a repo. */
 const TENDB_DIR = '.10db';
@@ -21,28 +20,15 @@ export class McpHostsFileError extends Error {
   override readonly name = 'McpHostsFileError';
 }
 
-/** True when `.10db` is a link: the file under it would then be read from wherever the link points. */
-function dirIsLink(repoPath: string): boolean {
-  try {
-    return lstatSync(join(repoPath, TENDB_DIR)).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The hosts the repo names for each server, sorted and once each, or none when there is no file. An
  * unreadable or invalid file throws, so it is never silently ignored.
  */
 export function readMcpHosts(repoPath: string): ReadonlyMap<string, readonly string[]> {
   const path = join(repoPath, MCP_HOSTS_FILE);
-  if (dirIsLink(repoPath))
-    throw new McpHostsFileError(
-      `${path} could not be read (${TENDB_DIR} must be a directory, not a link)`,
-    );
   let text: string | null;
   try {
-    text = readRepoConfigFile(path);
+    text = readRepoConfigFileIn(repoPath, MCP_HOSTS_FILE);
   } catch (error) {
     if (error instanceof RepoConfigFileError)
       throw new McpHostsFileError(`${path} could not be read (${error.message})`);

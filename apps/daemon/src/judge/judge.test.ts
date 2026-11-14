@@ -1,5 +1,11 @@
-import { mintId } from '@10db/contracts';
-import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
+import { mintId, type AccountId } from '@10db/contracts';
+import {
+  createTestStore,
+  listJudgeCalls,
+  patchJudgeConfig,
+  seedAccount,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -8,6 +14,7 @@ import { createJudge, type JudgeRequest } from './index';
 
 const KEY = 'router-test-key-0123';
 const SYSTEM_ONE_URL = 'https://openrouter.ai/api/v1/systemone';
+const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
 const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface Seen {
@@ -49,9 +56,12 @@ let clock: ManualClock;
 let seen: Seen[];
 let handler: Handler;
 let keyReads: number;
+let keyAsked: (AccountId | null)[];
 let key: string | null;
 let keyError: Error | null;
 let keyHangs: boolean;
+/** OpenRouter's decision models as the judge's list reads them; null when the list can't be read. */
+let decisionModels: ReadonlySet<string> | null;
 
 function build(options: { off?: boolean } = {}) {
   return createJudge({
@@ -70,12 +80,14 @@ function build(options: { off?: boolean } = {}) {
       seen.push(entry);
       return handler(entry, init?.signal ?? undefined);
     },
-    readKey: () => {
+    readKey: (accountId) => {
       keyReads += 1;
+      keyAsked.push(accountId);
       if (keyError) return Promise.reject(keyError);
       if (keyHangs) return new Promise<string | null>(() => undefined);
       return Promise.resolve(key);
     },
+    decisionModelIds: () => decisionModels,
     off: options.off ?? false,
     logger: silentLogger,
   });
@@ -96,9 +108,11 @@ beforeEach(() => {
   clock = new ManualClock();
   seen = [];
   keyReads = 0;
+  keyAsked = [];
   key = KEY;
   keyError = null;
   keyHangs = false;
+  decisionModels = new Set(['typesafe/jev-1.13', 'liquid/d1']);
   handler = () => json(systemOneBody({ review: 0.07, skip: 0.93 }));
 });
 afterEach(() => {
@@ -140,6 +154,18 @@ describe('judge.choose with a System One model', () => {
     });
   });
 
+  it("sends an option's criteria as the choice criteria and logs them in the question", async () => {
+    const criteria = { review: 'The diff touches shared code', skip: 'A rename in one file' };
+    await build().choose({ ...request, criteria });
+    expect(seen[0]?.body).toMatchObject({
+      questions: { decision: { criteria } },
+    });
+    const [call] = logged();
+    expect(call?.question).toBe(
+      `${request.question}\nOptions:\n- review: The diff touches shared code\n- skip: A rename in one file`,
+    );
+  });
+
   it('logs the call with what was asked and the provisional outcome', async () => {
     const workstreamId = mintId('Workstream');
     const taskId = mintId('Task');
@@ -174,6 +200,79 @@ describe('judge.choose with a System One model', () => {
   });
 });
 
+describe('judge.choose with another decision model', () => {
+  beforeEach(() => {
+    store.write((ctx) =>
+      patchJudgeConfig(ctx, { decisions: { review_size: { model: 'liquid/d1' } } }),
+    );
+  });
+
+  const decisionsBody = (answer: Record<string, unknown>) => ({
+    id: 'gen-dec-2',
+    model: 'liquid/d1',
+    answers: { decision: { type: 'choice', ...answer } },
+    usage: { input_tokens: 80, output_tokens: 1, cost: 0.000002 },
+  });
+
+  it('asks the decisions endpoint the System One question and answers with the chosen probability', async () => {
+    handler = () =>
+      json(decisionsBody({ choice: 'skip', probabilities: { review: 0.2, skip: 0.8 } }));
+    expect(await build().choose(request)).toMatchObject({
+      kind: 'answered',
+      choice: 'skip',
+      confidence: 0.8,
+      model: 'liquid/d1',
+      costUsd: 0.000002,
+    });
+    expect(seen.map((s) => s.url)).toEqual([DECISIONS_URL]);
+    expect(seen[0]?.body).toEqual({
+      model: 'liquid/d1',
+      state: request.state,
+      questions: {
+        decision: {
+          type: 'choice',
+          instructions: request.question,
+          // Some makers (Parallel, ScaleDown) refuse a null criterion: an option with none is described by its name.
+          criteria: { review: 'review', skip: 'skip' },
+        },
+      },
+    });
+  });
+
+  it('reads the confidence when the answer has no probabilities', async () => {
+    handler = () => json(decisionsBody({ choice: 'review', confidence: 0.6 }));
+    expect(await build().choose(request)).toMatchObject({ choice: 'review', confidence: 0.6 });
+  });
+
+  it('falls back on an answer with no confidence, which no floor can be checked against', async () => {
+    handler = () => json(decisionsBody({ choice: 'skip' }));
+    const answer = await build().choose(request);
+    expect(answer).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(answer.kind === 'fallback' && answer.detail).toMatch(/without a confidence/);
+  });
+
+  it.each([
+    ['a decision model', 'liquid/d1', DECISIONS_URL],
+    ['a model the list leaves out', 'anthropic/claude-haiku-5.5', CHAT_URL],
+    ['a TypeSafe model the list leaves out', 'typesafe/jev-2', SYSTEM_ONE_URL],
+  ])('sends %s to its endpoint', async (_name, model, url) => {
+    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { model } } }));
+    await build().choose(request);
+    expect(seen.map((s) => s.url)).toEqual([url]);
+  });
+
+  it('takes a model to be a decision model when the list cannot be read', async () => {
+    decisionModels = null;
+    store.write((ctx) =>
+      patchJudgeConfig(ctx, {
+        decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
+      }),
+    );
+    await build().choose(request);
+    expect(seen.map((s) => s.url)).toEqual([DECISIONS_URL]);
+  });
+});
+
 describe('judge.choose with a chat model', () => {
   beforeEach(() => {
     store.write((ctx) =>
@@ -181,6 +280,17 @@ describe('judge.choose with a chat model', () => {
         decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
       }),
     );
+  });
+
+  it("puts an option's criteria in the prompt", async () => {
+    handler = () => json(chatBody('{"choice":"skip","confidence":0.9}'));
+    await build().choose({
+      ...request,
+      criteria: { review: 'The diff touches shared code', skip: 'A rename in one file' },
+    });
+    const messages = (seen[0]?.body['messages'] ?? []) as { content: string }[];
+    expect(messages[1]?.content).toContain('- review: The diff touches shared code');
+    expect(messages[1]?.content).toContain('- skip: A rename in one file');
   });
 
   it('asks chat completions for a JSON-schema answer', async () => {
@@ -413,13 +523,30 @@ describe('the key never leaves the judge', () => {
   });
 });
 
+describe('the account a decision reads its key from', () => {
+  it('asks for the key of the account decisions run on, and for none when no account is picked', async () => {
+    await build().choose(request);
+    expect(keyAsked).toEqual([null]);
+    const account = seedAccount(store, { kind: 'openrouter', label: 'OpenRouter' });
+    store.write((ctx) => patchJudgeConfig(ctx, { accountId: account.id }));
+    await build().choose(request);
+    expect(keyAsked).toEqual([null, account.id]);
+  });
+
+  it('tests the account it is given, not the one decisions run on', async () => {
+    const other = mintId('Account');
+    expect((await build().test(other)).ok).toBe(true);
+    expect(keyAsked).toEqual([other]);
+  });
+});
+
 describe('judge.test', () => {
   it('reports the model, latency and cost of a tiny call, and logs nothing', async () => {
     handler = () => {
       clock.advance(180);
       return json(systemOneBody({ review: 0.1, skip: 0.9 }));
     };
-    expect(await build().test()).toEqual({
+    expect(await build().test(mintId('Account'))).toEqual({
       ok: true,
       model: 'typesafe/jev-1.13-20260917',
       latencyMs: 180,
@@ -439,7 +566,7 @@ describe('judge.test', () => {
       /key/i,
     ],
   ])('says why when %s', async (_name, make, error) => {
-    const result = await make().test();
+    const result = await make().test(mintId('Account'));
     expect(result).toMatchObject({ ok: false });
     expect(!result.ok && result.error).toMatch(error);
     expect(seen).toEqual([]);
@@ -447,12 +574,26 @@ describe('judge.test', () => {
 
   it('says what OpenRouter answered when the call fails', async () => {
     handler = () => json({ error: { message: 'No auth credentials found' } }, 401);
-    const result = await build().test();
+    const result = await build().test(mintId('Account'));
     expect(!result.ok && result.error).toMatch(/401/);
+  });
+
+  it('tests the model it is given instead of the review model', async () => {
+    handler = () =>
+      json({
+        model: 'liquid/d1',
+        answers: { decision: { type: 'choice', choice: 'review', confidence: 0.7 } },
+        usage: {},
+      });
+    expect(await build().test(mintId('Account'), 'liquid/d1')).toMatchObject({
+      ok: true,
+      model: 'liquid/d1',
+    });
+    expect(seen.map((s) => [s.url, s.body['model']])).toEqual([[DECISIONS_URL, 'liquid/d1']]);
   });
 
   it('still tests with the decision switched off', async () => {
     store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { enabled: false } } }));
-    expect((await build().test()).ok).toBe(true);
+    expect((await build().test(mintId('Account'))).ok).toBe(true);
   });
 });

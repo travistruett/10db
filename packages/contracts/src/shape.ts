@@ -11,6 +11,7 @@ import {
   TaskId,
 } from './ids';
 import { TopicKey } from './knowledge';
+import { PlanAlternative, PlanAnchor, PlanRef } from './plan-record';
 import { KnowledgeScope, PrincipleKind } from './states';
 import { SeeScreenInput } from './shape-screens';
 
@@ -111,8 +112,16 @@ function oneSizing(task: { basis?: unknown; size?: unknown }): boolean {
 }
 const ONE_SIZING = { message: 'Give either basis or size, not both and not neither' };
 
+/** Where an imported task came from in its Plan's record, and the record items its brief carries. */
+const planFields = {
+  planRef: PlanRef.optional(),
+  /** Keys of the Plan's intent, entries and decisions. */
+  cites: z.array(BriefKey).default([]),
+};
+
 export const PlanGoalTask = GoalBriefTask.extend({
   ...sizing,
+  ...planFields,
   annotations: Annotations,
   /** Task keys outside this goal: a loose task, another goal's task or one already converted. */
   dependsOnOutside: z.array(BriefKey).default([]),
@@ -147,6 +156,7 @@ const looseTaskFields = {
   criteria: z.array(z.string().min(1)).default([]),
   areas: z.array(z.string().min(1)).min(1),
   ...sizing,
+  ...planFields,
   ceremony: z.enum(Ceremony),
   /** Keys of any task in the draft, or of a task this conversation already converted. */
   dependsOn: z.array(BriefKey).default([]),
@@ -192,6 +202,15 @@ export const PlanDecisionRecord = z
     question: z.string().min(1),
     choice: z.string().min(1),
     rationale: z.string().min(1),
+    /** The options turned down; a decision stored before alternatives has none. */
+    alternatives: z.array(PlanAlternative).default([]),
+    /** The builder's own words for it. */
+    quote: z.string().min(1).optional(),
+    /** Whether it outlives this effort; only a lasting decision reaches Knowledge at Convert. */
+    lasting: z.boolean().default(true),
+    anchors: z.array(PlanAnchor).default([]),
+    /** The day the builder decided it, for an imported decision. */
+    decidedAt: z.iso.date().optional(),
   })
   .refine(areaMatchesScope, AREA_SCOPE);
 
@@ -219,6 +238,8 @@ export const PlanQuestion = z.object({
   for: z.string().min(1),
   /** The key of the goal or task the question belongs to; Convert stores it under that goal or task. */
   about: BriefKey.optional(),
+  /** What the question holds up, in words. */
+  blocks: z.string().min(1).optional(),
   sourceMessageIds: SourceMessageIds,
 });
 export type PlanQuestion = z.infer<typeof PlanQuestion>;
@@ -232,11 +253,13 @@ export const PlanChange = z
     acceptanceCriteria: z.array(z.string().min(1)).optional(),
     areas: z.array(z.string().min(1)).min(1).optional(),
     dependsOn: z.array(BriefKey).optional(),
+    planRef: PlanRef.optional(),
+    cites: z.array(BriefKey).optional(),
     sourceMessageIds: SourceMessageIds,
   })
   .refine(
     (c) =>
-      [c.title, c.description, c.acceptanceCriteria, c.areas, c.dependsOn].some(
+      [c.title, c.description, c.acceptanceCriteria, c.areas, c.dependsOn, c.planRef, c.cites].some(
         (f) => f !== undefined,
       ),
     { message: 'A change sets at least one field' },
@@ -294,6 +317,8 @@ export const ShapeDto = z.object({
   round: z.int().min(0),
   /** The model ID the builder chose for the conversation; null runs it on the `plan` role's. */
   model: z.string().nullable().default(null),
+  /** When the Plan was imported from a bundle; null for a conversation. */
+  importedAt: Timestamp.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -384,6 +409,13 @@ export const ShapeReviewer = {
   Rehearsal: 'rehearsal',
 } as const;
 export type ShapeReviewer = ValueOf<typeof ShapeReviewer>;
+
+/**
+ * Who a stored finding came from: a session's reviewer, or an imported review (its reviewer's name is
+ * kept beside it). No session reports as `imported`: `report_finding` takes `ShapeReviewer` only.
+ */
+export const ShapeFindingReviewer = { ...ShapeReviewer, Imported: 'imported' } as const;
+export type ShapeFindingReviewer = ValueOf<typeof ShapeFindingReviewer>;
 
 /** A finding is open until the session resolves it or the builder dismisses it (§7). */
 export const ShapeFindingState = {

@@ -357,6 +357,11 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
 
 ## 10. People and the stakeholder loop
 
+**Built since, on the Inbox card:** routing a question to a stakeholder in Slack and answering it there,
+`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`
+(`decisions/2026-11-12-stakeholder-questions-run-on-the-inbox-card.md`). It replaces this section's phase 3
+loop for questions; the rest of the section is still designed.
+
 **Built:** the `people` and `team_members` tables, and `routing_rules` with `assigneeFor` (a question's
 category and area → a person), which the judge's rules extend rather than replace. **Designed (phase 3):** the
 rest.

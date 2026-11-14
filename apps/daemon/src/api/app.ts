@@ -1,4 +1,6 @@
 import {
+  GithubSigninDto,
+  GithubStatusDto,
   AccountId,
   AccountInput,
   AccountPatch,
@@ -29,19 +31,34 @@ import {
   FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
+  PlanExportInput,
+  PlanImportInput,
+  PlanRecordList,
+  PlanRecordQuery,
   GoalId,
+  DevUiConnectionDto,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
   InboxState,
   JudgeConfigPatch,
-  JudgeKeyInput,
+  BenchmarkKeyInput,
+  ModelPicksQuery,
+  ModelsQuery,
   KeepAwakeInput,
   LanePermissionsDto,
+  LiveSystemsDto,
+  TrustOverrides,
+  TrustSwitches,
   ModelProfileId,
   NetworkHostInput,
   Month,
   ModelProfilePatch,
+  AskSomeoneInput,
+  PersonId,
+  SendInput,
+  SlackTokenInput,
+  StakeholderTimersDto,
   PersonaId,
   PersonaInput,
   PersonaPatch,
@@ -58,11 +75,17 @@ import {
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
+  PassId,
+  PassJoinRequest,
+  PassOpenRequest,
+  PassRename,
+  PassTurnId,
   SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
   ShapeConvertInput,
   ShapeDismissInput,
+  ShapeAttachmentId,
   ShapeEditInput,
   ShapeFindingId,
   ShapeId,
@@ -77,14 +100,21 @@ import {
   ShapeJevSettingDto,
   StartTaskInput,
   SystemCheckDto,
+  TakeOutRequest,
+  PassCloseRequest,
+  TaskFileId,
+  TaskScreenId,
   TaskId,
   TaskInput,
+  TaskMessageInput,
+  TASK_MESSAGE_PICTURES_MAX_BYTES,
   TaskMove,
   TaskPatch,
   TeamInput,
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type PlanImportError,
   type ScreenRenderRequest,
   type ShapeConvertError,
 } from '@10db/contracts';
@@ -124,6 +154,16 @@ export interface ApiDeps {
   readonly taskRemoval?: TaskRemovalServices;
   /** The commit the app was built from, for `/health`; null or absent for a run from source. */
   readonly commit?: string | null;
+  /** The browser origin opted in as 10db's own dev UI, for `/health`; absent when none is. */
+  readonly devUiOrigin?: string | null;
+  /**
+   * 10db's own dev UI: its read-only token and what that token may reach (`devUiMayRead`); absent
+   * when no dev UI origin is opted in.
+   */
+  readonly devUi?: {
+    readonly token: string;
+    mayRead(method: string, path: string): boolean;
+  } | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -137,7 +177,7 @@ export interface ApiDeps {
   onUnexpectedError(error: unknown): void;
 }
 
-const STATUS = { not_found: 404, conflict: 409, invalid: 400 } as const;
+const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 const STREAM_PATH = '/events/stream';
 
@@ -190,8 +230,38 @@ const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
 // A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
 // can name the limit in its refusal.
 const fileBodyLimit = bodyLimit({ maxSize: SHAPE_FILE_MAX_BYTES + 1024 });
+const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread(\/redo)?$/;
+// A builder's message carries its pictures in the one request, and a little over so the service can
+// name the limit.
+const messageBodyLimit = bodyLimit({ maxSize: TASK_MESSAGE_PICTURES_MAX_BYTES + 1024 * 1024 });
 const limitBody: MiddlewareHandler = (c, next) =>
-  (SHAPE_FILE_PATH.test(c.req.path) ? fileBodyLimit : bodyLimiter)(c, next);
+  (SHAPE_FILE_PATH.test(c.req.path)
+    ? fileBodyLimit
+    : TASK_THREAD_PATH.test(c.req.path)
+      ? messageBodyLimit
+      : bodyLimiter)(c, next);
+
+/** A builder's message as a multipart form: a `text` part and a `picture` part for each picture. */
+const TaskMessageForm = z.object({
+  text: TaskMessageInput.shape.text.default(''),
+  picture: z
+    .union([z.instanceof(File), z.array(z.instanceof(File))])
+    .optional()
+    .transform((parts) => (parts === undefined ? [] : [parts].flat())),
+});
+type TaskMessageForm = z.infer<typeof TaskMessageForm>;
+
+/** The pictures of a message's form, read whole. */
+function pastedPictures(
+  parts: readonly File[],
+): Promise<{ readonly name: string; readonly bytes: Uint8Array }[]> {
+  return Promise.all(
+    parts.map(async (file) => ({
+      name: file.name,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    })),
+  );
+}
 
 export function createApp(deps: ApiDeps) {
   const app = new Hono()
@@ -209,6 +279,14 @@ export function createApp(deps: ApiDeps) {
           ? (c.req.query('token') ?? '')
           : (/^Bearer (.+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? '');
       if (sameToken(presented, deps.token)) return next();
+      // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
+      if (presented !== '' && deps.devUi && sameToken(presented, deps.devUi.token))
+        return deps.devUi.mayRead(c.req.method, c.req.path)
+          ? next()
+          : c.json(
+              { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
+              403,
+            );
       // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
       // shows and nothing else, so no write, no digest and no command can be reached with it.
       if (presented !== '' && deps.screens?.tokenValid(presented) === true)
@@ -242,6 +320,7 @@ export function createApp(deps: ApiDeps) {
           protocolVersion: PROTOCOL_VERSION,
           startedAt: deps.startedAt.toISOString(),
           commit: deps.commit ?? null,
+          devUiOrigin: deps.devUiOrigin ?? null,
         }),
       ),
     )
@@ -303,6 +382,34 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.setShapeJev(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/projects/:projectId/trust', async (c) =>
+      c.json(await deps.services.projectTrust(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/trust',
+      validator('json', (value): TrustOverrides => TrustOverrides.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.setProjectTrust(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/live-systems', (c) =>
+      c.json(deps.services.liveSystems(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/live-systems',
+      validator('json', (value): LiveSystemsDto => LiveSystemsDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setLiveSystems(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
         ),
     )
     .get('/projects/:projectId/one-way-paths', (c) =>
@@ -654,6 +761,61 @@ export function createApp(deps: ApiDeps) {
         'x-content-type-options': 'nosniff',
       });
     })
+    // A planning effort as one Plan: 201 when it makes the Plan, 200 for an update or a dry run.
+    .post(
+      '/projects/:projectId/plans/import',
+      validator('json', (value): PlanImportInput => PlanImportInput.parse(value)),
+      async (c) => {
+        const outcome = await deps.services.importPlan(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        if (outcome.kind === 'imported')
+          return c.json(outcome.result, outcome.result.created ? 201 : 200);
+        if (outcome.kind === 'previewed') return c.json(outcome.preview, 200);
+        return c.json({ errors: outcome.errors } satisfies PlanImportError, 400);
+      },
+    )
+    // The record as Markdown, outside every checkout; a refused folder answers 400 naming why.
+    .post(
+      '/shapes/:shapeId/export',
+      validator('json', (value): PlanExportInput => PlanExportInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.exportPlan(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    // The Record view's reads: the record whole, a revision's text, and each list a page at a time.
+    .get('/shapes/:shapeId/record', (c) =>
+      c.json(deps.services.getPlanRecord(ShapeId.parse(c.req.param('shapeId')))),
+    )
+    .get('/shapes/:shapeId/documents/:documentId/revisions/:number', (c) =>
+      c.json(
+        deps.services.getPlanRevision(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeAttachmentId.parse(c.req.param('documentId')),
+          z.coerce.number().int().min(1).parse(c.req.param('number')),
+        ),
+      ),
+    )
+    .get(
+      '/shapes/:shapeId/record/:list',
+      validator('query', (value): PlanRecordQuery => PlanRecordQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.getPlanRecordPage(
+            ShapeId.parse(c.req.param('shapeId')),
+            z.enum(PlanRecordList).parse(c.req.param('list')),
+            c.req.valid('query'),
+          ),
+        ),
+    )
+    .get('/tasks/:taskId/plan-context', (c) =>
+      c.json(deps.services.getTaskPlanContext(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -677,6 +839,142 @@ export function createApp(deps: ApiDeps) {
           deps.services.startBatch(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
           202,
         ),
+    )
+    .post(
+      '/projects/:projectId/passes',
+      validator('json', (value): PassOpenRequest => PassOpenRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.openPass(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/passes/:passId', (c) =>
+      c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
+    )
+    .get('/passes/:passId/tasks/:taskId/take-out', async (c) =>
+      c.json(
+        await deps.services.takeOutPreview(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+      ),
+    )
+    .post(
+      '/passes/:passId/tasks/:taskId/take-out',
+      validator('json', (value): TakeOutRequest => TakeOutRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.takeOutPage(
+            PassId.parse(c.req.param('passId')),
+            TaskId.parse(c.req.param('taskId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post('/passes/:passId/abandon', async (c) =>
+      c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
+    )
+    // The Workbench's own routes (Workbench spec §4). Only the live list of passes is served.
+    .get(
+      '/passes',
+      validator('query', (query) => z.object({ live: z.literal('true') }).parse(query)),
+      (c) => c.json(deps.services.livePasses()),
+    )
+    .post(
+      '/passes/:passId/pages',
+      validator('json', (value): PassJoinRequest => PassJoinRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.addPassPages(
+            PassId.parse(c.req.param('passId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .patch(
+      '/passes/:passId',
+      validator('json', (value): PassRename => PassRename.parse(value)),
+      (c) =>
+        c.json(deps.services.renamePass(PassId.parse(c.req.param('passId')), c.req.valid('json'))),
+    )
+    .delete('/tasks/:taskId/kept-work', async (c) => {
+      await deps.services.discardKeptWork(TaskId.parse(c.req.param('taskId')));
+      return c.body(null, 204);
+    })
+    .post('/projects/:projectId/workbench-setup', async (c) =>
+      c.json(
+        await deps.services.workbenchSetup(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.raw.signal,
+        ),
+      ),
+    )
+    .get('/goals/:goalId/pass-pages', async (c) =>
+      c.json(await deps.services.goalPassPages(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/tasks/:taskId/turns', async (c) =>
+      c.json(await deps.services.taskTurns(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/pass-turns/:turnId/activity', (c) =>
+      c.json(deps.services.turnActivity(PassTurnId.parse(c.req.param('turnId')))),
+    )
+    .post('/tasks/:taskId/turns/:turnId/opened', (c) => {
+      deps.services.openedTurn(
+        TaskId.parse(c.req.param('taskId')),
+        PassTurnId.parse(c.req.param('turnId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/pass-start', async (c) =>
+      c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/passes/:passId/close', async (c) =>
+      c.json(await deps.services.passClosePreview(PassId.parse(c.req.param('passId')))),
+    )
+    .post(
+      '/passes/:passId/close',
+      validator('json', (value): PassCloseRequest => PassCloseRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.closePass(PassId.parse(c.req.param('passId')), c.req.valid('json')),
+        ),
+    )
+    .post('/passes/:passId/close/continue', (c) =>
+      c.json(deps.services.continueClose(PassId.parse(c.req.param('passId'))), 202),
+    )
+    .post('/passes/:passId/tasks/:taskId/sign-off', (c) =>
+      c.json(
+        deps.services.signOffPage(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+        202,
+      ),
+    )
+    .delete('/passes/:passId/tasks/:taskId/sign-off', (c) => {
+      deps.services.cancelSignOff(
+        PassId.parse(c.req.param('passId')),
+        TaskId.parse(c.req.param('taskId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.passPullRequest(PassId.parse(c.req.param('passId')))),
+    )
+    .post('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.openPassPullRequest(PassId.parse(c.req.param('passId'))), 202),
+    )
+    .post('/tasks/:taskId/thread/:messageId/send-to-agent', async (c) =>
+      c.json(
+        await deps.services.sendToAgent(
+          TaskId.parse(c.req.param('taskId')),
+          z.string().min(1).max(200).parse(c.req.param('messageId')),
+        ),
+        201,
+      ),
     )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
@@ -792,6 +1090,9 @@ export function createApp(deps: ApiDeps) {
     .get('/accounts/:accountId/identity', async (c) =>
       c.json(await deps.services.accountIdentity(AccountId.parse(c.req.param('accountId')))),
     )
+    .post('/accounts/:accountId/test', async (c) =>
+      c.json(await deps.services.testAccount(AccountId.parse(c.req.param('accountId')))),
+    )
     .get('/accounts/connecting', (c) => c.json(deps.services.connectingAccount()))
     .post('/accounts/:accountId/connect', async (c) =>
       c.json(await deps.services.connectAccount(AccountId.parse(c.req.param('accountId')))),
@@ -877,6 +1178,90 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): PersonInput => PersonInput.parse(value)),
       (c) => c.json(deps.services.createPerson(c.req.valid('json')), 201),
     )
+    .put(
+      '/people/:personId',
+      validator('json', (value): PersonInput => PersonInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.updatePerson(PersonId.parse(c.req.param('personId')), c.req.valid('json')),
+        ),
+    )
+    .delete('/people/:personId', (c) => {
+      deps.services.removePerson(PersonId.parse(c.req.param('personId')));
+      return c.json({});
+    })
+    .get(
+      '/github',
+      validator('query', (query): { recheck?: '1' | undefined } => SystemQuery.parse(query)),
+      async (c) =>
+        c.json(
+          GithubStatusDto.parse(
+            await deps.services.githubStatus(c.req.valid('query').recheck === '1'),
+          ),
+        ),
+    )
+    .post('/github/signin', async (c) =>
+      c.json(GithubSigninDto.parse(await deps.services.startGithubSignin())),
+    )
+    .delete('/github/signin', (c) => {
+      deps.services.cancelGithubSignin();
+      return c.body(null, 204);
+    })
+    .get('/slack', (c) => c.json(deps.services.slackStatus()))
+    .put(
+      '/slack/token',
+      validator('json', (value): SlackTokenInput => SlackTokenInput.parse(value)),
+      async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
+    )
+    .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .get('/slack/members', async (c) =>
+      c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
+    )
+    .get('/stakeholders/timers', (c) => c.json(deps.services.getStakeholderTimers()))
+    .put(
+      '/stakeholders/timers',
+      validator('json', (value): StakeholderTimersDto => StakeholderTimersDto.parse(value)),
+      (c) => c.json(deps.services.setStakeholderTimers(c.req.valid('json'))),
+    )
+    .get('/tasks/:taskId/question-routes', (c) =>
+      c.json(deps.services.questionRoutes(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/inbox/:id/send',
+      validator('json', (value): SendInput => SendInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.sendInbox(InboxItemId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .post(
+      '/inbox/:id/ask',
+      validator('json', (value): AskSomeoneInput => AskSomeoneInput.parse(value)),
+      (c) =>
+        c.json(deps.services.askSomeone(InboxItemId.parse(c.req.param('id')), c.req.valid('json'))),
+    )
+    .post('/inbox/:id/take-back', async (c) =>
+      c.json(await deps.services.takeBack(InboxItemId.parse(c.req.param('id')))),
+    )
+    .post('/inbox/:id/keep-waiting', (c) =>
+      c.json(deps.services.keepWaiting(InboxItemId.parse(c.req.param('id')))),
+    )
+    .get(
+      '/inbox/:id/compose',
+      validator('query', (query): { personIds?: string } => ({
+        ...(typeof query['personIds'] === 'string' ? { personIds: query['personIds'] } : {}),
+      })),
+      (c) =>
+        c.json(
+          deps.services.composeFor(
+            InboxItemId.parse(c.req.param('id')),
+            (c.req.valid('query').personIds ?? '')
+              .split(',')
+              .filter((id) => id !== '')
+              .map((id) => PersonId.parse(id)),
+          ),
+        ),
+    )
     .post(
       '/flows',
       validator('json', (value): FlowInput => FlowInput.parse(value)),
@@ -926,22 +1311,31 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
       async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
-    .put(
-      '/judge/key',
-      validator('json', (value): JudgeKeyInput => JudgeKeyInput.parse(value)),
-      async (c) => c.json(await deps.services.setJudgeKey(c.req.valid('json'))),
-    )
-    .delete('/judge/key', async (c) => c.json(await deps.services.removeJudgeKey()))
-    .post('/judge/test', async (c) => c.json(await deps.services.testJudge()))
+    .get('/judge/models', async (c) => c.json(await deps.services.listDecisionModels()))
     .get(
       '/judge/calls',
       validator('query', (query) => JudgeCallsQuery.parse(query)),
       (c) => c.json(deps.services.listJudgeCalls(c.req.valid('query').limit)),
     )
-    .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
+    .get('/benchmarks/status', async (c) => c.json(await deps.services.benchmarkStatus()))
+    .put(
+      '/benchmarks/key',
+      validator('json', (value): BenchmarkKeyInput => BenchmarkKeyInput.parse(value)),
+      async (c) => c.json(await deps.services.setBenchmarkKey(c.req.valid('json'))),
+    )
+    .delete('/benchmarks/key', async (c) => c.json(await deps.services.removeBenchmarkKey()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
-    .get('/models', (c) => c.json(deps.services.listModels()))
+    .get(
+      '/models',
+      validator('query', (query) => ModelsQuery.parse(query)),
+      (c) => c.json(deps.services.listModels(c.req.valid('query').account)),
+    )
+    .get(
+      '/models/picks',
+      validator('query', (query) => ModelPicksQuery.parse(query)),
+      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
+    )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))
     .post('/models/refresh', async (c) => c.json(await deps.services.refreshModels()))
@@ -996,6 +1390,79 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    // A task's thread (Workbench spec §4.3): the builder's messages and the pictures pasted with them.
+    .get('/tasks/:taskId/thread', (c) =>
+      c.json(deps.services.taskThread(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/tasks/:taskId/thread',
+      validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
+      async (c) => {
+        const { text, picture } = c.req.valid('form');
+        return c.json(
+          await deps.services.postTaskMessage(TaskId.parse(c.req.param('taskId')), {
+            text,
+            pictures: await pastedPictures(picture),
+          }),
+          201,
+        );
+      },
+    )
+    // Stop and Redo on a page of a Workbench pass: its running turn stops, then the message goes in.
+    .post(
+      '/tasks/:taskId/thread/redo',
+      validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
+      async (c) => {
+        const { text, picture } = c.req.valid('form');
+        return c.json(
+          await deps.services.postTaskMessage(
+            TaskId.parse(c.req.param('taskId')),
+            { text, pictures: await pastedPictures(picture) },
+            { redo: true },
+          ),
+          201,
+        );
+      },
+    )
+    .post('/tasks/:taskId/stop', async (c) => {
+      await deps.services.stopPage(TaskId.parse(c.req.param('taskId')));
+      return c.body(null, 204);
+    })
+    .get('/tasks/:taskId/thread/pictures/:fileId', (c) => {
+      const picture = deps.services.taskPicture(
+        TaskId.parse(c.req.param('taskId')),
+        TaskFileId.parse(c.req.param('fileId')),
+      );
+      return c.body(picture.bytes, 200, {
+        'content-type': picture.mediaType,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      });
+    })
+    // Pictures of the builder's app (Workbench spec §10): a task's, one picture's bytes, and Settings'
+    // status line for a project's browser and sign-in.
+    .get('/tasks/:taskId/screens', (c) =>
+      c.json(deps.services.taskScreens(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/screens/:screenId', (c) =>
+      c.body(deps.services.screenPicture(TaskScreenId.parse(c.req.param('screenId'))), 200, {
+        'content-type': 'image/png',
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      }),
+    )
+    .get('/dev-ui/connection', (c) =>
+      deps.devUi
+        ? c.json(DevUiConnectionDto.parse({ token: deps.devUi.token }))
+        : c.json({ error: 'not_found', message: 'No dev UI origin is opted in' }, 404),
+    )
+    .get('/projects/:projectId/pictures', (c) =>
+      c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post('/projects/:projectId/preview/restart', async (c) => {
+      await deps.services.restartPreview(ProjectId.parse(c.req.param('projectId')));
+      return c.body(null, 204);
+    })
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
     )
@@ -1134,6 +1601,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/trust', (c) => c.json(deps.services.trustSettings()))
+    .put(
+      '/settings/trust',
+      validator('json', (value): TrustSwitches => TrustSwitches.parse(value)),
+      (c) => c.json(deps.services.setTrustSwitches(c.req.valid('json'))),
     )
     .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
     .put(

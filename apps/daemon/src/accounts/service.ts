@@ -6,6 +6,7 @@ import {
   AccountProblem,
   AccountSecretInput,
   EventType,
+  runsAgents,
   signsInWithLogin,
   ConflictError,
   InvalidError,
@@ -51,7 +52,7 @@ import {
   loginIdentity,
   type AccountLogin,
   type SeenAccount,
-  type SessionAdapter,
+  type AgentAdapter,
 } from '../sessions';
 import { capStatus } from './cap';
 import { monthOf, monthWindow, usageWindow } from './month';
@@ -139,7 +140,7 @@ export function createAccountService(deps: {
   readonly dataDir: string;
   readonly keychain: Keychain;
   readonly launcher: Pick<Launcher, 'probe'>;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount' | 'startLogin'>;
+  readonly adapter: Pick<AgentAdapter, 'probeAccount' | 'startLogin'>;
   /** Where the models an account lists are kept, once the account check has passed. */
   readonly lists: AccountLists;
   /** Reads an account's list on its own, as a finished sign-in must: no one need be watching a drawer. */
@@ -268,6 +269,9 @@ export function createAccountService(deps: {
     },
     async identity(id) {
       const row = getAccountRow(db, id);
+      // Nothing to probe: the account runs no agent, so it has no login or organization to report.
+      if (!runsAgents(row.kind))
+        throw new InvalidError('OpenRouter accounts have no identity to check');
       let launch;
       try {
         launch = deps.launcher.probe(row);
@@ -303,7 +307,7 @@ export function createAccountService(deps: {
         );
       }
       const refusal = checkAccount(launch.expect, seen);
-      if (refusal === null) deps.lists.record(row, seen);
+      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind }, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {

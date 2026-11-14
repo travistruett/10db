@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `preview_command` text;

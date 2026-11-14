@@ -162,7 +162,7 @@ describe('resolveStepPlan', () => {
       patchProject(ctx, project.id, { accountId: empty.id });
       replaceAccountModels(ctx, empty.id, [listed('a-model-no-profile-has')]);
     });
-    expect(modelsOf()).toEqual(['balanced', 'strongest']);
+    expect(modelsOf()).toEqual(['balanced', 'capable']);
   });
 });
 

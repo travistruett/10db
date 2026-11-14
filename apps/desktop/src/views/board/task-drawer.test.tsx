@@ -1,6 +1,8 @@
 import {
   INSTALL_REPAIRED_NOTICE_KEY,
   mintId,
+  PASS_FOLDER_WAIT_LINE,
+  PASS_FOLDER_WAIT_NOTICE_KEY,
   RiskTag,
   TaskPatch,
   type BatchDto,
@@ -45,6 +47,7 @@ interface Opts {
   /** The column the card sits in; "Ready" unless given. */
   readonly columnName?: string;
   readonly onCancelRun?: (workstream: WorkstreamDto) => void;
+  readonly onOpenWorkbench?: () => void;
   /** The project's account, whose models the task's own setting offers. */
   readonly accountId?: typeof DEFAULT_ACCOUNT.id;
 }
@@ -66,6 +69,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       {...(opts.placementEditable ? { placementEditable: true } : {})}
       {...(opts.onCancelRun ? { onCancelRun: opts.onCancelRun } : {})}
+      {...(opts.onOpenWorkbench ? { onOpenWorkbench: opts.onOpenWorkbench } : {})}
       {...(opts.accountId ? { accountId: opts.accountId } : {})}
       onClose={() => {
         closes += 1;
@@ -727,6 +731,61 @@ describe('TaskDrawer', () => {
       expect(
         within(d).getByText(/Task "Beta" holds hazard migrations\. Task "Alpha"/),
       ).toBeTruthy();
+    });
+
+    it('links a task waiting for the pass that holds the folder to the UI Workbench', async () => {
+      serve();
+      let opened = 0;
+      open({
+        workstream: workstreamDto({
+          state: 'QUEUED',
+          notice: {
+            key: PASS_FOLDER_WAIT_NOTICE_KEY,
+            tone: 'info',
+            line: PASS_FOLDER_WAIT_LINE,
+            body: 'Your folder is in the UI Workbench pass "Settings pass".',
+          },
+        }),
+        onOpenWorkbench: () => {
+          opened += 1;
+        },
+      });
+      const d = await dialog();
+      expect(within(d).getByText(PASS_FOLDER_WAIT_LINE)).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Open UI Workbench' }));
+      expect(opened).toBe(1);
+    });
+
+    it.each([
+      { name: 'holds saved UI Workbench work', keptWork: true },
+      { name: 'holds none', keptWork: false },
+    ])('says so when the task $name', async ({ keptWork }) => {
+      serve();
+      open({ task: { keptWork } });
+      const d = await dialog();
+      expect(
+        within(d).queryByText('Has saved UI Workbench work: its next start puts it back.') !== null,
+      ).toBe(keptWork);
+    });
+
+    it('discards saved UI Workbench work after a confirm, for that task only', async () => {
+      const discarded: string[] = [];
+      serve(
+        http.delete(daemonUrl('/tasks/:taskId/kept-work'), ({ params }) => {
+          discarded.push(String(params['taskId']));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      const task = taskDto({ keptWork: true });
+      open({ task });
+      const d = await dialog();
+      fireEvent.click(within(d).getByRole('button', { name: 'Discard Saved Work' }));
+      const confirm = await screen.findByRole('dialog', { name: 'Discard Saved Work' });
+      expect(within(confirm).getByText(/can't be undone/)).toBeTruthy();
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Discard Saved Work' }));
+      await waitFor(() => {
+        expect(discarded).toEqual([task.id]);
+      });
     });
 
     it("says what the task's batch stands in, with the steps to fix it", async () => {
@@ -1427,7 +1486,7 @@ describe('TaskDrawer model setting', () => {
     modelRowDto({
       model: 'fast-a',
       name: 'Fast A',
-      tier: 'fast',
+      tier: 'efficient',
       availableOn: [DEFAULT_ACCOUNT.id],
     }),
   ];

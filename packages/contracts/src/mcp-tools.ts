@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InboxOption, Title } from './entities';
+import { BriefKey } from './goals';
 import { HandoffDto, HandoffInput } from './handoff';
 import {
   ClaimId,
@@ -15,10 +16,19 @@ import {
 } from './ids';
 import { PrincipleDraft } from './knowledge';
 import {
+  AnchorCheckDto,
+  PlanAlternative,
+  PlanAnchor,
+  PlanContext,
+  PlanEntryKind,
+  PlanEntryState,
+} from './plan-record';
+import {
   ClaimKind,
   KnowledgeScope,
   PrincipleKind,
   ProposalKind,
+  QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   RiskTag,
   Severity,
@@ -32,7 +42,22 @@ const OpId = z
   .regex(/^[A-Za-z0-9._:-]{8,100}$/)
   .describe('A unique ID for this call. Reuse it only when retrying the same call.');
 
+/**
+ * How many routes a page's turn, or an ordinary task's run, may name for its pictures with
+ * `report_pages` (Workbench spec §10).
+ */
+export const REPORTED_ROUTES_MAX = 4;
+
+/** The lane's read-only tools over its task's Plan: they answer only from that Plan. */
+export const PlanToolName = {
+  GetPlanSection: 'get_plan_section',
+  GetPlanEntry: 'get_plan_entry',
+  FindPlanEntries: 'find_plan_entries',
+} as const;
+export type PlanToolName = (typeof PlanToolName)[keyof typeof PlanToolName];
+
 export const McpToolName = {
+  ...PlanToolName,
   GetContext: 'get_context',
   FindKnowledge: 'find_knowledge',
   AskHuman: 'ask_human',
@@ -46,6 +71,7 @@ export const McpToolName = {
   RecordEvidence: 'record_evidence',
   WriteHandoff: 'write_handoff',
   CompleteStep: 'complete_step',
+  ReportPages: 'report_pages',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
 
@@ -88,7 +114,17 @@ export const ContextPack = z.object({
   claims: z.array(z.object({ kind: z.enum(ClaimKind), name: z.string() })),
   handoff: HandoffDto.nullable(),
   pendingAnswer: z
-    .object({ question: z.string(), answer: z.string(), note: z.string().nullable() })
+    .object({
+      question: z.string(),
+      answer: z.string(),
+      note: z.string().nullable(),
+      /** Who gave the answer: a handle, or null when the builder did. */
+      answeredBy: z.string().nullable().default(null),
+      via: z.enum(['inbox', 'slack']).default('inbox'),
+      /** The answerer's own words, when they chose none of the options. */
+      words: z.string().nullable().default(null),
+      conversation: z.array(z.object({ name: z.string(), text: z.string() })).default([]),
+    })
     .nullable(),
   knowledge: z.object({
     policies: z.array(PrincipleHit),
@@ -102,6 +138,8 @@ export const ContextPack = z.object({
     droppedCount: z.int(),
     empty: z.boolean(),
   }),
+  /** The task's Plan section and what it cites, for a task made from a Plan; null for the others. */
+  plan: PlanContext.nullable().default(null),
 });
 export type ContextPack = z.infer<typeof ContextPack>;
 
@@ -132,7 +170,42 @@ export const RemainingWorkInput = z.object({
 });
 export type RemainingWorkInput = z.infer<typeof RemainingWorkInput>;
 
+/** What `find_plan_entries` may search. */
+export const PlanSearchKind = {
+  ...PlanEntryKind,
+  Decision: 'decision',
+  Question: 'question',
+  Finding: 'finding',
+  Section: 'section',
+} as const;
+export type PlanSearchKind = (typeof PlanSearchKind)[keyof typeof PlanSearchKind];
+
+/** A record entry of the task's Plan, at its current version, with this lane's checks of its anchors. */
+const PlanEntryOutput = z.object({
+  kind: z.enum(PlanEntryKind),
+  key: z.string(),
+  title: z.string(),
+  version: z.int().min(1),
+  body: z.json(),
+  anchors: z.array(PlanAnchor),
+  checks: z.array(AnchorCheckDto),
+  sources: z.array(z.string()),
+  verified: z.boolean(),
+  checkedAt: z.string().nullable(),
+  state: z.enum(PlanEntryState),
+});
+
 export const McpToolInputs = {
+  get_plan_section: z.object({
+    ref: z.string().min(1).describe('doc#slug, as your brief names it; a task section is task-N'),
+    revision: z.int().min(1).optional(),
+  }),
+  get_plan_entry: z.object({ key: BriefKey }),
+  find_plan_entries: z.object({
+    query: z.string().min(1),
+    kinds: z.array(z.enum(PlanSearchKind)).optional(),
+    limit: z.int().min(1).max(50).default(20),
+  }),
   get_context: z.object({}),
   find_knowledge: z.object({
     query: z.string().min(1),
@@ -149,9 +222,20 @@ export const McpToolInputs = {
   }),
   ask_human: z.object({
     opId: OpId,
-    category: z.enum(QuestionCategory),
+    category: z.enum(QuestionCategory).describe(
+      Object.values(QuestionCategory)
+        .map(
+          (c) => `${c}: ${QUESTION_CATEGORY_HINTS[c].hint} (${QUESTION_CATEGORY_HINTS[c].covers})`,
+        )
+        .join('; '),
+    ),
     question: z.string().min(1).max(2000),
     options: z.array(InboxOption).min(2).max(4),
+    topic: z
+      .string()
+      .max(120)
+      .optional()
+      .describe("One of the project's topics from your briefing, when the question is about one"),
     recommendation: z.string().optional(),
     urgency: z.enum(Urgency).default(Urgency.Normal),
     consequences: z.string().optional(),
@@ -227,9 +311,72 @@ export const McpToolInputs = {
         'Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.',
       ),
   }),
+  report_pages: z.object({
+    opId: OpId,
+    routes: z
+      .array(z.string().min(1).max(512))
+      .min(1)
+      .max(REPORTED_ROUTES_MAX)
+      .describe(
+        "Paths on the app, such as /people/42 or /people?tab=all: each loaded for this turn's pictures.",
+      ),
+  }),
 } as const satisfies Record<McpToolName, z.ZodType>;
 
 export const McpToolOutputs = {
+  get_plan_section: z.object({
+    ref: z.string(),
+    document: z.string(),
+    revision: z.int().min(1),
+    title: z.string(),
+    text: z.string(),
+  }),
+  get_plan_entry: z.union([
+    PlanEntryOutput,
+    z.object({
+      kind: z.literal('decision'),
+      key: z.string(),
+      question: z.string(),
+      choice: z.string(),
+      rationale: z.string(),
+      alternatives: z.array(PlanAlternative),
+      quote: z.string().nullable(),
+      lasting: z.boolean(),
+      state: z.string(),
+    }),
+    z.object({
+      kind: z.literal('question'),
+      key: z.string(),
+      text: z.string(),
+      for: z.string(),
+      blocks: z.string().nullable(),
+    }),
+    /** An imported review finding; `revision` is the record's number, as `get_plan_section` reads it. */
+    z.object({
+      kind: z.literal('finding'),
+      key: z.string(),
+      document: z.string().nullable(),
+      revision: z.int().min(1).nullable(),
+      section: z.string().nullable(),
+      reviewer: z.string(),
+      severity: z.string(),
+      text: z.string(),
+      state: z.string(),
+    }),
+  ]),
+  find_plan_entries: z.object({
+    hits: z.array(
+      z.object({
+        kind: z.enum(PlanSearchKind),
+        key: z.string(),
+        title: z.string(),
+        snippet: z.string(),
+        /** A section hit's revision, the latest, to pass to `get_plan_section`; null for the rest. */
+        revision: z.int().min(1).nullable(),
+      }),
+    ),
+    empty: z.boolean(),
+  }),
   get_context: ContextPack,
   find_knowledge: z.object({
     results: z.array(KnowledgeHit),
@@ -284,5 +431,10 @@ export const McpToolOutputs = {
     instruction: z.string(),
     /** The tasks filed from `followUps`; absent in a result recorded before there were any. */
     followUps: z.array(z.object({ taskId: TaskId, title: z.string() })).default([]),
+  }),
+  report_pages: z.object({
+    /** The routes kept for this turn's (or this run's) pictures. */
+    accepted: z.array(z.string()),
+    refused: z.array(z.object({ route: z.string(), reason: z.string() })),
   }),
 } as const satisfies Record<McpToolName, z.ZodType>;

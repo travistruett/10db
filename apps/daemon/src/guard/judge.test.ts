@@ -1,7 +1,7 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_HAZARDS, type ClaimKind, type Delivery } from '@10db/contracts';
+import { DEFAULT_HAZARDS, JudgeKind, type ClaimKind, type Delivery } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SANDBOXED, tempDir } from '../../test/fixtures';
 import {
@@ -23,7 +23,14 @@ const login = tempDir('login claude');
 const CONFIG = join(data.path, 'accounts', 'acc_1', 'claude');
 const OWN_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_own', 'tool-results');
 const OTHER_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_other', 'tool-results');
+const OWN_FILES = join(data.path, 'tasks', 'tsk_own', 'files');
+const OTHER_FILES = join(data.path, 'tasks', 'tsk_other', 'files');
 beforeAll(() => {
+  mkdirSync(OWN_FILES, { recursive: true });
+  mkdirSync(OTHER_FILES, { recursive: true });
+  writeFileSync(join(OWN_FILES, 'shot.png'), 'png');
+  writeFileSync(join(OTHER_FILES, 'shot.png'), 'png');
+  symlinkSync(join(CONFIG, '.claude.json'), join(OWN_FILES, 'escape.png'));
   mkdirSync(OWN_RESULTS, { recursive: true });
   mkdirSync(OTHER_RESULTS, { recursive: true });
   writeFileSync(join(OWN_RESULTS, 'out.txt'), 'big');
@@ -69,6 +76,8 @@ function judge(
   readOnly = false,
 ) {
   return judgeToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     toolName,
     toolInput,
     repoPath: repo.path,
@@ -77,7 +86,7 @@ function judge(
     claims,
     readOnly,
     protectedPaths: guarded(),
-    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own' },
+    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own', filesDir: OWN_FILES },
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -237,6 +246,111 @@ describe('file edits', () => {
     expect(
       judge('Edit', { file_path: 'package.json' }, [{ kind: 'area', name: 'deps' }]).decision,
     ).toBe('deny');
+  });
+
+  // Workbench spec §7.1, §7.3: in a pass a page's file is the page's, even when a shared area or a
+  // hazard the lane holds also matches it. An area with no role that a task of the pass holds is a page.
+  const PAGES = { pages: ['profile', 'settings'], baseBranch: 'main' };
+  it.each<{
+    name: string;
+    inPass?: { pages: readonly string[]; baseBranch: string };
+    claims: Claims;
+    path: string;
+    decision: 'allow' | 'deny';
+    reason?: string;
+  }>([
+    {
+      name: 'in a pass, a page file under a held shared area is denied, naming the page',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
+      inPass: PAGES,
+      claims: [
+        { kind: 'area', name: 'src' },
+        { kind: 'hazard', name: 'deps' },
+      ],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file is allowed to the lane holding that page',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, a hazard under a held page still needs the hazard',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'hazard',
+    },
+    {
+      name: 'in a pass, a shared file is allowed under the held shared area',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/lib/button.tsx',
+      decision: 'allow',
+    },
+    {
+      name: "in a pass, another task's area with no role under a held shared area is denied, naming it",
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'deny',
+      reason: 'page "profile"',
+    },
+    {
+      name: "in a pass, the lane's own area with no role is allowed",
+      inPass: PAGES,
+      claims: [
+        { kind: 'area', name: 'settings' },
+        { kind: 'area', name: 'profile' },
+      ],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
+      inPass: { pages: ['settings'], baseBranch: 'main' },
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'outside a pass, a page file under a held shared area is allowed as before',
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+  ])('$name', ({ inPass, claims, path, decision, reason }) => {
+    const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
+      toolName: 'Edit',
+      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'profile', globs: ['src/profile/**'] },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims,
+      readOnly: false,
+      ...(inPass === undefined ? {} : { inPass }),
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe(decision);
+    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
   });
 
   it.each<{ name: string; path: string; skip?: boolean }>([
@@ -679,6 +793,8 @@ describe.each([
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: own.path,
@@ -726,6 +842,8 @@ describe('a path decided by its collapsed reading', () => {
 
   it('denies an edit whose kernel reading is claimed but whose text is not', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: 'docs/lk/../x.ts' },
       repoPath: own.path,
@@ -760,6 +878,8 @@ describe('rm -r arguments beyond a plain path', () => {
   });
   const run = (command: string) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command },
       repoPath: own.path,
@@ -1275,6 +1395,8 @@ describe('protected paths reached through a link and ..', () => {
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repoDir(),
@@ -1447,6 +1569,8 @@ describe('classifyPath with dotfiles', () => {
 
   it('lets an area edit a dotfile once it claims the area', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Edit',
       toolInput: { file_path: '.gitignore' },
       repoPath: repo.path,
@@ -1467,6 +1591,8 @@ describe('classifyPath with dotfiles', () => {
     'denies an edit of %s with the ** area claimed and no file-access judge',
     (path) => {
       const verdict = judgeToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
         toolName: 'Edit',
         toolInput: { file_path: path },
         repoPath: repo.path,
@@ -1721,6 +1847,8 @@ describe('read-only steps', () => {
 describe('delivery and gh', () => {
   const run = (command: string, delivery: Delivery) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command },
       repoPath: repo.path,
@@ -2067,6 +2195,8 @@ describe('delivery and gh', () => {
 
   it('tells an agent that 10db pushes, whatever the delivery', () => {
     const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName: 'Bash',
       toolInput: { command: 'git push origin feat/x' },
       repoPath: repo.path,
@@ -2107,6 +2237,8 @@ describe('file access judge', () => {
     toolInput: unknown,
   ) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repo.path,
@@ -2327,6 +2459,26 @@ describe('account isolation', () => {
       tool: 'Glob',
       input: () => ({ pattern: '../link-data/**', path: 'src' }),
     },
+    {
+      name: "Read of another task's pasted picture",
+      tool: 'Read',
+      input: () => ({ file_path: join(OTHER_FILES, 'shot.png') }),
+    },
+    {
+      name: "Read of another task's picture through .. from the task's own",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, '..', '..', 'tsk_other', 'files', 'shot.png') }),
+    },
+    {
+      name: "Read of the task's pictures through a link out of them",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'escape.png') }),
+    },
+    {
+      name: "Grep in the task's own pictures, which only Read opens",
+      tool: 'Grep',
+      input: () => ({ pattern: 'png', path: OWN_FILES }),
+    },
   ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
     for (const readOnly of [false, true]) {
       const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
@@ -2345,6 +2497,11 @@ describe('account isolation', () => {
       name: "Grep in the session's own saved output",
       tool: 'Grep',
       input: () => ({ pattern: 'big', path: OWN_RESULTS }),
+    },
+    {
+      name: "Read of a picture pasted into the session's own task",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'shot.png') }),
     },
     {
       name: 'Grep with a regex that looks like a path',
@@ -2375,6 +2532,8 @@ describe('account isolation with a nested data directory', () => {
   });
   const run = (toolName: string, toolInput: unknown) =>
     judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
       toolName,
       toolInput,
       repoPath: repo.path,

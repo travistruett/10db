@@ -1,0 +1,3 @@
+# apps/daemon/src/benchmarks
+
+- `benchmarks/` syncs Artificial Analysis's free model list with the builder's own key, read from the Keychain (service `10db`, account `artificial-analysis-api-key`). A model's speed is AA's `performance_v3.mean_output_tokens_per_second` (measured under load across short, long and multi-turn agentic workloads, reasoning tokens included); the older `performance` object is ignored, since AA nulls its fields from 2026-12-10. Of AA's evaluations only `artificial_analysis_intelligence_index` is read. AA data stays on the machine: never in logs, fixtures, docs or the repo, and every view of it shows AA's attribution. Tests use invented numbers and an injected `fetch`.

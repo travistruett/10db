@@ -1,0 +1,1 @@
+ALTER TABLE `task_messages` ADD `push_uuids` text DEFAULT '[]' NOT NULL;

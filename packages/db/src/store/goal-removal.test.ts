@@ -35,6 +35,8 @@ import {
   listGoalTasks,
   listTasks,
   removeDraftGoal,
+  setRoutingRules,
+  listRoutingRules,
   seedProject,
   transitionWorkstream,
   type Store,
@@ -79,6 +81,23 @@ const remove = (id: GoalId) =>
   });
 
 describe('removeDraftGoal', () => {
+  it("removes the goal's routes and keeps the project's", () => {
+    const id = seedGoal();
+    const sam = store.write((ctx) => insertPerson(ctx, { handle: 'sam', name: 'Sam' })).value;
+    store.write((ctx) =>
+      setRoutingRules(ctx, project.id, {
+        rules: [
+          { category: 'product', area: null, goalId: id, personId: sam.id },
+          { category: 'design', area: null, personId: sam.id },
+        ],
+      }),
+    );
+    remove(id);
+    expect(listRoutingRules(store.db, project.id)).toMatchObject([
+      { category: 'design', goalId: null },
+    ]);
+  });
+
   it('removes the tasks, the criteria and the goal, whatever order the tasks wait on each other', () => {
     const id = seedGoal();
     remove(id);

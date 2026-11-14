@@ -6,7 +6,7 @@ import {
   ShapeOrigin,
   type ProjectId,
   type ShapeId,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { createTestStore, insertShape, listInbox, recordMcpApproval, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -104,9 +104,13 @@ const lookupWith =
     Promise.resolve(names[host] ?? ['93.184.216.34']);
 
 function preparer(
-  laneSandbox: LaneSandbox = realSandbox(),
+  given: Pick<LaneSandbox, 'forSession'> = realSandbox(),
   lookup: (host: string) => Promise<readonly string[]> = lookupWith(),
 ) {
+  const laneSandbox: LaneSandbox = {
+    judgeSetup: () => Promise.reject(new Error('a Plan session never previews its setup')),
+    ...given,
+  };
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const profiles: string[] = [];
   const prepare = createShapePreparer({
@@ -119,6 +123,8 @@ function preparer(
     // The project env: the login shell's, with every billing switch and account secret stripped.
     projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: join(root, 'home') }),
     lookup,
+    builderHome: join(root, 'home'),
+    laneWritableRoots: [join(root, 't')],
     exportAwsCredentials: (profile) => {
       profiles.push(profile);
       return Promise.resolve({
@@ -140,7 +146,7 @@ const launchEnv = (): Record<string, string> => ({
 
 const inputFor = (
   owner: { projectId: ProjectId; shapeId: ShapeId },
-  accountKind: SupportedAccountKind = AccountKind.AnthropicApiKey,
+  accountKind: AgentAccountKind = AccountKind.AnthropicApiKey,
   env: Record<string, string> = launchEnv(),
 ) => ({
   ...owner,
@@ -197,6 +203,28 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
+  });
+
+  it('starts a Plan session with the instructions, the builder’s skills and their reads', async () => {
+    const owner = conversation({ mcpServers: {} });
+    writeFileSync(join(checkout, 'AGENTS.md'), '# Rules\n\nUse pnpm.\n');
+    const skill = join(root, 'home', '.claude', 'skills', 's');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'), '---\nname: s\ndescription: a skill\n---\n');
+    writeFileSync(join(skill, '.env'), 'TOKEN=x');
+    const { prepare } = preparer();
+    const prepared = await prepare(inputFor(owner));
+    try {
+      expect(prepared.instructions).toContain('Use pnpm.');
+      expect(prepared.setup.loaded.skills).toEqual(['s']);
+      expect(prepared.setup.pluginDirs[0]).toMatch(/\/yours$/);
+      expect(prepared.setup.secretFiles).toEqual([join(skill, '.env')]);
+      expect(prepared.sandbox?.settings.filesystem.allowRead).toContain(
+        join(root, 'home', '.claude', 'skills'),
+      );
+    } finally {
+      await prepared.release();
+    }
   });
 
   it('expands an approved server’s variables from the project env, never the account’s key in the session env', async () => {
@@ -299,7 +327,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
 
 describe('the config dir a Plan session’s sandbox is given', () => {
   // Where the account keeps its login, by its kind, as a lane's session reads it (`sessionConfigDir`).
-  it.each<[string, SupportedAccountKind, string]>([
+  it.each<[string, AgentAccountKind, string]>([
     ['a Claude kind', AccountKind.ClaudeSubscription, '/accounts/claude'],
     ['a Codex kind', AccountKind.CodexSignin, '/accounts/codex'],
   ])('follows the account of %s', async (_name, kind, expected) => {

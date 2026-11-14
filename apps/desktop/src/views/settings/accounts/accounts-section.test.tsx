@@ -188,12 +188,13 @@ describe('AccountsSection', () => {
     expect(within(row).getByText('Needs sign-in')).toBeTruthy();
   });
 
-  it('puts an archived account only under Archived (1), with its label and kind', async () => {
+  it('puts an archived account only under Archived, counted in a badge, with its label and kind', async () => {
     const archived = accountDto({ label: 'Old client', kind: 'gateway', archived: true });
     serve([DEFAULT_ACCOUNT, archived]);
     const table = await screen.findByRole('table', { name: 'Accounts' });
     expect(within(table).queryByText('Old client')).toBeNull();
-    const toggle = await screen.findByRole('button', { name: 'Archived (1)' });
+    const toggle = await screen.findByRole('button', { name: /^Archived/ });
+    expect(toggle.textContent).toBe('Archived1');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle);
     expect(await screen.findByText('Old client')).toBeTruthy();

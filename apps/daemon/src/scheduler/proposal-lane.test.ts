@@ -114,6 +114,8 @@ describe('a lane for a task filed from a proposal', () => {
     const lane = startTaskWithPlan(state, filed.id);
     const launched: WorkstreamId[] = [];
     const scheduler = createScheduler({
+      // No run here has saved Workbench work.
+      keptWork: { ready: () => true },
       state,
       clock,
       caps: { global: 4 },
@@ -125,6 +127,7 @@ describe('a lane for a task filed from a proposal', () => {
         launch: (id) => {
           launched.push(id);
         },
+        closeWarm: () => Promise.resolve(),
         isRunning: () => false,
       },
       accounts: { ...accounts, prepare: () => undefined },

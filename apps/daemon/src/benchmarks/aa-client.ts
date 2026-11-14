@@ -31,7 +31,10 @@ const AaEntry = z.looseObject({
     .nullable()
     .optional(),
   pricing: Numbers.optional(),
-  performance: Numbers.optional(),
+  // AA's speed and latency, measured under load over 1k, 10k and 100k-token prompts and a multi-turn agentic
+  // workload. Null when the model has no measurement in AA's latest window. The older `performance` object
+  // is ignored: AA nulls its fields from 2026-12-10.
+  performance_v3: Numbers.nullable().optional(),
 });
 
 const AaPage = z.looseObject({
@@ -55,7 +58,7 @@ function toModel(entry: z.infer<typeof AaEntry>, version: string | null, now: st
     costPerTaskUsd:
       entry.artificial_analysis_intelligence_index_cost?.cost_per_task?.total_cost ?? null,
     pricing: entry.pricing ?? {},
-    performance: entry.performance ?? {},
+    performance: entry.performance_v3 ?? {},
     fetchedAt: now,
   };
 }

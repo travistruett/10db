@@ -41,16 +41,19 @@ import {
   createLaneSandbox,
   type LaneSandbox,
   type LaneSessionInput,
+  type SetupInput,
 } from '../src/sandbox';
 import {
+  CODEX_COMMANDS,
   createCodexAdapter,
   guardSocketPath,
   patchPaths,
   spawnAppServer,
   type CodexChild,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
-  type SessionSpec,
+  type LaneSessionSpec,
+  type ShapeImage,
 } from '../src/sessions';
 import {
   startFakeResponses,
@@ -58,7 +61,8 @@ import {
   type FakeResponses,
   type FakeStep,
 } from './fake-responses';
-import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG } from './fixtures';
+import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG, testPolicy } from './fixtures';
+import { noisePng } from './png';
 
 const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
 
@@ -415,7 +419,7 @@ interface World {
   readonly mcp: FakeMcp;
   /** The bearer token of the session's MCP server, which Codex alone holds. */
   readonly mcpToken: string;
-  readonly adapter: SessionAdapter;
+  readonly adapter: AgentAdapter;
   readonly laneSandbox: LaneSandbox;
   /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
   readonly roots: SandboxRoots;
@@ -425,7 +429,7 @@ interface World {
   /** Every line the daemon's logger wrote. */
   readonly logs: string[];
   /** Run on each guard call before it is judged, for a test that acts mid-session. */
-  onCall: (call: GuardCall, spec: SessionSpec) => void;
+  onCall: (call: GuardCall, spec: LaneSessionSpec) => void;
   close(): Promise<void>;
 }
 
@@ -433,7 +437,7 @@ interface SessionRun {
   readonly events: readonly SessionEvent[];
   readonly threadId: string | null;
   readonly request: FakeRequest | undefined;
-  readonly spec: SessionSpec;
+  readonly spec: LaneSessionSpec;
 }
 
 let codexPath: string;
@@ -519,7 +523,7 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
   const roots = openSandboxRoots({}, homedir());
   if (roots.refusal !== null) throw roots.refusal;
   // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lanes' files alone.
-  const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+  const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
   opened.push(() => {
     claim.release();
     return Promise.resolve();
@@ -588,6 +592,10 @@ function laneInput(
     readonly reads?: readonly string[];
     readonly resume?: string | null;
     readonly claude?: boolean;
+    /** The task's pictures folder, as the runner names it for a lane of a task with pictures. */
+    readonly taskFiles?: string;
+    /** What comes along into the session, as the runner plans it. */
+    readonly setup?: SetupInput;
   } = {},
 ): LaneSessionInput {
   return {
@@ -606,6 +614,8 @@ function laneInput(
     configDir: world.codexHome,
     checkouts: [world.checkout, world.other],
     mcpServers: {},
+    ...(opts.taskFiles === undefined ? {} : { taskFiles: opts.taskFiles }),
+    ...(opts.setup === undefined ? {} : { setup: opts.setup }),
     ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes, provider: Provider.Codex }),
   };
 }
@@ -619,6 +629,12 @@ async function runSession(
     readonly reads?: readonly string[];
     readonly resume?: string | null;
     readonly sessionId?: SessionId;
+    /** A builder message's client uuid and pictures, as a pass page's prompt carries them. */
+    readonly promptUuid?: string;
+    readonly images?: readonly ShapeImage[];
+    readonly taskFiles?: string;
+    readonly setup?: SetupInput;
+    readonly instructions?: string;
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
@@ -633,25 +649,34 @@ async function runSession(
 async function runOnLane(
   world: World,
   steps: Parameters<FakeResponses['script']>[0],
-  opts: { readonly resume?: string | null; readonly sessionId?: SessionId },
+  opts: {
+    readonly resume?: string | null;
+    readonly sessionId?: SessionId;
+    readonly promptUuid?: string;
+    readonly images?: readonly ShapeImage[];
+    readonly instructions?: string;
+  },
   launch: ReturnType<Launcher['session']>,
   laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
 ): Promise<SessionRun> {
   const prompt = world.model.script(steps);
-  const spec: SessionSpec = {
+  const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
-    workstreamId: mintId('Workstream'),
-    sequence: 1,
+    policy: testPolicy(),
+    profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: world.checkout,
     prompt,
+    ...(opts.promptUuid === undefined ? {} : { promptUuid: opts.promptUuid }),
+    ...(opts.images === undefined ? {} : { images: opts.images }),
     model: launch.model,
     effort: 'low',
     resumeProviderSessionId: opts.resume ?? null,
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: [],
     sandbox: laneSession.spec,
+    ...(opts.instructions === undefined ? {} : { instructions: opts.instructions }),
+    setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
     mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
     preToolUse: (req) => {
       const call = { toolName: req.toolName, input: JSON.stringify(req.input) };
@@ -661,9 +686,10 @@ async function runOnLane(
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
     },
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
-  const handle = world.adapter.start(spec);
+  const handle = world.adapter.open(spec);
   const events: SessionEvent[] = [];
   try {
     for await (const event of handle.events) {
@@ -1074,16 +1100,164 @@ describe.skipIf(!live)(
 
     it('runs with the real toolchain: node and git status', async () => {
       writeFileSync(join(world.checkout, 'untracked.txt'), 'new\n');
-      const outputs = expectTurn(
-        await runSession(world, [
-          run('node -v; echo node=$?; git status --short; echo git=$?'),
-          { say: 'done' },
-        ]),
+      const session = await runSession(world, [
+        run('node -v; echo node=$?; git status --short; echo git=$?'),
+        { say: 'done' },
+      ]);
+      const outputs = expectTurn(session);
+      // It streams: the message's deltas are its text, the command runs from start to its exit, and
+      // the session lists the commands 10db sends as calls.
+      const message = session.events.find((e) => e.type === 'message');
+      if (message?.type !== 'message') throw new Error('no message streamed');
+      const deltas = session.events.flatMap((e) =>
+        e.type === 'text_delta' && e.itemId === message.itemId ? [e.text] : [],
       );
+      expect(deltas.length).toBeGreaterThan(0);
+      expect(deltas.join('')).toBe(message.text);
+      const command = session.events.flatMap((e) =>
+        e.type === 'tool_call' && e.call.kind === 'command' ? [e.call] : [],
+      );
+      expect(command[0]?.status).toBe('running');
+      expect(command.at(-1)).toMatchObject({ status: 'done', exitCode: 0 });
+      expect(session.events).toContainEqual({ type: 'commands', commands: CODEX_COMMANDS });
       expect(outputs[0]).toMatch(/v\d+\.\d+\.\d+/);
       expect(outputs[0]).toContain('node=0');
       expect(outputs[0]).toContain('?? untracked.txt');
       expect(outputs[0]).toContain('git=0');
+    });
+
+    /**
+     * Builder skill folders `~/<temp>/<name>`, two levels into the home (a skill directly in it, or
+     * in ~/.10db where the world lives, is refused), each with a SKILL.md naming it.
+     */
+    const builderSkills = (names: readonly string[]): { input: SetupInput; dir: string } => {
+      const dir = realpathSync(mkdtempSync(join(homedir(), '10db-live-skills-')));
+      const skills = names.map((name) => {
+        const path = join(dir, name);
+        mkdirSync(path);
+        writeFileSync(
+          join(path, 'SKILL.md'),
+          `---\nname: ${name}\ndescription: The ${name} skill, for the live check.\n---\n\n${name} body\n`,
+        );
+        return { name, path, skillFile: join(path, 'SKILL.md') };
+      });
+      return { input: { skills, plugins: [], projectFiles: [] }, dir };
+    };
+
+    it('lists a builder skill linked into yours/skills and reads its SKILL.md, and still cannot read auth.json', async () => {
+      const { input, dir } = builderSkills(['tendb-live-skill']);
+      try {
+        const auth = join(world.codexHome, 'auth.json');
+        const token = plant(auth);
+        const session = await runSession(
+          world,
+          [
+            run(`cat '${join(dir, 'tendb-live-skill', 'SKILL.md')}'; echo skill=$?`),
+            run(`cat '${auth}'; echo auth=$?`),
+            { say: 'done' },
+          ],
+          { setup: input, instructions: 'LIVE-INSTRUCTIONS-MARK: use pnpm.' },
+        );
+        const outputs = expectTurn(session);
+        expect(outputs[0]).toContain('tendb-live-skill body');
+        expect(outputs[0]).toContain('skill=0');
+        expect(outputs[1]).toMatch(/auth=1/);
+        expect(outputs.join('\n')).not.toContain(token);
+        // Codex listed the skill through the root of links, and the instructions reached the model.
+        const developer = (session.request?.developerTexts ?? []).join('\n');
+        expect(developer).toContain('tendb-live-skill');
+        expect(developer).toContain('LIVE-INSTRUCTIONS-MARK');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('runs node and git with about 200 skills in the setup', async () => {
+      const { input, dir } = builderSkills(
+        Array.from({ length: 200 }, (_, i) => `tendb-live-${String(i).padStart(3, '0')}`),
+      );
+      try {
+        writeFileSync(join(world.checkout, 'untracked.txt'), 'new\n');
+        const outputs = expectTurn(
+          await runSession(
+            world,
+            [run('node -v; echo node=$?; git status --short; echo git=$?'), { say: 'done' }],
+            { setup: input },
+          ),
+        );
+        expect(outputs[0]).toMatch(/v\d+\.\d+\.\d+/);
+        expect(outputs[0]).toContain('node=0');
+        expect(outputs[0]).toContain('?? untracked.txt');
+        expect(outputs[0]).toContain('git=0');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('takes a builder message with a picture under its client uuid, and reads the thread back once it closed', async () => {
+      const picturePath = join(world.root, 'header.png');
+      const png = noisePng(4, 4);
+      writeFileSync(picturePath, png);
+      const picture: ShapeImage = {
+        mediaType: 'image/png',
+        data: png.toString('base64'),
+        path: picturePath,
+      };
+      const first = randomUUID();
+      const page = await runSession(world, [{ say: 'Looked at the header.' }], {
+        promptUuid: first,
+        images: [picture],
+      });
+      expectTurn(page);
+      // The turn took the message on evidence, before it completed, and the model got the picture.
+      const kinds = page.events.map((e) => e.type);
+      expect(page.events).toContainEqual({ type: 'consumed', uuids: [first] });
+      expect(kinds.indexOf('consumed')).toBeLessThan(kinds.indexOf('turn_complete'));
+      expect(page.request?.images).toBe(1);
+
+      // The next message resumes the closed session; the thread read back holds both, and nothing else.
+      const second = randomUUID();
+      const resumed = await runSession(world, [{ say: 'Made it smaller.' }], {
+        resume: page.threadId,
+        promptUuid: second,
+        images: [picture],
+      });
+      expectTurn(resumed);
+      expect(resumed.threadId).toBe(page.threadId);
+      // The picture goes again with the message sent again: the thread holds both sends.
+      expect(resumed.request?.images).toBe(2);
+      expect(resumed.events).toContainEqual({ type: 'consumed', uuids: [second] });
+      const launch = launcher.session(world.account, MODEL, []);
+      const held = await world.adapter.readClientUuids({
+        account: launch.expect,
+        env: launch.env,
+        cwd: world.checkout,
+        providerSessionId: page.threadId ?? '',
+        wanted: [first, second, randomUUID()],
+        since: new Date(0).toISOString(),
+      });
+      expect([...held].sort()).toEqual([first, second].sort());
+    });
+
+    it("cannot open its task's stored picture by its path: the guard refuses view_image, the sandbox the shell", async () => {
+      const files = join(world.root, 'Application Support', '10db', 'tasks', 'tsk_live', 'files');
+      mkdirSync(files, { recursive: true });
+      const shot = join(files, 'shot.png');
+      writeFileSync(shot, noisePng(4, 4));
+      const outputs = expectTurn(
+        await runSession(
+          world,
+          [
+            codeMode(`tools.view_image({ path: ${JSON.stringify(shot)} })`),
+            run(`wc -c < '${shot}'; echo exit=$?`),
+          ],
+          { taskFiles: files },
+        ),
+      );
+      // So 10db sends Codex every picture as a local image, on every push.
+      expect(outputs[0]).toContain('does not allow the tool "view_image" in a lane');
+      expect(outputs[1]).toContain('operation not permitted');
+      expect(outputs[1]).toContain('exit=1');
     });
 
     it('resumes a thread after the process restarts', async () => {

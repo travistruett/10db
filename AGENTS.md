@@ -1,7 +1,9 @@
 # 10db working rules
 
 These rules bind every contributor: people, Claude Code and Codex. Each app and package has its own
-`AGENTS.md` with local rules; read the root file and the ones for every directory you touch.
+`AGENTS.md` with local rules, and a module or view keeps its notes in an `AGENTS.md` beside its code; read the
+root file and the ones for every directory you touch, and write a note in the nearest one
+(`docs/architecture/decisions/2026-11-13-module-notes-live-beside-the-module.md`).
 `CLAUDE.md` files are not used here, and a test fails if one appears.
 
 ## What 10db is
@@ -24,19 +26,48 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 ## Rules
 
 - Code style: `.claude/rules/code-style.md`. Testing: `.claude/rules/testing.md`. Both bind Codex too.
+- **Provider parity.** Every feature works on every kind of account 10db supports: a Claude plan,
+  Claude through Bedrock or an API key, and a ChatGPT/Codex plan. A project's account is the
+  builder's billing line, so 10db never asks the builder to move a project to another provider to
+  use a feature. Where a provider can't do something yet, the feature still runs there and says what
+  it lacks, and a follow-up task closes the gap. Specs and plans state how each feature behaves per
+  provider; plan review checks it.
+- **Trust the developer, contain the agent.** 10db is a developer tool for people building their own
+  projects. The kernel sandbox is the security, and inside it agents work freely
+  (`docs/architecture/decisions/2026-11-12-10db-trusts-the-developer-and-contains-the-agent.md`):
+  - Hard limits are about consequences: destroying data, sending data out, reading secrets, and
+    writing to anything live. Everything else runs.
+  - A judge decides what touches a limit (Claude's auto mode, Codex's Auto-review, or 10db's judge),
+    not a rulebook. Rules stay only for the sandbox's integrity and for coordinating 10db's own
+    writers.
+  - A task that stops to wait on the builder is a bug. Unattended work skips what crosses a limit,
+    finishes the rest, and leaves one Inbox item.
+  - The builder's setup comes along by default: skills, plugins, MCP servers, the project's
+    instructions and the web. The builder turns things off, not on.
+  - When in doubt, do what Claude Code does. A restriction Claude Code doesn't have needs a reason
+    tied to a hard limit or to 10db's own coordination. Specs say which; plan review checks it.
 - Import workspace packages by name through their entry point only. Packages never import apps.
 - Pin every dependency exactly, latest stable when added. A held-back pin gets a decision saying
   why.
 - A design decision is its own file in `docs/architecture/decisions/` (its README gives the format).
   The numbered log `decisions.md` is closed; never add a row to it.
 - Generated files are never edited by hand: `packages/contracts/generated/`,
-  `packages/db/drizzle/`. `make gate` fails when they drift. The exception is a
+  `packages/db/drizzle/`, `apps/daemon/src/sessions/codex-generated/`. `make gate` fails when they
+  drift. The Codex folder is written only by `pnpm --filter @10db/daemon generate:codex`, run on a
+  Mac, and `make gate` checks its `STAMP`. The exception is a
   `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
   Until the first published release the migration baseline is regenerated instead of extended
   (`packages/db/AGENTS.md`).
-- Done means `make gate` printed `GATE PASS`. Docs are part of done. An agent in a 10db lane leaves
-  the gate to 10db, which runs it after each implement step: it runs only the checks for what it changed (the
-  changed packages' tests, typecheck and lint, or the failing step's command) and never the full gate.
+- **Briefs, not documents.** Every spec, plan and end-of-run report opens with a brief of one screen
+  for the builder: what changes for them, what it buys, what could go wrong and how we'd know, the
+  calls they might disagree with, and what is needed from them (usually nothing). The rest is for
+  agents. The builder approves by replying to the brief; with nothing needed from them, work goes ahead.
+- Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff
+  touches and their dependents); the pre-push hook runs `make precheck`. `make gate` runs every check on the Mac
+  and is optional (`docs/architecture/decisions/2026-11-13-ci-is-the-gate-before-a-merge.md`). Docs are part
+  of done. An agent in a 10db lane leaves the gate to 10db, which runs it after each implement step: it runs
+  only the checks for what it changed (the changed packages' tests, typecheck and lint, or the failing step's
+  command) and never the full gate.
 
 ## Git
 

@@ -23,6 +23,7 @@ for (const name of [
   'build-info.json',
   'release',
   'catalogue-snapshot.json',
+  'node_modules',
 ]) {
   rmSync(resolve(outDir, name), { recursive: true, force: true });
 }
@@ -43,6 +44,9 @@ await build({
   entryPoints: [resolve(root, 'src/main.ts')],
   outfile: resolve(outDir, 'daemon.mjs'),
   sourcemap: true,
+  // Playwright reads its own package.json and browsers.json beside its modules, so it is copied
+  // whole below and loaded from there, only when a picture is taken.
+  external: ['playwright-core'],
 });
 // The builder's MCP bridge, which a client runs with the app's node. It needs no database: it only
 // forwards calls to the running daemon.
@@ -102,6 +106,16 @@ if (commit) {
   console.warn('No commit found for this build: the app will show none and never update itself.');
 }
 cpSync(sqliteAddonPath(), resolve(outDir, 'better_sqlite3.node'));
+// The daemon's pinned playwright-core, where node resolves it from daemon.mjs; pnpm's own
+// node_modules inside the package (its .bin links) is left out.
+const playwrightDir = dirname(
+  createRequire(import.meta.url).resolve('playwright-core/package.json'),
+);
+cpSync(playwrightDir, resolve(outDir, 'node_modules', 'playwright-core'), {
+  recursive: true,
+  dereference: true,
+  filter: (source) => source !== resolve(playwrightDir, 'node_modules'),
+});
 console.log(`Built ${outDir}/daemon.mjs, builder-mcp.mjs and srt.mjs`);
 
 /** The `owner/name` repository GitHub's runner built this for (`GITHUB_REPOSITORY`), else null. */

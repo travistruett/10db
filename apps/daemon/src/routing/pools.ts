@@ -2,13 +2,21 @@ import { Effort, ModelTier, type ModelProfileDto } from '@10db/contracts';
 
 /** Tiers, weakest first. */
 export const TIERS: readonly ModelTier[] = [
-  ModelTier.Fast,
+  ModelTier.Efficient,
   ModelTier.Balanced,
-  ModelTier.Strongest,
+  ModelTier.Capable,
+  ModelTier.Frontier,
 ];
 const EFFORTS: readonly Effort[] = Object.values(Effort);
 
 export const tierLevel = (tier: ModelTier): number => TIERS.indexOf(tier);
+
+/**
+ * The tiers whose models a top pick from the tier chooses among. Capable and Frontier split what was one
+ * strongest tier, so the top of Capable is still the dearest model of both.
+ */
+export const topSpan = (tier: ModelTier): readonly ModelTier[] =>
+  tier === ModelTier.Capable ? [ModelTier.Capable, ModelTier.Frontier] : [tier];
 export const effortLevel = (effort: Effort): number => EFFORTS.indexOf(effort);
 
 /** The effort one step above, or the same at the top. */
@@ -60,9 +68,19 @@ export interface TierPool {
   readonly profiles: readonly ModelProfileDto[];
 }
 
+/** The pool, with the models of every tier its top pick spans (`topSpan`). */
+export function withTopSpan(pool: TierPool, profiles: readonly ModelProfileDto[]): TierPool {
+  const span = topSpan(pool.tier);
+  if (span.length === 1) return pool;
+  return {
+    tier: pool.tier,
+    profiles: profiles.filter((p) => automatic(p) && p.tier !== null && span.includes(p.tier)),
+  };
+}
+
 /**
- * The profiles routing may pick in the tier, else in the nearest tier the account offers, the stronger on a
- * tie. Undefined when the account offers nothing routing may pick.
+ * The profiles routing may pick in the tier, else in the nearest stronger tier the account offers, else the
+ * nearest weaker one. Undefined when the account offers nothing routing may pick.
  */
 export function tierPool(
   tier: ModelTier,
@@ -72,11 +90,10 @@ export function tierPool(
   const target = tierLevel(tier);
   const present = new Set<ModelTier>();
   for (const p of pickable) if (p.tier !== null) present.add(p.tier);
-  const nearest = [...present].sort(
-    (a, b) =>
-      Math.abs(tierLevel(a) - target) - Math.abs(tierLevel(b) - target) ||
-      tierLevel(b) - tierLevel(a),
-  )[0];
+  const byLevel = [...present].sort((a, b) => tierLevel(a) - tierLevel(b));
+  const nearest =
+    byLevel.find((t) => tierLevel(t) >= target) ??
+    byLevel.filter((t) => tierLevel(t) < target).at(-1);
   return nearest === undefined
     ? undefined
     : { tier: nearest, profiles: pickable.filter((p) => p.tier === nearest) };

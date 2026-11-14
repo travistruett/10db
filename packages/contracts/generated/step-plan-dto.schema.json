@@ -41,14 +41,6 @@
               "edit"
             ]
           },
-          "score": {
-            "type": "string",
-            "enum": [
-              "intelligence",
-              "coding",
-              "agentic"
-            ]
-          },
           "profileId": {
             "anyOf": [
               {
@@ -106,9 +98,10 @@
                       "tier": {
                         "type": "string",
                         "enum": [
-                          "fast",
+                          "efficient",
                           "balanced",
-                          "strongest"
+                          "capable",
+                          "frontier"
                         ]
                       }
                     },
@@ -316,7 +309,6 @@
           "personaId",
           "personaName",
           "tools",
-          "score",
           "profileId",
           "model",
           "effort",

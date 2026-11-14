@@ -108,6 +108,11 @@ describe('createGh', () => {
       kind: 'unreachable',
     },
     {
+      name: 'a token GitHub rejected (gh 2.83.2 words it Bad credentials)',
+      answer: { exitCode: 1, stderr: 'gh: Bad credentials (HTTP 401)' },
+      expected: null,
+    },
+    {
       name: 'a rate limit GitHub answered with',
       answer: { exitCode: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)' },
       kind: 'failed',
@@ -122,12 +127,53 @@ describe('createGh', () => {
 
   it.each([
     {
+      name: 'the address gh printed',
+      answer: { exitCode: 0, stdout: '583231+octocat@users.noreply.github.com\n' },
+      expected: '583231+octocat@users.noreply.github.com',
+    },
+    {
+      name: 'an answer that is not one',
+      answer: { exitCode: 0, stdout: 'null+null@x\n' },
+      kind: 'failed',
+    },
+    { name: 'a failure', answer: { exitCode: 1, stderr: 'HTTP 502' }, kind: 'failed' },
+  ])('noreplyEmail: $name', async ({ answer, expected, kind }) => {
+    const { exec, seen } = scripted({ 'api user': answer });
+    const email = createGh(exec).noreplyEmail(CALL);
+    if (kind === undefined) await expect(email).resolves.toBe(expected);
+    else await expect(email).rejects.toMatchObject({ name: 'GhError', kind });
+    expect(seen).toEqual([
+      ['api', 'user', '--jq', '"\\(.id)+\\(.login)@users.noreply.github.com"'],
+    ]);
+  });
+
+  it.each([
+    {
       name: 'an open PR',
       answer: {
         exitCode: 0,
         stdout: '{"state":"OPEN","url":"https://github.com/acme/widgets/pull/7"}',
       },
-      expected: { state: 'OPEN', url: 'https://github.com/acme/widgets/pull/7' },
+      expected: {
+        state: 'OPEN',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: null,
+        baseRef: null,
+      },
+    },
+    {
+      name: 'a draft PR on another pass branch',
+      answer: {
+        exitCode: 0,
+        stdout:
+          '{"state":"OPEN","url":"https://github.com/acme/widgets/pull/7","isDraft":true,"baseRefName":"10db/polish-a"}',
+      },
+      expected: {
+        state: 'OPEN',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: true,
+        baseRef: '10db/polish-a',
+      },
     },
     {
       name: 'a merged PR',
@@ -135,7 +181,12 @@ describe('createGh', () => {
         exitCode: 0,
         stdout: '{"state":"MERGED","url":"https://github.com/acme/widgets/pull/7"}',
       },
-      expected: { state: 'MERGED', url: 'https://github.com/acme/widgets/pull/7' },
+      expected: {
+        state: 'MERGED',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: null,
+        baseRef: null,
+      },
     },
     {
       name: 'no PR for the branch',
@@ -160,7 +211,7 @@ describe('createGh', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state',
+      'url,state,isDraft,baseRefName',
     ]);
   });
 
@@ -198,6 +249,64 @@ describe('createGh', () => {
       '--body-file',
       '/tmp/body.md',
     ]);
+  });
+
+  it('creates a draft PR when asked, and makes a PR ready, moves its base or rewrites its body, each value its own argument', async () => {
+    const { exec, seen } = scripted({
+      'pr create': { exitCode: 0, stdout: 'https://github.com/acme/widgets/pull/8\n' },
+      'pr ready': { exitCode: 0 },
+      'pr edit': { exitCode: 0 },
+    });
+    const gh = createGh(exec);
+    const url = await gh.prCreate(
+      {
+        repo: 'acme/widgets',
+        base: '10db/polish-a',
+        head: '10db/polish-b',
+        title: 't',
+        bodyFile: '/b',
+        draft: true,
+      },
+      CALL,
+    );
+    await gh.prReady({ repo: 'acme/widgets', url }, CALL);
+    await gh.prEditBase({ repo: 'acme/widgets', url, base: 'main' }, CALL);
+    await gh.prEditBody({ repo: 'acme/widgets', url, bodyFile: '/b2' }, CALL);
+    expect(seen).toEqual([
+      [
+        'pr',
+        'create',
+        '-R',
+        'acme/widgets',
+        '--base',
+        '10db/polish-a',
+        '--head',
+        '10db/polish-b',
+        '--title',
+        't',
+        '--body-file',
+        '/b',
+        '--draft',
+      ],
+      ['pr', 'ready', url, '-R', 'acme/widgets'],
+      ['pr', 'edit', url, '-R', 'acme/widgets', '--base', 'main'],
+      ['pr', 'edit', url, '-R', 'acme/widgets', '--body-file', '/b2'],
+    ]);
+  });
+
+  it('refuses a ready or a base edit GitHub refused, with its reason', async () => {
+    const { exec } = scripted({
+      'pr ready': { exitCode: 1, stderr: 'GraphQL: Pull request is closed' },
+      'pr edit': { exitCode: 1, stderr: 'HTTP 422: base branch does not exist' },
+    });
+    const gh = createGh(exec);
+    const pr = { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' };
+    const ready = gh.prReady(pr, CALL);
+    await expect(ready).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+    await expect(ready).rejects.toThrow(/Pull request is closed/);
+    const edit = gh.prEditBase({ ...pr, base: 'gone' }, CALL);
+    await expect(edit).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+    await expect(edit).rejects.toThrow(/base branch does not exist/);
   });
 
   it.each([

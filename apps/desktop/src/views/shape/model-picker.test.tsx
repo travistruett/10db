@@ -65,7 +65,7 @@ describe('the Plan conversation model picker', () => {
       'claude-fable-5-1',
       'house-model',
     ]);
-    const headings = ['Fast models', 'Balanced models', 'Strongest models', 'Unknown tier'];
+    const headings = ['Efficient models', 'Balanced models', 'Capable models', 'Unknown tier'];
     for (const heading of headings) expect(within(list).getByText(heading)).toBeTruthy();
     const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Model' });
     expect(input.value).toBe('claude-sonnet-5-5');
@@ -77,14 +77,14 @@ describe('the Plan conversation model picker', () => {
       view,
       http.get(daemonUrl('/models'), () =>
         HttpResponse.json([
-          modelRowDto({ model: 'claude-haiku-5-5', name: 'Haiku', tier: 'fast' }),
+          modelRowDto({ model: 'claude-haiku-5-5', name: 'Haiku', tier: 'efficient' }),
           modelRowDto({
             model: 'claude-sonnet-5-5',
             name: 'Sonnet',
             tier: 'balanced',
             status: 'superseded',
           }),
-          modelRowDto({ model: 'claude-opus-5-5', name: 'Opus', tier: 'strongest' }),
+          modelRowDto({ model: 'claude-opus-5-5', name: 'Opus', tier: 'capable' }),
           modelRowDto({
             model: 'house-model',
             name: 'House',
@@ -112,7 +112,7 @@ describe('the Plan conversation model picker', () => {
         'House (Unknown)',
       ]);
     });
-    for (const heading of ['Fast models', 'Balanced models', 'Strongest models', 'Unknown tier'])
+    for (const heading of ['Efficient models', 'Balanced models', 'Capable models', 'Unknown tier'])
       expect(within(list).getByText(heading)).toBeTruthy();
   });
 

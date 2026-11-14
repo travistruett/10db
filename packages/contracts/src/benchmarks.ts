@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ScoreKind } from './states';
+import { SECRET_CHARACTERS } from './accounts';
 
 /**
  * One model from Artificial Analysis's free list, as 10db stores it locally. It is shown
@@ -15,6 +15,7 @@ export const AaModelDto = z.object({
   evaluations: z.record(z.string(), z.number().nullable()),
   costPerTaskUsd: z.number().nullable(),
   pricing: z.record(z.string(), z.number().nullable()),
+  /** AA's `performance_v3` means by their API name, e.g. `mean_output_tokens_per_second`. */
   performance: z.record(z.string(), z.number().nullable()),
   fetchedAt: z.iso.datetime(),
 });
@@ -32,9 +33,20 @@ export const BenchmarkStatusDto = z.object({
   indexVersion: z.string().nullable().default(null),
   /** Enabled profiles routing can't use for the Intelligence comparison: AA doesn't list the slug, or lists it without a cost or an Intelligence score. */
   unmeasuredProfiles: z.array(z.string()),
-  /** Enabled, costed profiles AA gave no score of some kind, with the kinds missing; a profile without Intelligence is here too. */
-  missingScores: z
-    .array(z.object({ profile: z.string(), kinds: z.array(z.enum(ScoreKind)) }))
-    .default([]),
+  /** The daemon was started with `TENDB_BENCHMARKS=off`: it reads no key and calls no one. */
+  off: z.boolean().default(false),
+  /** A sync is running now, so the outcome above is the one before it. */
+  syncing: z.boolean().default(false),
 });
 export type BenchmarkStatusDto = z.infer<typeof BenchmarkStatusDto>;
+
+/** `PUT /benchmarks/key`. The key reaches the Keychain on `security`'s standard input, so it is printable ASCII. */
+export const BenchmarkKeyInput = z.strictObject({
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(8192)
+    .regex(SECRET_CHARACTERS, 'printable ASCII with no spaces, double quotes or backslashes'),
+});
+export type BenchmarkKeyInput = z.infer<typeof BenchmarkKeyInput>;

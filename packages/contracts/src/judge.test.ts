@@ -4,20 +4,40 @@ import {
   JudgeCallDto,
   JudgeConfig,
   JudgeConfigPatch,
-  JudgeKeyInput,
   JudgeTestResultDto,
   mintId,
 } from './index';
+
+describe('judge account', () => {
+  it('defaults to no account, and a stored config without one reads null', () => {
+    expect(DEFAULT_JUDGE_CONFIG.accountId).toBeNull();
+    expect(
+      JudgeConfig.parse({ enabled: true, decisions: DEFAULT_JUDGE_CONFIG.decisions }).accountId,
+    ).toBeNull();
+  });
+
+  it('lets a patch set or clear the account', () => {
+    const id = mintId('Account');
+    expect(JudgeConfigPatch.parse({ accountId: id })).toEqual({ accountId: id });
+    expect(JudgeConfigPatch.parse({ accountId: null })).toEqual({ accountId: null });
+    expect(() => JudgeConfigPatch.parse({ accountId: 'nope' })).toThrow();
+  });
+});
 
 describe('judge config', () => {
   it('has the defaults the design names', () => {
     expect(DEFAULT_JUDGE_CONFIG).toEqual({
       enabled: true,
+      accountId: null,
       decisions: {
         review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_record: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         shape_elsewhere: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        question_route: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        thread_answer: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        reply_match: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        approval_read: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
@@ -33,6 +53,17 @@ describe('judge config', () => {
     expect(config.decisions.review_size).toEqual({ enabled: false, model: 'm', floor: 0.5 });
     expect(config.decisions.shape_record).toEqual(DEFAULT_JUDGE_CONFIG.decisions.shape_record);
   });
+
+  it.each(['question_route', 'thread_answer', 'reply_match', 'approval_read'] as const)(
+    'reads a config stored before %s with its default',
+    (decision) => {
+      const config = JudgeConfig.parse({
+        enabled: true,
+        decisions: { review_size: { enabled: true, model: 'm', floor: 0.5 } },
+      });
+      expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
+    },
+  );
 
   it.each([
     ['above one', 1.01],
@@ -61,6 +92,10 @@ describe('judge config patch', () => {
     ['the master switch', { enabled: false }],
     ['one decision field', { decisions: { review_size: { floor: 0.9 } } }],
     ['an empty decision', { decisions: { review_size: {} } }],
+    ['question_route', { decisions: { question_route: { floor: 0.9 } } }],
+    ['thread_answer', { decisions: { thread_answer: { enabled: false } } }],
+    ['reply_match', { decisions: { reply_match: { floor: 0.9 } } }],
+    ['approval_read', { decisions: { approval_read: { enabled: false } } }],
   ])('accepts %s', (_name, patch) => {
     expect(JudgeConfigPatch.safeParse(patch).success).toBe(true);
   });
@@ -71,21 +106,6 @@ describe('judge config patch', () => {
     ['an unknown field', { enabled: true, extra: 1 }],
   ])('rejects %s', (_name, patch) => {
     expect(JudgeConfigPatch.safeParse(patch).success).toBe(false);
-  });
-});
-
-describe('judge key input', () => {
-  it('trims the key', () => {
-    expect(JudgeKeyInput.parse({ key: '  sk-or-v1-abc  ' })).toEqual({ key: 'sk-or-v1-abc' });
-  });
-
-  it.each([
-    ['empty', ''],
-    ['blank', '   '],
-    ['holding a space', 'sk or'],
-    ['holding a quote', 'sk"or'],
-  ])('rejects a key that is %s', (_name, key) => {
-    expect(JudgeKeyInput.safeParse({ key }).success).toBe(false);
   });
 });
 

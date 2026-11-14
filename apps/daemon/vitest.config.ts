@@ -7,9 +7,11 @@ export default defineProject({
     // The delivery tests are their own project (vitest.delivery.config.ts): capped in workers and
     // run after this one.
     exclude: [...configDefaults.exclude, 'src/delivery/**'],
-    testTimeout: 30_000,
-    // Hooks build temp git repos too; under the full gate's load they can pass the 10 s default.
-    hookTimeout: 30_000,
+    // The pass tests drive real git across worktrees and restart the daemon: up to 13 s each at load
+    // average 15, and past 30 s at 55, where several Claude sessions share the Mac. Hooks build temp git
+    // repos too. The delivery project has the same margin.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     setupFiles: ['../../tests/git-isolation.setup.ts'],
     globalSetup: ['./test/repo-template.global.ts'],
   },

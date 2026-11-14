@@ -8,6 +8,7 @@ import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox'
 import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
+import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
 import type { WorktreeGenerators } from './worktree-generated';
 
@@ -53,17 +54,22 @@ export interface DeliveryContext {
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
   onWorkQueued(): void;
+  /** Puts a taken-out task's saved Workbench work back in a checkout (the pass module's put-back). */
+  readonly putBack: PutBackKeptWork;
 }
 
-export function networkCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+/** What a network call reads of the context: the login environment and the time limits. */
+type NetworkContext = Pick<DeliveryContext, 'networkEnv' | 'limits'>;
+
+export function networkCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { env: ctx.networkEnv(), timeoutMs: ctx.limits.networkTimeoutMs, signal };
 }
 
-export function pushCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+export function pushCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { ...networkCall(ctx, signal), timeoutMs: ctx.limits.pushTimeoutMs };
 }
 
-export function ghCall(ctx: DeliveryContext, signal: AbortSignal): GhCall {
+export function ghCall(ctx: NetworkContext, signal: AbortSignal): GhCall {
   return networkCall(ctx, signal);
 }
 
@@ -115,22 +121,20 @@ export function raiseIn(write: WriteContext, projectId: ProjectId, card: Card): 
 
 /**
  * Brings the project's open card with `card`'s fold key in line with `card`, inside the caller's
- * write: its title and body, and its detail when `card` has one, so it says what holds now. A
+ * write: its title and body, and the detail keys `card` has (the others stay), so it says what holds now. A
  * dismissed card stays dismissed, and a card that says this already is not written again.
  */
 export function rewriteIn(write: WriteContext, projectId: ProjectId, card: Card): void {
   if (card.foldKey === undefined) return;
   const open = findOpenByFoldKey(write.tx, projectId, card.foldKey);
   if (open === undefined) return;
+  const detail = card.detail ? { ...open.detail, ...card.detail } : undefined;
   const same =
     open.title === card.title &&
     open.body === card.body &&
-    (card.detail === undefined || JSON.stringify(open.detail) === JSON.stringify(card.detail));
+    (detail === undefined || JSON.stringify(open.detail) === JSON.stringify(detail));
   if (same) return;
-  rewordCard(write, open.id, card.body, {
-    title: card.title,
-    ...(card.detail ? { detail: card.detail } : {}),
-  });
+  rewordCard(write, open.id, card.body, { title: card.title, ...(detail ? { detail } : {}) });
 }
 
 /** `withdraw` inside the caller's write. */

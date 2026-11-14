@@ -37,9 +37,10 @@
         {
           "type": "string",
           "enum": [
-            "fast",
+            "efficient",
             "balanced",
-            "strongest"
+            "capable",
+            "frontier"
           ]
         },
         {
@@ -99,10 +100,15 @@
         "null"
       ]
     },
-    "coding": {
-      "type": [
-        "number",
-        "null"
+    "costPerTaskUsd": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "outputTokensPerSecond": {
@@ -110,6 +116,70 @@
         "number",
         "null"
       ]
+    },
+    "efforts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "pattern": "^mpf_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
+          "intelligence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costPerTaskUsd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outputTokensPerSecond": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "stepsRun": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "firstPassSteps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "profileId",
+          "effort",
+          "intelligence",
+          "costPerTaskUsd",
+          "outputTokensPerSecond",
+          "stepsRun",
+          "firstPassSteps"
+        ]
+      }
     },
     "stepsRun": {
       "type": "integer",
@@ -141,8 +211,9 @@
     "inputPrice",
     "outputPrice",
     "intelligence",
-    "coding",
+    "costPerTaskUsd",
     "outputTokensPerSecond",
+    "efforts",
     "stepsRun",
     "firstSeenAt"
   ]

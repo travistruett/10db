@@ -38,11 +38,17 @@ describe('isPickableModel', () => {
 describe('ModelSetting', () => {
   it.each([
     { name: 'automatic', value: { kind: 'automatic' }, ok: true },
-    { name: 'a tier', value: { kind: 'tier', tier: 'fast' }, ok: true },
+    { name: 'a tier', value: { kind: 'tier', tier: 'efficient' }, ok: true },
     { name: 'top of tier', value: { kind: 'top_of_tier' }, ok: true },
     { name: 'a named model', value: { kind: 'model', model: 'claude-opus-5-5' }, ok: true },
     { name: 'an unknown kind', value: { kind: 'cheapest' }, ok: false },
-    { name: 'a tier outside the three', value: { kind: 'tier', tier: 'huge' }, ok: false },
+    { name: 'a tier outside the four', value: { kind: 'tier', tier: 'huge' }, ok: false },
+    { name: 'a tier of the three-tier names', value: { kind: 'tier', tier: 'fast' }, ok: false },
+    {
+      name: 'the strongest tier of the three-tier names',
+      value: { kind: 'tier', tier: 'strongest' },
+      ok: false,
+    },
     { name: 'a tier with no tier', value: { kind: 'tier' }, ok: false },
     { name: 'a model with an empty name', value: { kind: 'model', model: '' }, ok: false },
     { name: 'a model with no name', value: { kind: 'model' }, ok: false },
@@ -51,9 +57,9 @@ describe('ModelSetting', () => {
   });
 
   it('keeps the shape it was given', () => {
-    expect(ModelSetting.parse({ kind: 'tier', tier: 'strongest' })).toEqual({
+    expect(ModelSetting.parse({ kind: 'tier', tier: 'frontier' })).toEqual({
       kind: 'tier',
-      tier: 'strongest',
+      tier: 'frontier',
     });
   });
 });
@@ -214,8 +220,9 @@ describe('ModelRowDto', () => {
       inputPrice: null,
       outputPrice: null,
       intelligence: null,
-      coding: null,
+      costPerTaskUsd: null,
       outputTokensPerSecond: null,
+      efforts: [],
       stepsRun: 0,
       firstSeenAt: '2026-11-06T12:00:00.000Z',
     };
@@ -272,6 +279,7 @@ describe('WorkstreamStep setting', () => {
     personaId: null,
     personaName: 'Implementer',
     tools: 'edit',
+    // Steps planned while routing kept a score kind per role still carry it; it is dropped on reading.
     score: 'coding',
     profileId: null,
     model: 'sonnet',

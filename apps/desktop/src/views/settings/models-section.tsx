@@ -1,302 +1,341 @@
-import { AccountId, ModelStatus, ModelTier, type ModelRowDto } from '@10db/contracts';
+import type { AccountId, ModelRowDto, StepRole } from '@10db/contracts';
 import {
-  Badge,
+  ActionIcon,
+  Anchor,
   Button,
   Group,
   SegmentedControl,
   Select,
   Stack,
-  Table,
   Text,
-  UnstyledButton,
+  Title,
+  Tooltip,
 } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconRefresh } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
+import { IconRefresh } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useCatalogueStatus, useModels, useRefreshModels } from '../../daemon/model-queries';
+import {
+  useCatalogueStatus,
+  useModelOffers,
+  useModelPicks,
+  useModels,
+  useRefreshModels,
+} from '../../daemon/model-queries';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
+import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
+import { TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { ModelDrawer } from './model-drawer';
-import { STATUS_LABEL, TIER_LABEL } from './model-labels';
-import { catalogueLine, formatPrice, formatScore, NO_DATA } from './model-format';
+import { groupByFamily } from './model-families';
+import { catalogueLine, costNote } from './model-format';
 import {
-  filterModels,
   earliestFirstSeen,
-  isNewModel,
+  filterModels,
   ModelColumn,
   SortDirection,
   sortModels,
+  type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { ModelsTable } from './models-table';
+import { RaisedPanel } from './raised-panel';
+import { RightsizingChart } from './rightsizing-chart';
+import { DotsMode, rightsizingSeries } from './rightsizing-series';
+import { ROLES } from './role-labels';
+import { RolePicksPanel } from './role-picks-panel';
+import { SettingsSectionKey } from './sections';
 
-const ALL = 'all';
-const ALL_ACCOUNTS = 'all-accounts';
+const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
-const TIER_CHOICES = [
-  { value: ALL, label: 'All' },
-  ...Object.values(ModelTier).map((tier) => ({ value: tier, label: TIER_LABEL[tier] })),
-];
+const DOTS_LABELS = [
+  { value: DotsMode.Every, label: 'Every effort' },
+  { value: DotsMode.Frontier, label: 'Frontier only' },
+] as const;
 
-const isTier = (value: string): value is ModelTier =>
-  Object.values(ModelTier).some((t) => t === value);
+const isDotsMode = (value: string): value is DotsMode =>
+  Object.values(DotsMode).some((mode) => mode === value);
 
-interface ColumnSpec {
-  readonly column: ModelColumn;
-  readonly label: string;
-  readonly numeric: boolean;
-}
+const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
-const COLUMNS: readonly ColumnSpec[] = [
-  { column: ModelColumn.Name, label: 'Model', numeric: false },
-  { column: ModelColumn.Tier, label: 'Tier', numeric: false },
-  { column: ModelColumn.AvailableOn, label: 'Available on', numeric: false },
-  { column: ModelColumn.Intelligence, label: 'Intelligence', numeric: true },
-  { column: ModelColumn.Coding, label: 'Coding', numeric: true },
-  { column: ModelColumn.Speed, label: 'Speed (tokens/s)', numeric: true },
-  { column: ModelColumn.InputPrice, label: 'Input', numeric: true },
-  { column: ModelColumn.OutputPrice, label: 'Output', numeric: true },
-  { column: ModelColumn.StepsRun, label: 'Steps run', numeric: true },
-];
-
-function SortableHeader({
-  spec,
-  sort,
-  onSort,
-}: {
-  readonly spec: ColumnSpec;
-  readonly sort: ModelSort;
-  readonly onSort: (column: ModelColumn) => void;
-}) {
-  const active = sort.column === spec.column;
-  const ariaSort = !active
-    ? 'none'
-    : sort.direction === SortDirection.Ascending
-      ? 'ascending'
-      : 'descending';
-  return (
-    <Table.Th aria-sort={ariaSort} {...(spec.numeric ? { ta: 'right' as const } : {})}>
-      <UnstyledButton
-        onClick={() => {
-          onSort(spec.column);
-        }}
-      >
-        <Group gap={4} wrap="nowrap" justify={spec.numeric ? 'flex-end' : 'flex-start'}>
-          <Text size="sm" fw={500} component="span">
-            {spec.label}
-          </Text>
-          {active ? (
-            sort.direction === SortDirection.Ascending ? (
-              <IconArrowUp size={14} stroke={1.5} aria-hidden />
-            ) : (
-              <IconArrowDown size={14} stroke={1.5} aria-hidden />
-            )
-          ) : null}
-        </Group>
-      </UnstyledButton>
-    </Table.Th>
-  );
-}
-
-function ModelTableRow({
-  row,
-  accountLabels,
-  now,
-  earliest,
-  onOpen,
-}: {
-  readonly row: ModelRowDto;
-  readonly accountLabels: ReadonlyMap<string, string>;
-  readonly now: number;
-  readonly earliest: number | null;
-  readonly onOpen: (row: ModelRowDto) => void;
-}) {
-  const statusBadge = row.status === ModelStatus.Current ? null : STATUS_LABEL[row.status];
-  const fresh = isNewModel(row, now, earliest);
-  const accounts = row.availableOn.map((id) => accountLabels.get(id) ?? 'Removed account');
-  return (
-    <Table.Tr>
-      <Table.Td>
-        <Stack gap={2}>
-          <Group gap="xs" wrap="nowrap">
-            <UnstyledButton
-              aria-label={`Open ${row.name}`}
-              onClick={() => {
-                onOpen(row);
-              }}
-            >
-              <Text size="sm" fw={500}>
-                {row.name}
-              </Text>
-            </UnstyledButton>
-            {fresh ? (
-              <Badge size="sm" variant="light" color="blue">
-                New
-              </Badge>
-            ) : null}
-            {statusBadge ? (
-              <Badge size="sm" variant="light" color="gray">
-                {statusBadge}
-              </Badge>
-            ) : null}
-          </Group>
-          <Text size="xs" c="dimmed" ff="monospace">
-            {row.model}
-          </Text>
-        </Stack>
-      </Table.Td>
-      <Table.Td>{row.tier === null ? NO_DATA : TIER_LABEL[row.tier]}</Table.Td>
-      <Table.Td>{accounts.length === 0 ? NO_DATA : accounts.join(', ')}</Table.Td>
-      <Table.Td ta="right">{formatScore(row.intelligence)}</Table.Td>
-      <Table.Td ta="right">{formatScore(row.coding)}</Table.Td>
-      <Table.Td ta="right">{formatScore(row.outputTokensPerSecond)}</Table.Td>
-      <Table.Td ta="right">{formatPrice(row.inputPrice)}</Table.Td>
-      <Table.Td ta="right">{formatPrice(row.outputPrice)}</Table.Td>
-      <Table.Td ta="right">{row.stepsRun}</Table.Td>
-    </Table.Tr>
-  );
-}
-
-/** Every model 10db can reach, with its tier, price and scores, and where the catalogue behind it came from. */
+/**
+ * Settings › Models: who each role gets on one account, then Intelligence against cost per task,
+ * then every model the account runs. A model's detail is in the drawer.
+ */
 export function ModelsSection() {
   const now = useNow();
-  const models = useModels();
-  const status = useCatalogueStatus();
   const accounts = useAccounts();
+  const [chosen, setChosen] = useState<AccountId | null>(null);
+  const live = (accounts.data ?? []).filter((a) => !a.archived);
+  // The page always has an account: the one chosen, else the default, else the first live one.
+  const account =
+    live.find((a) => a.id === chosen) ?? live.find((a) => a.isDefault) ?? live[0] ?? null;
+  const accountId = account?.id ?? null;
+  const models = useModels(accountId, accountId !== null);
+  const picks = useModelPicks(accountId);
+  const offers = useModelOffers();
+  const status = useCatalogueStatus();
   const refresh = useRefreshModels();
-  const [tier, setTier] = useState<ModelTier | null>(null);
-  const [accountId, setAccountId] = useState<AccountId | null>(null);
+  const [filter, setFilter] = useState<ModelFilter>(NO_FILTER);
   const [sort, setSort] = useState<ModelSort>({
-    column: ModelColumn.Tier,
+    column: ModelColumn.Intelligence,
     direction: SortDirection.Descending,
   });
+  const [role, setRole] = useState<StepRole | null>(null);
+  const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
   const [selected, setSelected] = useState<ModelRowDto | null>(null);
   const [opened, setOpened] = useState(false);
+  // The list goes back to its first page whenever what it holds or its order changes.
+  const paging = usePaging(JSON.stringify([filter, sort, accountId]), TABLE_PAGE_SIZES[0]);
 
-  if (models.isPending) return <Text c="dimmed">Loading models…</Text>;
-  if (models.data === undefined)
-    return <Text c="red">Models could not be loaded. Check that the daemon is running.</Text>;
-
-  const live = (accounts.data ?? []).filter((a) => !a.archived);
-  const labels = new Map((accounts.data ?? []).map((a) => [a.id, a.label]));
-  const earliest = earliestFirstSeen(models.data);
-  const rows = sortModels(filterModels(models.data, { tier, accountId }), sort);
-  const onSort = (column: ModelColumn) => {
-    setSort((current) =>
-      current.column === column
-        ? {
-            column,
-            direction:
-              current.direction === SortDirection.Ascending
-                ? SortDirection.Descending
-                : SortDirection.Ascending,
-          }
-        : { column, direction: SortDirection.Ascending },
-    );
-  };
-
-  return (
-    <Stack>
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Text size="xs" c="dimmed">
-          {status.data !== undefined
-            ? catalogueLine(status.data, now)
-            : status.isError
-              ? 'The catalogue status could not be read.'
-              : 'Reading the catalogue…'}
-        </Text>
+  const header = (
+    <Stack gap={4}>
+      <Group justify="space-between" align="center" wrap="nowrap">
+        <Title order={3}>Models</Title>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
             <Text size="xs" c="red" role="alert">
               {refresh.error.message}
             </Text>
           ) : null}
+          <Select
+            aria-label="Account"
+            size="xs"
+            w={240}
+            leftSection={
+              <Text size="xs" c="dimmed">
+                Account
+              </Text>
+            }
+            leftSectionWidth={72}
+            leftSectionPointerEvents="none"
+            allowDeselect={false}
+            data={live.map((a) => ({ value: a.id, label: a.label }))}
+            value={accountId}
+            placeholder={accounts.isPending ? 'Reading accounts…' : 'No account'}
+            disabled={live.length === 0}
+            onChange={(value) => {
+              const next = live.find((a) => a.id === value);
+              if (next) setChosen(next.id);
+            }}
+          />
+          <Tooltip
+            label="Fetch prices from models.dev and re-read every account's model list"
+            position="left"
+          >
+            <ActionIcon
+              variant="default"
+              size="input-xs"
+              aria-label="Refresh Models"
+              loading={refresh.isPending}
+              onClick={() => {
+                refresh.mutate();
+              }}
+            >
+              <IconRefresh size={16} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Group>
+      <Text size="xs" c="dimmed">
+        {status.data !== undefined
+          ? catalogueLine(status.data, now)
+          : status.isError
+            ? 'The catalogue status could not be read.'
+            : 'Reading the catalogue…'}{' '}
+        <ArtificialAnalysisCredit />
+      </Text>
+      <ArtificialAnalysisStatusLine />
+    </Stack>
+  );
+
+  if (accounts.isPending)
+    return (
+      <Stack>
+        {header}
+        <Text c="dimmed">Reading accounts…</Text>
+      </Stack>
+    );
+  // A failed background read keeps the accounts already shown, as during a daemon restart.
+  if (accounts.isError && accounts.data === undefined)
+    return (
+      <Stack>
+        {header}
+        <Group gap="sm">
+          <Text c="red" role="alert">
+            {accounts.error.message}
+          </Text>
           <Button
             variant="default"
             size="xs"
-            leftSection={<IconRefresh size={16} stroke={1.5} />}
-            loading={refresh.isPending}
             onClick={() => {
-              refresh.mutate();
+              void accounts.refetch();
             }}
           >
-            Refresh Models
+            Try Again
           </Button>
         </Group>
-      </Group>
-      <Group gap="md">
-        <SegmentedControl
-          aria-label="Tier"
-          value={tier ?? ALL}
-          data={TIER_CHOICES}
-          onChange={(value) => {
-            setTier(isTier(value) ? value : null);
-          }}
-        />
-        <Select
-          aria-label="Account"
-          w={240}
-          allowDeselect={false}
-          value={accountId ?? ALL_ACCOUNTS}
-          data={[
-            { value: ALL_ACCOUNTS, label: 'All accounts' },
-            ...live.map((a) => ({ value: a.id, label: a.label })),
-          ]}
-          onChange={(value) => {
-            const parsed = AccountId.safeParse(value);
-            setAccountId(parsed.success ? parsed.data : null);
-          }}
-        />
-      </Group>
-      {models.data.length === 0 ? (
+      </Stack>
+    );
+  if (account === null)
+    return (
+      <Stack>
+        {header}
         <Text c="dimmed">
-          No models yet. They appear once an account has been read; Refresh Models reads every
-          account now.
+          <Anchor
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Accounts }}
+              />
+            )}
+          >
+            Add an account
+          </Anchor>{' '}
+          to see what each role gets.
+        </Text>
+      </Stack>
+    );
+  if (models.isError)
+    return (
+      <Stack>
+        {header}
+        <Group gap="sm">
+          <Text c="red" role="alert">
+            {models.error.message}
+          </Text>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              void models.refetch();
+            }}
+          >
+            Try Again
+          </Button>
+        </Group>
+      </Stack>
+    );
+  if (models.data === undefined)
+    return (
+      <Stack>
+        {header}
+        <Text c="dimmed">Loading models…</Text>
+      </Stack>
+    );
+
+  const everyModel = models.data;
+  // Rows of another account stay up while this one loads; no ring is drawn on a price that is not this account's.
+  const settling = models.isPlaceholderData;
+  const accountRows = filterModels(everyModel, { ...NO_FILTER, accountId });
+  const families = groupByFamily(
+    sortModels(filterModels(everyModel, { ...filter, accountId }), sort),
+  );
+  // A refresh can shrink the list under the page; the page shown is never past the last one.
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
+  const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
+  const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
+  const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role, dots });
+  const names = new Map(everyModel.map((r) => [r.model, r.name]));
+  const usedBy = new Map<string, string[]>();
+  for (const pick of drawnPicks)
+    if (pick.model !== null)
+      usedBy.set(pick.model, [...(usedBy.get(pick.model) ?? []), roleLabel(pick.role)]);
+  const note = costNote(account, offers.data ?? []);
+  return (
+    <Stack gap="lg">
+      {header}
+      {picks.isError ? (
+        <Group gap="sm">
+          <Text size="sm" c="red" role="alert">
+            {picks.error.message}
+          </Text>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              void picks.refetch();
+            }}
+          >
+            Try Again
+          </Button>
+        </Group>
+      ) : picks.data === undefined || settling ? (
+        <Text size="sm" c="dimmed">
+          Reading what each role gets…
         </Text>
       ) : (
-        <Table aria-label="Models" verticalSpacing="sm" tabularNums>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th colSpan={3} />
-              <Table.Th colSpan={3} ta="right">
-                <ArtificialAnalysisCredit />
-              </Table.Th>
-              <Table.Th colSpan={2} ta="right">
-                <Text size="xs" c="dimmed" fw={400}>
-                  Price per 1M tokens
-                </Text>
-              </Table.Th>
-              <Table.Th />
-            </Table.Tr>
-            <Table.Tr>
-              {COLUMNS.map((spec) => (
-                <SortableHeader key={spec.column} spec={spec} sort={sort} onSort={onSort} />
-              ))}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((row) => (
-              <ModelTableRow
-                key={row.model}
-                row={row}
-                accountLabels={labels}
-                now={now}
-                earliest={earliest}
-                onOpen={(r) => {
-                  setSelected(r);
-                  setOpened(true);
-                }}
-              />
-            ))}
-          </Table.Tbody>
-        </Table>
+        <RolePicksPanel
+          picks={picks.data.picks}
+          names={names}
+          notOnChart={result.notOnChart}
+          selected={role}
+          onSelect={setRole}
+        />
       )}
-      {models.data.length > 0 && rows.length === 0 ? (
-        <Text c="dimmed">No model matches these filters.</Text>
-      ) : null}
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Title order={4} size="md" fw={600}>
+            Intelligence and cost
+          </Title>
+          <SegmentedControl
+            size="xs"
+            aria-label="Dots"
+            data={[...DOTS_LABELS]}
+            value={dots}
+            onChange={(value) => {
+              if (isDotsMode(value)) setDots(value);
+            }}
+          />
+        </Group>
+        <RaisedPanel>
+          <RightsizingChart
+            result={result}
+            costLabel={`Cost per task (USD, log scale). ${note}`}
+            height={300}
+          />
+        </RaisedPanel>
+        <Text size="xs" c="dimmed">
+          Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account.
+          {result.omitted > 0
+            ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
+            : ''}
+        </Text>
+      </Stack>
+      <Stack gap="xs">
+        <Title order={4} size="md" fw={600}>
+          All models
+        </Title>
+        {everyModel.length === 0 ? (
+          <Text c="dimmed">
+            No models yet. They appear once an account has been read; the refresh button reads every
+            account now.
+          </Text>
+        ) : (
+          <ModelsTable
+            families={shownFamilies}
+            paging={{ ...paging, page, total: families.length }}
+            filter={filter}
+            onFilter={setFilter}
+            sort={sort}
+            onSort={setSort}
+            now={now}
+            earliest={earliestFirstSeen(everyModel)}
+            usedBy={usedBy}
+            costNote={note}
+            onOpen={(r) => {
+              setSelected(r);
+              setOpened(true);
+            }}
+          />
+        )}
+      </Stack>
       <ModelDrawer
         row={selected}
         opened={opened}
         now={now}
+        picks={drawnPicks}
         onClose={() => {
           setOpened(false);
         }}

@@ -24,7 +24,7 @@ export type ModelSettingSelectProps = Common &
 
 /** One dropdown for the setting used everywhere a model is chosen: Automatic, a tier, Top of tier or a model. */
 export function ModelSettingSelect(props: ModelSettingSelectProps) {
-  const models = useModels();
+  const models = useModels(null);
   const { groups, settings } = settingChoices({
     models: models.data ?? null,
     accountIds: props.accountIds,

@@ -1,6 +1,9 @@
 import {
   allowedCommandProblem,
+  APP_URL_IS_DAEMON,
+  isDaemonAddress,
   AllowedCommands,
+  AppUrl,
   BranchName,
   Delivery,
   NAME_LANDING_BRANCH,
@@ -8,8 +11,10 @@ import {
   PrTitlePrefix,
   ProjectLanding,
   ProjectPatch,
+  ScreensMatrix,
   WorkspaceMode,
   type FlowId,
+  type ScreenTheme,
   type ProjectDto,
 } from '@10db/contracts';
 
@@ -71,12 +76,32 @@ export interface GeneralValues {
   /** One command prefix per line; blank lines are ignored. */
   readonly allowedCommands: string;
   readonly sandboxLoopback: boolean;
+  readonly prPictures: boolean;
   readonly sandboxDocker: boolean;
   readonly workspaceMode: WorkspaceMode;
   /** Directory names; blanks are dropped on save. */
   readonly worktreeSeed: readonly string[];
   /** Area and hazard names whose new tasks are proposed a separate copy; blanks are dropped on save. */
   readonly isolate: readonly string[];
+  /** Where the dev server answers; '' means none. */
+  readonly appUrl: string;
+  /** Prints the address that signs the browser for pictures in; '' means none. */
+  readonly devLoginCommand: string;
+  /** Serves the app while a pass is open; '' means none. */
+  readonly previewCommand: string;
+  /** The viewports, an emptied number being '', and the themes each page's pictures are taken in. */
+  readonly screens: ScreensValues;
+}
+
+/** A viewport as the form holds it; an emptied number field is ''. */
+export interface ViewportValues {
+  readonly width: number | '';
+  readonly height: number | '';
+}
+
+export interface ScreensValues {
+  readonly viewports: readonly ViewportValues[];
+  readonly themes: readonly ScreenTheme[];
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -103,11 +128,37 @@ export function generalValues(project: ProjectDto): GeneralValues {
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
+    prPictures: project.prPictures,
     sandboxDocker: project.sandboxDocker,
     workspaceMode: project.workspaceMode,
     worktreeSeed: project.worktreeSeed,
     isolate: project.isolate,
+    appUrl: project.appUrl ?? '',
+    devLoginCommand: project.devLoginCommand ?? '',
+    previewCommand: project.previewCommand ?? '',
+    screens: project.screens,
   };
+}
+
+/** The matrix the form holds, or the first rule it breaks, in the contract's words where it has them. */
+function checkScreens(values: ScreensValues): { matrix: ScreensMatrix } | { error: string } {
+  if (values.viewports.some((v) => v.width === '' || v.height === ''))
+    return { error: "Enter each viewport's width and height" };
+  if (values.themes.length === 0) return { error: 'Choose at least one theme' };
+  const parsed = ScreensMatrix.safeParse(values);
+  if (parsed.success) return { matrix: parsed.data };
+  const issue = parsed.error.issues[0];
+  // A size out of range is a number's message; the matrix's own rules carry words of their own.
+  return {
+    error:
+      issue?.path.includes('width') === true || issue?.path.includes('height') === true
+        ? 'A viewport is 320 to 3840 wide and 320 to 2400 high'
+        : (issue?.message ?? 'Check the screenshot matrix'),
+  };
+}
+
+function sameMatrix(a: ScreensMatrix, b: ScreensMatrix): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**
@@ -132,8 +183,15 @@ function parseAllowedCommands(text: string): { commands: string[]; error: string
   };
 }
 
-/** Client-side checks with the daemon's rules, and the patch of what differs from the project. */
-export function checkGeneral(project: ProjectDto, values: GeneralValues): GeneralCheck {
+/**
+ * Client-side checks with the daemon's rules, and the patch of what differs from the project.
+ * `daemonPort` is the port the window talks to the daemon on, which no app address may name.
+ */
+export function checkGeneral(
+  project: ProjectDto,
+  values: GeneralValues,
+  daemonPort: number | null = null,
+): GeneralCheck {
   const errors: GeneralErrors = {};
   const name = values.name.trim();
   const gateCommand = values.gateCommand.trim();
@@ -167,6 +225,18 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const seed = checkedSeed.names;
   const checkedIsolate = checkIsolateNames(values.isolate);
   if (checkedIsolate.error !== null) errors.isolate = checkedIsolate.error;
+  const appUrlText = values.appUrl.trim();
+  const appUrl = appUrlText === '' ? null : AppUrl.safeParse(appUrlText);
+  if (appUrl !== null && !appUrl.success)
+    errors.appUrl = appUrl.error.issues[0]?.message ?? 'Enter an address on this Mac';
+  else if (
+    appUrl?.success === true &&
+    daemonPort !== null &&
+    isDaemonAddress(appUrl.data, daemonPort)
+  )
+    errors.appUrl = APP_URL_IS_DAEMON;
+  const screens = checkScreens(values.screens);
+  if ('error' in screens) errors.screens = screens.error;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -202,10 +272,21 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     patch.allowedCommands = allowed.commands;
   if (values.sandboxLoopback !== project.sandboxLoopback)
     patch.sandboxLoopback = values.sandboxLoopback;
+  if (values.prPictures !== project.prPictures) patch.prPictures = values.prPictures;
   if (values.sandboxDocker !== project.sandboxDocker) patch.sandboxDocker = values.sandboxDocker;
   if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
   if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
   if (!sameCommands(checkedIsolate.names, project.isolate)) patch.isolate = checkedIsolate.names;
+  const address = appUrl?.success ? appUrl.data : null;
+  if (address !== project.appUrl) patch.appUrl = address;
+  const devLogin = values.devLoginCommand.trim();
+  const devLoginCommand = devLogin === '' ? null : devLogin;
+  if (devLoginCommand !== project.devLoginCommand) patch.devLoginCommand = devLoginCommand;
+  const preview = values.previewCommand.trim();
+  const previewCommand = preview === '' ? null : preview;
+  if (previewCommand !== project.previewCommand) patch.previewCommand = previewCommand;
+  if ('matrix' in screens && !sameMatrix(screens.matrix, project.screens))
+    patch.screens = screens.matrix;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 

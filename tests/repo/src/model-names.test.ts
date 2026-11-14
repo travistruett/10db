@@ -32,6 +32,12 @@ const ALLOWED: readonly Allowed[] = [
     reason:
       'the aliases Claude Code’s own Agent tool takes: they are its vocabulary, not a model 10db chose',
   },
+  {
+    file: 'apps/daemon/src/trust/auto-mode-models.ts',
+    names: ['opus', 'fable', 'sonnet', 'haiku'],
+    reason:
+      'the model families and aliases Claude Code’s auto mode is available on: its vocabulary, read from an ID, not a model 10db chose',
+  },
 ];
 
 function namesIn(file: string): Set<string> {
@@ -42,8 +48,14 @@ function namesIn(file: string): Set<string> {
   );
 }
 
+/** Codex's protocol as its pinned release generates it: its own text, which 10db never edits. */
+const GENERATED_CODE = 'apps/daemon/src/sessions/codex-generated/';
+
 const sources = globSync(SOURCE, { cwd: repoRoot })
-  .filter((file) => !TEST_CODE.test(file) && !file.includes('node_modules'))
+  .filter(
+    (file) =>
+      !TEST_CODE.test(file) && !file.startsWith(GENERATED_CODE) && !file.includes('node_modules'),
+  )
   .sort();
 
 describe('model names in source', () => {

@@ -39,6 +39,7 @@ export default defineConfig({
         TENDB_PARENT_STDIN: '',
         TENDB_SQLITE_BINDING: '',
         TENDB_CLAUDE_PATH: '',
+        TENDB_LIVE_BROWSER: '',
         TENDB_LIVE_CLAUDE: '',
         TENDB_LIVE_CODEX: '',
         // Each gate starts a daemon with a fresh data dir; it must not spend the shared AA quota.
@@ -49,6 +50,8 @@ export default defineConfig({
         TENDB_CATALOGUE_SNAPSHOT: resolve(DESKTOP_DIR, '../daemon/test/fixtures/catalogue.json'),
         // No decision may call OpenRouter from a throwaway daemon.
         TENDB_JUDGE: 'off',
+        // No question may reach a real person from a throwaway daemon.
+        TENDB_SLACK: 'off',
         TENDB_DATA_DIR: E2E_DATA,
         TENDB_PORT: String(ports.daemon),
         TENDB_FAKE_SCRIPTS: book,

@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `pr_pictures` integer DEFAULT false NOT NULL;

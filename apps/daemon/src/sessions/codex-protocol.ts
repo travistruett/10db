@@ -18,6 +18,7 @@ const Account = z.discriminatedUnion('type', [
   }),
   z.looseObject({ type: z.literal('apiKey') }),
   z.looseObject({ type: z.literal('amazonBedrock') }),
+  z.looseObject({ type: z.literal('gcp') }),
 ]);
 
 export const AccountReadResponse = z.looseObject({
@@ -94,6 +95,9 @@ export const HooksListResponse = z.looseObject({
   ),
 });
 
+/** `skills/extraRoots/set` answers an empty object (0.167.0's `SkillsExtraRootsSetResponse`). */
+export const SkillsExtraRootsResponse = z.looseObject({});
+
 export const ThreadResponse = z.looseObject({
   thread: z.looseObject({ id: z.string() }),
   model: z.string(),
@@ -122,6 +126,12 @@ export const TurnStartResponse = z.looseObject({ turn: Turn });
 
 export const TurnCompleted = z.looseObject({ threadId: z.string(), turn: Turn });
 
+/** `review/start` answers the turn the review runs in. */
+export const ReviewStarted = z.looseObject({ turn: Turn });
+
+/** `thread/compact/start` answers an empty object. */
+export const CompactStarted = z.looseObject({});
+
 const TokenBreakdown = z.looseObject({
   totalTokens: z.number(),
   inputTokens: z.number().optional(),
@@ -139,10 +149,94 @@ export const TokenUsageUpdated = z.looseObject({
   }),
 });
 
+const Item = z.looseObject({ type: z.string(), id: z.string().optional() });
+
 export const ItemCompleted = z.looseObject({
   threadId: z.string(),
   turnId: z.string(),
-  item: z.looseObject({ type: z.string(), id: z.string().optional() }),
+  item: Item,
+  completedAtMs: z.number().optional(),
+});
+
+export const ItemStarted = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  item: Item,
+  startedAtMs: z.number(),
+});
+
+/** A piece of the agent message an item is writing. */
+export const AgentMessageDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+});
+
+/** A piece of a reasoning summary; each summary part has its own index. */
+export const ReasoningSummaryDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+  summaryIndex: z.number(),
+});
+
+/** A piece of a running command's output. */
+export const CommandOutputDelta = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  delta: z.string(),
+});
+
+/** The turn's plan, whole each time; a status is a string, so a new one still parses. */
+export const TurnPlanUpdated = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  plan: z.array(z.looseObject({ step: z.string(), status: z.string() })),
 });
 
 export const TurnStarted = z.looseObject({ threadId: z.string(), turn: Turn });
+
+/**
+ * The thread items the model writes as it answers: one of these after a user message in a turn shows
+ * the model took the message in. A user message, a hook's prompt, a compaction and the review-mode
+ * markers are written without the model.
+ */
+export const MODEL_ITEMS: ReadonlySet<string> = new Set([
+  'agentMessage',
+  'reasoning',
+  'plan',
+  'commandExecution',
+  'fileChange',
+  'mcpToolCall',
+  'dynamicToolCall',
+  'collabAgentToolCall',
+  'functionCallOutput',
+  'webSearch',
+  'imageView',
+  'imageGeneration',
+  'subAgentActivity',
+  'sleep',
+]);
+
+/**
+ * One page of a thread's turns (`thread/turns/list` with `itemsView: "full"`), as far as 10db reads
+ * it: each turn's status and its items in order, a user message item with the client uuid
+ * `clientUserMessageId` set when it was sent.
+ */
+export const ThreadTurnsPage = z.looseObject({
+  data: z.array(
+    z.looseObject({
+      // Read as text: a status this Codex does not name counts as a turn that did not complete.
+      status: z.string(),
+      /** Unix seconds; absent or null for a turn that has not ended. */
+      completedAt: z.number().nullable().optional(),
+      items: z.array(
+        z.looseObject({ type: z.string(), clientId: z.string().nullable().optional() }),
+      ),
+    }),
+  ),
+  nextCursor: z.string().nullable().optional(),
+});

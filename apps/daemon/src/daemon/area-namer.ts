@@ -1,18 +1,18 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import { agentKind, isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
 import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
 import { chooseModel } from '../routing';
-import { CompletionError, type SessionAdapter } from '../sessions';
+import { CompletionError, type AgentAdapter } from '../sessions';
 import { routingInputs } from '../team';
 
 /** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
-const NAMING_MODEL = ModelTier.Fast;
+const NAMING_MODEL = ModelTier.Efficient;
 
 export interface AreaNamerDeps {
-  readonly adapter: Pick<SessionAdapter, 'complete'>;
+  readonly adapter: Pick<AgentAdapter, 'complete'>;
   readonly launcher: Pick<Launcher, 'session'>;
   readonly db: DbReader;
   /** Where each question gets its own empty folder to start in. */
@@ -31,7 +31,7 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
     const account = getAccountRow(deps.db, id);
     // The tier's model on this account, by the tier's default and never by score, so naming is never refused.
     const choice = chooseModel({
-      ...routingInputs(deps.db, { accountId: id, provider: providerOf(account.kind) }),
+      ...routingInputs(deps.db, { accountId: id, provider: providerOf(agentKind(account.kind)) }),
       def: { role: StepRole.Plan, need: 0 },
       persona: undefined,
       task: {

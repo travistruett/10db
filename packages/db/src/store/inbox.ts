@@ -4,24 +4,28 @@ import {
   mintId,
   NotFoundError,
   PARK_TASK_CHOICE,
-  type InboxAnswer,
+  type RecordedAnswer,
   type InboxItemDto,
   type InboxItemId,
   type InboxKind,
   type InboxOption,
   type InboxTarget,
+  type PersonId,
   type ProjectId,
   type ProposalId,
   type QuestionCategory,
   type TaskId,
   type Urgency,
   type WorkstreamId,
+  RoutedBy,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
-import { assigneeFor } from './routing-rules';
+import { assigneesFor } from './routing-rules';
+import { sendForCard } from './stakeholder-sends';
 import type { DbReader, WriteContext } from './store';
+import { BUILDER_HANDLE, findPersonByHandle } from './team';
 
 export interface NewInboxItem {
   readonly projectId: ProjectId;
@@ -35,12 +39,36 @@ export interface NewInboxItem {
   readonly detail: Record<string, Json> | null;
   readonly foldKey: string | null;
   readonly targets: readonly InboxTarget[];
+  /** The topic the lane named, which a project's topic routes can match. */
+  readonly topic?: string | null;
+  /** The card is a Workbench pass page's question, which the builder answers. */
+  readonly passPage?: boolean;
+  /**
+   * Leave a triage-tier card with the builder until the judge routes it: the rules' recipients are kept
+   * for folding, and `routedBy` is `triage_pending`.
+   */
+  readonly pendingTriage?: boolean;
 }
+
+/** The detail key marking a card whose message could not be composed; any recipients set by hand clear it. */
+export const DRAFT_FAILED_KEY = 'draftFailed';
+/** The detail key naming who an open question was meant for when they are not on Slack. */
+export const COPY_FOR_KEY = 'copyFor';
+/** The detail key holding why a tie went to the builder. */
+export const ROUTE_NOTE_KEY = 'routeNote';
+/** The detail key holding the topic the lane named. */
+export const ASKED_TOPIC_KEY = 'askedTopic';
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
 
-/** Every column except `foldKey`, which stays internal to folding. */
-function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
+function copyForOf(row: typeof schema.inboxItems.$inferSelect): string[] {
+  const named = row.detail?.[COPY_FOR_KEY];
+  if (row.state !== InboxState.Open || !Array.isArray(named)) return [];
+  return named.filter((h): h is string => typeof h === 'string');
+}
+
+/** Every column except `foldKey` and `ruleAssignees`, which stay internal to routing and folding. */
+function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -53,6 +81,11 @@ function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
     category: row.category,
     urgency: row.urgency,
     assignee: row.assignee,
+    assignees: row.assignees.length > 0 ? row.assignees : [row.assignee],
+    routedBy: row.routedBy,
+    routeSuggestion: row.routeSuggestion,
+    copyFor: copyForOf(row),
+    send: sendForCard(db, row.id),
     detail: row.detail,
     answer: row.answer,
     targets: row.targets,
@@ -61,29 +94,62 @@ function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
   };
 }
 
-/** The areas the targeted workstreams' tasks claim, so a routing rule can narrow by area. */
-function targetAreas(db: DbReader, targets: readonly InboxTarget[]): string[] {
-  const areas = new Set<string>();
+/** The tasks the targeted workstreams run, so a routing rule can match by task, goal and area. */
+export function targetTaskIds(db: DbReader, targets: readonly InboxTarget[]): TaskId[] {
+  const ids = new Set<TaskId>();
   for (const target of targets) {
     const row = db
-      .select({ areas: schema.tasks.areas })
+      .select({ taskId: schema.workstreams.taskId })
       .from(schema.workstreams)
-      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
       .where(eq(schema.workstreams.id, target.workstreamId))
       .get();
-    for (const area of row?.areas ?? []) areas.add(area);
+    if (row) ids.add(row.taskId);
   }
-  return [...areas];
+  return [...ids];
 }
 
-export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxItemDto {
+/** The lane's topic and a too-big tie's note ride in the card's detail, where triage and the card read them. */
+function withRouting(
+  detail: Record<string, Json> | null,
+  note: string | null,
+  topic: string | null,
+): Record<string, Json> | null {
+  if (note === null && topic === null) return detail;
+  return {
+    ...detail,
+    ...(note === null ? {} : { [ROUTE_NOTE_KEY]: note }),
+    ...(topic === null ? {} : { [ASKED_TOPIC_KEY]: topic }),
+  };
+}
+
+export function insertInboxItem(ctx: WriteContext, newItem: NewInboxItem): InboxItemDto {
+  const { topic, passPage, pendingTriage, ...item } = newItem;
+  const routed = assigneesFor(ctx.tx, {
+    projectId: item.projectId,
+    kind: item.kind,
+    category: item.category,
+    topic: topic ?? null,
+    taskIds: targetTaskIds(ctx.tx, item.targets),
+    passPage: passPage ?? false,
+  });
+  const pending = pendingTriage === true && routed.tier === 'triage';
+  const shown = pending ? [BUILDER_HANDLE] : routed.handles;
+  const recipients = {
+    assignee: shown[0] ?? BUILDER_HANDLE,
+    assignees: shown,
+    ruleAssignees: routed.handles,
+    routedBy: pending ? RoutedBy.TriagePending : RoutedBy.Rule,
+    routeSuggestion: null,
+  };
   const row = {
     id: mintId('InboxItem'),
     ...item,
+    // A tie too big for a group DM is explained on the card.
+    detail: withRouting(item.detail, routed.note, topic ?? null),
     options: [...item.options],
     targets: [...item.targets],
     state: InboxState.Open,
-    assignee: assigneeFor(ctx.tx, item.projectId, item.category, targetAreas(ctx.tx, item.targets)),
+    ...recipients,
     answer: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -95,13 +161,13 @@ export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxIte
     entityId: row.id,
     data: { kind: item.kind, projectId: item.projectId },
   });
-  return toDto(row);
+  return toDto(ctx.tx, row);
 }
 
 export function getInboxItem(db: DbReader, id: InboxItemId): InboxItemDto {
   const row = db.select().from(schema.inboxItems).where(eq(schema.inboxItems.id, id)).get();
   if (!row) throw new NotFoundError('inbox item', id);
-  return toDto(row);
+  return toDto(db, row);
 }
 
 const URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
@@ -130,7 +196,18 @@ export function listInbox(
           .orderBy(desc(schema.inboxItems.updatedAt), desc(schema.inboxItems.id))
           .limit(filter.recent)
           .all();
-  return rows.map(toDto);
+  return rows.map((row) => toDto(db, row));
+}
+
+/** Every card still marked as waiting for triage, in any state: the start sweep settles them. */
+export function listPendingTriage(db: DbReader): InboxItemDto[] {
+  return db
+    .select()
+    .from(schema.inboxItems)
+    .where(eq(schema.inboxItems.routedBy, RoutedBy.TriagePending))
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all()
+    .map((row) => toDto(db, row));
 }
 
 export function findOpenByFoldKey(
@@ -149,7 +226,7 @@ export function findOpenByFoldKey(
       ),
     )
     .get();
-  return row ? toDto(row) : undefined;
+  return row ? toDto(db, row) : undefined;
 }
 
 /** The open card that asks the builder about a proposal, if it is still open. */
@@ -168,7 +245,7 @@ export function findOpenProposalCard(
       ),
     )
     .get();
-  return row ? toDto(row) : undefined;
+  return row ? toDto(db, row) : undefined;
 }
 
 /** The states of a card the builder answered, whether or not the answer has been delivered. */
@@ -204,7 +281,8 @@ export function updateInboxItem(
     readonly state?: InboxState;
     readonly title?: string;
     readonly body?: string;
-    readonly answer?: InboxAnswer;
+    /** Null clears the answer, as an item opened again has none. */
+    readonly answer?: RecordedAnswer | null;
     readonly targets?: readonly InboxTarget[];
     readonly options?: readonly InboxOption[];
     /** Null clears the detail. */
@@ -235,6 +313,67 @@ export function updateInboxItem(
   return item;
 }
 
+/**
+ * Sets who a card is routed to, in routing order, and by whom. `assignee` is the first handle, or the
+ * builder when the list is empty. Leaving `triage_pending` is announced as `inbox.triaged`.
+ */
+export function setInboxRecipients(
+  ctx: WriteContext,
+  id: InboxItemId,
+  input: {
+    readonly assignees: readonly string[];
+    readonly routedBy: RoutedBy;
+    readonly suggestion: {
+      readonly personIds: readonly PersonId[];
+      readonly confidence: number;
+    } | null;
+  },
+): InboxItemDto {
+  const before = getInboxItem(ctx.tx, id);
+  const assignees = input.assignees.length > 0 ? [...input.assignees] : [BUILDER_HANDLE];
+  // Whoever sets the recipients decides; a stale mark from a failed draft must not override them.
+  const marked = before.detail?.[DRAFT_FAILED_KEY] !== undefined;
+  const detail = marked
+    ? Object.fromEntries(
+        Object.entries(before.detail ?? {}).filter(([k]) => k !== DRAFT_FAILED_KEY),
+      )
+    : undefined;
+  ctx.tx
+    .update(schema.inboxItems)
+    .set({
+      ...(detail === undefined ? {} : { detail: Object.keys(detail).length > 0 ? detail : null }),
+      assignees,
+      assignee: assignees[0] ?? BUILDER_HANDLE,
+      routedBy: input.routedBy,
+      routeSuggestion: input.suggestion && {
+        personIds: [...input.suggestion.personIds],
+        confidence: input.suggestion.confidence,
+      },
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.inboxItems.id, id))
+    .run();
+  const item = getInboxItem(ctx.tx, id);
+  ctx.emit({
+    type: EventType.InboxChanged,
+    entityType: 'inbox',
+    entityId: id,
+    data: { state: item.state },
+  });
+  if (before.routedBy === RoutedBy.TriagePending && input.routedBy !== RoutedBy.TriagePending) {
+    ctx.emit({
+      type: EventType.InboxTriaged,
+      entityType: 'inbox',
+      entityId: id,
+      data: {
+        routedBy: input.routedBy,
+        toBuilder: item.assignees.length === 1 && item.assignees[0] === BUILDER_HANDLE,
+      },
+    });
+  }
+  return item;
+}
+
 export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId): InboxItemDto[] {
   return db
     .select()
@@ -247,7 +386,7 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     )
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
-    .map(toDto);
+    .map((row) => toDto(db, row));
 }
 
 /** A card the builder answered, as a reviewer of its task is shown it. */
@@ -257,6 +396,9 @@ export interface AnsweredCard {
   readonly question: string;
   readonly choice: string;
   readonly note: string | null;
+  /** Who answered, when it was a stakeholder in Slack: their name. */
+  readonly answeredBy: string | null;
+  readonly via: 'inbox' | 'slack';
 }
 
 /**
@@ -288,6 +430,11 @@ export function answeredCardsForTask(db: DbReader, taskId: TaskId): AnsweredCard
               question: row.title,
               choice: row.answer.choice,
               note: row.answer.note ?? null,
+              answeredBy:
+                row.answer.answeredBy === undefined
+                  ? null
+                  : (findPersonByHandle(db, row.answer.answeredBy)?.name ?? row.answer.answeredBy),
+              via: row.answer.via ?? 'inbox',
             },
           ]
         : [],

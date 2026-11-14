@@ -51,13 +51,23 @@ const DaemonEnv = z.object({
   // The file the model catalogue is read from when none is stored, instead of the one the release bundles.
   // A throwaway daemon that fetches nothing points it at a catalogue file so it still has model profiles.
   TENDB_CATALOGUE_SNAPSHOT: z.string().startsWith('/').optional(),
-  // `off` keeps the daemon from reading the OpenRouter key and from calling OpenRouter: every decision
+  // `off` keeps the daemon from reading an OpenRouter account's key and from calling OpenRouter: every decision
   // keeps today's rule. Set for every daemon that is not the installed app, as TENDB_BENCHMARKS is.
   TENDB_JUDGE: z.enum(['on', 'off']).optional(),
+  // `off` keeps the daemon from reading the Slack bot token and from calling Slack: no question is sent
+  // and no reply is read. Set for every daemon that is not the installed app, as TENDB_JUDGE is, so a
+  // throwaway daemon never messages a real person.
+  TENDB_SLACK: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
+  // Test only: with TENDB_LIVE_CLAUDE, runs auto-mode.live.test.ts's Bedrock rows too.
+  TENDB_LIVE_BEDROCK: z.enum(['0', '1']).optional(),
+  // Test only: a file auto-mode.live.test.ts appends each row's observations to.
+  TENDB_LIVE_REPORT: z.string().min(1).optional(),
   // Test only: runs codex.live.test.ts against the real codex on a local fake model, signed in to nothing.
   TENDB_LIVE_CODEX: z.enum(['0', '1']).optional(),
+  // Test only: runs browser.live.test.ts on the pinned Chromium, against loopback servers of its own.
+  TENDB_LIVE_BROWSER: z.enum(['0', '1']).optional(),
 });
 export type DaemonEnv = z.infer<typeof DaemonEnv>;
 

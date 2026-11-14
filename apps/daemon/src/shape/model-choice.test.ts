@@ -10,9 +10,9 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 const MODELS = {
   default: 'claude-opus-5-5',
   offered: [
-    { model: 'claude-haiku-5-5', tier: 'fast' as const },
+    { model: 'claude-haiku-5-5', tier: 'efficient' as const },
     { model: 'claude-sonnet-5-5', tier: 'balanced' as const },
-    { model: 'claude-opus-5-5', tier: 'strongest' as const },
+    { model: 'claude-opus-5-5', tier: 'capable' as const },
     { model: 'house-model', tier: null },
   ],
 };
@@ -74,7 +74,7 @@ describe('a conversation’s model', () => {
           input: { subagent_type: 'code-researcher', prompt: 'x', model },
         }).decision;
       expect([agent('sonnet'), agent('opus'), agent('gpt-5.6-sol')]).toEqual([sonnet, opus, gpt]);
-      expect(spec.systemPrompt).toContain(
+      expect(spec.profile.systemPrompt).toContain(
         kind === AccountKind.Bedrock ? "session's model" : '"opus"',
       );
     },
@@ -84,7 +84,7 @@ describe('a conversation’s model', () => {
     f = createServiceFixture({
       models: () => ({
         default: 'claude-opus-5-5',
-        offered: [{ model: 'claude-opus-5-5', tier: 'strongest' }],
+        offered: [{ model: 'claude-opus-5-5', tier: 'capable' }],
       }),
     });
     const shapeId = f.c.shape.id;

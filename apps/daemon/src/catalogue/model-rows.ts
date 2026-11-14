@@ -1,13 +1,17 @@
 import {
   providerOf,
+  Effort,
+  runsAgents,
   ModelStatus,
   type AccountDto,
   type AccountId,
   type AccountModelDto,
+  type ModelEffortDto,
   type ModelProfileDto,
   type ModelRowDto,
   type Provider,
 } from '@10db/contracts';
+import { costOnAccount, offeredProfiles } from '../routing';
 import { joinModel, RUNTIME_MAKER, runnability } from './join';
 import type { Catalogue, CatalogueModel } from './source';
 
@@ -20,24 +24,48 @@ export interface ModelRowsInput {
   readonly accounts: readonly ModelRowAccount[];
   /** The catalogue in use; null when this daemon has none. */
   readonly catalogue: Catalogue | null;
+  /**
+   * The account the costs are for. A model it offers lists only the efforts it offers, priced on it; any other
+   * model keeps every effort at the maker's cost. Without one, costs are the maker's.
+   */
+  readonly account?: ModelRowAccount;
 }
 
-/** The profile that stands for a model's scores: its strongest effort by Intelligence, then Coding. */
-function strongestScored(profiles: readonly ModelProfileDto[]): ModelProfileDto | null {
-  let best: ModelProfileDto | null = null;
-  for (const p of profiles) {
-    const { intelligence, coding } = p.scores;
-    if (intelligence === null && coding === null) continue;
-    if (best === null) {
-      best = p;
-      continue;
+const EFFORT_ORDER: readonly Effort[] = Object.values(Effort);
+const effortLevel = (effort: Effort): number => EFFORT_ORDER.indexOf(effort);
+
+/**
+ * A model's efforts, strongest Intelligence first. Equal scores go to the cheaper effort, then the higher one;
+ * unscored efforts come last, highest effort first.
+ */
+function listEfforts(
+  profiles: readonly ModelProfileDto[],
+  accountModels: readonly AccountModelDto[] | undefined,
+): ModelEffortDto[] {
+  const withCost = profiles.map((p) => ({ p, cost: costOnAccount(p, accountModels) }));
+  withCost.sort((a, b) => {
+    const x = a.p.scores.intelligence;
+    const y = b.p.scores.intelligence;
+    if (x === null || y === null) {
+      if (x !== null) return -1;
+      if (y !== null) return 1;
+      return effortLevel(b.p.effort) - effortLevel(a.p.effort);
     }
-    const gap =
-      (intelligence ?? -1) - (best.scores.intelligence ?? -1) ||
-      (coding ?? -1) - (best.scores.coding ?? -1);
-    if (gap > 0) best = p;
-  }
-  return best;
+    return (
+      y - x ||
+      (a.cost ?? Infinity) - (b.cost ?? Infinity) ||
+      effortLevel(b.p.effort) - effortLevel(a.p.effort)
+    );
+  });
+  return withCost.map(({ p, cost }) => ({
+    profileId: p.id,
+    effort: p.effort,
+    intelligence: p.scores.intelligence,
+    costPerTaskUsd: cost,
+    outputTokensPerSecond: p.outputTokensPerSecond,
+    stepsRun: p.stepsRun,
+    firstPassSteps: p.firstPassSteps,
+  }));
 }
 
 /**
@@ -59,7 +87,10 @@ function firstSeen(profiles: readonly ModelProfileDto[]): string | null {
  */
 export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
   const { catalogue } = input;
-  const live = new Map(input.accounts.filter((a) => !a.archived).map((a) => [a.id, a]));
+  // An OpenRouter account offers no agent model, so it never counts as a place to run one.
+  const live = new Map(
+    input.accounts.filter((a) => !a.archived && runsAgents(a.kind)).map((a) => [a.id, a]),
+  );
   const offers = input.offers.filter((o) => live.has(o.accountId));
   const listing = new Set(offers.map((o) => o.accountId));
   const withoutList = [...live.values()].filter((a) => !listing.has(a.id));
@@ -74,7 +105,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const described = profiles.find((p) => p.maker !== null) ?? null;
     const providerOfAccount = (id: AccountId): Provider | null => {
       const account = live.get(id);
-      return account === undefined ? null : providerOf(account.kind);
+      return account === undefined || !runsAgents(account.kind) ? null : providerOf(account.kind);
     };
 
     // An account with no list is assumed to run its maker's models that are not retired.
@@ -87,7 +118,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       described.maker === RUNTIME_MAKER[described.provider] &&
       assumedEntry !== null &&
       !assumedEntry.deprecated
-        ? withoutList.filter((a) => providerOf(a.kind) === described.provider)
+        ? withoutList.filter((a) => runsAgents(a.kind) && providerOf(a.kind) === described.provider)
         : [];
 
     const profileStatus = profiles.find((p) => p.status !== null)?.status ?? null;
@@ -118,7 +149,25 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const kinds = new Set(
       availableOn.map((id) => live.get(id)?.kind).filter((k) => k !== undefined),
     );
-    const scored = strongestScored(profiles);
+    const { account } = input;
+    const accountOffers = account
+      ? input.offers.filter((o) => o.accountId === account.id)
+      : undefined;
+    const accountProvider =
+      account && runsAgents(account.kind) ? providerOf(account.kind) : undefined;
+    const offeredToAccount =
+      accountOffers !== undefined &&
+      (accountOffers.length === 0
+        ? profiles.some((p) => p.provider === accountProvider)
+        : accountOffers.some((o) => o.model === model && !o.unusable));
+    const efforts = listEfforts(
+      offeredToAccount && accountProvider !== undefined
+        ? offeredProfiles(profiles, accountOffers, accountProvider)
+        : profiles,
+      // A model the account does not offer, or offers unusably, keeps the maker's price.
+      offeredToAccount ? accountOffers : undefined,
+    );
+    const first = efforts[0];
 
     rows.push({
       model,
@@ -131,12 +180,13 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       providers: [...kinds].sort(),
       inputPrice: described?.inputPrice ?? null,
       outputPrice: described?.outputPrice ?? null,
-      intelligence: scored?.scores.intelligence ?? null,
-      coding: scored?.scores.coding ?? null,
+      intelligence: first?.intelligence ?? null,
+      costPerTaskUsd: first?.costPerTaskUsd ?? null,
       outputTokensPerSecond:
-        scored?.outputTokensPerSecond ??
+        first?.outputTokensPerSecond ??
         profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
         null,
+      efforts,
       stepsRun: profiles.reduce((sum, p) => sum + p.stepsRun, 0),
       firstSeenAt: firstSeen(profiles),
     });

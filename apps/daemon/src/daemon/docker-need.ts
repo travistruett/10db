@@ -1,4 +1,9 @@
 import { posix } from 'node:path';
+import type { ProjectDto } from '@10db/contracts';
+import type { Git } from '../git';
+
+/** The most of a Makefile or script read from the base to see whether a gate calls docker. */
+export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
 
 /** Reads a repository file as text, or null when it is absent; paths are relative to the repository root. */
 export type ReadRepoFile = (path: string) => Promise<string | null>;
@@ -147,4 +152,51 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
   }
 
   return scanText(command, '', 0);
+}
+
+/**
+ * The commit `refs/remotes/origin/<base>` is at, found by that exact name (`Git.remoteTrackingCommit`),
+ * or null when there is none. Never a guessed name: git takes a local branch or tag named
+ * `origin/<base>`, or `refs/remotes/origin/<base>` under `refs/heads/`, for a short or missing one,
+ * and a lane can make either.
+ */
+export async function originBaseCommit(
+  git: Git,
+  repoPath: string,
+  baseBranch: string,
+): Promise<string | null> {
+  try {
+    return await git.remoteTrackingCommit(repoPath, baseBranch);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the project's gate is seen to call Docker in `origin/<base>`, as the auto switch reads it
+ * before a gate runs (`callsDocker`), its files read from the remote-tracking branch's commit only;
+ * with no such branch only the command's own text, the builder's, counts. False with no gate and
+ * when git can't say.
+ */
+export async function gateCallsDocker(
+  git: Git,
+  project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'gateCommand'>,
+): Promise<boolean> {
+  if (project.gateCommand === null) return false;
+  const commit = await originBaseCommit(git, project.repoPath, project.baseBranch);
+  const read: ReadRepoFile = async (path) => {
+    // With no remote-tracking commit no file is read: only the command's own text counts.
+    if (commit === null) return null;
+    try {
+      const file = await git.fileAt(project.repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
+      return file.kind === 'file' ? file.text : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    return await callsDocker(project.gateCommand, read);
+  } catch {
+    return false;
+  }
 }

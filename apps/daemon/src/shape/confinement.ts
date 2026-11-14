@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { join } from 'node:path';
-import { ShapeToolName } from '@10db/contracts';
+import { JudgeKind, ShapeToolName } from '@10db/contracts';
 import { z } from 'zod';
 import {
   isOverLongPath,
@@ -69,6 +69,8 @@ export interface ShapeAccess {
     readonly protectedPaths: readonly ProtectedPath[];
     readonly fileAccess: FileAccessJudge;
   };
+  /** The folders the session's setup opened read-only, as its sandbox kept them; none without one. */
+  readonly setupReads?: readonly string[];
   /** The Agent tool aliases the project's account takes, which an agent may be launched on; empty when it takes none; every alias when absent. */
   readonly agentModels?: readonly string[];
 }
@@ -152,6 +154,8 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   const command = stringField(call.toolInput, 'command');
   if (command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
   const verdict = judgePreToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
     toolName: call.toolName,
     toolInput: call.toolInput,
     repoPath: access.checkout,
@@ -190,6 +194,7 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
     sandboxTemp: { roots: access.sandboxRoots, own: join(NOWHERE, 'no-own-temp-dir') },
+    ...(access.setupReads === undefined ? {} : { setupReads: access.setupReads }),
   };
 }
 
@@ -214,6 +219,24 @@ function judgeRead(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     return deny(`${current} could not be judged, so it is refused.`);
   }
   return ALLOW;
+}
+
+/**
+ * A skill is project or builder text, which the session and the agents that read the project hold anyway:
+ * the session, a code researcher and a reviewer may use one. The researcher holds nothing of the project,
+ * so it may not, nor may an agent Plan does not launch.
+ */
+function judgeSkill(call: ShapeCall): GuardVerdict {
+  if (call.agentId === undefined) return ALLOW;
+  const type = call.agentType;
+  return type === SHAPE_CODE_RESEARCHER ||
+    (type !== undefined && (SHAPE_REVIEWERS as readonly string[]).includes(type))
+    ? ALLOW
+    : deny(
+        type === SHAPE_RESEARCHER
+          ? 'The researcher uses no skill: it holds nothing of the project, and a skill is project text.'
+          : `Only the session, a code researcher and a reviewer use a skill.`,
+      );
 }
 
 /**
@@ -401,6 +424,7 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
         )
       : judgeRead(call, access);
   if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call);
+  if (call.toolName === 'Skill') return judgeSkill(call);
   if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
   if (COMMAND_TOOLS.has(call.toolName)) return judgeCommand(call, access);

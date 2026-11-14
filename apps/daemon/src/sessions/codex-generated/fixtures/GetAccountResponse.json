@@ -1,0 +1,222 @@
+[
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "type": "apiKey"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "free",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": null,
+      "planType": "free",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "go",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "plus",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "pro",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "prolite",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "promax",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "team",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "self_serve_business_prolite",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "self_serve_business_usage_based",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "business",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "ent26",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "enterprise_cbp_automation",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "enterprise_cbp_usage_based",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "enterprise",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "edu",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "edu_plus",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "edu_pro",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "sci",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "sci_plus",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "unknown",
+      "type": "chatgpt",
+      "workspaceName": "x"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "email": "x",
+      "planType": "free",
+      "type": "chatgpt",
+      "workspaceName": null
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "type": "amazonBedrock"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": {
+      "type": "gcp"
+    }
+  },
+  {
+    "requiresOpenaiAuth": false,
+    "account": null
+  }
+]

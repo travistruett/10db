@@ -1,6 +1,8 @@
 import {
   mintId,
+  type AccountId,
   type JudgeDecision,
+  type JudgeCallId,
   type JudgeOutcome,
   type JudgeTestResultDto,
   type TaskId,
@@ -10,7 +12,8 @@ import { getJudgeConfig, insertJudgeCall } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { askModel, type ModelAnswer } from './openrouter';
+import { askModel, modelApi, optionsText, type ModelAnswer } from './openrouter';
+import { untilAborted } from './until-aborted';
 
 /** How long a decision waits for a model before today's rule applies. */
 export const JUDGE_TIMEOUT_MS = 4_000;
@@ -25,6 +28,8 @@ export interface JudgeRequest {
   readonly state: string;
   readonly question: string;
   readonly options: readonly [string, ...string[]];
+  /** What each option means, by option. The call's logged question carries them as text. */
+  readonly criteria?: Readonly<Record<string, string>>;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
   readonly signal?: AbortSignal;
@@ -38,13 +43,13 @@ export type JudgeAnswer =
       readonly model: string;
       readonly latencyMs: number;
       readonly costUsd: number | null;
-      readonly callId: string;
+      readonly callId: JudgeCallId;
     }
   | {
       readonly kind: 'fallback';
       readonly reason: 'off' | 'no_key' | 'timeout' | 'error' | 'stopped';
       readonly detail: string;
-      readonly callId: string;
+      readonly callId: JudgeCallId;
     };
 
 /** What a decision asks of the judge. */
@@ -63,16 +68,24 @@ export interface Judge {
 }
 
 export interface JudgeService extends Judge {
-  /** One tiny call on the review decision's model, to check the key and the connection. Logs nothing. */
-  test(): Promise<JudgeTestResultDto>;
+  /**
+   * One tiny call with `account`'s key, to check the key, the connection and that `model` (the review decision's
+   * model when none is given) answers a decision 10db can use. Logs nothing.
+   */
+  test(account: AccountId, model?: string): Promise<JudgeTestResultDto>;
 }
 
 export interface JudgeDeps {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly fetch: typeof fetch;
-  /** The builder's OpenRouter key, read fresh for every call; null when there is none. */
-  readonly readKey: () => Promise<string | null>;
+  /**
+   * The OpenRouter key of `accountId`, read fresh for every call; null when there is none: no account,
+   * an archived or other kind of account, or a secret that is missing or changed.
+   */
+  readonly readKey: (accountId: AccountId | null) => Promise<string | null>;
+  /** The ids of OpenRouter's decision models, which say which endpoint a model answers on; null when unknown. Never waits. */
+  readonly decisionModelIds: () => ReadonlySet<string> | null;
   /** The daemon was started with `TENDB_JUDGE=off`: no key is read and nothing is sent. */
   readonly off: boolean;
   readonly logger: Logger;
@@ -105,23 +118,6 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
 }
 
-/** The promise's value, or a rejection as soon as `signal` aborts, whichever comes first. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(new Error('aborted'));
-    };
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => {
-      signal.removeEventListener('abort', onAbort);
-    });
-  });
-}
-
 export function createJudge(deps: JudgeDeps): JudgeService {
   /** Replaces the key wherever it appears, so a server that echoes it back cannot put it in a log. */
   function scrub(text: string, key: string | null): string {
@@ -131,7 +127,8 @@ export function createJudge(deps: JudgeDeps): JudgeService {
   /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
   async function attempt(
     model: string,
-    q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'signal'>,
+    accountId: AccountId | null,
+    q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'criteria' | 'signal'>,
     timeoutMs: number,
   ): Promise<Attempt> {
     const controller = new AbortController();
@@ -150,7 +147,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     let key: string | null = null;
     try {
       // The key read is part of the call: a slow Keychain counts against the same timeout.
-      key = await untilAborted(deps.readKey(), controller.signal);
+      key = await untilAborted(deps.readKey(accountId), controller.signal);
       // A call cut short while the key was read sends nothing.
       controller.signal.throwIfAborted();
       if (key === null)
@@ -162,9 +159,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         };
       const answer = await askModel({
         model,
+        api: modelApi(model, deps.decisionModelIds),
         state: q.state,
         question: q.question,
         options: q.options,
+        ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
         key,
         fetch: deps.fetch,
         signal: controller.signal,
@@ -211,13 +210,16 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         readonly latencyMs: number | null;
         readonly costUsd: number | null;
         readonly model?: string;
-      }): string =>
+      }): JudgeCallId =>
         deps.state.write((ctx) =>
           insertJudgeCall(ctx, {
             decision: req.decision,
             model: fields.model ?? model,
             state: req.state,
-            question: req.question,
+            question:
+              req.criteria === undefined
+                ? req.question
+                : `${req.question}\nOptions:${optionsText(req)}`,
             answer: fields.answer,
             confidence: fields.confidence,
             outcome: fields.outcome,
@@ -248,7 +250,12 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
 
-      const result = await attempt(model, req, deps.timeoutMs ?? JUDGE_TIMEOUT_MS);
+      const result = await attempt(
+        model,
+        config.accountId,
+        req,
+        deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
+      );
       if (result.kind === 'fallback')
         return fallback(result.reason, result.detail, result.latencyMs);
       const { answer } = result;
@@ -282,11 +289,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     }
   }
 
-  async function test(): Promise<JudgeTestResultDto> {
+  async function test(account: AccountId, model?: string): Promise<JudgeTestResultDto> {
     if (deps.off) return { ok: false, error: 'This daemon was started with TENDB_JUDGE=off' };
-    const model = getJudgeConfig(deps.state.db).decisions.review_size.model;
     const result = await attempt(
-      model,
+      model ?? getJudgeConfig(deps.state.db).decisions.review_size.model,
+      account,
       { state: TEST_STATE, question: TEST_QUESTION, options: TEST_OPTIONS },
       TEST_TIMEOUT_MS,
     );

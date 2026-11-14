@@ -23,6 +23,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  BUILDER_CHOSE_PLACEMENT,
   deleteCuttingBatch,
   findUnfinishedBatch,
   getBatch,
@@ -34,12 +35,16 @@ import {
   insertBatch,
   listWorkstreams,
   patchBatch,
+  passHoldingFolder,
+  passHoldingTask,
   patchTask,
+  placeTaskByRule,
   setBatchNotice,
   transitionBatch,
   type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
+import { proposePlacement, type PlacementProposal } from '../placement';
 import {
   insertJoinedWorkstream,
   insertPlannedWorkstream,
@@ -207,10 +212,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const tasks = input.taskIds.map((id) => getTask(db, id));
     for (const task of tasks) checkStartable(project, task);
     // Phase 1: every part is checked before any is written, so a refused start leaves no batch.
-    const { steps, placement } = prepare(project, input, tasks, undefined);
+    const { steps, placement, proposals } = prepare(project, input, tasks, undefined);
     // Phase 2: one transaction writes each task's placement and every batch, then the jobs queue.
     const batches = ctx.state.write((w) => {
       for (const task of tasks) {
+        const proposal = proposals.get(task.id);
+        // The placement rule moved it, so the task says why, as a task the rule placed at its making.
+        if (proposal) {
+          placeTaskByRule(w, task.id, proposal);
+          continue;
+        }
         const mode = placement(task);
         if (task.workspaceMode !== mode) patchTask(w, task.id, { workspaceMode: mode });
       }
@@ -239,18 +250,25 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     input: BatchStartInput,
     tasks: readonly TaskDto[],
     ending: BatchId | undefined,
-  ): { steps: StartStep[]; placement: (task: TaskDto) => WorkspaceMode } {
+  ): {
+    steps: StartStep[];
+    placement: (task: TaskDto) => WorkspaceMode;
+    /** Tasks the placement rule moves out of Your folder at this start, with why. */
+    proposals: ReadonlyMap<TaskId, PlacementProposal>;
+  } {
     if (input.batchId !== undefined) {
       const copy = copyBatchOf(project, input.batchId);
       if (copy)
         return {
           steps: [prepareJoinWorktree(project, copy, tasks)],
           placement: () => WorkspaceMode.Worktree,
+          proposals: new Map(),
         };
       // Anything else is the shared batch's join, or a refusal saying why it can't be.
       return {
         steps: [prepareShared(project, input.title, input.batchId, tasks, ending)],
         placement: () => WorkspaceMode.Shared,
+        proposals: new Map(),
       };
     }
     refuseCrossPlacementDependency(tasks, (card, taskIds) => {
@@ -270,8 +288,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         ? prepareJoinWorktree(project, batch, joining)
         : prepareShared(project, batch.title, batch.id, joining, ending);
     });
-    const inFolder = landings.rest.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
-    const inCopies = landings.rest.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
+    const proposals = passProposals(project, landings.rest);
+    const inFolder = landings.rest.filter(
+      (task) => task.workspaceMode === WorkspaceMode.Shared && !proposals.has(task.id),
+    );
+    const inCopies = landings.rest.filter(
+      (task) => task.workspaceMode === WorkspaceMode.Worktree || proposals.has(task.id),
+    );
     // Everything this request makes, so no batch of it counts another's tasks as use of its branch.
     const sameStart: SameStart = { tasks: new Set(tasks.map((t) => t.id)), batches: new Set() };
     return {
@@ -282,8 +305,33 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           : []),
         ...prepareWorktrees(project, inCopies, sameStart, landings.titles),
       ],
-      placement: (task) => joinedMode.get(task.id) ?? task.workspaceMode,
+      placement: (task) =>
+        joinedMode.get(task.id) ?? proposals.get(task.id)?.workspaceMode ?? task.workspaceMode,
+      proposals,
     };
+  }
+
+  /**
+   * While a Workbench pass holds Your folder (W9), the tasks set to work there that the builder did
+   * not place there go to a separate copy instead, as the placement rule proposes. One the builder
+   * placed in the folder stays, and the shared start refuses it saying why.
+   */
+  function passProposals(
+    project: ProjectDto,
+    tasks: readonly TaskDto[],
+  ): Map<TaskId, PlacementProposal> {
+    const proposals = new Map<TaskId, PlacementProposal>();
+    if (passHoldingFolder(db, project.id) === undefined) return proposals;
+    for (const task of tasks) {
+      if (task.workspaceMode !== WorkspaceMode.Shared) continue;
+      if (task.placementReason === BUILDER_CHOSE_PLACEMENT) continue;
+      const proposal = proposePlacement(
+        { ...project, passHoldsFolder: true },
+        { areas: task.areas, riskTags: task.riskTags, workspaceMode: WorkspaceMode.Shared },
+      );
+      if (proposal.workspaceMode === WorkspaceMode.Worktree) proposals.set(task.id, proposal);
+    }
+    return proposals;
   }
 
   /**
@@ -318,6 +366,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     ending: BatchId | undefined,
     sameStart?: SameStart,
   ): StartStep {
+    // Nothing else starts in Your folder while a pass holds it (W9), its own batch included.
+    const pass = passHoldingFolder(db, project.id);
+    if (pass) {
+      const titles = tasks.map((t) => t.title).join(', ');
+      throw new ConflictError(
+        `Your folder is in the UI Workbench pass "${pass.name}", so ${titles} can't start there until the pass closes. Set ${tasks.length === 1 ? 'it' : 'them'} to a separate copy, or start ${tasks.length === 1 ? 'it' : 'them'} once the pass has closed.`,
+      );
+    }
     const unfinished = findUnfinishedBatch(db, project.id) ?? null;
     // A dry run before starting over treats the batch it will abandon as already gone.
     const existing = unfinished?.id === ending ? null : unfinished;
@@ -488,6 +544,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
     if (latest && ACTIVE_STATES.includes(latest.state))
       throw new ConflictError(`Task ${task.title} is already running`);
+    // Checked here too, before the cut, so a pass task never leaves a fresh branch checked out.
+    const pass = passHoldingTask(db, task);
+    if (pass)
+      throw new ConflictError(
+        `Task ${task.title} is in the UI Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
+      );
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */

@@ -35,8 +35,19 @@ import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 
-/** Paths outside every package whose change cannot break a package: docs and tooling prose. */
-const LIGHT_OUTSIDE = [/^docs\//, /^spikes\//, /^\.claude\//, /^\.codex\//, /^[^/]+\.md$/];
+/**
+ * Paths outside every package whose change cannot break a package: docs and tooling prose, and
+ * GitHub's Markdown and issue templates. A workflow is not one of them.
+ */
+const LIGHT_OUTSIDE = [
+  /^docs\//,
+  /^spikes\//,
+  /^\.claude\//,
+  /^\.codex\//,
+  /^[^/]+\.md$/,
+  /^\.github\/.*\.md$/,
+  /^\.github\/ISSUE_TEMPLATE\//,
+];
 /** …and the scripts, except the gate itself, which is what a changed-packages check stands in for. */
 const SCRIPT_OUTSIDE = /^scripts\/(?!gate\.sh$)/;
 /** The Tauri shell: a change there also runs the Rust checks, as the gate's rust step does. */

@@ -7,7 +7,7 @@ import {
   Provider,
   providerOf,
   type DaemonEvent,
-  type SupportedAccountKind,
+  type AgentAccountKind,
 } from '@10db/contracts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -37,7 +37,7 @@ export interface ServiceFixture {
   readonly filesDir: string;
   readonly events: DaemonEvent[];
   /** Moves the project to an account of this kind, as a plan falling back to Bedrock does: the next start sees it. */
-  launchOn(kind: SupportedAccountKind): void;
+  launchOn(kind: AgentAccountKind): void;
   /** Closes the service and builds a new one over the same database, as quitting and reopening 10db does. */
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -59,7 +59,7 @@ export function createServiceFixture(
     /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
     limitsFor?: (kind: AccountKind) => PictureLimits;
     /** The kind of the account the project launches on; a Claude plan by default. */
-    accountKind?: SupportedAccountKind;
+    accountKind?: AgentAccountKind;
     /** Draws screens for `see_screen`; none by default. */
     screens?: Pick<ScreenService, 'see'>;
   } = {},

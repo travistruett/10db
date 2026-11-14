@@ -23,7 +23,7 @@ import {
   type GateResult,
   type GateRunner,
 } from '../src/verify';
-import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 /**
  * The gate under the real sandbox: srt and Seatbelt, with the profile the daemon builds. Runs in
@@ -237,6 +237,65 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     });
   }, 120_000);
 
+  it("keeps a project's browser sign-in and its dev login's log away from the gate", async () => {
+    // The data dir inside the checkout, which a gate reads: only the protected reads keep it out.
+    const dataDir = join(checkout, '.10db-data');
+    const browser = join(dataDir, 'browser', 'prj_x');
+    mkdirSync(browser, { recursive: true });
+    writeFileSync(join(browser, 'state.json'), `{"cookies":[{"value":"canary-${token}"}]}`);
+    writeFileSync(join(browser, 'login-1.log'), `http://localhost:8800/login/canary-${token}/`);
+    writeFileSync(join(checkout, 'readable'), 'ok');
+    const git = createGit();
+    const withData = createGateRunner({
+      sandbox: createGateSandbox({
+        home: homedir(),
+        dataDir,
+        loginConfigDir: null,
+        gitDirs: (path) => git.gitDirs(path),
+        tmpRoot,
+        filesRoot: join(root, 'r'),
+        codexLaneTempRoot: join(root, 'l'),
+        log: silentLogger,
+        pnpmLockDir: join(root, 'pnpm-locks'),
+        runtime: resolveSandboxRuntime(),
+      }),
+      logger: silentLogger,
+    });
+    const script = [
+      ['state', `cat '${join(browser, 'state.json')}'`],
+      ['login-log', `cat '${join(browser, 'login-1.log')}'`],
+      ['browser-listing', `ls '${browser}'`],
+      ['control', `cat '${join(checkout, 'readable')}'`],
+    ]
+      .map(
+        ([name, command]) =>
+          `if ( ${command ?? 'false'} ) >/dev/null 2>&1; then echo "probe ${name ?? ''} ok"; else echo "probe ${name ?? ''} denied"; fi`,
+      )
+      .join('\n');
+    const result = await withData.run({
+      project: { repoPath: checkout, sandboxLoopback: false },
+      command: script,
+      logPath: join(root, 'logs', `${randomBytes(4).toString('hex')}.log`),
+      timeoutMs: 60_000,
+      env: env(),
+      rules: [],
+      checkouts: [checkout],
+    });
+    expect(result.exitCode, result.tail).toBe(0);
+    expect(
+      Object.fromEntries(
+        [...result.tail.matchAll(/^probe (\S+) (ok|denied)$/gm)].map((m) => [m[1], m[2]]),
+      ),
+    ).toEqual({
+      state: 'denied',
+      'login-log': 'denied',
+      'browser-listing': 'denied',
+      control: 'ok',
+    });
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(join(checkout, 'readable'), { force: true });
+  }, 60_000);
+
   it("can't write the main checkout or a sibling worktree from a gate in a worktree", async () => {
     const worktrees = tempDir('gate-worktrees');
     try {
@@ -299,6 +358,41 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         { project: { repoPath: checkout, sandboxLoopback: true } },
       ),
     ).toEqual({ loopback: 'ok' });
+  }, 120_000);
+
+  // Decision 2026-11-11-10db-runs-the-preview-while-a-pass-is-open: a project's preview command runs
+  // through this runner with no timeout of its own, and the builder's browser must reach what it serves.
+  it("serves a loopback port the builder's browser reaches while it runs, as a preview does, and stops on abort", async () => {
+    const free = createServer();
+    await listen(free, 0);
+    const address = free.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    await new Promise<void>((resolve) =>
+      free.close(() => {
+        resolve();
+      }),
+    );
+    const page = `http://127.0.0.1:${String(port)}/`;
+    const answers = () =>
+      fetch(page).then(
+        () => true,
+        () => false,
+      );
+    const serve = `exec node -e "require('http').createServer((q, s) => s.end('ok')).listen(${String(port)}, '127.0.0.1')"`;
+    const abort = new AbortController();
+    const serving = run(serve, {
+      project: { repoPath: checkout, sandboxLoopback: true },
+      timeoutMs: 120_000,
+      signal: abort.signal,
+    });
+    await waitForAsync(answers, 30_000);
+    abort.abort();
+    expect((await serving).aborted).toBe(true);
+    expect(await answers()).toBe(false);
+    // Without Allow loopback nothing may listen, so the preview can't serve at all.
+    const refused = await run(serve, { project: { repoPath: checkout, sandboxLoopback: false } });
+    expect(refused.exitCode).not.toBe(0);
+    expect(await answers()).toBe(false);
   }, 120_000);
 
   // srt exits 0 when its own child dies by TERM or INT: none of these may pass.

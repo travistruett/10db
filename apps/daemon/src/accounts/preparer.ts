@@ -1,4 +1,5 @@
 import {
+  agentKind,
   ACCOUNT_CARD_DETAIL,
   AccountCardDetail,
   AccountCardChoice,
@@ -23,7 +24,7 @@ import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { checkAccount, loginIdentity, type SessionAdapter, type SeenAccount } from '../sessions';
+import { checkAccount, loginIdentity, type AgentAdapter, type SeenAccount } from '../sessions';
 import {
   confirmCard,
   credentialsCard,
@@ -63,7 +64,7 @@ export function createAccountPreparer(opts: {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly inbox: InboxService;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
+  readonly adapter: Pick<AgentAdapter, 'probeAccount'>;
   /** Where the models an account lists are kept, once the account check has passed. */
   readonly lists: AccountLists;
   readonly launcher: Pick<Launcher, 'probe'>;
@@ -89,12 +90,13 @@ export function createAccountPreparer(opts: {
   };
 
   async function confirmIdentity(account: AccountRow, projectId: ProjectId): Promise<void> {
+    const kind = agentKind(account.kind);
     let seen: SeenAccount;
     try {
       const release = await opts.startGate.acquire(account.id);
       try {
         seen = await opts.adapter.probeAccount({
-          kind: account.kind,
+          kind,
           cwd: opts.dataDir,
           env: opts.launcher.probe(account).env,
         });
@@ -122,7 +124,7 @@ export function createAccountPreparer(opts: {
       raise(projectId, signInCard(account));
       return;
     }
-    opts.lists.record(account, seen);
+    opts.lists.record({ id: account.id, kind }, seen);
     if (defaultAccountId(opts.state.db) === account.id) {
       // The default account's directory holds the builder's current login (accounts spec §3); the card names it.
       const email = seen.email;
@@ -134,7 +136,7 @@ export function createAccountPreparer(opts: {
       return;
     }
     closeNoLoginCards(opts.state, account.id);
-    raise(projectId, confirmCard(account, loginIdentity(account.kind, seen) ?? seen.email));
+    raise(projectId, confirmCard(account, loginIdentity(kind, seen) ?? seen.email));
   }
 
   /** The account's Confirm cards in the given states, from every project. */

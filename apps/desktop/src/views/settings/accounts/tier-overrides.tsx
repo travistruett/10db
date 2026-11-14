@@ -5,7 +5,12 @@ import { TIER_LABEL } from '../model-labels';
 import { modelLabel, offeredModelGroups, unlistedLabel } from '../model-setting-options';
 import type { AccountFormValues } from './account-form-values';
 
-const TIERS: readonly ModelTier[] = [ModelTier.Fast, ModelTier.Balanced, ModelTier.Strongest];
+const TIERS: readonly ModelTier[] = [
+  ModelTier.Efficient,
+  ModelTier.Balanced,
+  ModelTier.Capable,
+  ModelTier.Frontier,
+];
 
 /** The select value of a tier left to 10db. A model's value carries a prefix, so no model ID can equal it. */
 const AUTOMATIC = 'automatic';
@@ -87,7 +92,7 @@ export function TierOverrides({
   /** What is wrong with the overrides, shown on each field whose ID is too long. */
   readonly error: string | undefined;
 }) {
-  const models = useModels();
+  const models = useModels(null);
   const offers = useModelOffers();
   const set = (tier: ModelTier, model: string) => {
     onChange({ ...values, tierOverrides: { ...values.tierOverrides, [tier]: model } });
@@ -101,7 +106,7 @@ export function TierOverrides({
         </Text>
         <Text size="xs" c="dimmed">
           Automatic lets 10db choose the model for each tier. Pick one to run that tier on it
-          instead.
+          instead. Frontier model: leave blank to use the Capable model.
         </Text>
       </div>
       {models.data === undefined || hasList === undefined

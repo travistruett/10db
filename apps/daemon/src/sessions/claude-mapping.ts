@@ -5,12 +5,17 @@ import type {
   SDKAssistantMessage,
   SDKMessage,
   SDKUserMessage,
+  SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
+import { z } from 'zod';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
+  AgentCommand,
+  InterruptReceipt,
   SessionEvent,
   SessionMcpServer,
   ShapeImage,
@@ -18,9 +23,10 @@ import type {
   ToolDecision,
   TurnResult,
 } from './types';
+import { mapClaudeStreamEvent, unstreamedTextId, type ClaudeStreamState } from './claude-stream';
+import type { ClaudeToolCalls } from './claude-tool-calls';
 
 export const SUMMARY_CHARS = 200;
-const BRIEF_CHARS = 80;
 /** The most of a turn's last message a turn_complete event carries: what a step result may hold. */
 const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 /** Unix seconds stay below this until the year 33658; milliseconds are already above it. */
@@ -41,20 +47,6 @@ export function modelRefusalOf(
   return modelRefusalBasis(msg.error, text.join('\n'), launched);
 }
 
-/** What a tool call is about, in a few words: the command, or the file it touches. */
-export function toolBrief(input: unknown): string {
-  if (typeof input === 'object' && input !== null) {
-    for (const key of ['command', 'file_path', 'notebook_path', 'path']) {
-      // The SDK types tool input as unknown; the value is checked to be a string before it is used.
-      const value: unknown = Reflect.get(input, key);
-      if (typeof value === 'string') return value.slice(0, BRIEF_CHARS);
-    }
-  }
-  // JSON.stringify returns undefined for undefined and functions, despite its declared type.
-  const json = JSON.stringify(input) as string | undefined;
-  return (json ?? '').slice(0, BRIEF_CHARS);
-}
-
 /** The SDK reports reset times as Unix seconds or milliseconds depending on the CLI build; accept both. */
 export function resetsAtToDate(value: number | undefined): Date | null {
   if (value === undefined || !Number.isFinite(value) || value <= 0) return null;
@@ -62,14 +54,66 @@ export function resetsAtToDate(value: number | undefined): Date | null {
 }
 
 /**
+ * The client uuids of the user messages a frame says its turn consumed, the evidence each was taken
+ * (Workbench spec §6.3). The turn's first assistant message stamps those its prompt brought; a message
+ * folded into the running turn between tool rounds is stamped on no later assistant message of a turn
+ * a typed prompt started, only on the turn's result, which lists every one. An older producer stamps
+ * only the one it is answering.
+ */
+function consumedBy(
+  msg: Pick<SDKAssistantMessage, 'user_message_uuid' | 'user_message_uuids'>,
+): readonly string[] {
+  return (
+    msg.user_message_uuids ?? (msg.user_message_uuid === undefined ? [] : [msg.user_message_uuid])
+  );
+}
+
+/** Claude Code's slash commands as the session reports them; an empty hint is left out. */
+export function agentCommands(commands: readonly SlashCommand[]): AgentCommand[] {
+  return commands.map((c) => ({
+    name: c.name,
+    description: c.description,
+    ...(c.argumentHint === '' ? {} : { argumentHint: c.argumentHint }),
+  }));
+}
+
+/** What one session's mapping keeps between messages: its stream and its tool calls. */
+export interface ClaudeMapContext {
+  readonly pid: number | null;
+  readonly stream: ClaudeStreamState;
+  readonly calls: ClaudeToolCalls;
+}
+
+// A user frame's content is the Messages API's; only tool results are read, loosely.
+const ToolResultBlock = z.looseObject({
+  type: z.literal('tool_result'),
+  tool_use_id: z.string().min(1),
+  is_error: z.boolean().optional(),
+  content: z.unknown(),
+});
+
+/**
  * Maps one SDK message to session events. Never emits `context` or `ended`; the adapter owns those.
  * `if` rather than `switch`: the SDK adds message types often, and every other type maps to nothing.
  */
-export function mapSdkMessage(
-  msg: SDKMessage,
-  ctx: { readonly pid: number | null },
-): SessionEvent[] {
+export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEvent[] {
+  if (msg.type === 'stream_event') return mapClaudeStreamEvent(msg, ctx.stream);
+  if (msg.type === 'user') {
+    const content = msg.message.content;
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((block) => {
+      const result = ToolResultBlock.safeParse(block);
+      return result.success
+        ? ctx.calls.result(result.data.tool_use_id, {
+            isError: result.data.is_error === true,
+            content: result.data.content,
+          })
+        : [];
+    });
+  }
   if (msg.type === 'system') {
+    if (msg.subtype === 'commands_changed')
+      return [{ type: 'commands', commands: agentCommands(msg.commands) }];
     if (msg.subtype === 'init')
       return [{ type: 'started', providerSessionId: msg.session_id, pid: ctx.pid }];
     if (msg.subtype === 'compact_boundary')
@@ -87,19 +131,28 @@ export function mapSdkMessage(
   }
   if (msg.type === 'assistant') {
     const events: SessionEvent[] = [];
+    // A subagent's text is its own conversation: it shows as activity, never as the session's message.
+    const own = msg.parent_tool_use_id === null;
     for (const block of msg.message.content) {
       if (block.type === 'text') {
         const text = block.text.trim();
         if (text)
           events.push({ type: 'activity', kind: 'text', summary: text.slice(0, SUMMARY_CHARS) });
+        const itemId = own && text ? unstreamedTextId(ctx.stream, msg.message.id) : null;
+        if (itemId !== null) events.push({ type: 'message', itemId, text: block.text });
       } else if (block.type === 'tool_use') {
-        events.push({
-          type: 'activity',
-          kind: 'tool',
-          summary: `${block.name} ${toolBrief(block.input)}`.slice(0, SUMMARY_CHARS),
-        });
+        events.push(
+          ...ctx.calls.use({
+            id: block.id,
+            name: block.name,
+            input: block.input,
+            parentId: msg.parent_tool_use_id,
+          }),
+        );
       }
     }
+    const taken = consumedBy(msg);
+    if (taken.length > 0) events.push({ type: 'consumed', uuids: taken });
     if (msg.error === 'rate_limit')
       events.push({
         type: 'rate_limit',
@@ -111,6 +164,7 @@ export function mapSdkMessage(
     return events;
   }
   if (msg.type === 'result') {
+    ctx.calls.turnEnded();
     const usage = msg.usage;
     const result: TurnResult =
       msg.subtype === 'error_max_turns'
@@ -120,7 +174,11 @@ export function mapSdkMessage(
           : 'success';
     // What the model wrote last: a review that never calls complete_step may have put its findings here.
     const text = msg.subtype === 'success' ? msg.result.trim().slice(0, TURN_TEXT_CHARS) : '';
+    // The result lists what the turn consumed, a message folded in between tool rounds among it,
+    // which no later assistant message stamps; it comes first, so the turn's end sees it taken.
+    const taken = consumedBy(msg);
     return [
+      ...(taken.length > 0 ? [{ type: 'consumed' as const, uuids: taken }] : []),
       {
         type: 'turn_complete',
         // Only a turn that didn't end normally says so; the others stay as they were.
@@ -155,6 +213,13 @@ export function mapSdkMessage(
     ];
   }
   return [];
+}
+
+/** What Claude Code's interrupt answered, as a session reports it: null when it gave no receipt. */
+export function interruptReceipt(
+  answer: { readonly still_queued?: readonly string[] } | undefined,
+): InterruptReceipt {
+  return answer?.still_queued === undefined ? null : { stillQueued: [...answer.still_queued] };
 }
 
 export function toPermissionResult(
@@ -206,10 +271,19 @@ export function toShapeHookOutput(verdict: ShapeVerdict): HookJSONOutput {
   };
 }
 
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (text: string): text is UUID => UUID_TEXT.test(text);
+
+/**
+ * A user message for the session. `uuid` is the client uuid a turn that takes the message stamps in
+ * `user_message_uuids`; text that is no UUID is left off, as Claude Code would refuse it.
+ */
 export function userMessage(
   text: string,
   priority?: 'now' | 'next' | 'later',
   images: readonly ShapeImage[] = [],
+  uuid?: string,
 ): SDKUserMessage {
   return {
     type: 'user',
@@ -232,6 +306,7 @@ export function userMessage(
     },
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
+    ...(uuid !== undefined && isUuid(uuid) ? { uuid } : {}),
   };
 }
 

@@ -8,8 +8,11 @@ import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
+  InboxItemId,
   PROTOCOL_VERSION,
   Provider,
+  RoutedBy,
+  agentKind,
   providerOf,
   StepRole,
   type Effort,
@@ -27,6 +30,7 @@ import {
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
+  getInboxItem,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -60,6 +64,7 @@ import {
   createListRefresh,
   createMoveBack,
   MoveCause,
+  moveOpenRouterKey,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -74,8 +79,27 @@ import {
   resumeModelMarks,
   type Catalogue,
 } from '../catalogue';
-import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
-import { createJudgeServices } from './judge-services';
+import {
+  createDecisionModelList,
+  createJudge,
+  JUDGE_LOG_RETENTION_MS,
+  type JudgeService,
+} from '../judge';
+import { createBenchmarkServices } from './benchmark-services';
+import { createJudgeKeyReader, createJudgeServices } from './judge-services';
+import { createStakeholderApiServices } from './stakeholder-services';
+import {
+  createReplyWatch,
+  createSlackConnection,
+  createStakeholderSends,
+  createTimerWatch,
+  createTriage,
+  draftOnOpen,
+  routedAway,
+  sweepDrafts,
+} from '../stakeholders';
+import { createSlackClient, type SlackClient } from '../slack';
+import { createTrustServices } from './trust-services';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -98,6 +122,10 @@ import {
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
+  answerPassMoveCard,
+  createKeptWorkGate,
+  createPassPullRequests,
+  passGateKind,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -105,14 +133,19 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   moveRetiredLandings,
+  openPass,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
   resolvePnpm,
+  resumePassSettles,
+  subscribeKeptWorkLanding,
+  subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
+  type PassOpenDeps,
 } from '../delivery';
 import type { LogLevel } from '../env';
 import {
@@ -121,7 +154,7 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
-  OPENROUTER_KEY_ACCOUNT,
+  SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
@@ -131,9 +164,19 @@ import {
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
-import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
+import {
+  createGh,
+  createSystemGhExec,
+  resolveGh,
+  spawnGhLogin,
+  type Gh,
+  type GhLoginSpawn,
+  type GhTools,
+} from '../github';
+import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
+import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -146,21 +189,59 @@ import {
   forgetEndedYields,
   withdrawStaleClaimWaits,
 } from '../mcp';
+import {
+  answerMoveToCopy,
+  answerPassCard,
+  askSignOff,
+  cancelSignOffWait,
+  closeGateOf,
+  createPassCloses,
+  discardKeptWork,
+  joinPass,
+  putBackKeptWork,
+  resumePassWork,
+  startAbandon,
+  startSignOff,
+  subscribeMergedPasses,
+  subscribeSignOffWaits,
+  takeOut,
+  type AbandonDeps,
+  type MoveToCopyDeps,
+  type PassWorkDeps,
+  type TakeOutDeps,
+} from '../pass';
+import {
+  createBrowserHost,
+  createPlaywrightCamera,
+  launchChromium,
+  refusedCamera,
+  startPictures,
+  startPruning,
+  type PageCamera,
+  type Pictures,
+} from '../pictures';
+import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
-import { createScreenBroker, createScreens, renderMayRead } from '../screens';
+import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
+import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
+  type StartSignOff,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
   type Runner,
   type RunnerLimits,
+  type StopPassLane,
+  startTurnChecks,
+  TURN_CHECK_TIMEOUT_MS,
+  withTurnChecks,
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
@@ -197,12 +278,14 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import type { SessionAdapter } from '../sessions';
+import type { AgentAdapter } from '../sessions';
 import { routingInputs, seedTeam } from '../team';
+import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
+import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
 import {
   createCheckoutTrustedHandler,
@@ -211,8 +294,10 @@ import {
   refusedTrustCheckouts,
 } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
+import { devUiToken, removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
+import { systemListeners, type ListenerReader } from './listening-ports';
+import { loopbackProbe, type AddressProbe } from './loopback-probe';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -226,11 +311,14 @@ import {
 } from './sandbox-roots';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
+/** How long one Slack call may take before it counts as unreachable. */
+const SLACK_TIMEOUT_MS = 15_000;
+
 export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
   /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
-  readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
+  readonly adapter: AgentAdapter | ((logger: Logger) => AgentAdapter);
   readonly logLevel: LogLevel;
   /**
    * The sandbox every lane and every gate runs under. Its roots (tests) move what it makes off the
@@ -257,9 +345,22 @@ export interface DaemonOptions {
    * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
    */
   readonly worktreeRoot?: string;
+  /**
+   * The builder's home, whose instructions, skills and installed plugins come along into each session
+   * (Settings › Trust). Defaults to the user's home; tests give a temp one.
+   */
+  readonly builderHome?: string;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
+  /**
+   * The browser for pictures of the builder's app (Workbench spec §10): the pinned Chromium (the entry
+   * point), or a camera given with how its build is fetched (tests pass a fake one). Absent, the daemon
+   * takes no pictures and fetches nothing, so an in-process test never downloads a browser.
+   */
+  readonly pictures?:
+    | { readonly kind: 'pinned' }
+    | { readonly kind: 'given'; readonly camera: PageCamera; readonly prepare: () => void };
   /** Lane caps across all projects; each account has its own `laneCap`. */
   readonly caps?: { readonly global: number };
   /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
@@ -270,6 +371,8 @@ export interface DaemonOptions {
   readonly tickMs?: number;
   /** The GitHub CLI wrapper; tests pass a fake. */
   readonly gh?: Gh;
+  /** Starts `gh auth login` for Sign In; tests pass a fake, so none signs in for real. */
+  readonly githubLoginSpawn?: GhLoginSpawn;
   /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
   readonly networkEnv?: () => Readonly<Record<string, string>>;
   readonly deliveryLimits?: Partial<DeliveryLimits>;
@@ -285,6 +388,8 @@ export interface DaemonOptions {
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
+  /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
+  readonly benchmarksOff?: boolean;
   readonly fetch?: typeof fetch;
   /**
    * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
@@ -293,8 +398,17 @@ export interface DaemonOptions {
   readonly catalogueSync?: boolean;
   /** The file holding the catalogue the release embeds, read when nothing is stored; absent or missing means none. */
   readonly catalogueSnapshot?: string;
+  /**
+   * Talk to Slack with the bot token in the Keychain. Off unless given, so a test never reaches the
+   * network; the entry point turns it on unless `TENDB_SLACK=off`.
+   */
+  readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
+  /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
+  readonly listeners?: ListenerReader;
+  /** Whether a loopback address answers, for the Workbench setup's app address; one GET unless given. */
+  readonly probe?: AddressProbe;
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
@@ -357,8 +471,6 @@ const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 /** How long a Shape tool call may take: propose_plan validates and writes, and answers at once. */
 const SHAPE_TOOL_TIMEOUT_MS = 60_000;
-/** The most of a Makefile or script read from the base to see whether a gate calls docker. */
-const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
 
 /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
@@ -397,7 +509,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
   // gh from the same prefixes; a missing one fails each gh call as not installed, as the system check says.
-  const ghBin = resolveGh();
+  let ghBin = resolveGh();
+  // Read on every call, so a gh installed after startup (found again on Check Again) is the one run.
+  const ghTools: GhTools = {
+    get gh() {
+      return ghBin;
+    },
+    git: gitBin,
+  };
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -453,6 +572,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // policy opens to every ChatGPT lane. With no sandbox no lane runs, so none is.
   const laneWrittenRoots = sandboxRoots === null ? [] : laneWrittenRootsOf(sandboxRoots);
   const allSandboxRoots = sandboxRoots === null ? [] : allSandboxRootsOf(sandboxRoots);
+  const builderHome = opts.builderHome ?? homedir();
   // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
   // the daemon's own is refused before anything else starts.
   let worktreeRoot: string;
@@ -477,6 +597,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
+  backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
@@ -531,17 +653,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
+  const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
   const judge = createJudge({
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    readKey: () =>
-      opts.judgeOff === true
-        ? Promise.resolve(null)
-        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
+    decisionModelIds: () => decisionModels.ids(),
+    readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  // With the judge off no Keychain item is read, `openrouter-api-key` included.
+  if (opts.judgeOff !== true)
+    await moveOpenRouterKey({
+      state,
+      keychain: judgeKeychain,
+      logger: logger.child({ component: 'judge' }),
+    });
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,
@@ -579,12 +707,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  // Started once recovery is through; a launch before then waits for no before picture.
+  let pictures: Pictures | null = null;
+  let preview: Preview | null = null;
+  // The API's port, once it listens: an app address may not name it, and no picture is taken before.
+  let listenPort: number | null = null;
+  const listening = Promise.withResolvers<number>();
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGhCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let startPageSignOff: StartSignOff | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -605,18 +741,72 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     log: logger,
   });
+  // Slack is reached only when the entry point turned it on, and only with the bot token in the Keychain.
+  const slackClient: SlackClient | null =
+    opts.slack === true
+      ? createSlackClient({
+          fetch: opts.fetch ?? fetch,
+          token: () => judgeKeychain.readAsync(SLACK_BOT_ACCOUNT),
+          clock,
+          timeoutMs: SLACK_TIMEOUT_MS,
+        })
+      : null;
+  const sends = createStakeholderSends({
+    state,
+    slack: slackClient,
+    clock,
+    log: logger.child({ component: 'stakeholder-sends' }),
+    hasToken: async () => (await judgeKeychain.readAsync(SLACK_BOT_ACCOUNT)) !== null,
+    parkFor: (id) => {
+      runner?.parkFor(id);
+    },
+  });
+  const draftOpts = {
+    afterDraft: (id: InboxItemId): void => {
+      sends.afterDraft(id).catch((error: unknown) => {
+        logger.warn({ err: error, cardId: id }, 'a drafted question could not be sent');
+      });
+    },
+    log: logger.child({ component: 'drafts' }),
+  };
+  // A question no explicit route claimed is routed by the judge right after its card commits.
+  const triage = createTriage({
+    state,
+    judge,
+    log: logger.child({ component: 'triage' }),
+    // A card routed away from the builder is drafted, and the sessions waiting on it park, so the
+    // stakeholder's words are answered through the card and never reach a live ask_human call.
+    afterRouted: (id) => {
+      const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      after?.();
+    },
+  });
   const inbox = createInboxService({
     state,
+    judgeOff: opts.judgeOff === true,
+    parkWaiting: (id) => {
+      runner?.parkFor(id);
+    },
+    onQuestionOpened: (ctx, item) =>
+      item.routedBy === RoutedBy.TriagePending
+        ? () => {
+            void triage.run(item.id);
+          }
+        : draftOnOpen(ctx, item, draftOpts),
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
     onParkAnswer: parkAnswers,
     log: logger,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const signOffPage = startPageSignOff;
+      if (!runner || !signOffPage) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
     },
     onFlagAnswer: (item, answer) => {
+      runner?.retryTurn(item, answer);
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
@@ -626,6 +816,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerStartCard?.(item, answer);
       answerLostMigrationsCard?.(item, answer);
       answerWorktreeCard?.(item, answer);
+      answerPassCards?.(item, answer);
       answerDeadlockCard(item, answer);
     },
   });
@@ -649,7 +840,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconcileProfiles(ctx, from);
     });
     modelWait.release((id) => {
-      const provider = providerOf(getAccountRow(db, id).kind);
+      const provider = providerOf(agentKind(getAccountRow(db, id).kind));
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
@@ -701,7 +892,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // is neither swept nor claimed.
   const claimedRoots =
     sandboxRoots?.refusal === null
-      ? claimSandboxRoots([sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files])
+      ? claimSandboxRoots({
+          temps: [sandboxRoots.temp, sandboxRoots.codexLanes],
+          files: sandboxRoots.files,
+        })
       : null;
   // Off the event loop and never waited on by a start: `tmutil` can be slow, and a root it could
   // not exclude costs backup space, not a lane. `stop()` ends what still runs.
@@ -786,7 +980,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? sandboxesFor(sandboxRoots, {
           lane: () =>
             createLaneSandbox({
-              home: homedir(),
+              // The home the setup is found in is the one its paths are judged and named by.
+              home: builderHome,
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
               loginCodexHome: launcher.loginCodexHome(),
@@ -826,8 +1021,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       inbox,
       logger: logger.child({ component: 'gate' }),
-      readBase: async (repoPath, ref, path) => {
-        const read = await git.fileAt(repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+      baseCommit: (repoPath, baseBranch) => originBaseCommit(git, repoPath, baseBranch),
+      readBase: async (repoPath, commit, path) => {
+        const read = await git.fileAt(repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
         return read.kind === 'file' ? read.text : null;
       },
     },
@@ -872,7 +1068,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const delivery: DeliveryContext = {
     state,
     git,
-    gh: opts.gh ?? createGh(createSystemGhExec({ gh: ghBin, git: gitBin })),
+    gh: opts.gh ?? createGh(createSystemGhExec(ghTools)),
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
@@ -886,6 +1082,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorkQueued: () => {
       scheduler?.requestTick();
     },
+    // An ordinary start of a taken-out task puts its saved work back in the checkout it runs in.
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
@@ -894,6 +1093,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
+  // A pass's work in Your folder, and its cards (set below, once its take-outs are built).
+  const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
   answerLostMigrationsCard = createLostMigrationsAnswers(delivery);
@@ -914,6 +1115,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
+  });
+  // A pass's pull request: its push and draft in the delivery key, its gate and one review outside it.
+  const passPullRequests = createPassPullRequests({
+    ...delivery,
+    gate: shipGate,
+    holdShips: () => updateDrain.draining,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    identifyProcess: (pid) => processes.identify(pid),
+    review: {
+      adapter,
+      launch: (accountId, model) => {
+        const session = launcher.session(
+          getAccountRow(state.db, accountId),
+          model,
+          listAccountModels(state.db, accountId),
+        );
+        return { model: session.model, env: session.env, expect: session.expect };
+      },
+      scratchRoot: tmpdir(),
+    },
   });
   answerWorktreeCard = createWorktreeCardAnswers(delivery, {
     starter,
@@ -1123,7 +1346,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Judged on the account the conversation runs on, which can differ from the project's provider.
   const brainstormRefusal = (projectId: ProjectId): string | null =>
-    providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
+    providerOf(agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind)) ===
+    Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
   // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
@@ -1181,6 +1405,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             protectedPaths: guarded,
             projectEnv: () => launcher.projectEnv(),
             exportAwsCredentials,
+            builderHome,
+            laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
           }),
         }),
     models(projectId) {
@@ -1211,7 +1437,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         model: session.model,
         modelId,
         effort: profile.effort,
-        agentModels: shapeAgentModels(row.kind),
+        agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,
         access: {
@@ -1226,16 +1452,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
   const createdRunner = createRunner({
+    gitTools: { git: gitBin, gh: ghBin },
+    awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
     laneSandbox,
+    gateSandbox: sandboxes?.gate ?? null,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
+    builderHome,
+    laneWritableRoots: allSandboxRoots,
     hold: startHold,
     laneTempDirs,
     state,
     adapter,
     inbox,
     git,
+    jobs: deliveryJobs,
     gate,
     baseUpdates,
     migrationsBase,
@@ -1287,6 +1519,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : {}),
     },
     connecting: () => accountService.connecting(),
+    // A run in Your folder of a local project waits for its task's saved work to go back (call 33).
+    keptWork: createKeptWorkGate(delivery),
     modelWait,
     clock,
     instanceId,
@@ -1306,6 +1540,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   scheduler = createdScheduler;
 
+  // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shipping
+  // gates' limiter and its shared slots. Started before recovery, which settles turns a stopped daemon
+  // ended and so raises their Ready: a check that daemon left running is stopped first, so a new one
+  // never runs beside it or takes its pid's place.
+  const {
+    checks: turnChecks,
+    unsubscribe: unsubscribeTurnChecks,
+    begin: beginTurnChecks,
+  } = await startTurnChecks({
+    state,
+    git,
+    gate: shipGate,
+    bus,
+    processes,
+    logger: logger.child({ component: 'gate' }),
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    identifyProcess: (pid) => processes.identify(pid),
+    timeoutMs: Math.min(TURN_CHECK_TIMEOUT_MS, limits.gateTimeoutMs),
+  });
+  // What the close and Abandon stop of a pass's checks: its pull request's, then its turn check.
+  const passShip = withTurnChecks(passPullRequests, turnChecks);
+
   const cleanShutdown = getAppSetting(db, CLEAN_SHUTDOWN_KEY) !== undefined;
   state.write((ctx) => {
     deleteAppSetting(ctx, CLEAN_SHUTDOWN_KEY);
@@ -1314,11 +1572,97 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     inbox,
     git,
+    jobs: deliveryJobs,
+    clock,
     processes,
     maxRecoveryAttempts: limits.maxRecoveryAttempts,
     logger,
     cleanShutdown,
   });
+  // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
+  // one, and a send that was mid-post is looked for in Slack.
+  for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
+  const slackConnection = createSlackConnection({
+    state,
+    initial: slackClient === null ? 'off' : 'none',
+  });
+  const replyWatch = createReplyWatch({
+    state,
+    slack: slackClient,
+    inbox,
+    judge,
+    sends,
+    clock,
+    log: logger.child({ component: 'reply-watch' }),
+    connection: slackConnection,
+  });
+  // The timers need no Slack: a card comes back to the builder even while Slack is down.
+  const timerWatch = createTimerWatch({
+    state,
+    clock,
+    log: logger.child({ component: 'stakeholder-timers' }),
+  });
+  bus.subscribe((event) => {
+    if (event.type !== EventType.InboxChanged) return;
+    const id = InboxItemId.safeParse(event.entityId);
+    if (!id.success) return;
+    sends.onCardChanged(getInboxItem(state.db, id.data)).catch((error: unknown) => {
+      logger.warn({ err: error, cardId: id.data }, 'could not settle the send of a changed card');
+    });
+  });
+  // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
+  // files their put-back wrote.
+  const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
+  const passTakeOuts: TakeOutDeps = {
+    ...passWork,
+    stopLane,
+    wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
+  };
+  // A Ready page's Sign Off, from its route or its check item; one waiting for another page's hold
+  // goes on once that hold closes.
+  startPageSignOff = (taskId) => {
+    startSignOff(passTakeOuts, taskId);
+  };
+  const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // A pass page that asked for migrations or deps: Move to a Separate Copy takes it out and starts
+  // it in a copy, as the Board's Start does.
+  const passMoves: MoveToCopyDeps = {
+    ...passTakeOuts,
+    startInCopy: (taskId) => {
+      starter.startTask(taskId);
+      createdScheduler.requestTick();
+    },
+  };
+  answerPassCards = (item, answer) => {
+    answerPassCard(passWork, item, answer);
+    answerPassMoveCard(delivery, item, answer);
+    void answerMoveToCopy(passMoves, item, answer);
+  };
+  // A task has saved work only once a take-out has kept it; a later pass puts it back.
+  const passOpenDeps: PassOpenDeps = {
+    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
+    putBack: (input) => putBackKeptWork(passWork, input),
+  };
+  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam;
+  // a pass whose pull request merged while it was open closes by itself, its unfinished pages
+  // carried over to a follow-on pass.
+  const passCloses = createPassCloses({
+    ...passTakeOuts,
+    ship: passShip,
+    gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
+    openFollowOn: (input) => openPass(delivery, input, passOpenDeps),
+  });
+  const unsubscribeMergedPasses = subscribeMergedPasses(bus, state.db, passCloses);
+  // Abandon Pass stops what ships for the pass first: its pull request's checks and its close.
+  const passAbandons: AbandonDeps = {
+    ...passTakeOuts,
+    stopShip: async (passId) => {
+      await passShip.stopPassChecks(passId);
+      await passCloses.abort(passId);
+    },
+  };
+  // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
+  await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1334,6 +1678,85 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
+  // The batches' recovery has stopped the gates the last daemon left: the checks recovery's Ready
+  // turns asked for may run now.
+  beginTurnChecks();
+  // Pictures of the builder's app (Workbench spec §10): after recovery, so a page recovery made Ready
+  // is not shot half settled. The dev login runs through the unslotted gate runner, as an install does.
+  // The pinned browser is launched only with a ledger to hold its processes: with the sandbox's roots
+  // refused, its host refuses and fetches nothing.
+  const browserHost =
+    opts.pictures?.kind === 'pinned'
+      ? createBrowserHost({
+          dataDir: opts.dataDir,
+          ledgers:
+            ledgerSweep && sandboxRoots ? { sweep: ledgerSweep, root: sandboxRoots.files } : null,
+          processes: laneProcesses,
+          clock,
+          logger: logger.child({ component: 'pictures' }),
+          launch: launchChromium,
+        })
+      : null;
+  const pictureCamera =
+    opts.pictures?.kind === 'given'
+      ? opts.pictures.camera
+      : browserHost
+        ? createPlaywrightCamera(browserHost, logger.child({ component: 'pictures' }))
+        : refusedCamera('This daemon takes no pictures');
+  const prepareBrowser =
+    opts.pictures?.kind === 'given'
+      ? opts.pictures.prepare
+      : () => {
+          void browserHost?.prepare();
+        };
+  // The project's dev server, while a pass is open and its preview command is set: run under the
+  // gate's sandbox, as the dev login is, its processes in a ledger as the browser's are.
+  preview = startPreview({
+    state,
+    bus,
+    gate: gateRunner,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    logger: logger.child({ component: 'preview' }),
+    ledgers:
+      ledgerSweep && sandboxRoots
+        ? { sweep: ledgerSweep, root: sandboxRoots.files, processes: laneProcesses }
+        : null,
+  });
+  const previewNow = preview;
+  pictures = startPictures({
+    onNoAnswer: (projectId) => {
+      void previewNow.lost(projectId);
+    },
+    // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
+    devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
+    state,
+    bus,
+    camera: pictureCamera,
+    daemonPort: listening.promise,
+    prepareBrowser,
+    git,
+    signIn: {
+      gate: gateRunner,
+      dataDir: opts.dataDir,
+      now: () => clock.now().getTime(),
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+    },
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'pictures' }),
+  });
+  // Turn pictures go 14 days after their task is done: swept now and once a day.
+  const picturePruning = startPruning({
+    state,
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'pictures' }),
+  });
   // Tasks made for a branch that is gone from origin land in their project's default now. It asks
   // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
   const retiredLandingsAbort = new AbortController();
@@ -1343,6 +1766,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
+  // started task's saved work goes once its work lands.
+  const unsubscribePassSettles = subscribePassSettles(bus, delivery);
+  const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
+  resumePassSettles(delivery);
+  // A close a restart cut short goes on from its last step, once recovery has swept what the stopped
+  // daemon left: its scratch gate's worktree and process are its own from here.
+  passCloses.resume();
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
     ctx: delivery,
@@ -1393,8 +1824,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  const github = createGithubServices({
+    clock,
+    spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
+    resolveGh: () => {
+      ghBin = resolveGh();
+      return ghBin;
+    },
+    readLogin: () =>
+      delivery.gh.authLogin({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+    env: () => delivery.networkEnv(),
+    emit: (data) => {
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.GithubLoginEnded,
+          entityType: 'github',
+          entityId: 'login',
+          data,
+        });
+      });
+    },
+  });
   const services = createServices({
     state,
+    github: {
+      githubStatus: github.githubStatus,
+      startGithubSignin: github.startGithubSignin,
+      cancelGithubSignin: github.cancelGithubSignin,
+    },
     clock,
     bus,
     runner: createdRunner,
@@ -1413,21 +1873,72 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : noSystemCheck(),
     agents: opts.agents ?? null,
     benchmarks,
+    benchmarkApi: createBenchmarkServices({
+      benchmarks,
+      keychain: judgeKeychain,
+      off: opts.benchmarksOff === true,
+    }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
+    trust: createTrustServices({
+      state,
+      builderHome,
+      laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+      laneSandbox,
+      adapter,
+      log: logger.child({ component: 'trust' }),
+    }),
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
       judge,
+      models: decisionModels,
       off: opts.judgeOff === true,
     }),
+    stakeholders: createStakeholderApiServices({
+      state,
+      keychain: judgeKeychain,
+      slack: slackClient,
+      sends,
+      connection: slackConnection,
+      clock,
+      fetch: opts.fetch ?? fetch,
+      reconnect: () => replyWatch.reconnect(),
+    }),
     shape: createShapeServices({ shape, state, clock }),
+    planRecord: createPlanRecordServices({
+      state,
+      dataDir: opts.dataDir,
+      worktreeRoot,
+      sandboxRoots: allSandboxRoots,
+    }),
+    pictures,
+    preview: previewNow,
+    daemonPort: () => listenPort,
+    thread: createThreadService({
+      state,
+      dataDir: opts.dataDir,
+      pages: {
+        deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
+      },
+    }),
     knowledge: createKnowledgeServices({
       state,
       searchAvailable: knowledgeIndex.failed.length === 0,
     }),
     starter,
+    openPass: (input) => openPass(delivery, input, passOpenDeps),
+    takeOut: (input) => takeOut(passTakeOuts, input),
+    abandonPass: (passId) => startAbandon(passAbandons, passId),
+    joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
+    discardKeptWork: (taskId) => discardKeptWork(passWork, taskId),
+    passPullRequests,
+    closes: passCloses,
+    signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      cancelSignOffWait(passTakeOuts, passId, taskId);
+    },
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1439,6 +1950,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       }),
     protectedRoots: [opts.dataDir, ...allSandboxRoots, worktreeRoot],
     areaNamer,
+    listeners: opts.listeners ?? systemListeners,
+    probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
@@ -1504,7 +2017,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (installer === null) {
       updateLogger.warn({}, 'gh is not installed, so the app cannot update itself');
     } else {
-      const ghExec = createSystemGhExec({ gh: ghBin, git: gitBin });
+      const ghExec = createSystemGhExec(ghTools);
       const ghCall = () => ({
         env: delivery.networkEnv(),
         timeoutMs: delivery.limits.networkTimeoutMs,
@@ -1603,6 +2116,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const app = createApp({
     commit: build?.commit ?? null,
+    devUiOrigin: opts.devUiOrigin ?? null,
+    // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
+    devUi: opts.devUiOrigin ? { token: devUiToken(opts.dataDir), mayRead: devUiMayRead } : null,
     selfUpdate: selfUpdateServices,
     startedAt,
     allowedOrigins: [
@@ -1635,6 +2151,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       claimWaits,
+      deliverMessage: (taskId, messageId) =>
+        createdRunner.deliverMessage(taskId, messageId, { redo: false }),
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
@@ -1655,6 +2173,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // A server listening on a TCP port reports an AddressInfo.
   const port = (server.address() as AddressInfo).port;
+  listenPort = port;
+  listening.resolve(port);
   const url = `http://127.0.0.1:${String(port)}`;
   mcpUrl = `${url}/mcp`;
   writeRuntimeFiles(
@@ -1696,6 +2216,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
+  // After recovery: a send left mid-post is looked for in Slack, then replies and timers are watched.
+  void sends.recoverSending();
+  replyWatch.start();
+  timerWatch.start();
   if (selfUpdate) {
     selfUpdate.start();
     selfUpdate.tick().catch((error: unknown) => {
@@ -1717,18 +2241,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       createdScheduler.stop();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
       // before the database closes, so a slow stop does not eat the window the lanes need.
+      github.stop();
       const loginStopped = accountService.stop().catch((error: unknown) => {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribePassSettles();
+      unsubscribeSignOffWaits();
+      unsubscribeMergedPasses();
+      unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
+      await Promise.all([replyWatch.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
       await retiredLandings;
       systemTempAbort.abort();
       await systemTempSwept;
       backupsAbort.abort();
       await rootsKeptOutOfBackups;
+      // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
+      // A capture in flight is dropped; its browser closes with it.
+      await pictures?.stop();
+      // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
+      await preview?.stop();
+      picturePruning.stop();
+      await pictureCamera.close();
+      unsubscribeTurnChecks();
+      await Promise.all([passPullRequests.stop(), turnChecks.stopAll()]);
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
@@ -1757,6 +2296,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ledgerSweep?.stop();
       await preparer.idle();
       await loginStopped;
+      // A tick asked for before the stop may still be reading the branches; it launches nothing now,
+      // but it reads and writes the database until it ends.
+      await createdScheduler.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });

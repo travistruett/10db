@@ -70,32 +70,13 @@
         "type": "string"
       }
     },
-    "missingScores": {
-      "default": [],
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "profile": {
-            "type": "string"
-          },
-          "kinds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "intelligence",
-                "coding",
-                "agentic"
-              ]
-            }
-          }
-        },
-        "required": [
-          "profile",
-          "kinds"
-        ]
-      }
+    "off": {
+      "default": false,
+      "type": "boolean"
+    },
+    "syncing": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [

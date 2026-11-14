@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
+import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
 import { createTestStore, insertShape, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
@@ -30,7 +30,7 @@ import {
   shapeSystemPrompt,
   shapeToolset,
 } from '../src/shape';
-import { createTempRepo } from './fixtures';
+import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
 const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
@@ -89,7 +89,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: account.kind,
+      kind: agentKind(account.kind),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -115,7 +115,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     // leaves the session's files alone.
     const roots = openSandboxRoots({}, homedir());
     if (roots.refusal !== null) throw roots.refusal;
-    const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+    const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
     const prepare = createShapePreparer({
       state,
       inbox,
@@ -133,13 +133,15 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       protectedPaths: guarded,
       projectEnv: () => launcher.projectEnv(),
       exportAwsCredentials: () => Promise.reject(new Error('no AWS in this test')),
+      builderHome: homedir(),
+      laneWritableRoots: [join(dataDir, 'worktrees'), roots.temp, roots.codexLanes, roots.files],
     });
     const cards: { title: string; shapeId: unknown }[] = [];
     const prepared = await prepare({
       projectId: project.id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
-      accountKind: account.kind,
+      accountKind: agentKind(account.kind),
       env: launch.env,
       resumeProviderSessionId: null,
       signal: new AbortController().signal,
@@ -169,11 +171,19 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     const judged: Judged[] = [];
     let reply = '';
     try {
-      const handle = adapter.startShape({
+      const handle = adapter.open({
         sessionId: mintId('Session'),
-        shapeId: shape.id,
+        policy: testPolicy('plan'),
+        profile: {
+          kind: 'explore',
+          shapeId: shape.id,
+          systemPrompt: SHAPE_SYSTEM_PROMPT,
+          tools: [...toolset.tools],
+          allowedTools: SHAPE_ALLOWED_TOOLS,
+          disallowedTools: [...toolset.disallowedTools],
+          agents: toolset.agents,
+        },
         cwd: checkout,
-        systemPrompt: SHAPE_SYSTEM_PROMPT,
         prompt: [
           'Do these three things in order, calling the tool each time even if you expect it to fail:',
           '1. Run `git log --oneline -1` with the Bash tool yourself.',
@@ -186,10 +196,6 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         resumeProviderSessionId: null,
         env: launch.env,
         account: launch.expect,
-        tools: [...toolset.tools],
-        allowedTools: SHAPE_ALLOWED_TOOLS,
-        disallowedTools: [...toolset.disallowedTools],
-        agents: toolset.agents,
         mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
         sandbox,
         projectMcpServers: prepared.projectMcpServers,

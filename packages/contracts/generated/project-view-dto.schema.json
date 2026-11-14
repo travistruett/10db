@@ -49,6 +49,19 @@
           },
           "catchAll": {
             "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "page",
+              "shared"
+            ]
+          },
+          "route": {
+            "type": "string",
+            "maxLength": 500,
+            "format": "starts_with",
+            "pattern": "^\\/.*"
           }
         },
         "required": [
@@ -214,6 +227,9 @@
         "null"
       ]
     },
+    "prPictures": {
+      "type": "boolean"
+    },
     "allowedCommands": {
       "type": "array",
       "items": {
@@ -247,6 +263,70 @@
       "items": {
         "type": "string"
       }
+    },
+    "appUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "devLoginCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "previewCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "screens": {
+      "type": "object",
+      "properties": {
+        "viewports": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 3840
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 2400
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ]
+          }
+        },
+        "themes": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "default",
+              "light",
+              "dark"
+            ]
+          }
+        }
+      },
+      "required": [
+        "viewports",
+        "themes"
+      ]
     },
     "createdAt": {
       "type": "string",
@@ -589,6 +669,17 @@
                     "no_log",
                     "no_cut"
                   ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "passId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
                 },
                 {
                   "type": "null"
@@ -1052,6 +1143,17 @@
               }
             ]
           },
+          "passId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "gateExitCode": {
             "anyOf": [
               {
@@ -1196,6 +1298,7 @@
     "landing",
     "landingBranch",
     "prTitlePrefix",
+    "prPictures",
     "allowedCommands",
     "sandboxLoopback",
     "sandboxDocker",
@@ -1203,6 +1306,10 @@
     "workspaceMode",
     "worktreeSeed",
     "isolate",
+    "appUrl",
+    "devLoginCommand",
+    "previewCommand",
+    "screens",
     "createdAt",
     "updatedAt"
   ]

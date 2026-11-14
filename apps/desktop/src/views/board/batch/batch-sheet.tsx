@@ -1,6 +1,7 @@
 import {
   batchBranchStem,
   Delivery,
+  PASS_PAGE_CAP_MAX,
   PICK_MAX,
   WorkspaceMode,
   type GoalId,
@@ -20,8 +21,10 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useCandidates } from '../../../daemon/queries';
+import { namesAPage } from '../../workbench/start-pass-rules';
 import { BatchCandidate } from './batch-candidate';
 import { initialSelection, orderedSelection, startBlockers, toggle } from './batch-selection';
 import { sheetMode, submitLabel, type SheetMode } from './sheet-mode';
@@ -98,6 +101,15 @@ function Choices({ project, proposal, onStarted }: ChoicesProps) {
   const start = useStartWork(project.id);
   const blockers = startBlockers(proposal, selection, mode, batchTitle);
   const placementEditable = project.delivery === Delivery.PullRequest;
+  const navigate = useNavigate();
+  // Tasks that each work on a page can go through the Workbench instead (its spec §4.2).
+  const toWorkbench =
+    ordered.length > 0 &&
+    ordered.length <= PASS_PAGE_CAP_MAX &&
+    ordered.every((id) => {
+      const task = candidateOf.get(id);
+      return task !== undefined && namesAPage(task, project.areas);
+    });
   if (proposal.candidates.length === 0)
     return (
       <Text c="dimmed">No ready tasks. A task is ready when everything it depends on is done.</Text>
@@ -167,6 +179,17 @@ function Choices({ project, proposal, onStarted }: ChoicesProps) {
         </Alert>
       ) : null}
       <Group justify="flex-end">
+        {toWorkbench ? (
+          <Button
+            variant="default"
+            onClick={() => {
+              void navigate({ to: '/workbench', search: { tasks: ordered } });
+              onStarted();
+            }}
+          >
+            Work on These
+          </Button>
+        ) : null}
         <Button
           disabled={blockers.length > 0}
           loading={start.isPending}

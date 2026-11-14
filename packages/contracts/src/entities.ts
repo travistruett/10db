@@ -3,6 +3,8 @@ import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accoun
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
+import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
+import { ScreensMatrix } from './task-screens';
 import {
   AccountId,
   BatchId,
@@ -13,10 +15,13 @@ import {
   HandoffId,
   InboxItemId,
   LandingGroupId,
+  PassId,
+  PersonId,
   PermissionRuleId,
   ProjectId,
   SessionId,
   TaskId,
+  TaskMessageId,
   WorkstreamId,
 } from './ids';
 import {
@@ -30,12 +35,14 @@ import {
   Provider,
   QuestionCategory,
   RiskTag,
+  RoutedBy,
   TaskStatus,
   Urgency,
   WorkspaceMode,
   WorkstreamState,
 } from './states';
 import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
+import { StakeholderSendDto } from './slack';
 import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
@@ -86,8 +93,16 @@ const GlobbedDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(
  * falls back to its widest rule: a path no other area matches falls in it, so a file added later
  * (a new package, a first dotfile) is in an area. A path another area matches is never in it. A
  * project has at most one (`atMostOneCatchAll`); absent or false is an ordinary area.
+ *
+ * `role` says whether the area is a page of the project's app or code pages share; absent, the area
+ * behaves as it always has. `route` is the path that shows a page, on a page only. Two pages may not
+ * share a file (`areaRolesProblem`, checked on create and on patch).
  */
-export const AreaDef = GlobbedDef.extend({ catchAll: z.boolean().optional() });
+export const AreaDef = GlobbedDef.extend({
+  catchAll: z.boolean().optional(),
+  role: z.enum(AreaRole).optional(),
+  route: AreaRoute.optional(),
+});
 export type AreaDef = z.infer<typeof AreaDef>;
 
 /** The refusal for a project with two catch-all areas. */
@@ -98,6 +113,12 @@ export function atMostOneCatchAll(
   areas: readonly Pick<AreaDef, 'catchAll'>[] | undefined,
 ): boolean {
   return (areas ?? []).filter((a) => a.catchAll === true).length <= 1;
+}
+
+/** Adds the areas' role and route problem, if any, to a project being parsed. */
+function checkAreaRoles(areas: readonly AreaDef[] | undefined, ctx: z.RefinementCtx): void {
+  const problem = areaRolesProblem(areas ?? []);
+  if (problem !== null) ctx.addIssue({ code: 'custom', message: problem, path: ['areas'] });
 }
 
 /**
@@ -541,6 +562,11 @@ export const ProjectInput = z
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
      */
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
+    /**
+     * A pass's pull request shows each signed-off page's before and after pictures, pushed to a
+     * `10db-pictures/<pass>` branch of origin. Off by default: a picture can show the app's own data.
+     */
+    prPictures: z.boolean().default(false),
     /** The account that pays; absent means the default account. */
     accountId: AccountId.optional(),
     /**
@@ -587,6 +613,9 @@ export const ProjectInput = z
     path: ['precheckCommand'],
   })
   .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
+  .superRefine((p, ctx) => {
+    checkAreaRoles(p.areas, ctx);
+  })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
     {
@@ -596,6 +625,57 @@ export const ProjectInput = z
   );
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
+
+/** The loopback hosts a project's app address may name: this Mac, never another machine. */
+const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * Whether `raw` is exactly an `http` or `https` origin on a loopback host (`localhost`, a name under
+ * `.localhost`, `127.0.0.1` or `[::1]`), any port: no path, no query, no credentials, written as the
+ * browser writes the origin.
+ */
+export function isLoopbackOrigin(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    url.origin === raw &&
+    (LOOPBACK_HOSTS.includes(url.hostname) || url.hostname.endsWith('.localhost'))
+  );
+}
+
+/** Where the builder's dev server answers (Workbench spec §10): a loopback origin only. */
+export const AppUrl = z
+  .string()
+  .refine(
+    isLoopbackOrigin,
+    'An app address is an http origin on this Mac, such as http://localhost:8800',
+  );
+export type AppUrl = z.infer<typeof AppUrl>;
+
+/** Said when an app address names the daemon's own port: a page loaded there would reach 10db's API. */
+export const APP_URL_IS_DAEMON =
+  "That is 10db's own address: an app address names your dev server's port";
+
+/**
+ * Whether the app address is on the port the daemon listens on. Every app address is a loopback
+ * origin, so its port alone says it would reach the daemon's API.
+ */
+export function isDaemonAddress(appUrl: AppUrl, daemonPort: number): boolean {
+  const url = new URL(appUrl);
+  const port = url.port === '' ? (url.protocol === 'https:' ? 443 : 80) : Number(url.port);
+  return port === daemonPort;
+}
+
+/** A command the builder types for the project, such as its dev login; a blank one is no command. */
+const ProjectCommand = z
+  .string()
+  .max(2000)
+  .transform((c) => (c.trim() === '' ? null : c));
 
 export const ProjectDto = z.object({
   id: ProjectId,
@@ -634,6 +714,7 @@ export const ProjectDto = z.object({
   landing: z.enum(ProjectLanding),
   landingBranch: z.string().nullable(),
   prTitlePrefix: z.string().nullable(),
+  prPictures: z.boolean(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
   sandboxDocker: z.boolean(),
@@ -650,6 +731,17 @@ export const ProjectDto = z.object({
   worktreeSeed: z.array(z.string()),
   /** Area and hazard names whose tasks are proposed a separate copy. */
   isolate: z.array(z.string()),
+  /** Where the builder's dev server answers; null when the project has not said. */
+  appUrl: AppUrl.nullable(),
+  /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
+  devLoginCommand: z.string().nullable(),
+  /**
+   * Serves the app at its address while a UI Workbench pass is open, run by 10db under the gate's
+   * sandbox in the project's folder; null when the builder runs the dev server.
+   */
+  previewCommand: z.string().nullable(),
+  /** The viewports and themes each page's pictures are taken in. */
+  screens: ScreensMatrix,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -676,6 +768,7 @@ export const ProjectPatch = z
     /** The branch new tasks land in when `landing` is `branch`; a `landing` that is not `branch` forgets it. */
     landingBranch: BranchName.nullable(),
     prTitlePrefix: PrTitlePrefix.nullable(),
+    prPictures: z.boolean(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
     /** Replaces the project's hazards, commands included. */
@@ -692,10 +785,20 @@ export const ProjectPatch = z
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,
     isolate: Isolate,
+    /** Where Open Page goes; null forgets it. */
+    appUrl: AppUrl.nullable(),
+    /** Run under the gate's sandbox before pictures; blank or null forgets it. */
+    devLoginCommand: ProjectCommand.nullable(),
+    /** Run under the gate's sandbox while a pass is open; blank or null forgets it. */
+    previewCommand: ProjectCommand.nullable(),
+    screens: ScreensMatrix,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
   .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
+  .superRefine((p, ctx) => {
+    checkAreaRoles(p.areas, ctx);
+  })
   .refine(
     (p) => {
       const names = [...(p.areas ?? []), ...(p.hazards ?? [])].map((d) => d.name);
@@ -759,6 +862,13 @@ export const TaskDto = z.object({
    * so one pull request. Absent or null for a task that lands alone.
    */
   landingGroupId: LandingGroupId.nullable().optional(),
+  /** The Workbench pass the task is in; absent or null for a task outside every pass. */
+  passId: PassId.nullable().optional(),
+  /**
+   * Whether the task holds work saved from a Workbench pass it was taken out of, which its next start
+   * puts back; absent or false for none.
+   */
+  keptWork: z.boolean().optional(),
   /** The builder's own model setting for this task; null is no override, and Automatic is a setting. */
   modelSetting: ModelSetting.nullable(),
   createdAt: Timestamp,
@@ -812,6 +922,15 @@ export const NextAction = z.discriminatedUnion('kind', [
     providerSessionId: z.string().min(1).nullable(),
   }),
   z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
+  /**
+   * A builder message from the task's thread to act on: the provider session is resumed and handed
+   * it, or, with none, a fresh session starts from the thread's digest and then the message.
+   */
+  z.object({
+    kind: z.literal('feedback'),
+    messageId: TaskMessageId,
+    providerSessionId: z.string().min(1).nullable(),
+  }),
   /** The step ended with these changes in its claims uncommitted; the next session commits them. */
   z.object({ kind: z.literal('uncommitted'), paths: z.array(z.string().min(1)).min(1) }),
   /**
@@ -828,8 +947,17 @@ export const NextAction = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
   /** The work is done and the project has no gate: the builder approves it or sends it back. */
   z.object({ kind: z.literal('builder_review'), inboxId: InboxItemId }),
+  /**
+   * A page of a Workbench pass is Ready, or its turn failed: the builder looks at it and writes again
+   * or signs it off. `inboxId` names the Ready `check` item or the failed turn's `flag`.
+   */
+  z.object({ kind: z.literal('pass_review'), inboxId: InboxItemId }),
 ]);
 export type NextAction = z.infer<typeof NextAction>;
+
+/** What kind of next action a workstream has, without its fields. */
+export const NextActionKind = z.enum(NextAction.options.map((o) => o.shape.kind.value));
+export type NextActionKind = z.infer<typeof NextActionKind>;
 
 /** The longest `Notice.line`: one line on a task's card. */
 export const NOTICE_LINE_MAX = 500;
@@ -913,6 +1041,14 @@ export const WorkstreamDto = z.object({
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
   /**
+   * Who the task's question is out with, and since when: set only while its card has a sent send that has
+   * not come back, so the line never contradicts the Inbox's Open tab. The builder's own wait is not this.
+   */
+  waitingOn: z
+    .object({ names: z.array(z.string()), since: Timestamp })
+    .nullable()
+    .default(null),
+  /**
    * Whether a note told this run's session that its commits were reverted by Ship without it (a Retry
    * or a start that joined the batch wrote it), and that revert still stands: false once Ship without
    * it finds none on the branch. The notice slot can't say so: a joined run holds none, and a wait can
@@ -946,6 +1082,25 @@ export const InboxAnswer = z.object({
   record: DecisionRecording.nullable().optional(),
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
+
+/**
+ * An answer as stored. The extra keys are written by the daemon only; `InboxAnswer`, the HTTP body,
+ * drops them, so a client cannot answer as someone else.
+ */
+export const RecordedAnswer = InboxAnswer.extend({
+  answeredBy: z.string().optional(),
+  via: z.enum(['inbox', 'slack']).optional(),
+  /** The answerer's own words, when they chose none of the options. */
+  words: z.string().max(20000).optional(),
+  /** Others in the conversation, by name. */
+  with: z.array(z.string()).optional(),
+  /** What was said in the conversation that settled it, one entry per message, for the lane's resume. */
+  conversation: z
+    .array(z.object({ name: z.string().max(200), text: z.string().max(4000) }))
+    .max(100)
+    .optional(),
+});
+export type RecordedAnswer = z.infer<typeof RecordedAnswer>;
 
 /** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
 export const RetryInput = z.object({ note: z.string().max(4000).optional() });
@@ -1085,24 +1240,43 @@ export const InboxTarget = z.object({
 });
 export type InboxTarget = z.infer<typeof InboxTarget>;
 
-export const InboxItemDto = z.object({
-  id: InboxItemId,
-  projectId: ProjectId,
-  kind: z.enum(InboxKind),
-  state: z.enum(InboxState),
-  title: z.string(),
-  body: z.string(),
-  options: z.array(InboxOption),
-  recommendation: z.string().nullable(),
-  category: z.enum(QuestionCategory),
-  urgency: z.enum(Urgency),
-  assignee: z.string(),
-  detail: z.record(z.string(), z.json()).nullable(),
-  answer: InboxAnswer.nullable(),
-  targets: z.array(InboxTarget),
-  createdAt: Timestamp,
-  updatedAt: Timestamp,
-});
+export const InboxItemDto = z
+  .object({
+    id: InboxItemId,
+    projectId: ProjectId,
+    kind: z.enum(InboxKind),
+    state: z.enum(InboxState),
+    title: z.string(),
+    body: z.string(),
+    options: z.array(InboxOption),
+    recommendation: z.string().nullable(),
+    category: z.enum(QuestionCategory),
+    urgency: z.enum(Urgency),
+    assignee: z.string(),
+    /** Every handle the card is routed to, in routing order. */
+    assignees: z.array(z.string()).default([]),
+    routedBy: z.enum(RoutedBy).default(RoutedBy.Rule),
+    /** What triage suggested below the floor, for the builder to confirm. */
+    routeSuggestion: z
+      .object({ personIds: z.array(PersonId), confidence: z.number() })
+      .nullable()
+      .default(null),
+    /**
+     * Handles of people this question was meant for who are not on Slack: the card stays the builder's, and
+     * Copy for <name> offers them the message. Empty once the card is routed to Slack people or answered.
+     */
+    copyFor: z.array(z.string()).default([]),
+    send: StakeholderSendDto.nullable().default(null),
+    detail: z.record(z.string(), z.json()).nullable(),
+    answer: RecordedAnswer.nullable(),
+    targets: z.array(InboxTarget),
+    createdAt: Timestamp,
+    updatedAt: Timestamp,
+  })
+  // A card stored before routing named one assignee; its list is that one.
+  .overwrite((card) =>
+    card.assignees.length === 0 ? { ...card, assignees: [card.assignee] } : card,
+  );
 export type InboxItemDto = z.infer<typeof InboxItemDto>;
 
 export const PermissionRuleDto = z.object({

@@ -9,7 +9,7 @@
 
 - **The session.** A conversation's session starts through `SessionAdapter.startShape(ShapeSessionSpec)`, not
   the lane `SessionSpec`: a lane spec's `workstreamId`, sandbox, plugin and project MCP servers are lane-only,
-  and a Shape session has none of them. `sessions/claude-shape.ts` runs the SDK with `settingSources: []`,
+  and a Shape session has none of them. `sessions/claude-session.ts` (the explore profile) runs the SDK with `settingSources: []`,
   `strictMcpConfig`, no plugin, permission mode `default`, a `canUseTool` that denies, `tools` listing `Read`,
   `Grep`, `Glob` and `Agent`, and `disallowedTools` naming `Edit`, `Write`, `NotebookEdit`, `Bash`, `Monitor`,
   `WebFetch` and `WebSearch`. It keeps the lane adapter's account preflight and its event mapping.

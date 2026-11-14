@@ -508,7 +508,7 @@ describe('MCP tools in a worktree batch', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the thirteen tools', async () => {
+  it('lists exactly the seventeen tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -517,12 +517,16 @@ describe('MCP tools', () => {
       'complete_step',
       'file_follow_up',
       'find_knowledge',
+      'find_plan_entries',
       'get_context',
+      'get_plan_entry',
+      'get_plan_section',
       'install_dependencies',
       'propose',
       'record_decision',
       'record_evidence',
       'report_deviation',
+      'report_pages',
       'request_claim',
       'write_handoff',
     ]);
@@ -2509,7 +2513,6 @@ const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',

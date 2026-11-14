@@ -58,4 +58,23 @@ describe('daemons that are not the installed app', () => {
   ])('%s turns the judge off', (_name, path) => {
     expect(readRepoFile(path)).toMatch(JUDGE_OFF);
   });
+
+  // The reply watch and the sender message real people on the builder's bot token.
+  const SLACK_OFF = /TENDB_SLACK\s*[:=]\s*['"]?off\b/;
+
+  it.each([
+    ['the e2e web server', 'apps/desktop/e2e/playwright.config.ts'],
+    ['pnpm dev', 'scripts/dev.sh'],
+    ['the live acceptance daemon', 'apps/daemon/scripts/live-acceptance.ts'],
+  ])('%s turns Slack off', (_name, path) => {
+    expect(readRepoFile(path)).toMatch(SLACK_OFF);
+  });
+
+  it('every daemon test that spawns the entry turns Slack off', () => {
+    const spawners = globSync(['apps/daemon/src/**/*.test.ts', 'apps/daemon/test/**/*.test.ts'], {
+      cwd: repoRoot,
+    }).filter((path) => SPAWNS_DAEMON.test(readRepoFile(path)));
+    expect(spawners.length).toBeGreaterThanOrEqual(4);
+    expect(spawners.filter((path) => !SLACK_OFF.test(readRepoFile(path)))).toEqual([]);
+  });
 });

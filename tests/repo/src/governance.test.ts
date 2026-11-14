@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { z } from 'zod';
 import { readManifest, readRepoFile, repoRoot } from './workspace';
 import { workflowCheckNames } from './workflows';
 
@@ -126,7 +127,7 @@ describe('rulesets', () => {
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as { integration_id?: number }[];
-    expect(checks.length).toBe(12);
+    expect(checks.length).toBe(13);
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 
@@ -629,6 +630,21 @@ describe('community files', () => {
       expect(catchAll?.matchPackageNames).toContain(`!${dep}`);
     },
   );
+
+  it('names the command that regenerates the Codex types in the Codex PR note', () => {
+    const renovate = z
+      .looseObject({
+        packageRules: z.array(
+          z.looseObject({
+            matchPackageNames: z.array(z.string()).optional(),
+            prBodyNotes: z.array(z.string()).optional(),
+          }),
+        ),
+      })
+      .parse(JSON.parse(readRepoFile('renovate.json')));
+    const own = renovate.packageRules.find((r) => r.matchPackageNames?.includes('@openai/codex'));
+    expect(own?.prBodyNotes?.join('\n')).toContain('pnpm --filter @10db/daemon generate:codex');
+  });
 
   it('leaves the throwaway spikes alone', () => {
     const renovate = JSON.parse(readRepoFile('renovate.json')) as {

@@ -2,10 +2,13 @@ import { isAbsolute, posix, resolve, sep } from 'node:path';
 import { ClaimKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { ENDLESS_FILES, runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
+import { isOwnFile } from './account-rules';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
+import { JudgedRule, judgedRuleApplies } from './judged-rules';
 import { realPathOf } from './paths';
 import { laneReadOnlyWords } from './read-only';
+import { CLAUDE_TOOLS_REVIEWED } from './reviewed-tools';
 import { firstUnread } from './unread-commands';
 import { unreadableHazard } from './unread-hazards';
 
@@ -45,6 +48,8 @@ const OUT_OF_PROXY_TOOLS: ReadonlySet<string> = new Set([
   'ListMcpResourcesTool',
   'ReadMcpResourceTool',
 ]);
+/** The web tools a lane's agent judges itself where it can (`GuardInput.webOn`). */
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -114,12 +119,32 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
  * permission mode may decide it.
  */
 function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
+  // A rule the guard hands to a judge that runs. Only shell rules read the text, so none names git or sudo.
+  const handedToJudge = (rule: JudgedRule): boolean =>
+    !judgedRuleApplies(rule, {
+      judge: input.judge,
+      coveredByAllowRule: input.coveredByAllowRule,
+      namesGit: false,
+      namesSudo: false,
+    });
+  // The web goes to a judge that runs, and only while the project's Web switch is on. MCP calls
+  // stay with the broker under every judge: nothing yet shows the classifier judging them.
+  if (
+    WEB_TOOLS.has(input.toolName) &&
+    input.webOn === true &&
+    handedToJudge(JudgedRule.OutOfProxyTool)
+  )
+    return null;
   const judged = BROKER_JUDGES[input.toolName];
   if (judged !== undefined) return judged;
   if (actsOutsideSandboxProxy(input.toolName)) {
     return `${input.toolName} acts outside the sandbox's network proxy; 10db judges every call.`;
   }
-  if (!CLASSIFIER_TOOLS.has(input.toolName) && !input.toolName.startsWith('mcp__10db__')) {
+  if (
+    !CLASSIFIER_TOOLS.has(input.toolName) &&
+    !input.toolName.startsWith('mcp__10db__') &&
+    !(CLAUDE_TOOLS_REVIEWED.tools.has(input.toolName) && handedToJudge(JudgedRule.ReviewedTool))
+  ) {
     return `${input.toolName} is not a tool the classifier may decide for a lane; 10db judges it.`;
   }
   if (input.fileAccess !== undefined) {
@@ -134,15 +159,24 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
         : input.fileAccess.writeAsk(path);
     }
   }
+  let socketJudged = false;
   if (input.toolName === 'Monitor') {
     const keys = Object.keys(ToolInputRecord.safeParse(input.toolInput).data ?? { '': 0 });
     if (!keys.every((key) => MONITOR_INPUT_KEYS.has(key))) {
-      return 'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.';
+      // A socket reaches its host from Claude Code's own process, as WebFetch does, so it goes to a
+      // judge only while the Web switch is on.
+      if (input.webOn !== true || !handedToJudge(JudgedRule.MonitorSocket)) {
+        return 'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.';
+      }
+      socketJudged = true;
     }
   } else if (input.toolName !== 'Bash') return null;
   const command = stringField(input.toolInput, 'command');
   if (command === null) {
-    return input.toolName === 'Monitor' ? 'Monitor carried no command to read.' : null;
+    // A Monitor that only opens a socket has no command to read; the judge that took the socket sees it.
+    return input.toolName === 'Monitor' && !socketJudged
+      ? 'Monitor carried no command to read.'
+      : null;
   }
   // A background call never blocks the lane, so a loop with no end holds a core while it goes on.
   // A Monitor command always runs beside the lane.
@@ -168,6 +202,17 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
 
 const READS_ONLY =
   'Every part of this command only reads (decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md).';
+
+const OWN_PICTURE =
+  "A picture pasted into this task's thread is the session's to read (Workbench spec §13).";
+
+/** Whether the call is a Read of a picture pasted into the session's own task. */
+function readsOwnPicture(input: GuardInput): boolean {
+  if (input.toolName !== 'Read' || input.ownSession?.filesDir === undefined) return false;
+  const file = stringField(input.toolInput, 'file_path');
+  const from = input.cwd !== undefined && isAbsolute(input.cwd) ? input.cwd : input.repoPath;
+  return file !== null && isOwnFile(input.ownSession.filesDir, file, from);
+}
 
 /** A word longer than this is not split into the paths it may hold; the call keeps today's judgement. */
 const MAX_OPTION_WORD = 256;
@@ -283,5 +328,7 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const reads = onlyReads(input);
   const reason = brokerAsk(input, reads);
   if (reason !== null) return { decision: 'ask', reason };
+  // The judge opened it, and the data directory holds it: no allow rule or classifier reaches it.
+  if (readsOwnPicture(input)) return { decision: 'allow', settled: OWN_PICTURE };
   return reads ? { decision: 'allow', settled: READS_ONLY } : verdict;
 }

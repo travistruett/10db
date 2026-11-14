@@ -27,15 +27,22 @@ const entry = (slug: string, score: number) => ({
   model_creator: { id: 'c', name: 'Test Lab' },
   evaluations: {
     artificial_analysis_intelligence_index: score,
-    artificial_analysis_coding_index: score - 1,
-    artificial_analysis_agentic_index: score - 2,
+    // AA keeps both keys, always null: it no longer publishes a Coding or an Agentic Index.
+    artificial_analysis_coding_index: null,
+    artificial_analysis_agentic_index: null,
   },
   artificial_analysis_intelligence_index_cost: {
     total_cost: 1,
     cost_per_task: { total_cost: score / 100 },
   },
   pricing: { price_1m_input_tokens: 1, price_1m_output_tokens: 2 },
-  performance: { median_output_tokens_per_second: 50 },
+  // Both shapes AA serves until the old fields go null: speed is read from `performance_v3` only.
+  performance: { median_output_tokens_per_second: 70 },
+  performance_v3: {
+    mean_output_tokens_per_second: 50,
+    mean_time_to_first_token_seconds: 1,
+    mean_time_to_first_answer_token_seconds: 2,
+  },
 });
 const page = (data: object[], hasMore: boolean, pageNo = 1, version = '9.9') => ({
   tier: 'free',
@@ -117,7 +124,7 @@ describe('benchmark sync', () => {
       'other-lab-model',
     ]);
     expect(opusHigh()).toMatchObject({
-      scores: { intelligence: 50, coding: 49, agentic: 48 },
+      scores: { intelligence: 50 },
       costPerTaskUsd: 0.5,
       outputTokensPerSecond: 50,
       indexVersion: '9.9',
@@ -215,7 +222,7 @@ describe('benchmark sync', () => {
     ).sync();
     expect(status.outcome).toBe('ok');
     expect(opusHigh()).toMatchObject({
-      scores: { intelligence: null, coding: null, agentic: null },
+      scores: { intelligence: null },
       costPerTaskUsd: null,
     });
     expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
@@ -247,6 +254,38 @@ describe('benchmark sync', () => {
     expect(status.models).toBe(0);
   });
 
+  it.each([
+    {
+      name: 'the old fields gone null',
+      performance: {
+        median_output_tokens_per_second: null,
+        median_time_to_first_token_seconds: null,
+      },
+      performance_v3: { mean_output_tokens_per_second: 40, mean_time_to_first_token_seconds: 1 },
+      speed: 40,
+    },
+    {
+      name: 'no v3 measurement in the window',
+      performance: { median_output_tokens_per_second: 70 },
+      performance_v3: null,
+      speed: null,
+    },
+    {
+      name: 'no v3 object at all',
+      performance: { median_output_tokens_per_second: 70 },
+      performance_v3: undefined,
+      speed: null,
+    },
+  ])(
+    'reads the speed from performance_v3 with $name',
+    async ({ performance, performance_v3, speed }) => {
+      const listed = { ...entry('claude-opus-5-5-high', 50), performance, performance_v3 };
+      const status = await sync(fakeFetch({ status: 200, body: page([listed], false) })).sync();
+      expect(status.outcome).toBe('ok');
+      expect(opusHigh()?.outputTokensPerSecond).toBe(speed);
+    },
+  );
+
   it('reports a listed profile AA gives no cost as unmeasured', async () => {
     const unpriced = {
       ...entry('claude-opus-5-5-high', 50),
@@ -257,33 +296,15 @@ describe('benchmark sync', () => {
     expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
   });
 
-  it('reports a listed profile with no coding or agentic score as missing scores, not unmeasured', async () => {
-    const partial = {
-      ...entry('claude-opus-5-5-high', 50),
-      evaluations: { artificial_analysis_intelligence_index: 50 },
-    };
-    const status = await sync(fakeFetch({ status: 200, body: page([partial], false) })).sync();
-    expect(status.unmeasuredProfiles).not.toContain('claude-opus-5-5@high');
-    expect(status.missingScores).toContainEqual({
-      profile: 'claude-opus-5-5@high',
-      kinds: ['coding', 'agentic'],
-    });
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5@max');
-  });
-
   it('reports a listed profile with no intelligence score as unmeasured', async () => {
     const noIntelligence = {
       ...entry('claude-opus-5-5-high', 50),
-      evaluations: { artificial_analysis_coding_index: 49 },
+      evaluations: { artificial_analysis_engineering_index: 49 },
     };
     const status = await sync(
       fakeFetch({ status: 200, body: page([noIntelligence], false) }),
     ).sync();
     expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
-    expect(status.missingScores).toContainEqual({
-      profile: 'claude-opus-5-5@high',
-      kinds: ['intelligence', 'agentic'],
-    });
   });
 
   it('reports an unlisted profile as unmeasured and a fully scored one as neither', async () => {
@@ -291,12 +312,10 @@ describe('benchmark sync', () => {
       fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
     ).sync();
     expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@medium');
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5-5@medium');
     expect(status.unmeasuredProfiles).not.toContain('claude-opus-5-5@high');
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5-5@high');
   });
 
-  it('reads a status stored before missing scores were recorded', () => {
+  it('reads a status stored while it still listed the coding and agentic scores AA gave none of', () => {
     const s = sync(fakeFetch());
     state.write((ctx) => {
       setAppSetting(ctx, 'benchmarks.status', {
@@ -306,15 +325,16 @@ describe('benchmark sync', () => {
         outcome: null,
         message: 'stored earlier',
         unmeasuredProfiles: ['claude-opus-5-5@low'],
+        missingScores: [{ profile: 'claude-opus-5-5@low', kinds: ['coding', 'agentic'] }],
       });
     });
     expect(s.status()).toMatchObject({
       keyConfigured: true,
       message: 'stored earlier',
       unmeasuredProfiles: ['claude-opus-5-5@low'],
-      missingScores: [],
       indexVersion: null,
     });
+    expect(s.status()).not.toHaveProperty('missingScores');
   });
 
   describe('index version', () => {

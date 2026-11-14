@@ -2,24 +2,34 @@ import {
   EventsHead,
   KeepAwakeStatus,
   LanePermissionsDto,
+  PicturesStatusDto,
+  PlanRecordDto,
   PROTOCOL_VERSION,
   SelfUpdateStatusDto,
   SystemCheckDto,
+  TaskScreensDto,
 } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createMemoryHistory } from '@tanstack/react-router';
-import { render } from '@testing-library/react';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router';
+import { act, render } from '@testing-library/react';
 import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler } from 'msw';
 import { setupServer } from 'msw/node';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { App } from '../app';
 import type { ConnectionResolver, DaemonConnection } from '../daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
+import { githubStatusDto } from './github-fixtures';
 import { projectViewDto } from './fixtures';
+import { BUILDER_PERSON, slackConnection } from './people-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -62,6 +72,8 @@ export function baseHandlers(
     }),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
+    // Settings › Integrations reads gh's login; signed in, no Sign In running.
+    http.get(daemonUrl('/github', base), () => HttpResponse.json(githubStatusDto())),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),
@@ -104,8 +116,40 @@ export function baseHandlers(
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    // A task's drawer asks what its lane got of a Plan; a task filed by hand has none.
+    http.get(daemonUrl('/tasks/:taskId/plan-context', base), () =>
+      HttpResponse.json({ context: null, packed: null, checks: [] }),
+    ),
+    // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
+    http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>
+      HttpResponse.json(
+        PlanRecordDto.parse({
+          shapeId: params['shapeId'],
+          projectId: BASE_PROJECT.id,
+          title: 'Board polish',
+          importedAt: null,
+          origin: null,
+          documents: [],
+          counts: { decisions: 0, evidence: 0, reviews: 0, questions: 0, tasks: 0 },
+        }),
+      ),
+    ),
+    // A task's thread and drawer show its pictures of the app; none taken.
+    http.get(daemonUrl('/tasks/:taskId/screens', base), ({ params }) =>
+      HttpResponse.json(
+        TaskScreensDto.parse({ taskId: params['taskId'], screens: [], fromGoal: [] }),
+      ),
+    ),
+    // Settings › General says how the browser for pictures stands; off until a project needs it.
+    http.get(daemonUrl('/projects/:projectId/pictures', base), () =>
+      HttpResponse.json(
+        PicturesStatusDto.parse({ browser: { state: 'off', problem: null }, signIn: null }),
+      ),
+    ),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
+    // The sidebar and the Workbench read every project's live pass; none is open.
+    http.get(daemonUrl('/passes', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/self-update', base), () =>
       HttpResponse.json(
         SelfUpdateStatusDto.parse({
@@ -148,6 +192,14 @@ export function baseHandlers(
         }),
       ),
     ),
+    // People, Integrations, the Inbox and Who Answers read who the builder can ask and how Slack stands.
+    http.get(daemonUrl('/people', base), () => HttpResponse.json([BUILDER_PERSON])),
+    http.get(daemonUrl('/slack', base), () => HttpResponse.json(slackConnection())),
+    http.get(daemonUrl('/stakeholders/timers', base), () =>
+      HttpResponse.json({ remindAfterHours: 4, returnAfterHours: 8 }),
+    ),
+    http.get(daemonUrl('/projects/:projectId/routing-rules', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/tasks/:taskId/question-routes', base), () => HttpResponse.json([])),
     // Sockets connect and stay quiet unless a test adds its own connection listener.
     eventStream.addEventListener('connection', () => undefined),
   ];
@@ -184,13 +236,13 @@ export function renderApp(
   return { router, queryClient };
 }
 
-/** One component inside the providers, without the router or shell. */
+/** One component inside the providers, without the router or shell; `rerender` keeps the providers. */
 export function renderWithDaemon(
   ui: ReactElement,
   opts: RenderOptions = {},
-): { queryClient: QueryClient } {
+): { queryClient: QueryClient; rerender: (ui: ReactElement) => void } {
   const queryClient = testQueryClient();
-  render(
+  const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <MantineProvider
       theme={theme}
       cssVariablesResolver={cssVariablesResolver}
@@ -201,10 +253,25 @@ export function renderWithDaemon(
           resolve={opts.resolve ?? resolveTest}
           {...(opts.intervals ? { intervals: opts.intervals } : {})}
         >
-          {ui}
+          {children}
         </DaemonProvider>
       </QueryClientProvider>
-    </MantineProvider>,
+    </MantineProvider>
   );
-  return { queryClient };
+  const { rerender } = render(ui, { wrapper });
+  return { queryClient, rerender };
+}
+
+/**
+ * One component inside the providers and a router of its own at `/`, for a view that talks to the
+ * daemon and links elsewhere in the app; following a link changes the router's location only.
+ */
+export async function renderWithDaemonAndRouter(ui: ReactElement, opts: RenderOptions = {}) {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => ui }),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  });
+  await act(() => router.load());
+  const { queryClient } = renderWithDaemon(<RouterProvider router={router} />, opts);
+  return { queryClient, router };
 }

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "overrides": {
+      "type": "object",
+      "properties": {
+        "web": {
+          "type": "boolean"
+        },
+        "projectInstructions": {
+          "type": "boolean"
+        },
+        "yourInstructions": {
+          "type": "boolean"
+        },
+        "yourSkills": {
+          "type": "boolean"
+        },
+        "yourPlugins": {
+          "type": "boolean"
+        },
+        "projectSkills": {
+          "type": "boolean"
+        },
+        "plugins": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "effective": {
+      "type": "object",
+      "properties": {
+        "web": {
+          "type": "boolean"
+        },
+        "projectInstructions": {
+          "type": "boolean"
+        },
+        "yourInstructions": {
+          "type": "boolean"
+        },
+        "yourSkills": {
+          "type": "boolean"
+        },
+        "yourPlugins": {
+          "type": "boolean"
+        },
+        "projectSkills": {
+          "type": "boolean"
+        },
+        "plugins": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "required": [
+        "web",
+        "projectInstructions",
+        "yourInstructions",
+        "yourSkills",
+        "yourPlugins",
+        "projectSkills",
+        "plugins"
+      ],
+      "additionalProperties": false
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "leftOut": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "what": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "what",
+              "why"
+            ]
+          }
+        }
+      },
+      "required": [
+        "skills",
+        "plugins",
+        "leftOut"
+      ]
+    }
+  },
+  "required": [
+    "overrides",
+    "effective",
+    "preview"
+  ]
+}

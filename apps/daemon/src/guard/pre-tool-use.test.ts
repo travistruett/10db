@@ -1,6 +1,7 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
+import { ClaimKind, DEFAULT_HAZARDS, JudgeKind } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { judgePreToolUse, protectedPaths } from './index';
@@ -21,8 +22,16 @@ const MIGRATIONS: Claims = [...AREA, { kind: ClaimKind.Hazard, name: 'migrations
 const DEPS: Claims = [...AREA, { kind: ClaimKind.Hazard, name: 'deps' }];
 const EVERY_HAZARD_COMMAND: Claims = [...MIGRATIONS, { kind: ClaimKind.Hazard, name: 'deps' }];
 
-function judge(toolName: string, toolInput: unknown, claims: Claims = AREA) {
+function judge(
+  toolName: string,
+  toolInput: unknown,
+  claims: Claims = AREA,
+  extra: Partial<Parameters<typeof judgePreToolUse>[0]> = {},
+) {
   return judgePreToolUse({
+    judge: JudgeKind.Rules,
+    coveredByAllowRule: false,
+    ...extra,
     toolName,
     toolInput,
     repoPath: repo.path,
@@ -163,6 +172,22 @@ describe('judgePreToolUse', () => {
     expect(judge(toolName, input, claims).decision).toBe(decision);
   });
 
+  // Where Claude Code's auto mode judges the web, the call goes to its classifier, not a card.
+  it.each<[string, string, unknown, 'allow' | 'ask']>([
+    ['WebSearch, judged', 'WebSearch', { query: 'drizzle-kit generate custom' }, 'allow'],
+    [
+      'WebFetch, judged',
+      'WebFetch',
+      { url: 'https://example.net/', prompt: 'What is on the page?' },
+      'allow',
+    ],
+    ['mcp__repo__x, judged', 'mcp__repo__x', {}, 'ask'],
+  ])('%s', (_name, toolName, input, decision) => {
+    expect(judge(toolName, input, AREA, { judge: JudgeKind.Native, webOn: true }).decision).toBe(
+      decision,
+    );
+  });
+
   it('names what it could not read when it asks about a command', () => {
     expect(judge('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toEqual({
       decision: 'ask',
@@ -175,5 +200,64 @@ describe('judgePreToolUse', () => {
       judge('Write', { file_path: join(repo.path, 'db', 'migrations', '0001.sql'), content: '' })
         .decision,
     ).toBe('deny');
+  });
+
+  it("settles a Read of a picture pasted into the session's own task, and refuses another task's", () => {
+    const files = (task: string) => join(data.path, 'tasks', task, 'files');
+    for (const task of ['tsk_own', 'tsk_other']) {
+      mkdirSync(files(task), { recursive: true });
+      writeFileSync(join(files(task), 'shot.png'), 'png');
+    }
+    const read = (task: string) =>
+      judgePreToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
+        toolName: 'Read',
+        toolInput: { file_path: join(files(task), 'shot.png') },
+        repoPath: repo.path,
+        areas: [{ name: 'repo', globs: ['**'] }],
+        hazards: DEFAULT_HAZARDS,
+        claims: AREA,
+        readOnly: false,
+        protectedPaths: protectedPaths({
+          dataDir: data.path,
+          home: homedir(),
+          loginConfigDir: null,
+        }),
+        ownSession: {
+          configDir: join(data.path, 'accounts', 'acc_1', 'claude'),
+          providerSessionId: null,
+          filesDir: files('tsk_own'),
+        },
+      });
+    expect(read('tsk_own')).toEqual({ decision: 'allow', settled: expect.any(String) as string });
+    expect(read('tsk_other').decision).toBe('deny');
+  });
+});
+
+describe('judgePreToolUse in a pass', () => {
+  it("denies a write to a page's file under a held shared area, naming the page", () => {
+    const verdict = judgePreToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
+      toolName: 'Write',
+      toolInput: { file_path: 'src/settings/page.tsx', content: 'x' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: ClaimKind.Area, name: 'src' }],
+      readOnly: false,
+      inPass: { pages: ['settings'], baseBranch: 'main' },
+      protectedPaths: protectedPaths({
+        dataDir: data.path,
+        home: homedir(),
+        loginConfigDir: login.path,
+      }),
+    });
+    expect(verdict.decision).toBe('deny');
+    if (verdict.decision === 'deny') expect(verdict.reason).toContain('page "settings"');
   });
 });

@@ -6,6 +6,8 @@ import {
   type UngroupedDigestDto,
 } from '@10db/contracts';
 import { GOAL_STATUS_LOOK } from '../board/goal-status';
+import { elapsedWords } from '../board/task-state';
+import { joinNames } from '../inbox/route-line';
 
 const G = GoalStatus;
 
@@ -49,8 +51,17 @@ export function verdictLine(digest: GoalDigestDto): string {
     case G.Done:
       return `${label} · ${progressLine(digest)}`;
     case G.WaitingOnYou:
-    case G.WaitingOnSomeone:
       return `${label} · ${plural(openCards(digest), 'card')} · ${progressLine(digest)}`;
+    case G.WaitingOnSomeone: {
+      const names = [...new Set(digest.waitingOnSomeone.flatMap((c) => c.names))];
+      const since = digest.waitingOnSomeone.map((c) => c.at).sort()[0];
+      return [
+        names.length > 0 ? `Waiting on ${joinNames(names)}` : label,
+        plural(digest.waitingOnSomeone.length, 'question'),
+        ...(since === undefined ? [] : [elapsedWords(since)]),
+        progressLine(digest),
+      ].join(' · ');
+    }
     case G.Queued:
       return `${label} · ${progressLine(digest)} · waiting for a lane`;
     case G.Shipping:

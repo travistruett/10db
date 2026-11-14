@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { SECRET_CHARACTERS } from './accounts';
-import { JudgeCallId, TaskId, WorkstreamId } from './ids';
+import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
 
 /** A routine decision the daemon can ask a fast model to make. */
 export const JudgeDecision = {
@@ -11,6 +10,14 @@ export const JudgeDecision = {
   ShapeRecord: 'shape_record',
   /** Shape: is this a question only someone else can answer? */
   ShapeElsewhere: 'shape_elsewhere',
+  /** Stakeholder questions: which of the project's category and topic routes a question belongs to. */
+  QuestionRoute: 'question_route',
+  /** Stakeholder questions: which option a conversation landed on. */
+  ThreadAnswer: 'thread_answer',
+  /** Stakeholder questions: which open question a top-level reply answers. */
+  ReplyMatch: 'reply_match',
+  /** Stakeholder questions: whether a reply approves the open proposal. */
+  ApprovalRead: 'approval_read',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -44,35 +51,55 @@ const DEFAULT_DECISION: JudgeDecisionConfig = {
   floor: 0.8,
 };
 
-/** Shape's decisions came later: a config stored before them reads with their defaults. */
+/** Later decisions: a config stored before them reads with their defaults. */
 const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
   JudgeDecisionConfig.default({ ...DEFAULT_DECISION });
 
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
+  /** The OpenRouter account decisions run on; null until the builder picks one. */
+  accountId: AccountId.nullable().default(null),
   decisions: z.object({
     [JudgeDecision.ReviewSize]: JudgeDecisionConfig,
     [JudgeDecision.ShapeReady]: shapeDecision(),
     [JudgeDecision.ShapeRecord]: shapeDecision(),
     [JudgeDecision.ShapeElsewhere]: shapeDecision(),
+    [JudgeDecision.QuestionRoute]: shapeDecision(),
+    [JudgeDecision.ThreadAnswer]: shapeDecision(),
+    [JudgeDecision.ReplyMatch]: shapeDecision(),
+    [JudgeDecision.ApprovalRead]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
 
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   enabled: true,
+  accountId: null,
   decisions: {
     [JudgeDecision.ReviewSize]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
+    [JudgeDecision.QuestionRoute]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ThreadAnswer]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ReplyMatch]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
   },
 };
 
 export const JudgeStatusDto = z.object({
   config: JudgeConfig,
-  /** Whether a key is in the Keychain; never the key. */
-  keySet: z.boolean(),
+  /** The account decisions run on, or null when none is picked or the one picked no longer resolves. */
+  account: z
+    .object({
+      id: AccountId,
+      label: z.string(),
+      /** Whether the key is usable: `secretState` is `set`. */
+      secretSet: z.boolean(),
+      /** Whether the account's key is recorded, missing from the Keychain, or changed since it was recorded. */
+      secretState: z.enum(['set', 'missing', 'changed']),
+    })
+    .nullable(),
   /** The daemon was started with `TENDB_JUDGE=off`: it never reads the key or calls OpenRouter. */
   off: z.boolean(),
 });
@@ -84,12 +111,17 @@ const JudgeDecisionConfigPatch = JudgeDecisionConfig.partial().strict();
 export const JudgeConfigPatch = z
   .object({
     enabled: z.boolean(),
+    accountId: AccountId.nullable(),
     decisions: z
       .object({
         [JudgeDecision.ReviewSize]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,
+        [JudgeDecision.QuestionRoute]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ThreadAnswer]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ReplyMatch]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),
@@ -97,17 +129,6 @@ export const JudgeConfigPatch = z
   .partial()
   .strict();
 export type JudgeConfigPatch = z.infer<typeof JudgeConfigPatch>;
-
-/** `PUT /judge/key`. The key reaches the Keychain on `security`'s standard input, so it is printable ASCII. */
-export const JudgeKeyInput = z.strictObject({
-  key: z
-    .string()
-    .trim()
-    .min(1)
-    .max(8192)
-    .regex(SECRET_CHARACTERS, 'printable ASCII with no spaces, double quotes or backslashes'),
-});
-export type JudgeKeyInput = z.infer<typeof JudgeKeyInput>;
 
 export const JudgeTestResultDto = z.discriminatedUnion('ok', [
   z.object({

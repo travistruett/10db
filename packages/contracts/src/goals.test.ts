@@ -247,6 +247,13 @@ describe('GoalDigestDto', () => {
     },
   };
 
+  it('reads a digest from before questions went to other people as waiting on no one else', () => {
+    const old = Object.fromEntries(
+      Object.entries(digest).filter(([key]) => key !== 'waitingOnSomeone'),
+    );
+    expect(GoalDigestDto.parse(old).waitingOnSomeone).toEqual([]);
+  });
+
   it('carries every row of the digest table and the Ungrouped group', () => {
     const parsed = GoalDigestDto.parse(digest);
     expect(Object.keys(parsed).sort()).toEqual(
@@ -259,6 +266,7 @@ describe('GoalDigestDto', () => {
         'workingNow',
         'team',
         'waitingOn',
+        'waitingOnSomeone',
         'next',
         'deviations',
         'decisions',

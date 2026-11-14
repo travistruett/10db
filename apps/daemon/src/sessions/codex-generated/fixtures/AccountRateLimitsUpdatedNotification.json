@@ -1,0 +1,1194 @@
+[
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": null
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": null,
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": null,
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": null,
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": null,
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": null,
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "go",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "plus",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "pro",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "prolite",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "promax",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "team",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "self_serve_business_prolite",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "self_serve_business_usage_based",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "business",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "ent26",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "enterprise_cbp_automation",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "enterprise_cbp_usage_based",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "enterprise",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "edu",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "edu_plus",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "edu_pro",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "sci",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "sci_plus",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "unknown",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": null,
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": null,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": null
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": null,
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "workspace_owner_credits_depleted",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "workspace_member_credits_depleted",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "workspace_owner_usage_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "workspace_member_usage_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": null,
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": null,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": null
+      },
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": null,
+      "spendControlReached": false
+    }
+  },
+  {
+    "rateLimits": {
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "x"
+      },
+      "individualLimit": {
+        "limit": "x",
+        "remainingPercent": 0,
+        "resetsAt": 0,
+        "used": "x"
+      },
+      "limitId": "x",
+      "limitName": "x",
+      "normalModelSlug": "x",
+      "planType": "free",
+      "primary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "secondary": {
+        "usedPercent": 0,
+        "resetsAt": 0,
+        "windowDurationMins": 0
+      },
+      "spendControlReached": null
+    }
+  }
+]

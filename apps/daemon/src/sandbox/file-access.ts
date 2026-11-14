@@ -15,11 +15,25 @@ export interface FileAccessContext {
   readonly checkout: string;
   readonly home: string;
   readonly protectedReads: readonly string[];
-  /** The checkout's secret files by exact real path; unlike protected reads, a search over their directory is not refused. */
+  /**
+   * The secret files by real path, and everything under one that is a directory; unlike protected reads,
+   * a search over their directory is not refused.
+   */
   readonly secretFiles?: readonly string[];
+  /**
+   * The checkout's secret files a Read may open once the builder allows it on a card, where a person
+   * is in the session (a pass), as in Claude Code. Each is also in `secretFiles`, so a search over one
+   * and every other tool stay refused.
+   */
+  readonly secretsOnCard?: readonly string[];
   readonly readList: readonly string[];
   /** The system documentation this context reads without asking: `SYSTEM_DOC_ROOTS` for a lane. */
   readonly systemDocRoots?: readonly string[];
+  /**
+   * The pictures pasted into the lane's task's thread, which the data directory holds: a file in it
+   * is read, though the directory sits in a protected path. A search of it is not.
+   */
+  readonly filesDir?: string;
   /** Claude Code's config directory, where it keeps each session's tool results. */
   readonly configDir: string;
   /** The id Claude Code knows the session by; null until a start or resume names it. */
@@ -34,6 +48,11 @@ export interface FileAccessContext {
    * never right (a lane builds paths from its own copy), so it is refused, not asked about.
    */
   readonly worktreeRoot?: string;
+  /**
+   * The folders a session's setup opened read-only (`LaneSession.setup.reads`), real paths each judged
+   * by `setupReadRefusal`, which never opens one that holds a protected path.
+   */
+  readonly setupReads?: readonly string[];
 }
 
 /**
@@ -161,6 +180,11 @@ function spellings(root: string): string[] {
   return real === null || real === root ? [root] : [root, real];
 }
 
+/** True only for a file inside the task's own pictures directory, on a real path. */
+function isUnderOwnFiles(realPath: string, filesDir: string): boolean {
+  return spellings(filesDir).some((dir) => realPath !== dir && isEqualOrUnder(realPath, dir));
+}
+
 /**
  * True only for a file under this session's own `tool-results` directory in Claude Code's config:
  * `<configDir>/projects/<slug>/<providerSessionId>/tool-results/<file>`.
@@ -270,9 +294,28 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
   'outside-copy': 3,
 };
 
+/** Whether `real` is, or is under, one of the checkout's secrets a card may open (`secretsOnCard`). */
+export function isSecretOnCard(real: string, ctx: FileAccessContext): boolean {
+  return (ctx.secretsOnCard ?? []).some(
+    (file) =>
+      isEqualOrUnder(real, file) &&
+      spellings(ctx.checkout).some((root) => isEqualOrUnder(file, root)),
+  );
+}
+
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
-  if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
+  if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
+  // A secret may be a directory (a `.env` folder, or a `.env` link's target): its whole tree is closed,
+  // but for a Read of the checkout's own secret where the builder is there to allow it.
+  if (!tree && isSecretOnCard(real, ctx)) return 'ask';
+  if ((ctx.secretFiles ?? []).some((file) => isEqualOrUnder(real, file))) return 'protected';
+  if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) {
+    // A search of an opened folder that holds a secret file would read it: search a narrower one.
+    if (tree && (ctx.secretFiles ?? []).some((file) => isEqualOrUnder(file, real)))
+      return 'contains-protected';
+    return 'allowed';
+  }
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
   const roots = [...ctx.protectedReads, ...(ownTemp ? [] : ctx.sandboxTemp.roots)].flatMap(
     spellings,
@@ -435,8 +478,11 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
     readAsk(toolName, input, cwd) {
       try {
         for (const path of readPathsOf(toolName, input)) {
-          if (readAccess(path, ctx, toolName !== 'Read', cwd).access === 'ask') {
-            return `${path} is outside the paths a lane may read without asking.`;
+          const { access, realPath } = readAccess(path, ctx, toolName !== 'Read', cwd);
+          if (access === 'ask') {
+            return isSecretOnCard(realPath, ctx)
+              ? `${path} holds the project's secrets, so the builder is asked before it is read.`
+              : `${path} is outside the paths a lane may read without asking.`;
           }
         }
         return null;

@@ -8,27 +8,45 @@ import type {
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec } from '../sandbox';
 import { createChannel } from './channel';
-import { startShapeSession } from './claude-shape';
-import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
-import type { QueryFn } from './claude-adapter';
+import {
+  assistantMessage,
+  blockStart,
+  blockStop,
+  initMessage,
+  messageStart,
+  resultMessage,
+  streamEvent,
+  textBlock,
+  textDelta,
+  toolResultMessage,
+  toolUseBlock,
+} from './claude-test-support';
+import { SKILL_NAMES_LINE } from './setup-prompt';
+import { startShapeSession, type QueryFn } from './claude-session';
 import type {
   SessionEvent,
-  ShapeSessionSpec,
+  ExploreProfile,
+  ExploreSessionSpec,
   ShapeToolRequest,
   ShapeToolResult,
   ToolRequest,
 } from './types';
+import { testPolicy } from '../../test/fixtures';
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
-function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
+type ExploreOverrides = Partial<Omit<ExploreSessionSpec, 'profile'>> & {
+  readonly profile?: Partial<Omit<ExploreProfile, 'kind'>>;
+};
+
+function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
+  const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
-    shapeId: mintId('Shape'),
+    policy: testPolicy('plan'),
     cwd: '/repo',
-    systemPrompt: 'You are Shape.',
     prompt: 'First message',
     model: 'claude-sonnet-5-5',
     effort: 'high',
@@ -40,16 +58,23 @@ function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
       kind: 'claude_subscription',
       identity: 'builder@example.com',
     },
-    tools: ['Read', 'Grep', 'Glob', 'Agent'],
-    allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
-    disallowedTools: ['Edit', 'Bash'],
-    agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
     sandbox: null,
     projectMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'not in this test' }),
-    ...overrides,
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),
+    ...core,
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are Shape.',
+      tools: ['Read', 'Grep', 'Glob', 'Agent'],
+      allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
+      disallowedTools: ['Edit', 'Bash'],
+      agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
+      ...profile,
+    },
   };
 }
 
@@ -77,7 +102,6 @@ const readOnlySandbox: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   shellEnv: {},
   disallowedTools: ['Read(//h/.claude.json)'],
-  autoMode: autoModeRules(null),
   askRules: ['Edit(//repo/.mcp.json)'],
 };
 
@@ -206,6 +230,36 @@ describe('a Shape session’s SDK options', () => {
     });
   });
 
+  it('appends the instructions after Shape’s own prompt, on the preset', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec({
+        instructions: '# AGENTS.md\nUse pnpm.',
+        setup: { plugins: ['/s/yours'], skillRoots: [] },
+      }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    expect(run.options?.systemPrompt).toEqual({
+      type: 'preset',
+      preset: 'claude_code',
+      append: `You are Shape.\n\n# AGENTS.md\nUse pnpm.\n\n${SKILL_NAMES_LINE}`,
+    });
+  });
+
+  it('passes the setup’s plugin dirs and no harness', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec({ setup: { plugins: ['/s/yours', '/s/plugins/p'], skillRoots: [] } }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    expect(run.options?.plugins).toEqual([
+      { type: 'local', path: '/s/yours' },
+      { type: 'local', path: '/s/plugins/p' },
+    ]);
+  });
+
   it('runs its commands in the read-only sandbox it is given, with the scrub on', async () => {
     const { query, run } = fakeQuery();
     const handle = startShapeSession(spec({ sandbox: readOnlySandbox }), deps(query));
@@ -251,7 +305,11 @@ describe('a Shape session’s SDK options', () => {
       spec({
         canUseTool: (req) => {
           seen.push(req);
-          return Promise.resolve({ behavior: 'deny', message: 'the builder said no' });
+          return Promise.resolve({
+            behavior: 'deny',
+            message: 'the builder said no',
+            by: 'builder',
+          });
         },
       }),
       deps(query),
@@ -283,14 +341,16 @@ describe('a Shape session’s SDK options', () => {
     const { query, run } = fakeQuery();
     const handle = startShapeSession(
       spec({
-        agents: {
-          'code-researcher': {
-            description: 'Reads code',
-            prompt: 'Read',
-            tools: ['Read', 'Bash'],
-            model: 'fable',
+        profile: {
+          agents: {
+            'code-researcher': {
+              description: 'Reads code',
+              prompt: 'Read',
+              tools: ['Read', 'Bash'],
+              model: 'fable',
+            },
+            scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] },
           },
-          scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] },
         },
       }),
       deps(query),
@@ -371,7 +431,7 @@ describe('the Claude Code process', () => {
 });
 
 describe('the PreToolUse hook', () => {
-  async function hookFor(preToolUse: ShapeSessionSpec['preToolUse']) {
+  async function hookFor(preToolUse: ExploreSessionSpec['preToolUse']) {
     const { query, run } = fakeQuery();
     const handle = startShapeSession(spec({ preToolUse }), deps(query));
     await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
@@ -529,6 +589,49 @@ describe('the PostToolUseFailure hook', () => {
 });
 
 describe('the session’s run', () => {
+  it('streams its turn as a lane does: the deltas, one message, the call from use to result', async () => {
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage(),
+          streamEvent(messageStart('msg_1')),
+          streamEvent(blockStart(0, 'text')),
+          streamEvent(textDelta(0, 'Hel')),
+          streamEvent(textDelta(0, 'lo')),
+          streamEvent(blockStop(0)),
+          assistantMessage([textBlock('Hello')]),
+          assistantMessage([toolUseBlock('Read', { file_path: 'a.ts' })], undefined, 'msg_2'),
+          toolResultMessage('toolu_1', 'x'),
+          resultMessage({ input: 10, output: 5, costUsd: 0.01 }),
+        ],
+      ],
+    });
+    const handle = startShapeSession(spec(), deps(query));
+    const events = await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    const seen = events.filter((e) =>
+      ['text_delta', 'message', 'tool_call', 'turn_complete'].includes(e.type),
+    );
+    expect(seen.map((e) => e.type)).toEqual([
+      'text_delta',
+      'text_delta',
+      'message',
+      'tool_call',
+      'tool_call',
+      'turn_complete',
+    ]);
+    expect(seen.slice(0, 3)).toEqual([
+      { type: 'text_delta', itemId: 'msg_1:0', offset: 0, text: 'Hel' },
+      { type: 'text_delta', itemId: 'msg_1:0', offset: 3, text: 'lo' },
+      { type: 'message', itemId: 'msg_1:0', text: 'Hello' },
+    ]);
+    expect(
+      seen.flatMap((e) => (e.type === 'tool_call' ? [[e.call.id, e.call.status]] : [])),
+    ).toEqual([
+      ['toolu_1', 'running'],
+      ['toolu_1', 'done'],
+    ]);
+  });
+
   it('reports the turn, its tokens and the context used', async () => {
     const { query } = fakeQuery();
     const handle = startShapeSession(spec(), deps(query));

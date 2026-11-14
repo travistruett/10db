@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { PersonaId, PersonId, ProjectId, RoutingRuleId } from './ids';
+import { GoalId, PersonaId, PersonId, ProjectId, RoutingRuleId, TaskId } from './ids';
 import { HyphenatedKey } from './keys';
-import { Effort, QuestionCategory, StepRole, ToolAccess } from './states';
+import { Effort, QuestionCategory, SendMode, StepRole, ToolAccess } from './states';
 
 export const ModelPin = z.object({ model: z.string().min(1), effort: z.enum(Effort) });
 export type ModelPin = z.infer<typeof ModelPin>;
@@ -60,8 +60,28 @@ export const PersonaDto = z.object({
 });
 export type PersonaDto = z.infer<typeof PersonaDto>;
 
-export const PersonInput = z.object({ handle: HyphenatedKey, name: z.string().min(1).max(80) });
-export type PersonInput = z.infer<typeof PersonInput>;
+const DailyLimit = z.int().min(1).max(100);
+
+/** How to reach a person in Slack; the DM channel is learned on the first send. */
+export const SlackContactDto = z.object({
+  teamId: z.string().min(1),
+  userId: z.string().min(1),
+  dmChannelId: z.string().min(1).nullable(),
+  sendMode: z.enum(SendMode).default(SendMode.Review),
+  /** New questions a day to this person; null is no limit. */
+  dailyLimit: DailyLimit.nullable().default(10),
+});
+export type SlackContactDto = z.infer<typeof SlackContactDto>;
+
+export const SlackContactInput = SlackContactDto.omit({ dmChannelId: true });
+export type SlackContactInput = z.infer<typeof SlackContactInput>;
+
+export const PersonInput = z.object({
+  handle: HyphenatedKey,
+  name: z.string().min(1).max(80),
+  slack: SlackContactInput.nullable().default(null),
+});
+export type PersonInput = z.input<typeof PersonInput>;
 
 export const PersonDto = z.object({
   id: PersonId,
@@ -69,6 +89,7 @@ export const PersonDto = z.object({
   name: z.string(),
   /** The person running this app; cards nobody else owns go to them. */
   isBuilder: z.boolean(),
+  slack: SlackContactDto.nullable().default(null),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -90,25 +111,56 @@ export type TeamInput = z.infer<typeof TeamInput>;
 export const TeamDto = TeamInput.extend({ projectId: ProjectId });
 export type TeamDto = z.infer<typeof TeamDto>;
 
+/**
+ * A rule names one category or one topic, and the scope it holds in: the project, a goal or a task.
+ * The refinement lives on the list (`RoutingRulesInput`), so this object stays extendable.
+ */
 export const RoutingRuleInput = z.object({
-  category: z.enum(QuestionCategory),
+  category: z.enum(QuestionCategory).nullable(),
+  /** A topic route: a name from the project's topics, free of any goal, task or area. */
+  topic: z.string().min(1).max(120).nullable().default(null),
+  goalId: GoalId.nullable().default(null),
+  taskId: TaskId.nullable().default(null),
   /** Narrows the rule to work that claims this area; null matches any area. */
   area: z.string().min(1).nullable(),
   personId: PersonId,
 });
-export type RoutingRuleInput = z.infer<typeof RoutingRuleInput>;
+export type RoutingRuleInput = z.input<typeof RoutingRuleInput>;
 
-/** The project's whole rule list, replaced at once. */
+type RuleFields = z.output<typeof RoutingRuleInput>;
+
+/** What is wrong with one rule alone, or null. */
+function ruleProblem(r: RuleFields): string | null {
+  if ((r.category === null) === (r.topic === null)) return 'A rule names a category or a topic';
+  if (r.topic !== null && (r.goalId !== null || r.taskId !== null || r.area !== null)) {
+    return 'A topic rule has no goal, task or area';
+  }
+  if (r.goalId !== null && r.taskId !== null) return 'A rule has a goal or a task, not both';
+  if (r.taskId !== null && r.area !== null) return 'A task rule has no area';
+  return null;
+}
+
+const ruleKey = (r: RuleFields): string =>
+  [r.goalId, r.taskId, r.category, r.topic, r.area, r.personId].map((v) => v ?? '').join('\u0000');
+
+/** The project's whole rule list, replaced at once. The same category at one scope for two people is a tie. */
 export const RoutingRulesInput = z.object({
-  rules: z
-    .array(RoutingRuleInput)
-    .refine(
-      (rules) =>
-        new Set(rules.map((r) => `${r.category}\u0000${r.area ?? ''}`)).size === rules.length,
-      'Two rules have the same category and area',
-    ),
+  rules: z.array(RoutingRuleInput).superRefine((rules, ctx) => {
+    const seen = new Set<string>();
+    rules.forEach((rule, index) => {
+      const parsed = RoutingRuleInput.safeParse(rule);
+      if (!parsed.success) return;
+      const problem = ruleProblem(parsed.data);
+      if (problem !== null) ctx.addIssue({ code: 'custom', message: problem, path: [index] });
+      const key = ruleKey(parsed.data);
+      if (seen.has(key)) {
+        ctx.addIssue({ code: 'custom', message: 'Two rules are the same', path: [index] });
+      }
+      seen.add(key);
+    });
+  }),
 });
-export type RoutingRulesInput = z.infer<typeof RoutingRulesInput>;
+export type RoutingRulesInput = z.input<typeof RoutingRulesInput>;
 
 export const RoutingRuleDto = RoutingRuleInput.extend({
   id: RoutingRuleId,
@@ -117,3 +169,15 @@ export const RoutingRuleDto = RoutingRuleInput.extend({
   updatedAt: z.iso.datetime(),
 });
 export type RoutingRuleDto = z.infer<typeof RoutingRuleDto>;
+
+/** Hours before 10db reminds the recipient and before it returns the question to the builder. */
+export const StakeholderTimersDto = z
+  .object({
+    remindAfterHours: z.int().min(1).max(72).nullable().default(4),
+    returnAfterHours: z.int().min(1).max(168).default(8),
+  })
+  .refine((t) => t.remindAfterHours === null || t.remindAfterHours < t.returnAfterHours, {
+    message: 'Remind before the question goes back to you',
+    path: ['remindAfterHours'],
+  });
+export type StakeholderTimersDto = z.infer<typeof StakeholderTimersDto>;

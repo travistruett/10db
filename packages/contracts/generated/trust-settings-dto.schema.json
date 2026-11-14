@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "switches": {
+      "type": "object",
+      "properties": {
+        "web": {
+          "type": "boolean"
+        },
+        "projectInstructions": {
+          "type": "boolean"
+        },
+        "yourInstructions": {
+          "type": "boolean"
+        },
+        "yourSkills": {
+          "type": "boolean"
+        },
+        "yourPlugins": {
+          "type": "boolean"
+        },
+        "projectSkills": {
+          "type": "boolean"
+        },
+        "plugins": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "required": [
+        "web",
+        "projectInstructions",
+        "yourInstructions",
+        "yourSkills",
+        "yourPlugins",
+        "projectSkills",
+        "plugins"
+      ],
+      "additionalProperties": false
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "enabledInClaude": {
+            "type": "boolean"
+          },
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "version",
+          "enabledInClaude",
+          "on"
+        ]
+      }
+    },
+    "judges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "label": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "judge": {
+            "type": "string",
+            "enum": [
+              "native",
+              "tendb",
+              "rules"
+            ]
+          },
+          "why": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "label",
+          "model",
+          "judge",
+          "why"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "switches",
+    "plugins",
+    "judges"
+  ]
+}

@@ -7,9 +7,41 @@ export const EventType = {
   AccountResumed: 'account.resumed',
   /** An account's browser sign-in ended: it finished, failed, was cancelled or timed out. */
   AccountLoginEnded: 'account.login_ended',
+  /** A gh sign-in ended (`GithubLoginEndedData`); the gh login is the Mac's, so no entity owns it. */
+  GithubLoginEnded: 'github.login_ended',
   ProjectCreated: 'project.created',
   TaskCreated: 'task.created',
   TaskChanged: 'task.changed',
+  /** A message joined a task's thread; `data.messageId` names it. */
+  TaskMessageAdded: 'task.message_added',
+  /** A picture of the task's page was kept (`TaskScreenAddedData`). */
+  TaskScreenAdded: 'task.screen_added',
+  /** A Workbench pass opened in Your folder; `data.batchId` names its batch. */
+  PassOpened: 'pass.opened',
+  /**
+   * A pass moved on as a whole (closing, a close step, closed, settled, abandoning, abandoned) or a row
+   * of its close changed (a sign-off wait, its stack, its pull request, a header notice); `data` names
+   * what changed.
+   */
+  PassChanged: 'pass.changed',
+  /** A turn of a pass task began; `data.turnId` names it. */
+  PassTurnStarted: 'pass.turn_started',
+  /** A turn of a pass task ended, ready, stopped or failed; `data.turnId` names it. */
+  PassTurnEnded: 'pass.turn_ended',
+  /** A pass task's page is Ready for the builder; `data.turnId` names the turn that made it so. */
+  PassPageReady: 'pass.page_ready',
+  /** A shared change of a pass was kept, replaced or dropped (`PassSharedChangedData`). */
+  PassSharedChanged: 'pass.shared_changed',
+  /** A pass task's page was signed off and landed (`PassPageSignedOffData`). */
+  PassPageSignedOff: 'pass.page_signed_off',
+  /** A pass closed (`PassClosedData`). */
+  PassClosed: 'pass.closed',
+  /** A closed pass settled: its work is in the base, or the folder moved on (`PassSettledData`). */
+  PassSettled: 'pass.settled',
+  /** A page's turn broke the pass's preview (`PassPreviewBrokenData`). */
+  PassPreviewBroken: 'pass.preview_broken',
+  /** A turn of the page that broke the preview loaded it cleanly (`PassPreviewMendedData`). */
+  PassPreviewMended: 'pass.preview_mended',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',
@@ -36,6 +68,13 @@ export const EventType = {
   PersonaSaved: 'persona.saved',
   FlowSaved: 'flow.saved',
   PersonSaved: 'person.saved',
+  PersonRemoved: 'person.removed',
+  /** A stakeholder send changed state or content; `entityId` is the send. */
+  StakeholderSendChanged: 'stakeholder_send.changed',
+  SlackConnectionChanged: 'slack.connection.changed',
+  StakeholderTimersChanged: 'stakeholder_timers.changed',
+  /** A question card was triaged (`InboxTriagedData`). */
+  InboxTriaged: 'inbox.triaged',
   TeamSaved: 'team.saved',
   RoutingRulesSaved: 'routing_rules.saved',
   ModelProfileSaved: 'model_profile.saved',
@@ -49,6 +88,10 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A Plan's record gained or changed documents, entries, findings or proposals; `data.what` says which. */
+  PlanRecordChanged: 'plan.record_changed',
+  /** A task's cited anchors were checked against its workstream's base; `data.counts` per result. */
+  PlanAnchorChecked: 'plan.anchor_checked',
   /** A workstream's gate holds its slot and starts (Shape spec §8: lane time counts from here). */
   GateStarted: 'gate.started',
   /** The gate that `gate.started` began has ended, with its exit code. */

@@ -6,7 +6,6 @@ export {
   SYSTEM_READS,
   type LaneProfileInput,
 } from './profile';
-export { autoModeRules } from './auto-mode-rules';
 export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
@@ -19,12 +18,16 @@ export {
   type SweepReport,
 } from './stale-files';
 export {
+  createLaneProcessWatch,
   createLedgerSweep,
+  createProcessLedger,
+  LaneProcessFailure,
   reapLaneProcessLedgers,
+  removeProcessLedger,
   type LaneProcessSetup,
   type LedgerSweep,
 } from './lane-processes';
-export { systemProcessTable } from './process-table';
+export { systemProcessTable, type ProcessRow } from './process-table';
 export {
   claudeCodeTmpPath,
   codexLaneTempRoot,
@@ -46,6 +49,7 @@ export {
   expandHome,
   fileAccessJudge,
   isOutsideCopy,
+  isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
@@ -71,3 +75,7 @@ export {
   type LaneSessionInput,
 } from './lane-sandbox';
 export { singleQuoted } from './posix-quote';
+export type { SetupInput } from './setup-input';
+export { readFrontmatter, writeFrontmatter } from './frontmatter';
+export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
+export { writeSecretRead } from './secret-reads';

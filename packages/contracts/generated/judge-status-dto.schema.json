@@ -8,6 +8,18 @@
         "enabled": {
           "type": "boolean"
         },
+        "accountId": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "decisions": {
           "type": "object",
           "properties": {
@@ -113,6 +125,114 @@
                 "model",
                 "floor"
               ]
+            },
+            "question_route": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
+            "thread_answer": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
+            "reply_match": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
+            "approval_read": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
             }
           },
           "required": [
@@ -125,8 +245,41 @@
         "decisions"
       ]
     },
-    "keySet": {
-      "type": "boolean"
+    "account": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "label": {
+              "type": "string"
+            },
+            "secretSet": {
+              "type": "boolean"
+            },
+            "secretState": {
+              "type": "string",
+              "enum": [
+                "set",
+                "missing",
+                "changed"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "label",
+            "secretSet",
+            "secretState"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "off": {
       "type": "boolean"
@@ -134,7 +287,7 @@
   },
   "required": [
     "config",
-    "keySet",
+    "account",
     "off"
   ]
 }

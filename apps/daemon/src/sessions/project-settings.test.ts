@@ -147,6 +147,15 @@ describe('projectSettingsBillingProblem', () => {
       },
     ],
     [
+      'behind a .claude folder that is a link',
+      () => {
+        const elsewhere = join(repo.path, 'elsewhere');
+        mkdirSync(elsewhere);
+        writeFileSync(join(elsewhere, 'settings.json'), '{}');
+        symlinkSync(elsewhere, join(repo.path, '.claude'));
+      },
+    ],
+    [
       'a file over the size cap',
       () => {
         writeSettings(`{"env": {}}${' '.repeat(REPO_CONFIG_MAX_BYTES)}`);

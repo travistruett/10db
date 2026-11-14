@@ -16,6 +16,64 @@
     "isBuilder": {
       "type": "boolean"
     },
+    "slack": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "teamId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "userId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dmChannelId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sendMode": {
+              "default": "review",
+              "type": "string",
+              "enum": [
+                "review",
+                "auto"
+              ]
+            },
+            "dailyLimit": {
+              "default": 10,
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "teamId",
+            "userId",
+            "dmChannelId"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",

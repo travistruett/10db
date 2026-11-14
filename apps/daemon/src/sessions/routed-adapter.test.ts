@@ -1,14 +1,20 @@
-import { AccountKind, mintId, type SupportedAccountKind } from '@10db/contracts';
+import {
+  AccountKind,
+  mintId,
+  providerOf,
+  AGENT_ACCOUNT_KINDS,
+  type AgentAccountKind,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
+import { codexCapabilities } from './capabilities';
 import { createChannel } from './channel';
 import { createRoutedAdapter } from './routed-adapter';
 import type {
-  SessionAdapter,
+  AgentAdapter,
+  ExploreSessionSpec,
+  LaneSessionSpec,
   SessionEvent,
   SessionHandle,
-  SessionSpec,
-  ShapeSessionHandle,
-  ShapeSessionSpec,
 } from './types';
 
 const ended = () => {
@@ -18,10 +24,14 @@ const ended = () => {
 };
 
 /** Records which of its methods ran, in order, and answers each with its own name. */
-function recording(name: string): SessionAdapter & { readonly calls: string[] } {
+function recording(name: string): AgentAdapter & { readonly calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
+    capabilities: () => {
+      calls.push('capabilities');
+      return { ...codexCapabilities('codex_signin'), label: name };
+    },
     complete: () => {
       calls.push('complete');
       return Promise.resolve(name);
@@ -45,27 +55,23 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
         cancel: () => Promise.resolve(),
       });
     },
-    start: () => {
-      calls.push('start');
+    open: () => {
+      calls.push('open');
       return {
         events: ended(),
         send: () => undefined,
+        interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
       } satisfies SessionHandle;
     },
-    startShape: () => {
-      calls.push('startShape');
-      return {
-        events: ended(),
-        send: () => undefined,
-        interrupt: () => Promise.resolve(),
-        stop: () => Promise.resolve(),
-      } satisfies ShapeSessionHandle;
+    readClientUuids: () => {
+      calls.push('readClientUuids');
+      return Promise.resolve([name]);
     },
   };
 }
 
-const account = (kind: SupportedAccountKind) => ({
+const account = (kind: AgentAccountKind) => ({
   accountId: mintId('Account'),
   label: 'A',
   kind,
@@ -73,8 +79,8 @@ const account = (kind: SupportedAccountKind) => ({
 });
 
 /** Only the account matters to routing; the rest of a spec is the adapter's. */
-const asSession = (kind: SupportedAccountKind) => ({ account: account(kind) }) as SessionSpec; // routing reads only `account`
-const asShape = (kind: SupportedAccountKind) => ({ account: account(kind) }) as ShapeSessionSpec; // routing reads only `account`
+const asSession = (kind: AgentAccountKind) => ({ account: account(kind) }) as LaneSessionSpec; // routing reads only `account`
+const asShape = (kind: AgentAccountKind) => ({ account: account(kind) }) as ExploreSessionSpec; // routing reads only `account`
 
 const CLAUDE_KINDS = [
   AccountKind.ClaudeSubscription,
@@ -83,14 +89,31 @@ const CLAUDE_KINDS = [
   AccountKind.AnthropicApiKey,
 ] as const;
 
-const METHODS = ['start', 'startShape', 'complete', 'probeAccount', 'startLogin'] as const;
+const METHODS = [
+  'open',
+  'open',
+  'capabilities',
+  'complete',
+  'probeAccount',
+  'startLogin',
+  'readClientUuids',
+] as const;
 
-async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Promise<void> {
-  adapter.start(asSession(kind));
-  adapter.startShape(asShape(kind));
+async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<void> {
+  adapter.open(asSession(kind));
+  adapter.open(asShape(kind));
+  adapter.capabilities({ kind }, null);
   await adapter.complete({ cwd: '/d', prompt: 'q', model: 'm', env: {}, account: account(kind) });
   await adapter.probeAccount({ cwd: '/d', env: {}, kind });
   await adapter.startLogin({ cwd: '/d', env: {}, kind });
+  await adapter.readClientUuids({
+    account: account(kind),
+    env: {},
+    cwd: '/d',
+    providerSessionId: 'thr-1',
+    wanted: ['u1'],
+    since: '2026-11-11T00:00:00.000Z',
+  });
 }
 
 describe('createRoutedAdapter', () => {
@@ -115,5 +138,10 @@ describe('createRoutedAdapter', () => {
       kind: AccountKind.CodexSignin,
     });
     expect(probed.email).toBe('codex');
+  });
+
+  it.each(AGENT_ACCOUNT_KINDS)('asks the agent of %s what it can do', (kind) => {
+    const routed = createRoutedAdapter({ claude: recording('claude'), codex: recording('codex') });
+    expect(routed.capabilities({ kind }, null).label).toBe(providerOf(kind));
   });
 });

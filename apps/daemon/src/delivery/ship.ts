@@ -323,6 +323,166 @@ function stepFailure(
   }
 }
 
+/** What the gate before a push needs: the batch's row to record its process on, and the gate runner. */
+export type ShipGateDeps = Pick<
+  ShipperDeps,
+  | 'state'
+  | 'git'
+  | 'inbox'
+  | 'logger'
+  | 'gate'
+  | 'limits'
+  | 'clock'
+  | 'dataDir'
+  | 'sessionEnv'
+  | 'identifyProcess'
+>;
+
+/** What a push of a batch's branch needs. */
+export type ShipPushDeps = Pick<ShipperDeps, 'git' | 'logger' | 'clock' | 'limits' | 'networkEnv'>;
+
+/**
+ * Runs the check before the push (the pre-check or the gate) on the batch branch, recording its
+ * process group for recovery. `beforeStart` runs once it holds its gate slot; a false answer stops
+ * it as an abort would.
+ */
+export async function runGate(
+  deps: ShipGateDeps,
+  batch: BatchDto,
+  project: ProjectDto,
+  signal: AbortSignal,
+  beforeStart: () => Promise<boolean>,
+  /** Run this instead of the project's check: the rerun of a failed check's failing test files. */
+  command?: string,
+): Promise<GateResult | null> {
+  const gateCommand = command ?? shipCheck(project)?.command;
+  // The caller skips the gate step for a project without a gate.
+  if (gateCommand === undefined) throw new InvalidError('This project has no gate command to run');
+  let recording: Promise<void> = Promise.resolve();
+  const logPath = join(
+    deps.dataDir,
+    'logs',
+    'gate',
+    `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
+  );
+  deps.logger.info({ batchId: batch.id, command: gateCommand, logPath }, 'gate started');
+  const result = await deps.gate.run({
+    project,
+    command: gateCommand,
+    logPath,
+    timeoutMs: deps.limits.gateTimeoutMs,
+    env: deps.sessionEnv(project),
+    // The batch spans tasks, so only the project's own hosts and read paths open.
+    rules: listPermissionRules(deps.state.db, project.id, null),
+    checkouts: allCheckouts(deps.state.db),
+    signal,
+    beforeStart,
+    onWaiting: (ahead) => {
+      deps.logger.info(
+        { batchId: batch.id, ahead },
+        'ship gate is waiting for another gate to finish',
+      );
+    },
+    onSpawn: (pid) => {
+      recording = (deps.identifyProcess?.(pid) ?? Promise.resolve(null)).then((gatePidStart) => {
+        if (gatePidStart !== null)
+          deps.state.write((w) => patchBatch(w, batch.id, { gatePid: pid, gatePidStart }));
+      });
+    },
+  });
+  await recording.catch(() => undefined);
+  deps.logger.info(
+    {
+      batchId: batch.id,
+      exitCode: result.exitCode,
+      durationMs: result.durationMs,
+      logPath: result.logPath,
+      timedOut: result.timedOut,
+      aborted: result.aborted,
+    },
+    'gate finished',
+  );
+  deps.state.write((w) =>
+    patchBatch(w, batch.id, {
+      gatePid: null,
+      gatePidStart: null,
+      ...(result.aborted ? {} : { gateExitCode: result.exitCode, gateLogPath: result.logPath }),
+    }),
+  );
+  // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
+  if (result.aborted) return null;
+  // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
+  if (result.blockedHosts.length > 0) await takeFoundHostsReading(deps, project.id);
+  raiseGateHostCards(deps, {
+    projectId: project.id,
+    run: BlockedRun.Gate,
+    command: gateCommand,
+    hosts: result.blockedHosts,
+  });
+  return result;
+}
+
+/** Waits `ms` on the injected clock; a shutdown (the signal) ends the wait early. */
+function pause(clock: Clock, ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = clock.setTimeout(done, ms);
+    function done(): void {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }
+    function onAbort(): void {
+      timer.cancel();
+      done();
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Logs the push's duration and output, landed or refused, so what git printed is on record. A push
+ * GitHub's server fails (`GitNetworkFailure.ServerError`) is pushed again, at most
+ * `PUSH_SERVER_RETRIES` more times with a short wait between; the last failure is thrown.
+ */
+export async function pushBranch(
+  deps: ShipPushDeps,
+  batch: BatchDto,
+  project: ProjectDto,
+  branch: string,
+  signal: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const run = await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
+      deps.logger.info(
+        { batchId: batch.id, branch, durationMs: run.durationMs, output: run.output, attempt },
+        'git push finished',
+      );
+      return;
+    } catch (error) {
+      if (error instanceof GitNetworkError)
+        deps.logger.warn(
+          {
+            batchId: batch.id,
+            branch,
+            kind: error.kind,
+            durationMs: error.durationMs,
+            output: error.output,
+            attempt,
+          },
+          'git push failed',
+        );
+      const retry =
+        error instanceof GitNetworkError &&
+        error.kind === GitNetworkFailure.ServerError &&
+        attempt < PUSH_SERVER_RETRIES &&
+        !signal.aborted;
+      if (!retry) throw error;
+      await pause(deps.clock, deps.limits.pushRetryWaitMs, signal);
+    }
+  }
+}
+
 export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
 
@@ -414,7 +574,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
               personaId: implement.personaId,
               personaName: implement.personaName,
               tools: implement.tools,
-              score: implement.score,
               profileId: implement.profileId,
               model: implement.model,
               effort: implement.effort,
@@ -504,87 +663,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Runs the check before the push (the pre-check or the gate) on the batch branch, recording its
-   * process group for recovery. `beforeStart` runs once it holds its gate slot; a false answer stops
-   * it as an abort would.
-   */
-  async function runGate(
-    batch: BatchDto,
-    project: ProjectDto,
-    signal: AbortSignal,
-    beforeStart: () => Promise<boolean>,
-    /** Run this instead of the project's check: the rerun of a failed check's failing test files. */
-    command?: string,
-  ): Promise<GateResult | null> {
-    const gateCommand = command ?? shipCheck(project)?.command;
-    // The caller skips the gate step for a project without a gate.
-    if (gateCommand === undefined)
-      throw new InvalidError('This project has no gate command to run');
-    let recording: Promise<void> = Promise.resolve();
-    const logPath = join(
-      deps.dataDir,
-      'logs',
-      'gate',
-      `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
-    );
-    deps.logger.info({ batchId: batch.id, command: gateCommand, logPath }, 'gate started');
-    const result = await deps.gate.run({
-      project,
-      command: gateCommand,
-      logPath,
-      timeoutMs: deps.limits.gateTimeoutMs,
-      env: deps.sessionEnv(project),
-      // The batch spans tasks, so only the project's own hosts and read paths open.
-      rules: listPermissionRules(deps.state.db, project.id, null),
-      checkouts: allCheckouts(deps.state.db),
-      signal,
-      beforeStart,
-      onWaiting: (ahead) => {
-        deps.logger.info(
-          { batchId: batch.id, ahead },
-          'ship gate is waiting for another gate to finish',
-        );
-      },
-      onSpawn: (pid) => {
-        recording = (deps.identifyProcess?.(pid) ?? Promise.resolve(null)).then((gatePidStart) => {
-          if (gatePidStart !== null)
-            deps.state.write((w) => patchBatch(w, batch.id, { gatePid: pid, gatePidStart }));
-        });
-      },
-    });
-    await recording.catch(() => undefined);
-    deps.logger.info(
-      {
-        batchId: batch.id,
-        exitCode: result.exitCode,
-        durationMs: result.durationMs,
-        logPath: result.logPath,
-        timedOut: result.timedOut,
-        aborted: result.aborted,
-      },
-      'gate finished',
-    );
-    deps.state.write((w) =>
-      patchBatch(w, batch.id, {
-        gatePid: null,
-        gatePidStart: null,
-        ...(result.aborted ? {} : { gateExitCode: result.exitCode, gateLogPath: result.logPath }),
-      }),
-    );
-    // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
-    if (result.aborted) return null;
-    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
-    if (result.blockedHosts.length > 0) await takeFoundHostsReading(deps, project.id);
-    raiseGateHostCards(deps, {
-      projectId: project.id,
-      run: BlockedRun.Gate,
-      command: gateCommand,
-      hosts: result.blockedHosts,
-    });
-    return result;
-  }
-
-  /**
    * Whether a failed gate failed only in tests the batch couldn't have caused: every failing step
    * named failing tests, none of them is in a file the batch changed since its base, and each of the
    * batch's done tasks passed its own last gate. Anything 10db can't read counts as the batch's.
@@ -620,66 +698,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
         "batch's changed files not read",
       );
       return false;
-    }
-  }
-
-  /** Waits `ms` on the injected clock; a shutdown (the signal) ends the wait early. */
-  function pause(ms: number, signal: AbortSignal): Promise<void> {
-    if (ms <= 0 || signal.aborted) return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = deps.clock.setTimeout(done, ms);
-      function done(): void {
-        signal.removeEventListener('abort', onAbort);
-        resolve();
-      }
-      function onAbort(): void {
-        timer.cancel();
-        done();
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
-  }
-
-  /**
-   * Logs the push's duration and output, landed or refused, so what git printed is on record. A push
-   * GitHub's server fails (`GitNetworkFailure.ServerError`) is pushed again, at most
-   * `PUSH_SERVER_RETRIES` more times with a short wait between; the last failure is thrown.
-   */
-  async function pushBranch(
-    batch: BatchDto,
-    project: ProjectDto,
-    branch: string,
-    signal: AbortSignal,
-  ): Promise<void> {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        const run = await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
-        deps.logger.info(
-          { batchId: batch.id, branch, durationMs: run.durationMs, output: run.output, attempt },
-          'git push finished',
-        );
-        return;
-      } catch (error) {
-        if (error instanceof GitNetworkError)
-          deps.logger.warn(
-            {
-              batchId: batch.id,
-              branch,
-              kind: error.kind,
-              durationMs: error.durationMs,
-              output: error.output,
-              attempt,
-            },
-            'git push failed',
-          );
-        const retry =
-          error instanceof GitNetworkError &&
-          error.kind === GitNetworkFailure.ServerError &&
-          attempt < PUSH_SERVER_RETRIES &&
-          !signal.aborted;
-        if (!retry) throw error;
-        await pause(deps.limits.pushRetryWaitMs, signal);
-      }
     }
   }
 
@@ -1033,7 +1051,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           await afterEnd(batchId, worktreePath);
           return;
         }
-        fixPr = { url: status.url, state: status.state };
+        fixPr = {
+          url: status.url,
+          state: status.state,
+          isDraft: status.isDraft,
+          baseRef: status.baseRef,
+        };
       }
       // 1. Nothing beyond the base: nothing to push. (A fix batch's own commits were counted above.)
       if (
@@ -1069,7 +1092,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             startedAt: deps.clock.now(),
           };
           const gate = await deps.baseUpdates.gate(batchId, signal, () =>
-            runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
+            runGate(deps, batch, projectAtCheckout(project, checkout), signal, async () => {
               before.startedAt = deps.clock.now();
               // The batch's last task is the session to send when the base's conflicts need one.
               const update = await deps.baseUpdates.beforeGate(batchId, signal, {
@@ -1137,6 +1160,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             run: async (rerun) =>
               deps.baseUpdates.gate(batchId, signal, () =>
                 runGate(
+                  deps,
                   batch,
                   projectAtCheckout(project, checkout),
                   signal,
@@ -1206,7 +1230,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       // 3. Push, never forced.
       step = 'git push';
-      await pushBranch(batch, project, branch, signal);
+      await pushBranch(deps, batch, project, branch, signal);
       // 4. Any PR for the branch, in any state; create one only when there is none.
       step = 'gh pr view';
       const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
@@ -1259,6 +1283,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
+      // A pass's batch ships only when the pass closes: signing off its last page lands a commit and
+      // nothing more (Workbench spec §5.5).
+      if (batch.passId != null) return false;
       const current = members(w.tx, batchId);
       const left = current
         .filter((m) => superseded(w.tx, m) && committed(w.tx, m) && !leftOut(m))
@@ -1303,8 +1330,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
   }
 
+  /**
+   * A pass's batch ships when its pass closes and ends with its pass's own Abandon, never by a ship
+   * or an Abandon of the batch itself.
+   */
+  function refusePassBatch(batch: BatchDto): void {
+    if (batch.passId != null)
+      throw new ConflictError(
+        `Batch "${batch.title}" is a UI Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
+      );
+  }
+
   function ship(batchId: BatchId): BatchDto {
     const batch = getBatch(db, batchId);
+    refusePassBatch(batch);
     const unfinished = unfinishedWork(batch);
     switch (batch.state) {
       case BatchState.Open: {
@@ -2025,6 +2064,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return null;
         }
         return runGate(
+          deps,
           getBatch(db, batchId),
           projectAtCheckout(project, path),
           signal,
@@ -2083,7 +2123,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
       }
-      await pushBranch(getBatch(db, batchId), project, branch, signal);
+      await pushBranch(deps, getBatch(db, batchId), project, branch, signal);
       pushed = true;
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
       // The base update left this to the push: a merge put back renumbered nothing the batch holds.
@@ -2256,6 +2296,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     shipWithout(batchId, workstreamId, kept) {
       const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch ships`,
@@ -2278,6 +2319,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch can be abandoned`,

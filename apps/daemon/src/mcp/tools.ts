@@ -1,4 +1,5 @@
 import {
+  AreaRole,
   ClaimKind,
   currentStep,
   EventType,
@@ -12,13 +13,18 @@ import {
   McpToolOutputs,
   PrincipleDraft,
   ProposalKind,
+  QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   REVIEW_ROLES,
   StepRole,
   ToolAccess,
+  JudgeKind,
   Urgency,
+  WorkspaceMode,
   type McpToolInputs,
   type SessionId,
+  type TaskId,
+  type TaskMessageId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -39,10 +45,16 @@ import {
   insertInboxItem,
   insertProposal,
   insertSource,
+  insertSystemNotice,
+  insertTaskPageReports,
   insertToolOp,
   listEvidence,
+  listTaskPageReports,
   listToolOps,
   listStepToolOpResults,
+  openPassTurn,
+  passHoldingTask,
+  passPageAreas,
   replaceToolOp,
   patchWorkstream,
   releaseClaim,
@@ -52,7 +64,7 @@ import {
   type Json,
 } from '@10db/db';
 import type { z } from 'zod';
-import { buildContextPack } from '../briefing';
+import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
   MIGRATIONS_HAZARD,
@@ -72,6 +84,16 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
+import {
+  askMoveToCopy,
+  askShared,
+  grantSharedHold,
+  keepCommitToolPaths,
+  moveToCopyInstruction,
+  passHazardAsk,
+  slowPageLine,
+} from '../pass';
+import { pageAreaRoutes } from '../pictures';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -80,7 +102,10 @@ import {
   deadlockWaitInstruction,
   yieldRefusal,
   type ClaimResult,
+  type SharedGrant,
 } from './claim-wait';
+import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
+import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
 
 export interface McpDeps {
@@ -99,6 +124,8 @@ export interface McpDeps {
   readonly claimPollMs?: number;
   /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */
   readonly claimWaitSliceMs?: number;
+  /** Hands a builder message to its page's session, as the thread does; absent, it waits for the next. */
+  readonly deliverMessage?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
   /** Brings a task's base into its branch before it gets the migrations hazard; absent, it isn't. */
   readonly migrationsBase?: MigrationsBase;
   /** Installs a lane's dependency change in its copy; absent, `install_dependencies` is refused. */
@@ -135,13 +162,17 @@ function stepFilings(
   return proposed + countStepToolOps(db, ws, McpToolName.FileFollowUp);
 }
 
+const CATEGORY_LIST = Object.values(QuestionCategory)
+  .map((c) => `${c} (${QUESTION_CATEGORY_HINTS[c].hint} ${QUESTION_CATEGORY_HINTS[c].covers})`)
+  .join('; ');
+
 export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
+  ...PLAN_TOOL_DESCRIPTIONS,
   get_context:
     'Your context pack: the task, acceptance criteria, your claims, the latest handoff, any answer waiting for you, and relevant decisions.',
   find_knowledge:
     'Search the current decisions and confirmed principles that apply to this project, each labelled with its scope and area. Set kind to decision or principle to search one shelf; limit applies to each shelf. Returns an explicit empty result when nothing matches.',
-  ask_human:
-    'Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. 10db adds a "Park the task" choice to every card; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.',
+  ask_human: `Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. Set category to the one that fits: ${CATEGORY_LIST}. 10db adds a "Park the task" choice to your card, except when your task is a page of a Workbench pass; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.`,
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
@@ -156,6 +187,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
+  report_pages:
+    "Name the app's routes this turn's pictures should load, beyond the page areas your task names: a page area's route with its parameter filled in (/people/42 for /people/[id]), or the pages a change only in shared code shows. Only a page area's route is loaded: each parameter one plain value of letters, digits, _ or -, and your query dropped (the area route's own query is kept); any other path is refused. At most four a turn (a task outside a Workbench pass: a run); a read-only step can't call it. 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
   complete_step:
@@ -203,12 +236,68 @@ export function createToolHandlers(
     return result;
   };
 
-  /** A claim call's settled result, recorded under its opId. */
-  const recordClaim = (opId: string, settled: ClaimResult): Out<'request_claim'> => {
+  /**
+   * How a pass lane gets a shared area (Workbench spec §7.2): one turn at a time, with a hold that
+   * records what the area held at the grant. Undefined for any other claim.
+   */
+  const sharedGrantOf = (
+    kind: ClaimKind,
+    name: string,
+    reason: string,
+    signal: AbortSignal,
+  ): SharedGrant | undefined => {
+    if (kind !== ClaimKind.Area) return undefined;
+    const { project, task } = context();
+    if (!passHoldingTask(db, task)) return undefined;
+    if (project.areas.find((a) => a.name === name)?.role !== AreaRole.Shared) return undefined;
+    // The turn the call is made in: the wait ends with it, though the next turn opens.
+    const turnId = openPassTurn(db, task.id)?.id;
+    return {
+      ask: () => {
+        const asked = askShared(
+          {
+            ...deps,
+            logger: deps.log,
+            ...(deps.deliverMessage ? { deliver: deps.deliverMessage } : {}),
+          },
+          { workstreamId, sessionId, area: name, reason, signal },
+        );
+        if (!asked) return null;
+        return {
+          inboxId: asked.inboxId,
+          answer: asked.answer.then((given): ClaimResult | null =>
+            given.allowed
+              ? null
+              : {
+                  granted: false,
+                  heldBy: null,
+                  inboxId: asked.inboxId,
+                  instruction: given.instruction,
+                  yielded: false,
+                  parked: false,
+                },
+          ),
+        };
+      },
+      grant: () => grantSharedHold({ ...deps, logger: deps.log }, { workstreamId, area: name }),
+      turnOpen: () => turnId !== undefined && openPassTurn(db, task.id)?.id === turnId,
+    };
+  };
+
+  /**
+   * A claim call's settled result, recorded under its opId, with `line` added to the task's thread
+   * when it is the call that records it.
+   */
+  const recordClaim = (
+    opId: string,
+    settled: ClaimResult,
+    line: string | null = null,
+  ): Out<'request_claim'> => {
     const out = deps.state.write((ctx) => {
       // Two calls with the same opId can share one wait; the first records it, the second reads it.
       const recorded = findToolOp(ctx.tx, workstreamId, opId);
       if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
+      if (line !== null) insertSystemNotice(ctx, getWorkstream(ctx.tx, workstreamId).taskId, line);
       return record(
         'request_claim',
         opId,
@@ -268,7 +357,11 @@ export function createToolHandlers(
   }
 
   return {
-    get_context: () => Promise.resolve(buildContextPack(db, getWorkstream(db, workstreamId))),
+    ...createPlanToolHandlers(db, workstreamId),
+    get_context: () => {
+      const pack = buildContextPack(db, getWorkstream(db, workstreamId));
+      return Promise.resolve({ ...pack, pendingAnswer: quoteSlackAnswer(pack.pendingAnswer) });
+    },
 
     find_knowledge: ({ query, limit, kind }) => {
       const projectId = context().project.id;
@@ -307,6 +400,7 @@ export function createToolHandlers(
         options: input.options,
         recommendation: input.recommendation ?? null,
         category: input.category,
+        ...(input.topic === undefined ? {} : { topic: input.topic }),
         urgency: input.urgency,
         detail: null,
         signal,
@@ -498,7 +592,7 @@ export function createToolHandlers(
     request_claim: async (input) => {
       const done = prior(input.opId, McpToolName.RequestClaim);
       if (done !== undefined) return McpToolOutputs.request_claim.parse(done);
-      const { project } = context();
+      const { project, task } = context();
       // A name that is a project hazard is a hazard claim whatever kind the agent sent; claims are keyed on (kind, name).
       const hazardNames = project.hazards.map((h) => h.name);
       const areaNames = project.areas.map((a) => a.name);
@@ -511,6 +605,36 @@ export function createToolHandlers(
       // Claims the builder made this task give up are told before anything else is granted.
       const given = claimWaits.pendingYield(workstreamId);
       if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
+      // A pass page asking for migrations or deps leaves Your folder for a copy where the project
+      // allows copies: the builder is asked to move it, and the claim is refused meanwhile. A page
+      // never holds one: its launch claims only its pass's areas.
+      const passAsk =
+        kind === ClaimKind.Hazard
+          ? passHazardAsk(db, project, task, input.name)
+          : ({ kind: 'none' } as const);
+      if (passAsk.kind === 'move')
+        return deps.state.write((ctx) => {
+          const asked = askMoveToCopy(ctx, {
+            pass: passAsk.pass,
+            taskId: task.id,
+            workstreamId,
+            cause: { hazard: input.name },
+          });
+          return record(
+            'request_claim',
+            input.opId,
+            {
+              granted: false,
+              heldBy: null,
+              inboxId: asked.inboxId,
+              waiting: false,
+              instruction: moveToCopyInstruction(input.name, asked.notNow),
+            },
+            ctx,
+          );
+        });
+      const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
+      const shared = sharedGrantOf(kind, input.name, input.reason, signal);
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
       // one wait; a call answers "still waiting" before the session's tool timeout, and is not recorded,
       // so a retry with the same opId joins the wait again.
@@ -522,8 +646,9 @@ export function createToolHandlers(
         kind,
         name: input.name,
         reason: input.reason,
-        signal: deps.sessionSignal(sessionId) ?? new AbortController().signal,
+        signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
+        ...(shared ? { shared } : {}),
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
@@ -536,7 +661,33 @@ export function createToolHandlers(
       try {
         let result = await Promise.race([wait.done, slice]);
         if (result === 'slice') {
-          const { heldBy, inboxId } = wait.state;
+          const { heldBy, inboxId, askId } = wait.state;
+          if (askId !== null) {
+            // The answer may come while no call waits for it: it is kept under the opId then.
+            // A parked holder is a fact about now, never kept: a later call asks again.
+            wait.done
+              .then((settled) => {
+                if (!settled.granted && settled.parked) return;
+                recordClaim(input.opId, settled);
+              })
+              .catch((error: unknown) => {
+                deps.log.warn(
+                  {
+                    workstreamId,
+                    opId: input.opId,
+                    err: error instanceof Error ? error.message : String(error),
+                  },
+                  'a shared claim answer was not kept under its opId',
+                );
+              });
+            return {
+              granted: false,
+              waiting: true,
+              heldBy: null,
+              inboxId: askId,
+              instruction: `Waiting for the builder's answer about shared ${kind} ${input.name}; call request_claim again with the same opId, and edit nothing in it until a call returns granted: true.`,
+            };
+          }
           if (heldBy !== null && inboxId !== null)
             return {
               granted: false,
@@ -574,7 +725,11 @@ export function createToolHandlers(
             instruction: settled.instruction,
           };
         }
-        return recordClaim(input.opId, settled);
+        return recordClaim(
+          input.opId,
+          settled,
+          settled.granted && passAsk.kind === 'slow' ? slowPageLine(input.name) : null,
+        );
       } finally {
         clearTimeout(timer);
       }
@@ -623,8 +778,37 @@ export function createToolHandlers(
       if (done !== undefined) return McpToolOutputs.commit.parse(done);
       if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
         throw new InvalidError('This step is read-only; only an implement step commits.');
-      const { project, workstream } = context();
+      const { project, workstream, task } = context();
       const checkout = checkoutOf(db, workstream);
+      const pass = passHoldingTask(db, task);
+      if (pass) {
+        // A pass lane's work is kept at its task's ref, never committed on the pass's branch.
+        const claimed = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
+        // A commit tool call writes paths, never a push, so the base branch only completes the shape.
+        const inPass = { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch };
+        const kept = await keepCommitToolPaths(deps, {
+          workstreamId,
+          paths: input.paths,
+          opId: input.opId,
+          judge: (path) => {
+            const verdict = judgeToolUse({
+              judge: JudgeKind.Rules,
+              coveredByAllowRule: false,
+              toolName: 'Write',
+              toolInput: { file_path: path },
+              repoPath: checkout,
+              areas: project.areas,
+              hazards: project.hazards,
+              claims: claimed,
+              readOnly: false,
+              inPass,
+              protectedPaths: deps.protectedPaths,
+            });
+            return verdict.decision === 'deny' ? verdict.reason : null;
+          },
+        });
+        return deps.state.write((ctx) => record('commit', input.opId, { ...kept }, ctx));
+      }
       // A batch names its branch; other work commits on the branch pinned at its first session.
       const row = getWorkstreamRow(db, workstreamId);
       const branch = row.batchId ? getBatch(db, row.batchId).branch : row.branch;
@@ -635,6 +819,8 @@ export function createToolHandlers(
       const claims = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
       for (const path of input.paths) {
         const verdict = judgeToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
           toolName: 'Write',
           toolInput: { file_path: path },
           repoPath: checkout,
@@ -705,6 +891,46 @@ export function createToolHandlers(
             commitShas: [],
           });
           return record('record_evidence', input.opId, { evidenceId: evidence.id }, ctx);
+        }),
+      );
+    },
+
+    report_pages: (input) => {
+      const done = prior(input.opId, McpToolName.ReportPages);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.report_pages.parse(done));
+      return Promise.resolve(
+        deps.state.write((ctx) => {
+          const { project, task } = context();
+          const inPass = passHoldingTask(ctx.tx, task) !== undefined;
+          const turnId = inPass ? (openPassTurn(ctx.tx, task.id)?.id ?? null) : null;
+          const kept = (
+            turnId !== null
+              ? listTaskPageReports(ctx.tx, { taskId: task.id, turnId })
+              : listTaskPageReports(ctx.tx, { taskId: task.id, workstreamId })
+          ).map((r) => r.route);
+          const readOnly =
+            currentStep(getWorkstreamRow(ctx.tx, workstreamId)).tools === ToolAccess.ReadOnly;
+          const judged = judgeReportedRoutes({
+            appUrl: project.appUrl,
+            areaRoutes: pageAreaRoutes(project.areas),
+            refusal: readOnly
+              ? 'This step is read-only; only an implement step names pages for pictures.'
+              : inPass && turnId === null
+                ? "This page has no turn open, so there is no turn's picture to name routes for: call it during a turn."
+                : inPass || task.workspaceMode === WorkspaceMode.Shared
+                  ? null
+                  : 'Pictures are taken only of tasks in Your folder; this task runs in a separate copy.',
+            per: inPass ? 'turn' : 'run',
+            kept,
+            routes: input.routes,
+          });
+          insertTaskPageReports(ctx, {
+            taskId: task.id,
+            workstreamId,
+            turnId,
+            routes: judged.accepted.filter((route) => !kept.includes(route)),
+          });
+          return record('report_pages', input.opId, judged, ctx);
         }),
       );
     },

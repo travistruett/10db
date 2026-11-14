@@ -1,9 +1,10 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import type { ProjectDto } from '@10db/contracts';
+import { DeniedBy, type ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules } from '@10db/db';
 import { allCheckouts } from '../delivery';
+import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
@@ -15,7 +16,8 @@ import {
   type InboxService,
 } from '../inbox';
 import type { Logger } from '../log';
-import { fileAccessJudge, type LaneSandbox, type LaneSession } from '../sandbox';
+import { EMPTY_SETUP, fileAccessJudge, type LaneSandbox, type LaneSession } from '../sandbox';
+import { leftOutNote, planSessionSetup } from '../session-setup';
 import { skippedServersNote, splitProjectMcp, type ProjectMcp } from '../sessions';
 import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '../shape';
 
@@ -101,6 +103,10 @@ export function createShapePreparer(deps: {
   /** Resolves a remote server's host to its addresses; the system's resolver by default. */
   readonly lookup?: (host: string) => Promise<readonly string[]>;
   readonly exportAwsCredentials: AwsCredentialsExporter;
+  /** The builder's home, whose instructions, skills and plugins come along (Settings › Trust). */
+  readonly builderHome: string;
+  /** The roots lanes write outside the registered checkouts: no setup comes along from them. */
+  readonly laneWritableRoots: readonly string[];
 }): (input: ShapePrepareInput) => Promise<ShapePrepared> {
   const { state, inbox, logger } = deps;
   const reader = createProjectMcpReader({
@@ -155,9 +161,18 @@ export function createShapePreparer(deps: {
     );
     const remote = Object.fromEntries(publicRemote.filter((entry) => entry !== null));
     const offMac = Object.keys(servers.remote).filter((name) => !(name in remote));
+    // Read when each session is prepared: a switch flipped meanwhile applies from the next one.
+    const setupPlan = planSessionSetup({
+      home: deps.builderHome,
+      checkout: project.repoPath,
+      switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(logger)),
+      laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
+    });
+    const instructions = setupPlan.instructions.text;
     let session: LaneSession;
     try {
       session = await deps.laneSandbox.forSession({
+        setup: setupPlan.input,
         project,
         env: input.env,
         // A conversation has no workstream: only the project's own rules hold.
@@ -173,12 +188,21 @@ export function createShapePreparer(deps: {
       return {
         sandbox: null,
         projectMcpServers: {},
-        note: `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
+        note: [
+          `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
+          leftOutNote(setupPlan.leftOut),
+        ]
+          .filter((line) => line !== null)
+          .join('\n\n'),
         credentialsExpireAt: null,
+        // With no Bash a skill's scripts can't run, so no folder is opened: only the instructions go.
+        instructions,
+        setup: EMPTY_SETUP,
         canUseTool: () =>
           Promise.resolve({
             behavior: 'deny',
             message: 'This session has no sandbox to run it in.',
+            by: DeniedBy.TenDb,
           }),
         trackProcesses: () => undefined,
         release: () => Promise.resolve(),
@@ -224,8 +248,13 @@ export function createShapePreparer(deps: {
           fileAccess: fileAccessJudge(sandboxed.fileAccess),
         },
         projectMcpServers: { ...remote, ...sandboxed.mcpServers },
-        note: [problem, skipped].filter((line) => line !== null).join('\n\n') || null,
+        note:
+          [problem, skipped, leftOutNote([...setupPlan.leftOut, ...sandboxed.setup.leftOut])]
+            .filter((line) => line !== null)
+            .join('\n\n') || null,
         credentialsExpireAt: earliestExpiry(projectMcp),
+        instructions,
+        setup: sandboxed.setup,
         canUseTool: broker,
         trackProcesses: (pid) => {
           tracked = true;

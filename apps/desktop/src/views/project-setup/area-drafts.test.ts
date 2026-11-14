@@ -1,4 +1,4 @@
-import { WHOLE_REPOSITORY_GLOBS } from '@10db/contracts';
+import { WHOLE_REPOSITORY_GLOBS, type ProposedArea } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   addDraft,
@@ -10,6 +10,7 @@ import {
   setCatchAll,
   setGlobs,
   setName,
+  setRole,
   WHOLE_REPOSITORY,
 } from './area-drafts';
 
@@ -200,6 +201,61 @@ describe('the catch-all area', () => {
   it('is refused when two drafts say it, as the daemon would', () => {
     const drafts = draftsFromAreas(withRest).map((d) => ({ ...d, catchAll: true }));
     expect(draftProblems(drafts).whole).toBe('Only one area can be the catch-all');
+  });
+});
+
+describe('the role and route the proposal gave each area', () => {
+  const pages: ProposedArea[] = [
+    {
+      name: 'people',
+      globs: ['app/people/**'],
+      reason: 'A screen.',
+      role: 'page',
+      route: '/people',
+    },
+    { name: 'memos', globs: ['app/memos/**'], reason: 'A screen.', role: 'page', route: '/memos' },
+    { name: 'lib', globs: ['lib/**'], reason: 'Shared code.', role: 'shared' },
+    { name: 'root', globs: ['*'], reason: 'Top files.' },
+  ];
+
+  it('reaches the project as the builder left it, and an area with none gets none', () => {
+    const drafts = draftsFromAreas(pages);
+    const edited = setRole(drafts, keyOf(drafts, 'memos'), { route: '/notes' });
+    expect(areasOf(edited)).toEqual([
+      { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+      { name: 'memos', globs: ['app/memos/**'], role: 'page', route: '/notes' },
+      { name: 'lib', globs: ['lib/**'], role: 'shared' },
+      { name: 'root', globs: ['*'] },
+    ]);
+  });
+
+  it('loses the route when an area stops being a page', () => {
+    const drafts = draftsFromAreas(pages);
+    const shared = setRole(drafts, keyOf(drafts, 'people'), { role: 'shared' });
+    expect(areasOf(shared)[0]).toEqual({
+      name: 'people',
+      globs: ['app/people/**'],
+      role: 'shared',
+    });
+  });
+
+  it('makes two merged pages one page with no route, and a page merged with shared code no role', () => {
+    const drafts = draftsFromAreas(pages);
+    const two = mergeDrafts(drafts, keyOf(drafts, 'memos'), keyOf(drafts, 'people'));
+    expect(areasOf(two)[0]).toEqual({
+      name: 'people',
+      globs: ['app/people/**', 'app/memos/**'],
+      role: 'page',
+    });
+    const mixed = mergeDrafts(drafts, keyOf(drafts, 'lib'), keyOf(drafts, 'people'));
+    expect(areasOf(mixed)[0]).toEqual({ name: 'people', globs: ['app/people/**', 'lib/**'] });
+  });
+
+  it('is refused when two pages can share a file, as the daemon would', () => {
+    const drafts = draftsFromAreas(pages);
+    const wide = setGlobs(drafts, keyOf(drafts, 'memos'), 'app/**');
+    expect(draftProblems(wide).whole).toMatch(/Pages "people" and "memos" can share a file/);
+    expect(draftProblems(drafts).whole).toBeNull();
   });
 });
 

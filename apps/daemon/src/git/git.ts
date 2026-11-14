@@ -11,7 +11,8 @@ import {
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
-import { InvalidError } from '@10db/contracts';
+import { BRANCH_PREFIX, InvalidError } from '@10db/contracts';
+import { z } from 'zod';
 import { realPathOf, resolveInRepo } from '../guard';
 import { bookkeepingEntryAt, leftOutOfCommits } from './claude-code-bookkeeping';
 import {
@@ -51,20 +52,38 @@ const OP_TRAILER = '10db-Op';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/** One record of `diff-index --raw`, as git printed it. */
+const IndexChange = z.object({
+  path: z.string().min(1),
+  mode: z.string().regex(/^[0-7]{6}$/),
+  blob: z.string().regex(OBJECT_ID),
+  status: z.string().min(1),
+});
+
+/** What a pass's dirt commit records, as `log` printed its parent and trailers. */
+const PassDirtTrailers = z.object({
+  startSha: z.string().regex(OBJECT_ID),
+  branch: z
+    .string()
+    .startsWith(BRANCH_PREFIX)
+    .regex(/^[^,\s]+$/),
+  returnBranch: z.string().regex(/^[^,\s]+$/),
+});
+
 /**
  * Config on every daemon git call beside `DAEMON_GIT_CONFIG`: no attributes file, git's own checks on
  * paths that would be `.git` on HFS+ or NTFS, and no submodule recursion.
  */
-const NO_ATTRIBUTES: readonly string[] = [
-  '-c',
-  'core.attributesFile=/dev/null',
-  '-c',
-  'core.protectHFS=true',
-  '-c',
-  'core.protectNTFS=true',
-  '-c',
-  'submodule.recurse=false',
-];
+export const NO_ATTRIBUTES_CONFIG: Readonly<Record<string, string>> = {
+  'core.attributesFile': '/dev/null',
+  'core.protectHFS': 'true',
+  'core.protectNTFS': 'true',
+  'submodule.recurse': 'false',
+};
+const NO_ATTRIBUTES: readonly string[] = Object.entries(NO_ATTRIBUTES_CONFIG).flatMap(
+  ([key, value]) => ['-c', `${key}=${value}`],
+);
 
 /** `removeWorktree` was asked to remove a path that is not a worktree 10db made. */
 export class WorktreeNotOursError extends Error {
@@ -105,6 +124,49 @@ export interface DiffSince {
     readonly added: number | null;
     readonly removed: number | null;
   }[];
+}
+
+/** Which files a diff covers: only these, or every file but these. */
+interface DiffPaths {
+  readonly only?: readonly string[];
+  readonly except?: readonly string[];
+}
+
+/** Whether a file of the whole change is one `paths` keeps. */
+function keptBy(paths: DiffPaths): (path: string) => boolean {
+  const only = paths.only === undefined ? null : new Set(paths.only);
+  const except = new Set(paths.except ?? []);
+  return (path) => (only === null || only.has(path)) && !except.has(path);
+}
+
+/** How many files, and how many bytes of their names, one `diff-tree` command names at most. */
+const PATHS_PER_COMMAND = 200;
+const PATH_BYTES_PER_COMMAND = 32 * 1024;
+
+/**
+ * `paths` in turns small enough for one command line, in the order given; each name is a literal
+ * pathspec, so a name with `*` or `:` is never read as a pattern.
+ */
+function pathspecTurns(paths: readonly string[]): string[][] {
+  const turns: string[][] = [];
+  let turn: string[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    const spec = `:(literal)${path}`;
+    const size = Buffer.byteLength(spec) + 1;
+    if (
+      turn.length > 0 &&
+      (turn.length >= PATHS_PER_COMMAND || bytes + size > PATH_BYTES_PER_COMMAND)
+    ) {
+      turns.push(turn);
+      turn = [];
+      bytes = 0;
+    }
+    turn.push(spec);
+    bytes += size;
+  }
+  if (turn.length > 0) turns.push(turn);
+  return turns;
 }
 
 /** What `fileAt` found at a path of a commit. */
@@ -212,6 +274,197 @@ export interface MergedCommitInput {
   readonly message: string;
 }
 
+export interface PassBranchInput {
+  readonly repo: string;
+  /** The pass's branch to make at HEAD's commit; it must not exist yet. */
+  readonly branch: string;
+  /** Where the commit holding the folder's dirt is kept: a new ref under `refs/10db/`. */
+  readonly dirtRef: string;
+  readonly message: string;
+}
+
+/** What a pass's dirt commit says of where the pass opened, read back from its ref. */
+export interface PassDirtRecord {
+  /** The ref that keeps the commit, `refs/10db/passes/<pass id>/dirt`. */
+  readonly ref: string;
+  /** The pass's branch, under `10db/`. */
+  readonly branch: string;
+  /** The branch HEAD named when the pass opened. */
+  readonly returnBranch: string;
+  /** The commit the pass opened at: the dirt commit's parent. */
+  readonly startSha: string;
+}
+
+/** The trailers a dirt commit carries, so a pass a stop left with no row can be taken back. */
+const PASS_BRANCH_TRAILER = '10db-Pass-Branch';
+const RETURN_BRANCH_TRAILER = '10db-Return-Branch';
+
+/** What git leaves in a worktree's git dir while an operation waits for the builder to finish it. */
+const OPERATIONS_IN_PROGRESS = [
+  { entry: 'MERGE_HEAD', what: 'a merge', end: 'git merge --continue or git merge --abort' },
+  {
+    entry: 'CHERRY_PICK_HEAD',
+    what: 'a cherry-pick',
+    end: 'git cherry-pick --continue or git cherry-pick --abort',
+  },
+  { entry: 'REVERT_HEAD', what: 'a revert', end: 'git revert --continue or git revert --abort' },
+  { entry: 'rebase-merge', what: 'a rebase', end: 'git rebase --continue or git rebase --abort' },
+  {
+    entry: 'rebase-apply',
+    what: 'a rebase or git am',
+    end: 'git rebase --continue, git am --continue, or their --abort',
+  },
+] as const;
+
+/** An operation git left waiting for the builder: what it is, and how to finish or stop it. */
+export interface OperationInProgress {
+  readonly what: string;
+  readonly end: string;
+}
+
+/** Where `openPassBranch` found the folder, and what in it differed from that commit. */
+export interface PassBranch {
+  /** The branch HEAD named. */
+  readonly returnBranch: string;
+  /** The commit it was at, where the pass's branch now is. */
+  readonly startSha: string;
+  /**
+   * Every path whose content on disk differs from `startSha`, untracked ones git doesn't ignore
+   * included, sorted, with the blob of its content on disk; null for a file deleted from the folder.
+   */
+  readonly dirt: readonly { readonly path: string; readonly blob: string | null }[];
+  /** The unsigned commit on `startSha` whose tree holds that dirt, kept at `dirtRef`. */
+  readonly dirtCommit: string;
+}
+
+/** HEAD does not name the pass's branch, so the folder's files are not the pass's to keep. */
+export class PassFolderOffBranchError extends Error {
+  override readonly name = 'PassFolderOffBranchError';
+  readonly branch: string;
+  /** The branch HEAD names instead; null when it is detached. */
+  readonly found: string | null;
+  constructor(repo: string, branch: string, found: string | null) {
+    super(`${repo} is on ${found ?? 'a detached HEAD'}, not on the pass's branch ${branch}`);
+    this.branch = branch;
+    this.found = found;
+  }
+}
+
+/** A kept ref no longer held what its writer read, so nothing was kept over the other write. */
+export class KeptRefMovedError extends Error {
+  override readonly name = 'KeptRefMovedError';
+  readonly ref: string;
+  constructor(ref: string, expected: string | null, found: string | null) {
+    super(`${ref} moved from ${expected ?? 'nothing'} to ${found ?? 'nothing'} meanwhile`);
+    this.ref = ref;
+  }
+}
+
+export interface KeepWorkInput {
+  readonly repo: string;
+  /** The pass's branch: HEAD must name it, and the work is laid on its tip. */
+  readonly branch: string;
+  /** Where the work is kept, under `refs/10db/`. */
+  readonly ref: string;
+  /** The files to keep as the folder has them: changed, added (untracked ones too) or deleted. */
+  readonly paths: readonly string[];
+  /**
+   * What `ref` holds now, or null when it does not exist: the new commit's parent (the tip, for
+   * null), and the only value the ref moves from.
+   */
+  readonly parent: string | null;
+  readonly message: string;
+  /** Names the work (`10db-turn: <turn id>`), so a rerun finds the commit it made. */
+  readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** A path as a commit or the folder holds it: the blob of its content, or null where it is not there. */
+export interface PathBlob {
+  readonly path: string;
+  readonly blob: string | null;
+}
+
+/**
+ * A path as a commit or the folder holds it, with the mode git gives it (`100644`, `100755`, `120000`
+ * for a link): a link or an executable bit holding the same bytes is another entry. Null where it is
+ * not there.
+ */
+export interface PathEntry extends PathBlob {
+  readonly mode: string | null;
+}
+
+/** What `recordPaths` made: the unsigned commit on `base`, and what each path held in the folder. */
+export interface PathRecord {
+  readonly sha: string;
+  /** Each path recorded, sorted, as the commit holds it. */
+  readonly record: readonly PathBlob[];
+}
+
+/** What `landPaths` landed. */
+export interface LandedPaths {
+  /** The commit on the branch that holds the paths; null when the tip held them already. */
+  readonly sha: string | null;
+  /** A commit carrying the operation id was on the branch already: a rerun's own. */
+  readonly alreadyLanded: boolean;
+  /** Another git held the folder's index, so it still reads the landed paths as they were. */
+  readonly indexStale: boolean;
+}
+
+export interface ChainCommitInput {
+  readonly repo: string;
+  /** The chain's ref, under `refs/10db/`. */
+  readonly ref: string;
+  /** What `ref` holds now, or null when it does not exist: the only value it moves from. */
+  readonly expect: string | null;
+  /** The commit the first change is laid on while `ref` does not exist: the pass's start. */
+  readonly base: string;
+  /** The paths the change sets: as the folder has them, or, with `from`, as that commit has them. */
+  readonly paths: readonly string[];
+  readonly from?: string;
+  /** More paths the change sets, as commit `from` has them (gone where it lacks them). */
+  readonly restore?: { readonly from: string; readonly paths: readonly string[] };
+  readonly message: string;
+  /** Names the change (`10db-hold: <claim id>`), so a rerun finds the commit it made. */
+  readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** What `chainCommit` left on the chain. */
+export interface ChainCommit {
+  /** The change's commit: made now, or one the chain already holds; null when the paths changed nothing. */
+  readonly sha: string | null;
+  /** True when `sha` was made by this call. */
+  readonly made: boolean;
+  /** Each of `paths`, sorted, as the change's tree holds it. */
+  readonly files: readonly PathBlob[];
+}
+
+/** Work still kept at a ref that a move must not write over (`moveKeptRef`). */
+export interface KeptRefEarlier {
+  /** The commit the ref holds. */
+  readonly sha: string;
+  /** The commit it was made on. */
+  readonly base: string;
+  /** The commit the moved work was made on. */
+  readonly workBase: string;
+}
+
+/** What `keepWork` left at the ref. */
+export interface KeptCommit {
+  /** The kept commit now: made here, found by its trailer, or the parent; null when there is none. */
+  readonly sha: string | null;
+  /** The branch tip the work was laid on. */
+  readonly base: string;
+  /** True when `sha` is this work's own commit: made now, or by an earlier run with the trailer. */
+  readonly made: boolean;
+}
+
+/** One file's lines added and removed; both 0 for a binary file. */
+export interface LineChange {
+  readonly path: string;
+  readonly added: number;
+  readonly removed: number;
+}
+
 export interface MergeIntoBranchInput {
   /** The checkout that has `branch` checked out. */
   readonly repo: string;
@@ -256,6 +509,19 @@ const RESOLVABLE_BYTES = 1_000_000;
 
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+/** Config for a read that must reach no remote: no transport, ssh command, credential helper or askpass. */
+const NO_TRANSPORT: readonly string[] = [
+  '-c',
+  'protocol.allow=never',
+  '-c',
+  'core.sshCommand=false',
+  '-c',
+  'credential.helper=',
+  '-c',
+  'core.askPass=',
+];
+/** How many blob bytes one `cat-file --batch` call of `surveyTexts` is asked for, about. */
+const SURVEY_TEXT_BATCH_BYTES = 16 * 1024 * 1024;
 
 /** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
 const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
@@ -327,7 +593,18 @@ export interface Git {
    * nothing in the checkout is uncommitted; otherwise it is left as it is and the answer says why.
    * A branch is checked out at its current tip; a detached place at its commit.
    */
-  switchBack(repo: string, from: string, to: CheckoutPlace): Promise<SwitchBack>;
+  switchBack(
+    repo: string,
+    from: string,
+    to: CheckoutPlace,
+    opts?: {
+      /**
+       * Keep uncommitted changes the switch does not write, as `git switch` does: only one in a file
+       * that differs between the two refuses it (`dirty`, naming those files).
+       */
+      readonly keepChanges?: boolean;
+    },
+  ): Promise<SwitchBack>;
   /**
    * Pushes `branch` to the same name at origin's recorded push URL, never forced, and records it as
    * the branch's upstream. Resolves with how long the push ran and what it printed.
@@ -360,6 +637,24 @@ export interface Git {
    * that brought another branch in is listed, the commits it brought are not.
    */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
+  /** How many commits `tip` has that `base` lacks, every parent followed (`rev-list --count`). */
+  countCommits(repo: string, base: string, tip: string): Promise<number>;
+  /**
+   * The commit `refs/remotes/origin/<branch>` is at, found by that exact name (`show-ref --verify`,
+   * never git's guessing of a short or partial name, which would take a local branch named
+   * `origin/<branch>` or `refs/remotes/origin/<branch>`) and peeled by its object id; null when there
+   * is no such ref or it names no commit.
+   */
+  remoteTrackingCommit(repo: string, branch: string): Promise<string | null>;
+  /** The paths commit `rev` tracks, read from the object store (`ls-tree -r`), sorted by git. */
+  filesAt(repo: string, rev: string): Promise<string[]>;
+  /**
+   * When HEAD's history last committed a change to a file one of the globs matches (git's `glob`
+   * pathspec), as an ISO time in UTC; null with no glob, no commit or none that touched one.
+   */
+  lastChangedAt(repo: string, globs: readonly string[]): Promise<string | null>;
+  /** The merge, cherry-pick, revert, rebase or `git am` waiting in the worktree, or null. */
+  operationInProgress(repo: string): Promise<OperationInProgress | null>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
   filtersIn(repo: string, rev: string): Promise<{ path: string; filter: string }[]>;
   /**
@@ -411,6 +706,116 @@ export interface Git {
    * text, holds none.
    */
   conflictMarkers(repo: string, paths: readonly string[], rev?: string): Promise<string[]>;
+  /**
+   * Opens a Workbench pass in the checkout: records every path that differs from HEAD's commit, its
+   * content written as git objects held by an unsigned commit at `dirtRef`, then makes `branch` at
+   * that commit and points HEAD at it. No file and no index entry is written, so uncommitted work stays
+   * as it is. Refused on a detached HEAD, a HEAD with no commit, a branch or ref that already exists,
+   * and when HEAD moved meanwhile, which leaves nothing behind.
+   */
+  openPassBranch(input: PassBranchInput): Promise<PassBranch>;
+  /**
+   * Takes back an `openPassBranch` nothing was built on: while HEAD names `branch` and both it and
+   * `returnBranch` are still at `startSha`, HEAD names `returnBranch` again and `branch` and `dirtRef`
+   * go; when `branch` was never made, only `dirtRef` goes. No file is written. Anything else is left
+   * as it is, and the answer says whether it was undone.
+   */
+  undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean>;
+  /**
+   * Every pass dirt commit kept under `refs/10db/passes/`, with the branches its trailers name; one
+   * whose trailers or parent don't read as `openPassBranch` writes them is left out.
+   */
+  passDirtRecords(repo: string): Promise<PassDirtRecord[]>;
+  /**
+   * Keeps a pass task's work (spec §9.1), under the repo lock: an unsigned commit whose tree is the
+   * branch's tip with `paths` as the folder has them (ignored files never), on `parent`, at `ref` by
+   * compare-and-swap. No file, index, HEAD or branch is touched. A commit the ref already holds with
+   * the same trailer is answered as it is; a tree equal to the parent's (the tip's, with no parent)
+   * makes no commit. Refused with `PassFolderOffBranchError` while HEAD is not `branch`, and with
+   * `KeptRefMovedError` when `ref` no longer holds `parent`.
+   */
+  keepWork(input: KeepWorkInput): Promise<KeptCommit>;
+  /**
+   * Lines added and removed in each of `pages` between commit `tip` and the folder, sorted by path;
+   * a file the same in both is left out. Read through a private index: nothing is written.
+   */
+  pageChanges(repo: string, tip: string, pages: readonly string[]): Promise<LineChange[]>;
+  /**
+   * The blob and mode each of `paths` holds in the folder now, sorted by path; null for one that is
+   * not there. Read through a private index: nothing is written.
+   */
+  hashOnDisk(repo: string, paths: readonly string[]): Promise<PathEntry[]>;
+  /**
+   * Puts each `entries` path back as commit `from` has it, under the repo lock: written through a
+   * private index (its mode and content; never through a link), or removed when `from` lacks it. Each
+   * file is hashed again just before it is written: one whose blob on disk is not the one `expect`
+   * names for it (null: not there) changed since it was checked, and is left as it is, as is one
+   * where a directory now stands or beyond a link or a file. HEAD and the folder's own index are
+   * untouched.
+   */
+  restoreFiles(
+    repo: string,
+    entries: readonly { readonly path: string; readonly from: string }[],
+    expect: readonly { readonly path: string; readonly blob: string | null }[],
+  ): Promise<{ readonly written: string[]; readonly left: string[] }>;
+  /**
+   * Moves the commit kept at `from` to `to`, both under `refs/10db/`: `to` is set to it, then `from`
+   * goes. Resolves with the commit, or with what `to` holds when `from` is gone (a rerun), or null.
+   * With `earlier`, work still kept at `to` that is not in the folder: while `to` holds it, `to` gets
+   * a new commit on both, so neither is lost, whose tree is `from`'s with each file `earlier` changed
+   * since its base as `earlier` has it, where `from` left that file as `workBase` has it.
+   */
+  moveKeptRef(
+    repo: string,
+    from: string,
+    to: string,
+    earlier?: KeptRefEarlier,
+  ): Promise<string | null>;
+  /**
+   * Narrows the work kept at `ref` (commit `kept.sha`, made on `kept.base`) to `paths`, under the repo
+   * lock: a new commit on it whose tree is `kept.base`'s with only those files as it has them, set at
+   * `ref` by compare-and-swap. A rerun finds the commit it made. Resolves with it.
+   */
+  narrowKeptRef(
+    repo: string,
+    ref: string,
+    kept: { readonly sha: string; readonly base: string },
+    paths: readonly string[],
+  ): Promise<string>;
+  /**
+   * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
+   * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
+   * now holds both sides, or already did; `conflict` when they don't merge cleanly, a side is not a
+   * regular file, or the file changed while it merged, and then it is left as it is.
+   */
+  mergeFileBack(input: {
+    readonly repo: string;
+    readonly path: string;
+    readonly base: string;
+    readonly theirs: string;
+  }): Promise<'merged' | 'conflict'>;
+  /**
+   * Points HEAD from branch `from` at branch `to`, writing no file, only while HEAD names `from`, both
+   * branches are at `sha` and no other worktree has `to`; true when it did.
+   */
+  pointHeadAt(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly sha: string;
+  }): Promise<boolean>;
+  /**
+   * Refreshes the stat data of the folder's own index for `paths` alone, after 10db wrote them, so the
+   * builder's git reads an unchanged file as unchanged; staged content and every other entry are not
+   * touched, and a path the index lacks is passed over. False when another git held the index.
+   */
+  refreshIndex(repo: string, paths: readonly string[]): Promise<boolean>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -419,6 +824,64 @@ export interface Git {
   keptRefs(repo: string, prefix: string): Promise<string[]>;
   /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
   deleteKeptRef(repo: string, ref: string): Promise<void>;
+  /**
+   * A pass's shared hold (spec §7.2): an unsigned commit on `base` whose tree is `base`'s with each of
+   * `paths` as the folder has it (git's ignore rules aside; gone where nothing is there), under the
+   * repo lock, naming no ref. No file, index, HEAD or branch is touched.
+   */
+  recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord>;
+  /**
+   * One change of a pass's shared chain (spec §7.2), under the repo lock: an unsigned commit whose tree
+   * is the chain tip's (`expect`, else `base`) with `paths` set (and `restore`'s), on that tip, at `ref` by
+   * compare-and-swap. A tree equal to the tip's makes no commit: it answers the newest commit on the
+   * chain carrying the same trailer, a rerun's own, else null. Refused with `KeptRefMovedError` when
+   * `ref` no longer holds `expect`. No file, index, HEAD or branch is touched.
+   */
+  chainCommit(input: ChainCommitInput): Promise<ChainCommit>;
+  /**
+   * Lands paths on a branch the folder has checked out, under the repo lock: a signed commit on its
+   * tip whose tree is the tip's with each of `paths` as commit `from` has it (gone where it lacks
+   * it), named by `opId`, by compare-and-swap, while HEAD names the branch. No file is written; the
+   * folder's own index follows for those paths, so the builder's git reads them as committed;
+   * `indexStale` says another git held the index, which then still reads them as before (Workbench
+   * spec §18). A commit on the branch carrying the opId is answered as it is, the index following the
+   * branch's tip for the paths again; a tree equal to the tip's makes none and answers null. Refused
+   * with `PassFolderOffBranchError` while HEAD names another branch. A compare-and-swap that loses
+   * a race is refused; with `willRetry` (the caller lands once more from the new tip) the refusal is
+   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card.
+   */
+  landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+    readonly willRetry?: boolean;
+  }): Promise<LandedPaths>;
+  /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
+  keepRef(repo: string, ref: string, sha: string): Promise<void>;
+  /**
+   * A commit of `files` alone, at the root, with no parent and never signed, by `author`: the
+   * pictures a pass's pull request shows. Each file is read from its path on disk; nothing in the
+   * checkout or its index is touched, and no ref names the commit.
+   */
+  picturesCommit(
+    repo: string,
+    input: {
+      readonly files: readonly { readonly name: string; readonly path: string }[];
+      readonly author: { readonly name: string; readonly email: string };
+      readonly message: string;
+    },
+  ): Promise<string>;
+  /** Pushes commit `sha` to `refs/heads/<branch>` of origin, replacing whatever that branch held. */
+  pushCommitTo(repo: string, sha: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
+  /** The blob and mode each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
+  blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathEntry[]>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** Whether the object store of `repo` holds commit `sha`. */
@@ -472,6 +935,48 @@ export interface Git {
    * elsewhere and refuses one in the way; one checked out anywhere else is refused.
    */
   rewindBranch(repo: string, branch: string, from: string, to: string): Promise<void>;
+  // Branch moves of a closed Workbench pass (spec §5.3, §5.4: D8, D22, D24).
+  /**
+   * Moves local branch `branch` to commit `to` by compare-and-swap, under the repo lock: `moved` when
+   * it was at `expect`, `already` when it is at `to` (a rerun), `raced` when it is anywhere else or
+   * gone, and then nothing changes. A branch checked out in any worktree moves only to a commit whose
+   * tree is its tip's, so no file and no index entry goes stale; any other such move is refused.
+   */
+  moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'>;
+  /**
+   * D22's Move: moves `branch`, which HEAD names at `from`, to commit `to`, its files following
+   * through `read-tree -m -u` as the built switch writes them, under the repo lock. Uncommitted changes
+   * the move does not write stay; one where it writes (`dirty`), or a file git does not track in the
+   * way (`ignored`), refuses it and nothing changes, as does a HEAD on another branch or a branch no
+   * longer at `from` (`moved`).
+   */
+  moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack>;
+  /**
+   * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
+   * (parents the tip, then `theirs`), signed as the builder's config asks, set by compare-and-swap,
+   * under the repo lock; no file or index entry changes. `already` when the branch holds `theirs`.
+   */
+  mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }>;
+  /**
+   * Where `branch` is in use in a worktree of `repo` other than `repo` itself: checked out there, or
+   * being rebased or bisected there. Null when none is.
+   */
+  branchInUseElsewhere(repo: string, branch: string): Promise<string | null>;
   /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
@@ -526,9 +1031,16 @@ export interface Git {
   /**
    * The unified diff from `base` to `head`, read with no external diff program and no textconv
    * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
-   * of the whole change. Renames are shown as a delete and an add.
+   * of the whole change. Renames are shown as a delete and an add. With `paths`, only the files it
+   * names, or every file but those, each path matched as spelled.
    */
-  diffSince(repo: string, base: string, head: string, maxBytes: number): Promise<DiffSince>;
+  diffSince(
+    repo: string,
+    base: string,
+    head: string,
+    maxBytes: number,
+    paths?: DiffPaths,
+  ): Promise<DiffSince>;
   /**
    * The commit `rev` names now, as a full object id. A caller that reads many folders and files of one
    * `rev` resolves it once and reads each from the id, so the reads cannot span a branch that moves.
@@ -569,7 +1081,42 @@ export interface Git {
    * and no signature check.
    */
   survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
+  /**
+   * The text of each of `paths` at HEAD of the repository at or above `path`, read as `survey` reads:
+   * the object store only, unpinned, nothing written, no program the repository configures run. Only
+   * a regular file of at most `options.maxBytes` that holds no NUL byte is answered; any other path is
+   * left out, as is every path when git won't read the repository. A partial clone is not read at all
+   * (a missing blob would be fetched, running its remote's programs), nor are files that together
+   * hold more than `options.maxTotalBytes`; `refused` says which. `options.signal` stops between
+   * batches.
+   */
+  surveyTexts(
+    path: string,
+    paths: readonly string[],
+    options: SurveyTextsOptions,
+  ): Promise<SurveyTexts>;
 }
+
+export interface SurveyTextsOptions {
+  readonly maxBytes: number;
+  readonly maxTotalBytes: number;
+  readonly signal?: AbortSignal;
+}
+
+/** What `surveyTexts` read: each text by path, the bytes read, and why it read nothing, if it refused. */
+export interface SurveyTexts {
+  readonly texts: ReadonlyMap<string, string>;
+  readonly bytes: number;
+  readonly refused: string | null;
+}
+
+/** Said when `surveyTexts` meets a partial clone. */
+const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
+/** Said when the files `surveyTexts` is asked for hold more than it may read. */
+export const OVER_BUDGET_REFUSAL =
+  'the source is over what one read may take: page code is not read';
+/** Said when `surveyTexts` can't read the repository's config to tell. */
+const UNREAD_CONFIG_REFUSAL = "the repository's config could not be read: page code is not read";
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -662,16 +1209,38 @@ function configEnv(entries: readonly (readonly [string, string])[]): Record<stri
 /** Lexical checks first, then the guard's symlink-aware check, so `link/x` can't commit outside the repo. */
 function checkPaths(repo: string, paths: readonly string[]): string[] {
   return paths.map((p) => {
-    const clean = normalize(p);
-    const lexicallyBad =
-      p === '' || isAbsolute(p) || clean === '.' || clean === '..' || clean.startsWith(`..${sep}`);
-    if (lexicallyBad || !resolveInRepo(repo, clean).inside) {
+    const clean = checkPathName(p);
+    if (!resolveInRepo(repo, clean).inside) {
       throw new InvalidError(
         `Path ${JSON.stringify(p)} must be relative and inside the repository`,
       );
     }
     return clean;
   });
+}
+
+/** The path, normalized, when it is relative and names no place above the repository. */
+function checkPathName(p: string): string {
+  const clean = normalize(p);
+  if (p === '' || isAbsolute(p) || clean === '.' || clean === '..' || clean.startsWith(`..${sep}`))
+    throw new InvalidError(`Path ${JSON.stringify(p)} must be relative and inside the repository`);
+  return clean;
+}
+
+/**
+ * Whether a part of the folder on the way to `rel` is a link or not a directory. Git keeps no file
+ * beyond either, so the path is not there, and nothing is read or written through it. A path itself
+ * may be a link: git keeps the link, never what it points at.
+ */
+function blockedOnTheWay(real: string, rel: string): boolean {
+  let at = real;
+  for (const part of rel.split(sep).slice(0, -1)) {
+    at = join(at, part);
+    const entry = lstatSync(at, { throwIfNoEntry: false });
+    if (entry === undefined) return false;
+    if (!entry.isDirectory()) return true;
+  }
+  return false;
 }
 
 /** `message` with the op trailer, joined to a trailer block the message already ends with. */
@@ -1166,6 +1735,16 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   async function findCommitByOp(c: Pinned, tip: string, opId: string): Promise<string | null> {
+    return findCommitByTrailer(c, tip, OP_TRAILER, opId);
+  }
+
+  /** The newest commit on `tip`'s first-parent line whose `key` trailer names `value`, or null. */
+  async function findCommitByTrailer(
+    c: Pinned,
+    tip: string,
+    key: string,
+    value: string,
+  ): Promise<string | null> {
     const out = await git(c, [
       'log',
       '--no-show-signature',
@@ -1174,18 +1753,18 @@ export function createGit(opts: GitOptions = {}): Git {
       '--first-parent',
       '-n',
       String(OP_SEARCH_DEPTH),
-      `--format=%H%x1f%(trailers:key=${OP_TRAILER},valueonly,separator=%x2c)%x1e`,
+      `--format=%H%x1f%(trailers:key=${key},valueonly,separator=%x2c)%x1e`,
       tip,
     ]);
     for (const record of out.split('\x1e')) {
-      const [sha, ops] = record.trim().split('\x1f');
+      const [sha, values] = record.trim().split('\x1f');
       if (
         sha &&
         OBJECT_ID.test(sha) &&
-        ops
+        values
           ?.split(',')
-          .map((o) => o.trim())
-          .includes(opId)
+          .map((v) => v.trim())
+          .includes(value)
       ) {
         return sha;
       }
@@ -1380,14 +1959,16 @@ export function createGit(opts: GitOptions = {}): Git {
     c: Pinned,
     from: string,
     to: CheckoutPlace,
+    keepChanges = false,
   ): Promise<SwitchBack> {
     const found = await currentBranch(c);
     if (found !== from) return { kind: 'moved', found };
     // What the files hold beyond HEAD, and what the checkout's own index holds beyond it: staged
     // work the files no longer show, or entries a commit made while another git held index.lock
-    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it.
+    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it,
+    // or, keeping changes, leaves it where the switch writes.
     const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])].sort();
-    if (paths.length > 0) return { kind: 'dirty', paths };
+    if (paths.length > 0 && !keepChanges) return { kind: 'dirty', paths };
     const ref = to.branch === null ? null : `refs/heads/${to.branch}`;
     const target = await revParse(c, `${ref ?? to.sha}^{commit}`);
     if (target === null) return { kind: 'gone' };
@@ -1406,6 +1987,8 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\0')
         .filter(Boolean),
     );
+    const overlapping = paths.filter((path) => written.has(path));
+    if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
     const inTheWay = await untrackedInTheWay(c, head, target, written);
     if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
     try {
@@ -1859,6 +2442,818 @@ export function createGit(opts: GitOptions = {}): Git {
       await git(c, ['update-ref', '--no-deref', '-m', '10db: kept merge', input.ref, sha]);
       return sha;
     });
+  }
+
+  /**
+   * The paths a private index differs from `tip` by, each with its blob; null for one it lacks.
+   * Refused for a path the index now holds as a nested repository, whose content the record can't
+   * hold.
+   */
+  async function indexChanges(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    tip: string,
+  ): Promise<{ path: string; blob: string | null }[]> {
+    const fields = (
+      await git(c, ['diff-index', '--cached', '--raw', '--no-renames', '-z', tip], { env })
+    ).split('\0');
+    const found: { path: string; blob: string | null }[] = [];
+    for (let at = 0; at + 1 < fields.length; at += 2) {
+      const [, , mode, , blob, status] = (fields[at] ?? '').split(/[: ]/);
+      const parsed = IndexChange.safeParse({ path: fields[at + 1], mode, blob, status });
+      if (!parsed.success)
+        throw new GitError(['diff-index'], 'diff-index printed a record 10db cannot read', null);
+      const change = parsed.data;
+      if (change.mode === GitMode.Gitlink)
+        throw new InvalidError(
+          `${change.path} became a nested repository while the pass was opening; open it again`,
+        );
+      found.push({ path: change.path, blob: change.status === 'D' ? null : change.blob });
+    }
+    return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  /** The operation git left waiting in the worktree, or null when none is. */
+  function operationIn(c: Pinned): OperationInProgress | null {
+    const busy = OPERATIONS_IN_PROGRESS.find(({ entry }) =>
+      existsAsEntry(join(c.dirs.gitDir, entry)),
+    );
+    return busy === undefined ? null : { what: busy.what, end: busy.end };
+  }
+
+  async function openPassBranch(input: PassBranchInput): Promise<PassBranch> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      // Checked first: a rebase leaves HEAD detached, and saying so would hide why.
+      const busy = operationIn(c);
+      if (busy)
+        throw new InvalidError(
+          `${c.real} is in the middle of ${busy.what}; finish it or stop it (${busy.end}) before opening a pass`,
+        );
+      const startSha = await revParse(c, 'HEAD^{commit}');
+      if (startSha === null) throw new InvalidError(`${c.real} has no commit yet`);
+      const returnBranch = await currentBranch(c);
+      if (returnBranch === null)
+        throw new InvalidError(
+          `${c.real} is on a detached HEAD; a pass needs a branch to return the folder to`,
+        );
+      const ref = `refs/heads/${input.branch}`;
+      if ((await revParse(c, ref)) !== null)
+        throw new InvalidError(`A branch named ${input.branch} already exists`);
+      // A nested repository is no file of the folder's: its content is its own. git refuses to add
+      // one with no commit and keeps one with a commit as a submodule entry, so neither is named, and
+      // the dirt and its commit's tree leave it out alike.
+      const paths = (await changes(c)).filter(
+        (path) => !path.endsWith('/') && embeddedRepository(c.real, path) === null,
+      );
+      const { tree, dirt } = await withPrivateIndex(c, startSha, async (env) => {
+        // On stdin, so no number of paths runs into the limit on a command's arguments.
+        if (paths.length > 0)
+          await git(c, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], {
+            env,
+            input: `${paths.join('\0')}\0`,
+          });
+        return {
+          tree: (await git(c, ['write-tree'], { env })).trim(),
+          dirt: await indexChanges(c, env, startSha),
+        };
+      });
+      // Never pushed, so never signed. The trailers say where the pass opened, for start-up to take
+      // back a pass the daemon stopped opening before its row was written.
+      const dirtCommit = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', startSha], {
+          input: `${input.message}\n\n${PASS_BRANCH_TRAILER}: ${input.branch}\n${RETURN_BRANCH_TRAILER}: ${returnBranch}\n`,
+        })
+      ).trim();
+      const zero = '0'.repeat(startSha.length);
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: pass dirt',
+          input.dirtRef,
+          dirtCommit,
+          zero,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`${input.dirtRef} already exists`);
+      }
+      const undo = async (): Promise<void> => {
+        await git(c, ['update-ref', '-d', input.dirtRef, dirtCommit]).catch(() => undefined);
+        await git(c, ['update-ref', '-d', ref, startSha]).catch(() => undefined);
+      };
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: pass', ref, startSha, zero]);
+      } catch (error) {
+        await undo();
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(
+          `A branch named ${input.branch} already exists, or the name is not valid`,
+        );
+      }
+      // A commit or a switch the builder made while the dirt was read: the pass would start elsewhere.
+      if (
+        (await currentBranch(c)) !== returnBranch ||
+        (await revParse(c, 'HEAD^{commit}')) !== startSha
+      ) {
+        await undo();
+        throw new InvalidError(`${c.real} moved while the pass was opening; open it again`);
+      }
+      // The branch is at HEAD's own commit, so naming it moves no file and no index entry.
+      await git(c, ['symbolic-ref', '-m', '10db: pass', 'HEAD', ref]);
+      return { returnBranch, startSha, dirt, dirtCommit };
+    });
+  }
+
+  async function undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      // Stopped before the branch was made: HEAD never moved, and the dirt's record is all there is.
+      if ((await revParse(c, ref)) === null) {
+        await git(c, ['update-ref', '--no-deref', '-d', input.dirtRef]).catch(() => undefined);
+        return true;
+      }
+      if ((await currentBranch(c)) !== input.branch) return false;
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.startSha) return false;
+      if ((await revParse(c, `refs/heads/${input.returnBranch}^{commit}`)) !== input.startSha)
+        return false;
+      await git(c, [
+        'symbolic-ref',
+        '-m',
+        '10db: pass undone',
+        'HEAD',
+        `refs/heads/${input.returnBranch}`,
+      ]);
+      await git(c, ['update-ref', '-d', ref, input.startSha]).catch(() => undefined);
+      await git(c, ['update-ref', '--no-deref', '-d', input.dirtRef]).catch(() => undefined);
+      return true;
+    });
+  }
+
+  async function passDirtRecords(repo: string): Promise<PassDirtRecord[]> {
+    const c = await pinned(repo);
+    const refs = await git(c, [
+      'for-each-ref',
+      '--format=%(refname)%00%(objectname)',
+      `${KEPT_REF_PREFIX}passes/`,
+    ]);
+    const found: PassDirtRecord[] = [];
+    for (const line of refs.split('\n').filter(Boolean)) {
+      const [ref = '', sha = ''] = line.split('\0');
+      if (!ref.endsWith('/dirt') || !OBJECT_ID.test(sha)) continue;
+      const trailer = (key: string): string => `%(trailers:key=${key},valueonly,separator=%x2c)`;
+      const [startSha, branch, returnBranch] = (
+        await git(c, [
+          'log',
+          '-1',
+          '--no-show-signature',
+          `--format=%P%x1f${trailer(PASS_BRANCH_TRAILER)}%x1f${trailer(RETURN_BRANCH_TRAILER)}`,
+          sha,
+        ])
+      )
+        .trim()
+        .split('\x1f')
+        .map((field) => field.trim());
+      const record = PassDirtTrailers.safeParse({ startSha, branch, returnBranch });
+      if (record.success) found.push({ ref, ...record.data });
+    }
+    return found;
+  }
+
+  async function keepWork(input: KeepWorkInput): Promise<KeptCommit> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = input.paths.map(checkPathName);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `refs/heads/${input.branch}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const held = await revParse(c, `${input.ref}^{commit}`);
+      if (held !== null) {
+        const { key, value } = input.trailer;
+        // Only the ref's own commit: an older one of the chain is not a rerun's answer, since the
+        // work kept after it would read as undone.
+        const found = await findCommitByTrailer(c, held, key, value);
+        if (found === held) return { sha: found, base: tip, made: true };
+      }
+      if (held !== input.parent) throw new KeptRefMovedError(input.ref, input.parent, held);
+      // HEAD names the branch, so what differs from HEAD is what differs from the tip; an ignored
+      // file git doesn't track is never among it.
+      // A path beyond a link or a file is not there for git: kept as gone.
+      const blocked = named.filter((path) => blockedOnTheWay(c.real, path));
+      const open = named.filter((path) => !blocked.includes(path));
+      const changed = open.length === 0 ? [] : await changes(c, open);
+      const tree = await withPrivateIndex(c, tip, async (env) => {
+        await stage(c, env, changed, tip);
+        if (blocked.length > 0)
+          await git(c, ['update-index', '--force-remove', '-z', '--stdin'], {
+            env,
+            input: `${blocked.join('\0')}\0`,
+          });
+        return (await git(c, ['write-tree'], { env })).trim();
+      });
+      const parent = input.parent ?? tip;
+      if (tree === (await revParse(c, `${parent}^{tree}`)))
+        return { sha: input.parent, base: tip, made: false };
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', parent], {
+          input: `${input.message.trimEnd()}\n\n${input.trailer.key}: ${input.trailer.value}\n`,
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: kept work',
+          input.ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(input.ref, held, await revParse(c, `${input.ref}^{commit}`));
+      }
+      return { sha, base: tip, made: true };
+    });
+  }
+
+  /**
+   * Puts each of `paths` into a private index as the folder holds it, git's ignore rules aside: a
+   * regular file or a link is hashed, anything else, or nothing, leaves no entry, as does a path
+   * beyond a link or a file.
+   */
+  async function indexAsOnDisk(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<void> {
+    const present: string[] = [];
+    const absent: string[] = [];
+    for (const path of paths) {
+      const entry = blockedOnTheWay(c.real, path)
+        ? undefined
+        : lstatSync(join(c.real, path), { throwIfNoEntry: false });
+      (entry?.isFile() === true || entry?.isSymbolicLink() === true ? present : absent).push(path);
+    }
+    if (present.length > 0)
+      await git(c, ['update-index', '--add', '-z', '--stdin'], {
+        env,
+        input: `${present.join('\0')}\0`,
+      });
+    if (absent.length > 0)
+      await git(c, ['update-index', '--force-remove', '-z', '--stdin'], {
+        env,
+        input: `${absent.join('\0')}\0`,
+      });
+  }
+
+  async function pageChanges(
+    repo: string,
+    tip: string,
+    pages: readonly string[],
+  ): Promise<LineChange[]> {
+    const named = pages.map(checkPathName);
+    if (named.length === 0) return [];
+    const c = await pinned(repo);
+    const out = await withPrivateIndex(c, tip, async (env) => {
+      await indexAsOnDisk(c, env, named);
+      return git(c, ['diff-index', '--cached', '--numstat', '-z', '--no-renames', tip], { env });
+    });
+    const asked = new Set(named);
+    return parseNumstat(out)
+      .filter((file) => asked.has(file.path))
+      .map((file) => ({ path: file.path, added: file.added ?? 0, removed: file.removed ?? 0 }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  async function hashOnDisk(repo: string, paths: readonly string[]): Promise<PathEntry[]> {
+    const named = [...new Set(paths.map(checkPathName))].sort();
+    if (named.length === 0) return [];
+    const c = await pinned(repo);
+    const listed = await withPrivateIndex(c, null, async (env) => {
+      await indexAsOnDisk(c, env, named);
+      return git(c, ['ls-files', '-s', '-z'], { env });
+    });
+    const entries = new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [mode = '', oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), { mode, oid }] as const;
+        }),
+    );
+    return named.map((path) => ({
+      path,
+      blob: entries.get(path)?.oid ?? null,
+      mode: entries.get(path)?.mode ?? null,
+    }));
+  }
+
+  /** What each of `paths` holds in a private index, by path; null for one it has no entry for. */
+  async function indexBlobs(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<PathBlob[]> {
+    if (paths.length === 0) return [];
+    const listed = await git(c, ['ls-files', '-s', '-z', '--', ...paths], { env });
+    const blobs = new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+    return paths.map((path) => ({ path, blob: blobs.get(path) ?? null }));
+  }
+
+  /** The tree of commit `base` with each of `paths` as the folder has it, and what each then holds. */
+  async function treeWithDisk(
+    c: Pinned,
+    base: string,
+    paths: readonly string[],
+  ): Promise<{ readonly tree: string; readonly files: PathBlob[] }> {
+    return withPrivateIndex(c, base, async (env) => {
+      await indexAsOnDisk(c, env, paths);
+      return {
+        tree: (await git(c, ['write-tree'], { env })).trim(),
+        files: await indexBlobs(c, env, paths),
+      };
+    });
+  }
+
+  /** Sets each of `paths` in a private index as commit `from` has it, or removes it where it lacks it. */
+  async function takeInto(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    from: string,
+    paths: readonly string[],
+  ): Promise<void> {
+    for (const path of paths) {
+      const entry = await treeEntry(c, from, path);
+      await git(
+        c,
+        entry === null
+          ? ['update-index', '--force-remove', '--', path]
+          : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+        { env },
+      );
+    }
+  }
+
+  async function recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const base = await revParse(c, `${input.base}^{commit}`);
+      if (base === null) throw new InvalidError(`${input.base} names no commit`);
+      const { tree, files } = await treeWithDisk(c, base, named);
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', base], {
+          input: '10db: shared hold record\n',
+        })
+      ).trim();
+      return { sha, record: files };
+    });
+  }
+
+  async function chainCommit(input: ChainCommitInput): Promise<ChainCommit> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const held = await revParse(c, `${input.ref}^{commit}`);
+      if (held !== input.expect) throw new KeptRefMovedError(input.ref, input.expect, held);
+      const tip = held ?? (await revParse(c, `${input.base}^{commit}`));
+      if (tip === null) throw new InvalidError(`${input.base} names no commit`);
+      const from = input.from;
+      const restore = input.restore;
+      const { tree, files } =
+        restore !== undefined
+          ? await withPrivateIndex(c, tip, async (env) => {
+              if (from === undefined) await indexAsOnDisk(c, env, named);
+              else await takeInto(c, env, from, named);
+              const restored = [...new Set(restore.paths.map(checkPathName))].sort();
+              await takeInto(c, env, restore.from, restored);
+              return {
+                tree: (await git(c, ['write-tree'], { env })).trim(),
+                files: await indexBlobs(c, env, [...new Set([...named, ...restored])].sort()),
+              };
+            })
+          : from === undefined
+            ? await treeWithDisk(c, tip, named)
+            : {
+                tree: await treeTaking(c, tip, from, named),
+                files: await Promise.all(
+                  named.map(async (path) => ({
+                    path,
+                    blob: (await treeEntry(c, from, path))?.oid ?? null,
+                  })),
+                ),
+              };
+      const { key, value } = input.trailer;
+      if (tree === (await revParse(c, `${tip}^{tree}`))) {
+        // Nothing to add: the chain holds this change already when a commit of its own is on it.
+        const own = held === null ? null : await findCommitByTrailer(c, held, key, value);
+        return { sha: own, made: false, files };
+      }
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', tip], {
+          input: `${input.message.trimEnd()}\n\n${key}: ${value}\n`,
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: shared change',
+          input.ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(input.ref, held, await revParse(c, `${input.ref}^{commit}`));
+      }
+      return { sha, made: true, files };
+    });
+  }
+
+  async function landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+    readonly willRetry?: boolean;
+  }): Promise<LandedPaths> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      // Another git holding index.lock leaves the index stale, which the caller says.
+      const followIndex = (sha: string): Promise<boolean> =>
+        git(c, ['reset', '-q', sha, '--', ...named], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        }).then(
+          () => false,
+          () => true,
+        );
+      const existing = await findCommitByOp(c, tip, input.opId);
+      // A rerun's index follows the branch too: the run it repeats may have stopped before it did.
+      if (existing)
+        return { sha: existing, alreadyLanded: true, indexStale: await followIndex(tip) };
+      const from = await revParse(c, `${input.from}^{commit}`);
+      if (from === null) throw new InvalidError(`${input.from} names no commit`);
+      const tree = await treeTaking(c, tip, from, named);
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        return { sha: null, alreadyLanded: false, indexStale: false };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
+        throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
+      }
+      return { sha, alreadyLanded: false, indexStale: await followIndex(sha) };
+    });
+  }
+
+  /** The blob each of `paths` holds on disk; null for one that is not a file or a link. */
+  async function blobsOnDisk(c: Pinned, paths: readonly string[]): Promise<Map<string, string>> {
+    const listed = await withPrivateIndex(c, null, async (env) => {
+      await indexAsOnDisk(c, env, paths);
+      return git(c, ['ls-files', '-s', '-z'], { env });
+    });
+    return new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+  }
+
+  /** The mode and blob `path` has in commit `rev`; null when it has none there. */
+  async function treeEntry(
+    c: Pinned,
+    rev: string,
+    path: string,
+  ): Promise<{ readonly mode: string; readonly oid: string } | null> {
+    const out = await git(c, ['ls-tree', '-z', '--full-tree', rev, '--', path], {
+      env: { GIT_LITERAL_PATHSPECS: '1' },
+    });
+    const found = parseTree(out).find((entry) => entry.path === path);
+    return found ? { mode: found.mode, oid: found.oid } : null;
+  }
+
+  async function restoreFiles(
+    repo: string,
+    entries: readonly { readonly path: string; readonly from: string }[],
+    expect: readonly { readonly path: string; readonly blob: string | null }[],
+  ): Promise<{ readonly written: string[]; readonly left: string[] }> {
+    const named = entries.map((entry) => ({ path: checkPathName(entry.path), from: entry.from }));
+    const expected = new Map(expect.map((e) => [e.path, e.blob]));
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const written: string[] = [];
+      const left: string[] = [];
+      for (const { path, from } of [...named].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        const now = (await blobsOnDisk(c, [path])).get(path) ?? null;
+        const target = await treeEntry(c, from, path);
+        // Already as asked: a rerun after a restart writes nothing twice.
+        if (now === (target?.oid ?? null)) {
+          written.push(path);
+          continue;
+        }
+        // Nothing is written beyond a link or a file: git would refuse, and a link may lead out.
+        if (!expected.has(path) || expected.get(path) !== now || blockedOnTheWay(c.real, path)) {
+          left.push(path);
+          continue;
+        }
+        const file = join(c.real, path);
+        const entry = lstatSync(file, { throwIfNoEntry: false });
+        // A directory in the way may hold files git ignores: writing the path would remove them all.
+        if (entry?.isDirectory() === true) {
+          left.push(path);
+          continue;
+        }
+        if (target === null) {
+          if (entry) rmSync(file, { force: true });
+          written.push(path);
+          continue;
+        }
+        try {
+          await withPrivateIndex(c, null, async (env) => {
+            await git(
+              c,
+              ['update-index', '--add', '--cacheinfo', `${target.mode},${target.oid},${path}`],
+              {
+                env,
+              },
+            );
+            // Git checks every directory on the way and writes nothing through a link.
+            await git(c, ['checkout-index', '-f', '-q', '--', path], { env });
+          });
+          written.push(path);
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error;
+          left.push(path);
+        }
+      }
+      return { written, left };
+    });
+  }
+
+  async function mergeFileBack(input: {
+    readonly repo: string;
+    readonly path: string;
+    readonly base: string;
+    readonly theirs: string;
+  }): Promise<'merged' | 'conflict'> {
+    const path = checkPathName(input.path);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      if (blockedOnTheWay(c.real, path)) return 'conflict';
+      const base = await treeEntry(c, input.base, path);
+      const theirs = await treeEntry(c, input.theirs, path);
+      if (base?.oid === theirs?.oid && base?.mode === theirs?.mode) return 'merged';
+      const file = join(c.real, path);
+      const entry = lstatSync(file, { throwIfNoEntry: false });
+      const regular = (e: { readonly mode: string } | null) =>
+        e !== null && REGULAR_FILE_MODES.includes(e.mode);
+      if (entry?.isFile() !== true || !regular(base) || !regular(theirs) || !base || !theirs)
+        return 'conflict';
+      const ours = readFileSync(file);
+      const bytes = async (oid: string): Promise<Buffer> =>
+        gitCapped(c, ['cat-file', 'blob', oid], RESOLVABLE_BYTES + 1);
+      const sides = [ours, await bytes(base.oid), await bytes(theirs.oid)];
+      // A file too big to merge by line is left, and named.
+      if (sides.some((side) => side.length > RESOLVABLE_BYTES)) return 'conflict';
+      const dir = mkdtempSync(join(tmpdir(), '10db-merge-'));
+      try {
+        const [oursAt, baseAt, theirsAt] = ['ours', 'base', 'theirs'].map((name, at) => {
+          const where = join(dir, name);
+          writeFileSync(where, sides[at] ?? Buffer.alloc(0));
+          return where;
+        });
+        if (oursAt === undefined || baseAt === undefined || theirsAt === undefined)
+          return 'conflict';
+        try {
+          await git(c, ['merge-file', '-q', oursAt, baseAt, theirsAt]);
+        } catch (error) {
+          if (error instanceof GitError) return 'conflict';
+          throw error;
+        }
+        // The builder's editor is not under the lock: a file written while it merged is left.
+        if (!readFileSync(file).equals(ours)) return 'conflict';
+        writeFileSync(file, readFileSync(oursAt));
+        return 'merged';
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  /** The tree of commit `base` with each of `paths` as commit `from` has it, or gone where it lacks it. */
+  async function treeTaking(
+    c: Pinned,
+    base: string,
+    from: string,
+    paths: readonly string[],
+  ): Promise<string> {
+    return withPrivateIndex(c, base, async (env) => {
+      for (const path of paths) {
+        const entry = await treeEntry(c, from, path);
+        await git(
+          c,
+          entry === null
+            ? ['update-index', '--force-remove', '--', path]
+            : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+          { env },
+        );
+      }
+      return (await git(c, ['write-tree'], { env })).trim();
+    });
+  }
+
+  /** The paths whose entries differ between commits `from` and `to`. */
+  async function pathsBetween(c: Pinned, from: string, to: string): Promise<string[]> {
+    return (await git(c, ['diff-tree', '-r', '-z', '--name-only', '--no-renames', from, to]))
+      .split('\0')
+      .filter(Boolean);
+  }
+
+  async function moveKeptRef(
+    repo: string,
+    from: string,
+    to: string,
+    earlier?: KeptRefEarlier,
+  ): Promise<string | null> {
+    for (const ref of [from, to])
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const sha = await revParse(c, `${from}^{commit}`);
+      if (sha === null) return revParse(c, `${to}^{commit}`);
+      const held = await revParse(c, `${to}^{commit}`);
+      let moved = sha;
+      if (held === earlier?.sha && held !== sha) {
+        const keep: string[] = [];
+        for (const path of await pathsBetween(c, earlier.base, earlier.sha)) {
+          const ours = await treeEntry(c, sha, path);
+          const was = await treeEntry(c, earlier.workBase, path);
+          if (ours?.oid === was?.oid && ours?.mode === was?.mode) keep.push(path);
+        }
+        const tree = await treeTaking(c, sha, earlier.sha, keep);
+        // Never pushed, so never signed.
+        moved = (
+          await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', sha, '-p', held], {
+            input: 'Kept work, on the work kept before it\n',
+          })
+        ).trim();
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, moved, held]);
+      } else if (
+        held !== null &&
+        held !== sha &&
+        (await git(c, ['rev-list', '--parents', '-n', '1', held])).trim().split(' ').includes(sha)
+      ) {
+        // A rerun after the new commit was set: only `from` is left to go.
+        moved = held;
+      } else {
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, sha]);
+      }
+      await git(c, ['update-ref', '--no-deref', '-d', from, sha]);
+      return moved;
+    });
+  }
+
+  async function narrowKeptRef(
+    repo: string,
+    ref: string,
+    kept: { readonly sha: string; readonly base: string },
+    paths: readonly string[],
+  ): Promise<string> {
+    if (!ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = paths.map(checkPathName);
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const tree = await treeTaking(c, kept.base, kept.sha, named);
+      const held = await revParse(c, `${ref}^{commit}`);
+      if (
+        held !== null &&
+        held !== kept.sha &&
+        (await revParse(c, `${held}^{tree}`)) === tree &&
+        (await revParse(c, `${held}^1`)) === kept.sha
+      )
+        return held;
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', kept.sha], {
+          input: 'Kept work not yet back in the folder\n',
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: kept work narrowed',
+          ref,
+          sha,
+          kept.sha,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(ref, kept.sha, await revParse(c, `${ref}^{commit}`));
+      }
+      return sha;
+    });
+  }
+
+  async function pointHeadAt(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly sha: string;
+  }): Promise<boolean> {
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      if ((await currentBranch(c)) !== input.from) return false;
+      for (const branch of [input.from, input.to])
+        if ((await revParse(c, `refs/heads/${branch}^{commit}`)) !== input.sha) return false;
+      if ((await branchInUseElsewhere(c, input.to)) !== null) return false;
+      // Both branches are at the same commit, so naming the other moves no file and no index entry.
+      await git(c, ['symbolic-ref', '-m', '10db: pass', 'HEAD', `refs/heads/${input.to}`]);
+      return true;
+    });
+  }
+
+  async function refreshIndex(repo: string, paths: readonly string[]): Promise<boolean> {
+    const named = paths.map(checkPathName);
+    if (named.length === 0) return true;
+    const c = await pinned(repo);
+    const env = { GIT_LITERAL_PATHSPECS: '1' };
+    try {
+      // `add --refresh` refuses a path the index does not hold, and stages nothing.
+      const tracked = (await git(c, ['ls-files', '-z', '--', ...named], { env }))
+        .split('\0')
+        .filter(Boolean);
+      if (tracked.length > 0) await git(c, ['add', '--refresh', '--', ...tracked], { env });
+      return true;
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      return false;
+    }
   }
 
   /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
@@ -2418,6 +3813,178 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'> {
+    if (!OBJECT_ID.test(input.to) || !OBJECT_ID.test(input.expect))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db moves nothing there`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === input.to) return 'already';
+      if (tip === null || tip !== input.expect) return 'raced';
+      const holder = await branchInUse(c, input.branch);
+      if (
+        holder !== null &&
+        (await revParse(c, `${input.to}^{tree}`)) !== (await revParse(c, `${tip}^{tree}`))
+      )
+        throw new InvalidError(
+          `Branch ${input.branch} is checked out at ${holder}, so it moves only to a commit with the same files`,
+        );
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${input.to}`,
+          ref,
+          input.to,
+          input.expect,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return 'raced';
+      }
+      return 'moved';
+    });
+  }
+
+  /** The last step of `moveCheckedOutBranch`: the branch moves by compare-and-swap. */
+  async function moveRefOnly(
+    c: Pinned,
+    ref: string,
+    from: string,
+    target: string,
+    found: string | null,
+  ): Promise<SwitchBack> {
+    try {
+      await git(c, [
+        'update-ref',
+        '--no-deref',
+        '-m',
+        `10db: move to ${target}`,
+        ref,
+        target,
+        from,
+      ]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      return { kind: 'moved', found };
+    }
+    return { kind: 'switched' };
+  }
+
+  async function moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack> {
+    if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const found = await currentBranch(c);
+      if (found !== input.branch) return { kind: 'moved', found };
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
+      const target = await revParse(c, `${input.to}^{commit}`);
+      if (target === null) return { kind: 'gone' };
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      // A move a crash cut short after its files and index and before the branch: the index holds
+      // the target's tree, so only the branch is left to move.
+      const indexTree = await git(c, ['write-tree']).then(
+        (out) => out.trim(),
+        () => null,
+      );
+      if (indexTree !== null && indexTree === (await revParse(c, `${target}^{tree}`)))
+        return moveRefOnly(c, ref, input.from, target, found);
+      const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])];
+      const written = new Set(
+        (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', input.from, target]))
+          .split('\0')
+          .filter(Boolean),
+      );
+      const overlapping = paths.filter((path) => written.has(path)).sort();
+      if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
+      const inTheWay = await untrackedInTheWay(c, input.from, target, written);
+      if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
+      try {
+        await git(c, ['read-tree', '-m', '-u', input.from, target]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`10db could not move ${input.branch}'s files: ${error.message}`);
+      }
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${target}`,
+          ref,
+          target,
+          input.from,
+        ]);
+      } catch (error) {
+        // The branch moved meanwhile: its files go back to what it held.
+        await git(c, ['read-tree', '-m', '-u', target, input.from]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        return { kind: 'moved', found };
+      }
+      return { kind: 'switched' };
+    });
+  }
+
+  async function mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }> {
+    if (!OBJECT_ID.test(input.theirs)) throw new InvalidError(`${input.theirs} is not a commit id`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} is not there`);
+      if (await isAncestor(c, input.theirs, tip)) return { kind: 'already', sha: tip };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(
+          c,
+          ['commit-tree', ...sign.flags, `${tip}^{tree}`, '-p', tip, '-p', input.theirs],
+          {
+            input: `${input.message}\n`,
+            config: sign.config,
+          },
+        )
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: merge keeping its tree',
+          ref,
+          sha,
+          tip,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'merged', sha };
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -2474,7 +4041,7 @@ export function createGit(opts: GitOptions = {}): Git {
     const target = withRealParent(path);
     const root = opts.worktreeRoot;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
-    let present: ReturnType<typeof lstatSync> | null = null;
+    let present: ReturnType<typeof lstatSync> | null;
     try {
       present = lstatSync(target);
     } catch {
@@ -2500,7 +4067,9 @@ export function createGit(opts: GitOptions = {}): Git {
         samePath(comparablePath(e.path), target),
       );
       if (!entry) {
-        if (present) throw new WorktreeNotOursError(path, 'git lists no worktree there');
+        // Read again under the lock: a removal that held it before this one leaves nothing there.
+        if (existsAsEntry(target))
+          throw new WorktreeNotOursError(path, 'git lists no worktree there');
         pins.delete(target);
         return 'absent';
       }
@@ -2656,9 +4225,9 @@ export function createGit(opts: GitOptions = {}): Git {
         switchCheckout(await pinned(repo), name, startPoint),
       );
     },
-    async switchBack(repo, from, to) {
+    async switchBack(repo, from, to, opts) {
       return withRepoLock(realpathSync(repo), async () =>
-        switchBackCheckout(await pinned(repo), from, to),
+        switchBackCheckout(await pinned(repo), from, to, opts?.keepChanges ?? false),
       );
     },
     async push(repo, branch, net) {
@@ -2754,7 +4323,49 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\n')
         .filter(Boolean);
     },
-    async diffSince(repo, base, head, maxBytes) {
+    async remoteTrackingCommit(repo, branch) {
+      const ref = `refs/remotes/origin/${branch}`;
+      const c = await pinned(repo);
+      // for-each-ref matches names, never guesses one: the line whose name is exactly `ref`, if any.
+      const listed = await git(c, ['for-each-ref', '--format=%(objectname) %(refname)', ref]);
+      const oid = listed
+        .split('\n')
+        .map((line) => line.split(' '))
+        .find(([, name]) => name === ref)?.[0];
+      if (oid === undefined || !OBJECT_ID.test(oid)) return null;
+      return revParse(c, `${oid}^{commit}`);
+    },
+    async filesAt(repo, rev) {
+      // A rev that starts with a dash would be read as an option by ls-tree.
+      if (rev.startsWith('-')) throw new GitError(['ls-tree', rev], `${rev} names no commit`, null);
+      return parseTree(
+        await git(await pinned(repo), ['ls-tree', '-r', '-z', '--full-tree', rev, '--']),
+      ).map((entry) => entry.path);
+    },
+    async countCommits(repo, base, tip) {
+      return Number(
+        (await git(await pinned(repo), ['rev-list', '--count', `${base}..${tip}`, '--'])).trim(),
+      );
+    },
+    async operationInProgress(repo) {
+      return operationIn(await pinned(repo));
+    },
+    async lastChangedAt(repo, globs) {
+      if (globs.length === 0) return null;
+      const c = await pinned(repo);
+      if ((await revParse(c, 'HEAD^{commit}')) === null) return null;
+      const out = await git(c, [
+        'log',
+        '-1',
+        '--format=%cI',
+        'HEAD',
+        '--',
+        ...globs.map((g) => `:(glob)${g}`),
+      ]);
+      const at = out.trim();
+      return at === '' ? null : new Date(at).toISOString();
+    },
+    async diffSince(repo, base, head, maxBytes, paths) {
       const c = await pinned(repo);
       const numstat = await git(
         c,
@@ -2763,14 +4374,36 @@ export function createGit(opts: GitOptions = {}): Git {
           config: DIFF_CONFIG,
         },
       );
+      const patch = (specs: readonly string[], cap: number) =>
+        gitCapped(
+          c,
+          ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--', ...specs],
+          cap,
+          {
+            config: DIFF_CONFIG,
+          },
+        );
       // A few bytes past the cap are read so a character split by the cap is seen whole.
-      const text = await gitCapped(
-        c,
-        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--'],
-        maxBytes + UTF8_MAX_BYTES,
-        { config: DIFF_CONFIG },
-      );
-      return { ...cutDiff(text, maxBytes), files: parseNumstat(numstat) };
+      const cap = maxBytes + UTF8_MAX_BYTES;
+      if (paths === undefined)
+        return { ...cutDiff(await patch([], cap), maxBytes), files: parseNumstat(numstat) };
+      // The files are picked from the whole change's counts, never named on one command line: the
+      // kept ones are read in turns, in the counts' order, which is the order the text lists them in.
+      const files = parseNumstat(numstat).filter((file) => keptBy(paths)(file.path));
+      const read: Buffer[] = [];
+      let size = 0;
+      let left = false;
+      for (const turn of pathspecTurns(files.map((file) => file.path))) {
+        if (size >= cap) {
+          left = true;
+          break;
+        }
+        const text = await patch(turn, cap - size);
+        read.push(text);
+        size += text.length;
+      }
+      const cut = cutDiff(Buffer.concat(read), maxBytes);
+      return { diff: cut.diff, truncated: cut.truncated || left, files };
     },
     async filtersIn(repo, rev) {
       return filters(await pinned(repo), rev);
@@ -2779,6 +4412,18 @@ export function createGit(opts: GitOptions = {}): Git {
     mergeIntoBranch,
     revertCommits,
     mergedCommit,
+    openPassBranch,
+    undoPassBranch,
+    passDirtRecords,
+    keepWork,
+    pageChanges,
+    hashOnDisk,
+    restoreFiles,
+    moveKeptRef,
+    narrowKeptRef,
+    mergeFileBack,
+    pointHeadAt,
+    refreshIndex,
     async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];
@@ -2817,6 +4462,66 @@ export function createGit(opts: GitOptions = {}): Git {
       if ((await revParse(c, ref)) === null) return;
       await git(c, ['update-ref', '--no-deref', '-d', ref]);
     },
+    recordPaths,
+    chainCommit,
+    landPaths,
+    async picturesCommit(repo, { files, author, message }) {
+      const c = await pinned(repo);
+      const entries: string[] = [];
+      for (const file of files) {
+        const oid = (await git(c, ['hash-object', '-w', '--no-filters', '--', file.path])).trim();
+        entries.push(`100644 blob ${oid}\t${file.name}`);
+      }
+      const tree = (await git(c, ['mktree'], { input: `${entries.join('\n')}\n` })).trim();
+      const env = {
+        GIT_AUTHOR_NAME: author.name,
+        GIT_AUTHOR_EMAIL: author.email,
+        GIT_COMMITTER_NAME: author.name,
+        GIT_COMMITTER_EMAIL: author.email,
+      };
+      return (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree], { input: `${message}\n`, env })
+      ).trim();
+    },
+    async pushCommitTo(repo, sha, branch, net) {
+      const c = await pinned(repo);
+      const commit = await revParse(c, `${sha}^{commit}`);
+      if (commit === null) throw new InvalidError(`${sha} names no commit`);
+      const network = await networkConfig(c, net);
+      const url = await pinnedUrl(c, 'push');
+      return gitNetwork(
+        c.real,
+        network.config,
+        ['push', '--recurse-submodules=no', '--', url, `+${commit}:refs/heads/${branch}`],
+        net,
+        { bin, env: { ...c.env, ...network.env } },
+      );
+    },
+    async keepRef(repo, ref, sha) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      const commit = await revParse(c, `${sha}^{commit}`);
+      if (commit === null) throw new InvalidError(`${sha} names no commit`);
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept ref', ref, commit]);
+    },
+    async blobsAt(repo, rev, paths) {
+      const named = [...new Set(paths.map(checkPathName))].sort();
+      if (named.length === 0) return [];
+      const c = await pinned(repo);
+      const found = new Map(
+        parseTree(
+          await git(c, ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...named], {
+            env: { GIT_LITERAL_PATHSPECS: '1' },
+          }),
+        ).map((entry) => [entry.path, entry]),
+      );
+      return named.map((path) => ({
+        path,
+        blob: found.get(path)?.oid ?? null,
+        mode: found.get(path)?.mode ?? null,
+      }));
+    },
     async isAncestor(repo, ancestor, tip) {
       return isAncestor(await pinned(repo), ancestor, tip);
     },
@@ -2836,6 +4541,12 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     fastForwardBranch,
     rewindBranch,
+    moveBranchCas,
+    moveCheckedOutBranch,
+    mergeKeepingTree,
+    async branchInUseElsewhere(repo, branch) {
+      return branchInUseElsewhere(await pinned(repo), branch);
+    },
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [
@@ -3059,6 +4770,102 @@ export function createGit(opts: GitOptions = {}): Git {
         return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
       } catch (error) {
         return refusalOf(error);
+      }
+    },
+    async surveyTexts(path, paths, { maxBytes, maxTotalBytes, signal }) {
+      const none = (refused: string | null): SurveyTexts => ({
+        texts: new Map(),
+        bytes: 0,
+        refused,
+      });
+      const wanted = new Set(paths);
+      if (wanted.size === 0) return none(null);
+      // A missing blob is never fetched: the fetch would run the remote's programs. Should the config
+      // change after the check below, no transport, ssh command or credential helper is reachable.
+      // GIT_ALLOW_PROTOCOL overrides every protocol.* setting, the repository's own among them, and
+      // no protocol is named `none`.
+      const noFetch = {
+        env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
+        config: NO_TRANSPORT,
+      };
+      try {
+        const at = observed(
+          realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
+        );
+        // Git before 2.45 has no GIT_NO_LAZY_FETCH, so a partial clone is not read at all. Reading
+        // config runs no program; a config git can't read refuses too, never reads.
+        let partial: string;
+        let promisors: string;
+        try {
+          // `--get-regexp` prints the key whatever its value: an empty one still names a partial clone.
+          partial = await git(at, ['config', '--get-regexp', '^extensions\\.partialclone$'], {
+            answerExitCodes: [1],
+          });
+          promisors = await git(
+            at,
+            ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
+            { answerExitCodes: [1] },
+          );
+        } catch {
+          return none(UNREAD_CONFIG_REFUSAL);
+        }
+        if (partial !== '' || /\strue$/mu.test(promisors)) return none(PARTIAL_CLONE_REFUSAL);
+        const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
+          answerExitCodes: [1],
+        });
+        if (head.trim() === '') return none(null);
+        const blobs: { path: string; oid: string; bytes: number }[] = [];
+        for (const record of (
+          await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()], noFetch)
+        ).split('\0')) {
+          const entry = LS_TREE_ENTRY.exec(record);
+          if (!entry) continue;
+          const [, mode = '', type, oid = '', size = '', file = ''] = entry;
+          const bytes = Number(size);
+          if (
+            wanted.has(file) &&
+            type === 'blob' &&
+            REGULAR_FILE_MODES.includes(mode) &&
+            Number.isSafeInteger(bytes) &&
+            bytes <= maxBytes
+          )
+            blobs.push({ path: file, oid, bytes });
+        }
+        const total = blobs.reduce((sum, b) => sum + b.bytes, 0);
+        if (total > maxTotalBytes) return none(OVER_BUDGET_REFUSAL);
+        const texts = new Map<string, string>();
+        // `cat-file --batch` prints `<oid> blob <size>\n<bytes>\n` per line it is given, in batches
+        // that keep each call's output well under what one git call may print.
+        for (let start = 0; start < blobs.length;) {
+          signal?.throwIfAborted();
+          let end = start;
+          let size = 0;
+          while (
+            end < blobs.length &&
+            (end === start || size + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
+          ) {
+            size += (blobs[end]?.bytes ?? 0) + 100;
+            end += 1;
+          }
+          const batch = blobs.slice(start, end);
+          const out = await gitCapped(at, ['cat-file', '--batch'], size + 1, {
+            ...noFetch,
+            input: batch.map((b) => `${b.oid}\n`).join(''),
+          });
+          let offset = 0;
+          for (const blob of batch) {
+            const header = out.indexOf(0x0a, offset);
+            if (header === -1) break;
+            const body = out.subarray(header + 1, header + 1 + blob.bytes);
+            offset = header + 1 + blob.bytes + 1;
+            if (!body.includes(0)) texts.set(blob.path, body.toString('utf8'));
+          }
+          start = end;
+        }
+        return { texts, bytes: total, refused: null };
+      } catch (error) {
+        if (signal?.aborted === true) throw error;
+        return none(null);
       }
     },
     async ignoredDirectories(repo) {

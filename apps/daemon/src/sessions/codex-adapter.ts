@@ -1,6 +1,8 @@
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import type { SeenAccount } from './account-check';
+import { codexCapabilities } from './capabilities';
+import { onProfile } from './agent-profile';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
@@ -14,16 +16,16 @@ import {
   type CodexSpawn,
 } from './codex-rpc';
 import { startCodexSession } from './codex-session';
+import { readThreadClientUuids } from './codex-thread-read';
 import type { SignInCheck } from './sign-in-check';
 import {
   AccountProbeError,
   CompletionError,
   SessionEndReason,
   type AccountProbeSpec,
-  type SessionAdapter,
+  type AgentAdapter,
   type SessionEvent,
   type SessionHandle,
-  type ShapeSessionHandle,
 } from './types';
 
 export interface CodexAdapterOptions {
@@ -49,7 +51,12 @@ function endedAtOnce(message: string): SessionHandle {
   const events = createChannel<SessionEvent>();
   events.push({ type: 'ended', reason: SessionEndReason.Error, message });
   events.end();
-  return { events, send: () => undefined, stop: () => Promise.resolve() };
+  return {
+    events,
+    send: () => undefined,
+    interrupt: () => Promise.resolve(null),
+    stop: () => Promise.resolve(),
+  };
 }
 
 async function readAccount(rpc: CodexRpc): Promise<SeenAccount> {
@@ -97,15 +104,18 @@ async function probeAccount(
 }
 
 /** Runs sessions on the builder's installed Codex over `codex app-server` (the ChatGPT-plan design). */
-export function createCodexAdapter(opts: CodexAdapterOptions): SessionAdapter {
+export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
   const homes = codexHomes();
   return {
+    capabilities: (account) => codexCapabilities(account.kind),
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
-    start: (spec) => startCodexSession(spec, { ...opts, homes }),
-    startShape(): ShapeSessionHandle {
-      return { ...endedAtOnce(NO_BRAINSTORM), interrupt: () => Promise.resolve() };
-    },
+    open: (spec) =>
+      onProfile(spec, {
+        lane: (lane) => startCodexSession(lane, { ...opts, homes }),
+        explore: () => endedAtOnce(NO_BRAINSTORM),
+      }),
+    readClientUuids: (spec) => readThreadClientUuids(spec, { ...opts, homes }),
   };
 }

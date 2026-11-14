@@ -10,6 +10,9 @@ import {
   InboxAnswerRefused,
   InboxKind,
   InboxState,
+  JudgeDecision,
+  RecordedAnswer,
+  type PersonId,
   InvalidError,
   isParkChoice,
   MCP_TOOL_GRANT_DETAIL,
@@ -18,6 +21,8 @@ import {
   ProposalId,
   ProposalKind,
   QuestionCategory,
+  SHARED_ASK_REPLY_CHOICE,
+  SharedAskDetail,
   Urgency,
   type CardResolution,
   type InboxItemDto,
@@ -34,14 +39,20 @@ import {
 import {
   findOpenByFoldKey,
   getInboxItem,
+  getJudgeConfig,
+  getPerson,
+  sendForCard,
   areasForProposal,
   getProject,
   getProposal,
   getProposalDto,
   getTask,
   getWorkstreamRow,
+  passHoldingTask,
   insertDecision,
   insertInboxItem,
+  assigneesFor,
+  targetTaskIds,
   insertPermissionRule,
   insertSource,
   insertTaskFromProposal,
@@ -49,6 +60,7 @@ import {
   openItemsForWorkstream,
   resolveProposal,
   updateInboxItem,
+  type DbReader,
   type Json,
   type WriteContext,
 } from '@10db/db';
@@ -98,6 +110,10 @@ type AskInput = AskOwner & {
   readonly foldPerLane?: boolean;
   /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
   readonly escalated?: boolean;
+  /** The card folds with the open card under this key alone, whatever it says. */
+  readonly foldKey?: string;
+  /** The topic the lane named from the project's topics; a topic route can match it. */
+  readonly topic?: string;
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
@@ -129,10 +145,36 @@ interface Rewording {
   readonly detail?: Record<string, Json>;
 }
 
+/** What a stakeholder's reply came to once read against the card's options. */
+export interface SlackAnswerInput {
+  readonly readAs: 'option' | 'own_words' | 'approved';
+  /** The option picked or approved; null for words that match none. */
+  readonly answer: InboxAnswer | null;
+  readonly words: string;
+  readonly conversation: readonly { readonly name: string; readonly text: string }[];
+}
+
+/** An answer's note is cut here; the words are kept to the schema's limit. */
+const NOTE_LIMIT = 4000;
+const WORDS_LIMIT = 20_000;
+
 export interface InboxService {
   /** Folds into an open identical card; the returned promise never causes an unhandled rejection. */
   ask(input: AskInput): { item: InboxItemDto; answer: Promise<InboxAnswer> };
   answer(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
+  /**
+   * Answers a question as a stakeholder who replied in Slack (spec §8.3). It refuses a park choice and a
+   * person who is not a recipient of the card's send, accepts words that match no option, and stores who
+   * answered. It never resolves a live waiter: their sessions are parked and the words reach the lane only
+   * in the quoted resume. `inTx` runs in the same transaction, so what it writes stands or falls with the
+   * answer. An answered card is a `ConflictError` that changes nothing.
+   */
+  answerAs(
+    id: InboxItemId,
+    input: SlackAnswerInput,
+    by: { personId: PersonId; permalink: string; with: string[] },
+    inTx: (ctx: WriteContext, item: InboxItemDto) => void,
+  ): InboxItemDto;
   flag(input: FlagInput): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   /**
@@ -219,6 +261,13 @@ function optionsForTargets(
   );
 }
 
+/** Whether a lane's run is of a task that a pass holds as a page. */
+function askedByPassPage(db: DbReader, workstreamId: WorkstreamId | null): boolean {
+  if (workstreamId === null) return false;
+  const task = getTask(db, getWorkstreamRow(db, workstreamId).taskId);
+  return passHoldingTask(db, task) !== undefined;
+}
+
 /** Identical open questions fold into one card; with `foldPerLane`, only one lane's. */
 function foldKeyFor(
   input: Pick<
@@ -233,6 +282,7 @@ function foldKeyFor(
     | 'foldPerLane'
     | 'escalated'
   >,
+  recipients: readonly string[],
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
@@ -243,6 +293,8 @@ function foldKeyFor(
     ...(input.foldPerLane === true && input.workstreamId !== null ? [input.workstreamId] : []),
     // A call Claude Code handed to a person never shares a card with an ordinary ask.
     ...(input.escalated === true ? ['escalated'] : []),
+    // Who the rules give a question is part of what it is: one asked of Mark never answers Dana's.
+    ...(input.kind === InboxKind.Question ? [[...recipients].sort().join(',')] : []),
     input.kind,
     norm(input.title),
     norm(input.body),
@@ -258,9 +310,16 @@ function assertKnownChoice(item: InboxItemDto, answer: InboxAnswer): void {
   }
 }
 
-/** Whether the answer to a lane's question is the choice that parks the task. */
+/**
+ * Whether the answer to a lane's question is the choice that parks the task. A pass's shared-area
+ * question never parks its page: its asking call takes the choice as Keep It to This Page.
+ */
 function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
-  return item.kind === InboxKind.Question && isParkChoice(answer.choice);
+  return (
+    item.kind === InboxKind.Question &&
+    isParkChoice(answer.choice) &&
+    !SharedAskDetail.safeParse(item.detail).success
+  );
 }
 
 interface Waiter {
@@ -412,6 +471,18 @@ export function createInboxService(deps: {
   onParkAnswer?(item: InboxItemDto): void;
   /** Where a failure that must not fail the builder's answer is logged. */
   readonly log?: Logger;
+  /**
+   * Runs inside the write that inserts a new question card. The result runs once that write has
+   * committed: it starts the judge's triage, so the network call never sits inside a transaction.
+   */
+  onQuestionOpened?(ctx: WriteContext, item: InboxItemDto): (() => void) | null;
+  /**
+   * Parks every session waiting on the card (`Runner.parkFor`). `answerAs` calls it so a stakeholder's
+   * words are never handed to a live `ask_human` call.
+   */
+  parkWaiting?(id: InboxItemId): void;
+  /** The daemon was started with `TENDB_JUDGE=off`: no question is left waiting for triage. */
+  readonly judgeOff?: boolean;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -431,7 +502,7 @@ export function createInboxService(deps: {
     });
   }
 
-  function deliver(item: InboxItemDto): InboxItemDto {
+  function deliver(item: InboxItemDto, resolveWaiters = true): InboxItemDto {
     const answer = item.answer;
     if (answer === null) throw new ConflictError(`Inbox item ${item.id} has no answer to deliver`);
     if (item.state === InboxState.Answered) {
@@ -441,7 +512,7 @@ export function createInboxService(deps: {
     if (item.kind === InboxKind.Check) {
       return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
-    const live = waiters.get(item.id);
+    const live = resolveWaiters ? waiters.get(item.id) : undefined;
     waiters.delete(item.id);
     for (const target of item.targets) {
       const waiter = target.sessionId ? live?.get(target.sessionId) : undefined;
@@ -538,12 +609,26 @@ export function createInboxService(deps: {
     }
   }
 
+  /**
+   * Whether a question could be triaged now: something is wired to run triage and the judge is on. If
+   * not, the lane's tags decide at insert and the card is never pending.
+   */
+  function judgeCanTriage(db: DbReader): boolean {
+    if (deps.onQuestionOpened === undefined || deps.judgeOff === true) return false;
+    const config = getJudgeConfig(db);
+    return config.enabled && config.decisions[JudgeDecision.QuestionRoute].enabled;
+  }
+
   const service: InboxService = {
     ask(raw) {
-      // Whatever the lane wrote, a question can be answered by parking the task.
+      let afterCommit: (() => void) | undefined;
+      // Whatever the lane wrote, a question can be answered by parking the task, except a pass
+      // page's: a page leaves its pass by Take Out, never by parking.
       const input =
-        raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
-      const foldKey = foldKeyFor(input);
+        raw.kind === 'question' && !askedByPassPage(deps.state.db, raw.workstreamId)
+          ? { ...raw, options: withParkOption(raw.options) }
+          : raw;
+      const passPage = askedByPassPage(deps.state.db, raw.workstreamId);
       // A conversation's card has no target: no workstream waits on it, and its session's waiter below
       // is how the answer reaches it.
       const target: InboxTarget | null =
@@ -555,6 +640,15 @@ export function createInboxService(deps: {
           ? input.detail
           : { ...input.detail, [SHAPE_CARD_KEY]: input.shapeId };
       const item = deps.state.write((ctx) => {
+        const routed = assigneesFor(ctx.tx, {
+          projectId: input.projectId,
+          kind: input.kind,
+          category: input.category,
+          topic: input.topic ?? null,
+          taskIds: targetTaskIds(ctx.tx, target === null ? [] : [target]),
+          passPage,
+        });
+        const foldKey = input.foldKey ?? foldKeyFor(input, routed.handles);
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
           if (target === null) return existing;
@@ -567,7 +661,7 @@ export function createInboxService(deps: {
               : {}),
           });
         }
-        return insertInboxItem(ctx, {
+        const created = insertInboxItem(ctx, {
           projectId: input.projectId,
           kind: input.kind,
           title: input.title,
@@ -579,8 +673,21 @@ export function createInboxService(deps: {
           detail,
           foldKey,
           targets: target === null ? [] : [target],
+          topic: input.topic ?? null,
+          passPage,
+          pendingTriage: judgeCanTriage(ctx.tx),
         });
+        if (created.kind === InboxKind.Question) {
+          afterCommit = deps.onQuestionOpened?.(ctx, created) ?? undefined;
+        }
+        return created;
       });
+      // A callback that throws must not fail the ask: the card is stored and the lane waits on it.
+      try {
+        afterCommit?.();
+      } catch (error) {
+        deps.log?.warn({ err: error, cardId: item.id }, 'could not start triage');
+      }
       const answer = new Promise<InboxAnswer>((resolve, reject) => {
         const forItem = waiters.get(item.id) ?? new Map<SessionId, Waiter>();
         forItem.set(input.sessionId, { resolve });
@@ -614,6 +721,15 @@ export function createInboxService(deps: {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
         }
       }
+      // A reply to a shared-area question is the builder's words to the agent: it needs some.
+      if (
+        current.kind === InboxKind.Question &&
+        current.state === InboxState.Open &&
+        answer.choice === SHARED_ASK_REPLY_CHOICE &&
+        SharedAskDetail.safeParse(current.detail).success &&
+        (answer.note ?? '').trim() === ''
+      )
+        throw new InboxAnswerRefused('Reply needs a note saying what to tell the agent');
       let afterCommit: (() => void) | undefined;
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);
@@ -667,6 +783,55 @@ export function createInboxService(deps: {
         releaseCoveredEditCards(answered);
       }
       return delivered;
+    },
+
+    answerAs(id, input, by, inTx) {
+      if (input.answer !== null && isParkChoice(input.answer.choice))
+        throw new InvalidError('A stakeholder cannot park the task');
+      const current = getInboxItem(deps.state.db, id);
+      const send = sendForCard(deps.state.db, id);
+      if (!send?.people.some((p) => p.recipient && p.personId === by.personId))
+        throw new InvalidError('Only a person the question was sent to can answer it');
+      const person = getPerson(deps.state.db, by.personId);
+      const words = input.words.slice(0, WORDS_LIMIT);
+      let given: InboxAnswer;
+      if (input.readAs === 'own_words') {
+        given = { choice: `In ${person.name}'s words`, note: input.words.slice(0, NOTE_LIMIT) };
+      } else {
+        if (input.answer === null) throw new InvalidError('There is no option to record');
+        given = { ...input.answer };
+        assertKnownChoice(current, given);
+      }
+      const recorded = RecordedAnswer.parse({
+        ...given,
+        answeredBy: person.handle,
+        via: 'slack',
+        words,
+        with: by.with,
+        conversation: input.conversation.slice(0, 100).map((m) => ({
+          name: m.name.slice(0, 200),
+          text: m.text.slice(0, 4000),
+        })),
+      });
+      const answered = deps.state.write((ctx) => {
+        const item = getInboxItem(ctx.tx, id);
+        if (item.state !== InboxState.Open)
+          throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
+        const updated = updateInboxItem(ctx, id, { state: InboxState.Answered, answer: recorded });
+        if (item.kind === InboxKind.Question && input.readAs !== 'own_words') {
+          recordAnswerDecision(ctx, updated, recorded, getProject(ctx.tx, item.projectId), {
+            handle: person.handle,
+            permalink: by.permalink,
+            with: by.with,
+          });
+        }
+        inTx(ctx, updated);
+        return updated;
+      });
+      // Their sessions park first, so each answer reaches the lane through the card and the resume.
+      waiters.delete(id);
+      deps.parkWaiting?.(id);
+      return deliver(answered, false);
     },
 
     flag(input) {

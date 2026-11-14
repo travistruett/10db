@@ -1,7 +1,20 @@
+import { createDeliveryJobs } from '../delivery';
 import { rmSync } from 'node:fs';
-import type { AccountId, BatchId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
+  mintId,
+  REVERTED_NOTICE_KEY,
+  type AccountId,
+  type BatchId,
+  type BatchState,
+  type ProjectId,
+  type WorkstreamDto,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  acquireClaims,
+  activeClaims,
   countLanes,
+  insertPass,
   countMidSession,
   createTestStore,
   listBoardColumns,
@@ -12,14 +25,25 @@ import {
   moveTask,
   getWorkstream,
   getWorkstreamRow,
+  advanceTakeOut,
+  endPassTurn,
   insertBatch,
+  insertBuilderMessage,
+  insertPassTurn,
+  insertSession,
+  insertTakeOut,
   insertTask,
   insertWorkstream,
+  leavePass,
+  markTaskMessagesDelivered,
   patchBatch,
+  patchWorkstream,
+  settlePassTurn,
   releaseClaims,
   runNext,
   schema,
   seedProject,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   type Store,
@@ -49,6 +73,8 @@ let close: () => void;
 let state: StateStore;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
+/** The warm sessions the scheduler asked the runner to close. */
+let closed: WorkstreamId[];
 let inbox: InboxService;
 let pauses: AccountPauses;
 let accounts: AccountRuntime;
@@ -95,6 +121,7 @@ beforeEach(() => {
   });
   accounts = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   launched = [];
+  closed = [];
   running = new Set();
   branchOf = new Map();
   refusedRepos = new Set();
@@ -110,8 +137,14 @@ afterEach(() => {
   close();
 });
 
-function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = new Set()) {
+function scheduler(
+  caps = { global: 4 },
+  awaited: ReadonlySet<WorkstreamId> = new Set(),
+  // The launch rule for saved Workbench work is the delivery harness's (kept-work-start.test.ts).
+  keptWork: { ready(run: WorkstreamDto): boolean } = { ready: () => true },
+) {
   return createScheduler({
+    keptWork,
     state,
     clock,
     caps,
@@ -128,6 +161,10 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
         launched.push({ id, fence });
       },
       isRunning: (id) => running.has(id),
+      closeWarm: (id) => {
+        closed.push(id);
+        return Promise.resolve();
+      },
     },
     accounts: {
       ...accounts,
@@ -296,6 +333,8 @@ describe('scheduler', () => {
           inbox,
           git: createGit(),
           processes: systemProcesses,
+          jobs: createDeliveryJobs(silentLogger),
+          clock: clock,
           maxRecoveryAttempts: 3,
           logger: silentLogger,
           cleanShutdown: true,
@@ -487,6 +526,53 @@ describe('scheduler', () => {
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
   });
 
+  it('asks whether saved work is back only of a run that could launch now, and launches it only on yes', async () => {
+    const a = queue();
+    // Waits for `a`: no put-back is started for a run that could not launch anyway.
+    add(a.project, ['ui'], [a.task.id]);
+    const asked: WorkstreamId[] = [];
+    let back = false;
+    const gate = {
+      ready: (run: WorkstreamDto) => {
+        asked.push(run.id);
+        return back;
+      },
+    };
+
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(0);
+    expect(asked).toEqual([a.workstream.id]);
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('QUEUED');
+
+    back = true;
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+  });
+
+  it('asks nothing of a run whose area another run holds, so no saved work goes into a checkout that lane writes', async () => {
+    const a = queue();
+    const holder = add(a.project, ['api']);
+    state.write((ctx) => {
+      const held = acquireClaims(ctx, {
+        projectId: a.project.id,
+        workstreamId: holder.workstream.id,
+        requests: [{ kind: 'area', name: 'api' }],
+        leaseExpiresAt: new Date(clock.now().getTime() + 60_000).toISOString(),
+      });
+      if (!held.ok) throw new Error('the holder did not claim api');
+    });
+    moveWorkstream(holder.workstream.id, 'STARTING');
+    const asked: WorkstreamId[] = [];
+    const gate = {
+      ready: (run: WorkstreamDto) => {
+        asked.push(run.id);
+        return false;
+      },
+    };
+
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(0);
+    expect(asked).toEqual([]);
+  });
+
   it('serializes workstreams that claim the same area', async () => {
     const a = queue();
     const b = add(a.project, ['api']);
@@ -555,6 +641,536 @@ describe('scheduler', () => {
     s.stop();
     await s.idle();
     expect(getWorkstreamRow(store.db, a.workstream.id).leaseExpiresAt).not.toBe(before);
+  });
+});
+
+// Workbench spec §5.2, §5.3 (W9), §5.5, §12: a pass's task runs a turn when its rows say so (a builder
+// message no turn took, a turn not ended), never from its next action alone, and while a pass holds
+// Your folder ordinary work waits for it there.
+describe('UI Workbench passes', () => {
+  const PAGES = [
+    { name: 'settings', globs: ['src/settings/**'], role: 'page' as const, route: '/settings' },
+    { name: 'api', globs: ['api/**'] },
+  ];
+
+  /** A pass holding the folder, with one task on the settings page, claimed as the pass claims it. */
+  function openPass(project: ReturnType<typeof seedProject>) {
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings: UI work',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      }),
+    );
+    return state.write((ctx) => {
+      const { pass, batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      const ws = insertWorkstream(ctx, task.id, {
+        batchId: batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      const claimed = acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests: [{ kind: 'area', name: 'settings' }],
+        leaseExpiresAt: clock.now().toISOString(),
+      });
+      if (!claimed.ok) throw new Error('the page was not claimed');
+      return { pass, batch, task, workstream: ws };
+    });
+  }
+
+  it('never launches an open pass task, and its page claim holds across a restart with no session', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, opened.workstream.id).state).toBe('QUEUED');
+
+    await recoverOnStartup({
+      state,
+      inbox,
+      git: createGit(),
+      processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: clock,
+      maxRecoveryAttempts: 3,
+      logger: silentLogger,
+      cleanShutdown: false,
+    });
+    const s = scheduler();
+    s.start();
+    clock.advance(20_000);
+    s.stop();
+    await s.idle();
+    expect(launched).toEqual([]);
+    expect(getWorkstream(store.db, opened.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      currentSessionId: null,
+    });
+    const [claim] = activeClaims(store.db, opened.workstream.id);
+    expect(claim?.name).toBe('settings');
+    // The heartbeat renews it, as it renews every live workstream's claims.
+    expect(claim?.leaseExpiresAt).not.toBe(clock.now().toISOString());
+    expect(Date.parse(claim?.leaseExpiresAt ?? '')).toBeGreaterThan(clock.now().getTime());
+  });
+
+  /** The builder writes to the page's task. */
+  function write(task: { id: Parameters<typeof insertBuilderMessage>[1] }) {
+    return state.write((ctx) => insertBuilderMessage(ctx, task.id, { body: 'Tidy it', files: [] }));
+  }
+
+  /** Your folder on the pass's branch, as the tick reads it. */
+  function onPassBranch(
+    opened: ReturnType<typeof openPass>,
+    project: ReturnType<typeof seedProject>,
+  ) {
+    branchOf.set(project.repoPath, opened.batch.branch);
+  }
+
+  it('runs a page once the builder writes to it, and never before', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    expect(await scheduler().tick()).toBe(0);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+    expect(countLanes(store.db).byPass.get(opened.pass.id)).toBe(1);
+  });
+
+  it('runs a turn a crash cut short again after each restart, though its message was taken', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    const message = write(opened.task);
+    for (const restart of [1, 2]) {
+      launched = [];
+      expect(await scheduler().tick()).toBe(1);
+      const [lane] = launched;
+      if (!lane) throw new Error('the page was not launched');
+      state.write((ctx) => {
+        transitionWorkstream(ctx, opened.workstream.id, { to: 'RUNNING', fence: lane.fence });
+        if (restart === 1) {
+          insertPassTurn(ctx, {
+            taskId: opened.task.id,
+            workstreamId: opened.workstream.id,
+            sessionId: null,
+            messageId: message.id,
+          });
+          markTaskMessagesDelivered(ctx, opened.task.id, [message.id]);
+        }
+      });
+      await recoverOnStartup({
+        state,
+        inbox,
+        git: createGit(),
+        processes: systemProcesses,
+        jobs: createDeliveryJobs(silentLogger),
+        clock: clock,
+        maxRecoveryAttempts: 3,
+        logger: silentLogger,
+        cleanShutdown: false,
+      });
+      expect(getWorkstreamRow(store.db, opened.workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'start' },
+      });
+    }
+    launched = [];
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
+  it('holds a page the builder stopped until the builder writes to it again, then runs it', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    const before = write(opened.task);
+    // The builder stopped the turn before it took the message.
+    state.write((ctx) => {
+      const turn = insertPassTurn(ctx, {
+        taskId: opened.task.id,
+        workstreamId: opened.workstream.id,
+        sessionId: null,
+        messageId: before.id,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'stopped', replyBody: null });
+      settlePassTurn(ctx, turn.id);
+    });
+    expect(await scheduler().tick()).toBe(0);
+
+    clock.advance(1_000);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
+  it.each([
+    {
+      name: 'a page being taken out',
+      hold: (opened: ReturnType<typeof openPass>) => {
+        state.write((ctx) => {
+          insertTakeOut(ctx, { taskId: opened.task.id, passId: opened.pass.id, drops: [] });
+          advanceTakeOut(ctx, { taskId: opened.task.id, passId: opened.pass.id }, { step: 3 });
+        });
+      },
+    },
+    {
+      name: 'a page taken out of its pass, its run cancelled',
+      hold: (opened: ReturnType<typeof openPass>) => {
+        state.write((ctx) => {
+          transitionWorkstream(ctx, opened.workstream.id, { to: 'CANCELLED', fence: null });
+          releaseClaims(ctx, opened.workstream.id);
+          leavePass(ctx, opened.task.id);
+        });
+      },
+    },
+    {
+      name: 'a page whose folder was switched to another branch',
+      hold: (_opened: ReturnType<typeof openPass>, project: ReturnType<typeof seedProject>) => {
+        branchOf.set(project.repoPath, 'main');
+      },
+    },
+    {
+      name: 'a page of a pass being abandoned',
+      hold: () => {
+        store.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+      },
+    },
+  ])('never runs $name, whatever the builder writes', async ({ hold }) => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    hold(opened, project);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(0);
+    expect(launched).toEqual([]);
+    // The pass's own card says where the folder is; the batch's wrong-branch card is not raised.
+    expect(wrongBranch).toEqual([]);
+  });
+
+  it("raises the pass's folder card once while a page waits on Your folder, and withdraws it once the folder is back", async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const folderCards = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((i) => i.detail?.['passCard'] === 'folder');
+    // The builder switched Your folder to another branch and wrote to the page.
+    branchOf.set(project.repoPath, 'main');
+    write(opened.task);
+    const s = scheduler();
+    expect(await s.tick()).toBe(0);
+    expect(await s.tick()).toBe(0);
+    expect(folderCards().map((c) => c.body)).toEqual([
+      expect.stringContaining("Your folder is on main, not on the pass's branch"),
+    ]);
+
+    onPassBranch(opened, project);
+    expect(await s.tick()).toBe(1);
+    expect(folderCards()).toEqual([]);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
+  it("withdraws the pass's folder card once Your folder is back, though no page of it is queued", async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const folderCards = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((i) => i.detail?.['passCard'] === 'folder');
+    branchOf.set(project.repoPath, 'main');
+    write(opened.task);
+    const s = scheduler();
+    await s.tick();
+    expect(folderCards()).toHaveLength(1);
+    // The page is no longer queued: it waits for the builder.
+    state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, opened.workstream.id, { to, fence: null });
+    });
+
+    onPassBranch(opened, project);
+    await s.tick();
+    expect(folderCards()).toEqual([]);
+  });
+
+  it('runs a page that waited at the open only once it holds its page', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    // Another task held the settings page when the pass opened.
+    const holder = add(project, ['settings']);
+    state.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: holder.workstream.id,
+        requests: [{ kind: 'area', name: 'settings' }],
+        leaseExpiresAt: clock.now().toISOString(),
+      }),
+    );
+    moveWorkstream(holder.workstream.id, 'STARTING');
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings: UI work',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      }),
+    );
+    const { batch, ws } = state.write((ctx) => {
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      return {
+        batch: opened.batch,
+        ws: insertWorkstream(ctx, task.id, {
+          batchId: opened.batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      };
+    });
+    branchOf.set(project.repoPath, batch.branch);
+    write(task);
+    expect(await scheduler().tick()).toBe(0);
+    expect(activeClaims(store.db, ws.id)).toEqual([]);
+    moveWorkstream(holder.workstream.id, 'CANCELLED');
+    state.write((ctx) => releaseClaims(ctx, holder.workstream.id));
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([ws.id]);
+    expect(activeClaims(store.db, ws.id).map((c) => c.name)).toEqual(['settings']);
+  });
+
+  /** A pass of `pageCap` holding one page whose session is warm, Ready, and one queued page. */
+  function warmAndWaiting(pageCap: number, warm = true) {
+    const project = seedProject(store, {
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+      ],
+    });
+    const task = (title: string, area: string) =>
+      state.write((ctx) =>
+        insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas: [area] }),
+      );
+    const ready = task('Settings: UI work', 'settings');
+    const waiting = task('People: UI work', 'people');
+    const opened = state.write((ctx) => {
+      const { pass, batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [ready.id, waiting.id],
+        dirt: [],
+      });
+      const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+      const warmWs = insertWorkstream(ctx, ready.id, { batchId: batch.id, first });
+      const queued = insertWorkstream(ctx, waiting.id, { batchId: batch.id, first });
+      for (const to of ['STARTING', 'RUNNING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, warmWs.id, { to, fence: null });
+      const turn = insertPassTurn(ctx, {
+        taskId: ready.id,
+        workstreamId: warmWs.id,
+        sessionId: null,
+        messageId: null,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null });
+      settlePassTurn(ctx, turn.id);
+      const session = insertSession(ctx, {
+        workstreamId: warmWs.id,
+        provider: 'claude',
+        model: 'claude-sonnet-5-5',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'h',
+        briefed: false,
+        briefingBaselinePct: null,
+      });
+      patchWorkstream(ctx, warmWs.id, null, {
+        currentSessionId: warm ? session.id : null,
+        nextAction: { kind: 'pass_review', inboxId: mintId('InboxItem') },
+      });
+      insertBuilderMessage(ctx, waiting.id, { body: 'Tidy it', files: [] });
+      return { pass, batch, warm: warmWs, queued };
+    });
+    if (warm) running.add(opened.warm.id);
+    branchOf.set(project.repoPath, opened.batch.branch);
+    return { ...opened, project };
+  }
+
+  it("closes the pass's longest-idle warm session for a page with no room, and launches it once freed", async () => {
+    const opened = warmAndWaiting(1);
+    expect(await scheduler().tick()).toBe(0);
+    expect(closed).toEqual([opened.warm.id]);
+    // The runner closed it: the lane is free on the next tick.
+    running.delete(opened.warm.id);
+    state.write((ctx) => {
+      patchWorkstream(ctx, opened.warm.id, null, { currentSessionId: null });
+    });
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.queued.id]);
+  });
+
+  it.each([
+    {
+      name: 'ordinary work in Your folder, which waits for the pass',
+      waiting: (project: ReturnType<typeof seedProject>) => {
+        add(project, ['people']);
+        return 1;
+      },
+    },
+    {
+      name: 'ordinary work of a project at its own lane limit',
+      waiting: () => {
+        const busy = queue({ maxLanes: 1 });
+        moveWorkstream(busy.workstream.id, 'STARTING');
+        add(busy.project, ['api']);
+        return 2;
+      },
+    },
+  ])('closes no warm session at the daemon-wide cap for $name', async ({ waiting }) => {
+    const opened = warmAndWaiting(4);
+    moveWorkstream(opened.queued.id, 'CANCELLED');
+    const cap = waiting(opened.project);
+    expect(await scheduler({ global: cap }).tick()).toBe(0);
+    expect(closed).toEqual([]);
+  });
+
+  it('says a page waits for a free session when no warm one can close, and drops it once it starts', async () => {
+    const opened = warmAndWaiting(1);
+    // The warm page is working again, so no session is idle.
+    running.delete(opened.warm.id);
+    expect(await scheduler({ global: 1 }).tick()).toBe(0);
+    expect(closed).toEqual([]);
+    expect(getWorkstream(store.db, opened.queued.id).notice?.line).toBe(
+      'Waiting for a free session: 1 is working',
+    );
+    // Its session ends: the lane is free, and the page starts with no notice left.
+    state.write((ctx) => {
+      patchWorkstream(ctx, opened.warm.id, null, { currentSessionId: null });
+    });
+    expect(await scheduler({ global: 1 }).tick()).toBe(1);
+    expect(getWorkstream(store.db, opened.queued.id).notice).toBeNull();
+  });
+
+  it('holds ordinary work in Your folder while a pass holds it, saying so, and launches it once the pass settles', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const ordinary = add(project, ['api']);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
+      'Waits for the UI Workbench pass to close',
+    );
+    // A closed pass still holds the folder until its work is in the base. The test has one pass,
+    // whose close took its task out.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
+    store.db.update(schema.passes).set({ state: 'CLOSED' }).run();
+    expect(await scheduler().tick()).toBe(0);
+    // Closed, the wait is for the pass's pull request now (D22).
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
+      "Waits for the UI Workbench pass's pull request to merge",
+    );
+    store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([ordinary.workstream.id]);
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice).toBeNull();
+  });
+
+  it('writes its wait over no other notice, and takes it down once the run no longer waits for the pass', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const kept = add(project, ['api']);
+    const reverted = {
+      key: REVERTED_NOTICE_KEY,
+      tone: 'info' as const,
+      line: 'Its commits are reverted on the branch',
+      body: 'b',
+    };
+    state.write((ctx) => setWorkstreamNotice(ctx, kept.workstream.id, reverted));
+    const blocker = add(project, ['api']);
+    const behind = add(project, ['api'], [blocker.task.id]);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, kept.workstream.id).notice?.line).toBe(reverted.line);
+    expect(getWorkstream(store.db, behind.workstream.id).notice?.key).toBe('workbench-pass');
+    // The pass ends; the run still waits, for its dependency now, and says nothing of the pass.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
+    moveWorkstream(blocker.workstream.id, 'CANCELLED');
+    moveWorkstream(kept.workstream.id, 'CANCELLED');
+    store.db.update(schema.passes).set({ state: 'ABANDONED' }).run();
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, behind.workstream.id).notice).toBeNull();
+  });
+
+  it('launches the new run of a task its abandoned pass no longer holds', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    // As the pass's Abandon takes its task out: the run cancelled, its page released.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
+    state.write((ctx) => releaseClaims(ctx, opened.workstream.id));
+    store.db.update(schema.passes).set({ state: 'ABANDONED' }).run();
+    store.db.update(schema.batches).set({ state: 'ABANDONED' }).run();
+    const again = state.write((ctx) =>
+      insertWorkstream(ctx, opened.task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([again.id]);
+  });
+
+  it("leaves a pass's lanes out of its project's lane limit", async () => {
+    const project = seedProject(store, { delivery: 'pull_request', areas: PAGES, maxLanes: 1 });
+    const opened = openPass(project);
+    moveWorkstream(opened.workstream.id, 'STARTING');
+    // Ordinary work in a separate copy, where a pass does not hold it.
+    const dir = tempDir('worktree');
+    try {
+      const task = state.write((ctx) =>
+        insertTask(ctx, project.id, { title: 'o', acceptanceCriteria: ['x'], areas: ['api'] }),
+      );
+      const batch = state.write((ctx) => {
+        const b = insertBatch(ctx, {
+          projectId: project.id,
+          title: 'Ordinary',
+          baseBranch: 'main',
+          worktreePath: dir.path,
+        });
+        transitionBatch(ctx, b.id, { to: 'OPEN' });
+        patchBatch(ctx, b.id, { branch: '10db/ordinary-0a1b2c3d', baseSha: 'a'.repeat(40) });
+        return b;
+      });
+      branchOf.set(dir.path, '10db/ordinary-0a1b2c3d');
+      const ordinary = state.write((ctx) =>
+        insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        }),
+      );
+      expect(await scheduler().tick()).toBe(1);
+      expect(launched.map((l) => l.id)).toEqual([ordinary.id]);
+    } finally {
+      dir.cleanup();
+    }
   });
 });
 

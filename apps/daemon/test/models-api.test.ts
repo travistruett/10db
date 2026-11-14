@@ -1,17 +1,22 @@
 import {
+  AccountCreatedDto,
+  AccountDto,
   AccountModelDto,
   CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
+  mintId,
   ModelRowDto,
+  RolePicksDto,
   type Effort,
 } from '@10db/contracts';
-import { findModelProfile, listAccountModels } from '@10db/db';
+import { findModelProfile, listAccountModels, replaceAccountModels } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { measureForTests } from './catalogue';
 import { tempDir, waitFor } from './fixtures';
 import { readModelsDevFixture } from './models-dev-fixture';
 
@@ -73,7 +78,7 @@ describe('the model list over HTTP', () => {
     expect(rows.map((r) => r.model)).toEqual(['claude-opus-5-5']);
     expect(rows[0]).toMatchObject({
       maker: 'anthropic',
-      tier: 'strongest',
+      tier: 'frontier',
       status: 'current',
       outputPrice: 20,
       intelligence: null,
@@ -81,12 +86,86 @@ describe('the model list over HTTP', () => {
     expect(rows[0]?.availableOn).toHaveLength(1);
   });
 
+  it('prices the list on an account, one line per effort, and refuses a bad or archived account', async () => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    const [account] = await api.get('/accounts', z.array(AccountDto));
+    if (!account) throw new Error('the daemon has no default account');
+    // The account's stored list names only `low`; the model has a profile at every effort.
+    running.state.write((ctx) => {
+      replaceAccountModels(
+        ctx,
+        account.id,
+        listAccountModels(ctx.tx, account.id).map((m) => ({
+          model: m.model,
+          family: m.family,
+          launchId: m.launchId,
+          efforts: ['low'],
+          inputPrice: m.inputPrice,
+          outputPrice: m.outputPrice,
+        })),
+      );
+    });
+    const efforts = async (path: string) =>
+      (await api.get(path, z.array(ModelRowDto)))
+        .find((r) => r.model === 'claude-opus-5-5')
+        ?.efforts.map((e) => e.effort)
+        .sort();
+    expect(await efforts(`/models?account=${account.id}`)).toEqual(['low']);
+    expect(await efforts('/models')).toEqual(['high', 'low', 'max', 'medium', 'xhigh']);
+
+    await expect(api.get('/models?account=nope', z.array(ModelRowDto))).rejects.toThrow('-> 400');
+    await expect(
+      api.get(`/models?account=${mintId('Account')}`, z.array(ModelRowDto)),
+    ).rejects.toThrow('-> 404');
+
+    const { account: spare } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'Spare',
+    });
+    await api.post(`/accounts/${spare.id}/archive`, z.unknown());
+    await expect(api.get(`/models?account=${spare.id}`, z.array(ModelRowDto))).rejects.toThrow(
+      '-> 404',
+    );
+  });
+
+  it('answers what routing picks for each role on an account, and refuses a bad or archived one', async () => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    // Invented measurements: low scores 45, high 51, so the roles that need 48 are the ones that go up.
+    measureForTests(running.state);
+    const [account] = await api.get('/accounts', z.array(AccountDto));
+    if (!account) throw new Error('the daemon has no default account');
+    const { accountId, picks } = await api.get(`/models/picks?account=${account.id}`, RolePicksDto);
+    expect(accountId).toBe(account.id);
+    expect(picks.map((p) => `${p.role}:${String(p.model)}@${String(p.effort)}`)).toEqual([
+      'plan:claude-opus-5-5@low',
+      'plan_review:claude-opus-5-5@high',
+      'implement:claude-opus-5-5@low',
+      'review:claude-opus-5-5@high',
+      'qa:claude-opus-5-5@low',
+    ]);
+    expect(picks[0]).toMatchObject({ intelligence: 45, costPerTaskUsd: 1 });
+
+    await expect(api.get('/models/picks', RolePicksDto)).rejects.toThrow('-> 400');
+    await expect(api.get('/models/picks?account=nope', RolePicksDto)).rejects.toThrow('-> 400');
+    await expect(
+      api.get(`/models/picks?account=${mintId('Account')}`, RolePicksDto),
+    ).rejects.toThrow('-> 404');
+    const { account: spare } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'Spare',
+    });
+    await api.post(`/accounts/${spare.id}/archive`, z.unknown());
+    await expect(api.get(`/models/picks?account=${spare.id}`, RolePicksDto)).rejects.toThrow(
+      '-> 404',
+    );
+  });
+
   it('lists the maker’s models as available on an account whose list has not been read', async () => {
     const { running, api } = await start([]);
     expect(listAccountModels(running.state.db)).toEqual([]);
     const rows = await api.get('/models', z.array(ModelRowDto));
     const opus = rows.find((r) => r.model === 'claude-opus-5-5');
-    expect(opus).toMatchObject({ status: 'current', tier: 'strongest' });
+    expect(opus).toMatchObject({ status: 'current', tier: 'capable' });
     expect(opus?.availableOn).toHaveLength(1);
   });
 

@@ -1,5 +1,6 @@
 import {
   ACCOUNT_CARD_DETAIL,
+  OPEN_INTEGRATIONS_DETAIL,
   AccountCardDetail,
   AccountProblem,
   InboxKind,
@@ -24,18 +25,32 @@ import {
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
+import { z } from 'zod';
+import { CodeSpans } from '../../shell/code-spans';
+import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
+import { PassCardExtras } from './pass-card-extras';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
 import { RecordDecision } from './record-decision';
 import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
 import { SettingsSectionKey } from '../settings/sections';
+import { usePeople } from '../../daemon/people';
+import { SlackPreview } from './slack-preview';
+import {
+  AskSomeoneFooter,
+  ComposedMessage,
+  RouteLineRow,
+  SendInsteadLink,
+  SentNotice,
+} from './stakeholder-extras';
+import { copyPeople, joinNames, StakeholderMode, stakeholderMode } from './route-line';
 
 export interface InboxCardProps {
   readonly item: InboxItemDto;
@@ -60,6 +75,11 @@ export interface InboxCardProps {
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
   readonly onDismiss: () => void;
+  /** Whether the Inbox's keys answer the card, so each option shows its digit and Send its Enter. */
+  readonly shortcuts?: boolean;
+  /** Whether the builder chose Answer Myself on a drafted question, which swaps the preview for the options. */
+  readonly answeringMyself?: boolean;
+  readonly onAnswerMyself?: (value: boolean) => void;
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
@@ -74,7 +94,7 @@ export function CardBody({ item }: { readonly item: InboxItemDto }) {
   }
   return (
     <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-      {item.body}
+      <CodeSpans text={item.body} />
     </Text>
   );
 }
@@ -91,6 +111,12 @@ const GITHUB_PAGE = 'https://github.com/';
 function needsAccountModels(item: InboxItemDto): boolean {
   const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
   return card.success && card.data.problem === AccountProblem.NoUsableModel;
+}
+
+/** The Integrations card a flag card sends the builder to (`detail.openIntegrations`), or null. */
+function integrationsFocusOf(item: InboxItemDto): string | null {
+  const focus = z.string().min(1).safeParse(item.detail?.[OPEN_INTEGRATIONS_DETAIL]);
+  return focus.success ? focus.data : null;
 }
 
 function cardLink(item: InboxItemDto): string | null {
@@ -119,7 +145,12 @@ export function InboxCard({
   onNoteFocus,
   onSubmit,
   onDismiss,
+  shortcuts = true,
+  answeringMyself = false,
+  onAnswerMyself = () => undefined,
 }: InboxCardProps) {
+  const people = usePeople().data ?? [];
+  const mode = stakeholderMode(item, people);
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
   const principle = usePrincipleOf(item, selected);
@@ -130,6 +161,8 @@ export function InboxCard({
       {review ? 'MCP server' : KIND_LABELS[item.kind]}
     </Badge>
   );
+  // The Inbox lists every project, so each card says whose it is.
+  const where = <ProjectLabel projectId={item.projectId} />;
   const times =
     count > 1 ? (
       <Badge size="sm" variant="default" style={{ flexShrink: 0 }}>
@@ -155,6 +188,7 @@ export function InboxCard({
         <UnstyledButton onClick={onSelect} p="sm" style={{ flex: 1, minWidth: 0 }}>
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
             <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
               {item.title}
@@ -194,7 +228,34 @@ export function InboxCard({
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
+            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+              {item.title}
+            </Text>
+          </Group>
+        }
+      />
+    );
+  }
+
+  if (
+    (mode === StakeholderMode.Draft || mode === StakeholderMode.Failed) &&
+    item.send !== null &&
+    !answeringMyself
+  ) {
+    return (
+      <SlackPreview
+        item={item}
+        send={item.send}
+        people={people}
+        onAnswerMyself={() => {
+          onAnswerMyself(true);
+        }}
+        header={
+          <Group gap="sm" wrap="nowrap">
+            {kind}
+            {where}
             <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
               {item.title}
             </Text>
@@ -221,6 +282,7 @@ export function InboxCard({
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
+          {where}
           {principle ? (
             <Badge size="sm" variant="outline" style={{ flexShrink: 0 }}>
               {PRINCIPLE_KIND_LABELS[principle.kind]}
@@ -258,6 +320,35 @@ export function InboxCard({
             Open Accounts in Settings
           </Anchor>
         ) : null}
+        {integrationsFocusOf(item) === null ? null : (
+          <Anchor
+            size="sm"
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Integrations }}
+                search={{ focus: integrationsFocusOf(item) ?? undefined }}
+              />
+            )}
+          >
+            Open Integrations
+          </Anchor>
+        )}
+        <RouteLineRow item={item} people={people} mode={mode} />
+        <SentNotice item={item} />
+        {mode === StakeholderMode.Copy ? (
+          <ComposedMessage item={item} recipients={copyPeople(item, people)} />
+        ) : null}
+        {answeringMyself && item.send !== null ? (
+          <SendInsteadLink
+            names={joinNames(item.send.people.filter((p) => p.recipient).map((p) => p.name))}
+            onClick={() => {
+              onAnswerMyself(false);
+            }}
+          />
+        ) : null}
+        <PassCardExtras item={item} />
         <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
@@ -266,7 +357,7 @@ export function InboxCard({
                 <Radio.Card key={option.label} value={option.label} p="sm">
                   <Group wrap="nowrap" align="flex-start">
                     <Radio.Indicator />
-                    {index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
+                    {shortcuts && index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
                     <div>
                       <Group gap="xs">
                         <Text size="sm" fw={500}>
@@ -311,14 +402,19 @@ export function InboxCard({
           </Alert>
         ) : null}
         <Group justify="flex-end">
+          {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
+            <AskSomeoneFooter item={item} people={people} />
+          ) : null}
           <Button
             size="sm"
             loading={pending}
             onClick={onSubmit}
             rightSection={
-              <Kbd size="xs" aria-hidden>
-                ↵
-              </Kbd>
+              shortcuts ? (
+                <Kbd size="xs" aria-hidden>
+                  ↵
+                </Kbd>
+              ) : null
             }
           >
             {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}

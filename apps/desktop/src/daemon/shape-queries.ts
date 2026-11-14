@@ -20,6 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
+import { dataUrlOf } from './data-url';
 import { goalKeys } from './goal-queries';
 import { useDaemon } from './provider';
 
@@ -55,22 +56,6 @@ export function useShapeView(shapeId: ShapeId | null) {
         ? readJson(await client.shapes[':shapeId'].$get({ param: { shapeId } }), ShapeViewDto)
         : Promise.reject(new Error('Open a conversation first.')),
     enabled: shapeId !== null,
-  });
-}
-
-/** A picture as a data URL: the window's CSP allows images from `self` and `data:`, not from `blob:`. */
-function dataUrlOf(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      // `readAsDataURL` always leaves a string.
-      if (typeof reader.result === 'string') resolve(reader.result);
-      else reject(new Error('The screenshot could not be read'));
-    };
-    reader.onerror = () => {
-      reject(new Error('The screenshot could not be read'));
-    };
-    reader.readAsDataURL(blob);
   });
 }
 
@@ -357,7 +342,7 @@ export function useUploadShapeFile() {
   });
 }
 
-/** Withdraw Principle…: a tombstone with the builder's reason; the principle leaves searches and context. */
+/** Withdraw Principle: a tombstone with the builder's reason; the principle leaves searches and context. */
 export function useWithdrawPrinciple(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -375,7 +360,7 @@ export function useWithdrawPrinciple(shapeId: ShapeId) {
   });
 }
 
-/** Withdraw Decision…: a tombstone with the builder's reason; the decision leaves searches and context. */
+/** Withdraw Decision: a tombstone with the builder's reason; the decision leaves searches and context. */
 export function useWithdrawDecision(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
