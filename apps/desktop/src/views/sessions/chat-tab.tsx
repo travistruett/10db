@@ -23,7 +23,9 @@ import {
 } from '../../daemon/conversation-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
+import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
+import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
@@ -165,16 +167,45 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
     };
   }, []);
 
-  // A card that has just arrived is said once, so a screen reader hears it without the focus moving.
+  // What the builder acts on is said once, in the screen's polite region, without the focus moving: a
+  // card that has just arrived, a reply that finished, a stop and a pause. Streaming text never is.
+  const say = (event: SessionEvent): void => {
+    const message = sessionAnnouncement(event);
+    if (message !== null) onAnnounce?.(message);
+  };
   const seenCards = useRef(open.length);
   useEffect(() => {
-    if (open.length > seenCards.current) {
-      onAnnounce?.(
-        `${caps.label} needs an answer: ${open[open.length - 1]?.title ?? ''}. Answer it above the message box.`,
-      );
-    }
+    if (open.length > seenCards.current) say({ kind: 'asks', label: caps.label });
     seenCards.current = open.length;
+    // `say` only reads `onAnnounce`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, caps.label, onAnnounce]);
+  const lastState = useRef(conversation.state);
+  useEffect(() => {
+    const was = lastState.current;
+    const now = conversation.state;
+    lastState.current = now;
+    if (was === now) return;
+    if (now === 'ended_error') say({ kind: 'stopped' });
+    else if (now === 'paused_account')
+      say({
+        kind: 'paused',
+        resumes:
+          conversation.pausedUntil === null
+            ? null
+            : dayjs(conversation.pausedUntil).format('HH:mm'),
+      });
+    else if (WORKING_STATES.has(was) && (now === 'idle_warm' || now === 'idle_cold')) {
+      const reply = items.findLast((item) => item.kind === 'agent_message');
+      say({
+        kind: 'replied',
+        label: caps.label,
+        text: reply?.kind === 'agent_message' ? reply.text : '',
+      });
+    }
+    // The transition is read once per state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.state]);
 
   const allow = (call: ToolCallView): void => {
     send.mutate({ conversationId: chat.conversationId, text: `Go ahead: ${call.title}` });

@@ -9,7 +9,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { ActionIcon, Box, Group, Menu, Tooltip } from '@mantine/core';
-import { useElementSize, useMediaQuery } from '@mantine/hooks';
+import { useElementSize } from '@mantine/hooks';
 import { IconPlus } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { EdgeFade } from '../../shell/edge-fade';
@@ -20,12 +20,10 @@ import { TabMenuItems } from './tab-menu';
 import { SessionTab } from './session-tab';
 import { tabTitle, tabProjectId, type StripTab } from './strip-tabs';
 import { tabInfo, type TabInfo } from './tab-info';
+import { useStripLayout } from './strip-layout';
 import { needsYou, tabWidths } from './tab-state';
 
 export type { StripTab } from './strip-tabs';
-
-/** From 900 px up the strip shows full tabs; under it an unselected tab is its tile and state. */
-const COMPACT_QUERY = '(max-width: 899px)';
 
 /** A tab's width before the strip squeezes it: tile, gaps and the mark, plus the title at about 7 px a letter. */
 function naturalWidth(title: string): number {
@@ -91,7 +89,8 @@ export function TabStrip({
     readonly x: number;
     readonly y: number;
   } | null>(null);
-  const compact = useMediaQuery(COMPACT_QUERY);
+  const layout = useStripLayout();
+  const compact = layout !== 'full';
   const { ref: sizeRef, width: available } = useElementSize();
   const { ref: edgesRef, edges, onScroll } = useHiddenEdges();
   const list = useRef<HTMLDivElement | null>(null);
@@ -130,6 +129,32 @@ export function TabStrip({
     (t) => hidden.has(t.key) && needsYou(infos.get(t.key)?.state ?? 'idle'),
   ).length;
 
+  const selectedTab = tabs[selectedIndex];
+  const othersNeeding = tabs.filter(
+    (t) => t.key !== selectedKey && needsYou(infos.get(t.key)?.state ?? 'idle'),
+  ).length;
+  const allTabs = (needing: number, current: StripTab | null) => (
+    <AllTabsMenu
+      switcher={
+        current === null
+          ? null
+          : {
+              tab: current,
+              info: infos.get(current.key) ?? tabInfo(current, cards, seen),
+              projectName: projectName(current),
+            }
+      }
+      tabs={tabs}
+      infos={infos}
+      projectName={projectName}
+      hiddenNeedingYou={needing}
+      closed={closed}
+      projectNameOf={(id) => projects.find((p) => p.id === id)?.name ?? ''}
+      onSelect={onSelect}
+      onReopen={onReopen}
+    />
+  );
+
   const move = (from: HTMLElement, by: number): void => {
     const all = [...(list.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
     all[all.indexOf(from) + by]?.focus();
@@ -162,85 +187,82 @@ export function TabStrip({
       style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}
       ref={sizeRef}
     >
-      <Box pos="relative" style={{ minWidth: 0, flex: '0 1 auto' }}>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
-          <SortableContext
-            items={tabs.filter((t) => t.kind === 'chat').map((t) => t.key)}
-            strategy={horizontalListSortingStrategy}
-          >
-            {/* The tabs hold the roving focus; the list itself is not a stop. */}
-            {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
-            <div
-              ref={(node) => {
-                list.current = node;
-                edgesRef(node);
-              }}
-              role="tablist"
-              aria-label="Sessions"
-              aria-orientation="horizontal"
-              onScroll={scrolled}
-              onKeyDown={onKeyDown}
-              style={{
-                display: 'flex',
-                gap: 4,
-                alignItems: 'center',
-                overflowX: 'auto',
-                scrollbarWidth: 'none',
-              }}
+      {layout === 'switcher' ? (
+        selectedTab === undefined ? null : (
+          allTabs(othersNeeding, selectedTab)
+        )
+      ) : (
+        <Box pos="relative" style={{ minWidth: 0, flex: '0 1 auto' }}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
+            <SortableContext
+              items={tabs.filter((t) => t.kind === 'chat').map((t) => t.key)}
+              strategy={horizontalListSortingStrategy}
             >
-              {tabs.map((tab, index) => {
-                const info = infos.get(tab.key) ?? tabInfo(tab, cards, seen);
-                const selected = tab.key === selectedKey;
-                const label = tab.kind === 'chat' ? tab.chat.conversation.capabilities.label : '';
-                const model = tab.kind === 'chat' ? (tab.chat.conversation.model ?? '') : '';
-                return (
-                  <SessionTab
-                    key={tab.key}
-                    tab={tab}
-                    projectName={projectName(tab)}
-                    info={info}
-                    selected={selected}
-                    width={widths?.[index] ?? null}
-                    compact={compact}
-                    kindLine={`${projectName(tab)} · Chat${label === '' ? '' : ` · ${label} ${model}`.trimEnd()}`}
-                    panelId={selected ? panelId(tab.key) : null}
-                    onSelect={() => {
-                      onSelect(tab);
-                    }}
-                    onClose={() => {
-                      onClose(tab);
-                    }}
-                    onRename={() => {
-                      onRename(tab);
-                    }}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setMenu({ tab, x: event.clientX, y: event.clientY });
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </SortableContext>
-        </DndContext>
-        <EdgeFade side="left" shown={edges.left} color="var(--mantine-color-body)" depth={24} />
-        <EdgeFade side="right" shown={edges.right} color="var(--mantine-color-body)" depth={24} />
-      </Box>
+              {/* The tabs hold the roving focus; the list itself is not a stop. */}
+              {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus */}
+              <div
+                ref={(node) => {
+                  list.current = node;
+                  edgesRef(node);
+                }}
+                role="tablist"
+                aria-label="Sessions"
+                aria-orientation="horizontal"
+                onScroll={scrolled}
+                onKeyDown={onKeyDown}
+                style={{
+                  display: 'flex',
+                  gap: 4,
+                  alignItems: 'center',
+                  overflowX: 'auto',
+                  scrollbarWidth: 'none',
+                }}
+              >
+                {tabs.map((tab, index) => {
+                  const info = infos.get(tab.key) ?? tabInfo(tab, cards, seen);
+                  const selected = tab.key === selectedKey;
+                  const label = tab.kind === 'chat' ? tab.chat.conversation.capabilities.label : '';
+                  const model = tab.kind === 'chat' ? (tab.chat.conversation.model ?? '') : '';
+                  return (
+                    <SessionTab
+                      key={tab.key}
+                      tab={tab}
+                      projectName={projectName(tab)}
+                      info={info}
+                      selected={selected}
+                      width={widths?.[index] ?? null}
+                      compact={compact}
+                      kindLine={`${projectName(tab)} · Chat${label === '' ? '' : ` · ${label} ${model}`.trimEnd()}`}
+                      panelId={selected ? panelId(tab.key) : null}
+                      onSelect={() => {
+                        onSelect(tab);
+                      }}
+                      onClose={() => {
+                        onClose(tab);
+                      }}
+                      onRename={() => {
+                        onRename(tab);
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setMenu({ tab, x: event.clientX, y: event.clientY });
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
+          <EdgeFade side="left" shown={edges.left} color="var(--mantine-color-body)" depth={24} />
+          <EdgeFade side="right" shown={edges.right} color="var(--mantine-color-body)" depth={24} />
+        </Box>
+      )}
       <Tooltip label="New Session ⌘T" openDelay={500}>
         <ActionIcon variant="subtle" aria-label="New Session" onClick={onNew}>
           <IconPlus size={16} stroke={1.5} />
         </ActionIcon>
       </Tooltip>
-      <AllTabsMenu
-        tabs={tabs}
-        infos={infos}
-        projectName={projectName}
-        hiddenNeedingYou={hiddenNeedingYou}
-        closed={closed}
-        projectNameOf={(id) => projects.find((p) => p.id === id)?.name ?? ''}
-        onSelect={onSelect}
-        onReopen={onReopen}
-      />
+      {layout === 'switcher' ? null : allTabs(hiddenNeedingYou, null)}
       <Menu
         opened={menu !== null}
         onClose={() => {

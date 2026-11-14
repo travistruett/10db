@@ -1,6 +1,6 @@
 import type { ChatDto, ProjectId } from '@10db/contracts';
 import { Box, Button, Group, Paper, Text } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useInbox } from '../../daemon/queries';
 import { Announcer } from '../../conversation/announcer';
@@ -23,6 +23,7 @@ import { useClosedTabs } from './closed-tabs';
 import { useTabClosing } from './use-tab-closing';
 import { openCardsByConversation } from './needs-you';
 import { markSeen, readSeen } from './seen';
+import { sessionAnnouncement } from './session-announcements';
 import { nextNeeding, targetIndex } from './session-keys';
 import { tabInfo } from './tab-info';
 import { needsYou } from './tab-state';
@@ -172,6 +173,31 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     setFresh((tabsNow) => setFreshProject(tabsNow, tab.id, projectId));
     select(projectId);
   };
+
+  // Another tab that has just begun to need the builder is said once; the open tab says its own cards.
+  const needingNow = tabs.flatMap((tab, i) =>
+    needsYou(infos[i]?.state ?? 'idle') ? [tab.key] : [],
+  );
+  const needingBefore = useRef<ReadonlySet<string> | null>(null);
+  const needingKey = needingNow.join('|');
+  useEffect(() => {
+    const before = needingBefore.current;
+    needingBefore.current = new Set(needingNow);
+    if (before === null) return;
+    for (const tab of tabs) {
+      if (tab.kind !== 'chat' || tab.key === selected?.key) continue;
+      if (!needingNow.includes(tab.key) || before.has(tab.key)) continue;
+      setAnnouncement(
+        sessionAnnouncement({
+          kind: 'needs_you',
+          title: tab.chat.title,
+          project: list.find((p) => p.id === tab.chat.projectId)?.name ?? '',
+        }),
+      );
+    }
+    // Read once per change in who needs the builder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needingKey]);
 
   useSessionKeys((key) => {
     const at = selected === null ? -1 : tabs.indexOf(selected);

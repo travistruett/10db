@@ -11,6 +11,7 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconDots } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { JudgeLine } from '../../conversation';
@@ -19,6 +20,7 @@ import { ModelPicker } from '../../conversation/model-picker';
 import { useChatModels, usePatchChat } from '../../daemon/chat-queries';
 import { ContextGauge } from '../factory/context-gauge';
 import { kindLine } from './kind-line';
+import { COMPACT_MAX } from './strip-layout';
 import { TabMenuItems, type TabActions } from './tab-menu';
 
 // Sessions UI spec §4, §7.10: the 44 px row under the header. At its left the title over what the session
@@ -163,6 +165,8 @@ export function SessionBar({
   renaming = false,
   onRenamed,
 }: SessionBarProps) {
+  // From 640 to 899 px the model and the meter move into ⋯, where they are read, not changed.
+  const compact = useMediaQuery(`(max-width: ${String(COMPACT_MAX)}px)`);
   const [typing, setEditing] = useState(false);
   const editing = typing || renaming;
   const models = useChatModels(chat.projectId);
@@ -192,24 +196,28 @@ export function SessionBar({
           </Stack>
         </Group>
         <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-          {capabilities.modelSwitch === 'none' || offered.length === 0 ? (
-            <Text size="xs" c="dimmed">
-              {named === null ? capabilities.label : `${capabilities.label} · ${named}`}
-            </Text>
-          ) : (
-            <ModelPicker
-              offered={offered}
-              default={models.data?.default ?? null}
-              picked={conversation.model}
-              busy={working}
-              pending={modelPending}
-              error={modelError}
-              prefix={capabilities.label}
-              width={230}
-              onPick={onModel}
-            />
+          {compact ? null : (
+            <>
+              {capabilities.modelSwitch === 'none' || offered.length === 0 ? (
+                <Text size="xs" c="dimmed">
+                  {named === null ? capabilities.label : `${capabilities.label} · ${named}`}
+                </Text>
+              ) : (
+                <ModelPicker
+                  offered={offered}
+                  default={models.data?.default ?? null}
+                  picked={conversation.model}
+                  busy={working}
+                  pending={modelPending}
+                  error={modelError}
+                  prefix={capabilities.label}
+                  width={230}
+                  onPick={onModel}
+                />
+              )}
+              <ContextMeter conversation={conversation} />
+            </>
           )}
-          <ContextMeter conversation={conversation} />
           <Tooltip label={fileDisabledReason ?? ''} disabled={fileDisabledReason === null}>
             <Button
               variant="default"
@@ -227,6 +235,19 @@ export function SessionBar({
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
+              {compact ? (
+                <>
+                  <Menu.Label>
+                    {named === null ? capabilities.label : `${capabilities.label} · ${named}`}
+                  </Menu.Label>
+                  {conversation.contextPct === null ? null : (
+                    <Menu.Label>
+                      {`${String(Math.round(conversation.contextPct))}% of the context used`}
+                    </Menu.Label>
+                  )}
+                  <Menu.Divider />
+                </>
+              ) : null}
               <TabMenuItems
                 actions={{
                   othersOpen: false,

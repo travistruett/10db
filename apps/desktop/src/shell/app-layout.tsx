@@ -64,7 +64,7 @@ const PROJECT_NAV = [
 ] as const;
 
 /**
- * The Workbench sits beside the builder's browser, often 420 to 520 px wide (Workbench spec §4.3): under
+ * The Workbench and Sessions sit beside the builder's browser, often 420 to 520 px wide (Workbench spec §4.3): under
  * 900 px its sidebar folds away behind a header button.
  */
 const WORKBENCH_FOLD_QUERY = '(max-width: 899px)';
@@ -171,7 +171,8 @@ function FullLayout() {
   const navigate = useNavigate();
   const narrow = useMediaQuery(WORKBENCH_FOLD_QUERY);
   const small = useMediaQuery(SHELL_FOLD_QUERY);
-  const folded = small || (narrow && pathname === '/workbench');
+  const inSessions = pathname === '/sessions' || pathname.startsWith('/sessions/');
+  const folded = small || (narrow && (pathname === '/workbench' || inSessions));
   // Where the builder opened the folded sidebar; leaving that view folds it again.
   const [openedOn, setOpenedOn] = useState<string | null>(null);
   const navHidden = folded && openedOn !== pathname;
@@ -187,7 +188,6 @@ function FullLayout() {
       />
     );
   }
-  const inSessions = pathname === '/sessions' || pathname.startsWith('/sessions/');
   return (
     <HeaderSlotProvider>
       <AppShell

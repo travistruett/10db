@@ -1,4 +1,5 @@
 import { Box } from '@mantine/core';
+import { useReducedMotion } from '@mantine/hooks';
 
 export type FadeSide = 'top' | 'bottom' | 'left' | 'right';
 
@@ -19,6 +20,8 @@ export interface EdgeFadeProps {
  * rather than snapping.
  */
 export function EdgeFade({ side, shown, color, depth, inset = {} }: EdgeFadeProps) {
+  // With reduced motion the fade appears and goes at once.
+  const still = useReducedMotion();
   const across =
     side === 'left' || side === 'right'
       ? { top: inset.start ?? 0, bottom: inset.end ?? 0, width: depth }
@@ -33,7 +36,7 @@ export function EdgeFade({ side, shown, color, depth, inset = {} }: EdgeFadeProp
         [side]: 0,
         pointerEvents: 'none',
         opacity: shown ? 1 : 0,
-        transition: 'opacity 200ms ease',
+        transition: still ? 'none' : 'opacity 200ms ease',
         background: `linear-gradient(to ${side}, transparent, ${color})`,
       }}
     />
