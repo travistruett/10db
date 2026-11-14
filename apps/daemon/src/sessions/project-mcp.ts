@@ -312,6 +312,38 @@ export function readRepoMcp(repoPath: string): RepoMcp {
   return { servers, warnings: [...warnings, ...strayHosts(hosts, servers)] };
 }
 
+/** A builder's server references a variable 10db can't expand. Names the variable, never a value. */
+export class YourMcpExpandError extends Error {
+  override readonly name = 'YourMcpExpandError';
+  /** The variable, or null for a `${` that names none. */
+  readonly variable: string | null;
+
+  constructor(variable: string | null) {
+    super(
+      variable === null
+        ? 'it holds a "${" that names no variable'
+        : `\${${variable}} is not set in the login environment`,
+    );
+    this.variable = variable;
+  }
+}
+
+/**
+ * Expands `${NAME}` and `${NAME:-default}` from `env`, any name, as Claude Code does for the builder's own
+ * servers. An unset name with no default throws, and so does a result that still holds `${`.
+ */
+export function expandFrom(value: string, env: Readonly<Record<string, string>>): string {
+  const result = value.replace(VARIABLE_REF, (_ref, name: string, fallback: string | undefined) => {
+    // Own keys only, so `${constructor}` is unset rather than Object's.
+    const found = Object.hasOwn(env, name) ? env[name] : undefined;
+    if (found !== undefined) return found;
+    if (fallback !== undefined) return fallback;
+    throw new YourMcpExpandError(name);
+  });
+  if (result.includes('${')) throw new YourMcpExpandError(null);
+  return result;
+}
+
 interface ExpandScope {
   readonly env: Readonly<Record<string, string>>;
   readonly approved: ReadonlySet<string>;

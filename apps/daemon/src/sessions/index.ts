@@ -48,12 +48,14 @@ export type {
 } from './types';
 export {
   EnvName,
+  expandFrom,
   HeaderMap,
   ProjectMcpError,
   readRepoMcp,
   RemoteUrl,
   SENSITIVE_NAME,
   TENDB_MCP_SERVER,
+  YourMcpExpandError,
   resolveProjectMcp,
   skippedServersNote,
   splitProjectMcp,
