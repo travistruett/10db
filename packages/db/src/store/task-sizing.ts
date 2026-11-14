@@ -11,7 +11,7 @@ import {
   type TaskId,
   type TaskKind,
 } from '@10db/contracts';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import { listKinds } from './kinds';
 import type { DbReader, WriteContext } from './store';
@@ -38,6 +38,11 @@ export interface TaskSizing {
    * A rigor the builder or an agent set stays.
    */
   readonly clearJudged?: boolean;
+  /**
+   * The fingerprint the judge now owes an answer for (this sizing's own when the task is queued for it), or null
+   * when none is owed; left out leaves the mark as it is.
+   */
+  readonly owedFor?: string | null;
 }
 
 /** What sizing reads of a task: its text, pins, fingerprint and whether it can still be sized. */
@@ -54,6 +59,8 @@ export interface TaskSizingState {
   readonly kindsOff: readonly string[];
   /** The fingerprint of the text last sized; null before the first sizing. */
   readonly sizedFor: string | null;
+  /** The fingerprint the judge still owes an answer for; null when none is owed. */
+  readonly sizingOwedFor: string | null;
   /** The judge calls whose answers sizing applied: the rigor call and one call per kind key. */
   readonly sizingCalls: SizingCalls;
   /** Whether any workstream of the task exists. */
@@ -68,6 +75,36 @@ export function listUnsizedTasks(db: DbReader): { id: TaskId; createdAt: string 
     .where(and(eq(schema.tasks.status, TaskStatus.Open), isNull(schema.tasks.sizedFor)))
     .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
     .all();
+}
+
+/**
+ * Open tasks the judge still owes an answer for, oldest first, each with when it was made and the fingerprint
+ * it is owed for.
+ */
+export function listOwedTasks(db: DbReader): { id: TaskId; createdAt: string; owedFor: string }[] {
+  return db
+    .select({
+      id: schema.tasks.id,
+      createdAt: schema.tasks.createdAt,
+      owedFor: schema.tasks.sizingOwedFor,
+    })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.status, TaskStatus.Open), isNotNull(schema.tasks.sizingOwedFor)))
+    .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
+    .all()
+    .flatMap(({ owedFor, ...rest }) => (owedFor === null ? [] : [{ ...rest, owedFor }]));
+}
+
+/**
+ * Ends the judge's debt for `fingerprint` when that is still the one owed; a debt for newer text stays.
+ * Writes no event: nothing a view shows changes.
+ */
+export function clearSizingOwed(ctx: WriteContext, taskId: TaskId, fingerprint: string): void {
+  ctx.tx
+    .update(schema.tasks)
+    .set({ sizingOwedFor: null })
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.sizingOwedFor, fingerprint)))
+    .run();
 }
 
 /** The task's sizing state, one light read; null for a task that does not exist. */
@@ -91,6 +128,7 @@ export function readTaskSizing(db: DbReader, taskId: TaskId): TaskSizingState | 
     kinds: row.kinds,
     kindsOff: row.kindsOff,
     sizedFor: row.sizedFor,
+    sizingOwedFor: row.sizingOwedFor,
     sizingCalls: row.sizingCalls,
     started: started !== undefined,
   };
@@ -122,7 +160,7 @@ const sameKeys = (a: readonly TaskKind[], b: readonly TaskKind[]): boolean =>
  *   a key no kind has is dropped; the rest of the kinds are the sizing's;
  * - a rigor is written only while the task's own is not the builder's or an agent's, and `clearJudged`
  *   drops one the judge set when no new one is given;
- * - the fingerprint is always written;
+ * - the fingerprint is always written, and `owedFor` sets or clears the judge's debt when given;
  * - when the kinds change, `placement` is asked where the task works, and the answer is taken as an edit of
  *   the task's areas or kinds takes it.
  */
@@ -164,6 +202,7 @@ export function applyTaskSizing(
     .set({
       kinds,
       sizedFor: sizing.fingerprint,
+      ...(sizing.owedFor === undefined ? {} : { sizingOwedFor: sizing.owedFor }),
       ...(sizing.clearJudged === true && row.rigorSource === RigorSource.Judge
         ? { rigor: null, rigorSource: null, rigorReason: null }
         : {}),
