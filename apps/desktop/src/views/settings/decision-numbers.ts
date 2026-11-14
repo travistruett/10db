@@ -1,11 +1,11 @@
 import {
+  JudgeDecision,
   JudgeOutcome,
   SHADOW_MIN_SCORED,
   type DecisionModelDto,
   type DecisionStatsDto,
   type DecisionStatsListDto,
   type JudgeCallDto,
-  type JudgeDecision,
   type ShadowAgreementDto,
 } from '@10db/contracts';
 import { DECISIONS, DecisionMode } from './decision-catalogue';
@@ -128,7 +128,13 @@ const FALLBACK_PREFIX = {
 } as const;
 
 /** The answer and the outcome together: "acted" means different things per decision. */
-export function outcomeText(call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'answer'>): string {
+export function outcomeText(
+  call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'answer' | 'model'>,
+): string {
+  if (call.decision === JudgeDecision.CrossesLimit) {
+    const said = limitOutcomeText(call);
+    if (said !== null) return said;
+  }
   switch (call.outcome) {
     case JudgeOutcome.Acted:
       if (call.answer === 'skip') return 'Skipped the review';
@@ -147,6 +153,18 @@ export function outcomeText(call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'a
     case JudgeOutcome.FallbackError:
       return `${FALLBACK_PREFIX[call.outcome]}; ${DECISIONS[call.decision].fellBack}`;
   }
+}
+
+/** The model a logged auto mode denial names, which 10db never asks. */
+const AUTO_MODE_MODEL = 'claude-code-auto-mode';
+
+/** A limits call's outcome where it reads differently from the others; null where it doesn't. */
+function limitOutcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer' | 'model'>): string | null {
+  if (call.model === AUTO_MODE_MODEL) return 'Auto mode stopped it';
+  if (call.outcome === JudgeOutcome.BelowFloor) return 'Not sure enough; treated as a limit';
+  if (call.outcome === JudgeOutcome.Acted)
+    return call.answer === 'allow' ? 'Allowed' : 'Stopped at a limit';
+  return null;
 }
 
 export function answerText(call: Pick<JudgeCallDto, 'answer' | 'confidence'>): string {

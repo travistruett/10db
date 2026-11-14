@@ -8,10 +8,12 @@ import {
   ProjectDto,
   ProjectTrustDto,
   TRUST_DEFAULTS,
+  TrustGrantDto,
   TrustSettingsDto,
   type TrustOverrides,
   type TrustSwitches,
 } from '@10db/contracts';
+import { insertTrustGrant } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -107,7 +109,11 @@ const project = async (path: string, name: string) =>
     areas: [{ name: 'src', globs: ['src/**'] }],
   });
 
-async function send(method: 'GET' | 'PUT', path: string, body?: unknown): Promise<Response> {
+async function send(
+  method: 'GET' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<Response> {
   return fetch(`${daemon.url}${path}`, {
     method,
     headers: { authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
@@ -142,6 +148,7 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       switches: TRUST_DEFAULTS,
       plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: false, on: false }],
       judges: [expect.objectContaining({ judge: JudgeKind.Native, why: null })],
+      tendbReady: false,
     });
   });
 
@@ -305,5 +312,35 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
     });
     expect(byId.has(openRouter.id)).toBe(false);
     expect(judges).toHaveLength(5);
+  });
+});
+
+describe("a project's grants over HTTP", () => {
+  const grant = (projectId: ProjectDto['id'], target: string) =>
+    daemon.state.write((ctx) =>
+      insertTrustGrant(ctx, { projectId, limit: 'writes_live', target, sourceInboxId: null }),
+    );
+  const grants = async (id: string) =>
+    z.array(TrustGrantDto).parse(await (await send('GET', `/projects/${id}/trust-grants`)).json());
+
+  it("lists a project's grants and removes one", async () => {
+    const one = await project(repo.path, 'one');
+    const kept = grant(one.id, 'deploys to staging with vercel');
+    expect(await grants(one.id)).toEqual([kept]);
+    const removed = await send('DELETE', `/projects/${one.id}/trust-grants/${kept.id}`);
+    expect(removed.status).toBe(204);
+    expect(await grants(one.id)).toEqual([]);
+  });
+
+  it("removing another project's grant is 404", async () => {
+    const one = await project(repo.path, 'one');
+    const two = await project(other.path, 'two');
+    const kept = grant(one.id, 'deploys');
+    expect((await send('DELETE', `/projects/${two.id}/trust-grants/${kept.id}`)).status).toBe(404);
+    expect(await grants(one.id)).toEqual([kept]);
+  });
+
+  it("trust settings say whether 10db's judge is ready", async () => {
+    expect((await settings('GET')).tendbReady).toBe(false);
   });
 });

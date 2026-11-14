@@ -63,12 +63,13 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   [JudgeDecision.CrossesLimit]: {
     group: DecisionGroup.Trust,
     label: 'Limits',
-    asks: 'On accounts without Claude Code’s auto mode: does this tool call cross one of the four limits?',
+    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (a gateway, Codex, an older model), 10db’s judge decides whether each call crosses a limit.',
     onAnswer:
-      'Allow: the call runs. A limit, or unsure: a card asks you, or an unattended lane skips the call.',
-    whenUnsure: 'Treated as a limit: a card asks you, or an unattended lane skips the call.',
-    fellBack: '10db’s rules decided',
+      'Allow: the call runs. A limit, or unsure: a card asks you, or a lane nobody watches skips the call.',
+    whenUnsure: 'Treated as a limit.',
+    fellBack: "10db's rules decided",
     mode: DecisionMode.Acting,
+    note: 'Each call it checks goes to the model through OpenRouter with the project’s limits and up to 12 000 characters of its input, and is kept in the recent decisions for 30 days. Off, 10db’s rules decide and say so.',
   },
   [JudgeDecision.TaskRigor]: {
     group: DecisionGroup.Sizing,

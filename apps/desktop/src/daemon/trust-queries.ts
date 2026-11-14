@@ -1,12 +1,15 @@
 import {
   LiveSystemsDto,
   ProjectTrustDto,
+  TrustGrantDto,
+  type TrustGrantId,
   TrustSettingsDto,
   type ProjectId,
   type TrustOverrides,
   type TrustSwitches,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
@@ -16,6 +19,7 @@ export const trustKeys = {
   app: ['trust'],
   project: (projectId: ProjectId) => ['trust', 'project', projectId],
   liveSystems: (projectId: ProjectId) => ['trust', 'live-systems', projectId],
+  grants: (projectId: ProjectId) => ['trust', 'grants', projectId],
 } as const;
 
 /** The app-wide switches and the builder's installed plugins. */
@@ -117,5 +121,36 @@ export function useSetLiveSystems(projectId: ProjectId) {
     onSuccess: (saved) => {
       queryClient.setQueryData(trustKeys.liveSystems(projectId), saved);
     },
+  });
+}
+
+/** What the builder allowed in a project from now on, oldest first. */
+export function useTrustGrants(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.grants(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['trust-grants'].$get({ param: { projectId } }),
+        z.array(TrustGrantDto),
+      ),
+  });
+}
+
+/** Removes one grant: 10db's judge stops reading it at the next call, auto mode at the next session. */
+export function useRemoveTrustGrant(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (grantId: TrustGrantId) => {
+      // The answer is 204 with no body; a refusal throws with the daemon's message.
+      await readJson(
+        await client.projects[':projectId']['trust-grants'][':grantId'].$delete({
+          param: { projectId, grantId },
+        }),
+        z.unknown(),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trustKeys.grants(projectId) }),
   });
 }

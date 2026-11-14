@@ -1,6 +1,8 @@
 import {
   effectiveTrust,
+  mintId,
   LiveSystemsDto,
+  type TrustGrantDto,
   TRUST_DEFAULTS,
   TrustOverrides,
   type ProjectTrustDto,
@@ -20,7 +22,10 @@ function serve(
   preview: SetupPreviewDto,
   overrides: TrustOverrides = {},
   liveSystems: readonly string[] = [],
+  initialGrants: readonly TrustGrantDto[] = [],
 ) {
+  let grants = [...initialGrants];
+  const removed: string[] = [];
   let current: ProjectTrustDto = {
     overrides,
     effective: effectiveTrust(TRUST_DEFAULTS, overrides),
@@ -36,6 +41,7 @@ function serve(
         switches: TRUST_DEFAULTS,
         plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: true }],
         judges: [],
+        tendbReady: false,
       }),
     ),
     http.get(daemonUrl('/projects/:projectId/live-systems'), () => HttpResponse.json(live)),
@@ -57,6 +63,13 @@ function serve(
       live = parsed.data;
       return HttpResponse.json(live);
     }),
+    http.get(daemonUrl('/projects/:projectId/trust-grants'), () => HttpResponse.json(grants)),
+    http.delete(daemonUrl('/projects/:projectId/trust-grants/:grantId'), ({ params }) => {
+      const id = String(params['grantId']);
+      removed.push(id);
+      grants = grants.filter((g) => g.id !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
     http.get(daemonUrl('/projects/:projectId/trust'), () => HttpResponse.json(current)),
     http.put(daemonUrl('/projects/:projectId/trust'), async ({ request }) => {
       const next = TrustOverrides.parse(await request.json());
@@ -66,12 +79,50 @@ function serve(
     }),
     ...baseHandlers(),
   );
-  return { put, sentLive };
+  return { put, sentLive, removed };
 }
 
 const NOTHING: SetupPreviewDto = { skills: [], plugins: [], leftOut: [] };
 
 describe('Settings › project Trust', () => {
+  it('lists a grant and removes it', async () => {
+    const grant: TrustGrantDto = {
+      id: mintId('TrustGrant'),
+      projectId: project.id,
+      limit: 'writes_live',
+      target: 'deploys to staging with vercel',
+      createdAt: '2026-11-14T10:00:00.000Z',
+    };
+    const { removed } = serve(NOTHING, {}, [], [grant]);
+    renderApp('/settings/project-trust');
+    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
+    expect(await within(region).findByText('deploys to staging with vercel')).toBeTruthy();
+    expect(within(region).getByText(/^Writing to live systems · /)).toBeTruthy();
+    fireEvent.click(
+      within(region).getByRole('button', { name: 'Remove deploys to staging with vercel' }),
+    );
+    await waitFor(() => {
+      expect(removed).toEqual([grant.id]);
+    });
+    expect(
+      await within(region).findByText(
+        'Nothing yet. "Always in this project" on a card adds a line here, and every judge on the project reads it.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('shows the empty line', async () => {
+    serve(NOTHING);
+    renderApp('/settings/project-trust');
+    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
+    expect(await within(region).findByText(/^Nothing yet\./)).toBeTruthy();
+    expect(
+      within(region).getByText(
+        "10db's judge reads a change from the next call; auto mode from the next session.",
+      ),
+    ).toBeTruthy();
+  });
+
   it('As app clears the override; Off sends web: false', async () => {
     const { put } = serve(NOTHING, { yourSkills: false });
     renderApp('/settings/project-trust');
