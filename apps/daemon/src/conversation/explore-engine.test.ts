@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { idUuid, type ToolCallView } from '@10db/contracts';
-import { getSession, updateSessionUsage } from '@10db/db';
+import { getSession, listAccountModels, replaceAccountModels, updateSessionUsage } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { exploreWorld, gate, type ExploreWorld } from '../../test/explore-world';
 import type { SessionEvent } from '../sessions';
@@ -477,6 +477,8 @@ describe('Stop', () => {
   });
 });
 
+const NO_RESUME = { reason: 'error', message: 'No conversation found to resume.' } as const;
+
 describe('fresh sessions', () => {
   it('closes a session that ends a turn past 70% and starts the next fresh from a stored digest', async () => {
     w = exploreWorld();
@@ -511,7 +513,7 @@ describe('fresh sessions', () => {
     w.clock.advance(10 * 60_000);
     await w.engine.settled(w.conv.id);
     w.adapter.shapeStartFailure = (spec) =>
-      spec.resumeProviderSessionId === null ? null : 'No conversation found to resume.';
+      spec.resumeProviderSessionId === null ? null : NO_RESUME;
     w.send('two');
     await w.engine.settled(w.conv.id);
     expect(w.adapter.shapeSessions.map((s) => s.spec.resumeProviderSessionId)).toEqual([
@@ -525,9 +527,185 @@ describe('fresh sessions', () => {
 
     w.clock.advance(10 * 60_000);
     await w.engine.settled(w.conv.id);
-    w.adapter.shapeStartFailure = () => 'No conversation found to resume.';
+    w.adapter.shapeStartFailure = () => NO_RESUME;
     w.send('three');
     await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+  });
+});
+
+const RESET_MS = 20 * 60_000;
+const sendNowLines = (world: ExploreWorld) => world.items().filter((i) => i.kind === 'turn_marker');
+const notices = (world: ExploreWorld) =>
+  world
+    .items()
+    .filter((i) => i.kind === 'notice')
+    .map((i) => i.body);
+
+/** A turn that streams half a sentence, then ends its session as `reason`, after `before` if given. */
+function endingTurn(
+  world: ExploreWorld,
+  reason: 'rate_limited' | 'error' | 'completed' | 'model_refused',
+  opts: { readonly resetsAt?: Date | null; readonly before?: Promise<void> } = {},
+) {
+  world.adapter.shapeBehaviour = async (turn) => {
+    turn.emit({ type: 'text_delta', itemId: 'half', offset: 0, text: 'Half a sen' });
+    if (opts.resetsAt !== undefined)
+      turn.emit({
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: opts.resetsAt,
+        utilization: 1,
+        limitType: 'five_hour',
+      });
+    await opts.before;
+    world.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Back.' });
+    return { end: { reason, message: `ended: ${reason}` } };
+  };
+}
+
+describe('ends', () => {
+  it.each([
+    ['at the reported reset', RESET_MS, RESET_MS],
+    ['after the default pause when no reset is reported', null, 30 * 60_000],
+  ] as const)('pauses on a rate limit and runs the queue %s', async (_name, resetIn, wait) => {
+    w = exploreWorld();
+    const resetsAt = resetIn === null ? null : new Date(w.clock.now().getTime() + resetIn);
+    const held = gate();
+    endingTurn(w, 'rate_limited', { resetsAt, before: held.promise });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    held.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('paused_account');
+    expect(partials(w)).toEqual([['agent_message', { text: 'Half a sen' }]]);
+    expect(w.engine.view(w.conv.id).pausedUntil).toBe(
+      new Date(w.clock.now().getTime() + wait).toISOString(),
+    );
+    expect(notices(w)).toHaveLength(1);
+    w.send('two');
+    expect(w.engine.view(w.conv.id).queued).toBe(1);
+    w.clock.advance(wait - 1);
+    expect(w.stateOf()).toBe('paused_account');
+    w.clock.advance(1);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[1]?.spec.prompt).toContain('two');
+    expect(w.stateOf()).toBe('idle_warm');
+  });
+
+  it('pauses a start the account runtime holds, until the hold’s end', async () => {
+    let blocked: { until: Date | null } | null = null;
+    w = exploreWorld({ deps: { accountBlocked: () => blocked } });
+    blocked = { until: new Date(w.clock.now().getTime() + RESET_MS) };
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('paused_account');
+    expect(w.adapter.shapeSessions).toEqual([]);
+    blocked = null;
+    w.clock.advance(RESET_MS);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+    expect(w.stateOf()).toBe('idle_warm');
+  });
+
+  it('waits out a metered account at its cap with one notice and no loop, until the account can run', async () => {
+    let blocked: { until: Date | null } | null = { until: null };
+    w = exploreWorld({ accountKind: 'anthropic_api_key', deps: { accountBlocked: () => blocked } });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('paused_account');
+    expect(w.engine.view(w.conv.id).pausedUntil).toBeNull();
+    expect(w.clock.pendingTimers()).toBe(1);
+    for (const text of ['two', 'three', 'four']) w.send(text);
+    const changed = (): void => {
+      w.state.write((ctx) => {
+        ctx.emit({
+          type: 'account.saved',
+          entityType: 'account',
+          entityId: w.project.accountId,
+          data: {},
+        });
+      });
+    };
+    changed();
+    await w.engine.settled(w.conv.id);
+    expect(notices(w)).toHaveLength(1);
+    expect(w.stateOf()).toBe('paused_account');
+    expect(w.adapter.shapeSessions).toEqual([]);
+    blocked = null;
+    changed();
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[0]?.spec.prompt).toBe('one\n\ntwo\n\nthree\n\nfour');
+    expect(notices(w)).toHaveLength(1);
+  });
+
+  it('hands back what an errored session held, and waits under one Send now line for the next message', async () => {
+    w = exploreWorld();
+    const held = gate();
+    endingTurn(w, 'error', { before: held.promise });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    const injected = w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    held.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+    expect(partials(w)).toHaveLength(1);
+    expect(w.items().find((i) => i.id === injected.id)?.handedBackAt).not.toBeNull();
+    expect(sendNowLines(w)).toHaveLength(1);
+    w.send('three');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[1]?.spec.prompt).toBe('two\n\nthree');
+  });
+
+  it.each([
+    ['running', 'idle_cold'],
+    ['starting', 'ended_error'],
+  ] as const)('reads an end it did not ask for while %s as %s', async (from, to) => {
+    w = exploreWorld();
+    if (from === 'running') endingTurn(w, 'completed');
+    else w.adapter.shapeStartFailure = () => ({ reason: 'completed', message: 'exited' });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe(to);
+  });
+
+  it('hands back what a session that exited by itself held, under Send now, and runs nothing', async () => {
+    w = exploreWorld();
+    const held = gate();
+    endingTurn(w, 'completed', { before: held.promise });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    const injected = w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    held.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(w.items().find((i) => i.id === injected.id)?.handedBackAt).not.toBeNull();
+    expect(sendNowLines(w)).toHaveLength(1);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+  });
+
+  it('marks the model unusable when the account refuses it', async () => {
+    w = exploreWorld();
+    w.state.write((ctx) =>
+      replaceAccountModels(ctx, w.project.accountId, [
+        {
+          model: 'claude-opus-5-5',
+          family: null,
+          launchId: 'claude-opus-5-5',
+          efforts: [],
+          inputPrice: null,
+          outputPrice: null,
+        },
+      ]),
+    );
+    w.adapter.shapeBehaviour = () => Promise.resolve({ refusedModel: true });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(listAccountModels(w.state.db, w.project.accountId)).toMatchObject([
+      { model: 'claude-opus-5-5', unusable: true },
+    ]);
     expect(w.stateOf()).toBe('ended_error');
   });
 });

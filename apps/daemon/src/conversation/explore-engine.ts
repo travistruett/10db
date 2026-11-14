@@ -7,9 +7,11 @@ import {
   ConversationItemKind,
   ConversationState,
   mintId,
+  ModelMarkBasis,
   ModelSwitch,
   providerOf,
   SessionMode,
+  TurnMarker,
   type AccountId,
   type AgentAccountKind,
   type ConversationDto,
@@ -36,15 +38,22 @@ import {
   markItemsDelivered,
   markItemsHandedBack,
   findItemByPushUuid,
+  openTurnMarker,
   patchConversation,
   type ConversationItemRow,
   type ConversationRow,
   type WriteContext,
 } from '@10db/db';
-import type { Clock, Timer } from '../clock';
+import { timerAt, type Clock, type Timer } from '../clock';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
-import type { AgentAdapter, InterruptReceipt, SessionHandle } from '../sessions';
+import { markModelUnusable } from '../catalogue';
+import {
+  SessionEndReason,
+  type AgentAdapter,
+  type InterruptReceipt,
+  type SessionHandle,
+} from '../sessions';
 import type { Hold } from '../verify';
 import { clientUuid, pushedAgainAfter } from './delivery-rules';
 import type { ExploreLaunch, ExploreOwnerHooks, Outgoing, TurnEnd } from './explore-hooks';
@@ -68,6 +77,12 @@ export const WARM_CAP = 4;
 const CREDENTIALS_MARGIN_MS = 5 * 60_000;
 /** What a conversation reads when its next session starts fresh past the context limit. */
 export const FRESH_SESSION_NOTICE = 'Continued in a fresh session. Nothing is lost.';
+/** What a conversation paused for the account's usage limit reads, naming when it resumes. */
+export const pausedNotice = (until: Date): string =>
+  `Paused for the account's usage limit until ${until.toISOString()}. What you send waits, and runs then.`;
+/** What a conversation paused at a metered account's monthly cap reads; it has no time to name. */
+export const CAPPED_NOTICE =
+  'Paused: the account reached its monthly limit. What you send waits, and runs once the account can run again.';
 /** How far back a Redo looks for the builder's message it replaces. */
 const REDO_LOOKBACK = 50;
 
@@ -79,6 +94,23 @@ const BUSY: ReadonlySet<ConversationState> = new Set([
   S.WaitingCard,
   S.Stopping,
 ]);
+
+/** How a session's own end reads to the reducer (call 7). */
+function endedHow(reason: SessionEndReason): 'error' | 'paused' | 'unasked' {
+  switch (reason) {
+    case SessionEndReason.RateLimited:
+      return 'paused';
+    case SessionEndReason.Completed:
+    case SessionEndReason.Stopped:
+      return 'unasked';
+    case SessionEndReason.Error:
+    case SessionEndReason.BillingRefused:
+    case SessionEndReason.AccountRefused:
+    case SessionEndReason.SandboxRefused:
+    case SessionEndReason.ModelRefused:
+      return 'error';
+  }
+}
 
 export interface ExploreEngine {
   register(
@@ -138,6 +170,8 @@ interface Session {
   readonly open: OpenSession;
   /** The engine asked it to end: its `ended` is no event of the conversation's. */
   asked: boolean;
+  /** It reported `started`: the turn its first message began ran on it. */
+  started: boolean;
 }
 
 interface Runtime {
@@ -174,6 +208,11 @@ interface Runtime {
   lastSession: Session | null;
   /** The session starting resumes an earlier one, and has not started yet. */
   resuming: boolean;
+  /** The reset the session's last refused rate limit named. */
+  rateReset: Date | null;
+  /** While paused: when it resumes, null when it waits on the account; and the timer that checks. */
+  pausedUntil: Date | null;
+  pauseTimer: Timer | null;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -186,6 +225,13 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const runtimes = new Map<ConversationId, Runtime>();
 
   const conversation = (id: ConversationId): ConversationRow => getConversation(state.db, id);
+  // A change to an account (saved, a cap raised, a card answered) checks the conversations paused on it.
+  const unsubscribeAccounts = deps.bus.subscribe((event) => {
+    if (event.entityType !== 'account') return;
+    for (const rt of runtimes.values())
+      if (rt.state === S.PausedAccount && accountOf(conversation(rt.id)).id === event.entityId)
+        recheckPause(rt);
+  });
   const hooksOf = (conv: ConversationRow): ExploreOwnerHooks => {
     const hooks = owners.get(conv.ownerKind);
     if (hooks === undefined) throw new ConflictError(`No explore owner runs a ${conv.ownerKind}`);
@@ -224,6 +270,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         redo: null,
         lastSession: null,
         resuming: false,
+        rateReset: null,
+        pausedUntil: null,
+        pauseTimer: null,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -407,6 +456,35 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     return stopped;
   };
 
+  /**
+   * Checks again, at the pause's end (or the next month's first instant for a cap), whether the account
+   * can run; a check that finds it still blocked waits silently for the next (call 6).
+   */
+  const armPause = (rt: Runtime): void => {
+    rt.pauseTimer?.cancel();
+    const now = clock.now();
+    const at = rt.pausedUntil ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    rt.pauseTimer = timerAt(clock, at, () => {
+      rt.pauseTimer = null;
+      recheckPause(rt);
+    });
+  };
+
+  const recheckPause = (rt: Runtime): void => {
+    if (rt.state !== S.PausedAccount) return;
+    const conv = conversation(rt.id);
+    const blocked = deps.accountBlocked(accountOf(conv).id, conv.projectId);
+    if (blocked === null) {
+      rt.pauseTimer?.cancel();
+      rt.pauseTimer = null;
+      rt.pausedUntil = null;
+      reduce(rt, { type: 'account_resumed' });
+      return;
+    }
+    rt.pausedUntil = blocked.until;
+    if (rt.pauseTimer === null || blocked.until !== null) armPause(rt);
+  };
+
   /** The agent has spoken in the conversation, so a fresh session lacks what it said. */
   const spoke = (rt: Runtime): boolean =>
     hasItemOfKind(state.db, rt.id, ConversationItemKind.AgentMessage);
@@ -509,6 +587,14 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const conv = conversation(rt.id);
     const hooks = hooksOf(conv);
     const account = accountOf(conv);
+    // A start the account runtime holds reads as an end for the limit (call 6): nothing is sent.
+    const blocked = deps.accountBlocked(account.id, conv.projectId);
+    if (blocked !== null) {
+      rt.pausedUntil = blocked.until;
+      rt.inTurn = false;
+      reduce(rt, { type: 'ended', how: 'paused' });
+      return;
+    }
     const resume = conv.providerSessionId;
     const fresh = resume === null;
     // A fresh session after the agent has spoken is told what came before, and the digest is kept.
@@ -597,7 +683,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       fresh,
       sink: {
         started: () => {
-          if (rt.session !== self) return;
+          if (self === null || rt.session !== self) return;
+          self.started = true;
           rt.resuming = false;
           reduce(rt, { type: 'started' });
         },
@@ -611,7 +698,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
               markItemsDelivered(ctx, rt.id, ids);
             });
         },
-        rateLimited: () => undefined,
+        rateLimited: (resetsAt) => {
+          rt.rateReset = resetsAt;
+        },
         turnComplete: (event) => {
           if (rt.session !== self) return;
           if (rt.lateComplete) {
@@ -638,16 +727,29 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.grace?.cancel();
           rt.grace = null;
           rt.lastSession = self;
-          // What it held goes back to the queue before it stops counting as live (call 22).
+          // A turn that ran took what it began with; the rest of what the session held goes back to
+          // the queue before it stops counting as live (call 22).
+          if (self.started && rt.inTurn) settleTurn(rt);
           handBack(rt);
           rt.session = null;
           rt.inTurn = false;
           rt.ended = 'ended';
-          reduce(rt, { type: 'ended', how: 'error' });
+          if (event.reason === SessionEndReason.ModelRefused)
+            markModelUnusable(
+              { state, clock },
+              launch.accountId,
+              launch.model,
+              event.refusalBasis ?? ModelMarkBasis.Error,
+            );
+          const how = endedHow(event.reason);
+          if (how === 'paused')
+            rt.pausedUntil = rt.rateReset ?? new Date(clock.now().getTime() + deps.defaultPauseMs);
+          rt.rateReset = null;
+          reduce(rt, { type: 'ended', how });
         },
       },
     });
-    self = { open, asked: false };
+    self = { open, asked: false, started: false };
     rt.session = self;
     rt.resuming = !fresh;
     rt.starters = items.map((item) => item.id);
@@ -745,12 +847,26 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         });
         await start(rt, taken.waiting);
         return;
-      // Stored, or cleared, when reduced.
+      case E.PausedNotice: {
+        const until = rt.pausedUntil;
+        notice(rt, until === null ? CAPPED_NOTICE : pausedNotice(until));
+        armPause(rt);
+        return;
+      }
+      case E.SendNow:
+        if (openTurnMarker(state.db, rt.id) === null)
+          state.write((ctx) => {
+            insertItem(ctx, rt.id, {
+              author: ConversationItemAuthor.System,
+              kind: ConversationItemKind.TurnMarker,
+              body: { marker: TurnMarker.SendNow, resolvedAt: null },
+            });
+          });
+        return;
+      // Stored or cleared when reduced; takeover and archive are Sessions' (M5a, M6).
       case E.StorePartial:
       case E.DropPendingStart:
       case E.WithdrawCard:
-      case E.PausedNotice:
-      case E.SendNow:
       case E.HandBackNotice:
       case E.Archive:
       case E.ArchiveAfterStop:
@@ -893,8 +1009,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         contextPct: conv.contextPct,
         queued: unpushed(rt).length,
         costUsd: capabilities.costUsd ? (conversationCostUsd(state.db, id) ?? 0) : null,
-        sendNow: false,
-        pausedUntil: null,
+        sendNow: openTurnMarker(state.db, id) !== null,
+        pausedUntil:
+          rt.state === S.PausedAccount && rt.pausedUntil !== null
+            ? rt.pausedUntil.toISOString()
+            : null,
       };
     },
     live(id) {
@@ -915,6 +1034,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       }
     },
     recover: () => Promise.resolve(),
-    close: () => Promise.resolve(),
+    close() {
+      unsubscribeAccounts();
+      return Promise.resolve();
+    },
   };
 }

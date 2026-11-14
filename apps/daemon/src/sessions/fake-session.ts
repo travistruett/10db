@@ -583,6 +583,8 @@ export interface FakeShapeTurnResult {
   readonly contextPercent?: number;
   /** The account could not run the session's model: the session ends as refused, after no turn. */
   readonly refusedModel?: boolean;
+  /** The session ends after the turn's events, with no `turn_complete`: a limit, an error, an exit. */
+  readonly end?: { readonly reason: SessionEndReason; readonly message: string | null };
 }
 
 /** One turn the fake runs for a message it was sent. */
@@ -676,6 +678,10 @@ export function runFakeExploreSession(
       }
       current = null;
       if (core.ended()) break;
+      if (result.end !== undefined) {
+        core.end(result.end.reason, result.end.message);
+        break;
+      }
       if (result.refusedModel === true) {
         core.end(
           'model_refused',

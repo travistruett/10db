@@ -181,6 +181,27 @@ export function hasItemOfKind(
   );
 }
 
+/** The conversation's open "Send now" line, if one waits. */
+export function openTurnMarker(
+  db: DbReader,
+  conversationId: ConversationId,
+): ConversationItemRow | null {
+  return (
+    db
+      .select()
+      .from(schema.conversationItems)
+      .where(
+        and(
+          ofConversation(conversationId),
+          eq(schema.conversationItems.kind, ConversationItemKind.TurnMarker),
+          sql`json_extract(${schema.conversationItems.body}, '$.resolvedAt') IS NULL`,
+        ),
+      )
+      .orderBy(bySeq)
+      .get() ?? null
+  );
+}
+
 export function getItem(db: DbReader, id: ConversationItemId): ConversationItemRow {
   const row = db
     .select()

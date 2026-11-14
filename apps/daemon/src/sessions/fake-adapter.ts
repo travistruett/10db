@@ -274,7 +274,9 @@ export class FakeAdapter implements AgentAdapter {
    * Why a Shape session ends before it starts, or null when it starts: a test stands for an agent
    * session that can no longer be resumed.
    */
-  shapeStartFailure: (spec: ExploreSessionSpec) => string | null = () => null;
+  shapeStartFailure: (
+    spec: ExploreSessionSpec,
+  ) => { readonly reason: SessionEndReason; readonly message: string } | null = () => null;
 
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
@@ -289,7 +291,7 @@ export class FakeAdapter implements AgentAdapter {
           message: `${refusal.message}. No message was sent.`,
         })
       : failure !== null
-        ? fakeEndedSession({ type: 'ended', reason: SessionEndReason.Error, message: failure })
+        ? fakeEndedSession({ type: 'ended', reason: failure.reason, message: failure.message })
         : runFakeExploreSession(
             spec,
             (turn) => this.shapeBehaviour(turn),
