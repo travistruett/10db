@@ -2,7 +2,7 @@ import { ConflictError, WorkspaceMode, type BatchDto, type TaskDto } from '@10db
 import { startCards, type Card } from './cards';
 
 /** Where an unfinished batch works: a copy has a worktree path, the shared batch never does. */
-export function batchPlacement(batch: BatchDto): WorkspaceMode {
+export function batchPlacement(batch: Pick<BatchDto, 'worktreePath'>): WorkspaceMode {
   return batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
 }
 

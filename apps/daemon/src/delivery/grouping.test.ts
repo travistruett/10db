@@ -50,6 +50,12 @@ function tasksNamed(
         workstreamId: null,
         modelSetting: null,
         rigor: null,
+        rigorSource: null,
+        rigorReason: null,
+        effectiveRigorSource: 'default',
+        effectiveRigorReason: null,
+        kindsOff: [],
+        sizedByRules: true,
         kinds: [],
         effortPin: null,
         effectiveRigor: 'standard',
@@ -203,5 +209,63 @@ describe('groupByDependency with landing groups', () => {
       { title: 'A', members: ['A'] },
       { title: 'Real areas', members: ['B', 'C'] },
     ]);
+  });
+});
+
+describe('groupByDependency with goal links', () => {
+  const run = (
+    set: readonly string[],
+    deps: Record<string, readonly string[]>,
+    links: readonly (readonly [string, string])[],
+  ): { title: string; members: string[] }[] => {
+    const tasks = tasksNamed(deps);
+    const get = (name: string): TaskDto => {
+      const task = tasks.get(name);
+      if (!task) throw new Error(`no task ${name}`);
+      return task;
+    };
+    return groupByDependency(
+      set.map(get),
+      new Map(),
+      links.map(([a, b]) => [get(a).id, get(b).id] as const),
+    ).map((g) => ({ title: g.title, members: g.tasks.map((t) => t.title) }));
+  };
+
+  it.each<{
+    name: string;
+    set: readonly string[];
+    deps: Record<string, readonly string[]>;
+    links: readonly (readonly [string, string])[];
+    groups: readonly { readonly title: string; readonly members: readonly string[] }[];
+  }>([
+    {
+      name: 'a linked pair shares a group and the rest stay apart',
+      set: ['A', 'B', 'C'],
+      deps: {},
+      links: [['C', 'A']],
+      groups: [
+        { title: 'A', members: ['A', 'C'] },
+        { title: 'B', members: ['B'] },
+      ],
+    },
+    {
+      name: 'a link and a dependency chain join into one group',
+      set: ['A', 'B', 'C'],
+      deps: { B: ['A'] },
+      links: [['C', 'B']],
+      groups: [{ title: 'A', members: ['A', 'B', 'C'] }],
+    },
+    {
+      name: 'a link to a task outside the set is ignored',
+      set: ['A', 'B'],
+      deps: {},
+      links: [['A', 'X']],
+      groups: [
+        { title: 'A', members: ['A'] },
+        { title: 'B', members: ['B'] },
+      ],
+    },
+  ])('$name', ({ set, deps, links, groups }) => {
+    expect(run(set, deps, links)).toEqual(groups);
   });
 });

@@ -35,6 +35,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  listBatches,
   listWorkstreams,
   patchBatch,
   passHoldingFolder,
@@ -58,6 +59,8 @@ import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } f
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
+import { goalJoin, goalPairs, type OpenGoalBatch } from './goal-batches';
+import { goalShipping } from './goal-shipping';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
@@ -291,26 +294,71 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         : prepareShared(project, batch.title, batch.id, joining, ending);
     });
     const proposals = passProposals(project, landings.rest);
-    const inFolder = landings.rest.filter(
+    const inCopy = (task: TaskDto): boolean =>
+      task.workspaceMode === WorkspaceMode.Worktree || proposals.has(task.id);
+    // A task that ships with its goal joins the goal's open batch when it can; else it starts as usual.
+    const shipping = goalShipping(db, project);
+    const goalJoins = new Map<BatchId, { batch: BatchDto; tasks: TaskDto[] }>();
+    const unjoined: TaskDto[] = [];
+    let open: OpenGoalBatch<BatchDto>[] | undefined;
+    for (const task of landings.rest) {
+      const linked = tasks.some(
+        (other) => task.dependsOn.includes(other.id) || other.dependsOn.includes(task.id),
+      );
+      const batch =
+        inCopy(task) && !linked && shipping.ships(task)
+          ? goalJoin(task, (open ??= openCopyBatches(project.id, ending)), shipping)
+          : null;
+      if (batch === null) {
+        unjoined.push(task);
+        continue;
+      }
+      const joining = goalJoins.get(batch.id) ?? { batch, tasks: [] };
+      joining.tasks.push(task);
+      goalJoins.set(batch.id, joining);
+      joinedMode.set(task.id, WorkspaceMode.Worktree);
+    }
+    const goalJoinSteps = [...goalJoins.values()].map(({ batch, tasks: joining }) =>
+      prepareJoinWorktree(project, batch, joining),
+    );
+    const inFolder = unjoined.filter(
       (task) => task.workspaceMode === WorkspaceMode.Shared && !proposals.has(task.id),
     );
-    const inCopies = landings.rest.filter(
-      (task) => task.workspaceMode === WorkspaceMode.Worktree || proposals.has(task.id),
-    );
+    const inCopies = unjoined.filter(inCopy);
     // Everything this request makes, so no batch of it counts another's tasks as use of its branch.
     const sameStart: SameStart = { tasks: new Set(tasks.map((t) => t.id)), batches: new Set() };
     return {
       steps: [
         ...joinSteps,
+        ...goalJoinSteps,
         ...(inFolder.length > 0
           ? [prepareShared(project, input.title, undefined, inFolder, ending, sameStart)]
           : []),
-        ...prepareWorktrees(project, inCopies, sameStart, landings.titles),
+        ...prepareWorktrees(
+          project,
+          inCopies,
+          sameStart,
+          landings.titles,
+          goalPairs(inCopies, shipping),
+        ),
       ],
       placement: (task) =>
         joinedMode.get(task.id) ?? proposals.get(task.id)?.workspaceMode ?? task.workspaceMode,
       proposals,
     };
+  }
+
+  /** The project's open batches that work in a copy, each with the tasks it holds. */
+  function openCopyBatches(
+    projectId: ProjectId,
+    ending: BatchId | undefined,
+  ): OpenGoalBatch<BatchDto>[] {
+    return listBatches(db, { projectId, states: [BatchState.Open] })
+      .filter((batch) => batch.id !== ending && batch.worktreePath !== null)
+      .map((batch) => ({
+        batch,
+        tasks: listWorkstreams(db, { batchId: batch.id }).map((w) => getTask(db, w.taskId)),
+      }));
   }
 
   /**
@@ -446,9 +494,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     tasks: readonly TaskDto[],
     sameStart: SameStart,
     landingTitles: ReadonlyMap<LandingGroupId, string>,
+    goalLinks: readonly (readonly [TaskId, TaskId])[],
   ): StartStep[] {
     if (tasks.length === 0) return [];
-    const groups = groupByDependency(tasks, landingTitles);
+    const groups = groupByDependency(tasks, landingTitles, goalLinks);
     // Tasks that share a worktree share a pull request, so they must land alike; checked for every
     // group before any batch is made.
     const targets = groups.map((group) => sharedLanding(project, group.tasks, 'worktree'));
