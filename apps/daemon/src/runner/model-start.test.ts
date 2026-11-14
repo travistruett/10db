@@ -173,6 +173,10 @@ describe('the model a planned step starts on', () => {
         new RegExp(`${planned} is not offered by Second plan`),
       );
       expect(saved.model).toBe(ran);
+      // The write that records the step's session keeps the model the launch just saved.
+      expect(saved.steps[0]?.providerSessionId).toBe(
+        listSessions(engine.store.db, workstream.id).at(-1)?.providerSessionId,
+      );
     });
   });
 });
@@ -251,6 +255,81 @@ describe('a step the gate sends back for another try', () => {
       'escalated from claude-sonnet-5-5@high after the gate failed',
     );
     expect(ws(workstream.id).steps[0]?.model).toBe('claude-opus-5-5');
+  });
+});
+
+describe('a send-back that would resume the step’s own session', () => {
+  const reject = (opId: string) => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: '1. The empty state has no test.', verdict: 'reject' },
+  });
+  const approve = (opId: string) => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: 'Looks right.', verdict: 'approve' },
+  });
+
+  it.each([
+    {
+      name: 'the project moved to another account',
+      change: (planned: string, there: AccountId) => {
+        list(there, claudeModels());
+        engine.state.write((ctx) => patchProject(ctx, engine.project.id, { accountId: there }));
+        return planned;
+      },
+    },
+    {
+      name: 'the account stopped offering the model the session ran on',
+      change: (planned: string) => {
+        list(
+          engine.project.accountId,
+          claudeModels().filter((m) => m !== planned),
+        );
+        return planned;
+      },
+    },
+  ])('runs fresh, one profile up, when $name', async ({ change }) => {
+    const there = { id: null as AccountId | null };
+    let sessions = 0;
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          finish('op-resume-01'),
+          [reject('op-resume-02'), turn],
+          finish('op-resume-03'),
+          [approve('op-resume-04'), turn],
+        ],
+      },
+      {},
+      {
+        afterSession: () => {
+          sessions += 1;
+          // After the review rejected, before the fix launches.
+          if (sessions === 2 && there.id !== null) change(planned.model, there.id);
+          return Promise.resolve();
+        },
+      },
+    );
+    const planned = { model: '' };
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    planned.model = ws(workstream.id).steps[0]?.model ?? '';
+    there.id = secondPlan().id;
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const ran = listSessions(engine.store.db, workstream.id);
+    const build = ran[0];
+    const fix = ran[2];
+    expect(fix?.model).not.toBe(build?.model);
+    expect(engine.adapter.prompts[2]?.resume).toBeNull();
+    // Escalated once, for the fresh start, and marked so a crash does not step up again.
+    expect(ws(workstream.id).steps[0]).toMatchObject({ fixFresh: 'done', model: fix?.model });
+    expect(ws(workstream.id).steps[0]?.reason).toContain('escalated from');
   });
 });
 

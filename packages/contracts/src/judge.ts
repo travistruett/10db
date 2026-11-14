@@ -3,6 +3,10 @@ import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
 
 /** A routine decision the daemon can ask a fast model to make. */
 export const JudgeDecision = {
+  /**
+   * Retired: a rigor decides up front whether a review runs, so this is never asked. Its logged calls still
+   * parse and show, and a stored config that holds it reads with the key dropped.
+   */
   ReviewSize: 'review_size',
   /** Shape (spec §9): has the builder said enough to propose? */
   ShapeReady: 'shape_ready',
@@ -60,7 +64,6 @@ export const JudgeConfig = z.object({
   /** The OpenRouter account decisions run on; null until the builder picks one. */
   accountId: AccountId.nullable().default(null),
   decisions: z.object({
-    [JudgeDecision.ReviewSize]: JudgeDecisionConfig,
     [JudgeDecision.ShapeReady]: shapeDecision(),
     [JudgeDecision.ShapeRecord]: shapeDecision(),
     [JudgeDecision.ShapeElsewhere]: shapeDecision(),
@@ -72,11 +75,13 @@ export const JudgeConfig = z.object({
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
 
+/** A decision 10db still asks a model, and so still configures: every one but the retired `review_size`. */
+export type AskedDecision = keyof JudgeConfig['decisions'];
+
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   enabled: true,
   accountId: null,
   decisions: {
-    [JudgeDecision.ReviewSize]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
@@ -86,6 +91,11 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
   },
 };
+
+/** Whether 10db still asks this decision, so it has a config; a retired one only labels logged calls. */
+export function isAskedDecision(decision: JudgeDecision): decision is AskedDecision {
+  return decision in DEFAULT_JUDGE_CONFIG.decisions;
+}
 
 export const JudgeStatusDto = z.object({
   config: JudgeConfig,
@@ -114,7 +124,6 @@ export const JudgeConfigPatch = z
     accountId: AccountId.nullable(),
     decisions: z
       .object({
-        [JudgeDecision.ReviewSize]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,

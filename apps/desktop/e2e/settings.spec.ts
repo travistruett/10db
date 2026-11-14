@@ -152,7 +152,7 @@ test.describe('Settings › Decisions with logged calls', () => {
     await openDecisions(page, 'dark');
     const main = page.getByRole('main');
     const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
-    for (const group of ['Delivery', 'Plan', 'Stakeholder questions']) {
+    for (const group of ['Plan', 'Stakeholder questions']) {
       await expect(decisions.getByText(group, { exact: true })).toBeVisible();
     }
     // The e2e daemon runs with TENDB_JUDGE=off.
@@ -184,8 +184,8 @@ test.describe('Settings › Decisions with logged calls', () => {
     const main = page.getByRole('main');
     await expect(main.getByRole('table', { name: 'Decisions', exact: true })).toBeVisible();
     await expectAccessible(page, 'settings decisions light');
-    await main.getByRole('button', { name: 'Skip review for small changes' }).first().click();
-    await expect(page.getByRole('dialog', { name: 'Skip review for small changes' })).toBeVisible();
+    await main.getByRole('button', { name: 'Who a question goes to' }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Who a question goes to' })).toBeVisible();
     await expectAccessible(page, 'settings decisions drawer light');
   });
 });

@@ -744,6 +744,22 @@
                           "minimum": 0,
                           "maximum": 9007199254740991
                         },
+                        "reviewRounds": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 3
+                        },
+                        "providerSessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "fixFresh": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "done"
+                          ]
+                        },
                         "shippedAtLimit": {
                           "type": "object",
                           "properties": {

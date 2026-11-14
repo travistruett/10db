@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
 import {
+  atRoundLimit,
   filedFollowUpLines,
   findingBody,
   findingNotes,
   parseFindings,
-  rejectionsSentBack,
   reviewRounds,
 } from './review-rounds';
 import { FOLLOW_UPS_HEADING, type WorkstreamStep } from './steps';
@@ -230,49 +230,14 @@ describe('reviewRounds', () => {
   });
 });
 
-describe('rejectionsSentBack', () => {
-  const rejections = [
-    result('reject', '2026-10-29T10:00:00.000Z'),
-    result('reject', '2026-10-29T11:00:00.000Z'),
-    result('reject', '2026-10-29T11:30:00.000Z'),
-  ];
+describe('atRoundLimit', () => {
+  // The rejection being judged is the sentBack + 1th; it is at the limit when that exceeds the rounds.
   it.each([
-    { name: 'no rounds', steps: [step({})], count: 0 },
-    {
-      name: 'a rejection that sent the work back',
-      steps: [step({ earlier: rejections.slice(0, 1), sentBack: 1 })],
-      count: 1,
-    },
-    {
-      name: 'the rejection that used the last attempt up, which sent nothing back',
-      steps: [
-        step({
-          earlier: rejections,
-          result: result('reject', '2026-10-29T12:00:00.000Z'),
-          sentBack: 3,
-        }),
-      ],
-      count: 3,
-    },
-    {
-      // The review rejected 4 times and the builder retried; the rerun implement step then failed
-      // its gate twice (attempt 2), and the review has not run since.
-      name: 'none since a retry, whatever came before it',
-      steps: [
-        step({ role: 'implement', tools: 'edit', attempts: 2 }),
-        step({ earlier: [...rejections, result('reject', '2026-10-29T12:00:00.000Z')] }),
-      ],
-      count: 0,
-    },
-    {
-      name: 'the send-backs of every step that gives a verdict',
-      steps: [
-        step({ role: 'plan_review', earlier: rejections.slice(0, 1), sentBack: 1 }),
-        step({ earlier: rejections.slice(1), sentBack: 1 }),
-      ],
-      count: 2,
-    },
-  ])('counts $name', ({ steps, count }) => {
-    expect(rejectionsSentBack({ steps })).toBe(count);
+    { rounds: 0, atLimit: [true, true, true, true] },
+    { rounds: 1, atLimit: [false, true, true, true] },
+    { rounds: 2, atLimit: [false, false, true, true] },
+    { rounds: 3, atLimit: [false, false, false, true] },
+  ])('with $rounds rounds, sent back 0 to 3 times', ({ rounds, atLimit }) => {
+    expect([0, 1, 2, 3].map((sentBack) => atRoundLimit(sentBack, rounds))).toEqual(atLimit);
   });
 });

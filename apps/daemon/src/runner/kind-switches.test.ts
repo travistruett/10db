@@ -4,7 +4,7 @@ import { proposalFiling } from '../inbox';
 import { proposePlacement } from '../placement';
 import { SEEDED_KINDS } from '../team';
 import { shipsAtRetryLimit } from './limit-ship';
-import { reviewSizeRule } from './review-size';
+import { forcedReview } from './forced-review';
 
 // What the four risk tags did before kinds: review forced for all four, a rejection at the limit failing
 // security and auth, a separate copy for migration and dependency, and a card for every proposal that had one.
@@ -27,8 +27,7 @@ describe('the seeded kinds carry the behaviour the risk tags had', () => {
     const kind = seeded.find((k) => k.key === key);
     if (kind === undefined) throw new Error(`no seeded kind ${key}`);
     const task = { kinds: [kind] };
-    const step = { pinned: false, result: null, earlier: [] };
-    expect(reviewSizeRule(task, { files: [] }, step, []) === 'review').toBe(before.review);
+    expect(forcedReview(task.kinds, { files: [] }, []) !== null).toBe(before.review);
     expect(
       shipsAtRetryLimit({ role: StepRole.Review, kinds: task.kinds, evidence: [...gateRun] }),
     ).toBe(!before.failsAtLimit);

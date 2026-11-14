@@ -1,7 +1,7 @@
 export { DEFAULT_PERSONA_FOR } from './catalogue';
 export { ROLE_DEFAULT } from './role-defaults';
 export { rolePicks } from './role-picks';
-export { planSteps } from './plan-steps';
+export { planAddedStep, planSteps, type PlanInput } from './plan-steps';
 export { chooseModel, type ChooseInput } from './choose-model';
 export { escalateStep } from './router';
 export { offeredModels, offeredProfiles } from './offered';

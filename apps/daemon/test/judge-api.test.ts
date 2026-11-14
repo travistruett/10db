@@ -244,14 +244,14 @@ describe('PATCH /judge', () => {
     const { api } = await start();
     const status = await api.patch('/judge', JudgeStatusDto, {
       enabled: false,
-      decisions: { review_size: { floor: 0.95, enabled: false } },
+      decisions: { shape_ready: { floor: 0.95, enabled: false } },
     });
     expect(status.config).toEqual({
       enabled: false,
       accountId: null,
       decisions: {
         ...DEFAULT_JUDGE_CONFIG.decisions,
-        review_size: { enabled: false, model: 'typesafe/jev-1.13', floor: 0.95 },
+        shape_ready: { enabled: false, model: 'typesafe/jev-1.13', floor: 0.95 },
       },
     });
     expect(await api.get('/judge', JudgeStatusDto)).toEqual(status);
@@ -262,9 +262,9 @@ describe('PATCH /judge', () => {
     const { api } = await start();
     await openRouterAccount(api);
     const status = await api.patch('/judge', JudgeStatusDto, {
-      decisions: { review_size: { model: 'liquid/d1' } },
+      decisions: { shape_ready: { model: 'liquid/d1' } },
     });
-    expect(status.config.decisions.review_size.model).toBe('liquid/d1');
+    expect(status.config.decisions.shape_ready.model).toBe('liquid/d1');
     expect(openRouterRequests).toEqual([
       { url: MODEL_LIST_URL, authorization: null },
       { url: DECISIONS_URL, authorization: `Bearer ${KEY}` },
@@ -275,9 +275,9 @@ describe('PATCH /judge', () => {
     const { api, raw } = await start({ judgeOff: true });
     await openRouterAccount(api);
     expect(
-      (await raw('PATCH', '/judge', { decisions: { review_size: { model: 'liquid/d1' } } })).status,
+      (await raw('PATCH', '/judge', { decisions: { shape_ready: { model: 'liquid/d1' } } })).status,
     ).toBe(409);
-    expect((await api.get('/judge', JudgeStatusDto)).config.decisions.review_size.model).toBe(
+    expect((await api.get('/judge', JudgeStatusDto)).config.decisions.shape_ready.model).toBe(
       'typesafe/jev-1.13',
     );
     expect(openRouterRequests).toEqual([]);
@@ -287,7 +287,7 @@ describe('PATCH /judge', () => {
     const { api } = await start();
     await openRouterAccount(api);
     await api.patch('/judge', JudgeStatusDto, {
-      decisions: { review_size: { model: 'typesafe/jev-1.13', floor: 0.9 } },
+      decisions: { shape_ready: { model: 'typesafe/jev-1.13', floor: 0.9 } },
     });
     expect(openRouterRequests).toEqual([]);
   });
@@ -323,13 +323,13 @@ describe('PATCH /judge', () => {
     if (account) await openRouterAccount(api);
     const res = await raw('PATCH', '/judge', {
       enabled: false,
-      decisions: { review_size: { model: 'liquid/d1' } },
+      decisions: { shape_ready: { model: 'liquid/d1' } },
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { message: string }).message).toMatch(says);
     expect((await api.get('/judge', JudgeStatusDto)).config).toMatchObject({
       enabled: true,
-      decisions: { review_size: { model: 'typesafe/jev-1.13' } },
+      decisions: { shape_ready: { model: 'typesafe/jev-1.13' } },
     });
   });
 
@@ -356,9 +356,9 @@ describe('PATCH /judge', () => {
   });
 
   it.each([
-    ['a floor above one', { decisions: { review_size: { floor: 3 } } }],
+    ['a floor above one', { decisions: { shape_ready: { floor: 3 } } }],
     ['an unknown decision', { decisions: { other: { enabled: true } } }],
-    ['an empty model', { decisions: { review_size: { model: '' } } }],
+    ['an empty model', { decisions: { shape_ready: { model: '' } } }],
   ])('answers 400 for %s and changes nothing', async (_name, body) => {
     const { api, raw } = await start();
     expect((await raw('PATCH', '/judge', body)).status).toBe(400);
@@ -680,7 +680,7 @@ describe('GET /judge/calls', () => {
     const { api, daemon: d } = await start();
     await openRouterAccount(api);
     const answer = await d.judge.choose({
-      decision: 'review_size',
+      decision: 'shape_ready',
       state: 's',
       question: 'Does this need a review?',
       options: ['review', 'skip'],

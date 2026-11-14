@@ -58,7 +58,13 @@ import {
   revertedWorkNote,
   revertedWorkNotice,
 } from './reverted-work';
-import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
+import {
+  clearSendBacks,
+  restartStep,
+  retryTargetAfterRejection,
+  sendBackSteps,
+  withoutFixFresh,
+} from './step-flow';
 
 /** What starting this task would run: its rigor and kinds resolved against the playbook and the catalogue. */
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
@@ -343,7 +349,7 @@ export function retryWorkstream(
           failureReason: null,
           failureKind: null,
           steps: clearSendBacks(
-            sendBackSteps(row.steps, row.stepIndex, reworkAt, reworked, {
+            sendBackSteps(row.steps, row.stepIndex, reworkAt, withoutFixFresh(reworked), {
               now: ctx.now,
               sessions: getWorkstream(ctx.tx, id).sessionCount,
             }),
@@ -353,7 +359,7 @@ export function retryWorkstream(
           effort: reworked.effort,
           nextAction: evidence
             ? { kind: 'fix', evidenceId: evidence.id }
-            : { kind: 'revise', reviewStep: row.stepIndex },
+            : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
       });

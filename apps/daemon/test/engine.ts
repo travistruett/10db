@@ -154,6 +154,8 @@ function rigorOfFlow(flow: string): Rigor {
       return Rigor.Light;
     case 'standard':
       return Rigor.Standard;
+    case 'careful':
+      return Rigor.Careful;
     case 'full':
       return Rigor.Critical;
     default:
@@ -206,7 +208,6 @@ export async function createTestEngine(
       | 'hold'
       | 'laneTempDirs'
       | 'migrationsBase'
-      | 'judge'
       | 'git'
       | 'worktreeRoot'
       | 'builderHome'
@@ -460,8 +461,6 @@ export async function createTestEngine(
       gate: (_batchId, _signal, run) => run(),
       atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
     },
-    // No decision is asked of a model unless a test scripts one.
-    judge: offJudge,
     clock,
     logger: silentLogger,
     // No test declares an AWS profile; one that did would have no CLI to ask.

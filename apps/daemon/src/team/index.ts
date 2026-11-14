@@ -25,6 +25,7 @@ export {
   revertCommitLine,
   revertOfRun,
 } from './reverted-work';
+export { replanSteps } from './replan-steps';
 export {
   advanceSteps,
   countSendBack,

@@ -1,4 +1,4 @@
-import type { DecisionModelDto, JudgeDecision, JudgeStatusDto } from '@10db/contracts';
+import type { AskedDecision, DecisionModelDto, JudgeStatusDto } from '@10db/contracts';
 import {
   Button,
   Group,
@@ -59,7 +59,7 @@ export function DecisionModelPicker({
   status,
   disabled,
 }: {
-  readonly decision: JudgeDecision;
+  readonly decision: AskedDecision;
   readonly status: JudgeStatusDto;
   readonly disabled: boolean;
 }) {

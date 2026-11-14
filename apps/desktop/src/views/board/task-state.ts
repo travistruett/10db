@@ -6,7 +6,6 @@ import {
   PARKED_NOTICE_KEY,
   PullRequestChecks,
   PullRequestState,
-  rejectionsSentBack,
   retryTargetAfterRejection,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
@@ -319,20 +318,32 @@ export function shippedAnywayAndClosed(
   return workstream?.state === S.Failed && pullRequestClosed(batch);
 }
 
+const SENT_BACK_LABEL: Readonly<Record<StepRole, string>> = {
+  plan: 'Planner',
+  plan_review: 'Plan review',
+  implement: 'Implementer',
+  review: 'Review',
+  qa: 'QA',
+};
+
 /**
- * How often the review sent the work back, against the limit that fails the task; null when it
- * never did, or a retry has started the count over.
+ * How often each reviewing step sent the work back, against the rounds its rigor allowed when the step was
+ * written (a step stored without them counts against the limit gate failures share); null when none did, or a
+ * retry has started the count over.
  */
 export function reviewSentBackLine(workstream: WorkstreamDto | undefined): string | null {
-  if (!workstream) return null;
-  const sentBack = rejectionsSentBack(workstream);
-  return sentBack > 0
-    ? `Review sent back ${String(sentBack)} of ${String(FIX_ATTEMPT_LIMIT)}`
-    : null;
+  const lines = (workstream?.steps ?? []).flatMap((step) =>
+    step.sentBack > 0
+      ? [
+          `${SENT_BACK_LABEL[step.role]} sent back ${String(step.sentBack)} of ${String(step.reviewRounds ?? FIX_ATTEMPT_LIMIT)}`,
+        ]
+      : [],
+  );
+  return lines.length > 0 ? lines.join('; ') : null;
 }
 
 /**
- * The follow-up tasks filed when the work shipped at the retry limit with findings still open, in
+ * The follow-up tasks filed when the work shipped with its review rounds used up and findings still open, in
  * step order: one per step that rejected past the limit (a review, then the QA after it). Empty
  * otherwise.
  */
@@ -340,12 +351,12 @@ export function shippedAtLimit(workstream: WorkstreamDto | undefined): ShippedAt
   return (workstream?.steps ?? []).flatMap((s) => (s.shippedAtLimit ? [s.shippedAtLimit] : []));
 }
 
-/** The sentence a card and the drawer say of work that shipped at the retry limit; null when it did not. */
+/** The sentence a card and the drawer say of work that shipped when its review rounds ran out; null when it did not. */
 export function shippedAtLimitLine(workstream: WorkstreamDto | undefined): string | null {
   const shipped = shippedAtLimit(workstream);
   if (shipped.length === 0) return null;
   const titles = shipped.map((s) => s.followUpTitle).join('; ');
-  return `Shipped at the retry limit with open findings. ${shipped.length === 1 ? 'Follow-up task' : 'Follow-up tasks'}: ${titles}`;
+  return `Shipped when its review rounds ran out with open findings. ${shipped.length === 1 ? 'Follow-up task' : 'Follow-up tasks'}: ${titles}`;
 }
 
 /**

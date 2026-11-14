@@ -1,5 +1,6 @@
 import {
   JudgeDecision,
+  type AskedDecision,
   type DecisionStatsDto,
   type JudgeStatusDto,
   type ShadowAgreementDto,
@@ -25,7 +26,7 @@ const work = accountDto({ kind: 'openrouter', label: 'Work key', secretSet: true
 function keyedStatus(
   floor = 0.8,
   extra: Partial<JudgeStatusDto> = {},
-  decision: JudgeDecision = DECISION,
+  decision: AskedDecision = DECISION,
 ): JudgeStatusDto {
   const base = judgeStatusDto();
   return judgeStatusDto({
@@ -49,14 +50,14 @@ function Harness({
   shadow,
   statsFailed = false,
 }: {
-  readonly decision?: JudgeDecision;
+  readonly decision?: AskedDecision;
   readonly stats?: DecisionStatsDto;
   readonly shadow?: ShadowAgreementDto;
   /** The stats could not be read: the page passes no entry and says so. */
   readonly statsFailed?: boolean;
 }) {
   const status = useJudgeStatus();
-  const [open, setOpen] = useState<JudgeDecision | null>(decision);
+  const [open, setOpen] = useState<AskedDecision | null>(decision);
   if (status.data === undefined) return null;
   return (
     <DecisionDrawer

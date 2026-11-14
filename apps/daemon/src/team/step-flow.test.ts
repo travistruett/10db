@@ -191,8 +191,10 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
 describe('countSendBack and clearSendBacks', () => {
   it('counts each send-back on the step whose rejection sent the work back', () => {
     const steps = [step('plan'), step('plan_review', 'reject'), step('implement'), step('review')];
-    const twice = countSendBack(countSendBack(steps, 3), 3);
-    expect(countSendBack(twice, 1).map((s) => s.sentBack)).toEqual([0, 1, 0, 2]);
+    const twice = countSendBack(countSendBack(steps, 3, 2), 3, 2);
+    const counted = countSendBack(twice, 1, 1);
+    expect(counted.map((s) => s.sentBack)).toEqual([0, 1, 0, 2]);
+    expect(counted.map((s) => s.reviewRounds)).toEqual([undefined, 1, undefined, 2]);
   });
 
   it('sets every count to 0 when the attempts start over, keeping the rounds', () => {
