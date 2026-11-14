@@ -501,7 +501,7 @@ the judge answers from a closed list, the builder's edit pins, every call is log
 | Cells resolve to models | the account's offer | the account's offer; a Frontier cell needs a Frontier model the account can run (§6.1) | the account's offer; Frontier is OpenAI's top band |
 | Effort levels | low to max | low to max | the levels Codex offers; a cell's level snaps to the nearest |
 | Personas and kind skills | harness plugin dir | harness plugin dir | inlined in the prompt, as today |
-| Resumed build session for Standard fixes | yes | yes | yes |
+| Resumed build session for Standard fixes | yes, on the session's own model | yes, on the session's own model | yes: `thread/resume` on the thread's own model; another account or a model no longer offered fixes fresh, as on Claude |
 | Plan and Workbench pickers | the account's offer | the account's offer | the account's offer |
 | The judge sizes tasks | with a decision account | with a decision account | with a decision account |
 
