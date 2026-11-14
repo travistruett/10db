@@ -15,3 +15,4 @@ export {
   type ApprovedAction,
   type TurnSkips,
 } from './skip';
+export { createSkipRecorder, type RecordedSkip, type SkipRecorder } from './skip-recorder';
