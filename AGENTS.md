@@ -110,9 +110,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   and inside a worktree in `10db-worktrees/` only: discarding named tracked files
   (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only where git runs: the
   command's cwd, or the directory that plain `cd <dir> &&` segments right before the git call lead
-  to. `git -C <worktree>`, a `cd` joined by `;` or `||`, a `cd` the guard can't read, another
-  command in the line, or any other way of pointing git elsewhere turns it off. Directories, globs,
-  `.`, untracked paths and every `stash` still ask.
+  to. `git -C <worktree>`, a `cd` joined by `;` or `||`, a `cd` the guard can't read or that
+  CDPATH may redirect (a relative name without `./` or `../`), another command in the line, or any
+  other way of pointing git elsewhere turns it off. Directories, globs, `.`, untracked paths and
+  every `stash` still ask.
   A second exception, in the Claude guard, anywhere: a lone `git branch -D <branch>...` doesn't ask
   when each local branch's pull request has merged on GitHub (checked with `gh pr list`) and the
   branch tip is that pull request's head commit, so deleting it loses nothing. PRs are

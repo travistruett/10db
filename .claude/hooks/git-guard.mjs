@@ -724,21 +724,37 @@ function resolveDirectory(base, target) {
 /**
  * The directory a plain `cd` segment leaves the shell in, or null when it can't be read: a cd with
  * no operand, more than one, or a path `resolveDirectory` can't resolve. `-L` and `--` are the
- * only options read. zsh reads `+N` and `-N` as directory-stack entries, and the shell looks a
- * relative name up in CDPATH first unless it starts with `./` or `../`, so neither is read.
+ * only options read. zsh reads `+N` and `-N` as directory-stack entries, so neither is read.
  * @param {string[]} words the segment's words, the first being `cd`
  * @param {string | null} base the directory it runs in
  * @returns {string | null}
  */
 function cdDestination(words, base) {
+  const target = cdOperand(words);
+  if (target === null || /^[+-]\d+$/.test(target)) return null;
+  return resolveDirectory(base, target);
+}
+
+/**
+ * The one operand of a plain `cd` segment, past `-L` and `--`, or null when it has none or more.
+ * @param {string[]} words
+ * @returns {string | null}
+ */
+function cdOperand(words) {
   let i = 1;
   if (words[i] === '-L') i += 1;
   if (words[i] === '--') i += 1;
-  if (words.length !== i + 1) return null;
-  const target = words[i];
-  if (/^[+-]\d+$/.test(target)) return null;
-  const searched = !posix.isAbsolute(target) && !/^\.\.?(\/|$)/.test(target);
-  return searched ? null : resolveDirectory(base, target);
+  return words.length === i + 1 ? words[i] : null;
+}
+
+/**
+ * True when the shell may look the cd's operand up in CDPATH first, so it may land somewhere other
+ * than the path read from here: a relative name that doesn't start with `./` or `../`.
+ * @param {string[]} words
+ */
+function cdMaySearch(words) {
+  const target = cdOperand(words);
+  return target !== null && !posix.isAbsolute(target) && !/^\.\.?(\/|$)/.test(target);
 }
 
 /**
@@ -1134,6 +1150,10 @@ function judge(command, cwd, whole = command, startDir = cwd) {
   // closes, or a list goes to the background (bash runs a whole `a && b &` list in a subshell),
   // the shell may be back where it was, so the directory becomes unknown.
   let followedCd = false;
+  // Whether a cd CDPATH may redirect has run. `dir` still guides the index and path lookups, but
+  // the decisions that need to know where git runs (a bare push, the discard exception) treat the
+  // directory as unknown.
+  let searchedCd = false;
   /** @type {string | null | undefined} undefined until looked up; null when git can't say */
   let prefix;
   const repoPrefix = () => {
@@ -1161,6 +1181,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       const readable =
         plainCd && !grouped && inLine.includes(previous) && inLine.includes(seg.separator);
       const destination = readable ? cdDestination(seg.words, dir) : null;
+      if (destination !== null && cdMaySearch(seg.words)) searchedCd = true;
       if (destination !== null && !listCertain) uncertainAtListEnd = true;
       dir = destination;
       if (destination === null) listCertain = false;
@@ -1168,7 +1189,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
     } else listCertain = false;
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
-      const verdict = inner === null ? null : judge(inner, cwd, whole, dir);
+      const verdict = inner === null ? null : judge(inner, cwd, whole, searchedCd ? null : dir);
       if (verdict) verdicts.push(verdict);
     }
     if (seg.words.some((w) => HOOK_SKIP.test(w) && !HOOK_SKIP_HARMLESS.test(w))) {
@@ -1335,7 +1356,10 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       const pushTargets = git.verb === 'push' ? a.filter((x) => !x.startsWith('-')).slice(1) : [];
       // A bare push sends the branch checked out where git runs: the directory the command line's
       // `cd` and `-C` lead to. Unknown (null) when a cd or retargeting can't be read, and then it asks.
-      let pushDir = dir;
+      // Where git runs, as far as the decisions that depend on it can trust: unknown after a cd
+      // CDPATH may redirect.
+      const gitDir = searchedCd ? null : dir;
+      let pushDir = gitDir;
       for (const target of git.dirs) pushDir = resolveDirectory(pushDir, target);
       if (git.retargeted || (touchedDirectory && GIT_REPOSITORY_VARIABLE.test(whole))) {
         pushDir = null;
@@ -1382,15 +1406,21 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       // cd can't be read. Only the git call itself is checked for retargeting, since `cd` is one.
       const cdsThenGitCall =
         plainGitCall &&
-        dir !== null &&
+        gitDir !== null &&
         filled.slice(0, -1).every((x) => x.words[0] === 'cd' && x.separator === '&&') &&
         !RETARGETS.test(seg.raw);
       const ownDiscard =
-        dir !== null &&
+        gitDir !== null &&
         (loneGitCall ? !RETARGETS.test(whole) : cdsThenGitCall) &&
         ['checkout', 'restore'].includes(git.verb) &&
-        isFileDiscard(git.verb, a, dir) &&
-        inAgentWorktree(dir);
+        isFileDiscard(git.verb, a, gitDir) &&
+        inAgentWorktree(gitDir);
+      // Whether git certainly runs in an agent worktree, for the hint shown to a subagent.
+      const inOwnWorktree = () =>
+        gitDir !== null &&
+        !RETARGETS.test(seg.raw) &&
+        !GIT_REPOSITORY_VARIABLE.test(whole) &&
+        inAgentWorktree(gitDir);
       // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
       // call, for the same reason as above; the cwd is the repository the branch names live in.
       // GitHub is asked only for a call that would ask otherwise (`&&` stops before the lookup).
@@ -1416,7 +1446,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
             ? 'Name the branch: git push origin <branch>.'
             : pushesMain
               ? 'Push your branch and open a pull request.'
-              : insteadOf(git.verb, rewritesRefs, () => inAgentWorktree(dir ?? cwd)),
+              : insteadOf(git.verb, rewritesRefs, inOwnWorktree),
         });
       }
     }

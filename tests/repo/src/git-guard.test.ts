@@ -547,6 +547,18 @@ describe("git guard with another session's work already staged", () => {
   it('names the staged path in the deny reason', () => {
     expect(runHook(bash("git add a.ts && git commit -m 'x'", dirty)).reason).toContain('other.ts');
   });
+
+  it('reads the index from where a relative cd leads, CDPATH or not', () => {
+    // A retry: src/c.ts is already staged, and the command adds it again from inside src/.
+    const retry = makeRepo(['src/c.ts']);
+    try {
+      expect(runHook(bash("cd src && git add c.ts && git commit -m 'x'", retry.dir)).outcome).toBe(
+        'allow',
+      );
+    } finally {
+      retry.remove();
+    }
+  });
 });
 
 // A checkout laid out as AGENTS.md says: the main checkout `10db/`, an agent's linked worktree in
@@ -705,6 +717,21 @@ describe('git guard in an agent worktree beside the checkout', () => {
     (_name, command) => {
       expect(inAgent(command, fakeOfCheckout)).toBe('ask');
       expect(inAgent(command, fakeOfAgent)).toBe('ask');
+    },
+  );
+
+  it.each<[string, string]>([
+    ['a cd the guard cannot read', 'cd ~/elsewhere && git restore a.ts'],
+    ['a cd CDPATH may redirect', 'cd agentlink && git checkout -- a.ts'],
+    ['git -C another checkout', 'git -C CHECKOUT checkout -- .'],
+  ])(
+    'never shows a subagent in its worktree how to overwrite files git may not run on: %s',
+    (_name, command) => {
+      const { outcome, reason } = runHook(
+        bash(command.replaceAll('CHECKOUT', checkout.dir), agent, { agent_id: 'a1' }),
+      );
+      expect(outcome).toBe('deny');
+      expect(reason).not.toContain('git show');
     },
   );
 
