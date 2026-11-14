@@ -1,9 +1,15 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { InboxItemId, ProjectId, WorkstreamId, WorkstreamState } from '@10db/contracts';
+import {
+  mintId,
+  type InboxItemId,
+  type ProjectId,
+  type WorkstreamId,
+  type WorkstreamState,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase } from '../database';
+import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase, type TendbDatabase } from '../database';
 import { lastConfigHead, lastListed, markListed, unlistedEndedRuns } from './skip-listings';
 import { recordSkip } from './skipped-actions';
 import { createStore, type Store } from './store';
@@ -107,6 +113,31 @@ describe('skip listings', () => {
   });
 });
 
+/**
+ * A task and its run at `state`, written in SQL with only the columns a database at the backfill has, so a
+ * column added by a later migration doesn't break the seed.
+ */
+function rawRunOf(db: TendbDatabase, projectId: ProjectId, state: WorkstreamState): WorkstreamId {
+  const at = new Date().toISOString();
+  const taskId = mintId('Task');
+  const id = mintId('Workstream');
+  db.$client
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES (?, ?, 'Alpha', '', '["x"]', '["api"]', 'open', ?, 'shared', ?, ?)`,
+    )
+    .run(taskId, projectId, Date.now(), at, at);
+  db.$client
+    .prepare(
+      `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts, model,
+         effort, fence, created_at, updated_at)
+       VALUES (?, ?, ?, ?, '{"kind":"start"}', 0, 0, 'claude-sonnet-5-5', 'medium', 0, ?, ?)`,
+    )
+    .run(id, taskId, projectId, state, at, at);
+  return id;
+}
+
 describe('the listings backfill', () => {
   let dir: string;
   afterEach(() => {
@@ -128,9 +159,9 @@ describe('the listings backfill', () => {
       migrateDatabase(db, older);
       const old = createStore(db);
       const project = seedProject(old).id;
-      runOf(old, project, 'DONE');
-      runOf(old, project, 'FAILED');
-      const running = runOf(old, project, 'RUNNING');
+      rawRunOf(db, project, 'DONE');
+      rawRunOf(db, project, 'FAILED');
+      const running = rawRunOf(db, project, 'RUNNING');
       migrateDatabase(db);
       expect(unlistedEndedRuns(db)).toEqual([]);
       db.$client.prepare("UPDATE workstreams SET state = 'DONE' WHERE id = ?").run(running);

@@ -4163,6 +4163,44 @@ describe('flows', () => {
         expect(filed.find((t) => t.id === ids[1])?.description).toContain(QA_FINDINGS);
       });
 
+      it('files one follow-up when QA sends the work back and the review rejects past its limit again', async () => {
+        const LATER = '1. BLOCKING src/api/a.txt:9 the card still hides what the reviewer found.';
+        const QA_SENT_BACK = '1. BLOCKING src/api/a.txt:1 the empty state crashes.';
+        engine = await createTestEngine({
+          Alpha: [
+            [plan, turn],
+            // Round 1 of the review, then its rejection past the limit that ships, then QA sends the work
+            // back, the review rejects past its limit once more, and QA approves.
+            [turn],
+            [reject('op-flow-0591', '1. NOTE round 1'), turn],
+            [turn],
+            [reject('op-flow-0592', FINAL), turn],
+            [reject('op-flow-0593', QA_SENT_BACK), turn],
+            [turn],
+            [reject('op-flow-0594', LATER), turn],
+            [approve('op-flow-0595'), turn],
+          ],
+        });
+        engine.state.write((ctx) =>
+          setPlaybook(ctx, null, { rows: [{ rigor: 'critical', reviewRounds: 1 }] }),
+        );
+        const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
+          flow: 'full',
+          criteria: 4,
+        });
+        await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+        expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+        const [filed, ...rest] = filedFor(task.id);
+        expect(rest).toEqual([]);
+        expect(step(workstream.id, 2)?.shippedAtLimit).toEqual({
+          followUpTaskId: filed?.id,
+          followUpTitle: filed?.title,
+        });
+        // The follow-up is still unstarted, so what the review found the second time joins it.
+        expect(filed?.description).toContain(FINAL);
+        expect(filed?.description).toContain(LATER);
+      });
+
       it('skips QA, as an approval would, when only Markdown changed', async () => {
         const docsPlan = {
           do: 'mcp' as const,
@@ -8402,6 +8440,10 @@ describe("a Light task's review safety net", () => {
     expect(engine.adapter.prompts).toHaveLength(2);
     // The review runs on the Light row's rounds, on the cell of the lowest stronger rigor that reviews.
     expect(step(workstream.id, 1)).toMatchObject({ reviewRounds: 1 });
+    // The drawer shows the step's own reason, so it says why the review was added.
+    expect(step(workstream.id, 1)?.reason).toMatch(
+      /^review added: changes `src\/api\/package\.json`/,
+    );
     expect(
       reasons(workstream.id).some(
         (r) =>
@@ -8493,6 +8535,39 @@ describe("a Light task's review safety net", () => {
         (r) => typeof r === 'string' && r.includes('review added: the changes could not be read'),
       ),
     ).toBe(true);
+  });
+
+  it('ends cancelled, and adds no review, when a cancel lands while the safety net reads the change', async () => {
+    const real = createGit();
+    let reading = false;
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const git: Git = {
+      ...real,
+      diffSince: async (...args) => {
+        reading = true;
+        await gate;
+        return real.diffSince(...args);
+      },
+    };
+    engine = await createTestEngine(
+      { Alpha: [implement('op-net-0071', 'src/api/package.json', '{}')] },
+      {},
+      { git },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api', 'deps'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await waitFor(() => reading);
+    // The cancel waits for the lane, which is held in the read until it is let go.
+    const cancelling = engine.runner.cancel(workstream.id);
+    release();
+    await cancelling;
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);
+    expect(engine.adapter.prompts).toHaveLength(1);
   });
 
   it('adds nothing to a Standard task, which has its review planned', async () => {

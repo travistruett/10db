@@ -1723,10 +1723,15 @@ describe('Inbox across projects', () => {
   it('shows every project’s cards, each naming its project', async () => {
     twoProjects();
     renderApp('/inbox');
-    // A card's header row holds its kind, its project and its title.
-    const header = async (title: string) => (await screen.findByText(title)).parentElement;
-    expect((await header('Alpha question?'))?.textContent).toContain('alpha');
-    expect((await header('Beta question?'))?.textContent).toContain('beta');
+    // A card's header row holds its kind, its project and its title. The cards can arrive before the
+    // projects that name them, so each header is waited on until it names its project.
+    const header = (title: string) => screen.getByText(title).parentElement?.textContent;
+    await waitFor(() => {
+      expect(header('Alpha question?')).toContain('alpha');
+    });
+    await waitFor(() => {
+      expect(header('Beta question?')).toContain('beta');
+    });
     expect(screen.getByRole('radio', { name: 'Open 2' })).toBeTruthy();
   });
 

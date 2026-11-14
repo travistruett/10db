@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a4da6319-0e80-4dd4-8893-c290ab2fd5e8",
-  "prevId": "e2f2a47d-f014-4d7f-afea-ea6cf95234b4",
+  "id": "705b1afb-63e2-485d-ad29-35e0a0dce1ee",
+  "prevId": "abc9e42b-c684-4ccb-bfb0-92004e89f264",
   "tables": {
     "aa_models": {
       "name": "aa_models",
@@ -677,80 +677,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_tasks": {
-      "name": "chat_tasks",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_tasks_task_idx": {
-          "name": "chat_tasks_task_idx",
-          "columns": [
-            "task_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chat_tasks_chat_id_chats_id_fk": {
-          "name": "chat_tasks_chat_id_chats_id_fk",
-          "tableFrom": "chat_tasks",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "chat_tasks_task_id_tasks_id_fk": {
-          "name": "chat_tasks_task_id_tasks_id_fk",
-          "tableFrom": "chat_tasks",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_tasks_chat_id_task_id_pk": {
-          "columns": [
-            "chat_id",
-            "task_id"
-          ],
-          "name": "chat_tasks_chat_id_task_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chats": {
       "name": "chats",
       "columns": {
@@ -835,7 +761,7 @@
           "name": "last_activity_at",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "archived_at": {
@@ -853,13 +779,6 @@
             "project_id"
           ],
           "isUnique": false
-        },
-        "chats_conversation_unique": {
-          "name": "chats_conversation_unique",
-          "columns": [
-            "conversation_id"
-          ],
-          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -1404,13 +1323,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "commands": {
-          "name": "commands",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "next_seq": {
           "name": "next_seq",
           "type": "integer",
@@ -1905,59 +1817,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "flows": {
-      "name": "flows",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "steps": {
-          "name": "steps",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "flows_name_unique": {
-          "name": "flows_name_unique",
-          "columns": [
-            "name"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -4561,95 +4420,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "patterns": {
-      "name": "patterns",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "match": {
-          "name": "match",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "setting": {
-          "name": "setting",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "patterns_scope_idx": {
-          "name": "patterns_scope_idx",
-          "columns": [
-            "project_id",
-            "position"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "patterns_project_id_projects_id_fk": {
-          "name": "patterns_project_id_projects_id_fk",
-          "tableFrom": "patterns",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "people": {
       "name": "people",
       "columns": {
@@ -4952,20 +4722,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'[]'"
-        },
-        "minimum_score": {
-          "name": "minimum_score",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "model_pin": {
-          "name": "model_pin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "archived": {
           "name": "archived",
@@ -5646,13 +5402,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "flow_id": {
-          "name": "flow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "default_rigor": {
           "name": "default_rigor",
           "type": "text",
@@ -5838,19 +5587,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "projects_flow_id_flows_id_fk": {
-          "name": "projects_flow_id_flows_id_fk",
-          "tableFrom": "projects",
-          "tableTo": "flows",
-          "columnsFrom": [
-            "flow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5972,76 +5708,6 @@
           "tableTo": "sources",
           "columnsFrom": [
             "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "role_settings": {
-      "name": "role_settings",
-      "columns": {
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "setting": {
-          "name": "setting",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "role_settings_project_idx": {
-          "name": "role_settings_project_idx",
-          "columns": [
-            "role",
-            "project_id"
-          ],
-          "isUnique": true,
-          "where": "\"role_settings\".\"project_id\" is not null"
-        },
-        "role_settings_global_idx": {
-          "name": "role_settings_global_idx",
-          "columns": [
-            "role"
-          ],
-          "isUnique": true,
-          "where": "\"role_settings\".\"project_id\" is null"
-        }
-      },
-      "foreignKeys": {
-        "role_settings_project_id_projects_id_fk": {
-          "name": "role_settings_project_id_projects_id_fk",
-          "tableFrom": "role_settings",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
           ],
           "columnsTo": [
             "id"
@@ -9463,21 +9129,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "risk_tags": {
-          "name": "risk_tags",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "flow_id": {
-          "name": "flow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "rigor": {
           "name": "rigor",
           "type": "text",
@@ -9517,6 +9168,13 @@
         },
         "sized_for": {
           "name": "sized_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sizing_owed_for": {
+          "name": "sizing_owed_for",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -9688,19 +9346,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "tasks_flow_id_flows_id_fk": {
-          "name": "tasks_flow_id_flows_id_fk",
-          "tableFrom": "tasks",
-          "tableTo": "flows",
-          "columnsFrom": [
-            "flow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "tasks_proposal_id_proposals_id_fk": {
           "name": "tasks_proposal_id_proposals_id_fk",
           "tableFrom": "tasks",
@@ -9768,72 +9413,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "team_bindings": {
-      "name": "team_bindings",
-      "columns": {
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "persona_id": {
-          "name": "persona_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "team_bindings_project_id_projects_id_fk": {
-          "name": "team_bindings_project_id_projects_id_fk",
-          "tableFrom": "team_bindings",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "team_bindings_persona_id_personas_id_fk": {
-          "name": "team_bindings_persona_id_personas_id_fk",
-          "tableFrom": "team_bindings",
-          "tableTo": "personas",
-          "columnsFrom": [
-            "persona_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "team_bindings_project_id_role_pk": {
-          "columns": [
-            "project_id",
-            "role"
-          ],
-          "name": "team_bindings_project_id_role_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -9977,85 +9556,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
-    },
-    "trust_grants": {
-      "name": "trust_grants",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "limit_name": {
-          "name": "limit_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_inbox_id": {
-          "name": "source_inbox_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "trust_grants_project_idx": {
-          "name": "trust_grants_project_idx",
-          "columns": [
-            "project_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "trust_grants_project_id_projects_id_fk": {
-          "name": "trust_grants_project_id_projects_id_fk",
-          "tableFrom": "trust_grants",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "trust_grants_limit_name": {
-          "name": "trust_grants_limit_name",
-          "value": "\"trust_grants\".\"limit_name\" IS NULL OR \"trust_grants\".\"limit_name\" IN ('destroys_data', 'sends_data_out', 'reads_secrets', 'writes_live')"
-        }
-      }
     },
     "workstreams": {
       "name": "workstreams",

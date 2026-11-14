@@ -97,21 +97,14 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   return row;
 }
 
-/** The row without `flow_id`, a column of the flows the playbook replaced that only the legacy store reads. */
-function projectDto(row: typeof schema.projects.$inferSelect): ProjectDto {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the legacy column is dropped, not used
-  const { flowId, ...dto } = row;
-  return dto;
-}
-
 export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
   const row = db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
   if (!row) throw new NotFoundError('project', id);
-  return projectDto(row);
+  return row;
 }
 
 export function listProjects(db: DbReader): ProjectDto[] {
-  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all().map(projectDto);
+  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
 }
 
 /**

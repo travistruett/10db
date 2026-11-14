@@ -32,7 +32,6 @@ import type {
   EvidenceKind,
   StoredRequiredChecks,
   FailingCheckDto,
-  FlowId,
   GoalBudget,
   GoalCriterionId,
   GoalId,
@@ -75,7 +74,6 @@ import type {
   SkipKind,
   SkipSource,
   LimitName,
-  PatternId,
   ModelProfileId,
   NextAction,
   Notice,
@@ -158,12 +156,6 @@ import type {
   TrustGrantId,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
-import type {
-  LegacyFlowStep,
-  LegacyModelPin,
-  LegacyPatternMatch,
-  LegacyRiskTag,
-} from './legacy-types';
 import { sql } from 'drizzle-orm';
 import {
   type AnySQLiteColumn,
@@ -202,14 +194,6 @@ export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
   value: text('value', { mode: 'json' }).notNull(),
   updatedAt: text('updated_at').notNull(),
-});
-
-export const flows = sqliteTable('flows', {
-  id: text('id').$type<FlowId>().primaryKey(),
-  name: text('name').notNull().unique(),
-  steps: text('steps', { mode: 'json' }).$type<LegacyFlowStep[]>().notNull(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
 });
 
 export const accounts = sqliteTable(
@@ -278,9 +262,6 @@ export const projects = sqliteTable('projects', {
   handoffPct: integer('handoff_pct').notNull(),
   nudgePct: integer('nudge_pct').notNull(),
   humanWaitMinutes: integer('human_wait_minutes').notNull(),
-  flowId: text('flow_id')
-    .$type<FlowId>()
-    .references(() => flows.id),
   /** The rigor a task gets when nothing else sets one. */
   defaultRigor: text('default_rigor').$type<Rigor>().notNull().default('standard'),
   budgetCeiling: real('budget_ceiling'),
@@ -449,13 +430,6 @@ export const tasks = sqliteTable(
     description: text('description').notNull(),
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),
-    riskTags: text('risk_tags', { mode: 'json' })
-      .$type<LegacyRiskTag[]>()
-      .notNull()
-      .default(sql`'[]'`),
-    flowId: text('flow_id')
-      .$type<FlowId>()
-      .references(() => flows.id),
     /** The rigor set on the task; null follows the project's default and the task's kinds. */
     rigor: text('rigor').$type<Rigor>(),
     /** Who set `rigor`; null while the task has none. */
@@ -473,6 +447,8 @@ export const tasks = sqliteTable(
       .default(sql`'[]'`),
     /** The fingerprint of the text the task was last sized for; null before the first sizing. */
     sizedFor: text('sized_for'),
+    /** The fingerprint the judge still owes an answer for: set when sizing queues the task, cleared when that work ends other than by a stop. */
+    sizingOwedFor: text('sizing_owed_for'),
     /** The judge calls whose answers sizing applied: the rigor call and one call per kind key. */
     sizingCalls: text('sizing_calls', { mode: 'json' })
       .$type<{ rigor: JudgeCallId | null; kinds: Record<string, JudgeCallId> }>()
@@ -1016,8 +992,6 @@ export const personas = sqliteTable('personas', {
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'`),
-  minimumScore: real('minimum_score'),
-  modelPin: text('model_pin', { mode: 'json' }).$type<LegacyModelPin>(),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1031,23 +1005,6 @@ export const people = sqliteTable('people', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
-
-/** Per project: which persona plays each role (spec §4). */
-export const teamBindings = sqliteTable(
-  'team_bindings',
-  {
-    projectId: text('project_id')
-      .$type<ProjectId>()
-      .notNull()
-      .references(() => projects.id),
-    role: text('role').$type<StepRole>().notNull(),
-    personaId: text('persona_id')
-      .$type<PersonaId>()
-      .notNull()
-      .references(() => personas.id),
-  },
-  (t) => [primaryKey({ columns: [t.projectId, t.role] })],
-);
 
 export const teamMembers = sqliteTable(
   'team_members',
@@ -1261,27 +1218,6 @@ export const accountModels = sqliteTable(
   (t) => [primaryKey({ columns: [t.accountId, t.model] })],
 );
 
-/** The model setting for a role: one row per role and project, and one per role with no project. */
-export const roleSettings = sqliteTable(
-  'role_settings',
-  {
-    role: text('role').$type<StepRole>().notNull(),
-    projectId: text('project_id')
-      .$type<ProjectId>()
-      .references(() => projects.id),
-    setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [
-    uniqueIndex('role_settings_project_idx')
-      .on(t.role, t.projectId)
-      .where(sql`${t.projectId} is not null`),
-    uniqueIndex('role_settings_global_idx')
-      .on(t.role)
-      .where(sql`${t.projectId} is null`),
-  ],
-);
-
 /** A kind of work: its minimum rigor, safety switches, extra steps and per-role overrides. Global. */
 export const kinds = sqliteTable('kinds', {
   id: text('id').$type<KindId>().primaryKey(),
@@ -1366,24 +1302,6 @@ export const playbookCells = sqliteTable(
       .on(t.rigor, t.role)
       .where(sql`${t.projectId} is null`),
   ],
-);
-
-/** A rule that gives matching steps a model setting; the lowest position within its scope that matches wins. */
-export const patterns = sqliteTable(
-  'patterns',
-  {
-    id: text('id').$type<PatternId>().primaryKey(),
-    projectId: text('project_id')
-      .$type<ProjectId>()
-      .references(() => projects.id),
-    name: text('name').notNull(),
-    match: text('match', { mode: 'json' }).$type<LegacyPatternMatch>().notNull(),
-    setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
-    position: integer('position').notNull(),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [index('patterns_scope_idx').on(t.projectId, t.position)],
 );
 
 /** Artificial Analysis's free model list, kept only on this machine (AA's terms forbid sharing it); keyed by AA's slug. */

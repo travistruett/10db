@@ -34,7 +34,6 @@ const ID_SCHEMAS = {
   Proposal: idSchema(['prp'], 'ProposalId'),
   PermissionRule: idSchema(['prm'], 'PermissionRuleId'),
   Persona: idSchema(['per'], 'PersonaId'),
-  Flow: idSchema(['flw'], 'FlowId'),
   Person: idSchema(['psn'], 'PersonId'),
   RoutingRule: idSchema(['rtr'], 'RoutingRuleId'),
   PersonContact: idSchema(['pcn'], 'PersonContactId'),
@@ -57,7 +56,6 @@ const ID_SCHEMAS = {
   ShapeEntryVersion: idSchema(['sev'], 'ShapeEntryVersionId'),
   TaskContextCheck: idSchema(['tcx'], 'TaskContextCheckId'),
   LandingGroup: idSchema(['lgp'], 'LandingGroupId'),
-  Pattern: idSchema(['pat'], 'PatternId'),
   Kind: idSchema(['knd'], 'KindId'),
   Pass: idSchema(['pas'], 'PassId'),
   PassTurn: idSchema(['ptn'], 'PassTurnId'),
@@ -91,7 +89,6 @@ const ID_PREFIX = {
   Proposal: 'prp',
   PermissionRule: 'prm',
   Persona: 'per',
-  Flow: 'flw',
   Person: 'psn',
   RoutingRule: 'rtr',
   PersonContact: 'pcn',
@@ -114,7 +111,6 @@ const ID_PREFIX = {
   ShapeEntryVersion: 'sev',
   TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
-  Pattern: 'pat',
   Kind: 'knd',
   Pass: 'pas',
   PassTurn: 'ptn',
@@ -185,8 +181,6 @@ export const PermissionRuleId = ID_SCHEMAS.PermissionRule;
 export type PermissionRuleId = IdOf<'PermissionRule'>;
 export const PersonaId = ID_SCHEMAS.Persona;
 export type PersonaId = IdOf<'Persona'>;
-export const FlowId = ID_SCHEMAS.Flow;
-export type FlowId = IdOf<'Flow'>;
 export const PersonId = ID_SCHEMAS.Person;
 export type PersonId = IdOf<'Person'>;
 export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
@@ -231,8 +225,6 @@ export const TaskContextCheckId = ID_SCHEMAS.TaskContextCheck;
 export type TaskContextCheckId = IdOf<'TaskContextCheck'>;
 export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
-export const PatternId = ID_SCHEMAS.Pattern;
-export type PatternId = IdOf<'Pattern'>;
 export const KindId = ID_SCHEMAS.Kind;
 export type KindId = IdOf<'Kind'>;
 export const PassId = ID_SCHEMAS.Pass;

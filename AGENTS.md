@@ -62,6 +62,12 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   for the builder: what changes for them, what it buys, what could go wrong and how we'd know, the
   calls they might disagree with, and what is needed from them (usually nothing). The rest is for
   agents. The builder approves by replying to the brief; with nothing needed from them, work goes ahead.
+- **A roadmap is cut by the builder before it runs.** It opens with a "Builder's cut" table: each milestone is
+  needed for the goal, later, or cut, and only the needed ones run. A plan is written once its predecessors
+  have merged, so at most one milestone is planned ahead, and one plan stays under about 8,000 words; a bigger
+  one is split (`docs/architecture/research/2026-11-14-build-process-audit.md` §3.2).
+- **A branch generates its migrations last**, after its final merge of `main`, and only one open pull request
+  adds migrations at a time. Two branches that both number migrations renumber each other at every landing.
 - Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff
   touches and their dependents); the pre-push hook runs `make precheck`. `make gate` runs every check on the Mac
   and is optional (`docs/architecture/decisions/2026-11-13-ci-is-the-gate-before-a-merge.md`). Docs are part
@@ -79,7 +85,11 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - Sessions running in parallel each work in their own worktree, never in a shared checkout. A
   worktree made by hand goes in `10db-worktrees/` beside the checkout:
   `git worktree add ../10db-worktrees/<name> -b <branch> origin/main`. Never put one inside the
-  checkout, where the linters, tests and gate would read it too. Remove it once its PR merges.
+  checkout, where the linters, tests and gate would read it too. Remove it once its work merges: once
+  its PR merges, or, for an implementer's worktree that never gets its own PR, once its branch merges
+  into the integration branch. Its `.dev/data/tools` is read-only, so make it writable first
+  (`chmod -R u+w <worktree>/.dev`) or the removal stops part-way. Only a worktree whose change touches
+  `apps/desktop/src-tauri` builds Rust; its `target/` is 1-3 GB.
   The worktrees 10db makes for its own lanes live under `~/.10db/worktrees/`.
 - Commit messages are Conventional Commits with an optional scope, for example
   `fix(daemon): close the db on shutdown` or `fix: close the db on shutdown`. Allowed scopes: `daemon`, `desktop`, `contracts`, `db`,

@@ -10,6 +10,7 @@ import { readRepoFile, repoRoot } from './workspace';
 const PUBLIC_RESEARCH = [
   '2026-11-11-sessions-research.md',
   '2026-11-12-trust-line-research.md',
+  '2026-11-14-build-process-audit.md',
   'delivery-test-timings.md',
   'external-research.md',
   'external-research-recheck.md',

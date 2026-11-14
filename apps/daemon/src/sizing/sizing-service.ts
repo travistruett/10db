@@ -13,10 +13,12 @@ import {
 } from '@10db/contracts';
 import {
   applyTaskSizing,
+  clearSizingOwed,
   getGoal,
   getJudgeConfig,
   getProject,
   listKinds,
+  listOwedTasks,
   listUnsizedTasks,
   placementRuleMoves,
   readTaskSizing,
@@ -58,7 +60,8 @@ export interface SizingService {
   settled(taskIds: readonly TaskId[], timeoutMs?: number): Promise<void>;
   /**
    * Sizes every open task no sizing has fingerprinted, by rules, and asks the judge about those made in the
-   * last 24 hours. Run once when the daemon starts, for tasks made while it was down.
+   * last 24 hours, and again about each of those the judge still owed an answer for when the daemon last
+   * stopped. Run once when the daemon starts, for tasks made while it was down.
    */
   sweep(): void;
   /** Stops listening for task events and cuts the calls in flight short. */
@@ -177,9 +180,10 @@ export function createSizingService(deps: SizingDeps): SizingService {
 
   /**
    * The rules' answer for a task whose text changed, in one write; the text's fingerprint, or null when
-   * there was nothing to size.
+   * there was nothing to size. When `queued`, the same write records that the judge owes an answer for
+   * this text, so a stop before it answers leaves the debt for the next start.
    */
-  function sizeByRulesNow(taskId: TaskId): string | null {
+  function sizeByRulesNow(taskId: TaskId, queued: boolean): string | null {
     const task = readTaskSizing(deps.state.db, taskId);
     if (task === null || !sizable(task, taskId)) return null;
     const fingerprint = sizingFingerprint(task);
@@ -202,6 +206,7 @@ export function createSizingService(deps: SizingDeps): SizingService {
           {
             fingerprint,
             kinds: sizing.kinds,
+            owedFor: queued ? fingerprint : null,
             clearJudged: true,
             sizingCalls: {
               rigor: null,
@@ -228,6 +233,13 @@ export function createSizingService(deps: SizingDeps): SizingService {
     return config.enabled && config.accountId !== null;
   }
 
+  /** The judge has nothing to do for this text: the debt recorded for it, if it is still the one owed, ends. */
+  function forgiveDebt(job: Job): void {
+    deps.state.write((ctx) => {
+      clearSizingOwed(ctx, job.taskId, job.fingerprint);
+    });
+  }
+
   /** Asks the judge about the task as it stands and applies the answers in one write. */
   async function judgeTask(job: Job): Promise<void> {
     const asked = readTaskSizing(deps.state.db, job.taskId);
@@ -235,8 +247,10 @@ export function createSizingService(deps: SizingDeps): SizingService {
       asked === null ||
       !sizable(asked, job.taskId) ||
       sizingFingerprint(asked) !== job.fingerprint
-    )
+    ) {
+      forgiveDebt(job);
       return;
+    }
     const config = getJudgeConfig(deps.state.db);
     const known = listKinds(deps.state.db);
     const implied = new Set(
@@ -253,7 +267,10 @@ export function createSizingService(deps: SizingDeps): SizingService {
           (k) => !held.has(k.key) && !asked.kindsOff.includes(k.key) && !implied.has(k.key),
         )
       : [];
-    if (!askRigor && askKinds.length === 0) return;
+    if (!askRigor && askKinds.length === 0) {
+      forgiveDebt(job);
+      return;
+    }
 
     const goal = asked.goalId === null ? null : getGoal(deps.state.db, asked.goalId).title;
     const text = {
@@ -270,6 +287,9 @@ export function createSizingService(deps: SizingDeps): SizingService {
       ),
     ]);
 
+    // A stop cuts the calls short: nothing is written, so the debt stays and the next start asks again.
+    if (stopped) return;
+
     deps.state.write((ctx) => {
       const now = readTaskSizing(ctx.tx, job.taskId);
       // The answers were asked for this text and these pins, of a task that has not started: anything
@@ -283,6 +303,7 @@ export function createSizingService(deps: SizingDeps): SizingService {
         for (const answer of [rigorAnswer, ...kindAnswers])
           if (answer?.kind === 'answered')
             recordJudgeOutcome(ctx, answer.callId, JudgeOutcome.Stopped);
+        clearSizingOwed(ctx, job.taskId, job.fingerprint);
         return;
       }
       const rigor =
@@ -319,6 +340,7 @@ export function createSizingService(deps: SizingDeps): SizingService {
             ? {}
             : { rigor: sized.rigor.value, rigorReason: sized.rigor.reason }),
           sizingCalls: { rigor: rigor?.callId ?? null, kinds: calls },
+          owedFor: null,
         },
         placementFor(ctx.tx),
       );
@@ -349,8 +371,9 @@ export function createSizingService(deps: SizingDeps): SizingService {
     const id = TaskId.safeParse(event.entityId);
     if (!id.success) return;
     try {
-      const fingerprint = sizeByRulesNow(id.data);
-      if (fingerprint !== null && judgeAvailable()) enqueue(id.data, fingerprint);
+      const judge = judgeAvailable();
+      const fingerprint = sizeByRulesNow(id.data, judge);
+      if (fingerprint !== null && judge) enqueue(id.data, fingerprint);
     } catch (error) {
       deps.log.error({ err: error, taskId: id.data }, 'could not size a task');
     }
@@ -372,9 +395,28 @@ export function createSizingService(deps: SizingDeps): SizingService {
       const since = deps.clock.now().getTime() - SWEEP_JUDGES_WITHIN_MS;
       for (const { id, createdAt } of listUnsizedTasks(deps.state.db)) {
         try {
-          const fingerprint = sizeByRulesNow(id);
-          if (fingerprint !== null && Date.parse(createdAt) >= since && judgeAvailable())
-            enqueue(id, fingerprint);
+          const queued = Date.parse(createdAt) >= since && judgeAvailable();
+          const fingerprint = sizeByRulesNow(id, queued);
+          if (fingerprint !== null && queued) enqueue(id, fingerprint);
+        } catch (error) {
+          deps.log.error({ err: error, taskId: id }, 'could not size a task');
+        }
+      }
+      // Tasks whose judge call was cut off by the last stop: asked again when still wanted, else forgiven.
+      for (const { id, updatedAt, owedFor } of listOwedTasks(deps.state.db)) {
+        if (inflight.has(id)) continue;
+        try {
+          const task = readTaskSizing(deps.state.db, id);
+          const wanted =
+            task !== null &&
+            Date.parse(updatedAt) >= since &&
+            sizable(task, id) &&
+            sizingFingerprint(task) === owedFor;
+          if (wanted && judgeAvailable()) enqueue(id, owedFor);
+          else if (!wanted)
+            deps.state.write((ctx) => {
+              clearSizingOwed(ctx, id, owedFor);
+            });
         } catch (error) {
           deps.log.error({ err: error, taskId: id }, 'could not size a task');
         }

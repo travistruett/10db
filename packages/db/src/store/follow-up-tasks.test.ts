@@ -9,6 +9,8 @@ import {
 import { patchProject } from './projects';
 import type { Store } from './store';
 import {
+  appendRetryLimitFindings,
+  cancelTask,
   FollowUpOrigin,
   getTask,
   insertFollowUpTask,
@@ -16,6 +18,7 @@ import {
   insertTask,
 } from './tasks';
 import { createTestStore, seedProject } from './test-support';
+import { insertWorkstream } from './workstreams';
 
 let store: Store;
 let close: () => void;
@@ -196,5 +199,55 @@ describe('insertRetryLimitFollowUp', () => {
       insertRetryLimitFollowUp(ctx, source.id, { role: 'review', notes: '' }),
     ).value;
     expect(filed.acceptanceCriteria).toHaveLength(1);
+  });
+});
+
+describe('appendRetryLimitFindings', () => {
+  const first = '1. BLOCKING src/api/a.ts:3 the empty state has no test.';
+  const later = '1. BLOCKING src/api/a.ts:9 the card still hides it.';
+
+  function filed() {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    return store.write((ctx) =>
+      insertRetryLimitFollowUp(ctx, source.id, { role: 'review', notes: first }),
+    ).value;
+  }
+  const append = (id: ReturnType<typeof filed>['id']) =>
+    store.write((ctx) => {
+      appendRetryLimitFindings(ctx, id, { role: 'review', notes: later });
+    });
+
+  it('adds the later findings to the description of a follow-up still open and unstarted', () => {
+    const made = filed();
+    append(made.id);
+    const now = getTask(store.db, made.id);
+    expect(now.description).toContain(first);
+    expect(now.description).toContain(later);
+    expect(now.description.indexOf(first)).toBeLessThan(now.description.indexOf(later));
+    expect(now.acceptanceCriteria).toEqual([
+      'Fixed: BLOCKING src/api/a.ts:3 the empty state has no test.',
+      'Fixed: BLOCKING src/api/a.ts:9 the card still hides it.',
+    ]);
+  });
+
+  it.each([
+    {
+      name: 'has started',
+      act: (id: ReturnType<typeof filed>['id']) =>
+        store.write((ctx) =>
+          insertWorkstream(ctx, id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+        ),
+    },
+    {
+      name: 'was removed',
+      act: (id: ReturnType<typeof filed>['id']) => store.write((ctx) => cancelTask(ctx, id)),
+    },
+  ])('leaves the follow-up as it was once it $name', ({ act }) => {
+    const made = filed();
+    act(made.id);
+    const before = getTask(store.db, made.id).description;
+    append(made.id);
+    expect(getTask(store.db, made.id).description).toBe(before);
   });
 });
