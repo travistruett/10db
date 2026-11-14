@@ -11,6 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 
+import { START_REFUSED_DETAIL } from './cards';
+
 // A task ships with its goal when its row says so, none of its kinds has its own copy, and it works in
 // a copy: tasks of one goal started together share a batch, and one started later joins the goal's open
 // batch when it can, else starts its own. A start is never refused for it.
@@ -117,6 +119,36 @@ describe('tasks of a goal that ship with it', () => {
     expect(second.id).not.toBe(first.id);
     await h.jobs.idle();
     expect(members(second)).toEqual([get(t, 'b').id]);
+  });
+
+  it('a goal join whose batch starts shipping before the join writes starts its own batch, with no card', async () => {
+    const t = goalOf({ a: { rigor: 'light' }, b: { rigor: 'light' } });
+    const [first] = start(get(t, 'a'));
+    await h.jobs.idle();
+    if (!first) throw new Error('no batch');
+    const joined = start(get(t, 'b'));
+    expect(joined.map((b) => b.id)).toEqual([first.id]);
+    // The join's checks are still ahead when the batch moves on.
+    h.state.write((w) => transitionBatch(w, first.id, { to: 'SHIPPING' }));
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toHaveLength(2);
+    expect(members(first)).toEqual([get(t, 'a').id]);
+    const second = listBatches(h.store.db).find((b) => b.id !== first.id);
+    expect(second && members(second)).toEqual([get(t, 'b').id]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('a goal join refused for unfinished dependencies leaves a card that names no batch', async () => {
+    const t = goalOf({
+      a: { rigor: 'light' },
+      blocker: { rigor: 'careful' },
+      c: { rigor: 'light', dependsOn: ['blocker'] },
+    });
+    start(get(t, 'a'));
+    await h.jobs.idle();
+    expect(() => start(get(t, 'c'))).toThrow(/unfinished|isn't finished|not finished/i);
+    const card = h.only(h.cards());
+    expect(card.detail?.[START_REFUSED_DETAIL]).not.toHaveProperty('batchId');
   });
 
   it('a Careful task of the goal is alone', async () => {

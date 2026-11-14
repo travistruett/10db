@@ -117,6 +117,11 @@ describe('goalPairs', () => {
       pairs: [],
     },
     { name: 'tasks of different goals', specs: { A: {}, B: { goal: GOAL_B } }, pairs: [] },
+    {
+      name: 'a task in a Shape landing group keeps that group’s rule',
+      specs: { A: {}, B: { landingGroup: true } },
+      pairs: [],
+    },
     { name: 'tasks with no goal', specs: { A: { goal: null }, B: { goal: null } }, pairs: [] },
     { name: 'tasks that land differently', specs: { A: {}, B: { target: HELD } }, pairs: [] },
     {

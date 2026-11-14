@@ -27,9 +27,13 @@ export interface OpenGoalBatch<B extends Pick<BatchDto, 'state' | 'worktreePath'
 
 type LandingBatch = Pick<BatchDto, 'baseBranch' | 'autoMerge'>;
 
+/** A task in a Shape landing group keeps that group's rule for where it ships. */
+const inLandingGroup = (task: TaskDto): boolean =>
+  task.landingGroupId !== null && task.landingGroupId !== undefined;
+
 /**
  * The links a start adds between tasks of one goal that ship with it, as pairs for `groupByDependency`:
- * each such task is linked to the first earlier one of its goal that lands the same way. Tasks that
+ * each such task outside a landing group is linked to the first earlier one of its goal that lands the same way. Tasks that
  * land differently stay apart, so sharing a batch never refuses a start.
  */
 export function goalPairs(
@@ -39,7 +43,7 @@ export function goalPairs(
   const pairs: (readonly [TaskId, TaskId])[] = [];
   const firstOf: { task: TaskDto; target: LandingTarget }[] = [];
   for (const task of tasks) {
-    if (!shipping.ships(task)) continue;
+    if (!shipping.ships(task) || inLandingGroup(task)) continue;
     const target = shipping.target(task);
     const first = firstOf.find((f) => f.task.goalId === task.goalId && same(f.target, target));
     if (first === undefined) firstOf.push({ task, target });
@@ -59,7 +63,7 @@ export function goalJoin<B extends Pick<BatchDto, 'state' | 'worktreePath'> & La
   shipping: GoalShipping,
 ): B | null {
   if (!shipping.ships(task)) return null;
-  if (task.landingGroupId !== null && task.landingGroupId !== undefined) return null;
+  if (inLandingGroup(task)) return null;
   const target = shipping.target(task);
   const found = open.find(
     ({ batch, tasks }) =>

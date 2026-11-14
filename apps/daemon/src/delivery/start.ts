@@ -126,6 +126,15 @@ export interface BatchStarter {
   reopen(batchId: BatchId): void;
 }
 
+/** What a join came to: written or refused with a card, or to be started as if it had no batch. */
+const JoinOutcome = { Done: 'done', StartFresh: 'start_fresh' } as const;
+type JoinOutcome = (typeof JoinOutcome)[keyof typeof JoinOutcome];
+
+/** A goal join's batch can no longer take the task; the task starts fresh instead of being refused. */
+class GoalJoinStaleError extends Error {
+  override readonly name = 'GoalJoinStaleError';
+}
+
 export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   const db = ctx.state.db;
   /**
@@ -141,15 +150,41 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     tasks: readonly TaskDto[],
     plans: Plans,
     inBatch: ReadonlySet<TaskId>,
+    goal: boolean,
   ): void {
     for (const task of tasks) joining.add(task.id);
     ctx.jobs.run(jobKey(batch, JobQueue.Cut), async (signal) => {
+      let outcome: JoinOutcome;
       try {
-        await join(batch.id, tasks, plans, inBatch, signal);
+        outcome = await join(batch.id, tasks, plans, inBatch, signal, goal);
       } finally {
         for (const task of tasks) joining.delete(task.id);
       }
+      if (outcome === JoinOutcome.StartFresh) startFresh(batch.projectId, tasks);
     });
+  }
+
+  /**
+   * A goal join is best effort: when its batch can no longer take the task, the task starts as one
+   * that had no batch to join, which may join another open batch of its goal or make its own.
+   */
+  function startFresh(projectId: ProjectId, tasks: readonly TaskDto[]): void {
+    try {
+      startBatch(projectId, {
+        title: tasks[0]?.title ?? '',
+        taskIds: tasks.map((t) => t.id),
+      });
+    } catch (error) {
+      ctx.logger.warn({ projectId, err: error }, 'a task that left a goal join did not start');
+      const card = forTasks(
+        startCards.notStarted(error),
+        tasks.map((t) => t.id),
+        {
+          title: tasks[0]?.title ?? '',
+        },
+      );
+      raise(ctx.inbox, projectId, card);
+    }
   }
 
   /**
@@ -319,7 +354,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       joinedMode.set(task.id, WorkspaceMode.Worktree);
     }
     const goalJoinSteps = [...goalJoins.values()].map(({ batch, tasks: joining }) =>
-      prepareJoinWorktree(project, batch, joining),
+      prepareJoinWorktree(project, batch, joining, true),
     );
     const inFolder = unjoined.filter(
       (task) => task.workspaceMode === WorkspaceMode.Shared && !proposals.has(task.id),
@@ -460,7 +495,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       return {
         write: () => existing,
         launch: (batch) => {
-          queueJoin(batch, tasks, plans, inBatch);
+          queueJoin(batch, tasks, plans, inBatch, false);
         },
       };
     return {
@@ -545,6 +580,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     project: ProjectDto,
     batch: BatchDto,
     tasks: readonly TaskDto[],
+    goal = false,
   ): StartStep {
     if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
       throw new ConflictError(
@@ -558,13 +594,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     ]);
     refuseUnfinished(
       project.id,
-      { title: batch.title, batchId: batch.id },
+      // A goal join's Retry starts afresh, where the goal's join is decided again.
+      goal ? { title: batch.title } : { title: batch.title, batchId: batch.id },
       unfinishedDependencies(db, tasks, inBatch),
     );
     return {
       write: () => batch,
       launch: () => {
-        queueJoin(batch, tasks, plans, inBatch);
+        queueJoin(batch, tasks, plans, inBatch, goal);
       },
     };
   }
@@ -751,7 +788,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     plans: Plans,
     inBatch: ReadonlySet<TaskId>,
     signal: AbortSignal,
-  ): Promise<void> {
+    goal: boolean,
+  ): Promise<JoinOutcome> {
     const batch = getBatch(db, batchId);
     const project = getProject(db, batch.projectId);
     // A FAILED worktree batch reopens once its worktree is whole, which replaces the branch check.
@@ -764,15 +802,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const stopped = (): boolean => signal.aborted;
     if (stopped()) {
       refuse(startCards.joinInterrupted(batch));
-      return;
+      return JoinOutcome.Done;
     }
     try {
       if (!reopening) {
         const checkout = batchCheckout(db, batch);
         const current = await ctx.git.currentBranch(checkout);
         if (current !== batch.branch) {
+          if (goal) return JoinOutcome.StartFresh;
           refuse(wrongBranchCard(batch, current, checkout, 'not_joined'));
-          return;
+          return JoinOutcome.Done;
         }
       }
       const call = ghCall(ctx, signal);
@@ -786,11 +825,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       });
       if (unmerged.length > 0) {
         refuse(startCards.unmergedDependencies(unmerged));
-        return;
+        return JoinOutcome.Done;
       }
       if (stopped()) {
         refuse(startCards.joinInterrupted(batch));
-        return;
+        return JoinOutcome.Done;
       }
       if (reopening) {
         const opened = await reopenWhenWhole(ctx, batchId, 'a fix task joined', signal, (w) => {
@@ -803,7 +842,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
               ? startCards.joinInterrupted(batch)
               : startCards.notJoined(batch, 'the batch did not reopen'),
           );
-        return;
+        return JoinOutcome.Done;
       }
       ctx.state.write((w) => {
         const now = getBatch(w.tx, batchId);
@@ -814,14 +853,19 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
             patch: { failure: null },
             reason: 'a fix task joined',
           });
-        else if (now.state !== BatchState.Open)
+        else if (now.state !== BatchState.Open) {
+          if (goal) throw new GoalJoinStaleError();
           throw new ConflictError(`Batch "${now.title}" is ${now.state.toLowerCase()} now`);
+        }
         for (const [taskId, plan] of plans) insertJoinedWorkstream(w, taskId, plan, batchId);
       });
       resolveStartCards(db, ctx.inbox, project.id, plans.keys());
       ctx.onWorkQueued();
+      return JoinOutcome.Done;
     } catch (error) {
+      if (error instanceof GoalJoinStaleError) return JoinOutcome.StartFresh;
       refuse(stopped() ? startCards.joinInterrupted(batch) : startCards.notJoined(batch, error));
+      return JoinOutcome.Done;
     }
   }
 
