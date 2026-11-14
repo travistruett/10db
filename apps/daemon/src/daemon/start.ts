@@ -94,6 +94,7 @@ import {
   type JudgeService,
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
+import { createSizingService, SIZING_WAIT_MS } from '../sizing';
 import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -383,6 +384,8 @@ export interface DaemonOptions {
   readonly leaseMs?: number;
   /** How often the scheduler looks for work when nothing asks it to. */
   readonly tickMs?: number;
+  /** How long a start from the Board, the API or the builder's MCP waits for sizing in flight; 4 s when left out. */
+  readonly sizingWaitMs?: number;
   /** The GitHub CLI wrapper; tests pass a fake. */
   readonly gh?: Gh;
   /** Starts `gh auth login` for Sign In; tests pass a fake, so none signs in for real. */
@@ -1160,6 +1163,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A pass's work in Your folder, and its cards (set below, once its take-outs are built).
   const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
   const starter = createBatchStarter(delivery);
+  // Rules and the judge size each new or edited task; a start from the Board, the API or the builder's
+  // MCP waits for the sizing still in flight (`settleSizing`).
+  const sizing = createSizingService({
+    state,
+    bus,
+    judge,
+    clock,
+    log: logger.child({ component: 'sizing' }),
+    joiningProblem: (taskId) => starter.joiningProblem(taskId),
+  });
   answerStartCard = createStartCardAnswers({ state, starter });
   answerLostMigrationsCard = createLostMigrationsAnswers(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
@@ -1989,6 +2002,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       searchAvailable: knowledgeIndex.failed.length === 0,
     }),
     starter,
+    sizing,
+    sizingWaitMs: opts.sizingWaitMs ?? SIZING_WAIT_MS,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
@@ -2308,6 +2323,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
       unsubscribeShip();
       unsubscribePassSettles();
+      sizing.stop();
       unsubscribeSignOffWaits();
       unsubscribeMergedPasses();
       unsubscribeKeptWork();

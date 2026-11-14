@@ -66,7 +66,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
+`clock`, `log`, `events`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
 `delivery`, `stakeholders`, `accounts` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.

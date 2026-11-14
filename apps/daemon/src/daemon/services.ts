@@ -112,6 +112,7 @@ import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
 import { buildModelRows, groupMeasuresByModel, type CatalogueSync } from '../catalogue';
 import { placementAfterEdit, proposePlacement } from '../placement';
+import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
@@ -230,6 +231,10 @@ export function createServices(deps: {
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** The sizing in flight, which a start from the Board, the API or the builder's MCP waits for. */
+  readonly sizing: Pick<SizingService, 'settled'>;
+  /** How long that wait is at most. */
+  readonly sizingWaitMs: number;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
@@ -379,6 +384,7 @@ export function createServices(deps: {
       return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
+    settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);

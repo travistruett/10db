@@ -315,6 +315,12 @@ export interface ApiServices extends PlanRecordServices {
     rigorSource?: RigorSource,
   ): TaskDto | Promise<TaskDto>;
   /**
+   * Resolves when the sizing in flight for these tasks has ended, or after a short wait, whichever is
+   * first; never rejects. A start from the Board, the API or the builder's MCP awaits it before it reads
+   * anything, so the rules and the judge have sized the task it starts.
+   */
+  settleSizing(taskIds: readonly TaskId[]): Promise<void>;
+  /**
    * Starts a task; a held one is queued again as the run it was, in any delivery mode. A task whose
    * latest run failed in an open or failed batch runs again in that batch, keeping its commits; with
    * `fresh` it starts over from the base branch instead, and the batch that held only its failed

@@ -450,3 +450,73 @@ describe('a judge answer for text or pins that have since changed', () => {
     expect(getTask(store.db, task.id)).toMatchObject({ rigor: 'critical', rigorSource: 'judge' });
   });
 });
+
+describe('settled', () => {
+  beforeEach(withAccount);
+
+  /** A judge whose answers wait for `release`. */
+  function held() {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const judge = scriptedJudge(state, async () => {
+      await gate;
+      return { choice: 'light', confidence: 0.9 };
+    });
+    return { judge, release };
+  }
+  const pending = (promise: Promise<void>) => {
+    const seen = { done: false };
+    void promise.then(() => {
+      seen.done = true;
+    });
+    return seen;
+  };
+
+  it('resolves at once for a task nothing is sizing', async () => {
+    const sizer = start(offJudge);
+    const task = create();
+    await sizer.settled([task.id]);
+    await sizer.settled([mintId('Task')]);
+  });
+
+  it('waits for the sizing in flight, for every caller', async () => {
+    const { judge, release } = held();
+    const sizer = start(judge);
+    const task = create();
+    const first = pending(sizer.settled([task.id]));
+    const second = pending(sizer.settled([task.id]));
+    await Promise.resolve();
+    expect([first.done, second.done]).toEqual([false, false]);
+    release();
+    await sizer.settled([task.id]);
+    await vi.waitFor(() => {
+      expect([first.done, second.done]).toEqual([true, true]);
+    });
+    expect(getTask(store.db, task.id).rigor).toBe('light');
+  });
+
+  it('gives up at the timeout on the injected clock, and the late answer is stopped', async () => {
+    const { judge, release } = held();
+    const sizer = start(judge);
+    const task = create();
+    const waiting = pending(sizer.settled([task.id], 50));
+    clock.advance(49);
+    await Promise.resolve();
+    expect(waiting.done).toBe(false);
+    clock.advance(1);
+    await vi.waitFor(() => {
+      expect(waiting.done).toBe(true);
+    });
+    expect(getTask(store.db, task.id).rigor).toBeNull();
+    state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
+    release();
+    await vi.waitFor(() => {
+      expect(listJudgeCalls(store.db, 10).every((c) => c.outcome === 'stopped')).toBe(true);
+    });
+    expect(getTask(store.db, task.id).rigor).toBeNull();
+  });
+});

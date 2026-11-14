@@ -39,6 +39,7 @@ export type BuilderServices = Pick<
   | 'createTask'
   | 'patchTask'
   | 'startTask'
+  | 'settleSizing'
   | 'moveTask'
   | 'runNext'
   | 'listBoardColumns'
@@ -192,8 +193,10 @@ export function createBuilderTools(
     },
     [BuilderToolName.RemoveTask]: (args) =>
       taskSummary(services.removeTask(BuilderToolInputs.remove_task.parse(args).taskId)),
-    [BuilderToolName.StartTask]: (args) => {
+    [BuilderToolName.StartTask]: async (args) => {
       const { taskId, fresh } = BuilderToolInputs.start_task.parse(args);
+      // Before any read, so two quick starts of one task run their checks one after the other.
+      await services.settleSizing([taskId]);
       // The API starts any open task; an agent filing tasks must not jump one past its dependencies.
       const task = services.getTask(taskId);
       // A held task already started once: the Board's Start queues its run again, so this does too.
