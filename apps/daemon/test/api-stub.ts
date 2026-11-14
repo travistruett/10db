@@ -97,6 +97,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     listAaModels: track('listAaModels'),
     listModels: track('listModels'),
     modelPicks: track('modelPicks'),
+    modelMeasures: track('modelMeasures'),
     getPlaybook: track('getPlaybook'),
     setPlaybook: track('setPlaybook'),
     playbookMoveReport: track('playbookMoveReport'),

@@ -84,6 +84,7 @@ import type {
   TrustSwitches,
   McpServerStatusDto,
   ModelProfileDto,
+  ModelMeasuresDto,
   ModelRowDto,
   RolePicksDto,
   NetworkHostDto,
@@ -693,6 +694,11 @@ export interface ApiServices extends PlanRecordServices {
    * when no project is given. Throws NotFoundError for an unknown or archived account or a missing project.
    */
   modelPicks(accountId: AccountId, rigor?: Rigor, projectId?: ProjectId): RolePicksDto;
+  /**
+   * The OpenRouter rows stored for one model (a catalogue id or an OpenRouter id), with the provider an account's
+   * speed is measured on. Reads the database alone. Throws NotFoundError for an unknown or archived account.
+   */
+  modelMeasures(model: string, accountId?: AccountId): ModelMeasuresDto;
   /**
    * The playbook a project sees (its own overrides over the global ones over 10db's defaults), or, with null,
    * the global one. Throws NotFoundError for a missing project.
