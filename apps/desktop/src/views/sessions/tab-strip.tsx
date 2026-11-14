@@ -8,13 +8,15 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { ActionIcon, Box, Group, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Group, Menu, Tooltip } from '@mantine/core';
 import { useElementSize, useMediaQuery } from '@mantine/hooks';
 import { IconPlus } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { EdgeFade } from '../../shell/edge-fade';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
 import { AllTabsMenu } from './all-tabs-menu';
+import type { ClosedTab } from './closed-tabs';
+import { TabMenuItems } from './tab-menu';
 import { SessionTab } from './session-tab';
 import { tabTitle, tabProjectId, type StripTab } from './strip-tabs';
 import { tabInfo, type TabInfo } from './tab-info';
@@ -45,6 +47,11 @@ export interface TabStripProps {
   readonly onSelect: (tab: StripTab) => void;
   readonly onClose: (tab: StripTab) => void;
   readonly onNew: () => void;
+  readonly closed: readonly ClosedTab[];
+  readonly onReopen: (entry: ClosedTab) => void;
+  readonly onRename: (tab: StripTab) => void;
+  readonly onArchive: (tab: StripTab) => void;
+  readonly onCloseOthers: (tab: StripTab) => void;
   /** A chat's tab was dragged to this place. */
   readonly onReorder: (tab: StripTab, position: number) => void;
 }
@@ -72,8 +79,18 @@ export function TabStrip({
   onSelect,
   onClose,
   onNew,
+  closed,
+  onReopen,
+  onRename,
+  onArchive,
+  onCloseOthers,
   onReorder,
 }: TabStripProps) {
+  const [menu, setMenu] = useState<{
+    readonly tab: StripTab;
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
   const compact = useMediaQuery(COMPACT_QUERY);
   const { ref: sizeRef, width: available } = useElementSize();
   const { ref: edgesRef, edges, onScroll } = useHiddenEdges();
@@ -194,9 +211,12 @@ export function TabStrip({
                       onClose(tab);
                     }}
                     onRename={() => {
-                      onSelect(tab);
+                      onRename(tab);
                     }}
-                    onContextMenu={() => undefined}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setMenu({ tab, x: event.clientX, y: event.clientY });
+                    }}
                   />
                 );
               })}
@@ -216,8 +236,57 @@ export function TabStrip({
         infos={infos}
         projectName={projectName}
         hiddenNeedingYou={hiddenNeedingYou}
+        closed={closed}
+        projectNameOf={(id) => projects.find((p) => p.id === id)?.name ?? ''}
         onSelect={onSelect}
+        onReopen={onReopen}
       />
+      <Menu
+        opened={menu !== null}
+        onClose={() => {
+          setMenu(null);
+        }}
+        position="bottom-start"
+        withinPortal
+      >
+        <Menu.Target>
+          <Box
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              left: menu?.x ?? 0,
+              top: menu?.y ?? 0,
+              width: 0,
+              height: 0,
+            }}
+          />
+        </Menu.Target>
+        <Menu.Dropdown>
+          {menu === null ? null : (
+            <TabMenuItems
+              actions={{
+                ...(menu.tab.kind === 'chat'
+                  ? {
+                      onRename: () => {
+                        onRename(menu.tab);
+                      },
+                      onArchive: () => {
+                        onArchive(menu.tab);
+                      },
+                    }
+                  : {}),
+                onClose: () => {
+                  onClose(menu.tab);
+                },
+                onCloseOthers: () => {
+                  onCloseOthers(menu.tab);
+                },
+                othersOpen: tabs.length > 1,
+              }}
+            />
+          )}
+        </Menu.Dropdown>
+      </Menu>
       <Box data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch', minWidth: 8 }} />
     </Group>
   );

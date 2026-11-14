@@ -1,12 +1,31 @@
 import { useSyncExternalStore } from 'react';
+import { z } from 'zod';
 import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 
 // What the builder has typed in each tab and not sent: kept for the window, so a tab switch, a closed tab
 // that comes back, and a visit to another screen all find the words where they were left. A fresh tab's
-// draft moves to the chat made from it, together with the request to send it.
+// draft moves to the chat made from it, together with the request to send it. A chat's text and mentions
+// are kept in `localStorage` (`tendb.sessions.drafts`) too, so a restart finds them; a picture is dropped
+// on restart, as the Workbench's are.
+
+export const DRAFTS_KEY = 'tendb.sessions.drafts';
+
+const Stored = z.record(z.string(), z.object({ text: z.string(), mentions: z.array(z.string()) }));
+
+function readStored(): Map<string, Draft> {
+  try {
+    const parsed = Stored.safeParse(JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '{}'));
+    if (!parsed.success) return new Map();
+    return new Map(
+      Object.entries(parsed.data).map(([key, d]) => [key, { ...d, pictures: [] }] as const),
+    );
+  } catch {
+    return new Map();
+  }
+}
 
 class SessionDrafts {
-  private readonly drafts = new Map<string, Draft>();
+  private readonly drafts = readStored();
   private readonly sends = new Set<string>();
   private readonly listeners = new Set<() => void>();
 
@@ -44,7 +63,21 @@ class SessionDrafts {
     return this.sends.delete(key);
   }
 
+  private persist(): void {
+    const kept: Record<string, { text: string; mentions: readonly string[] }> = {};
+    for (const [key, draft] of this.drafts) {
+      if (key.startsWith('chat:') && draft.text !== '')
+        kept[key] = { text: draft.text, mentions: draft.mentions };
+    }
+    try {
+      localStorage.setItem(DRAFTS_KEY, JSON.stringify(kept));
+    } catch {
+      // A draft is a convenience; nothing is lost but it.
+    }
+  }
+
   private notify(): void {
+    this.persist();
     for (const listener of this.listeners) listener();
   }
 }

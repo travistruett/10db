@@ -1,6 +1,11 @@
 import type { ChatDto } from '@10db/contracts';
-import { Stack, Text, UnstyledButton } from '@mantine/core';
+import { Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { useInbox } from '../../daemon/queries';
 import { fromNow, useNow } from '../../shell/relative';
+import { openCardsByConversation } from './needs-you';
+import { readSeen } from './seen';
+import { Mark } from './session-tab';
+import { tabInfo } from './tab-info';
 
 // Sessions UI spec §6.2: the project's last sessions. One click opens one in this tab.
 
@@ -22,6 +27,14 @@ export function RecentSessions({
   readonly onOpen: (chat: ChatDto) => void;
 }) {
   const now = useNow();
+  const cards = openCardsByConversation(useInbox().data ?? []);
+  const seen = readSeen();
+  const marks = new Map(
+    chats.map((chat) => [
+      chat.id,
+      tabInfo({ kind: 'chat', key: chat.id, chat, position: 0 }, cards, seen),
+    ]),
+  );
   if (chats.length === 0) return null;
   return (
     <Stack gap={2} component="section" aria-label="Recent">
@@ -38,11 +51,16 @@ export function RecentSessions({
           px="xs"
           style={{ borderRadius: 'var(--mantine-radius-sm)' }}
         >
-          <Text size="sm" lineClamp={1}>
-            {chat.title}
-          </Text>
+          <Group gap={6} wrap="nowrap">
+            <Text size="sm" lineClamp={1}>
+              {chat.title}
+            </Text>
+            <Mark mark={marks.get(chat.id)?.words.mark ?? null} />
+          </Group>
           <Text size="xs" c="dimmed" lineClamp={1}>
-            {recentLine(chat, now)}
+            {[recentLine(chat, now), marks.get(chat.id)?.words.spoken ?? '']
+              .filter((p) => p !== '')
+              .join(' · ')}
           </Text>
         </UnstyledButton>
       ))}

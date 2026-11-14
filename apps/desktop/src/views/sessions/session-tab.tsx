@@ -15,7 +15,7 @@ const RING_COLOR = {
 } as const;
 
 /** The state mark at the tab's right: a dot or a glyph, each with a shape of its own. */
-function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
+export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
   switch (mark) {
     case 'dot_blue':
     case 'dot_yellow':

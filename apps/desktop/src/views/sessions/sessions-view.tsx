@@ -1,5 +1,5 @@
 import type { ChatDto, ProjectId } from '@10db/contracts';
-import { Box } from '@mantine/core';
+import { Box, Button, Group, Paper, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useInbox } from '../../daemon/queries';
@@ -19,6 +19,8 @@ import {
 } from './fresh-tabs';
 import { draftKey, sessionDrafts } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
+import { useClosedTabs } from './closed-tabs';
+import { useTabClosing } from './use-tab-closing';
 import { openCardsByConversation } from './needs-you';
 import { markSeen, readSeen } from './seen';
 import { nextNeeding, targetIndex } from './session-keys';
@@ -124,14 +126,21 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     }
   };
 
-  /** Closing keeps the chat warm: its tab leaves the strip and focus goes to the tab on the right. */
-  const closeTab = (tab: StripTab): void => {
-    const index = tabs.indexOf(tab);
-    const next = tabs[index + 1] ?? tabs[index - 1];
-    if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: null });
-    else setFresh((tabsNow) => removeFreshTab(tabsNow, tab.tab.id));
-    if (tab.key === selected?.key && next !== undefined) select_(next);
-  };
+  const closing = useTabClosing({
+    tabs,
+    selected,
+    chatCount: chats.length,
+    onSelect: select_,
+    onOpenChat: (chatId, projectId) => {
+      onSearch({ chat: chatId }, false);
+      select(projectId);
+    },
+    removeFresh: (id) => {
+      setFresh((tabsNow) => removeFreshTab(tabsNow, id));
+    },
+  });
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const closed = useClosedTabs();
 
   const newTab = (): void => {
     const after = selected?.position ?? -1;
@@ -172,8 +181,10 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         return true;
       case 'close':
         if (selected === null) return false;
-        closeTab(selected);
+        closing.close(selected);
         return true;
+      case 'reopen':
+        return closing.reopenLast();
       case 'next_needing': {
         const next = nextNeeding(
           infos.map((info) => needsYou(info.state)),
@@ -192,7 +203,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         if (tab !== undefined) select_(tab);
         return true;
       }
-      case 'reopen':
       case 'stop':
         return false;
     }
@@ -209,13 +219,39 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           cards={cards}
           seen={seen}
           onSelect={select_}
-          onClose={closeTab}
+          onClose={closing.close}
+          closed={closed}
+          onReopen={(entry) => {
+            void closing.reopen(entry);
+          }}
+          onRename={(tab) => {
+            select_(tab);
+            if (tab.kind === 'chat') setRenaming(tab.chat.id);
+          }}
+          onArchive={closing.archiveTab}
+          onCloseOthers={closing.closeOthers}
           onNew={newTab}
           onReorder={(tab, position) => {
             if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: position });
           }}
         />
       </HeaderSlot>
+      {closing.notice === null ? null : (
+        <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="sm">{closing.notice}</Text>
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => {
+                closing.setNotice(null);
+              }}
+            >
+              Dismiss
+            </Button>
+          </Group>
+        </Paper>
+      )}
       {selected === null ? null : (
         <div
           role="tabpanel"
@@ -247,6 +283,22 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               chat={selected.chat}
               project={list.find((p) => p.id === selected.chat.projectId)}
               onAnnounce={setAnnouncement}
+              actions={{
+                onArchive: () => {
+                  closing.archiveTab(selected);
+                },
+                onClose: () => {
+                  closing.close(selected);
+                },
+                onCloseOthers: () => {
+                  closing.closeOthers(selected);
+                },
+                othersOpen: tabs.length > 1,
+              }}
+              renaming={renaming === selected.chat.id}
+              onRenamed={() => {
+                setRenaming(null);
+              }}
             />
           ) : null}
         </div>

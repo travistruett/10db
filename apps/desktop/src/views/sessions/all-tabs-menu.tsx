@@ -2,6 +2,7 @@ import { Box, Group, Menu, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
 import { CountBadge } from '../../shell/count-badge';
 import { ProjectTile } from '../../shell/project-tile';
+import type { ClosedTab } from './closed-tabs';
 import type { TabInfo } from './tab-info';
 import { tabTitle, type StripTab } from './strip-tabs';
 
@@ -11,7 +12,11 @@ export interface AllTabsMenuProps {
   readonly projectName: (tab: StripTab) => string;
   /** Tabs scrolled out of the strip that need the builder. */
   readonly hiddenNeedingYou: number;
+  /** The last closed tabs, newest first. */
+  readonly closed: readonly ClosedTab[];
+  readonly projectNameOf: (projectId: string) => string;
   readonly onSelect: (tab: StripTab) => void;
+  readonly onReopen: (entry: ClosedTab) => void;
 }
 
 /** All Tabs: every open tab with its tile, title and state, so a scrolled-away tab is still reachable. */
@@ -20,7 +25,10 @@ export function AllTabsMenu({
   infos,
   projectName,
   hiddenNeedingYou,
+  closed,
+  projectNameOf,
   onSelect,
+  onReopen,
 }: AllTabsMenuProps) {
   return (
     <Menu position="bottom-end" withinPortal>
@@ -68,6 +76,37 @@ export function AllTabsMenu({
             </Menu.Item>
           );
         })}
+        {closed.length === 0 ? null : (
+          <>
+            <Menu.Divider />
+            <Menu.Label>Recently Closed</Menu.Label>
+            {closed.map((entry) => (
+              <Menu.Item
+                key={entry.chatId}
+                aria-label={`Reopen ${entry.title}`}
+                leftSection={<ProjectTile name={projectNameOf(entry.projectId)} size={16} />}
+                rightSection={
+                  <Text size="xs" c="dimmed">
+                    {entry.archived === true ? 'Archived · Reopen' : 'Reopen'}
+                  </Text>
+                }
+                onClick={() => {
+                  onReopen(entry);
+                }}
+              >
+                <Box maw={200}>
+                  <Text
+                    size="sm"
+                    lineClamp={1}
+                    {...(entry.archived === true ? { c: 'dimmed' } : {})}
+                  >
+                    {entry.title}
+                  </Text>
+                </Box>
+              </Menu.Item>
+            ))}
+          </>
+        )}
       </Menu.Dropdown>
     </Menu>
   );

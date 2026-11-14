@@ -19,6 +19,7 @@ import { ModelPicker } from '../../conversation/model-picker';
 import { useChatModels, usePatchChat } from '../../daemon/chat-queries';
 import { ContextGauge } from '../factory/context-gauge';
 import { kindLine } from './kind-line';
+import { TabMenuItems, type TabActions } from './tab-menu';
 
 // Sessions UI spec §4, §7.10: the 44 px row under the header. At its left the title over what the session
 // is; at its right the agent and model, the context meter, File as Tasks and the ⋯ menu.
@@ -41,6 +42,11 @@ export interface SessionBarProps {
   /** File as Tasks, disabled with this reason when it cannot be sent. */
   readonly fileDisabledReason: string | null;
   readonly onFileAsTasks: () => void;
+  /** What the ⋯ menu does for the tab; Rename edits the title in place. */
+  readonly actions?: Omit<TabActions, 'onRename'>;
+  /** The builder asked to rename from the strip. */
+  readonly renaming?: boolean;
+  readonly onRenamed?: () => void;
 }
 
 /** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
@@ -153,8 +159,12 @@ export function SessionBar({
   onModel,
   fileDisabledReason,
   onFileAsTasks,
+  actions,
+  renaming = false,
+  onRenamed,
 }: SessionBarProps) {
-  const [editing, setEditing] = useState(false);
+  const [typing, setEditing] = useState(false);
+  const editing = typing || renaming;
   const models = useChatModels(chat.projectId);
   const { capabilities } = conversation;
   const offered = models.data?.offered ?? [];
@@ -173,6 +183,7 @@ export function SessionBar({
               }}
               onDone={() => {
                 setEditing(false);
+                onRenamed?.();
               }}
             />
             <Text size="xs" c="dimmed" lineClamp={1}>
@@ -216,13 +227,17 @@ export function SessionBar({
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
-              <Menu.Item
-                onClick={() => {
-                  setEditing(true);
+              <TabMenuItems
+                actions={{
+                  othersOpen: false,
+                  onClose: () => undefined,
+                  onCloseOthers: () => undefined,
+                  ...actions,
+                  onRename: () => {
+                    setEditing(true);
+                  },
                 }}
-              >
-                Rename
-              </Menu.Item>
+              />
             </Menu.Dropdown>
           </Menu>
         </Group>
