@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { JudgeKind } from '@10db/contracts';
+import { JudgeKind } from '@10db/contracts';
 import {
   ChatToolName,
   ConversationId,
@@ -191,7 +191,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...launch.access,
         filesDir: chatFolder(deps.dataDir, conv.id),
         agentModels: launch.agentModels,
-        judge,
+        // A chat attaches no hook judge, so 10db's judge's calls are held to the rules: a command the
+        // rules would card is carded, never left to a judge that isn't there.
+        judge: judge === JudgeKind.Tendb ? JudgeKind.Rules : judge,
         ...(setup === null || setup.reads.length === 0
           ? {}
           : {

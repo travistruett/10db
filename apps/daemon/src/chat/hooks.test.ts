@@ -115,6 +115,19 @@ describe("a chat's session", () => {
     },
   );
 
+  // A chat attaches no hook judge, so on 10db's judge (Codex, a gateway) a command the rules would card is
+  // carded: nothing else would judge it, and a Codex hook runs what it allows.
+  it.each([JudgeKind.Tendb, JudgeKind.Rules])(
+    'on a %s judge with no hook judge it asks the builder about a command that is not read-only',
+    async (judge) => {
+      const spec = await firstSpec(judge);
+      expect(spec.judgeCall).toBeUndefined();
+      expect(spec.preToolUse({ toolName: 'Bash', input: { command: 'make build' } }).decision).toBe(
+        'ask',
+      );
+    },
+  );
+
   it("runs on the chat's pick, or the plan role's when it has none", async () => {
     expect((await firstSpec(JudgeKind.Native, 'claude-sonnet-5-5')).model).toBe(
       'claude-sonnet-5-5',
