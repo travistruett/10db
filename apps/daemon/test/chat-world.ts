@@ -19,6 +19,7 @@ import {
 } from '../src/chat';
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
+import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { mintSessionToken } from '../src/mcp';
 import { FakeAdapter } from '../src/sessions';
@@ -36,6 +37,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly inbox: InboxService;
   readonly project: ProjectDto;
   readonly dataDir: string;
   readonly events: DaemonEvent[];
@@ -58,6 +60,7 @@ export function chatWorld(
   const adapter = new FakeAdapter({});
   const clock = new ManualClock();
   const dir = tempDir('chat');
+  const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
   const engine = createExploreEngine({
     state,
@@ -70,7 +73,9 @@ export function chatWorld(
     mintToken: mintSessionToken,
     accountBlocked: () => null,
     defaultPauseMs: 30 * 60_000,
-    withdrawCard: () => undefined,
+    withdrawCard: (id) => {
+      inbox.withdraw(id);
+    },
   });
   const launch = (model: string | null): ShapeLaunch => ({
     cwd: '/repo',
@@ -122,6 +127,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    inbox,
     project,
     dataDir: dir.path,
     events,
