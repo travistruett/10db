@@ -1,4 +1,12 @@
 import type {
+  ChatCreateInput,
+  ChatDto,
+  ChatId,
+  ChatModelsDto,
+  ChatPatchInput,
+  ProjectFileMatchDto,
+  SessionStartDto,
+  SessionsSettingsDto,
   ConversationDeltaFrame,
   ConversationDto,
   ConversationFullDto,
@@ -596,8 +604,36 @@ export interface ApiServices extends PlanRecordServices {
   conversationItems(id: ConversationId, afterSeq: number | null): ConversationItemsPage;
   /** What it streams now, for a client that joins or reconnects. */
   conversationLive(id: ConversationId): ConversationLiveDto;
-  /** A builder message, stored queued and taken by the conversation's owner; ConflictError for a task's. */
-  postConversationMessage(id: ConversationId, text: string): ConversationItemDto;
+  /**
+   * A builder message, stored queued and taken by the conversation's owner, with the paths its `@`
+   * mentions name and its pictures (a chat's); ConflictError for a task's.
+   */
+  postConversationMessage(
+    id: ConversationId,
+    message: {
+      readonly text: string;
+      readonly mentions: readonly string[];
+      readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+    },
+  ): ConversationItemDto;
+  /** The tracked files of the conversation's checkout an `@` query matches (sessions spec §11). */
+  conversationFiles(id: ConversationId, q: string): Promise<ProjectFileMatchDto[]>;
+  /** Sessions (spec §7.1, §10): the open tabs in strip order, across every project. */
+  openChats(): ChatDto[];
+  /** A project's chats that have had a message and are not archived, newest first. */
+  recentChats(projectId: ProjectId, limit: number): ChatDto[];
+  /** A new chat on the project's account; ConflictError, in words, on an account that runs none yet. */
+  createChat(input: ChatCreateInput): ChatDto;
+  /** Renames, moves or closes a tab, or picks a model between turns. */
+  patchChat(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
+  /** Ends the chat's session in whatever state it is in, then archives it and removes its folder. */
+  archiveChat(id: ChatId): Promise<ChatDto>;
+  unarchiveChat(id: ChatId): ChatDto;
+  chatModels(projectId: ProjectId): ChatModelsDto;
+  /** Start from: at most three prompts built by rules from the project's state; none when git fails. */
+  sessionStarts(projectId: ProjectId): Promise<SessionStartDto[]>;
+  sessionsSettings(): SessionsSettingsDto;
+  setSessionsSettings(input: SessionsSettingsDto): SessionsSettingsDto;
   /** Sends what waits under "Send now"; ConflictError, with the state's words, when nothing would run. */
   sendConversationNow(id: ConversationId): ConversationDto;
   /** Stops the turn; answers once it is stopping or settled. */

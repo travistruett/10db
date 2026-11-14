@@ -1,0 +1,138 @@
+import {
+  AccountKind,
+  JudgeKind,
+  Provider,
+  providerOf,
+  type AgentAccountKind,
+  type ChatDto,
+  type DaemonEvent,
+  type ProjectDto,
+} from '@10db/contracts';
+import { createTestStore, seedProject, type Store } from '@10db/db';
+import { ManualClock } from '../src/clock';
+import {
+  chatHooks,
+  chatsUnavailable,
+  createChatService,
+  type ChatHooksDeps,
+  type ChatService,
+} from '../src/chat';
+import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
+import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
+import { silentLogger } from '../src/log';
+import { mintSessionToken } from '../src/mcp';
+import { FakeAdapter } from '../src/sessions';
+import type { ShapeLaunch } from '../src/shape';
+import { shapeAgentModels } from '../src/shape';
+import { tempDir } from './fixtures';
+
+// A project's chats on a real store, the explore engine and the fake adapter: the chat service and
+// its hooks as the daemon wires them, with a launch that needs no account on disk.
+
+export interface ChatWorld {
+  readonly store: Store;
+  readonly state: StateStore;
+  readonly engine: ExploreEngine;
+  readonly adapter: FakeAdapter;
+  readonly clock: ManualClock;
+  readonly chat: ChatService;
+  readonly project: ProjectDto;
+  readonly dataDir: string;
+  readonly events: DaemonEvent[];
+  /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
+  launchOn(kind: AgentAccountKind): void;
+  /** A chat in its tab at `tabPosition`. */
+  open(tabPosition?: number): ChatDto;
+  close(): Promise<void>;
+}
+
+export function chatWorld(
+  opts: { readonly prepare?: ChatHooksDeps['prepare']; readonly judge?: JudgeKind } = {},
+): ChatWorld {
+  const { store, close } = createTestStore();
+  const project = seedProject(store, { name: 'alpha' });
+  const bus = createEventBus();
+  const events: DaemonEvent[] = [];
+  bus.subscribe((e) => events.push(e));
+  const state = createStateStore(store, bus);
+  const adapter = new FakeAdapter({});
+  const clock = new ManualClock();
+  const dir = tempDir('chat');
+  const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
+  const engine = createExploreEngine({
+    state,
+    adapter,
+    clock,
+    log: silentLogger,
+    dataDir: dir.path,
+    frames: createLiveFrames(),
+    bus,
+    mintToken: mintSessionToken,
+    accountBlocked: () => null,
+    defaultPauseMs: 30 * 60_000,
+    withdrawCard: () => undefined,
+  });
+  const launch = (model: string | null): ShapeLaunch => ({
+    cwd: '/repo',
+    model: model ?? 'claude-opus-5-5',
+    modelId: model ?? 'claude-opus-5-5',
+    effort: 'high',
+    agentModels: shapeAgentModels(launched.kind),
+    env: {},
+    account: {
+      accountId: project.accountId,
+      label: 'Claude plan',
+      kind: launched.kind,
+      identity: null,
+    },
+    access: { checkout: '/repo', home: '/home', protectedReads: [], sandboxRoots: ['/tmp/10db'] },
+  });
+  engine.register(
+    'chat',
+    chatHooks({
+      state,
+      log: silentLogger,
+      dataDir: dir.path,
+      now: () => clock.now(),
+      mcp: { url: 'http://127.0.0.1:4317/mcp' },
+      launch: (_projectId, model) => launch(model),
+      ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
+      limitsFor: pictureLimitsFor,
+      judgeOf: () => opts.judge ?? JudgeKind.Native,
+    }),
+  );
+  const chat = createChatService({
+    state,
+    engine,
+    dataDir: dir.path,
+    now: () => clock.now(),
+    modelsOf: () => ({
+      default: 'claude-opus-5-5',
+      offered: [
+        { model: 'claude-opus-5-5', tier: null },
+        { model: 'claude-sonnet-5-5', tier: null },
+      ],
+    }),
+    unavailable: () => chatsUnavailable(providerOf(launched.kind) === Provider.Codex),
+  });
+  return {
+    store,
+    state,
+    engine,
+    adapter,
+    clock,
+    chat,
+    project,
+    dataDir: dir.path,
+    events,
+    launchOn(kind) {
+      launched.kind = kind;
+    },
+    open: (tabPosition = 0) => chat.create({ projectId: project.id, model: null, tabPosition }),
+    async close() {
+      await engine.close();
+      dir.cleanup();
+      close();
+    },
+  };
+}

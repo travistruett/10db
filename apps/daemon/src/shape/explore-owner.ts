@@ -481,6 +481,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           ? null
           : await deps.prepare({
               projectId: shape.projectId,
+              conversationId: conv.id,
               shapeId,
               sessionId: start.sessionId,
               accountKind: launch.account.kind,

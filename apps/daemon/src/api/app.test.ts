@@ -1,5 +1,6 @@
 import {
   BatchStartResult,
+  CHATS_UNAVAILABLE_ON_CHATGPT,
   ConflictError,
   GoalDigestDto,
   GoalListDto,
@@ -2447,5 +2448,74 @@ describe('judge routes', () => {
       expect(res.status).toBe(400);
       expect(seen).toEqual([text.length]);
     });
+  });
+});
+
+describe('the chat routes', () => {
+  const projectId = mintId('Project');
+  const chatId = mintId('Chat');
+
+  it.each([
+    { name: 'an unknown key', body: { projectId, model: null, tabPosition: 0, title: 'x' } },
+    { name: 'no project', body: { model: null, tabPosition: 0 } },
+  ])('POST /chats with $name is a 400 that reaches no service', async ({ body }) => {
+    const services = stubServices({ createChat: track('createChat') });
+    const res = await app(services).request('/chats', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it("POST /chats on a ChatGPT-plan project answers 409 with the service's words", async () => {
+    const services = stubServices({
+      createChat: () => {
+        throw new ConflictError(CHATS_UNAVAILABLE_ON_CHATGPT);
+      },
+    });
+    const res = await app(services).request('/chats', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ projectId, model: null, tabPosition: 0 }),
+    });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain(CHATS_UNAVAILABLE_ON_CHATGPT);
+  });
+
+  it('PATCH /chats/:id with {} is a 400, and its 409 reaches the client in words', async () => {
+    const empty = await app().request(`/chats/${chatId}`, {
+      method: 'PATCH',
+      ...json,
+      body: '{}',
+    });
+    expect(empty.status).toBe(400);
+    const services = stubServices({
+      patchChat: () => Promise.reject(new ConflictError('Change the model between turns.')),
+    });
+    const res = await app(services).request(`/chats/${chatId}`, {
+      method: 'PATCH',
+      ...json,
+      body: JSON.stringify({ model: 'claude-sonnet-5-5' }),
+    });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain('Change the model between turns.');
+  });
+
+  it('GET /conversations/:id/files takes q alone: a root is a 400, an unknown conversation a 404', async () => {
+    const conversationId = mintId('Conversation');
+    const services = stubServices({
+      conversationFiles: () => Promise.reject(new NotFoundError('conversation', conversationId)),
+    });
+    const files = `/conversations/${conversationId}/files`;
+    expect((await app(services).request(`${files}?q=a&root=/elsewhere`, auth)).status).toBe(400);
+    expect((await app(services).request(`${files}?q=a`, auth)).status).toBe(404);
+  });
+
+  it('GET /chats?open=1 answers the open tabs; any other query is a 400', async () => {
+    const services = stubServices({ openChats: () => [] });
+    expect(await (await app(services).request('/chats?open=1', auth)).json()).toEqual([]);
+    expect((await app(services).request('/chats?open=0', auth)).status).toBe(400);
   });
 });

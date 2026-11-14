@@ -92,6 +92,12 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/trust':
     "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',
+  '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
+  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
+  '/projects/:projectId/chat-models': 'Only Sessions draws it, in the 10db app.',
+  '/settings/sessions': 'Only Settings draws it, in the 10db app.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

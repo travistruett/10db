@@ -31,6 +31,11 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 const TOKEN = 'ui-token';
 const RENDER = 'render-token';
 const DEV_UI = 'dev-ui-token';
+
+/** No chat runs here: a Plan's routes never reach one. */
+const noChat = (): never => {
+  throw new Error('no chat in this test');
+};
 let f: ServiceFixture;
 let conv: ConversationId;
 let request: (
@@ -60,6 +65,8 @@ beforeEach(() => {
         state: f.state,
         engine: f.engine,
         shape: f.service,
+        chat: { send: noChat, post: noChat },
+        files: () => Promise.resolve([]),
         dataDir: f.filesDir,
       }),
     ),

@@ -55,11 +55,17 @@ const ItemCommon = {
   createdAt: Timestamp,
 };
 
-const TextKind = (kind: 'message' | 'agent_message' | 'reasoning' | 'digest') =>
+const TextKind = (kind: 'agent_message' | 'reasoning' | 'digest') =>
   z.object({ ...ItemCommon, kind: z.literal(kind), text: z.string() });
 
 export const ConversationItemDto = z.discriminatedUnion('kind', [
-  TextKind('message'),
+  z.object({
+    ...ItemCommon,
+    kind: z.literal('message'),
+    text: z.string(),
+    /** The paths the message's `@` mentions name; none for a message without. */
+    mentions: z.array(z.string()).default([]),
+  }),
   TextKind('agent_message'),
   TextKind('reasoning'),
   TextKind('digest'),

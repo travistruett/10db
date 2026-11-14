@@ -135,6 +135,13 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/dev-ui/connection': "The dev UI's token is for the app's Open Page, not for a screen.",
   '/decisions/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
   '/principles/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
+  '/chats': "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/chats/recent':
+    "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
+  '/projects/:projectId/chat-models': 'No screen draws the model list.',
+  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
+  '/settings/sessions': 'No screen draws a setting.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

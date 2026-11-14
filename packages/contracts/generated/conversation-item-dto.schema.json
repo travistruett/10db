@@ -54,6 +54,13 @@
         },
         "text": {
           "type": "string"
+        },
+        "mentions": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

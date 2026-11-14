@@ -28,6 +28,7 @@ export type {
   LanePermissionMode,
   AgentAdapter,
   AgentSessionSpec,
+  ExploreProfile,
   ExploreSessionSpec,
   LaneProfile,
   LaneSessionSpec,

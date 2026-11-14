@@ -22,7 +22,15 @@ export function itemDtoOf(row: ConversationItemRow, hasFull: boolean): Conversat
     createdAt: row.createdAt,
   };
   switch (row.kind) {
-    case ConversationItemKind.Message:
+    case ConversationItemKind.Message: {
+      const body = parseItemBody(row.kind, row.body);
+      return ConversationItemDto.parse({
+        ...common,
+        kind: row.kind,
+        text: body.text,
+        mentions: body.mentions ?? [],
+      });
+    }
     case ConversationItemKind.AgentMessage:
     case ConversationItemKind.Reasoning:
     case ConversationItemKind.Digest:

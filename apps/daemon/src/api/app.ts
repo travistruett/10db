@@ -123,6 +123,11 @@ import {
   NotFoundError,
   ConversationItemId,
   PostConversationMessage,
+  ChatCreateInput,
+  ChatId,
+  ChatPatchInput,
+  ConversationFilesQuery,
+  SessionsSettingsDto,
 } from '@10db/contracts';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -241,7 +246,7 @@ const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
 // A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
 // can name the limit in its refusal.
 const fileBodyLimit = bodyLimit({ maxSize: SHAPE_FILE_MAX_BYTES + 1024 });
-const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread(\/redo)?$/;
+const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread(\/redo)?$|^\/conversations\/[^/]+\/messages$/;
 // A builder's message carries its pictures in the one request, and a little over so the service can
 // name the limit.
 const messageBodyLimit = bodyLimit({ maxSize: TASK_MESSAGE_PICTURES_MAX_BYTES + 1024 * 1024 });
@@ -262,6 +267,14 @@ const TaskMessageForm = z.object({
 });
 type TaskMessageForm = z.infer<typeof TaskMessageForm>;
 
+/** A conversation message as a multipart form: its text, a `mention` part per path, and its pictures. */
+const ConversationMessageForm = TaskMessageForm.extend({
+  mention: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((parts) => (parts === undefined ? [] : [parts].flat())),
+});
+
 /** The pictures of a message's form, read whole. */
 function pastedPictures(
   parts: readonly File[],
@@ -273,6 +286,13 @@ function pastedPictures(
     })),
   );
 }
+
+/** `GET /chats?open=1`: the open tabs, the only list this route serves. */
+const OpenChatsQuery = z.strictObject({ open: z.literal('1') });
+const RecentChatsQuery = z.strictObject({
+  projectId: ProjectId,
+  limit: z.coerce.number().int().min(1).max(50).default(6),
+});
 
 /** The conversation a `/conversations/:id…` path names, when it does. */
 const CONVERSATION_PATH = /^\/conversations\/([^/]+)/;
@@ -607,17 +627,85 @@ export function createApp(deps: ApiDeps) {
     .get('/conversations/:conversationId/live', (c) =>
       c.json(deps.services.conversationLive(ConversationId.parse(c.req.param('conversationId')))),
     )
-    .post(
-      '/conversations/:conversationId/messages',
-      validator('json', (value): PostConversationMessage => PostConversationMessage.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.postConversationMessage(
-            ConversationId.parse(c.req.param('conversationId')),
-            c.req.valid('json').text,
-          ),
+    // JSON for words alone, a multipart form when pictures go with them.
+    .post('/conversations/:conversationId/messages', async (c) => {
+      const id = ConversationId.parse(c.req.param('conversationId'));
+      if ((c.req.header('content-type') ?? '').startsWith('multipart/form-data')) {
+        const form = ConversationMessageForm.parse(await c.req.parseBody({ all: true }));
+        const { mentions } = PostConversationMessage.parse({
+          text: form.text,
+          mentions: form.mention,
+        });
+        return c.json(
+          deps.services.postConversationMessage(id, {
+            text: form.text,
+            mentions,
+            pictures: await pastedPictures(form.picture),
+          }),
           202,
+        );
+      }
+      const body = PostConversationMessage.parse(await c.req.json());
+      return c.json(
+        deps.services.postConversationMessage(id, {
+          text: body.text,
+          mentions: body.mentions,
+          pictures: [],
+        }),
+        202,
+      );
+    })
+    .get(
+      '/conversations/:conversationId/files',
+      validator('query', (value): ConversationFilesQuery => ConversationFilesQuery.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.conversationFiles(
+            ConversationId.parse(c.req.param('conversationId')),
+            c.req.valid('query').q,
+          ),
         ),
+    )
+    // Sessions (spec §7.1, §10): a chat's own routes; its conversation is served by the ones above.
+    .get(
+      '/chats',
+      validator('query', (value): z.infer<typeof OpenChatsQuery> => OpenChatsQuery.parse(value)),
+      (c) => c.json(deps.services.openChats()),
+    )
+    .get(
+      '/chats/recent',
+      validator('query', (value): z.infer<typeof RecentChatsQuery> =>
+        RecentChatsQuery.parse(value),
+      ),
+      (c) => {
+        const query = c.req.valid('query');
+        return c.json(deps.services.recentChats(query.projectId, query.limit));
+      },
+    )
+    .post(
+      '/chats',
+      validator('json', (value): ChatCreateInput => ChatCreateInput.parse(value)),
+      (c) => c.json(deps.services.createChat(c.req.valid('json')), 201),
+    )
+    .patch(
+      '/chats/:chatId',
+      validator('json', (value): ChatPatchInput => ChatPatchInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.patchChat(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
+        ),
+    )
+    .post('/chats/:chatId/archive', async (c) =>
+      c.json(await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')))),
+    )
+    .post('/chats/:chatId/unarchive', (c) =>
+      c.json(deps.services.unarchiveChat(ChatId.parse(c.req.param('chatId')))),
+    )
+    .get('/projects/:projectId/chat-models', (c) =>
+      c.json(deps.services.chatModels(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/session-starts', async (c) =>
+      c.json(await deps.services.sessionStarts(ProjectId.parse(c.req.param('projectId')))),
     )
     .post('/conversations/:conversationId/send-now', (c) =>
       c.json(
@@ -1695,6 +1783,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/sessions', (c) => c.json(deps.services.sessionsSettings()))
+    .put(
+      '/settings/sessions',
+      validator('json', (value): SessionsSettingsDto => SessionsSettingsDto.parse(value)),
+      (c) => c.json(deps.services.setSessionsSettings(c.req.valid('json'))),
     )
     .get('/settings/trust', (c) => c.json(deps.services.trustSettings()))
     .put(
