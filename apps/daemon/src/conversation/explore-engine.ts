@@ -676,7 +676,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         id,
         owner: { kind: conv.ownerKind, id: conv.ownerId },
         state: rt.state,
-        capabilities,
+        capabilities: rt.judge === null ? capabilities : { ...capabilities, judge: rt.judge },
         model: conv.model,
         contextPct: conv.contextPct,
         queued: unpushed(rt).length,
