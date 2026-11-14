@@ -1,7 +1,7 @@
 import { StepRole, type PlaybookCellDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { isEmptyCell, noneLabels, ownCell, toggleStep } from './playbook-edits';
-import { personaDto } from '../../test/playbook-fixtures';
+import { isEmptyCell, noneLabels, ownCell, processLine, toggleStep } from './playbook-edits';
+import { personaDto, playbookDto } from '../../test/playbook-fixtures';
 
 const cell = (over: Partial<PlaybookCellDto>): PlaybookCellDto => ({
   rigor: 'standard',
@@ -147,5 +147,47 @@ describe('noneLabels', () => {
     },
   ])('$name', ({ projectId, cell: c, globalCell, want }) => {
     expect(noneLabels({ projectId, cell: c, globalCell, ...base })).toEqual(want);
+  });
+});
+
+describe('processLine', () => {
+  const row = (rigor: 'light' | 'standard' | 'careful' | 'critical') => {
+    const found = playbookDto().rows.find((r) => r.rigor === rigor);
+    if (!found) throw new Error(`no ${rigor} row`);
+    return found;
+  };
+  it.each([
+    { name: 'Light has no review', row: row('light'), want: 'no review' },
+    { name: 'Standard resumes its fix', row: row('standard'), want: '1 round · resumed fix' },
+    { name: 'Careful uses a fresh fix', row: row('careful'), want: '2 rounds · fresh fix' },
+    {
+      name: 'Critical asks the builder to approve the plan',
+      row: row('critical'),
+      want: '2 rounds · fresh fix · you approve the plan',
+    },
+    {
+      name: 'a row with no review but a plan approval keeps the approval',
+      row: {
+        ...row('careful'),
+        steps: { value: [StepRole.Plan, StepRole.Implement], source: 'global' as const },
+        approvesPlan: { value: true, source: 'global' as const },
+      },
+      want: 'no review · you approve the plan',
+    },
+    {
+      name: 'an approval without a plan step is not shown',
+      row: {
+        ...row('critical'),
+        steps: { value: [StepRole.Implement, StepRole.Review], source: 'global' as const },
+      },
+      want: '2 rounds · fresh fix',
+    },
+    {
+      name: 'zero rounds',
+      row: { ...row('standard'), reviewRounds: { value: 0, source: 'project' as const } },
+      want: '0 rounds · resumed fix',
+    },
+  ])('$name', ({ row: r, want }) => {
+    expect(processLine(r)).toBe(want);
   });
 });

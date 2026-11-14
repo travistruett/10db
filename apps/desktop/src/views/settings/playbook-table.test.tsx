@@ -1,4 +1,10 @@
-import { PlaybookInput as PlaybookInputSchema, type PlaybookDto } from '@10db/contracts';
+import {
+  PlaybookInput as PlaybookInputSchema,
+  type PlaybookDto,
+  type PlaybookRowDto,
+  type PlaybookSource,
+  type Rigor,
+} from '@10db/contracts';
 import type { z } from 'zod';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -23,6 +29,12 @@ interface Put {
   readonly body: PlaybookBody;
 }
 
+function defaultRow(rigor: Rigor): PlaybookRowDto {
+  const found = playbookDto().rows.find((r) => r.rigor === rigor);
+  if (!found) throw new Error(`no default row for ${rigor}`);
+  return found;
+}
+
 /** What a scope's playbook looks like after a write: each field sent is set there, and a null one is cleared. */
 function applyPut(
   view: PlaybookDto,
@@ -33,10 +45,36 @@ function applyPut(
     value === null || value === undefined
       ? { value: null, source: 'default' as const }
       : { value, source };
+  /** A field a write sent is set here, a null one is back to its default, and one left out is as it was. */
+  const field = <T,>(
+    sent: T | null | undefined,
+    was: { value: T; source: PlaybookSource },
+    fallback: T,
+  ): { value: T; source: PlaybookSource } =>
+    sent === undefined
+      ? was
+      : sent === null
+        ? { value: fallback, source: 'default' }
+        : { value: sent, source };
   return playbookDto({
     rows: view.rows.map((row) => {
       const sent = input.rows.find((r) => r.rigor === row.rigor);
-      return sent?.steps == null ? row : { ...row, steps: { value: sent.steps, source } };
+      if (sent === undefined) return row;
+      return {
+        ...row,
+        steps: field(sent.steps, row.steps, defaultRow(row.rigor).steps.value),
+        reviewRounds: field(
+          sent.reviewRounds,
+          row.reviewRounds,
+          defaultRow(row.rigor).reviewRounds.value,
+        ),
+        fixBy: field(sent.fixBy, row.fixBy, defaultRow(row.rigor).fixBy.value),
+        approvesPlan: field(
+          sent.approvesPlan,
+          row.approvesPlan,
+          defaultRow(row.rigor).approvesPlan.value,
+        ),
+      };
     }),
     cells: view.cells.map((cell) => {
       const sent = input.cells.find((c) => c.rigor === cell.rigor && c.role === cell.role);
@@ -334,7 +372,7 @@ describe('the playbook table', () => {
       const puts = serve();
       renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Light steps' }));
-      const drawer = within(await screen.findByRole('dialog', { name: 'Light: steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Light: process' }));
       expect(drawer.getByRole('checkbox', { name: /Build/, hidden: true })).toHaveProperty(
         'disabled',
         true,
@@ -363,20 +401,137 @@ describe('the playbook table', () => {
       });
       renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Critical steps' }));
-      const drawer = within(await screen.findByRole('dialog', { name: 'Critical: steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Critical: process' }));
       fireEvent.click(drawer.getByRole('checkbox', { name: /^Plan\b(?! Review)/, hidden: true }));
       await waitFor(() => {
         expect(puts.at(-1)?.body.rows).toEqual([
           { rigor: 'critical', steps: ['implement', 'review', 'qa'] },
         ]);
       });
-      const reset = drawer.getByRole('button', { name: 'Reset', hidden: true });
+      const reset = drawer.getByRole('button', { name: 'Reset: steps', hidden: true });
       await waitFor(() => {
         expect(reset).toHaveProperty('disabled', false);
       });
       fireEvent.click(reset);
       await waitFor(() => {
         expect(puts.at(-1)?.body.rows).toEqual([{ rigor: 'critical', steps: null }]);
+      });
+    });
+  });
+
+  describe('a rigor’s process', () => {
+    const openDrawer = async (rigor: string) => {
+      fireEvent.click(await screen.findByRole('button', { name: `${rigor} steps` }));
+      return within(await screen.findByRole('dialog', { name: `${rigor}: process` }));
+    };
+
+    it('shows each default row’s process under its name', async () => {
+      serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const header = async (rigor: string) =>
+        (await screen.findByRole('button', { name: `${rigor} steps` })).textContent;
+      expect(await header('Light')).toContain('no review');
+      expect(await header('Standard')).toContain('1 round · resumed fix');
+      expect(await header('Critical')).toContain('2 rounds · fresh fix · you approve the plan');
+    });
+
+    it('changing the review rounds sends the rounds and nothing else', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Standard');
+      fireEvent.click(drawer.getByRole('radio', { name: '2', hidden: true }));
+      await waitFor(() => {
+        expect(puts).toEqual([
+          {
+            path: '/playbook',
+            body: { rows: [{ rigor: 'standard', reviewRounds: 2 }], cells: [] },
+          },
+        ]);
+      });
+    });
+
+    it('changing how a send-back is fixed sends the fix and nothing else', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Standard');
+      await pickOption(
+        drawer.getByRole('combobox', { name: 'A send-back is fixed by', hidden: true }),
+        'A fresh build session',
+      );
+      await waitFor(() => {
+        expect(puts).toEqual([
+          { path: '/playbook', body: { rows: [{ rigor: 'standard', fixBy: 'fresh' }], cells: [] } },
+        ]);
+      });
+    });
+
+    it('turning off the plan approval sends it alone', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Critical');
+      fireEvent.click(
+        drawer.getByRole('switch', { name: /The builder approves the plan/, hidden: true }),
+      );
+      await waitFor(() => {
+        expect(puts).toEqual([
+          {
+            path: '/playbook',
+            body: { rows: [{ rigor: 'critical', approvesPlan: false }], cells: [] },
+          },
+        ]);
+      });
+    });
+
+    it('needs a Plan step before the builder can approve the plan', async () => {
+      serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Light');
+      expect(
+        drawer.getByRole('switch', { name: /The builder approves the plan/, hidden: true }),
+      ).toHaveProperty('disabled', true);
+      expect(drawer.getByText('Needs a Plan step')).toBeTruthy();
+    });
+
+    it('says the rounds and the fix apply only to a review the change forces, when the row has none', async () => {
+      serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      let drawer = await openDrawer('Light');
+      expect(drawer.getAllByText('Only for a review the change forces')).toHaveLength(2);
+      cleanup();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      drawer = await openDrawer('Standard');
+      expect(drawer.queryByText('Only for a review the change forces')).toBeNull();
+    });
+
+    it('in a project, shows each field’s source and Use global clears only that field', async () => {
+      const puts = serve({
+        own: playbookDto({
+          rows: [
+            { rigor: 'standard', reviewRounds: own(3, 'project'), fixBy: own('fresh', 'global') },
+          ],
+        }),
+      });
+      renderWithDaemon(<PlaybookTable projectId={project.id} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Standard');
+      expect(drawer.getByText('this project')).toBeTruthy();
+      expect(drawer.getByText('global')).toBeTruthy();
+      expect(drawer.getAllByText('default').length).toBeGreaterThan(0);
+      expect(
+        drawer.getByRole('button', { name: 'Use global: steps', hidden: true }),
+      ).toHaveProperty('disabled', true);
+      expect(
+        drawer.getByRole('button', { name: 'Use global: send-back fix', hidden: true }),
+      ).toHaveProperty('disabled', true);
+      fireEvent.click(
+        drawer.getByRole('button', { name: 'Use global: review rounds', hidden: true }),
+      );
+      await waitFor(() => {
+        expect(puts).toEqual([
+          {
+            path: '/projects/:projectId/playbook',
+            body: { rows: [{ rigor: 'standard', reviewRounds: null }], cells: [] },
+          },
+        ]);
       });
     });
   });
