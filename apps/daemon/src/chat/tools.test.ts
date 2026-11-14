@@ -5,6 +5,7 @@ import {
   ChatDto,
   ChatToolName,
   ConversationDto,
+  PrincipleItem,
   ProjectDto,
   TaskDto,
   TaskId,
@@ -118,6 +119,9 @@ const builderTask = (title = 'Builder work') =>
     areas: ['src'],
   });
 
+const principle = (of: ProjectDto, statement = 'Retry a 401 once') =>
+  api.post(`/projects/${of.id}/principles`, PrincipleItem, { statement });
+
 const openCards = () =>
   listInbox(running().state.db, { states: ['OPEN'] }).filter((c) => c.kind === 'permission');
 
@@ -213,21 +217,18 @@ describe("a chat's tools on /mcp", () => {
 
   it("removes the chat's own task with no card, and asks before retiring a record", async () => {
     const chat = await newChat();
+    const rule = await principle(project);
     const retired: string[] = [];
     const turn = agentTurn(chat, async (call) => {
       const filed = JSON.parse(
         await call('create_task', { title: 'Mine', acceptanceCriteria: ['x'], areas: ['src'] }),
       ) as { taskId: string };
       await call('remove_task', { taskId: filed.taskId });
-      retired.push(
-        await call('retire_knowledge', {
-          id: 'pri_0190a0b0-0000-7000-8000-000000000000',
-          reason: 'Ended',
-        }),
-      );
+      retired.push(await call('retire_knowledge', { id: rule.id, reason: 'Ended' }));
     });
     const card = await waitForAsync(() => Promise.resolve(openCards()[0]));
     expect(card.title).toBe('Retire a principle?');
+    expect(card.body).toContain(`“Retry a 401 once” (${rule.id})`);
     expect(await tasksOf()).toEqual([]);
     await answer(card, 'deny');
     await turn;

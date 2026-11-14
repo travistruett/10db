@@ -6,8 +6,10 @@ import {
   ChatTitleSource,
   ConflictError,
   cutTitle,
+  DecisionId,
   InboxState,
   PermissionChoice,
+  PrincipleId,
   QuestionCategory,
   TaskEditPrevious,
   type ChatToolResult,
@@ -16,7 +18,15 @@ import {
   TaskId,
   type TaskDto,
 } from '@10db/contracts';
-import { chatMadeTask, chatView, getInboxItem, recordChatTask, setChatTitle } from '@10db/db';
+import {
+  chatMadeTask,
+  chatView,
+  getDecision,
+  getInboxItem,
+  getPrinciple,
+  recordChatTask,
+  setChatTitle,
+} from '@10db/db';
 import type { EventBus, StateStore } from '../events';
 import { ParkedError, type InboxService } from '../inbox';
 import type { ChatToolHandlers, ChatToolsFor } from '../mcp';
@@ -76,6 +86,9 @@ const EDITED_FIELDS = [
 /** What the builder's `create_task` answers: the filed task's summary. */
 const FiledTask = z.object({ id: TaskId });
 
+const decisionText = (d: { question: string; choice: string }): string =>
+  `${d.question} ${d.choice}`;
+
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /** The old value of each field an edit names and changes, for its Undo. */
@@ -108,6 +121,14 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
       if (task.projectId !== projectId)
         throw new ConflictError('That task is in another project; this chat works in its own.');
       return task;
+    };
+    /** The record a knowledge tool names, as its card quotes it: its words and its id. */
+    const named = (id: string): string => {
+      const decision = DecisionId.safeParse(id);
+      const text = decision.success
+        ? decisionText(getDecision(state.db, decision.data))
+        : getPrinciple(state.db, PrincipleId.parse(id)).statement;
+      return `“${text}” (${id}).`;
     };
     const run = (name: BuilderToolName, args: unknown): Promise<unknown> =>
       Promise.resolve(builder[name](args));
@@ -238,24 +259,24 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
         run(BuilderToolName.SaveDecision, inProject(args, projectId)),
       [ChatToolName.SavePrinciple]: (args) =>
         run(BuilderToolName.SavePrinciple, inProject(args, projectId)),
-      [ChatToolName.SupersedeKnowledge]: (args) =>
+      [ChatToolName.SupersedeKnowledge]: async (args) =>
         asked(
           'Change a recorded decision or principle?',
-          'The chat asks to supersede a record. The old one stays in history.',
+          `${named(ChatToolInputs.supersede_knowledge.parse(args).id)} The chat asks to supersede this record. The old one stays in history.`,
           BUILDER_KEPT_RECORD,
           () => run(BuilderToolName.SupersedeKnowledge, args),
         ),
-      [ChatToolName.RetireKnowledge]: (args) =>
+      [ChatToolName.RetireKnowledge]: async (args) =>
         asked(
           'Retire a principle?',
-          'The chat asks to retire a principle, which then stops applying anywhere.',
+          `${named(ChatToolInputs.retire_knowledge.parse(args).id)} The chat asks to retire this principle, which then stops applying anywhere.`,
           BUILDER_KEPT_RECORD,
           () => run(BuilderToolName.RetireKnowledge, args),
         ),
-      [ChatToolName.WithdrawKnowledge]: (args) =>
+      [ChatToolName.WithdrawKnowledge]: async (args) =>
         asked(
           'Withdraw a recorded decision or principle?',
-          'The chat asks to withdraw a record as a mistake.',
+          `${named(ChatToolInputs.withdraw_knowledge.parse(args).id)} The chat asks to withdraw this record as a mistake.`,
           BUILDER_KEPT_RECORD,
           () => run(BuilderToolName.WithdrawKnowledge, args),
         ),
