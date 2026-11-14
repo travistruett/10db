@@ -2,6 +2,7 @@ import {
   AccountModelDto,
   CatalogueStatusDto,
   ModelEffortDto,
+  ModelMeasuresDto,
   ModelProfileDto,
   ModelRowDto,
   RolePickDto,
@@ -119,6 +120,19 @@ export function modelProfileDto(over: Partial<ModelProfileDto> & Pick<ModelProfi
     escalations: 0,
     createdAt: AT,
     updatedAt: AT,
+    ...over,
+  });
+}
+
+/** What the daemon answers for a model with nothing stored; a test names what it is about. */
+export function modelMeasuresDto(over: Partial<ModelMeasuresDto> = {}): ModelMeasuresDto {
+  return ModelMeasuresDto.parse({
+    openRouterIds: [],
+    accountProvider: null,
+    evals: [],
+    speeds: [],
+    evalsMissing: 'Not read from OpenRouter yet.',
+    speedsMissing: 'Not read from OpenRouter yet.',
     ...over,
   });
 }

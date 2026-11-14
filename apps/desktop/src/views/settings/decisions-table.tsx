@@ -58,12 +58,15 @@ export function DecisionsTable({
   shadow,
   models,
   onOpen,
+  withStatus = true,
 }: {
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsListDto | undefined;
   readonly shadow: readonly ShadowAgreementDto[] | undefined;
   readonly models: readonly DecisionModelDto[] | undefined;
   readonly onOpen: (decision: JudgeDecision) => void;
+  /** The Status column; off where the page is not the place that switches decisions on. */
+  readonly withStatus?: boolean;
 }) {
   const { config } = status;
   const allOn = config.enabled && !status.off;
@@ -95,16 +98,20 @@ export function DecisionsTable({
           </UnstyledButton>
         )),
     },
-    {
-      accessor: 'status',
-      title: 'Status',
-      noWrap: true,
-      render: (row) =>
-        ofDecision(row, (d) => {
-          const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
-          return <StatusMark text={text} keyed={keyed} />;
-        }),
-    },
+    ...(withStatus
+      ? [
+          {
+            accessor: 'status',
+            title: 'Status',
+            noWrap: true,
+            render: (row: Row) =>
+              ofDecision(row, (d) => {
+                const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
+                return <StatusMark text={text} keyed={keyed} />;
+              }),
+          },
+        ]
+      : []),
     {
       accessor: 'model',
       title: 'Model',
@@ -156,7 +163,7 @@ export function DecisionsTable({
           <Table.Tr {...rowProps} onClick={undefined} data-group>
             <Table.Th
               scope="rowgroup"
-              colSpan={5}
+              colSpan={columns.length}
               fz="xs"
               fw={600}
               c="dimmed"

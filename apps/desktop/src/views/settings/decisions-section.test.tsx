@@ -46,6 +46,12 @@ describe('Settings › Decisions', () => {
       };
     };
 
+    it('still shows the Status column in Settings › Decisions', async () => {
+      open();
+      const table = await screen.findByRole('table', { name: 'Decisions' });
+      expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeTruthy();
+    });
+
     it('groups every decision, with no Sizing group until it has rows', async () => {
       open();
       await screen.findByRole('table', { name: 'Decisions' });

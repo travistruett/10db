@@ -6,8 +6,15 @@ import { expect, type Page } from '@playwright/test';
  * Selenized's, not a WCAG ratio (docs/architecture/decisions/2026-10-28-selenized-exactly.md); every
  * other rule still runs.
  */
-export async function expectAccessible(page: Page, label: string): Promise<void> {
-  const results = await new AxeBuilder({ page })
+export async function expectAccessible(
+  page: Page,
+  label: string,
+  /** CSS selectors of parts of the page a scan leaves out, each with its reason at the call. */
+  exclude: readonly string[] = [],
+): Promise<void> {
+  const builder = new AxeBuilder({ page });
+  for (const selector of exclude) builder.exclude(selector);
+  const results = await builder
     .withTags(['wcag2a', 'wcag2aa'])
     .disableRules(['color-contrast'])
     .analyze();
