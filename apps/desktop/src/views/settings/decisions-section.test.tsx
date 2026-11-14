@@ -1,11 +1,11 @@
-import type { AccountDto } from '@10db/contracts';
+import { JudgeDecision, type AccountDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { daemonUrl, renderApp, server } from '../../test/daemon';
 import {
-  decisionModelDto,
+  decisionStatsDto,
   judgeStatusDto,
   serveJudge,
   shapeMeasuresDto,
@@ -31,7 +31,133 @@ describe('Settings › Decisions', () => {
     expect(link.getAttribute('href')).toBe('/knowledge');
   });
 
-  describe('Runs on', () => {
+  describe('Decisions table', () => {
+    const noKey = judgeStatusDto();
+    const rowOf = async (label: string) => {
+      const button = await screen.findByRole('button', { name: label });
+      const row = button.closest('tr');
+      if (row === null) throw new Error(`no row for ${label}`);
+      return row;
+    };
+    const keyed = () => {
+      const work = accountDto({ kind: 'openrouter', label: 'Work key', secretSet: true });
+      return {
+        work,
+        status: judgeStatusDto({
+          config: { ...judgeStatusDto().config, accountId: work.id },
+          account: { id: work.id, label: work.label, secretSet: true, secretState: 'set' },
+        }),
+      };
+    };
+
+    it('groups every decision, with no Sizing group until it has rows', async () => {
+      open();
+      await screen.findByRole('table', { name: 'Decisions' });
+      const groups = screen.getAllByRole('rowheader').map((h) => h.textContent);
+      expect(groups).toEqual(['Delivery', 'Plan', 'Stakeholder questions']);
+      expect(screen.queryByText('Sizing', { selector: 'th' })).toBeNull();
+    });
+
+    it('each row shows its status, model, sure enough and last 30 days', async () => {
+      const { work, status } = keyed();
+      open({
+        status,
+        accounts: [work],
+        stats: {
+          since: '2026-10-14T12:00:00.000Z',
+          decisions: [
+            decisionStatsDto(JudgeDecision.ReviewSize, { calls: 120, acted: 62, costUsd: 0.0123 }),
+          ],
+        },
+      });
+      const row = await rowOf('Skip review for small changes');
+      await waitFor(() => {
+        expect(row.textContent).toContain('120 calls · 62 acted · $0.0123');
+      });
+      expect(row.textContent).toContain('Acting');
+      expect(row.textContent).not.toContain('no key');
+      await waitFor(() => {
+        expect(row.textContent).toContain('Jev 1.13');
+      });
+      expect(row.textContent).toContain('80%');
+    });
+
+    it('a decision with no calls in 30 days reads No calls', async () => {
+      open({
+        stats: {
+          since: '2026-10-14T12:00:00.000Z',
+          decisions: [decisionStatsDto(JudgeDecision.ReviewSize, { calls: 3 })],
+        },
+      });
+      const row = await rowOf('Which option a conversation chose');
+      await waitFor(() => {
+        expect(row.textContent).toContain('No calls');
+      });
+      expect(row.textContent).not.toContain('—');
+    });
+
+    it('with no key every status says so', async () => {
+      open({ status: noKey });
+      const row = await rowOf('Who a question goes to');
+      expect(row.textContent).toContain('Acting');
+      expect(row.textContent).toContain('· no key');
+      expect(row.textContent).toContain('jev-1.13');
+    });
+
+    it.each([
+      ['the master switch is off', { enabled: false }, false],
+      ['the daemon runs with the judge off', {}, true],
+    ] as const)('every status reads Off (all decisions) while %s', async (_name, config, off) => {
+      open({
+        status: judgeStatusDto({ config: { ...judgeStatusDto().config, ...config }, off }),
+      });
+      await screen.findByRole('table', { name: 'Decisions' });
+      for (const label of [
+        'Skip review for small changes',
+        'Enough to propose',
+        'Whether a reply approves',
+      ]) {
+        expect((await rowOf(label)).textContent).toContain('Off (all decisions)');
+      }
+    });
+
+    it('a stats failure still lists every decision, with a dash', async () => {
+      open();
+      server.use(
+        http.get(daemonUrl('/judge/decisions'), () =>
+          HttpResponse.json({ message: 'down' }, { status: 500 }),
+        ),
+      );
+      const row = await rowOf('Which question a reply answers');
+      await waitFor(() => {
+        expect(row.textContent).toContain('—');
+      });
+      expect(screen.getAllByRole('row').length).toBeGreaterThan(8);
+    });
+
+    it('Paid by sits beside the master switch', async () => {
+      const { work, status } = keyed();
+      open({ status, accounts: [work] });
+      expect(await screen.findByRole('combobox', { name: 'Paid by' })).toBeTruthy();
+      expect(screen.getByRole('switch', { name: 'Fast-model decisions' })).toBeTruthy();
+      expect(screen.queryByText('Runs on')).toBeNull();
+    });
+
+    it('a row, or Enter on its name, opens that decision', async () => {
+      open();
+      const row = await rowOf('Who a question goes to');
+      fireEvent.click(within(row).getByText('jev-1.13'));
+      expect(await screen.findByRole('dialog', { name: 'Who a question goes to' })).toBeTruthy();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Who a question goes to' })).toBeNull();
+      });
+      fireEvent.click(await screen.findByRole('button', { name: 'Whether a reply approves' }));
+      expect(await screen.findByRole('dialog', { name: 'Whether a reply approves' })).toBeTruthy();
+    });
+  });
+
+  describe('Paid by', () => {
     const router = (label: string, secretSet = true) =>
       accountDto({ kind: 'openrouter', label, secretSet });
     const status = (account: AccountDto, secretState: 'set' | 'missing' | 'changed' = 'set') =>
@@ -71,7 +197,7 @@ describe('Settings › Decisions', () => {
     it('shows the account decisions run on with its key set, and no key row or Test', async () => {
       const work = router('Work key');
       open({ status: status(work), accounts: [work] });
-      const select = await screen.findByRole('combobox', { name: 'Runs on' });
+      const select = await screen.findByRole('combobox', { name: 'Paid by' });
       await waitFor(() => {
         expect(select).toHaveProperty('value', 'Work key');
       });
@@ -101,7 +227,7 @@ describe('Settings › Decisions', () => {
       const work = router('Work key');
       const spare = router('Spare');
       const { sent } = open({ status: status(work), accounts: [work, spare] });
-      const select = await screen.findByRole('combobox', { name: 'Runs on' });
+      const select = await screen.findByRole('combobox', { name: 'Paid by' });
       fireEvent.click(select);
       const plan = await screen.findByRole('option', { name: /Claude plan/, hidden: true });
       expect(
@@ -119,172 +245,6 @@ describe('Settings › Decisions', () => {
     });
   });
 
-  it('sends the master switch and the per-decision switch as patches', async () => {
-    const { sent } = open();
-    const master = await screen.findByRole('switch', {
-      name: 'Use fast models for routine decisions',
-    });
-    expect(master).toHaveProperty('checked', true);
-    fireEvent.click(master);
-    await waitFor(() => {
-      expect(sent).toContainEqual({ method: 'PATCH', path: '/judge', body: { enabled: false } });
-    });
-    fireEvent.click(
-      screen.getByRole('switch', { name: 'Skip review for small, well-tested changes' }),
-    );
-    await waitFor(() => {
-      expect(sent).toContainEqual({
-        method: 'PATCH',
-        path: '/judge',
-        body: { decisions: { review_size: { enabled: false } } },
-      });
-    });
-  });
-
-  it('sends a changed floor', async () => {
-    const { sent } = open();
-    const floor = await screen.findByLabelText('Confidence needed');
-    expect(floor).toHaveProperty('value', '0.8');
-    fireEvent.change(floor, { target: { value: '0.9' } });
-    fireEvent.blur(floor);
-    await waitFor(() => {
-      expect(sent).toContainEqual({
-        method: 'PATCH',
-        path: '/judge',
-        body: { decisions: { review_size: { floor: 0.9 } } },
-      });
-    });
-  });
-
-  describe('Model', () => {
-    const work = accountDto({ kind: 'openrouter', label: 'Work key', secretSet: true });
-    const keyed = judgeStatusDto({
-      config: { ...judgeStatusDto().config, accountId: work.id },
-      account: { id: work.id, label: work.label, secretSet: true, secretState: 'set' },
-    });
-    const models = [
-      decisionModelDto(),
-      decisionModelDto({
-        id: '~typesafe/jev-latest',
-        name: 'Jev Latest',
-        latest: true,
-      }),
-      decisionModelDto({
-        id: 'respan/span-01-lite:free',
-        name: 'Span 01 Lite (free)',
-        maker: 'Respan',
-        inputUsdPerMillion: 0,
-      }),
-      decisionModelDto({
-        id: 'cloudflare/clairic',
-        name: 'Clairic',
-        maker: 'Cloudflare',
-        inputUsdPerMillion: 0.1,
-        cantCall:
-          "10db can't call this model yet: OpenRouter serves it for extractions, not decisions.",
-      }),
-    ];
-
-    it("lists OpenRouter's decision models with their price, the latest and the ones 10db can't call", async () => {
-      open({ status: keyed, accounts: [work], models });
-      const select = await screen.findByRole('combobox', { name: 'Model' });
-      await waitFor(() => {
-        expect(select).toHaveProperty('value', 'Jev 1.13');
-      });
-      fireEvent.click(select);
-      const latest = await screen.findByRole('option', { name: /Jev Latest/, hidden: true });
-      expect(
-        within(latest).getByText(/Always TypeSafe's newest · \$0\.042 per million input tokens/),
-      ).toBeTruthy();
-      const free = screen.getByRole('option', { name: /Span 01 Lite/, hidden: true });
-      expect(within(free).getByText(/respan\/span-01-lite:free · Free/)).toBeTruthy();
-      const clairic = screen.getByRole('option', { name: /Clairic/, hidden: true });
-      expect(
-        clairic.getAttribute('aria-disabled') ?? clairic.getAttribute('data-combobox-disabled'),
-      ).toBeTruthy();
-      expect(within(clairic).getByText(/can't call this model yet/)).toBeTruthy();
-    });
-
-    it('sends the model picked, which the daemon saves once it answers a test decision', async () => {
-      const { sent } = open({ status: keyed, accounts: [work], models });
-      fireEvent.click(await screen.findByRole('combobox', { name: 'Model' }));
-      fireEvent.click(await screen.findByRole('option', { name: /Jev Latest/, hidden: true }));
-      await waitFor(() => {
-        expect(sent).toContainEqual({
-          method: 'PATCH',
-          path: '/judge',
-          body: { decisions: { review_size: { model: '~typesafe/jev-latest' } } },
-        });
-      });
-      // Saved, not only shown while it is tested: the field is enabled again and still shows the pick.
-      await waitFor(() => {
-        expect(screen.queryByText(/a test decision…/)).toBeNull();
-        const select = screen.getByRole('combobox', { name: 'Model' });
-        expect(select).toHaveProperty('disabled', false);
-        expect(select).toHaveProperty('value', 'Jev Latest');
-      });
-    });
-
-    it('keeps the saved model in view and offers Try Again when the list cannot be read', async () => {
-      open({ status: keyed, accounts: [work], models });
-      let failing = true;
-      server.use(
-        http.get(daemonUrl('/judge/models'), () =>
-          failing
-            ? HttpResponse.json({ error: 'upstream', message: 'HTTP 503' }, { status: 502 })
-            : HttpResponse.json({ models, fetchedAt: '2026-11-13T12:00:00.000Z' }),
-        ),
-      );
-      expect(await screen.findByText(/could not be read/)).toBeTruthy();
-      expect(screen.getByText('typesafe/jev-1.13')).toBeTruthy();
-      failing = false;
-      fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
-      expect(await screen.findByRole('combobox', { name: 'Model' })).toBeTruthy();
-    });
-
-    it('says why a model was refused and keeps the one saved', async () => {
-      open({
-        status: keyed,
-        accounts: [work],
-        models,
-        refuseModel:
-          "~typesafe/jev-latest didn't answer a test decision, so it wasn't saved: OpenRouter answered HTTP 400",
-      });
-      fireEvent.click(await screen.findByRole('combobox', { name: 'Model' }));
-      fireEvent.click(await screen.findByRole('option', { name: /Jev Latest/, hidden: true }));
-      expect(await screen.findByText(/didn't answer a test decision/)).toBeTruthy();
-      expect(screen.getByRole('combobox', { name: 'Model' })).toHaveProperty('value', 'Jev 1.13');
-    });
-
-    it("says so when the saved model is one 10db can't call", async () => {
-      const saved = judgeStatusDto({
-        ...keyed,
-        config: {
-          ...keyed.config,
-          decisions: {
-            ...keyed.config.decisions,
-            review_size: { enabled: true, model: 'cloudflare/clairic', floor: 0.8 },
-          },
-        },
-      });
-      open({ status: saved, accounts: [work], models });
-      // Beside the field, not only in its closed list's option.
-      await waitFor(() => {
-        const beside = screen
-          .getAllByText(/OpenRouter serves it for extractions/)
-          .filter((el) => el.closest('[role="option"]') === null);
-        expect(beside).toHaveLength(1);
-      });
-    });
-
-    it('asks for a key instead of listing models when there is none', async () => {
-      open();
-      expect(await screen.findByText('typesafe/jev-1.13')).toBeTruthy();
-      expect(screen.getByText(/Add an OpenRouter key to pick another model/)).toBeTruthy();
-      expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
-    });
-  });
-
   it('says the daemon runs with the judge off and disables the controls', async () => {
     open({ status: judgeStatusDto({ off: true }) });
     expect(await screen.findByText(/TENDB_JUDGE=off/)).toBeTruthy();
@@ -293,9 +253,10 @@ describe('Settings › Decisions', () => {
       'disabled',
       false,
     );
-    expect(
-      screen.getByRole('switch', { name: 'Use fast models for routine decisions' }),
-    ).toHaveProperty('disabled', true);
+    expect(screen.getByRole('switch', { name: 'Fast-model decisions' })).toHaveProperty(
+      'disabled',
+      true,
+    );
   });
 
   it('says when there are no decisions yet', async () => {
@@ -351,33 +312,5 @@ describe('Settings › Decisions › Shape (spec §8, §9)', () => {
     open();
     const questions = await screen.findByRole('group', { name: 'Questions' });
     expect(questions.textContent).toContain('No converted task has started yet');
-  });
-
-  it("shows each Shape decision's shadow agreement, and sends its switch", async () => {
-    const { sent } = open({
-      measures: shapeMeasuresDto({
-        shadow: [
-          { decision: 'shape_ready', answered: 3, scored: 2, agreed: 1, canShow: false },
-          { decision: 'shape_record', answered: 25, scored: 20, agreed: 18, canShow: true },
-          { decision: 'shape_elsewhere', answered: 0, scored: 0, agreed: 0, canShow: false },
-        ],
-      }),
-    });
-    const record = await screen.findByRole('group', { name: 'Record as a decision?' });
-    expect(record.textContent).toContain('In shadow: 18 of 20 scored answers agreed (90%)');
-    expect(record.textContent).toContain('Ready to show');
-    const ready = screen.getByRole('group', { name: 'Enough to propose' });
-    expect(screen.getByText(/until the first Propose: have you said enough\?/)).toBeTruthy();
-    expect(ready.textContent).toContain('1 of 2 scored answers agreed (50%)');
-    const elsewhere = screen.getByRole('group', { name: 'Question for someone else?' });
-    expect(elsewhere.textContent).toContain('No scored answers yet');
-    fireEvent.click(within(record).getByRole('switch'));
-    await waitFor(() => {
-      expect(sent).toContainEqual({
-        method: 'PATCH',
-        path: '/judge',
-        body: { decisions: { shape_record: { enabled: false } } },
-      });
-    });
   });
 });

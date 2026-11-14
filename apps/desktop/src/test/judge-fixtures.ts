@@ -1,5 +1,7 @@
 import {
   DecisionModelDto,
+  DecisionStatsDto,
+  type DecisionStatsListDto,
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
   JudgeCallDto,
@@ -58,6 +60,26 @@ export function judgeCallDto(overrides: Partial<JudgeCallDto> = {}): JudgeCallDt
   });
 }
 
+/** A decision's last 30 days: no calls unless `overrides` says so. */
+export function decisionStatsDto(
+  decision: JudgeDecision,
+  overrides: Partial<DecisionStatsDto> = {},
+): DecisionStatsDto {
+  return DecisionStatsDto.parse({
+    decision,
+    calls: 0,
+    acted: 0,
+    belowFloor: 0,
+    shadow: 0,
+    stopped: 0,
+    fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
+    costUsd: 0,
+    medianLatencyMs: null,
+    answers: [],
+    ...overrides,
+  });
+}
+
 export function decisionModelDto(overrides: Partial<DecisionModelDto> = {}): DecisionModelDto {
   return DecisionModelDto.parse({
     id: 'typesafe/jev-1.13',
@@ -85,6 +107,8 @@ export function serveJudge(initial: {
   readonly calls?: readonly JudgeCallDto[];
   readonly test?: JsonBodyType;
   readonly measures?: ShapeMeasuresDto;
+  /** `GET /judge/decisions`; the daemon leaves out a decision with no calls, so the default lists none. */
+  readonly stats?: DecisionStatsListDto;
   /** The accounts a patch naming `accountId` can resolve to the status's account. */
   readonly accounts?: readonly AccountDto[];
   /** OpenRouter's decision models, as `GET /judge/models` answers them. */
@@ -176,7 +200,7 @@ export function serveJudge(initial: {
       });
     }),
     http.get(daemonUrl('/judge/decisions'), () =>
-      HttpResponse.json({ since: '2026-10-14T12:00:00.000Z', decisions: [] }),
+      HttpResponse.json(initial.stats ?? { since: '2026-10-14T12:00:00.000Z', decisions: [] }),
     ),
     http.get(daemonUrl('/judge/models'), () =>
       HttpResponse.json({

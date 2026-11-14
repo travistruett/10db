@@ -1,5 +1,6 @@
 import {
   DecisionModelListDto,
+  DecisionStatsListDto,
   JudgeCallsPageDto,
   type AccountId,
   JudgeStatusDto,
@@ -17,6 +18,7 @@ export const judgeKeys = {
   calls: ['judge', 'calls'],
   /** One page of calls; under `calls`, so invalidating `calls` refreshes every page. */
   callsPage: (query: JudgeCallsPageQuery) => ['judge', 'calls', query] as const,
+  decisions: ['judge', 'decisions'],
   models: ['judge', 'models'],
 } as const;
 
@@ -52,6 +54,17 @@ export function useJudgeCallsPage(query: JudgeCallsPageQuery) {
         JudgeCallsPageDto,
       ),
     placeholderData: keepPreviousData,
+    refetchInterval: CALLS_REFRESH_MS,
+    refetchOnWindowFocus: 'always',
+  });
+}
+
+/** What each decision's calls came to in the last 30 days; the calls arrive without an event, so it polls. */
+export function useDecisionStats() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: judgeKeys.decisions,
+    queryFn: async () => readJson(await client.judge.decisions.$get(), DecisionStatsListDto),
     refetchInterval: CALLS_REFRESH_MS,
     refetchOnWindowFocus: 'always',
   });
