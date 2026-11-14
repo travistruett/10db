@@ -75,6 +75,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
+  AnsweredAwayError,
   carriesRiskTags,
   fileProposalByItself,
   proposalCardBody,
@@ -427,7 +428,19 @@ export function createToolHandlers(
       });
       const observer = deps.waitObserverFor(sessionId);
       observer?.onWaitStart(item);
-      const result = await answer;
+      let result;
+      try {
+        result = await answer;
+      } catch (error) {
+        // Triage kept the question with the builder, and nobody watches this task.
+        const awayNow = deps.awayFor?.(sessionId);
+        if (!(error instanceof AnsweredAwayError) || awayNow === undefined) throw error;
+        observer?.onWaitEnd(item);
+        const away = answerAway(awayNow, McpToolName.AskHuman, input.question);
+        return deps.state.write((ctx) =>
+          record('ask_human', input.opId, { inboxId: null, answer: away, note: null }, ctx),
+        );
+      }
       observer?.onWaitEnd(item);
       return deps.state.write((ctx) =>
         record(

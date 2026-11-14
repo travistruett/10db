@@ -283,8 +283,10 @@ export async function createTestEngine(
     log: silentLogger,
     afterRouted: (id) => {
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live,
+      // except for a lane nobody watches, which answers at once.
       if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      else inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
   });

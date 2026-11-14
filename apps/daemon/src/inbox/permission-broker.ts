@@ -64,7 +64,7 @@ import {
 import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
 import { answerAway, callKey, routedToPerson, skipMessage, type SkipRecorder } from '../trust';
 import { foundHostReason } from './gate-host-card';
-import { ParkedError, type InboxService } from './service';
+import { AnsweredAwayError, ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
   onWaitStart(item: InboxItemDto): void;
@@ -442,7 +442,16 @@ export function createPermissionBroker(
         detail: null,
         signal: ctx.signal,
       });
-      const result = await wait(item, answer);
+      let result;
+      try {
+        result = await wait(item, answer);
+      } catch (error) {
+        // Triage kept the question with the builder, and nobody watches this task.
+        if (!(error instanceof AnsweredAwayError) || away === undefined) throw error;
+        ctx.observer.onWaitEnd(item);
+        answers[q.question] = answerAway(away, req.toolName, q.question);
+        continue;
+      }
       answers[q.question] = result.note ? `${result.choice} (${result.note})` : result.choice;
     }
     return { behavior: 'allow', updatedInput: { ...req.input, answers } };

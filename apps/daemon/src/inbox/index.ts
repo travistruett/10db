@@ -27,6 +27,7 @@ export { cardsResolvedByEvent, resolveStaleCards } from './resolve-cards';
 export {
   createInboxService,
   flagCard,
+  AnsweredAwayError,
   ParkedError,
   rewordCard,
   withdrawCard,

@@ -88,6 +88,17 @@ export class ParkedError extends Error {
 }
 
 /**
+ * Rejects an answer promise when the asking session is a lane nobody watches and its question stayed
+ * with the builder: the caller answers the question at once instead (trust line §5).
+ */
+export class AnsweredAwayError extends Error {
+  override readonly name = 'AnsweredAwayError';
+  constructor() {
+    super('Nobody watches this task, so its question is answered at once');
+  }
+}
+
+/**
  * Who waits on a card: a lane's workstream, or a conversation, whose card has no target and names the
  * conversation in its detail (`CONVERSATION_CARD_KEY`), and Plan's shape too (`SHAPE_CARD_KEY`).
  */
@@ -195,6 +206,11 @@ export interface InboxService {
   reword(id: InboxItemId, body: string, card?: Rewording): void;
   /** Closes an open card whose question a later change made moot; a closed card is left as it was. */
   withdraw(id: InboxItemId): void;
+  /**
+   * Ends the wait of each session `away` names on the open question card `id`, with
+   * `AnsweredAwayError`, so each answers at once; a card left with nobody waiting is withdrawn.
+   */
+  answerAwayWaits(id: InboxItemId, away: (sessionId: SessionId) => boolean): void;
   /**
    * Closes an open card as RESOLVED by 10db, because the action it reports as failed has succeeded
    * since. The reason goes in `detail.resolution`, where the resolved view shows it; a card that is
@@ -335,6 +351,8 @@ function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
 
 interface Waiter {
   resolve(answer: InboxAnswer): void;
+  /** Ends the wait with `AnsweredAwayError`. */
+  answerAway(): void;
 }
 
 /**
@@ -705,12 +723,18 @@ export function createInboxService(deps: {
       }
       const answer = new Promise<InboxAnswer>((resolve, reject) => {
         const forItem = waiters.get(item.id) ?? new Map<SessionId, Waiter>();
-        forItem.set(input.sessionId, { resolve });
-        waiters.set(item.id, forItem);
         const onAbort = (): void => {
           forItem.delete(input.sessionId);
           reject(new ParkedError());
         };
+        forItem.set(input.sessionId, {
+          resolve,
+          answerAway: () => {
+            input.signal.removeEventListener('abort', onAbort);
+            reject(new AnsweredAwayError());
+          },
+        });
+        waiters.set(item.id, forItem);
         if (input.signal.aborted) onAbort();
         else input.signal.addEventListener('abort', onAbort, { once: true });
       });
@@ -896,6 +920,26 @@ export function createInboxService(deps: {
       deps.state.write((ctx) => {
         withdrawCard(ctx, id);
       });
+    },
+
+    answerAwayWaits(id, away) {
+      const forItem = waiters.get(id);
+      if (forItem === undefined) return;
+      const released = [...forItem].filter(([sessionId]) => away(sessionId));
+      if (released.length === 0) return;
+      for (const [sessionId] of released) forItem.delete(sessionId);
+      if (forItem.size === 0) waiters.delete(id);
+      const releasedIds = new Set(released.map(([sessionId]) => sessionId));
+      deps.state.write((ctx) => {
+        // A target parked earlier still waits for the builder's answer, so its card stays.
+        const card = getInboxItem(ctx.tx, id);
+        if (
+          forItem.size === 0 &&
+          card.targets.every((t) => t.sessionId !== null && releasedIds.has(t.sessionId))
+        )
+          withdrawCard(ctx, id);
+      });
+      for (const [, waiter] of released) waiter.answerAway();
     },
 
     resolve(id, reason) {

@@ -381,6 +381,52 @@ describe('a question no route sends to a person', () => {
   });
 });
 
+/** The judge's triage answer: one route's choice, or nobody, sure of it. */
+const triageSays = (choice: string) => ({
+  openRouter: {
+    fetch: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'typesafe/jev-1.13',
+            answers: {
+              decision: {
+                type: 'choice',
+                choice,
+                confidence: 0.9,
+                probabilities: { [choice]: 0.95 },
+              },
+            },
+            usage: { cost: 0 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+  },
+});
+
+describe('a lane question triage keeps with the builder', () => {
+  it.each([
+    ['ask_human', askHuman('product', 'op-triage-kept-01'), 'product', 'Charge tax?'],
+    ['AskUserQuestion', askUser, 'other', 'Ship it?'],
+  ])(
+    '%s is answered at once, listed, and its card withdrawn',
+    async (toolName, ask, category, question) => {
+      engine = await createTestEngine(oneAsk(ask), {}, {}, triageSays('nobody'));
+      routeTo(category, ['mark'], false);
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+        { toolName, summary: question, kind: 'question' },
+      ]);
+    },
+  );
+});
+
 describe('a task cancelled while its question waits for triage', () => {
   it('cancels the card, and the judge answering later only leaves pending', async () => {
     let release: () => void = () => undefined;

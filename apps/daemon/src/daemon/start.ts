@@ -787,8 +787,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // stakeholder's words are answered through the card and never reach a live ask_human call.
     afterRouted: (id) => {
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live,
+      // except for a lane nobody watches, which answers at once.
       if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      else inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
   });
