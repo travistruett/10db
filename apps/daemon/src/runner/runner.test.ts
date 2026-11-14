@@ -3552,6 +3552,26 @@ describe('flows', () => {
       expect(step(workstream.id, 0)?.reason).not.toContain('escalated');
     });
 
+    it('starts a fresh session one profile up, once, when the resumed fix crashes', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-fixby-0021'),
+          [reject('op-fixby-0022'), turn],
+          [{ do: 'crash', message: 'boom' }],
+          implement('op-fixby-0023'),
+          [approve('op-fixby-0024'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sessions = listSessions(engine.store.db, workstream.id);
+      expect(engine.adapter.prompts[2]?.resume).toBe(sessions[0]?.providerSessionId);
+      expect(engine.adapter.prompts[3]?.resume).toBeNull();
+      expect(sessions[3]?.model).toBe('claude-opus-5-5');
+      expect(step(workstream.id, 0)).toMatchObject({ fixFresh: 'done', model: 'claude-opus-5-5' });
+    });
+
     it('starts a fresh session one profile up when the row says fresh, as a Careful row does', async () => {
       engine = await createTestEngine({ Alpha: script });
       engine.state.write((ctx) =>
@@ -4188,8 +4208,10 @@ describe('flows', () => {
         state: 'QUEUED',
         stepIndex: 0,
         attempt: 0,
-        nextAction: { kind: 'revise', reviewStep: 1 },
+        nextAction: { kind: 'revise', reviewStep: 1, providerSessionId: null },
       });
+      // The builder's retry stays fresh and owes no step up for a send-back that resumed.
+      expect(step(workstream.id, 0)?.fixFresh).toBeUndefined();
       // The review has not run since the retry, so nothing it said before counts.
       expect(step(workstream.id, 1)?.sentBack).toBe(0);
       expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);

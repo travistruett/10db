@@ -136,3 +136,12 @@ export function clearSendBacks(steps: readonly WorkstreamStep[]): WorkstreamStep
 export function failStep(steps: readonly WorkstreamStep[], index: number): WorkstreamStep[] {
   return steps.map((s, i) => (i === index ? { ...s, status: StepStatus.Failed } : s));
 }
+
+/**
+ * A step the builder's retry restarts: its fix is a fresh session that owes no step up for a send-back
+ * that meant to resume the step's own session.
+ */
+export function withoutFixFresh(step: WorkstreamStep): WorkstreamStep {
+  const { fixFresh, ...rest } = step;
+  return fixFresh === undefined ? step : rest;
+}

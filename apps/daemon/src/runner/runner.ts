@@ -999,6 +999,62 @@ export function createRunner(opts: RunnerOptions): Runner {
     );
   }
 
+  /**
+   * A fix that would resume its step's session runs fresh when the account would launch the step on another
+   * model than that session ran on: a resumed session never moves to another model.
+   */
+  function reviseAfterModelDrift(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+  ): NextAction | null {
+    const action = row.nextAction;
+    if (action.kind !== 'revise' || action.providerSessionId === null) return null;
+    const ran = getSessionByProviderId(db, id, action.providerSessionId);
+    if (ran === undefined) return null;
+    const account = getAccountRow(db, ctl.accountId);
+    const now = resolveOn(row, currentStep(row), account, listAccountModels(db, account.id));
+    return now.model === ran.model ? null : { ...action, providerSessionId: null };
+  }
+
+  /**
+   * A fix that starts a fresh session where it meant to resume one (the session crashed, ran on another
+   * account or on a model the account no longer gives the step) still owes the step up a model rung,
+   * once. The step is escalated, the fresh action is saved with it, and the row is read again.
+   */
+  function withFreshFixEscalated(id: WorkstreamId, ctl: Control): WorkstreamRow {
+    const row = getWorkstreamRow(db, id);
+    const action =
+      actionOnAnotherAccount(id, ctl, row) ?? reviseAfterModelDrift(id, ctl, row) ?? row.nextAction;
+    const step = row.steps[row.stepIndex];
+    if (
+      action.kind !== 'revise' ||
+      action.providerSessionId !== null ||
+      step?.fixFresh !== FixFresh.Pending
+    )
+      return row;
+    const rejecter = row.steps[action.reviewStep]?.role ?? StepRole.Review;
+    const up = escalated(
+      row,
+      step,
+      `the ${rejecter} step rejected it, and the session that wrote it could not be resumed`,
+      ctl.accountId,
+    );
+    opts.state.write((ctx) => {
+      if (up.moved && step.profileId)
+        recordProfileOutcome(ctx, step.profileId, { firstPass: false, escalated: true });
+      patchWorkstream(ctx, id, ctl.fence, {
+        steps: row.steps.map((s, i) =>
+          i === row.stepIndex ? { ...up.step, fixFresh: FixFresh.Done } : s,
+        ),
+        model: up.step.model,
+        effort: up.step.effort,
+        nextAction: action,
+      });
+    });
+    return getWorkstreamRow(db, id);
+  }
+
   function cancelNow(id: WorkstreamId, fence: number | null): void {
     opts.state.write((ctx) => {
       transitionWorkstream(ctx, id, {
@@ -1950,13 +2006,13 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   async function runSession(id: WorkstreamId, ctl: Control): Promise<Outcome> {
-    const row = getWorkstreamRow(db, id);
+    const row = withFreshFixEscalated(id, ctl);
     const project = getProject(db, row.projectId);
     const checkout = checkoutOf(db, row);
     const task = getTask(db, row.taskId);
     // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
     const pass = passOfWorkstream(db, id) ?? null;
-    const fresh = actionOnAnotherAccount(id, ctl, row);
+    const fresh = actionOnAnotherAccount(id, ctl, row) ?? reviseAfterModelDrift(id, ctl, row);
     // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
     // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
     // can't be read gives way to a fresh session, which is sent the message again. A stop ends the read.
