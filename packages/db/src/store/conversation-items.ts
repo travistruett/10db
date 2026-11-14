@@ -165,6 +165,22 @@ export function lastItems(
     .reverse();
 }
 
+/** Whether the conversation holds any item of `kind`. */
+export function hasItemOfKind(
+  db: DbReader,
+  conversationId: ConversationId,
+  kind: ConversationItemKind,
+): boolean {
+  return (
+    db
+      .select({ id: schema.conversationItems.id })
+      .from(schema.conversationItems)
+      .where(and(ofConversation(conversationId), eq(schema.conversationItems.kind, kind)))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
 export function getItem(db: DbReader, id: ConversationItemId): ConversationItemRow {
   const row = db
     .select()

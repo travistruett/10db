@@ -270,8 +270,15 @@ export class FakeAdapter implements AgentAdapter {
   /** The same for a lane session: its stop waits for it before the session ends. */
   laneStopGate: Promise<void> | null = null;
 
+  /**
+   * Why a Shape session ends before it starts, or null when it starts: a test stands for an agent
+   * session that can no longer be resumed.
+   */
+  shapeStartFailure: (spec: ExploreSessionSpec) => string | null = () => null;
+
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
+    const failure = refusal === null ? this.shapeStartFailure(spec) : null;
     const sent: string[] = [];
     const uuids: (string | null)[] = [];
     const models: string[] = [];
@@ -281,13 +288,15 @@ export class FakeAdapter implements AgentAdapter {
           reason: SessionEndReason.AccountRefused,
           message: `${refusal.message}. No message was sent.`,
         })
-      : runFakeExploreSession(
-          spec,
-          (turn) => this.shapeBehaviour(turn),
-          providerSessionId,
-          this.claim(providerSessionId),
-          (queued) => this.shapeInterruptReceipt(queued),
-        );
+      : failure !== null
+        ? fakeEndedSession({ type: 'ended', reason: SessionEndReason.Error, message: failure })
+        : runFakeExploreSession(
+            spec,
+            (turn) => this.shapeBehaviour(turn),
+            providerSessionId,
+            this.claim(providerSessionId),
+            (queued) => this.shapeInterruptReceipt(queued),
+          );
     const handle: SessionHandle = {
       events: inner.events,
       send: (text, images, uuid) => {

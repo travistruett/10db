@@ -25,6 +25,7 @@ import {
   getAccountRow,
   getConversation,
   getProject,
+  hasItemOfKind,
   insertItem,
   insertSession,
   lastItems,
@@ -65,6 +66,8 @@ export const STOP_GRACE_MS = 10_000;
 export const WARM_CAP = 4;
 /** A live session this close to its credentials' expiry is closed before a push, so the next start has fresh ones. */
 const CREDENTIALS_MARGIN_MS = 5 * 60_000;
+/** What a conversation reads when its next session starts fresh past the context limit. */
+export const FRESH_SESSION_NOTICE = 'Continued in a fresh session. Nothing is lost.';
 /** How far back a Redo looks for the builder's message it replaces. */
 const REDO_LOOKBACK = 50;
 
@@ -169,6 +172,8 @@ interface Runtime {
   redo: ConversationItemId | null;
   /** The session the engine last stopped or saw end, whose stream a partial is stored from. */
   lastSession: Session | null;
+  /** The session starting resumes an earlier one, and has not started yet. */
+  resuming: boolean;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -218,6 +223,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         lateComplete: false,
         redo: null,
         lastSession: null,
+        resuming: false,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -245,7 +251,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       providerSessionId: conv.providerSessionId !== null,
       restartedWhilePaused: false,
       steer: capabilitiesOf(conv).steer,
-      resuming: false,
+      resuming: rt.resuming,
     };
   };
 
@@ -401,6 +407,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     return stopped;
   };
 
+  /** The agent has spoken in the conversation, so a fresh session lacks what it said. */
+  const spoke = (rt: Runtime): boolean =>
+    hasItemOfKind(state.db, rt.id, ConversationItemKind.AgentMessage);
+
   const storePartialNow = (rt: Runtime): void => {
     const open = (rt.session ?? rt.lastSession)?.open;
     if (open !== undefined)
@@ -501,9 +511,19 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const account = accountOf(conv);
     const resume = conv.providerSessionId;
     const fresh = resume === null;
+    // A fresh session after the agent has spoken is told what came before, and the digest is kept.
+    const digest = fresh && spoke(rt) ? hooks.digest(conv) : null;
+    if (digest !== null)
+      state.write((ctx) => {
+        insertItem(ctx, rt.id, {
+          author: ConversationItemAuthor.System,
+          kind: ConversationItemKind.Digest,
+          body: { text: digest },
+        });
+      });
     const limits: PictureLimits = pictureLimitsFor(account.kind);
     const out = combined(
-      items.map((item) => hooks.outgoing(conv, item, { fresh, digest: null, limits })),
+      items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
     );
     const uuid = clientUuid(first, randomUUID);
     const sessionId = mintId('Session');
@@ -520,7 +540,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         sessionId,
         mcpToken: token,
         resume,
-        digest: null,
+        digest,
         first: out,
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
       });
@@ -577,7 +597,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       fresh,
       sink: {
         started: () => {
-          if (rt.session === self) reduce(rt, { type: 'started' });
+          if (rt.session !== self) return;
+          rt.resuming = false;
+          reduce(rt, { type: 'started' });
         },
         consumed: (uuids) => {
           const ids = uuids.flatMap((u) => {
@@ -602,6 +624,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.ended =
             rt.state === S.Stopping ? 'stopped' : event.result === 'error' ? 'failed' : 'complete';
           reduce(rt, { type: 'turn_complete' });
+          // Strictly past the owner's limit, the next start is fresh from the digest.
+          const pct = conversation(rt.id).contextPct;
+          if (rt.state === S.IdleWarm && pct !== null && pct > hooks.freshAtContextPct)
+            reduce(rt, { type: 'context_full' });
         },
         ended: (event) => {
           state.write((ctx) => {
@@ -612,9 +638,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           rt.grace?.cancel();
           rt.grace = null;
           rt.lastSession = self;
+          // What it held goes back to the queue before it stops counting as live (call 22).
+          handBack(rt);
           rt.session = null;
           rt.inTurn = false;
-          handBack(rt);
           rt.ended = 'ended';
           reduce(rt, { type: 'ended', how: 'error' });
         },
@@ -622,6 +649,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     });
     self = { open, asked: false };
     rt.session = self;
+    rt.resuming = !fresh;
     rt.starters = items.map((item) => item.id);
     rt.inTurn = true;
     open.newTurn();
@@ -699,12 +727,28 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         if (session !== null) await stopSession(rt, session);
         return;
       }
-      // Stored when reduced.
+      case E.FreshNext:
+        state.write((ctx) => {
+          patchConversation(ctx, rt.id, { providerSessionId: null });
+          insertItem(ctx, rt.id, {
+            author: ConversationItemAuthor.System,
+            kind: ConversationItemKind.Notice,
+            body: { text: FRESH_SESSION_NOTICE },
+          });
+        });
+        return;
+      case E.StartFreshFromDigest:
+        // The resume failed before it started: once, a fresh session from the digest (call 8).
+        rt.resuming = false;
+        state.write((ctx) => {
+          patchConversation(ctx, rt.id, { providerSessionId: null });
+        });
+        await start(rt, taken.waiting);
+        return;
+      // Stored, or cleared, when reduced.
       case E.StorePartial:
       case E.DropPendingStart:
       case E.WithdrawCard:
-      case E.FreshNext:
-      case E.StartFreshFromDigest:
       case E.PausedNotice:
       case E.SendNow:
       case E.HandBackNotice:

@@ -476,3 +476,58 @@ describe('Stop', () => {
     await w.engine.settled(w.conv.id);
   });
 });
+
+describe('fresh sessions', () => {
+  it('closes a session that ends a turn past 70% and starts the next fresh from a stored digest', async () => {
+    w = exploreWorld();
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.', contextPercent: 71 });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(w.items().at(-1)?.body).toEqual({
+      text: 'Continued in a fresh session. Nothing is lost.',
+    });
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Again.' });
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).toBeNull();
+    const kinds = w.items().map((i) => i.kind);
+    expect(kinds.indexOf('digest')).toBeGreaterThan(kinds.lastIndexOf('notice'));
+    expect(w.starts.at(-1)?.digest).toContain('Understood.');
+  });
+
+  it('keeps a session warm at exactly 70%', async () => {
+    w = exploreWorld();
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.', contextPercent: 70 });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+  });
+
+  it('starts fresh from the digest once when a resume fails, and ends in error when that fails too', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.clock.advance(10 * 60_000);
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeStartFailure = (spec) =>
+      spec.resumeProviderSessionId === null ? null : 'No conversation found to resume.';
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions.map((s) => s.spec.resumeProviderSessionId)).toEqual([
+      null,
+      'fake-shape-1',
+      null,
+    ]);
+    expect(w.adapter.shapeSessions[2]?.spec.prompt).toBe('two');
+    expect(w.items().filter((i) => i.kind === 'digest')).toHaveLength(1);
+    expect(w.stateOf()).toBe('idle_warm');
+
+    w.clock.advance(10 * 60_000);
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeStartFailure = () => 'No conversation found to resume.';
+    w.send('three');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('ended_error');
+  });
+});
