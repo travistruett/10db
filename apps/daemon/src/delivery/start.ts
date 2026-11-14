@@ -135,6 +135,9 @@ class GoalJoinStaleError extends Error {
   override readonly name = 'GoalJoinStaleError';
 }
 
+/** A start refused for tasks it depends on that are not finished; its card is raised already. */
+class UnfinishedDependenciesError extends ConflictError {}
+
 export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   const db = ctx.state.db;
   /**
@@ -160,7 +163,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       } finally {
         for (const task of tasks) joining.delete(task.id);
       }
-      if (outcome === JoinOutcome.StartFresh) startFresh(batch.projectId, tasks);
+      if (outcome === JoinOutcome.StartFresh) startFresh(batch, tasks);
     });
   }
 
@@ -168,22 +171,28 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
    * A goal join is best effort: when its batch can no longer take the task, the task starts as one
    * that had no batch to join, which may join another open batch of its goal or make its own.
    */
-  function startFresh(projectId: ProjectId, tasks: readonly TaskDto[]): void {
+  function startFresh(left: BatchDto, tasks: readonly TaskDto[]): void {
+    const projectId = left.projectId;
     try {
-      startBatch(projectId, {
-        title: tasks[0]?.title ?? '',
-        taskIds: tasks.map((t) => t.id),
-      });
+      // The batch just left is not offered again, or the same join would be planned forever.
+      startBatchApart(
+        projectId,
+        { title: tasks[0]?.title ?? '', taskIds: tasks.map((t) => t.id) },
+        left.id,
+      );
     } catch (error) {
       ctx.logger.warn({ projectId, err: error }, 'a task that left a goal join did not start');
-      const card = forTasks(
-        startCards.notStarted(error),
-        tasks.map((t) => t.id),
-        {
-          title: tasks[0]?.title ?? '',
-        },
+      // A refusal for unfinished dependencies has raised its own card already.
+      if (error instanceof UnfinishedDependenciesError) return;
+      raise(
+        ctx.inbox,
+        projectId,
+        forTasks(
+          startCards.notStarted(error),
+          tasks.map((t) => t.id),
+          { title: tasks[0]?.title ?? '' },
+        ),
       );
-      raise(ctx.inbox, projectId, card);
     }
   }
 
@@ -245,6 +254,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   function startBatch(projectId: ProjectId, raw: BatchStartInput): BatchDto[] {
+    return startBatchApart(projectId, raw, undefined);
+  }
+
+  /** `apart` is a batch no goal join may offer, the one a task just left. */
+  function startBatchApart(
+    projectId: ProjectId,
+    raw: BatchStartInput,
+    apart: BatchId | undefined,
+  ): BatchDto[] {
     const input = BatchStartInput.parse(raw);
     const project = getProject(db, projectId);
     if (project.delivery !== Delivery.PullRequest)
@@ -252,7 +270,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const tasks = input.taskIds.map((id) => getTask(db, id));
     for (const task of tasks) checkStartable(project, task);
     // Phase 1: every part is checked before any is written, so a refused start leaves no batch.
-    const { steps, placement, proposals } = prepare(project, input, tasks, undefined);
+    const { steps, placement, proposals } = prepare(project, input, tasks, undefined, apart);
     // Phase 2: one transaction writes each task's placement and every batch, then the jobs queue.
     const batches = ctx.state.write((w) => {
       for (const task of tasks) {
@@ -290,6 +308,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     input: BatchStartInput,
     tasks: readonly TaskDto[],
     ending: BatchId | undefined,
+    apart?: BatchId,
   ): {
     steps: StartStep[];
     placement: (task: TaskDto) => WorkspaceMode;
@@ -342,7 +361,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       );
       const batch =
         inCopy(task) && !linked && shipping.ships(task)
-          ? goalJoin(task, (open ??= openCopyBatches(project.id, ending)), shipping)
+          ? goalJoin(task, (open ??= openCopyBatches(project.id, ending, apart)), shipping)
           : null;
       if (batch === null) {
         unjoined.push(task);
@@ -387,9 +406,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   function openCopyBatches(
     projectId: ProjectId,
     ending: BatchId | undefined,
+    apart: BatchId | undefined,
   ): OpenGoalBatch<BatchDto>[] {
     return listBatches(db, { projectId, states: [BatchState.Open] })
-      .filter((batch) => batch.id !== ending && batch.worktreePath !== null)
+      .filter((batch) => batch.id !== ending && batch.id !== apart && batch.worktreePath !== null)
       .map((batch) => ({
         batch,
         tasks: listWorkstreams(db, { batchId: batch.id }).map((w) => getTask(db, w.taskId)),
@@ -620,7 +640,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       request,
     );
     raise(ctx.inbox, projectId, card);
-    throw new ConflictError(`${card.title}. ${card.body}`);
+    throw new UnfinishedDependenciesError(`${card.title}. ${card.body}`);
   }
 
   function checkStartable(project: ProjectDto, task: TaskDto): void {

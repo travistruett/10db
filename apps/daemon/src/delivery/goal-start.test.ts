@@ -1,5 +1,6 @@
 import type { BatchDto, TaskDto } from '@10db/contracts';
 import {
+  getBatch,
   insertGoal,
   insertKind,
   listBatches,
@@ -8,7 +9,9 @@ import {
   patchTask,
   transitionBatch,
 } from '@10db/db';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../test/fixtures';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 
 import { START_REFUSED_DETAIL } from './cards';
@@ -149,6 +152,25 @@ describe('tasks of a goal that ship with it', () => {
     expect(() => start(get(t, 'c'))).toThrow(/unfinished|isn't finished|not finished/i);
     const card = h.only(h.cards());
     expect(card.detail?.[START_REFUSED_DETAIL]).not.toHaveProperty('batchId');
+  });
+
+  it('a goal batch whose copy sits on another branch is left for a batch of its own, once', async () => {
+    const t = goalOf({ a: { rigor: 'light' }, b: { rigor: 'light' } });
+    const [first] = start(get(t, 'a'));
+    await h.jobs.idle();
+    const copy = first && getBatch(h.store.db, first.id).worktreePath;
+    if (!first || !copy) throw new Error('no copy');
+    execFileSync('git', ['-C', copy, 'checkout', '-q', '-b', 'elsewhere'], {
+      env: isolatedGitEnv(),
+    });
+    const joined = start(get(t, 'b'));
+    expect(joined.map((b) => b.id)).toEqual([first.id]);
+    await h.jobs.idle();
+    const batches = listBatches(h.store.db);
+    expect(batches).toHaveLength(2);
+    const second = batches.find((b) => b.id !== first.id);
+    expect(second && members(second)).toEqual([get(t, 'b').id]);
+    expect(h.cards()).toEqual([]);
   });
 
   it('a Careful task of the goal is alone', async () => {
