@@ -85,14 +85,18 @@ import {
   createTimerWatch,
   createTriage,
   draftOnOpen,
-  keptWithBuilder,
   routedAway,
   type ReplyWatch,
   type StakeholderSends,
   type TimerWatch,
 } from '../src/stakeholders';
 import type { SlackClient } from '../src/slack';
-import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
+import {
+  createInboxService,
+  createParkAnswers,
+  leftWithBuilder,
+  type InboxService,
+} from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
@@ -115,13 +119,35 @@ import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 
 /**
- * Routes every category of the project's questions to a stakeholder. A lane nobody watches answers a
- * question to the builder at once (T4 call 21); one routed to a person still waits on them, parked, so
- * a row about parking and answers asks one of those.
+ * A triage judge that answers nothing until its timeout on the engine's clock, which then routes by
+ * the rules. A lane nobody watches waits live only on a card triage has yet to route, so a row about
+ * a live wait or a live answer asks one of those.
+ */
+export function triageHeld(): { readonly openRouter: { readonly fetch: typeof fetch } } {
+  return {
+    openRouter: {
+      fetch: (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new Error('triage was stopped'));
+          });
+        }),
+    },
+  };
+}
+
+/**
+ * Routes every category of the project's questions to a stakeholder with Slack. A lane nobody watches
+ * answers a question left with the builder at once; one routed to a person who has Slack still waits on
+ * them, parked, so a row about parking and answers asks one of those.
  */
 export function routeQuestionsAway(engine: Pick<TestEngine, 'state' | 'project'>): void {
   engine.state.write((ctx) => {
-    const person = insertPerson(ctx, { handle: 'stakeholder', name: 'Stakeholder' });
+    const person = insertPerson(ctx, {
+      handle: 'stakeholder',
+      name: 'Stakeholder',
+      slack: { teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 },
+    });
     setRoutingRules(ctx, engine.project.id, {
       rules: Object.values(QuestionCategory).map((category) => ({
         category,
@@ -330,13 +356,13 @@ export async function createTestEngine(
     judge: triageJudge,
     log: silentLogger,
     afterRouted: (id) => {
-      // Read before the draft, which may hand a person's card back to the builder for want of Slack.
-      const kept = keptWithBuilder(getInboxItem(state.db, id));
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live,
-      // except one triage kept with the builder in a lane nobody watches, which answers at once.
-      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
-      else if (kept)
+      // Read after the draft, which hands a person's card back to the builder for want of Slack. A
+      // card that now goes to someone else parks its sessions; one left with the builder waits live,
+      // except in a lane nobody watches, which answers at once.
+      const routed = getInboxItem(state.db, id);
+      if (routedAway(routed)) runner?.parkFor(id);
+      else if (leftWithBuilder(routed))
         inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },

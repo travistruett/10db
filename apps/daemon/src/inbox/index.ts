@@ -5,6 +5,7 @@ export {
   raiseDockerMayBeNeededNote,
   raiseDockerOnNote,
 } from './docker-card';
+export { leftWithBuilder } from './builder-card';
 export { raiseGateHostCards } from './gate-host-card';
 export {
   HazardChoice,

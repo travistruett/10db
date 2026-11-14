@@ -10,7 +10,12 @@ import {
   setRoutingRules,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, type TestEngine } from '../../test/engine';
+import {
+  createTestEngine,
+  routeQuestionsAway,
+  triageHeld,
+  type TestEngine,
+} from '../../test/engine';
 import { waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
 
@@ -56,17 +61,8 @@ const askUser: FakeStep = {
   },
 };
 
-/**
- * Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim.
- * `triage` adds a project-wide route for that category to Tess, who has no Slack: its question waits
- * for triage, the builder's card until it is routed, so a lane nobody watches still asks it (T4 call 21).
- */
-function routeTo(
-  category: string,
-  handles: ('mark' | 'ana')[],
-  areaScoped = true,
-  triage: string | null = null,
-) {
+/** Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim. */
+function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = true) {
   const person = (handle: string, name: string, userId: string) =>
     engine.store.write((ctx) =>
       insertPerson(ctx, {
@@ -78,24 +74,11 @@ function routeTo(
   const people = { mark: person('mark', 'Mark', 'U1'), ana: person('ana', 'Ana', 'U2') };
   engine.store.write((ctx) =>
     setRoutingRules(ctx, engine.project.id, {
-      rules: [
-        ...handles.map((h) => ({
-          category: category as 'product',
-          area: areaScoped ? 'api' : null,
-          personId: people[h].id,
-        })),
-        ...(triage === null
-          ? []
-          : [
-              {
-                category: triage as 'product',
-                area: null,
-                personId: engine.store.write((ctx) =>
-                  insertPerson(ctx, { handle: 'tess', name: 'Tess' }),
-                ).value.id,
-              },
-            ]),
-      ],
+      rules: handles.map((h) => ({
+        category: category as 'product',
+        area: areaScoped ? 'api' : null,
+        personId: people[h].id,
+      })),
     }),
   );
 }
@@ -180,8 +163,13 @@ describe('a question routed to someone else', () => {
   });
 
   it('parks a session already waiting on a card triage has yet to route when it asks a second, routed question', async () => {
-    engine = await createTestEngine(oneAsk(askHuman('engineering', 'op-builder-ask-2')));
-    routeTo('product', ['mark'], true, 'engineering');
+    engine = await createTestEngine(
+      oneAsk(askHuman('engineering', 'op-builder-ask-2')),
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const { task, workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const first = await waitFor(openCard);
@@ -205,7 +193,14 @@ describe('a question routed to someone else', () => {
       detail: null,
       signal: new AbortController().signal,
     });
-    expect(second.assignees).toEqual(['mark']);
+    // Triage is held for this one too, so the builder sends it to the stakeholder.
+    engine.state.write((ctx) =>
+      setInboxRecipients(ctx, second.id, {
+        assignees: ['stakeholder'],
+        routedBy: RoutedBy.Builder,
+        suggestion: null,
+      }),
+    );
     observer?.onWaitStart(second);
     await engine.runner.idle();
 
@@ -261,8 +256,13 @@ describe('a question routed to someone else', () => {
 
 describe('Runner.parkFor', () => {
   it('parks a live session waiting on a card triage has yet to route', async () => {
-    engine = await createTestEngine(oneAsk(askHuman('engineering', 'op-park-for-0001')));
-    routeTo('product', [], true, 'engineering');
+    engine = await createTestEngine(
+      oneAsk(askHuman('engineering', 'op-park-for-0001')),
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -277,11 +277,16 @@ describe('Runner.parkFor', () => {
   });
 
   it('parks every session whose identical ask folded into the card', async () => {
-    engine = await createTestEngine({
-      Alpha: [[askHuman('engineering', 'op-folded-ask-001'), turn], [turn]],
-      Beta: [[askHuman('engineering', 'op-folded-ask-002'), turn], [turn]],
-    });
-    routeTo('product', [], true, 'engineering');
+    engine = await createTestEngine(
+      {
+        Alpha: [[askHuman('engineering', 'op-folded-ask-001'), turn], [turn]],
+        Beta: [[askHuman('engineering', 'op-folded-ask-002'), turn], [turn]],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const alpha = engine.addTask('Alpha');
     const beta = engine.addTask('Beta', ['ui']);
     engine.launch(alpha.workstream.id);
@@ -422,6 +427,44 @@ describe('a lane question triage keeps with the builder', () => {
       expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
       expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
         { toolName, summary: question, kind: 'question' },
+      ]);
+    },
+  );
+});
+
+/** A project-wide route for `category` to Tess, who has no Slack, so her card goes back to the builder. */
+function routeToNoSlack(category: string): void {
+  engine.state.write((ctx) => {
+    const tess = insertPerson(ctx, { handle: 'tess', name: 'Tess' });
+    setRoutingRules(ctx, engine.project.id, {
+      rules: [{ category: category as 'product', area: null, personId: tess.id }],
+    });
+  });
+}
+
+// A lane nobody watches never waits on the builder: a card handed back to them for want of Slack is answered at once.
+describe('a lane question routed to a person with no Slack', () => {
+  it.each([
+    ['ask_human, by a rule', askHuman('product', 'op-no-slack-rule1'), 'product', null],
+    ['AskUserQuestion, by a rule', askUser, 'other', null],
+    [
+      'ask_human, by triage',
+      askHuman('product', 'op-no-slack-judge'),
+      'product',
+      triageSays('category:product'),
+    ],
+  ])(
+    '%s is answered at once, listed, and its card withdrawn',
+    async (_name, ask, category, judge) => {
+      engine = await createTestEngine(oneAsk(ask), {}, {}, judge ?? {});
+      routeToNoSlack(category);
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => ws(workstream.id).state === 'DONE');
+
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+        { kind: 'question' },
       ]);
     },
   );

@@ -64,6 +64,7 @@ import {
 import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
 import { answerAway, callKey, routedToPerson, skipMessage, type SkipRecorder } from '../trust';
 import { foundHostReason } from './gate-host-card';
+import { leftWithBuilder } from './builder-card';
 import { AnsweredAwayError, ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -442,11 +443,14 @@ export function createPermissionBroker(
         detail: null,
         signal: ctx.signal,
       });
+      // A rule's person with no Slack leaves the card with the builder, whom this lane never waits on.
+      if (away !== undefined && leftWithBuilder(getInboxItem(deps.state.db, item.id)))
+        deps.inbox.answerAwayWaits(item.id, (waiting) => waiting === ctx.sessionId);
       let result;
       try {
         result = await wait(item, answer);
       } catch (error) {
-        // Triage kept the question with the builder, and nobody watches this task.
+        // The question was left with the builder, and nobody watches this task.
         if (!(error instanceof AnsweredAwayError) || away === undefined) throw error;
         ctx.observer.onWaitEnd(item);
         answers[q.question] = answerAway(away, req.toolName, q.question);

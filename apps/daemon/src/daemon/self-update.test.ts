@@ -180,11 +180,15 @@ async function addProject(api: ReturnType<typeof apiClient>) {
 }
 
 /**
- * Routes the project's engineering questions to a person with no Slack. A lane nobody watches
- * answers a builder question at once (T4 call 21); this one waits for triage on the builder's card.
+ * Routes the project's engineering questions to a person with Slack. A lane nobody watches answers
+ * a question left with the builder at once; this one waits on Tess's card, parked.
  */
 async function routeEngineering(api: ReturnType<typeof apiClient>, projectId: string) {
-  const person = await api.post('/people', PersonDto, { handle: 'tess', name: 'Tess' });
+  const person = await api.post('/people', PersonDto, {
+    handle: 'tess',
+    name: 'Tess',
+    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+  });
   await api.put(`/projects/${projectId}/routing-rules`, z.unknown(), {
     rules: [{ category: 'engineering', area: null, personId: person.id }],
   });
@@ -459,11 +463,12 @@ describe('self-update in the daemon', () => {
         return { api, project, alpha };
       }
 
-      it('says it holds the update, as a lane waiting on a card and not as work running', async () => {
+      // A lane nobody watches parks on a card routed to a person: no session waits on it live.
+      it('counts a lane parked on its card as neither work running nor a live wait', async () => {
         const { api } = await waitingOnCard();
         expect((await selfUpdate(api)).midSession).toEqual({
           working: 0,
-          waitingOnCard: 1,
+          waitingOnCard: 0,
           batches: 0,
           jobs: 0,
           shapes: [],

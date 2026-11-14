@@ -71,7 +71,10 @@ function lane(title: string): FakeScriptBook[string][number] {
     { do: 'turn_complete' },
   ];
 }
-const BOOK: FakeScriptBook = Object.fromEntries(TITLES.map((t) => [t, [lane(t)]]));
+// A lane parks on its question, and the answer resumes it in a second session that ends the step.
+const BOOK: FakeScriptBook = Object.fromEntries(
+  TITLES.map((t) => [t, [lane(t), [{ do: 'turn_complete' }]]]),
+);
 
 let data: { path: string; cleanup(): void };
 let worktrees: { path: string; cleanup(): void };
@@ -126,9 +129,13 @@ async function start(gateCommand = 'true', maxLanes = 3) {
     prTitlePrefix: 'feat(app)',
     workspaceMode: 'worktree',
   });
-  // A lane nobody watches answers a builder question at once (T4 call 21); one routed to a person
-  // still waits for them, which is what holds the three lanes open together here.
-  const person = await api.post('/people', PersonDto, { handle: 'ana', name: 'Ana' });
+  // A lane nobody watches answers a question left with the builder at once; one routed to a person
+  // with Slack still waits for them, which is what holds the three lanes open together here.
+  const person = await api.post('/people', PersonDto, {
+    handle: 'ana',
+    name: 'Ana',
+    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+  });
   await api.put(`/projects/${project.id}/routing-rules`, z.unknown(), {
     rules: [{ category: 'design', area: null, personId: person.id }],
   });

@@ -140,7 +140,12 @@ import {
   tempDir,
   waitFor,
 } from '../../test/fixtures';
-import { createTestEngine, routeQuestionsAway, type TestEngine } from '../../test/engine';
+import {
+  createTestEngine,
+  routeQuestionsAway,
+  triageHeld,
+  type TestEngine,
+} from '../../test/engine';
 import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
 import { importBundle, planImportChanges } from '../plan-record';
@@ -959,7 +964,7 @@ describe('runner', () => {
     ])(
       'cancels the run of a live session waiting on $name, with no review round and no new session',
       async ({ ask }) => {
-        engine = await createTestEngine(parkedBook(ask));
+        engine = await createTestEngine(parkedBook(ask), {}, {}, triageHeld());
         routeQuestionsAway(engine);
         const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
         engine.launch(workstream.id);
@@ -1034,9 +1039,14 @@ describe('runner', () => {
   });
 
   it('delivers a live answer to the same session', async () => {
-    engine = await createTestEngine({
-      Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
     routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -1053,7 +1063,7 @@ describe('runner', () => {
   });
 
   it('goes STARTING -> RUNNING -> WAITING_HUMAN when the first step is a question', async () => {
-    engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+    engine = await createTestEngine({ Alpha: [[askShip, turn]] }, {}, {}, triageHeld());
     routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -1887,7 +1897,7 @@ describe('runner', () => {
     ])(
       'parks normally when the turn completes after the wait timer fired, %s',
       async (_name, answerEarly, expected) => {
-        engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+        engine = await createTestEngine({ Alpha: [[askShip, turn]] }, {}, {}, triageHeld());
         routeQuestionsAway(engine);
         let first = true;
         // The timer's stop is swallowed so the script runs on to turn_complete and a normal end, as a real adapter can.
@@ -3232,12 +3242,17 @@ describe('moving accounts', () => {
   });
 
   it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
-    engine = await createTestEngine({
-      Alpha: [
-        [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
-        [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
-      ],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
+          [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
+        ],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
     routeQuestionsAway(engine);
     const home = engine.project.accountId;
     const { workstream } = engine.addTask('Alpha');
@@ -3455,12 +3470,17 @@ describe('flows', () => {
         ],
       },
     };
-    engine = await createTestEngine({
-      Alpha: [
-        [ask, ...compacted, ...implement('op-flow-ask-02')],
-        [...compacted, approve('op-flow-ask-03'), turn],
-      ],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [ask, ...compacted, ...implement('op-flow-ask-02')],
+          [...compacted, approve('op-flow-ask-03'), turn],
+        ],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
     routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     engine.launch(workstream.id);

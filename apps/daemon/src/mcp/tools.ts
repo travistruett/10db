@@ -38,6 +38,7 @@ import {
   findToolOp,
   FollowUpOrigin,
   getBatch,
+  getInboxItem,
   getProject,
   getSmallProposalLimit,
   getTask,
@@ -87,6 +88,7 @@ import {
   AnsweredAwayError,
   carriesKinds,
   fileProposalByItself,
+  leftWithBuilder,
   proposalCardBody,
   proposalFiling,
   raisedAsCardLine,
@@ -439,13 +441,16 @@ export function createToolHandlers(
         detail: null,
         signal,
       });
+      // A rule's person with no Slack leaves the card with the builder, whom this lane never waits on.
+      if (away !== undefined && leftWithBuilder(getInboxItem(deps.state.db, item.id)))
+        deps.inbox.answerAwayWaits(item.id, (waiting) => waiting === sessionId);
       const observer = deps.waitObserverFor(sessionId);
       observer?.onWaitStart(item);
       let result;
       try {
         result = await answer;
       } catch (error) {
-        // Triage kept the question with the builder, and nobody watches this task.
+        // The question was left with the builder, and nobody watches this task.
         const awayNow = deps.awayFor?.(sessionId);
         if (!(error instanceof AnsweredAwayError) || awayNow === undefined) throw error;
         observer?.onWaitEnd(item);

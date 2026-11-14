@@ -107,7 +107,6 @@ import {
   createTimerWatch,
   createTriage,
   draftOnOpen,
-  keptWithBuilder,
   routedAway,
   sweepDrafts,
 } from '../stakeholders';
@@ -197,7 +196,7 @@ import {
   type GhTools,
 } from '../github';
 import { createGithubServices } from './github-services';
-import { createInboxService, createParkAnswers } from '../inbox';
+import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
@@ -871,13 +870,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // A card routed away from the builder is drafted, and the sessions waiting on it park, so the
     // stakeholder's words are answered through the card and never reach a live ask_human call.
     afterRouted: (id) => {
-      // Read before the draft, which may hand a person's card back to the builder for want of Slack.
-      const kept = keptWithBuilder(getInboxItem(state.db, id));
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live,
-      // except one triage kept with the builder in a lane nobody watches, which answers at once.
-      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
-      else if (kept)
+      // Read after the draft, which hands a person's card back to the builder for want of Slack. A
+      // card that now goes to someone else parks its sessions; one left with the builder waits live,
+      // except in a lane nobody watches, which answers at once.
+      const routed = getInboxItem(state.db, id);
+      if (routedAway(routed)) runner?.parkFor(id);
+      else if (leftWithBuilder(routed))
         inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
