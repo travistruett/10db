@@ -164,7 +164,6 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are helping plan work. Answer briefly.',
       tools: ['Read'],
       allowedTools: [],

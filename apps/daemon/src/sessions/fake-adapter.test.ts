@@ -352,7 +352,6 @@ describe('one open handle per agent session', () => {
     ...spec({ resumeProviderSessionId: resume }),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are Shape.',
       tools: [],
       allowedTools: [],

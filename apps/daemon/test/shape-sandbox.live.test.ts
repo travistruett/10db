@@ -177,7 +177,6 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         policy: testPolicy('plan'),
         profile: {
           kind: 'explore',
-          shapeId: shape.id,
           systemPrompt: SHAPE_SYSTEM_PROMPT,
           tools: [...toolset.tools],
           allowedTools: SHAPE_ALLOWED_TOOLS,

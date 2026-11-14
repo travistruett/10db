@@ -485,7 +485,12 @@ function logFields(session: ClaudeSession): Record<string, string> {
     case 'lane':
       return { sessionId: session.spec.sessionId, workstreamId: session.spec.profile.workstreamId };
     case 'explore':
-      return { sessionId: session.spec.sessionId, shapeId: session.spec.profile.shapeId };
+      return {
+        sessionId: session.spec.sessionId,
+        ...(session.spec.conversationId === null
+          ? {}
+          : { conversationId: session.spec.conversationId }),
+      };
   }
 }
 

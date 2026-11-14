@@ -6,7 +6,6 @@ import type {
   Effort,
   ModelMarkBasis,
   SessionId,
-  ShapeId,
   AgentAccountKind,
   ToolCallView,
   TrustPolicy,
@@ -168,7 +167,6 @@ export interface LaneProfile {
  */
 export interface ExploreProfile {
   readonly kind: typeof AgentProfileKind.Explore;
-  readonly shapeId: ShapeId;
   /** Who judges the session's calls (`capabilities.judge`): native runs it in auto mode; rules where absent. */
   readonly judge?: JudgeKind;
   /** Appended to Claude Code's own system prompt. */

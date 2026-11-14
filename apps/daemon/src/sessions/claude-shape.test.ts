@@ -69,7 +69,6 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     ...core,
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are Shape.',
       tools: ['Read', 'Grep', 'Glob', 'Agent'],
       allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],

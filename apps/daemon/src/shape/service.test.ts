@@ -150,7 +150,6 @@ describe('a message', () => {
     const session = must(adapter.shapeSessions[0], 'a session');
     expect(session.spec.prompt).toBe(`[m:${sent.id}] Make the board denser.`);
     expect(session.spec.resumeProviderSessionId).toBeNull();
-    expect(session.spec.profile.shapeId).toBe(shapeId);
     const conversationId = shapeConversation(c.store.db, shapeId).id;
     expect(session.spec.conversationId).toBe(conversationId);
     expect(session.spec.profile.tools).toEqual([

@@ -107,8 +107,8 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
           requestInit: { headers: { Authorization: `Bearer ${turn.spec.mcp.token}` } },
         }),
       );
-      const ids = heard.get(turn.spec.profile.shapeId) ?? [];
-      heard.set(turn.spec.profile.shapeId, ids);
+      const ids = heard.get(turn.spec.conversationId ?? turn.spec.sessionId) ?? [];
+      heard.set(turn.spec.conversationId ?? turn.spec.sessionId, ids);
       if (turn.message.includes('pressed Propose')) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
         let area = 'repo';

@@ -130,7 +130,6 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     ...core,
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are Shape.',
       tools: ['Read', 'Grep', 'Glob', 'Agent'],
       allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
@@ -2963,7 +2962,7 @@ describe('a Plan session through the adapter', () => {
     await collect(adapter.open(refusedSpec).events);
     const refused = logs.lines().filter((l) => l['msg'] === 'shape session refused');
     expect(refused).toHaveLength(1);
-    expect(refused[0]?.['shapeId']).toBe(refusedSpec.profile.shapeId);
+    expect(refused[0]?.['sessionId']).toBe(refusedSpec.sessionId);
     const laneLines = [
       'claude session billing',
       'claude session mcp',

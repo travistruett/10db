@@ -32,8 +32,16 @@
   `start_failed`.
 - Plan's session runs in auto mode under the trust line's attended policy where its judge is `native`, and keeps
   today's rules where it is `rules` (and `tendb`, until 10db's judge exists).
-- Plan's own session searches and fetches the web there; its researcher is an option. Commands are judged, not
-  carded, and may run in the background under the lanes' process tracking.
+- Plan's own session searches and fetches the web there; its researcher is an option. The checks auto mode's
+  classifier doesn't make still apply to every web call, the session's and the researcher's: a query's length cap,
+  the researcher's question limit, and a page that is https, public and named. What passes them is the
+  classifier's to judge, never allowed outright. Commands are judged, not carded, and may run in the background
+  under the lanes' process tracking.
+- Auto mode turns Claude Code's subprocess env scrub off, so its children inherit the session env, which holds
+  the account's credential. Plan's commands run in the read-only lane sandbox built from that env, which denies
+  every credential name to Bash (`credentials.envVars`), as a lane's does; lanes and passes go through the same
+  sandbox. No hook command runs, and the project's stdio servers start under srt with no session env. What
+  keeps the credential is Claude Code itself and the git it runs, which need it to call the model.
 - Plan writes no code. That is its role, and its sandbox stays read-only; its `.env` rule is unchanged.
 - Plan's transcript is read through `/conversations/:id/items`; `ShapeViewDto.messages` is removed and
   `PROTOCOL_VERSION` is 9.

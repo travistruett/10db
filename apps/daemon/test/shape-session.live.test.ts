@@ -125,7 +125,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: mintId('Shape'),
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -297,7 +296,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: shape.id,
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -420,7 +418,6 @@ describe.skipIf(!live)('a Shape session, live', () => {
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: mintId('Shape'),
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -641,7 +638,6 @@ async function readInSession(
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: SHAPE_SYSTEM_PROMPT,
       tools: [...SHAPE_BUILT_IN_TOOLS],
       allowedTools: SHAPE_ALLOWED_TOOLS,
