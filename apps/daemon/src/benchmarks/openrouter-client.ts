@@ -203,6 +203,10 @@ export async function fetchOpenRouterModels(
   };
 }
 
+/** A p50 that is not positive is OpenRouter's "no sample", not a measurement. */
+const positive = (p50: number | null | undefined): number | null =>
+  p50 != null && p50 > 0 ? p50 : null;
+
 /** One model's p50 throughput and latency per provider; a provider with no stats reads null, never zero. */
 export async function fetchEndpointStats(
   deps: Request & { readonly key: string; readonly id: string },
@@ -217,8 +221,8 @@ export async function fetchEndpointStats(
     if (!parsed.success) continue;
     stats.push({
       provider: parsed.data.provider_name,
-      tokensPerSecond: parsed.data.throughput_last_30m?.p50 ?? null,
-      latencyMs: parsed.data.latency_last_30m?.p50 ?? null,
+      tokensPerSecond: positive(parsed.data.throughput_last_30m?.p50),
+      latencyMs: positive(parsed.data.latency_last_30m?.p50),
     });
   }
   return { kind: 'ok', value: stats };

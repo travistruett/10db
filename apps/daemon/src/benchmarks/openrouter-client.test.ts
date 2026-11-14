@@ -253,7 +253,7 @@ describe('fetchEndpointStats', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/models/acme/model-one/endpoints');
   });
 
-  it('reads the p50s, and a null throughput as null, never zero', async () => {
+  it('reads the p50s, and a null or zero throughput or latency as null, never zero', async () => {
     const { fetch, calls } = fakeFetch({
       [url]: () =>
         json({
@@ -265,6 +265,11 @@ describe('fetchEndpointStats', () => {
                 latency_last_30m: { p50: 410, p75: 500, p90: 600, p99: 900 },
               },
               { provider_name: 'Beta', throughput_last_30m: null, latency_last_30m: null },
+              {
+                provider_name: 'Gamma',
+                throughput_last_30m: { p50: 0 },
+                latency_last_30m: { p50: 0 },
+              },
               { provider_name: 7 },
             ],
           },
@@ -275,6 +280,7 @@ describe('fetchEndpointStats', () => {
       value: [
         { provider: 'Alpha', tokensPerSecond: 88.5, latencyMs: 410 },
         { provider: 'Beta', tokensPerSecond: null, latencyMs: null },
+        { provider: 'Gamma', tokensPerSecond: null, latencyMs: null },
       ],
     });
     expect(calls[0]?.authorization).toBe(`Bearer ${KEY}`);
