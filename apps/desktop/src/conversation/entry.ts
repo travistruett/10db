@@ -17,6 +17,8 @@ export type ConversationEntry =
       readonly id: string;
       readonly text: string;
       readonly partial: boolean;
+      /** Still arriving: drawn block by block until the stored reply replaces it. */
+      readonly streaming?: boolean;
     }
   | {
       readonly kind: 'reasoning';

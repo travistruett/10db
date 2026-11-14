@@ -36,6 +36,8 @@ export interface ConversationListProps {
   readonly onAllow?: (call: ToolCallView) => void;
   /** The agent's hidden speaker heading: its capabilities' label, never a provider's name. */
   readonly agentLabel: string;
+  /** A reply is streaming, so the list is `aria-busy` (sessions UI spec §7.4). */
+  readonly busy?: boolean;
 }
 
 /** The entry ids a row draws. */
@@ -76,6 +78,7 @@ export function ConversationList({
   loadFull,
   onAllow,
   agentLabel,
+  busy = false,
 }: ConversationListProps) {
   const articles = conversationArticles(conversationRows(entries));
   const marked = new Set(highlight?.ids ?? []);
@@ -94,6 +97,7 @@ export function ConversationList({
         loadFull={loadFull}
         onAllow={onAllow}
         agentLabel={agentLabel}
+        busy={busy}
       />
     </RowStateProvider>
   );
@@ -110,6 +114,7 @@ interface WindowedArticlesProps {
   readonly loadFull: LoadFull | undefined;
   readonly onAllow: ((call: ToolCallView) => void) | undefined;
   readonly agentLabel: string;
+  readonly busy: boolean;
 }
 
 function WindowedArticles({
@@ -121,6 +126,7 @@ function WindowedArticles({
   loadFull,
   onAllow,
   agentLabel,
+  busy,
 }: WindowedArticlesProps) {
   const viewport = useRef<HTMLDivElement>(null);
   const [aboveTail, setAboveTail] = useState(false);
@@ -184,7 +190,13 @@ function WindowedArticles({
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
         viewportRef={viewport}
-        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Messages', onScroll }}
+        viewportProps={{
+          tabIndex: 0,
+          role: 'group',
+          'aria-label': 'Messages',
+          'aria-busy': busy,
+          onScroll,
+        }}
       >
         <div style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
           <Box

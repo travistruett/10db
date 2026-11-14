@@ -208,6 +208,16 @@ describe('ConversationList', () => {
       expect(within(article).getByRole('heading', { level: 1, name: 'Done' })).toBeTruthy();
     });
 
+    it('is busy only while a reply streams', () => {
+      const entries: ConversationEntry[] = [
+        { kind: 'reply', id: 'r', text: 'Half', partial: false },
+      ];
+      const { rerender } = render(ui({ entries, busy: true }));
+      expect(viewport().getAttribute('aria-busy')).toBe('true');
+      rerender(ui({ entries }));
+      expect(viewport().getAttribute('aria-busy')).toBe('false');
+    });
+
     it('ends a partial reply with Stopped here.', () => {
       render(ui({ entries: [{ kind: 'reply', id: 'r', text: 'Half', partial: true }] }));
       expect(screen.getByText('Stopped here.')).toBeTruthy();

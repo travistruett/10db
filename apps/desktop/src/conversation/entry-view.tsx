@@ -46,7 +46,7 @@ function BuilderMessage({ entry }: { readonly entry: Entry<'builder'> }) {
 function Reply({ entry }: { readonly entry: Entry<'reply'> }) {
   return (
     <Box className={classes['reply']}>
-      <Markdown text={entry.text} />
+      <Markdown text={entry.text} streaming={entry.streaming === true} />
       {entry.partial && (
         <Text size="sm" c="dimmed">
           Stopped here.
