@@ -3524,6 +3524,50 @@ describe('flows', () => {
     });
   });
 
+  describe('a send-back is fixed by the session that wrote the code, or a fresh one', () => {
+    const script = [
+      implement('op-fixby-0011'),
+      [reject('op-fixby-0012'), turn],
+      implement('op-fixby-0013'),
+      [approve('op-fixby-0014'), turn],
+    ];
+
+    it('resumes the build session on its own model, with no escalation, when the row says resumed', async () => {
+      engine = await createTestEngine({ Alpha: script });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sessions = listSessions(engine.store.db, workstream.id);
+      const build = sessions[0];
+      expect(sessions).toHaveLength(4);
+      expect(engine.adapter.prompts[2]?.resume).toBe(build?.providerSessionId);
+      expect(sessions[2]?.model).toBe(build?.model);
+      expect(sessions[2]?.effort).toBe(build?.effort);
+      expect(step(workstream.id, 0)).toMatchObject({
+        model: build?.model,
+        attempts: 1,
+        providerSessionId: build?.providerSessionId,
+      });
+      expect(step(workstream.id, 0)?.reason).toContain('fixing in its own session');
+      expect(step(workstream.id, 0)?.reason).not.toContain('escalated');
+    });
+
+    it('starts a fresh session one profile up when the row says fresh, as a Careful row does', async () => {
+      engine = await createTestEngine({ Alpha: script });
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'standard', fixBy: 'fresh' }] }),
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts[2]?.resume).toBeNull();
+      expect(listSessions(engine.store.db, workstream.id)[2]?.model).toBe('claude-opus-5-5');
+      expect(step(workstream.id, 0)?.reason).toBe(
+        'escalated from claude-sonnet-5-5@high after the review step rejected it',
+      );
+    });
+  });
+
   it('sends a rejection back to the implement step, one profile up, with the notes', async () => {
     engine = await createTestEngine({
       Alpha: [
@@ -3533,6 +3577,10 @@ describe('flows', () => {
         [approve('op-flow-0014'), turn],
       ],
     });
+    // The row says fresh, which is what Careful and Critical do: Standard resumes by default.
+    engine.state.write((ctx) =>
+      setPlaybook(ctx, null, { rows: [{ rigor: 'standard', fixBy: 'fresh' }] }),
+    );
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     engine.launch(workstream.id);
     await engine.runner.idle();

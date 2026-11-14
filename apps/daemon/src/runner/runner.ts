@@ -9,6 +9,8 @@ import {
   type SessionActivityData,
   findingNotes,
   atRoundLimit,
+  FixFresh,
+  FixBy,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
   RoutedBy,
@@ -1402,10 +1404,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         // A reviewer's rejections count against the rigor's rounds, read live; the gate's and the
         // builder's send-backs use `attempt`, which this never touches.
         const task = getTask(db, row.taskId);
-        const rounds = rowProcess(
+        const { reviewRounds: rounds, fixBy } = rowProcess(
           task.effectiveRigor,
           playbookInputs(db, row.projectId).playbook,
-        ).reviewRounds;
+        );
         if (atRoundLimit(step.sentBack, rounds)) {
           const result = step.result;
           if (
@@ -1453,7 +1455,21 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
         const target = row.steps[move.to];
         if (!target) return 'stop';
-        const up = escalated(row, target, `the ${step.role} step rejected it`, ctl.accountId);
+        // A row that fixes in the step's own session resumes it, on its own model and effort, so nothing
+        // is escalated; `fixFresh` keeps what a fresh start at launch would still owe.
+        const resumes = fixBy === FixBy.Resumed && target.providerSessionId !== undefined;
+        const up = resumes
+          ? {
+              step: {
+                ...target,
+                reason: `${target.reason}; fixing in its own session`,
+                fixFresh: FixFresh.Pending,
+              },
+              moved: false,
+            }
+          : withFixFresh(
+              escalated(row, target, `the ${step.role} step rejected it`, ctl.accountId),
+            );
         opts.state.write((ctx) => {
           if (up.moved && target.profileId)
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
@@ -1464,7 +1480,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               rounds,
             ),
             stepIndex: move.to,
-            nextAction: { kind: 'revise', reviewStep: row.stepIndex },
+            nextAction: {
+              kind: 'revise',
+              reviewStep: row.stepIndex,
+              providerSessionId: resumes ? (target.providerSessionId ?? null) : null,
+            },
             model: up.step.model,
             effort: up.step.effort,
           });
@@ -1816,6 +1836,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     });
     return resolved;
+  }
+
+  /** An escalated step, marked as having stepped up for the send-back that made it. */
+  function withFixFresh(up: { step: WorkstreamStep; moved: boolean }): {
+    step: WorkstreamStep;
+    moved: boolean;
+  } {
+    return { ...up, step: { ...up.step, fixFresh: FixFresh.Done } };
   }
 
   /**

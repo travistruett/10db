@@ -353,7 +353,7 @@ export function retryWorkstream(
           effort: reworked.effort,
           nextAction: evidence
             ? { kind: 'fix', evidenceId: evidence.id }
-            : { kind: 'revise', reviewStep: row.stepIndex },
+            : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
       });

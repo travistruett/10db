@@ -952,8 +952,15 @@ export const NextAction = z.discriminatedUnion('kind', [
     paths: z.array(z.string().min(1)).min(1),
   }),
   z.object({ kind: z.literal('verify') }),
-  /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
-  z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
+  /**
+   * Rerun a step a reviewer rejected; the rejecting step's notes are in its result. With a
+   * `providerSessionId` the step's own session is resumed to fix it; without one a fresh session starts.
+   */
+  z.object({
+    kind: z.literal('revise'),
+    reviewStep: z.int().min(0),
+    providerSessionId: z.string().min(1).nullable().default(null),
+  }),
   /** The work is done and the project has no gate: the builder approves it or sends it back. */
   z.object({ kind: z.literal('builder_review'), inboxId: InboxItemId }),
   /**

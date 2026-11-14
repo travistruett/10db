@@ -29,6 +29,13 @@ export const ShippedAtLimit = z.object({
 });
 export type ShippedAtLimit = z.infer<typeof ShippedAtLimit>;
 
+/**
+ * Whether the fresh session a send-back falls back to still has to step up a model rung: `pending` when the
+ * send-back meant to resume the step's own session, `done` once the step was escalated for it.
+ */
+export const FixFresh = { Pending: 'pending', Done: 'done' } as const;
+export type FixFresh = (typeof FixFresh)[keyof typeof FixFresh];
+
 /** One step of a workstream's resolved plan, fixed when the task starts. */
 export const WorkstreamStep = z.object({
   role: z.enum(StepRole),
@@ -72,6 +79,8 @@ export const WorkstreamStep = z.object({
    * the step has started.
    */
   providerSessionId: z.string().min(1).optional(),
+  /** Set when a reviewer's send-back targets this step; see `FixFresh`. Absent otherwise. */
+  fixFresh: z.enum(FixFresh).optional(),
   /**
    * Set on a review or QA step whose rejection used up the retry limit and shipped the work anyway:
    * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.

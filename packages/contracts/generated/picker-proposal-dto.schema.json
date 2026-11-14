@@ -753,6 +753,13 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "fixFresh": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "done"
+                          ]
+                        },
                         "shippedAtLimit": {
                           "type": "object",
                           "properties": {

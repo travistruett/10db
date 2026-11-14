@@ -1695,7 +1695,8 @@ describe('the gate in a brief', () => {
     ['uncommitted', { kind: 'uncommitted', paths: ['src/ui/badge.tsx'] }],
     ['merge', { kind: 'merge', base: 'origin/main', paths: ['src/ui/badge.tsx'] }],
     ['verify', { kind: 'verify' }],
-    ['revise', { kind: 'revise', reviewStep: 0 }],
+    ['revise', { kind: 'revise', reviewStep: 0, providerSessionId: null }],
+    ['resumed revise', { kind: 'revise', reviewStep: 0, providerSessionId: 'p1' }],
     ['builder review', { kind: 'builder_review', inboxId: mintId('InboxItem') }],
     ['pass review', { kind: 'pass_review', inboxId: mintId('InboxItem') }],
   ];

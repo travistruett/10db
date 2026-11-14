@@ -249,6 +249,18 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "providerSessionId": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -618,6 +630,13 @@
               "providerSessionId": {
                 "type": "string",
                 "minLength": 1
+              },
+              "fixFresh": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "done"
+                ]
               },
               "shippedAtLimit": {
                 "type": "object",
