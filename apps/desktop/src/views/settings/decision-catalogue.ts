@@ -2,6 +2,7 @@ import { JudgeDecision } from '@10db/contracts';
 
 export const DecisionGroup = {
   Delivery: 'delivery',
+  Trust: 'trust',
   Sizing: 'sizing',
   Plan: 'plan',
   Stakeholders: 'stakeholders',
@@ -10,6 +11,7 @@ export type DecisionGroup = (typeof DecisionGroup)[keyof typeof DecisionGroup];
 
 export const DECISION_GROUP_ORDER: readonly DecisionGroup[] = [
   DecisionGroup.Delivery,
+  DecisionGroup.Trust,
   DecisionGroup.Sizing,
   DecisionGroup.Plan,
   DecisionGroup.Stakeholders,
@@ -17,6 +19,7 @@ export const DECISION_GROUP_ORDER: readonly DecisionGroup[] = [
 
 export const DECISION_GROUP_LABEL: Readonly<Record<DecisionGroup, string>> = {
   [DecisionGroup.Delivery]: 'Delivery',
+  [DecisionGroup.Trust]: 'Trust',
   [DecisionGroup.Sizing]: 'Sizing',
   [DecisionGroup.Plan]: 'Plan',
   [DecisionGroup.Stakeholders]: 'Stakeholder questions',
@@ -55,6 +58,16 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     onAnswer: 'Skip: the review is skipped. Review: it runs.',
     whenUnsure: 'The review runs.',
     fellBack: 'the review ran',
+    mode: DecisionMode.Acting,
+  },
+  [JudgeDecision.CrossesLimit]: {
+    group: DecisionGroup.Trust,
+    label: 'Limits',
+    asks: 'On accounts without Claude Code’s auto mode: does this tool call cross one of the four limits?',
+    onAnswer:
+      'Allow: the call runs. A limit, or unsure: a card asks you, or an unattended lane skips the call.',
+    whenUnsure: 'Treated as a limit: a card asks you, or an unattended lane skips the call.',
+    fellBack: '10db’s rules decided',
     mode: DecisionMode.Acting,
   },
   [JudgeDecision.TaskRigor]: {

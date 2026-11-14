@@ -49,6 +49,27 @@ describe('judge config', () => {
     expect(getJudgeConfig(store.db)).toEqual(DEFAULT_JUDGE_CONFIG);
   });
 
+  it('reads a config stored before crosses_limit with its default', () => {
+    const before = Object.fromEntries(
+      Object.entries(DEFAULT_JUDGE_CONFIG.decisions).filter(([d]) => d !== 'crosses_limit'),
+    );
+    store.write((ctx) => {
+      setAppSetting(ctx, 'judge', {
+        enabled: true,
+        decisions: { ...before, shape_ready: { enabled: false, model: 'm', floor: 0.5 } },
+      });
+    });
+    expect(getJudgeConfig(store.db).decisions).toEqual({
+      ...DEFAULT_JUDGE_CONFIG.decisions,
+      shape_ready: { enabled: false, model: 'm', floor: 0.5 },
+    });
+    expect(getJudgeConfig(store.db).decisions.crosses_limit).toEqual({
+      enabled: true,
+      model: 'typesafe/jev-1.13',
+      floor: 0.8,
+    });
+  });
+
   it('merges a patch into what is stored, one field at a time', () => {
     store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_ready: { floor: 0.9 } } }));
     store.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));

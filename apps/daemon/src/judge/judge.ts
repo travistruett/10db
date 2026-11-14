@@ -4,6 +4,7 @@ import {
   type AccountId,
   type AskedDecision,
   JudgeDecision,
+  isAskedDecision,
   type JudgeCallId,
   type JudgeOutcome,
   type JudgeTestResultDto,
@@ -65,6 +66,11 @@ export interface Judge {
    * today's rule. The caller records what it did with an answer through `recordJudgeOutcome`.
    */
   choose(req: JudgeRequest): Promise<JudgeAnswer>;
+  /**
+   * Whether `decision` can be asked now: the daemon isn't off, the master switch and the decision's are on, and
+   * the key reads within `JUDGE_TIMEOUT_MS`. Calls no model and logs nothing.
+   */
+  ready(decision: JudgeDecision): Promise<boolean>;
 }
 
 export interface JudgeService extends Judge {
@@ -289,6 +295,25 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     }
   }
 
+  async function ready(decision: JudgeDecision): Promise<boolean> {
+    if (deps.off || !isAskedDecision(decision)) return false;
+    const controller = new AbortController();
+    const timer = deps.clock.setTimeout(() => {
+      controller.abort();
+    }, deps.timeoutMs ?? JUDGE_TIMEOUT_MS);
+    try {
+      const config = getJudgeConfig(deps.state.db);
+      if (!config.enabled || !config.decisions[decision].enabled) return false;
+      const key = await untilAborted(deps.readKey(config.accountId), controller.signal);
+      return key !== null && key.length > 0;
+    } catch {
+      // A key read that throws or doesn't answer in time means no call could run now.
+      return false;
+    } finally {
+      timer.cancel();
+    }
+  }
+
   async function test(account: AccountId, model?: string): Promise<JudgeTestResultDto> {
     if (deps.off) return { ok: false, error: 'This daemon was started with TENDB_JUDGE=off' };
     const result = await attempt(
@@ -310,5 +335,5 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     };
   }
 
-  return { off: deps.off, choose, test };
+  return { off: deps.off, choose, ready, test };
 }

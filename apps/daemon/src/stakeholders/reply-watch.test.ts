@@ -70,6 +70,7 @@ const answeredWith =
 
 const judge: Judge = {
   off: false,
+  ready: () => Promise.resolve(true),
   choose: (req) => {
     judgeAnswers.push(req);
     return Promise.resolve(judgeReply(req));

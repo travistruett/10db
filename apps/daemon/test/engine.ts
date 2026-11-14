@@ -217,6 +217,7 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
 /** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
   off: true,
+  ready: () => Promise.resolve(false),
   choose: () =>
     Promise.resolve({
       kind: 'fallback',

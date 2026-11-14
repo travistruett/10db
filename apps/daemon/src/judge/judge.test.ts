@@ -331,6 +331,64 @@ describe('judge.off', () => {
   });
 });
 
+describe('judge.ready', () => {
+  it.each([
+    ['off', { off: true }, (): void => undefined],
+    [
+      'master switch off',
+      {},
+      (): void => {
+        store.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));
+      },
+    ],
+    [
+      'decision off',
+      {},
+      (): void => {
+        store.write((ctx) =>
+          patchJudgeConfig(ctx, { decisions: { crosses_limit: { enabled: false } } }),
+        );
+      },
+    ],
+    [
+      'no key',
+      {},
+      (): void => {
+        key = null;
+      },
+    ],
+    [
+      'the key read fails',
+      {},
+      (): void => {
+        keyError = new Error('security: item not found');
+      },
+    ],
+  ] as const)('is false with %s, and logs nothing', async (_name, options, arrange) => {
+    arrange();
+    expect(await build(options).ready('crosses_limit')).toBe(false);
+    expect(logged()).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it('is false when the key read hangs past the timeout, and logs nothing', async () => {
+    keyHangs = true;
+    const pending = build().ready('crosses_limit');
+    await Promise.resolve();
+    clock.advance(4_000);
+    expect(await pending).toBe(false);
+    expect(logged()).toEqual([]);
+    expect(clock.pendingTimers()).toBe(0);
+  });
+
+  it('is true with a key and every switch on, and calls nothing', async () => {
+    expect(await build().ready('crosses_limit')).toBe(true);
+    expect(logged()).toEqual([]);
+    expect(seen).toEqual([]);
+    expect(clock.pendingTimers()).toBe(0);
+  });
+});
+
 describe('judge.choose falls back', () => {
   it('is off when the daemon is, without reading the key or calling out', async () => {
     const answer = await build({ off: true }).choose(request);
