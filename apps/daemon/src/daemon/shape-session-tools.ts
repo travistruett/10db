@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import { DeniedBy, type ProjectDto } from '@10db/contracts';
+import { DeniedBy, Provider, providerOf, type ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules } from '@10db/db';
 import { allCheckouts } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -107,6 +107,8 @@ export function createShapePreparer(deps: {
   readonly builderHome: string;
   /** The roots lanes write outside the registered checkouts: no setup comes along from them. */
   readonly laneWritableRoots: readonly string[];
+  /** Where a ChatGPT session's temp dir is made, apart from Claude sessions', as a ChatGPT lane's is. */
+  readonly codexLaneTempRoot: string;
 }): (input: ShapePrepareInput) => Promise<ShapePrepared> {
   const { state, inbox, logger } = deps;
   const reader = createProjectMcpReader({
@@ -182,6 +184,11 @@ export function createShapePreparer(deps: {
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
         readOnly: true,
+        // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
+        provider: providerOf(input.accountKind),
+        ...(providerOf(input.accountKind) === Provider.Codex
+          ? { tempRoot: deps.codexLaneTempRoot }
+          : {}),
       });
     } catch (error) {
       logger.warn({ err: error, projectId: project.id }, 'a Plan sandbox could not be built');

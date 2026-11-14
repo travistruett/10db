@@ -141,6 +141,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       exportAwsCredentials: () => Promise.reject(new Error('no AWS in this test')),
       builderHome: homedir(),
       laneWritableRoots: [join(dataDir, 'worktrees'), roots.temp, roots.codexLanes, roots.files],
+      codexLaneTempRoot: roots.codexLanes,
     });
     const cards: { title: string; shapeId: unknown }[] = [];
     const prepared = await prepare({
