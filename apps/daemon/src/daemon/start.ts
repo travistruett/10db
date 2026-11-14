@@ -1573,6 +1573,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     engine: exploreEngine,
     clock,
+    judge,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
@@ -1634,6 +1635,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // What each task conversation's session streams now; the runner owns those sessions.
   const laneLive = createLiveRegistry();
   const createdRunner = createRunner({
+    judge,
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
@@ -2115,6 +2117,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
       laneSandbox,
       adapter,
+      judge,
       log: logger.child({ component: 'trust' }),
     }),
     judge: createJudgeServices({

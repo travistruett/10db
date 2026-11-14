@@ -48,6 +48,7 @@ const rendered = renderClaudeAutoMode(
     gateCommand: 'make gate',
     liveSystems: [],
     switches: TRUST_DEFAULTS,
+    grants: [],
   }),
 );
 

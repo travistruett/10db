@@ -72,6 +72,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     setProjectTrust: none,
     liveSystems: none,
     setLiveSystems: none,
+    trustGrants: none,
+    removeTrustGrant: none,
     eventsHead: () => 0,
     reviewProjectMcp: none,
     inspectFolder: none,

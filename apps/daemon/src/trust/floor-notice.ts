@@ -3,74 +3,73 @@ import { autoModeRuns } from './auto-mode-models';
 
 type ValueOf<T> = T[keyof T];
 
-/** Why a session is judged by 10db's rules and not by an agent's judge. */
+/** Why a session, or a call, is judged by 10db's rules and not by a judge. */
 export const FloorReason = {
-  Gateway: 'gateway',
-  Model: 'model',
   Setting: 'setting',
-  Codex: 'codex',
+  /** The account's judge is 10db's, and it isn't ready: no OpenRouter key, or a switch off. */
+  NoJudge: 'no_judge',
+  /** 10db's judge timed out or failed mid-session, so its calls meet the rules for a while. */
+  JudgeUnavailable: 'judge_unavailable',
   LeftAutoMode: 'left_auto_mode',
 } as const;
 export type FloorReason = ValueOf<typeof FloorReason>;
 
 /**
  * The reason a session starts on the rules floor, or null when it starts on a judge. `autoMode` is
- * whether the lane asks for auto mode (the app-wide setting); an account that never runs it says so
- * whatever the setting.
+ * whether the lane asks for auto mode (the app-wide setting); `tendbReady` whether 10db's judge can answer,
+ * for an account auto mode doesn't judge (a gateway, Codex, a model auto mode doesn't run on).
  */
 export function floorReason(input: {
   kind: AgentAccountKind;
   model: string | null;
   autoMode: boolean;
+  tendbReady: boolean;
 }): FloorReason | null {
-  switch (input.kind) {
-    case AccountKind.Gateway:
-      return FloorReason.Gateway;
-    case AccountKind.CodexSignin:
-      return FloorReason.Codex;
-    case AccountKind.ClaudeSubscription:
-    case AccountKind.AnthropicApiKey:
-    case AccountKind.Bedrock:
-      if (!input.autoMode) return FloorReason.Setting;
-      return autoModeRuns(input.kind, input.model) ? null : FloorReason.Model;
-  }
+  if (!input.autoMode) return FloorReason.Setting;
+  const tendb = input.kind === AccountKind.CodexSignin || !autoModeRuns(input.kind, input.model);
+  return tendb && !input.tendbReady ? FloorReason.NoJudge : null;
 }
 
 const CARD = "A call those rules can't settle waits on a card.";
+const SKIP = "A call those rules can't settle is skipped, not asked about.";
 
-/** Why a session is on the floor, as a clause; `model` names the model a model reason is about. */
-function floorCause(reason: FloorReason, model: string): string {
+/** Why a session is on the floor, as a clause; `detail` says what 10db's judge answered. */
+function floorCause(reason: FloorReason, detail: string): string {
   switch (reason) {
-    case FloorReason.Gateway:
-      return "auto mode doesn't run through a gateway account yet";
-    case FloorReason.Model:
-      return `auto mode doesn't run on ${model} on this account`;
     case FloorReason.Setting:
       return '"Lanes decide routine permissions" is off in Settings';
-    case FloorReason.Codex:
-      return 'Codex has no judge in 10db yet';
+    case FloorReason.NoJudge:
+      return "10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions";
+    case FloorReason.JudgeUnavailable:
+      return `10db's judge didn't answer (${detail})`;
     case FloorReason.LeftAutoMode:
       return 'Claude Code stopped running in auto mode during this session';
   }
 }
 
-/** What the thread says about a session on the floor; `model` is quoted for a model that auto mode doesn't run on. */
-export function floorNoticeText(reason: FloorReason, model: string): string {
-  const cause = floorCause(reason, `\`${model}\``);
+/**
+ * What the thread says about a session on the floor. `attended` is whether the builder is in the session, so a
+ * call the rules can't settle waits on a card; in a lane it is skipped. `detail` is what 10db's judge answered.
+ */
+export function floorNoticeText(
+  reason: FloorReason,
+  context: { readonly attended: boolean; readonly detail?: string },
+): string {
+  const cause = floorCause(reason, context.detail ?? '');
   switch (reason) {
-    case FloorReason.Gateway:
-    case FloorReason.Model:
     case FloorReason.Setting:
       return `10db's rules judge this session, not auto mode: ${cause}. ${CARD}`;
-    case FloorReason.Codex:
-      return `10db's rules judge this session: ${cause}. ${CARD}`;
+    case FloorReason.NoJudge:
+      return `10db's rules judge this session: ${cause}. ${context.attended ? CARD : SKIP}`;
+    case FloorReason.JudgeUnavailable:
+      return `${cause}, so 10db's rules judge calls until it answers again.`;
     case FloorReason.LeftAutoMode:
       return `${cause}, so 10db's rules judge its calls from here. ${CARD}`;
   }
 }
 
-/** Why an account's sessions start on the floor, as one sentence for Settings, which shows the model beside it. */
+/** Why an account's sessions start on the floor, as one sentence for Settings. */
 export function floorWhy(reason: FloorReason): string {
-  const cause = floorCause(reason, 'this model');
+  const cause = floorCause(reason, 'no answer');
   return `${cause.charAt(0).toUpperCase()}${cause.slice(1)}.`;
 }

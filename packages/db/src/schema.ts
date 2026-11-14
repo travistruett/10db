@@ -155,6 +155,7 @@ import type {
   ShapeProposalKind,
   ShapeProposalState,
   ShapeState,
+  TrustGrantId,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import type {
@@ -2622,3 +2623,30 @@ export const skipFollowUps = sqliteTable('skip_follow_ups', {
   startedAt: text('started_at'),
   createdAt: createdAt(),
 });
+
+/**
+ * A call the builder allowed in a project from now on (Always in this project, trust line §5): the limit its
+ * card named, or none, and a one-line target every judge reads. Gone with its project.
+ */
+export const trustGrants = sqliteTable(
+  'trust_grants',
+  {
+    id: text('id').$type<TrustGrantId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** Not `limit`, a word hand-written SQL reserves. */
+    limitName: text('limit_name').$type<LimitName>(),
+    target: text('target').notNull(),
+    sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('trust_grants_project_idx').on(t.projectId),
+    check(
+      'trust_grants_limit_name',
+      sql`${t.limitName} IS NULL OR ${t.limitName} IN ('destroys_data', 'sends_data_out', 'reads_secrets', 'writes_live')`,
+    ),
+  ],
+);

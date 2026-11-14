@@ -115,7 +115,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `sessions/`: Claude Code and Codex sessions: adapters, launch, repo config and tool calls (`src/sessions/AGENTS.md`)
 - `shape/`: Shape (Plan) conversations: ceremony, preview and landings (`src/shape/AGENTS.md`)
 - `team/`: the team configuration and each task's step plan (`src/team/AGENTS.md`)
-- `trust/`: each session's trust policy (`src/trust/AGENTS.md`)
+- `trust/`: each session's trust policy, and 10db's judge: the fast path, `crosses_limit` and the grants (`src/trust/AGENTS.md`)
 - `verify/`: the gate runner and machine-wide gate slots (`src/verify/AGENTS.md`)
 - `watcher/`: flags writes to sensitive paths and strays outside claims (`src/watcher/AGENTS.md`)
 

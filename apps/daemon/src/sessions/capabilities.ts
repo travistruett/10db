@@ -18,8 +18,8 @@ const IMAGES = [ImageFormat.Png, ImageFormat.Jpeg, ImageFormat.Webp];
 
 /**
  * Claude Code: auto mode judges a call where it runs on the kind and the model; elsewhere (a gateway,
- * an older or unreadable model) the guard's rules are the judge until 10db's judge exists (trust line §4,
- * §12).
+ * an older or unreadable model) 10db's judge does (trust line §4, §10). Whether it is ready is the session's
+ * to read as it starts: a session on 10db's judge without a key starts on the rules.
  */
 export function claudeCapabilities(
   kind: AgentAccountKind,
@@ -39,13 +39,13 @@ export function claudeCapabilities(
     modelSwitch: ModelSwitch.NextTurn,
     takeover: true,
     costUsd: isMetered(kind),
-    judge: autoModeRuns(kind, model) ? JudgeKind.Native : JudgeKind.Rules,
+    judge: autoModeRuns(kind, model) ? JudgeKind.Native : JudgeKind.Tendb,
   };
 }
 
 /**
- * Codex through app-server: the guard's rules judge its calls until 10db's judge exists. Codex can do
- * the same on every kind it runs on.
+ * Codex through app-server: 10db's judge judges its calls through the guard hook, with approvals closed
+ * (decision `2026-11-12-codex-is-judged-by-10dbs-judge.md`). Codex can do the same on every kind it runs on.
  */
 export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = () => ({
   harness: Provider.Codex,
@@ -61,7 +61,7 @@ export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = 
   modelSwitch: ModelSwitch.NextTurn,
   takeover: true,
   costUsd: false,
-  judge: JudgeKind.Rules,
+  judge: JudgeKind.Tendb,
 });
 
 const CAPABILITIES_BY_ADAPTER: Readonly<

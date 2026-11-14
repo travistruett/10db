@@ -2,6 +2,7 @@ import { JudgeDecision } from '@10db/contracts';
 
 export const DecisionGroup = {
   Delivery: 'delivery',
+  Trust: 'trust',
   Sizing: 'sizing',
   Plan: 'plan',
   Stakeholders: 'stakeholders',
@@ -10,6 +11,7 @@ export type DecisionGroup = (typeof DecisionGroup)[keyof typeof DecisionGroup];
 
 export const DECISION_GROUP_ORDER: readonly DecisionGroup[] = [
   DecisionGroup.Delivery,
+  DecisionGroup.Trust,
   DecisionGroup.Sizing,
   DecisionGroup.Plan,
   DecisionGroup.Stakeholders,
@@ -17,6 +19,7 @@ export const DECISION_GROUP_ORDER: readonly DecisionGroup[] = [
 
 export const DECISION_GROUP_LABEL: Readonly<Record<DecisionGroup, string>> = {
   [DecisionGroup.Delivery]: 'Delivery',
+  [DecisionGroup.Trust]: 'Trust',
   [DecisionGroup.Sizing]: 'Sizing',
   [DecisionGroup.Plan]: 'Plan',
   [DecisionGroup.Stakeholders]: 'Stakeholder questions',
@@ -56,6 +59,17 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     whenUnsure: 'The review runs.',
     fellBack: 'the review ran',
     mode: DecisionMode.Acting,
+  },
+  [JudgeDecision.CrossesLimit]: {
+    group: DecisionGroup.Trust,
+    label: 'Limits',
+    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (a gateway, Codex, an older model), 10db’s judge decides whether each call crosses a limit.',
+    onAnswer:
+      'Allow: the call runs. A limit, or unsure: a card asks you, or a lane nobody watches skips the call.',
+    whenUnsure: 'Treated as a limit.',
+    fellBack: "10db's rules decided",
+    mode: DecisionMode.Acting,
+    note: 'Each call it checks goes to the model through OpenRouter with the project’s limits and up to 12 000 characters of its input, and is kept in the recent decisions for 30 days. Off, 10db’s rules decide and say so.',
   },
   [JudgeDecision.TaskRigor]: {
     group: DecisionGroup.Sizing,

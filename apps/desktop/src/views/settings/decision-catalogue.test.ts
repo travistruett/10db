@@ -22,6 +22,7 @@ describe('groupedDecisions', () => {
   it('groups every decision in order and leaves out the group with no rows', () => {
     expect(groupedDecisions(Object.values(JudgeDecision))).toEqual([
       { group: DecisionGroup.Delivery, decisions: [JudgeDecision.ReviewSize] },
+      { group: DecisionGroup.Trust, decisions: [JudgeDecision.CrossesLimit] },
       {
         group: DecisionGroup.Sizing,
         decisions: [JudgeDecision.TaskRigor, JudgeDecision.TaskKinds],
@@ -49,6 +50,7 @@ describe('groupedDecisions', () => {
   it('has no Delivery group when the daemon no longer configures review_size', () => {
     const without = Object.values(JudgeDecision).filter((d) => d !== JudgeDecision.ReviewSize);
     expect(groupedDecisions(without).map((g) => g.group)).toEqual([
+      DecisionGroup.Trust,
       DecisionGroup.Sizing,
       DecisionGroup.Plan,
       DecisionGroup.Stakeholders,

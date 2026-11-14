@@ -284,7 +284,7 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
-import { LiveSystemsDto } from './trust-policy';
+import { LiveSystemsDto, TrustGrantDto } from './trust-policy';
 import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
 
@@ -364,6 +364,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,
   'live-systems-dto': LiveSystemsDto,
+  'trust-grant-dto': TrustGrantDto,
   'tool-call-view': ToolCallView,
   'trust-overrides': TrustOverrides,
   'trust-settings-dto': TrustSettingsDto,

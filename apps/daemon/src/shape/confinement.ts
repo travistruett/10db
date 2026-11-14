@@ -154,7 +154,8 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
   // A native judge's session may run a command in the background, under the lanes' process tracking:
   // it stops with the session.
-  const native = access.judge === JudgeKind.Native;
+  // A judge that runs (auto mode or 10db's) takes the calls the rules would card.
+  const native = access.judge !== undefined && access.judge !== JudgeKind.Rules;
   if (!native && flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
   const command = stringField(call.toolInput, 'command');
   if (!native && command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
@@ -355,7 +356,7 @@ const isProjectTool = (toolName: string): boolean =>
  * classifier makes none of them: a query's length, a page that is https, public and named.
  */
 function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
-  if (judge !== JudgeKind.Native && !isResearcher(call))
+  if ((judge === undefined || judge === JudgeKind.Rules) && !isResearcher(call))
     return deny(
       `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${SHAPE_RESEARCHER}", and ask it in words.`,
     );

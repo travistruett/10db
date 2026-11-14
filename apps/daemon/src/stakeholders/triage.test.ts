@@ -94,6 +94,7 @@ type Reply =
 function judgeReplying(reply: Reply, onAsked?: (req: JudgeRequest) => void): Judge {
   return {
     off: false,
+    ready: () => Promise.resolve(true),
     choose: (req) => {
       onAsked?.(req);
       if ('throws' in reply) return Promise.reject(new Error('judge exploded'));

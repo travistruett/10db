@@ -255,6 +255,7 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
 /** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
   off: true,
+  ready: () => Promise.resolve(false),
   choose: () =>
     Promise.resolve({
       kind: 'fallback',
@@ -548,6 +549,7 @@ export async function createTestEngine(
   const frames = createLiveFrames();
   const laneLive = createLiveRegistry();
   const created = createRunner({
+    judge: triageJudge,
     // The daemon's own git and gh, as `startDaemon` resolves them.
     gitTools: { git: await resolveGit(), gh: resolveGh() },
     laneSandbox: null,

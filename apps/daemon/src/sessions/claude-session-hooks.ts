@@ -183,14 +183,18 @@ function deniedBy(output: HookJSONOutput): string | null {
 }
 
 /**
- * Denies while the gate is closed; a judge that throws becomes a deny naming 10db's guard. Before it
+ * Denies while the gate is closed; a judge that throws or rejects becomes a deny naming 10db's guard. Before it
  * judges, `beforeCall` sees the call (where its previous text is read), and a deny is told to
  * `onDenied`.
  */
 export function preToolUseHook(hook: {
   readonly gate: ToolGate;
   readonly cwds: HookCwds;
-  readonly judge: (input: PreToolUseHookInput) => HookJSONOutput;
+  /** The guard, then the session's judge where it has one, which may take a model's answer. */
+  readonly judge: (
+    input: PreToolUseHookInput,
+    signal: AbortSignal,
+  ) => HookJSONOutput | Promise<HookJSONOutput>;
   readonly beforeCall?: (input: PreToolUseHookInput) => void;
   readonly onDenied?: OnDenied;
   /**
@@ -221,7 +225,7 @@ export function preToolUseHook(hook: {
     try {
       hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
       hook.beforeCall?.(hookInput);
-      output = hook.judge(hookInput);
+      output = await hook.judge(hookInput, signal);
       if (permissionDecisionOf(output) === 'ask' && input.success) {
         const decision = hook.settleAsk?.(hookInput, input.data, signal) ?? null;
         if (decision !== null) settling = { decision, input: input.data };

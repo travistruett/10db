@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SANDBOXED } from '../../test/fixtures';
 import { codexHomes } from './codex-home';
 import {
@@ -17,7 +17,7 @@ import {
 } from './codex-guard';
 import type { LaneSessionSpec } from './types';
 
-type Spec = Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>;
+type Spec = Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool' | 'judgeCall'>;
 
 const ALLOW_ALL: Spec = {
   preToolUse: () => ({ decision: 'allow' }),
@@ -27,13 +27,17 @@ const NEVER = new AbortController().signal;
 
 describe('guardCalls', () => {
   it.each([
-    ['Bash', { command: 'ls' }, [{ toolName: 'Bash', input: { command: 'ls' } }]],
+    ['Bash', { command: 'ls' }, [{ toolName: 'Bash', input: { command: 'ls' }, hunk: null }]],
     [
       'mcp__10db__commit',
       { message: 'x' },
-      [{ toolName: 'mcp__10db__commit', input: { message: 'x' } }],
+      [{ toolName: 'mcp__10db__commit', input: { message: 'x' }, hunk: null }],
     ],
-    ['mcp__10db__no_arguments', undefined, [{ toolName: 'mcp__10db__no_arguments', input: {} }]],
+    [
+      'mcp__10db__no_arguments',
+      undefined,
+      [{ toolName: 'mcp__10db__no_arguments', input: {}, hunk: null }],
+    ],
     ['Bash', 'not an object', null],
     ['Bash', {}, null],
     ['Bash', { command: 3 }, null],
@@ -61,16 +65,34 @@ describe('guardCalls', () => {
     expect(
       guardCalls({ tool_name: 'apply_patch', tool_input: { command }, cwd: '/work/copy' }),
     ).toEqual([
-      { toolName: 'Edit', input: { file_path: '/work/copy/src/a.ts' } },
-      { toolName: 'Edit', input: { file_path: '/work/copy/src/b.ts' } },
-      { toolName: 'Edit', input: { file_path: '/work/copy/c.ts' } },
+      { toolName: 'Edit', input: { file_path: '/work/copy/src/a.ts' }, hunk: 'move' },
+      { toolName: 'Edit', input: { file_path: '/work/copy/src/b.ts' }, hunk: 'move' },
+      { toolName: 'Edit', input: { file_path: '/work/copy/c.ts' }, hunk: 'add' },
     ]);
+  });
+
+  it.each([
+    ['Add File is add', '*** Add File: a.ts\n+x', ['add']],
+    ['Update File is update', '*** Update File: a.ts\n@@\n-x\n+y', ['update']],
+    ['Delete File is delete', '*** Delete File: a.ts', ['delete']],
+    [
+      'Update File with Move to is move',
+      '*** Update File: a.ts\n*** Move to: b.ts',
+      ['move', 'move'],
+    ],
+  ])('%s', (_name, command, hunks) => {
+    const calls = guardCalls({ tool_name: 'apply_patch', tool_input: { command } });
+    expect(calls?.map((c) => c.hunk)).toEqual(hunks);
+  });
+
+  it('Bash has no hunk', () => {
+    expect(guardCalls({ tool_name: 'Bash', tool_input: { command: 'ls' } })?.[0]?.hunk).toBeNull();
   });
 
   it('leaves a patch path alone when the hook gave no cwd', () => {
     expect(
       guardCalls({ tool_name: 'apply_patch', tool_input: { command: '*** Add File: a.ts' } }),
-    ).toEqual([{ toolName: 'Edit', input: { file_path: 'a.ts' } }]);
+    ).toEqual([{ toolName: 'Edit', input: { file_path: 'a.ts' }, hunk: 'add' }]);
   });
 
   it.each([
@@ -504,3 +526,100 @@ describe.skipIf(SANDBOXED || !existsSync('/usr/bin/curl'))(
     });
   },
 );
+
+describe('judgeHookCall with the session judge', () => {
+  const deploy: HookInput = {
+    tool_name: 'Bash',
+    tool_input: { command: 'vercel deploy --prod' },
+    tool_use_id: 'call_1',
+    cwd: '/work/copy',
+  };
+  const judging = (
+    judgeCall: NonNullable<Spec['judgeCall']>,
+    guard: ReturnType<Spec['preToolUse']> = { decision: 'allow' },
+    canUseTool: Spec['canUseTool'] = ALLOW_ALL.canUseTool,
+  ): Spec => ({ preToolUse: () => guard, canUseTool, judgeCall });
+
+  it('a bare allow goes to judgeCall and its deny stands', async () => {
+    const judgeCall = vi.fn<NonNullable<Spec['judgeCall']>>(() =>
+      Promise.resolve({ decision: 'deny', reason: 'a deploy' }),
+    );
+    expect(await judgeHookCall(judging(judgeCall), deploy, NEVER)).toMatchObject({
+      allow: false,
+      reason: 'a deploy',
+    });
+    expect(judgeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'Bash',
+        toolUseId: 'call_1',
+        cwd: '/work/copy',
+        hunk: null,
+      }),
+    );
+  });
+
+  it('a settled allow never reaches judgeCall', async () => {
+    const judgeCall = vi.fn<NonNullable<Spec['judgeCall']>>();
+    const spec = judging(judgeCall, { decision: 'allow', settled: 'reads only' });
+    expect(await judgeHookCall(spec, deploy, NEVER)).toEqual({ allow: true });
+    expect(judgeCall).not.toHaveBeenCalled();
+  });
+
+  it('a guard deny never reaches judgeCall', async () => {
+    const judgeCall = vi.fn<NonNullable<Spec['judgeCall']>>();
+    const spec = judging(judgeCall, { decision: 'deny', reason: 'no' });
+    expect(await judgeHookCall(spec, deploy, NEVER)).toMatchObject({ allow: false, reason: 'no' });
+    expect(judgeCall).not.toHaveBeenCalled();
+  });
+
+  it("judgeCall's ask reaches canUseTool with the same tool use id", async () => {
+    const canUseTool = vi.fn<Spec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'deny', message: 'the builder said no', by: 'builder' }),
+    );
+    const spec = judging(
+      () => Promise.resolve({ decision: 'ask', reason: 'a limit' }),
+      { decision: 'allow' },
+      canUseTool,
+    );
+    expect(await judgeHookCall(spec, deploy, NEVER)).toMatchObject({
+      allow: false,
+      reason: 'the builder said no',
+    });
+    expect(canUseTool).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: 'call_1' }));
+  });
+
+  it("a judgeCall that throws denies, naming 10db's guard", async () => {
+    const spec = judging(() => Promise.reject(new Error('judge down')));
+    expect(await judgeHookCall(spec, deploy, NEVER)).toMatchObject({
+      allow: false,
+      reason: "10db's guard failed: judge down",
+    });
+  });
+
+  it("no judgeCall leaves today's answer", async () => {
+    expect(await judgeHookCall(ALLOW_ALL, deploy, NEVER)).toEqual({ allow: true });
+  });
+
+  it('a patch of two files runs judgeCall for each, and the first deny refuses the patch', async () => {
+    const judgeCall = vi.fn<NonNullable<Spec['judgeCall']>>((req) =>
+      Promise.resolve(
+        req.hunk === 'delete'
+          ? { decision: 'deny', reason: 'deletes data' }
+          : { decision: 'allow' },
+      ),
+    );
+    const command =
+      '*** Begin Patch\n*** Add File: a.ts\n+x\n*** Delete File: data.db\n*** End Patch';
+    expect(
+      await judgeHookCall(
+        judging(judgeCall),
+        { tool_name: 'apply_patch', tool_input: { command }, tool_use_id: 'call_2', cwd: '/w' },
+        NEVER,
+      ),
+    ).toMatchObject({ allow: false, reason: 'deletes data' });
+    expect(judgeCall.mock.calls.map(([req]) => [req.input, req.hunk])).toEqual([
+      [{ file_path: '/w/a.ts' }, 'add'],
+      [{ file_path: '/w/data.db' }, 'delete'],
+    ]);
+  });
+});

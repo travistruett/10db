@@ -23,13 +23,21 @@ import { DaemonRequestError } from '../../daemon/client';
 import {
   useLiveSystems,
   useProjectTrust,
+  useRemoveTrustGrant,
   useSetLiveSystems,
   useSetProjectTrust,
   useTrust,
+  useTrustGrants,
 } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TrustRowText } from './trust-section';
-import { LIVE_SYSTEMS_DESCRIPTION, TRUST_ROWS } from './trust-rows';
+import {
+  GRANT_LIMIT_LABELS,
+  GRANTS_DESCRIPTION,
+  GRANTS_EMPTY,
+  LIVE_SYSTEMS_DESCRIPTION,
+  TRUST_ROWS,
+} from './trust-rows';
 
 const Choice = { App: 'app', On: 'on', Off: 'off' } as const;
 type Choice = (typeof Choice)[keyof typeof Choice];
@@ -212,6 +220,52 @@ function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
   );
 }
 
+/** What the builder allowed in this project from now on, each line with its limit, its date and Remove. */
+function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] }) {
+  const grants = useTrustGrants(projectId);
+  const remove = useRemoveTrustGrant(projectId);
+  const headingId = useId();
+  const listed = grants.data ?? [];
+  return (
+    <Stack gap="xs" role="region" aria-labelledby={headingId}>
+      <Title order={5} id={headingId}>
+        Allowed in this project
+      </Title>
+      <Text size="sm" c="dimmed">
+        {GRANTS_DESCRIPTION}
+      </Text>
+      {grants.isError ? <Alert color="red">{grants.error.message}</Alert> : null}
+      {remove.isError ? <Alert color="red">{remove.error.message}</Alert> : null}
+      {grants.data !== undefined && listed.length === 0 ? (
+        <Text size="sm">{GRANTS_EMPTY}</Text>
+      ) : (
+        <SettingsCard>
+          {listed.map((grant) => (
+            <SettingRow
+              key={grant.id}
+              label={grant.target}
+              description={`${grant.limit === null ? 'Any limit' : GRANT_LIMIT_LABELS[grant.limit]} · ${new Date(grant.createdAt).toLocaleDateString()}`}
+            >
+              <Button
+                variant="subtle"
+                color="red"
+                size="xs"
+                aria-label={`Remove ${grant.target}`}
+                loading={remove.isPending && remove.variables === grant.id}
+                onClick={() => {
+                  remove.mutate(grant.id);
+                }}
+              >
+                Remove
+              </Button>
+            </SettingRow>
+          ))}
+        </SettingsCard>
+      )}
+    </Stack>
+  );
+}
+
 /** A project's Trust: each switch as the app has it, or on or off for this project alone. */
 export function ProjectTrustSection({ project }: { readonly project: ProjectDto }) {
   const trust = useProjectTrust(project.id);
@@ -263,6 +317,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
         </SettingsCard>
       )}
       <LiveSystems projectId={project.id} />
+      <AllowedInProject projectId={project.id} />
       <ComesAlong preview={trust.data?.preview} />
     </Stack>
   );

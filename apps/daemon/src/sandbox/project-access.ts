@@ -3,7 +3,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { pinnedToolsRoot } from '../environment';
-import { foldPathCase } from '../guard';
+import { isSecretFileName } from '../guard';
 import { MISE_SYSTEM_DIRS } from './mise-config';
 import { isSandboxDomain, isSandboxPath, SandboxProfileError } from './profile';
 import { isEqualOrUnder, protectedReads } from './protected-reads';
@@ -94,8 +94,6 @@ export interface ProjectAccessInput {
 }
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
-/** Folded the way the file system folds names, so `.ENV` is caught where it is the same file. */
-const SECRET_FILE_PREFIX = foldPathCase('.env');
 const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
 /** Listing errors that mean the directory is gone, so it can hide no secret file. */
 const VANISHED: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR']);
@@ -150,7 +148,7 @@ export async function secretFilesIn(
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!UNWALKED_DIRECTORIES.has(entry.name)) pending.push(path);
-      } else if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
+      } else if (isSecretFileName(entry.name)) {
         for (const secret of await secretPathsOf(path, entry)) found.add(secret);
       }
     }

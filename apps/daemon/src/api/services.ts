@@ -97,6 +97,8 @@ import type {
   KeepAwakeStatus,
   LanePermissionsDto,
   LiveSystemsDto,
+  TrustGrantDto,
+  TrustGrantId,
   ProjectTrustDto,
   TrustOverrides,
   TrustSettingsDto,
@@ -675,8 +677,8 @@ export interface ApiServices extends PlanRecordServices {
   lanePermissions(): LanePermissionsDto;
   setLanePermissions(autoMode: boolean): LanePermissionsDto;
   /** Settings › Trust: the app-wide switches and the builder's installed plugins; read when each session starts. */
-  trustSettings(): TrustSettingsDto;
-  setTrustSwitches(switches: TrustSwitches): TrustSettingsDto;
+  trustSettings(): Promise<TrustSettingsDto>;
+  setTrustSwitches(switches: TrustSwitches): Promise<TrustSettingsDto>;
   /** A project's Trust: its overrides, the switches its sessions use, and what would come along; throws NotFoundError. */
   projectTrust(projectId: ProjectId): Promise<ProjectTrustDto>;
   setProjectTrust(projectId: ProjectId, overrides: TrustOverrides): Promise<ProjectTrustDto>;
@@ -684,6 +686,10 @@ export interface ApiServices extends PlanRecordServices {
   liveSystems(projectId: ProjectId): LiveSystemsDto;
   /** Replaces them, trimmed and without duplicates; read when each session starts. */
   setLiveSystems(projectId: ProjectId, input: LiveSystemsDto): LiveSystemsDto;
+  /** What the builder allowed in a project from now on (Always in this project), oldest first; throws NotFoundError. */
+  trustGrants(projectId: ProjectId): TrustGrantDto[];
+  /** Removes one of the project's grants; throws NotFoundError when the project has none by that id. */
+  removeTrustGrant(projectId: ProjectId, grantId: TrustGrantId): void;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */

@@ -36,6 +36,7 @@ let joining: string | null;
 let account: ReturnType<typeof seedAccount> | null;
 const offJudge: Judge = {
   off: true,
+  ready: () => Promise.resolve(false),
   choose: () => Promise.reject(new Error('the judge is off: nothing may ask it')),
 };
 

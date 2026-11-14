@@ -7,7 +7,7 @@ import type {
   ShapeId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
-import type { WaitObserver } from '../inbox';
+import type { LimitNotes, WaitObserver } from '../inbox';
 import type { LaneSandboxSpec, SessionSetup } from '../sandbox';
 import type { SessionMcpServer, ToolDecision, ToolRequest } from '../sessions';
 import type { ShapeAccess } from './confinement';
@@ -50,6 +50,8 @@ export interface ShapePrepareInput {
   readonly signal: AbortSignal;
   /** Told when a call waits on the builder's card. */
   readonly observer: WaitObserver;
+  /** The limits 10db's judge stopped calls at, which the broker asks with the trust line's three answers. */
+  readonly limits?: LimitNotes;
 }
 
 /** A session's read-only sandbox, the project's approved MCP servers and its permission broker. */

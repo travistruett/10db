@@ -21,6 +21,7 @@ import {
   type FakeStep,
 } from './fake-script';
 import { FakeTaskRefs } from './fake-task-refs';
+import { judgedVerdict } from './session-judge';
 import { readCheckoutText } from './before-text';
 import { claudeToolCall, claudeToolResult, createClaudeToolCalls } from './claude-tool-calls';
 import {
@@ -270,6 +271,22 @@ export function runFakeLaneSession(
     }
   };
 
+  /** The guard, then the session's judge for a call it left open, as Claude Code's hook runs them. */
+  const sessionVerdict = (
+    toolName: string,
+    input: Record<string, unknown>,
+    reportedMode: ReportedMode | undefined,
+    toolUseId: string,
+  ): Promise<GuardVerdict> =>
+    judgedVerdict(spec, guardVerdict(toolName, input, reportedMode, toolUseId), {
+      toolName,
+      input,
+      toolUseId,
+      signal: abort.signal,
+      hunk: null,
+      ...(reportedMode === undefined ? {} : { reportedMode }),
+    });
+
   const applyFileEffect = (toolName: string, input: Record<string, unknown>): void => {
     const file =
       typeof input['file_path'] === 'string' ? resolve(spec.cwd, input['file_path']) : null;
@@ -349,7 +366,7 @@ export function runFakeLaneSession(
         const verdict: GuardVerdict =
           step.toolName === 'SandboxNetworkAccess'
             ? { decision: 'ask', reason: 'network request' }
-            : guardVerdict(step.toolName, input, step.reportedMode, toolUseId);
+            : await sessionVerdict(step.toolName, input, step.reportedMode, toolUseId);
         if (verdict.decision === 'deny') {
           denied(DeniedBy.TenDb, verdict.reason);
           observe(index, 'denied_by_guard', { reason: verdict.reason });

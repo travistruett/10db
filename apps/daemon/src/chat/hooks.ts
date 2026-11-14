@@ -36,7 +36,7 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { ExploreProfile } from '../sessions';
 import type { ShapeAccess, ShapeLaunch, ShapePrepared, ShapePrepareInput } from '../shape';
-import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import { buildTrustPolicy, projectGrantLines, projectLiveSystems } from '../trust';
 import { judgeChatCall } from './confinement';
 import type { ChatLiveSessions } from './live-sessions';
 import { CHAT_SYSTEM_PROMPT } from './prompt';
@@ -212,6 +212,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           );
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+        grants: projectGrantLines(state.db, project.id),
       });
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
       const parts = [

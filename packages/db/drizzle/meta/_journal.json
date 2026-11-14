@@ -610,6 +610,13 @@
       "when": 1794686270364,
       "tag": "0086_chat_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1794686568358,
+      "tag": "0087_trust_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -59,6 +59,7 @@ import {
   listInbox,
   listPermissionRules,
   listTasks,
+  listTrustGrants,
   openItemsForWorkstream,
   patchProject,
   schema,
@@ -98,8 +99,10 @@ import {
 import type { ToolDecision } from '../sessions';
 import {
   createInboxService,
+  createLimitNotes,
   createPermissionBroker,
   fileProposalByItself,
+  type LimitNotes,
   ParkedError,
   type InboxService,
   type WaitObserver,
@@ -1783,6 +1786,153 @@ describe('permission broker', () => {
       void broker(ws)(request('Bash', { command: 'docker compose up' })).catch(() => undefined);
       expect(() => inbox.answer(onlyOpenCard().id, { choice: SERVER_OPTION })).toThrow();
     });
+  });
+});
+
+describe('limit cards', () => {
+  let limits: LimitNotes;
+  beforeEach(() => {
+    limits = createLimitNotes();
+  });
+  function broker(ws: ReturnType<typeof seedWorkstream>) {
+    return createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+        limits,
+      },
+    );
+  }
+  const bash = (command: string, escalated = false) => ({
+    toolName: 'Bash',
+    input: { command },
+    toolUseId: 't1',
+    escalated,
+    signal: new AbortController().signal,
+  });
+  function onlyOpenCard(): InboxItemDto {
+    const [card, ...rest] = listInbox(state.db, { states: ['OPEN'] });
+    if (!card || rest.length > 0) throw new Error('expected exactly one open card');
+    return card;
+  }
+  const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+  const DEPLOY = 'vercel deploy --prod';
+  const WRITES_LIVE = {
+    limit: 'writes_live' as const,
+    reason: "10db's judge: Writing To Live Systems",
+  };
+
+  it("a noted call raises a card with the three answers and its limit's title", async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    const pending = broker(ws)(bash(DEPLOY));
+    await settle();
+    const card = onlyOpenCard();
+    expect(card.title).toBe('Allow this? It may write to a live system');
+    expect(card.body).toBe(DEPLOY);
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'always_in_project', 'deny']);
+    expect(card.detail).toMatchObject({ limit: 'writes_live' });
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+  });
+
+  it('an escalated call raises the three answers', async () => {
+    const ws = seedWorkstream(base);
+    void broker(ws)(bash('pnpm test', true));
+    await settle();
+    const card = onlyOpenCard();
+    expect(card.title).toBe('Allow Bash?');
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'always_in_project', 'deny']);
+  });
+
+  it('an ordinary card keeps its options', async () => {
+    const ws = seedWorkstream(base);
+    void broker(ws)(bash('pnpm test'));
+    await settle();
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual([
+      'allow_once',
+      'allow_workstream',
+      'allow_project',
+      'deny',
+    ]);
+  });
+
+  it("Always in this project stores a grant with the card's limit and the note as its target, and allows the call", async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    const pending = broker(ws)(bash(DEPLOY));
+    await settle();
+    const card = onlyOpenCard();
+    inbox.answer(card.id, { choice: 'always_in_project', note: 'deploys to staging with vercel' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
+      { limit: 'writes_live', target: 'deploys to staging with vercel' },
+    ]);
+  });
+
+  it('Always in this project with no note stores the call in quotes', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'vercel deploy --prod # and any other command';
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(command));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
+      { target: 'the call "vercel deploy --prod # and any other command"' },
+    ]);
+  });
+
+  it('Always in this project on a 300-character call with no note is refused and stores nothing; with a note it stores the note', async () => {
+    const ws = seedWorkstream(base);
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(`echo ${'x'.repeat(295)}`));
+    await settle();
+    const card = onlyOpenCard();
+    expect(card.detail).toMatchObject({ noteNeeded: true });
+    expect(card.options[1]?.description).toContain('Say in your note what to allow');
+    expect(() => inbox.answer(card.id, { choice: 'always_in_project' })).toThrow(
+      'Say in the note what to allow: this call is too long to keep as it is.',
+    );
+    expect(listTrustGrants(state.db, ws.project.id)).toEqual([]);
+    expect(onlyOpenCard().id).toBe(card.id);
+    inbox.answer(card.id, { choice: 'always_in_project', note: 'long echoes' });
+    expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([{ target: 'long echoes' }]);
+  });
+
+  it("an escalated card's grant has no limit", async () => {
+    const ws = seedWorkstream(base);
+    void broker(ws)(bash('pnpm test', true));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
+      { limit: null, target: 'the call "pnpm test"' },
+    ]);
+  });
+
+  it('a project rule never answers a noted call', async () => {
+    const ws = seedWorkstream(base);
+    // As an answer on an ordinary card for the same command would have stored it.
+    const rule = storableRule('Bash', DEPLOY);
+    if (rule === undefined) throw new Error('expected a storable rule');
+    state.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: rule.toolName,
+        pattern: rule.pattern,
+        sourceInboxId: null,
+      }),
+    );
+    // Without a note the rule answers the call; with one, it never does.
+    expect(await broker(ws)(bash(DEPLOY))).toEqual({ behavior: 'allow' });
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(DEPLOY));
+    await settle();
+    expect(onlyOpenCard().title).toBe('Allow this? It may write to a live system');
   });
 });
 

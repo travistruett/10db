@@ -79,6 +79,7 @@ import { convertProposals, type ConvertOutcome, type JoiningProblem } from './co
 import { checkDroppedFile, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import { createShapeOwner, type ShapeTurnState } from './explore-owner';
+import type { Judge } from '../judge';
 import type { ShapeJev } from './jev';
 import { proposeNote, rehearseNote } from './policy';
 import { dismissFinding as dismissRow, editedTaskKeys, unrehearsedTasks } from './review';
@@ -107,6 +108,8 @@ export interface ShapeServiceDeps {
    */
   readonly engine?: ExploreEngine;
   readonly clock: Clock;
+  /** 10db's judge, for Plan on an account auto mode doesn't judge; absent, such a session is on the rules. */
+  readonly judge?: Judge;
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
@@ -506,6 +509,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       ...(deps.prepare === undefined ? {} : { prepare: deps.prepare }),
       limitsFor,
       judgeOf: (kind, model) => deps.adapter.capabilities({ kind }, model).judge,
+      ...(deps.judge === undefined ? {} : { judge: deps.judge }),
+      clock: deps.clock,
       contextLimitPct: deps.contextLimitPct ?? CONTEXT_LIMIT_PCT,
       turnOf,
       announce,

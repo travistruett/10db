@@ -70,6 +70,7 @@ import {
   PersonInput,
   PickSize,
   ProjectId,
+  TrustGrantId,
   ProjectInput,
   ProjectPatch,
   PROTOCOL_VERSION,
@@ -492,6 +493,16 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/trust-grants', (c) =>
+      c.json(deps.services.trustGrants(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .delete('/projects/:projectId/trust-grants/:grantId', (c) => {
+      deps.services.removeTrustGrant(
+        ProjectId.parse(c.req.param('projectId')),
+        TrustGrantId.parse(c.req.param('grantId')),
+      );
+      return c.body(null, 204);
+    })
     .get('/projects/:projectId/one-way-paths', (c) =>
       c.json(deps.services.getOneWayPaths(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1794,11 +1805,11 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): SessionsSettingsDto => SessionsSettingsDto.parse(value)),
       (c) => c.json(deps.services.setSessionsSettings(c.req.valid('json'))),
     )
-    .get('/settings/trust', (c) => c.json(deps.services.trustSettings()))
+    .get('/settings/trust', async (c) => c.json(await deps.services.trustSettings()))
     .put(
       '/settings/trust',
       validator('json', (value): TrustSwitches => TrustSwitches.parse(value)),
-      (c) => c.json(deps.services.setTrustSwitches(c.req.valid('json'))),
+      async (c) => c.json(await deps.services.setTrustSwitches(c.req.valid('json'))),
     )
     .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
     .put(

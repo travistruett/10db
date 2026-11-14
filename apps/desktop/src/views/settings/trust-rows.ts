@@ -1,4 +1,4 @@
-import { JudgeKind, TRUST_SWITCH_KEYS, type TrustSwitchKey } from '@10db/contracts';
+import { JudgeKind, TRUST_SWITCH_KEYS, type LimitName, type TrustSwitchKey } from '@10db/contracts';
 
 /** One switch of Settings › Trust: its label, what it brings, and how each agent takes it. */
 export interface TrustRow {
@@ -17,7 +17,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Web',
     description: `Lets sessions search and fetch the web. ${NEXT}`,
     providers:
-      "On: Claude in auto mode judges each search and fetch, with no card. Claude through a gateway, and Codex, still card it until 10db's judge comes. Off: every search and fetch waits on a card.",
+      "On: Claude in auto mode judges each search and fetch, with no card; Claude through a gateway, or on a model auto mode doesn't run, is judged by 10db's judge; Codex searches from OpenAI's index and opens no page it names. Off: no session searches or fetches without asking.",
   },
   projectInstructions: {
     label: 'Project instructions',
@@ -62,9 +62,30 @@ export const JUDGE_LABELS: Readonly<Record<JudgeKind, string>> = {
   [JudgeKind.Tendb]: "10db's judge",
 };
 
+/** A tendb row while 10db's judge can't answer: no key, or a switch off. */
+export const TENDB_NOT_READY_LABEL =
+  "10db's rules: add an OpenRouter key in Settings › Decisions for 10db's judge";
+
+/** The Judge list's note: who 10db's judge judges. */
+export const JUDGE_LIST_NOTE = "Accounts without auto mode, and Codex, use 10db's judge.";
+
 /** What a native row adds: the model a task runs on can still put its session on the rules. */
 export const NATIVE_JUDGE_NOTE =
   "On a model auto mode doesn't run, a session falls back to 10db's rules and says so in its thread.";
 
 /** The project's Live systems input: what an entry is, and when a change applies. */
 export const LIVE_SYSTEMS_DESCRIPTION = `Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. ${NEXT}`;
+
+/** A grant's limit as the project's Allowed in this project list names it; null is any limit. */
+export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {
+  destroys_data: "Destroying data it didn't create",
+  sends_data_out: 'Sending data out',
+  reads_secrets: 'Reading secrets',
+  writes_live: 'Writing to live systems',
+};
+
+export const GRANTS_DESCRIPTION =
+  "10db's judge reads a change from the next call; auto mode from the next session.";
+
+export const GRANTS_EMPTY =
+  'Nothing yet. "Always in this project" on a card adds a line here, and every judge on the project reads it.';

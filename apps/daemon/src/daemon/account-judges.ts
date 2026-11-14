@@ -45,7 +45,10 @@ export function accountJudges(
     // A tier's name is what a choice says when the account offers no model for it.
     const model = isModelTier(choice.model) ? null : choice.model;
     const judge = adapter.capabilities({ kind }, model).judge;
-    const reason = judge === JudgeKind.Rules ? floorReason({ kind, model, autoMode: true }) : null;
+    const reason =
+      judge === JudgeKind.Rules
+        ? floorReason({ kind, model, autoMode: true, tendbReady: false })
+        : null;
     return {
       accountId: account.id,
       label: account.label,

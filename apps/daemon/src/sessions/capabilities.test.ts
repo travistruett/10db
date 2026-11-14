@@ -34,15 +34,18 @@ describe('capabilities', () => {
     ['claude_subscription', { ...CLAUDE, costUsd: false, judge: 'native' }],
     ['anthropic_api_key', { ...CLAUDE, costUsd: true, judge: 'native' }],
     ['bedrock', { ...CLAUDE, costUsd: true, judge: 'native' }],
-    ['gateway', { ...CLAUDE, costUsd: true, judge: 'rules' }],
-    ['codex_signin', { ...CODEX, judge: 'rules' }],
+    ['gateway', { ...CLAUDE, costUsd: true, judge: 'tendb' }],
+    ['codex_signin', { ...CODEX, judge: 'tendb' }],
   ] as const)('%s runs on an agent that can do what spec §5.3 says', (kind, expected) => {
     expect(capabilitiesOf(kind, 'claude-opus-5-5')).toEqual(expected);
     expect(AgentCapabilitiesDto.parse(capabilitiesOf(kind, 'claude-opus-5-5'))).toEqual(expected);
   });
 
   it.each([
-    ['bedrock on claude-sonnet-4-6 has the rules judge', 'bedrock', 'claude-sonnet-4-6', 'rules'],
+    ['gateway on claude-opus-5-5 is tendb', 'gateway', 'claude-opus-5-5', 'tendb'],
+    ['bedrock on claude-sonnet-4-6 is tendb', 'bedrock', 'claude-sonnet-4-6', 'tendb'],
+    ['an unreadable model id is tendb', 'anthropic_api_key', 'my-model', 'tendb'],
+    ['codex_signin is tendb', 'codex_signin', 'gpt-5.5', 'tendb'],
     [
       'claude_subscription with no model has the native judge',
       'claude_subscription',
@@ -51,6 +54,14 @@ describe('capabilities', () => {
     ],
   ] as const)('%s', (_name, kind, model, judge) => {
     expect(capabilitiesOf(kind, model).judge).toBe(judge);
+  });
+
+  it.each(
+    AGENT_ACCOUNT_KINDS.flatMap((kind) =>
+      ['claude-opus-5-5', 'claude-sonnet-4-5', 'gpt-5.5'].map((model) => [kind, model] as const),
+    ),
+  )('%s on %s: no capability is rules', (kind, model) => {
+    expect(capabilitiesOf(kind, model).judge).not.toBe('rules');
   });
 
   // Delivery rule 3 (spec §6.2): a message injected mid-turn counts as delivered only by a receipt.

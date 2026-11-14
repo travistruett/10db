@@ -16,6 +16,7 @@ import {
   RecordedAnswer,
   type PersonId,
   InvalidError,
+  LimitName,
   isParkChoice,
   kindsOfTask,
   MCP_TOOL_GRANT_DETAIL,
@@ -67,15 +68,19 @@ import {
   type DbReader,
   type Json,
   type WriteContext,
+  insertTrustGrant,
 } from '@10db/db';
+import { z } from 'zod';
 import type { StateStore } from '../events';
 import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
 import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
+import { grantTargetOf } from '../trust';
 import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
+import { LIMIT_DETAIL } from './limit-card';
 import { applyMcpApproval } from './mcp-approval';
 import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
@@ -407,6 +412,10 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
     applyMcpServerChoice(ctx, item, answer);
     return;
   }
+  if (answer.choice === PermissionChoice.AlwaysInProject) {
+    applyGrantChoice(ctx, item, answer, summary);
+    return;
+  }
   const rule = storableRule(toolName, summary);
   if (rule === undefined) return;
   if (answer.choice === PermissionChoice.AllowWorkstream) {
@@ -440,6 +449,31 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
       sourceId,
     });
   }
+}
+
+/**
+ * Always in this project on a limit or an escalation card: a grant of the card's limit, whose target is the
+ * builder's note or the call quoted. A call too long to keep needs a note, so the answer is refused without one.
+ */
+function applyGrantChoice(
+  ctx: WriteContext,
+  item: InboxItemDto,
+  answer: InboxAnswer,
+  summary: string,
+): void {
+  const target = grantTargetOf(answer.note ?? null, summary);
+  if (target === null)
+    throw new InvalidError(
+      'Say in the note what to allow: this call is too long to keep as it is.',
+    );
+  // The detail is JSON the broker wrote; read the limit back by its schema.
+  const limit = z.enum(LimitName).safeParse(item.detail?.[LIMIT_DETAIL]);
+  insertTrustGrant(ctx, {
+    projectId: item.projectId,
+    limit: limit.success ? limit.data : null,
+    target,
+    sourceInboxId: item.id,
+  });
 }
 
 /**

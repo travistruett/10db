@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectId, TrustGrantId } from './ids';
 import { TrustSwitches } from './trust';
 
 type ValueOf<T> = T[keyof T];
@@ -66,3 +67,30 @@ export const LiveSystemsDto = z.strictObject({
   }),
 });
 export type LiveSystemsDto = z.infer<typeof LiveSystemsDto>;
+
+/** The longest a grant's target may be. */
+export const GRANT_TARGET_MAX = 500;
+
+/**
+ * What a grant allows, as one line every judge reads: the builder's note, or the call in quotes. No newline or
+ * tab, so it can't add a list entry, and never `$defaults`, which would splice Claude Code's own rules in.
+ */
+export const GrantTarget = z
+  .string()
+  .trim()
+  .min(1)
+  .max(GRANT_TARGET_MAX)
+  .regex(/^[^\n\r\t]+$/, { message: 'A grant is one line' })
+  .refine((s) => !s.includes('$defaults'), { message: 'A grant cannot name $defaults' });
+export type GrantTarget = z.infer<typeof GrantTarget>;
+
+/** A call the builder allowed in a project from now on (Always in this project): `GET /projects/:projectId/trust-grants`. */
+export const TrustGrantDto = z.strictObject({
+  id: TrustGrantId,
+  projectId: ProjectId,
+  /** The limit the card named; null when it named none (an escalation, or a call 10db's judge wasn't sure of). */
+  limit: z.enum(LimitName).nullable(),
+  target: GrantTarget,
+  createdAt: z.iso.datetime(),
+});
+export type TrustGrantDto = z.infer<typeof TrustGrantDto>;

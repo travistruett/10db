@@ -1313,6 +1313,12 @@ describe('buildSessionPrompt for flow steps', () => {
       WEB_JUDGED_SENTENCE,
     ],
     [
+      "tendb names 10db's judge",
+      { judged: true, judge: 'tendb' as const, webJudged: true },
+      JUDGED_LANE_RULE.replace("Claude Code's auto mode judges", "10db's judge checks"),
+      "WebSearch and WebFetch go to 10db's judge, which refuses a fetch that would send the project's code or secrets out.",
+    ],
+    [
       'a lane on the floor',
       { judged: false },
       "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
@@ -1406,6 +1412,20 @@ describe('buildSessionPrompt for flow steps', () => {
       "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
     const CLAUDE_EDIT =
       'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
+
+    it('a Codex session with web search says it opens no page; without it, nothing', () => {
+      const line = "Web search answers from OpenAI's index; it opens no page you name.";
+      expect(buildSessionPrompt({ ...codexInput, codexWebSearch: true })).toContain(line);
+      expect(buildSessionPrompt(codexInput)).not.toContain(line);
+      expect(
+        buildSessionPrompt({
+          ...base,
+          action: { kind: 'start' },
+          sandboxed: true,
+          codexWebSearch: true,
+        }),
+      ).not.toContain(line);
+    });
 
     it('tells a Codex lane that ending its turn finishes the step, and a handoff is only for 10db to ask', () => {
       const prompt = buildSessionPrompt(codexInput);

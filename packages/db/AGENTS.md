@@ -114,4 +114,12 @@ only process that writes the database.
   (generated): `skip_listings.config_head`, the commit a check read the run's config through (null when it read
   none); `lastConfigHead` answers the newest, so each ending lists the config changed since the last check that
   read it, and a check that couldn't read the paths leaves them to the next.
+- Chats, migration 0086 (generated; sessions M5a): `chat_tasks` (`chat_id` and `task_id` together the key, `created_at`),
+  the tasks a chat filed, which scope its `edit_task` and `remove_task`; `conversations.commands`; and a rebuild of `chats` that makes
+  `last_activity_at` nullable and `conversation_id` unique.
+- Grants, migration 0087 (generated; trust line §5, T5): `trust_grants` (`store/trust-grants.ts`), one row per
+  Always in this project answer: the project (deleted with it), the limit its card named or null (`limit_name`, a
+  CHECK over the four), a one-line `target` parsed with `GrantTarget` before it is written, and the card it came
+  from. `listTrustGrants` answers a project's oldest first; `deleteTrustGrant` answers false for a grant that isn't
+  that project's. The writes append no event.
 - `rigorFigures` (`store/rigor-figures.ts`) computes, with nothing stored, what each rigor's tasks that became done in a period took: a task is in the window by its last `task.changed` to `done` (its `updated_at` when none was logged) and a task still in a Workbench pass is left out (one taken out runs as an ordinary task); a step counts when `startedAt` is set, send-backs are the `step.changed` events whose `sentBackBy` is not `builder`, pull requests are distinct batch PR URLs, and the judge-override share reads the project's answered (acted or overridden) `task_rigor` rows in `judge_calls` through `task_id`. `humanTouchDays` counts every `InboxKind` through one `Record<InboxKind, number>`, so a new kind fails typecheck until it has a column.

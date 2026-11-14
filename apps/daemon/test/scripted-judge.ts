@@ -20,6 +20,7 @@ export function scriptedJudge(
   const requests: JudgeRequest[] = [];
   return {
     off: false,
+    ready: () => Promise.resolve(true),
     requests,
     asked: (decision) => requests.filter((r) => r.decision === decision),
     async choose(req): Promise<JudgeAnswer> {

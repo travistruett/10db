@@ -8,7 +8,13 @@ import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from
 import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
-import { JUDGE_LABELS, NATIVE_JUDGE_NOTE, TRUST_ROWS } from './trust-rows';
+import {
+  JUDGE_LABELS,
+  JUDGE_LIST_NOTE,
+  NATIVE_JUDGE_NOTE,
+  TENDB_NOT_READY_LABEL,
+  TRUST_ROWS,
+} from './trust-rows';
 
 /** A row's description with the note on each agent under it. */
 export function TrustRowText({
@@ -68,7 +74,13 @@ function judgeNote(row: AccountJudgeDto): string | null {
 }
 
 /** Who judges a new task's calls on each account, on the model it would run; read-only. */
-function JudgeList({ judges }: { readonly judges: readonly AccountJudgeDto[] }) {
+function JudgeList({
+  judges,
+  tendbReady,
+}: {
+  readonly judges: readonly AccountJudgeDto[];
+  readonly tendbReady: boolean;
+}) {
   const headingId = useId();
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
@@ -76,13 +88,14 @@ function JudgeList({ judges }: { readonly judges: readonly AccountJudgeDto[] }) 
         Judge
       </Title>
       <Text size="sm" c="dimmed">
-        What decides a new task's routine calls on each account, on the model it would run.
+        What decides a new task's routine calls on each account, on the model it would run.{' '}
+        {JUDGE_LIST_NOTE}
       </Text>
       <Paper withBorder radius="md" component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
         {judges.map((row, i) => (
           <Fragment key={row.accountId}>
             {i > 0 ? <Divider component="li" aria-hidden /> : null}
-            <JudgeRow row={row} />
+            <JudgeRow row={row} tendbReady={tendbReady} />
           </Fragment>
         ))}
       </Paper>
@@ -90,7 +103,13 @@ function JudgeList({ judges }: { readonly judges: readonly AccountJudgeDto[] }) 
   );
 }
 
-function JudgeRow({ row }: { readonly row: AccountJudgeDto }) {
+function JudgeRow({
+  row,
+  tendbReady,
+}: {
+  readonly row: AccountJudgeDto;
+  readonly tendbReady: boolean;
+}) {
   const labelId = useId();
   const note = judgeNote(row);
   return (
@@ -118,7 +137,9 @@ function JudgeRow({ row }: { readonly row: AccountJudgeDto }) {
         )}
       </Stack>
       <Text size="sm" ta="right">
-        {JUDGE_LABELS[row.judge]}
+        {row.judge === JudgeKind.Tendb && !tendbReady
+          ? TENDB_NOT_READY_LABEL
+          : JUDGE_LABELS[row.judge]}
       </Text>
     </Group>
   );
@@ -202,7 +223,9 @@ export function TrustSection() {
               </SettingRow>
             ))}
       </SettingsCard>
-      {trust.data === undefined ? null : <JudgeList judges={trust.data.judges} />}
+      {trust.data === undefined ? null : (
+        <JudgeList judges={trust.data.judges} tendbReady={trust.data.tendbReady} />
+      )}
     </Stack>
   );
 }
