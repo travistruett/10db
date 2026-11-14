@@ -543,7 +543,9 @@ describe('isModelRefusal', () => {
   it('reads a long error in linear time', () => {
     const started = performance.now();
     isModelRefusal('invalid_request', `${LAUNCHED} ${'model '.repeat(20_000)}`, LAUNCHED);
-    expect(performance.now() - started).toBeLessThan(200);
+    // A linear read takes a few milliseconds and a quadratic one many seconds; the bound leaves room
+    // for a loaded machine without letting a quadratic read through.
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 
   it('matches a launch ID that carries the context suffix without it', () => {
