@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -564,6 +572,10 @@ describe('git guard in an agent worktree beside the checkout', () => {
     checkout.git('worktree', 'add', '-q', '-b', 'feat/elsewhere', elsewhere);
     // A tracked file deleted from disk is still one index entry.
     rmSync(join(agent, 'b.ts'));
+    // Names zsh reads as a directory-stack entry, or that CDPATH may send elsewhere, which lead to
+    // the agent worktree when read as plain paths.
+    symlinkSync(agent, join(checkout.dir, '+0'));
+    symlinkSync(agent, join(checkout.dir, 'agentlink'));
     // A worktree whose tracked directory src/ was replaced on disk by a file named src.
     replaced = join(layout, '10db-worktrees', 'replaced');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/replaced', replaced);
@@ -696,6 +708,12 @@ describe('git guard in an agent worktree beside the checkout', () => {
     },
   );
 
+  it('shows a subagent in its own worktree how to discard one file', () => {
+    const { outcome, reason } = runHook(bash('git checkout -- .', agent, { agent_id: 'a1' }));
+    expect(outcome).toBe('deny');
+    expect(reason).toContain('git show <ref>:./<path> > <path>');
+  });
+
   it('applies from a subdirectory of the agent worktree', () => {
     expect(inAgent('git restore c.ts', join(agent, 'src'))).toBe('allow');
   });
@@ -716,7 +734,22 @@ describe('git guard in an agent worktree beside the checkout', () => {
       'allow',
     ],
     ['cd -- to the agent worktree', 'cd -- AGENT && git restore a.ts', 'checkout', 'allow'],
-    ['a relative cd within the agent worktree', 'cd src && git restore c.ts', 'agent', 'allow'],
+    ['a ./ cd within the agent worktree', 'cd ./src && git restore c.ts', 'agent', 'allow'],
+    [
+      'a ../ cd into the agent worktree',
+      'cd ../10db-worktrees/agent && git restore a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'a bare relative cd, which CDPATH may send elsewhere',
+      'cd agentlink && git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['a bare relative cd within the agent worktree', 'cd src && git restore c.ts', 'agent', 'ask'],
+    ['zsh cd +N, a directory-stack entry', 'cd +0 && git restore a.ts', 'checkout', 'ask'],
+    ['zsh cd -- +N', 'cd -- +0 && git checkout -- a.ts', 'checkout', 'ask'],
     [
       'two cds ending in the agent worktree',
       'cd CHECKOUT && cd AGENT && git restore a.ts',
@@ -789,6 +822,23 @@ describe('git guard judging a push in the directory the command runs in', () => 
     checkout.git('worktree', 'add', '-q', '-b', 'feat/pr147', worktree);
     onMainSub = join(checkout.dir, 'sub');
     mkdirSync(onMainSub);
+    symlinkSync(worktree, join(checkout.dir, '+0'));
+    symlinkSync(worktree, join(checkout.dir, '-0'));
+    symlinkSync(worktree, join(checkout.dir, 'wtlink'));
+  });
+
+  it.each<[string, string]>([
+    ['zsh cd +N, a directory-stack entry', 'cd +0 && git push'],
+    ['zsh cd -N', 'cd -0 && git push'],
+    ['a bare relative cd, which CDPATH may send elsewhere', 'cd wtlink && git push'],
+  ])('asks for a push after a cd the shell may read otherwise: %s', (_name, command) => {
+    expect(run(command, checkout.dir)).toBe('ask');
+  });
+
+  it('a subagent pushing where the guard cannot tell the branch is told to name it', () => {
+    const { outcome, reason } = runHook(bash('cd $HOME && git push', worktree, { agent_id: 'a1' }));
+    expect(outcome).toBe('deny');
+    expect(reason).toContain('git push origin <branch>');
   });
 
   afterAll(() => {
@@ -1183,12 +1233,17 @@ describe('git guard inside a subagent', () => {
     runHook(bash(command, clean, { agent_id: agentId }));
 
   it.each<[string, string, Outcome, string]>([
-    ['a whole-tree discard', 'git checkout -- .', 'deny', 'git show HEAD:<path> > <path>'],
+    [
+      'a whole-tree discard outside an agent worktree',
+      'git checkout -- .',
+      'deny',
+      'your own worktree',
+    ],
     [
       'a named-file discard outside an agent worktree',
       'git restore a.ts',
       'deny',
-      'git show HEAD:<path> > <path>',
+      'your own worktree',
     ],
     ['a hard reset', 'git reset --hard HEAD', 'deny', 'git revert'],
     ['a stash', 'git stash', 'deny', 'git diff > <file>'],
@@ -1220,6 +1275,16 @@ describe('git guard inside a subagent', () => {
     ['a non-string agent_id', 7],
   ])('still asks in the main session: %s', (_name, agentId) => {
     expect(asAgent('git rebase main', agentId).outcome).toBe('ask');
+  });
+
+  it('still asks in an --agent main session, which carries agent_type without agent_id', () => {
+    expect(runHook(bash('git rebase main', clean, { agent_type: 'implementer' })).outcome).toBe(
+      'ask',
+    );
+  });
+
+  it('never shows a subagent how to overwrite files outside its own worktree', () => {
+    expect(asAgent('git restore a.ts', 'a1').reason).not.toContain('git show');
   });
 });
 

@@ -724,7 +724,8 @@ function resolveDirectory(base, target) {
 /**
  * The directory a plain `cd` segment leaves the shell in, or null when it can't be read: a cd with
  * no operand, more than one, or a path `resolveDirectory` can't resolve. `-L` and `--` are the
- * only options read.
+ * only options read. zsh reads `+N` and `-N` as directory-stack entries, and the shell looks a
+ * relative name up in CDPATH first unless it starts with `./` or `../`, so neither is read.
  * @param {string[]} words the segment's words, the first being `cd`
  * @param {string | null} base the directory it runs in
  * @returns {string | null}
@@ -734,7 +735,10 @@ function cdDestination(words, base) {
   if (words[i] === '-L') i += 1;
   if (words[i] === '--') i += 1;
   if (words.length !== i + 1) return null;
-  return resolveDirectory(base, words[i]);
+  const target = words[i];
+  if (/^[+-]\d+$/.test(target)) return null;
+  const searched = !posix.isAbsolute(target) && !/^\.\.?(\/|$)/.test(target);
+  return searched ? null : resolveDirectory(base, target);
 }
 
 /**
@@ -1178,7 +1182,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       verdicts.push({
         decision: 'ask',
         reason:
-          'A wrapper option the guard does not know comes before the command, so it cannot tell which word runs. Run the command without the wrapper, or approve it.',
+          'A wrapper option the guard does not know comes before the command, so it cannot tell which word runs. Run the command without the wrapper.',
       });
     }
     const program = programAt(seg.words, start);
@@ -1400,14 +1404,19 @@ function judge(command, cwd, whole = command, startDir = cwd) {
           deletesOnlyMergedBranches(a, cwd)
         )
       ) {
+        const unknownBranch = git.verb === 'push' && pushTargets.length === 0 && pushDir === null;
         verdicts.push({
           decision: 'ask',
-          reason: pushesMain
-            ? 'main changes only through a pull request.'
-            : `git ${git.verb} ${a.join(' ')} cannot be undone easily.`,
-          instead: pushesMain
-            ? 'Push your branch and open a pull request.'
-            : insteadOf(git.verb, rewritesRefs),
+          reason: unknownBranch
+            ? 'The guard cannot tell which directory this push runs in, so it cannot tell which branch a bare push sends; main changes only through a pull request.'
+            : pushesMain
+              ? 'main changes only through a pull request.'
+              : `git ${git.verb} ${a.join(' ')} cannot be undone easily.`,
+          instead: unknownBranch
+            ? 'Name the branch: git push origin <branch>.'
+            : pushesMain
+              ? 'Push your branch and open a pull request.'
+              : insteadOf(git.verb, rewritesRefs, () => inAgentWorktree(dir ?? cwd)),
         });
       }
     }
@@ -1440,14 +1449,18 @@ function judge(command, cwd, whole = command, startDir = cwd) {
  * can approve it. Undefined when there is none to suggest.
  * @param {string} verb
  * @param {boolean} rewritesRefs a push that forces or deletes a remote ref
+ * @param {() => boolean} inOwnWorktree whether git runs in an agent worktree in `10db-worktrees/`
  * @returns {string | undefined}
  */
-function insteadOf(verb, rewritesRefs) {
+function insteadOf(verb, rewritesRefs, inOwnWorktree) {
   if (verb === 'push' && rewritesRefs) return 'Push the rewritten history to a new branch instead.';
-  if (verb === 'checkout' || verb === 'restore') {
-    return 'To discard one file, write its committed copy over it: git show HEAD:<path> > <path>.';
+  if (verb === 'checkout' || verb === 'restore' || verb === 'reset') {
+    // Files outside the agent's own worktree may hold another session's uncommitted work.
+    const discard = inOwnWorktree()
+      ? 'To discard one file, write its committed copy over it: git show <ref>:./<path> > <path>.'
+      : 'Discard files only in your own worktree in 10db-worktrees/, never in a checkout another session may be using.';
+    return verb === 'reset' ? `${discard} To undo a commit, use git revert.` : discard;
   }
-  if (verb === 'reset') return 'Undo committed work with git revert, which makes a new commit.';
   if (verb === 'stash') {
     return 'Commit the work to your branch, or save it as a patch with git diff > <file> in your scratchpad.';
   }

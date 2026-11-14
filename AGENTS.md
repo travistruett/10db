@@ -124,12 +124,15 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   A bare `git push` is judged in the directory the command runs in: the Claude guard follows a
   `cd` (and `git -C`) earlier in the same command line, so `cd ../10db-worktrees/x && git push`
   on a feature branch doesn't ask, while a `cd` to a checkout on main, or to a path it can't read
-  (a variable, substitution, `~`, glob, `pushd`, `eval`, a subshell or a `cd` that may not run),
+  (a variable, substitution, `~`, glob, `pushd`, `eval`, a subshell, a `cd` that may not run, a
+  relative name without `./` or `../`, which CDPATH may redirect, or zsh's stack entries `+N` and
+  `-N`),
   still asks, as does a push after a subshell, backtick substitution or `&` that follows a `cd`. This
   is separate from the discard exception above, which follows only `cd <dir> &&` and never `-C`.
   Inside a subagent (the hook input carries `agent_id`), where nobody can answer, every ask in the
-  Claude guard is a deny instead, whose reason names a way that needs no approval; the main session
-  still asks. Codex's rules can't tell a subagent apart and keep prompting.
+  Claude guard is a deny instead. Its reason keeps the rule, names a way that needs no approval
+  where there is one, and otherwise says to stop and report the command as blocked; the main
+  session still asks. Codex's rules can't tell a subagent apart and keep prompting.
 - `.claude/hooks/git-guard.mjs` (Claude Code) and `.codex/rules/default.rules` (Codex) enforce
   these rules. The Claude guard fails open; only `TENDB_GIT_GUARD=off` in the environment
   Claude Code starts with disables it. It also asks before `gh pr merge --admin`, `gh api` writes
