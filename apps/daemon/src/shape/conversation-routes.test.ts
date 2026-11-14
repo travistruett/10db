@@ -23,14 +23,20 @@ import { seedWorkstream, waitFor } from '../../test/fixtures';
 import { writeFullOutput } from '../conversation';
 import { createConversationServices } from '../daemon';
 import { createApp } from '../api';
+import { devUiMayRead, renderMayRead } from '../screens';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
 // Sessions spec §10: the conversation routes, over a real store, the explore engine and Plan.
 
 const TOKEN = 'ui-token';
+const RENDER = 'render-token';
+const DEV_UI = 'dev-ui-token';
 let f: ServiceFixture;
 let conv: ConversationId;
-let request: (path: string, init?: { method?: string; body?: unknown }) => Promise<Response>;
+let request: (
+  path: string,
+  init?: { method?: string; body?: unknown; token?: string },
+) => Promise<Response>;
 
 beforeEach(() => {
   f = createServiceFixture();
@@ -40,6 +46,15 @@ beforeEach(() => {
     allowedOrigins: [],
     token: TOKEN,
     onUnexpectedError: () => undefined,
+    screens: {
+      claim: () => Promise.resolve(null),
+      deliver: () => false,
+      refuse: () => false,
+      tokenValid: (token) => token === RENDER,
+      mayRead: renderMayRead,
+      image: () => null,
+    },
+    devUi: { token: DEV_UI, mayRead: devUiMayRead },
     services: stubServices(
       createConversationServices({
         state: f.state,
@@ -56,7 +71,10 @@ beforeEach(() => {
     Promise.resolve(
       app.request(path, {
         method: init.method ?? 'GET',
-        headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${init.token ?? TOKEN}`,
+          'content-type': 'application/json',
+        },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       }),
     );
@@ -190,5 +208,19 @@ describe('the conversation routes', () => {
       body: { text: 'Hello' },
     });
     expect(res.status).toBe(409);
+  });
+
+  it.each([
+    ['a screen’s render token', RENDER],
+    ['the dev UI’s token', DEV_UI],
+  ])('lets %s read a Plan conversation, and no task’s', async (_name, token) => {
+    const ws = seedWorkstream(f.c.store);
+    f.state.write((ctx) => insertBuilderMessage(ctx, ws.task.id, { body: 'First', files: [] }));
+    const task = taskConversationOf(f.c.store.db, ws.task.id);
+    if (task === null) throw new Error('no thread');
+    for (const path of ['', '/items', '/live']) {
+      expect((await request(`/conversations/${conv}${path}`, { token })).status).toBe(200);
+      expect((await request(`/conversations/${task.id}${path}`, { token })).status).toBe(403);
+    }
   });
 });

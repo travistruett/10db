@@ -118,6 +118,7 @@ import {
   type ScreenRenderRequest,
   type ShapeConvertError,
   ConversationId,
+  ConversationOwnerKind,
   ConversationItemId,
   PostConversationMessage,
 } from '@10db/contracts';
@@ -271,7 +272,26 @@ function pastedPictures(
   );
 }
 
+/** The conversation a `/conversations/:id…` path names, when it does. */
+const CONVERSATION_PATH = /^\/conversations\/([^/]+)/;
+
 export function createApp(deps: ApiDeps) {
+  /**
+   * A token held by code an agent may edit (a screen's, the dev UI's) reads a conversation only where it
+   * is a Plan's: what Plan's screen read before its transcript moved, never a task's thread, its tool
+   * output or a chat. A path that names no conversation, or one 10db lacks (which answers 404), passes.
+   */
+  const shapeOwnedOrNone = (path: string): boolean => {
+    const raw = CONVERSATION_PATH.exec(path)?.[1];
+    if (raw === undefined) return true;
+    const id = ConversationId.safeParse(raw);
+    if (!id.success) return true;
+    try {
+      return deps.services.getConversation(id.data).owner.kind === ConversationOwnerKind.Shape;
+    } catch {
+      return true;
+    }
+  };
   const app = new Hono()
     .use(
       '*',
@@ -289,7 +309,7 @@ export function createApp(deps: ApiDeps) {
       if (sameToken(presented, deps.token)) return next();
       // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
       if (presented !== '' && deps.devUi && sameToken(presented, deps.devUi.token))
-        return deps.devUi.mayRead(c.req.method, c.req.path)
+        return deps.devUi.mayRead(c.req.method, c.req.path) && shapeOwnedOrNone(c.req.path)
           ? next()
           : c.json(
               { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
@@ -298,7 +318,7 @@ export function createApp(deps: ApiDeps) {
       // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
       // shows and nothing else, so no write, no digest and no command can be reached with it.
       if (presented !== '' && deps.screens?.tokenValid(presented) === true)
-        return deps.screens.mayRead(c.req.method, c.req.path)
+        return deps.screens.mayRead(c.req.method, c.req.path) && shapeOwnedOrNone(c.req.path)
           ? next()
           : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
       return c.json({ error: 'unauthorized' }, 401);
