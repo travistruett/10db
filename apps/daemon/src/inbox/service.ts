@@ -533,9 +533,9 @@ export function createInboxService(deps: {
       if (waiter) waiter.resolve(answer);
       else deps.onParkedAnswer(target, item);
     }
-    // A Plan conversation's session waits with no target, so it is handed the answer here; one that
-    // stopped waiting withdrew its card, and a stored rule from the answer still holds.
-    if (item.detail?.[SHAPE_CARD_KEY] !== undefined)
+    // A conversation's session (a Plan's, a chat's) waits with no target, so it is handed the answer
+    // here; one that stopped waiting withdrew its card, and a stored rule from the answer still holds.
+    if (item.detail?.[CONVERSATION_CARD_KEY] !== undefined)
       for (const waiter of live?.values() ?? []) waiter.resolve(answer);
     return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
   }

@@ -38,6 +38,7 @@ import type { ExploreProfile } from '../sessions';
 import type { ShapeAccess, ShapeLaunch, ShapePrepared, ShapePrepareInput } from '../shape';
 import { buildTrustPolicy, projectLiveSystems } from '../trust';
 import { judgeChatCall } from './confinement';
+import type { ChatLiveSessions } from './live-sessions';
 import { CHAT_SYSTEM_PROMPT } from './prompt';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
@@ -95,6 +96,8 @@ export interface ChatHooksDeps {
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
+  /** Where the chat's tools find the session that calls them. */
+  readonly live: ChatLiveSessions;
 }
 
 /** A builder message's words for the session: under its id, with each picture not sent as a block named by path. */
@@ -162,10 +165,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               signal: ending.signal,
               observer: start.observer,
             });
+      deps.live.open(conv.id, {
+        sessionId: start.sessionId,
+        observer: start.observer,
+        signal: ending.signal,
+      });
       let released: Promise<void> | null = null;
       const release = (): Promise<void> => {
         released ??= (async () => {
           ending.abort();
+          deps.live.end(conv.id, start.sessionId);
           try {
             await ready?.release();
           } catch (error) {

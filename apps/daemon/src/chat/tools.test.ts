@@ -1,0 +1,288 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { InboxItemDto } from '@10db/contracts';
+import {
+  ChatDto,
+  ChatToolName,
+  ConversationDto,
+  ProjectDto,
+  TaskDto,
+  TaskId,
+} from '@10db/contracts';
+import { chatMadeTask, listInbox } from '@10db/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { apiClient } from '../../test/api-client';
+import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
+import { seedProfiles } from '../../test/seed-profiles';
+import { startDaemon, type RunningDaemon } from '../daemon';
+import { FakeAdapter, type FakeShapeTurn } from '../sessions';
+import { BUILDER_KEPT_TASK, BUILDER_STOPPED } from './tools';
+
+// Sessions spec §6.6: a chat's agent reaches every builder tool through 10db's own /mcp by its
+// session's token, held to the chat's project; removing or retiring work it didn't make asks the
+// builder on a card. Through a started daemon on the fake adapter and a real SQLite file.
+
+let dir: { path: string; cleanup(): void };
+let repo: { path: string; cleanup(): void };
+let daemon: RunningDaemon | null;
+let adapter: FakeAdapter;
+let api: ReturnType<typeof apiClient>;
+let project: ProjectDto;
+
+beforeEach(async () => {
+  dir = tempDir('daemon');
+  repo = createTempRepo();
+  adapter = new FakeAdapter({});
+  daemon = await startDaemon({
+    sandbox: null,
+    dataDir: dir.path,
+    port: 0,
+    adapter,
+    logLevel: 'warn',
+    caffeinate: () => null,
+    watch: false,
+  });
+  seedProfiles(daemon.state);
+  api = apiClient(daemon.url, daemon.token);
+  project = await api.post('/projects', ProjectDto, {
+    name: 'demo',
+    repoPath: repo.path,
+    gateCommand: 'true',
+    areas: [{ name: 'src', globs: ['src/**'] }],
+  });
+});
+afterEach(async () => {
+  await daemon?.stop();
+  repo.cleanup();
+  dir.cleanup();
+});
+
+const running = (): RunningDaemon => {
+  if (daemon === null) throw new Error('no daemon is running');
+  return daemon;
+};
+
+async function connect(url: string, token: string): Promise<Client> {
+  const client = new Client({ name: 'test', version: '0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  return client;
+}
+
+type Call = (name: string, args: Record<string, unknown>) => Promise<string>;
+
+/** A tool's answer as the agent reads it: the text of its one block. */
+const ToolText = z.object({
+  content: z.array(z.object({ type: z.literal('text'), text: z.string() })),
+});
+
+/**
+ * The chat's agent takes a turn that runs `work` against /mcp with the session's own token; the
+ * promise settles once the turn has ended.
+ */
+async function agentTurn(chat: ChatDto, work: (call: Call, turn: FakeShapeTurn) => Promise<void>) {
+  const outcome: { failure: Error | null } = { failure: null };
+  adapter.shapeBehaviour = async (turn) => {
+    const client = await connect(turn.spec.mcp.url, turn.spec.mcp.token);
+    try {
+      await work(async (name, args) => {
+        const result = ToolText.parse(await client.callTool({ name, arguments: args }));
+        return result.content.map((c) => c.text).join('');
+      }, turn);
+    } catch (error) {
+      outcome.failure = error instanceof Error ? error : new Error('the turn failed');
+    } finally {
+      await client.close();
+    }
+    return { text: 'Done.' };
+  };
+  await api.post(`/conversations/${chat.conversationId}/messages`, z.unknown(), { text: 'Go on.' });
+  await waitForAsync(async () => {
+    const conv = await api.get(`/conversations/${chat.conversationId}`, ConversationDto);
+    return conv.state === 'idle_warm' ? conv : false;
+  });
+  if (outcome.failure !== null) throw outcome.failure;
+}
+
+const newChat = () =>
+  api.post('/chats', ChatDto, { projectId: project.id, model: null, tabPosition: 0 });
+
+const builderTask = (title = 'Builder work') =>
+  api.post(`/projects/${project.id}/tasks`, TaskDto, {
+    title,
+    acceptanceCriteria: ['It works'],
+    areas: ['src'],
+  });
+
+const openCards = () =>
+  listInbox(running().state.db, { states: ['OPEN'] }).filter((c) => c.kind === 'permission');
+
+async function answer(card: InboxItemDto, choice: 'allow_once' | 'deny'): Promise<void> {
+  await api.post(`/inbox/${card.id}/answer`, z.unknown(), { choice });
+}
+
+const tasksOf = async () =>
+  (await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto))).filter(
+    (t) => t.status === 'open',
+  );
+
+describe("a chat's tools on /mcp", () => {
+  it('lists every builder tool and set_title, and no lane or Plan tool', async () => {
+    const chat = await newChat();
+    let names: string[] = [];
+    await agentTurn(chat, async (_call, turn) => {
+      const client = await connect(turn.spec.mcp.url, turn.spec.mcp.token);
+      names = (await client.listTools()).tools.map((t) => t.name);
+      await client.close();
+    });
+    expect(new Set(names)).toEqual(new Set(Object.values(ChatToolName)));
+  });
+
+  it("files a task in the chat's own project whatever project the call names, and records it", async () => {
+    const chat = await newChat();
+    const other = await api.post('/projects', ProjectDto, {
+      name: 'other',
+      repoPath: createTempRepo().path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    });
+    let filed = '';
+    await agentTurn(chat, async (call) => {
+      filed = await call('create_task', {
+        projectId: other.id,
+        title: 'Retry login once on a 401',
+        acceptanceCriteria: ['A 401 retries once'],
+        areas: ['src'],
+      });
+    });
+    const result = z
+      .object({ kind: z.literal('task'), taskId: TaskId, column: z.string() })
+      .parse(JSON.parse(filed));
+    expect(result.column).toBe('Ready');
+    expect((await tasksOf()).map((t) => t.title)).toEqual(['Retry login once on a 401']);
+    expect(chatMadeTask(running().state.db, chat.id, result.taskId)).toBe(true);
+  });
+
+  it("edits the builder's task with the old values for Undo, and starts a task with no card", async () => {
+    const chat = await newChat();
+    const task = await builderTask('Old title');
+    let edited = '';
+    let started = '';
+    await agentTurn(chat, async (call) => {
+      edited = await call('edit_task', { taskId: task.id, title: 'New title', why: task.why });
+      started = await call('start_task', { taskId: task.id });
+    });
+    expect(JSON.parse(edited)).toEqual({
+      kind: 'task_edit',
+      taskId: task.id,
+      title: 'New title',
+      previous: { title: 'Old title' },
+    });
+    expect(JSON.parse(started)).toEqual({ kind: 'start', taskId: task.id, started: true });
+    expect(openCards()).toEqual([]);
+  });
+
+  it("asks before removing the builder's task: Deny keeps it, Allow once removes it", async () => {
+    const chat = await newChat();
+    const task = await builderTask();
+    const said: string[] = [];
+    const turn = agentTurn(chat, async (call) => {
+      said.push(await call('remove_task', { taskId: task.id }));
+      said.push(await call('remove_task', { taskId: task.id }));
+    });
+    const first = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    expect(openCards()).toHaveLength(1);
+    expect(first.detail).toMatchObject({ conversationId: chat.conversationId });
+    expect((await api.get(`/conversations/${chat.conversationId}`, ConversationDto)).state).toBe(
+      'waiting_card',
+    );
+    await answer(first, 'deny');
+    const second = await waitForAsync(() =>
+      Promise.resolve(openCards().find((c) => c.id !== first.id) ?? false),
+    );
+    expect((await tasksOf()).map((t) => t.id)).toEqual([task.id]);
+    await answer(second, 'allow_once');
+    await turn;
+    expect(said[0]).toContain(BUILDER_KEPT_TASK);
+    expect(await tasksOf()).toEqual([]);
+  });
+
+  it("removes the chat's own task with no card, and asks before retiring a record", async () => {
+    const chat = await newChat();
+    const retired: string[] = [];
+    const turn = agentTurn(chat, async (call) => {
+      const filed = JSON.parse(
+        await call('create_task', { title: 'Mine', acceptanceCriteria: ['x'], areas: ['src'] }),
+      ) as { taskId: string };
+      await call('remove_task', { taskId: filed.taskId });
+      retired.push(
+        await call('retire_knowledge', {
+          id: 'pri_0190a0b0-0000-7000-8000-000000000000',
+          reason: 'Ended',
+        }),
+      );
+    });
+    const card = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    expect(card.title).toBe('Retire a principle?');
+    expect(await tasksOf()).toEqual([]);
+    await answer(card, 'deny');
+    await turn;
+  });
+
+  it("renames an agent-titled chat cut at a word, and leaves the builder's name", async () => {
+    const chat = await newChat();
+    await agentTurn(chat, async (call) => {
+      await call('set_title', { title: 'Login fails after sleep because the token refresh races' });
+    });
+    expect((await api.get('/chats?open=1', z.array(ChatDto)))[0]?.title).toBe(
+      'Login fails after sleep',
+    );
+    await api.patch(`/chats/${chat.id}`, ChatDto, { title: 'Mine' });
+    await agentTurn(chat, async (call) => {
+      await call('set_title', { title: 'Something else' });
+    });
+    expect((await api.get('/chats?open=1', z.array(ChatDto)))[0]?.title).toBe('Mine');
+  });
+
+  it('withdraws a waiting card on Stop, and the call answers that the builder stopped', async () => {
+    const chat = await newChat();
+    const task = await builderTask();
+    let said = '';
+    const turn = agentTurn(chat, async (call) => {
+      said = await call('remove_task', { taskId: task.id });
+    });
+    const card = await waitForAsync(() => Promise.resolve(openCards()[0] ?? false));
+    await api.post(`/conversations/${chat.conversationId}/stop`, z.unknown());
+    await turn;
+    expect(said).toContain(BUILDER_STOPPED);
+    expect(listInbox(running().state.db, { states: ['OPEN'] }).map((c) => c.id)).not.toContain(
+      card.id,
+    );
+    expect((await tasksOf()).map((t) => t.id)).toEqual([task.id]);
+  });
+
+  it("refuses the UI token on /mcp, the chat's token on /builder/mcp, and an archived chat's token", async () => {
+    const chat = await newChat();
+    let token = '';
+    let url = '';
+    await agentTurn(chat, (_call, turn) => {
+      token = turn.spec.mcp.token;
+      url = turn.spec.mcp.url;
+      return Promise.resolve();
+    });
+    const post = (path: string, bearer: string) =>
+      fetch(path, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      });
+    expect((await post(url, running().token)).status).toBe(401);
+    expect((await post(`${running().url}/builder/mcp`, token)).status).toBe(401);
+    await api.post(`/chats/${chat.id}/archive`, ChatDto);
+    expect((await post(url, token)).status).toBe(401);
+  });
+});

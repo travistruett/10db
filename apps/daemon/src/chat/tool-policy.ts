@@ -1,0 +1,39 @@
+import { BuilderToolName, ChatToolName } from '@10db/contracts';
+
+// Sessions spec §6.6: which of a chat's tools run at once and which ask the builder. Every one is in
+// the session's `allowedTools`; the tool's own handler decides what asks, since only 10db knows which
+// tasks the chat filed.
+
+export const ChatToolPolicy = { Runs: 'runs', Asks: 'asks' } as const;
+export type ChatToolPolicy = (typeof ChatToolPolicy)[keyof typeof ChatToolPolicy];
+
+const R = ChatToolPolicy.Runs;
+const A = ChatToolPolicy.Asks;
+
+/**
+ * Removing a task the chat didn't file, and retiring, withdrawing or superseding a record, take the
+ * builder's work away: limit 1, asked on a card. Everything else runs, `start_task` included, since
+ * starting a task touches no limit.
+ */
+export const CHAT_TOOL_POLICY: Readonly<Record<ChatToolName, ChatToolPolicy>> = {
+  [BuilderToolName.ListProjects]: R,
+  [BuilderToolName.ListKinds]: R,
+  [BuilderToolName.ListTasks]: R,
+  [BuilderToolName.CreateTask]: R,
+  [BuilderToolName.EditTask]: R,
+  [BuilderToolName.RemoveTask]: A,
+  [BuilderToolName.StartTask]: R,
+  [BuilderToolName.MoveTask]: R,
+  [BuilderToolName.RunNext]: R,
+  [BuilderToolName.ListInbox]: R,
+  [BuilderToolName.StartShape]: R,
+  [BuilderToolName.ImportPlan]: R,
+  [BuilderToolName.SearchKnowledge]: R,
+  [BuilderToolName.SaveDecision]: R,
+  [BuilderToolName.SavePrinciple]: R,
+  [BuilderToolName.SupersedeKnowledge]: A,
+  [BuilderToolName.RetireKnowledge]: A,
+  [BuilderToolName.WithdrawKnowledge]: A,
+  [BuilderToolName.ListProposals]: R,
+  [ChatToolName.SetTitle]: R,
+};

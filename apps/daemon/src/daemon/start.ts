@@ -197,9 +197,16 @@ import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../ke
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
-import { createBuilderMcpHandler } from '../builder';
+import { createBuilderMcpHandler, createBuilderTools } from '../builder';
 import { createExploreEngine, pictureLimitsFor } from '../conversation';
-import { chatHooks, chatsUnavailable, createChatService, createConversationFiles } from '../chat';
+import {
+  chatHooks,
+  chatsUnavailable,
+  createChatLiveSessions,
+  createChatService,
+  createChatTools,
+  createConversationFiles,
+} from '../chat';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
@@ -1555,9 +1562,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // Until chats run on Codex (M5b), a project on a ChatGPT plan says when they come.
     unavailable: (projectId) => chatsUnavailable(brainstormRefusal(projectId) !== null),
   });
+  const chatLive = createChatLiveSessions();
   exploreEngine.register(
     ConversationOwnerKind.Chat,
     chatHooks({
+      live: chatLive,
       state,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
@@ -2319,6 +2328,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
+      chatTools: createChatTools({
+        state,
+        bus,
+        inbox,
+        live: chatLive,
+        builder: createBuilderTools(services),
+        getTask: (id) => services.getTask(id),
+      }),
     }),
   });
   // What a restart found of each explore conversation is settled before the API serves it.

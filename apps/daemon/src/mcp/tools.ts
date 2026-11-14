@@ -108,6 +108,7 @@ import {
 } from './claim-wait';
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
+import type { ChatToolsFor } from './chat-tools';
 import type { ShapeToolsFor } from './shape-tools';
 import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
@@ -137,6 +138,8 @@ export interface McpDeps {
   readonly dependencyChanges?: DependencyChanges;
   /** The tools of a Shape conversation's session; absent, such a session is refused. */
   readonly shapeTools?: ShapeToolsFor;
+  /** The tools of a chat's session; absent, such a session is refused. */
+  readonly chatTools?: ChatToolsFor;
 }
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;

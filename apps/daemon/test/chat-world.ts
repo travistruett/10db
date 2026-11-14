@@ -12,6 +12,7 @@ import { createTestStore, seedProject, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
+  createChatLiveSessions,
   chatsUnavailable,
   createChatService,
   type ChatHooksDeps,
@@ -95,6 +96,7 @@ export function chatWorld(
   engine.register(
     'chat',
     chatHooks({
+      live: createChatLiveSessions(),
       state,
       log: silentLogger,
       dataDir: dir.path,

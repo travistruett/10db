@@ -6,7 +6,17 @@ export { judgeChatCall } from './confinement';
 export { createConversationFiles, TASK_FILES_LATER } from './conversation-files';
 export { rankFiles } from './file-rank';
 export { CHAT_MCP_TOOLS, chatFolder, chatHooks, chatProfile, type ChatHooksDeps } from './hooks';
+export { createChatLiveSessions, type ChatLive, type ChatLiveSessions } from './live-sessions';
 export { CHAT_SYSTEM_PROMPT } from './prompt';
+export { CHAT_TOOL_POLICY, ChatToolPolicy } from './tool-policy';
+export {
+  BUILDER_KEPT_RECORD,
+  BUILDER_KEPT_TASK,
+  BUILDER_STOPPED,
+  createChatTools,
+  type BuilderTools,
+  type ChatToolsDeps,
+} from './tools';
 export {
   CHAT_ARCHIVED,
   CHANGE_MODEL_BETWEEN_TURNS,
