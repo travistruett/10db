@@ -195,6 +195,18 @@ describe('claimSandboxTempRoot', () => {
     }
   });
 
+  it('a 10db-ymcp env file of a dead daemon is swept', async () => {
+    const envFile = join(root, '10db-ymcp-0123456789ab.sh');
+    writeFileSync(envFile, "export TOKEN='x'\n", { mode: 0o400 });
+    writeFileSync(join(root, `10db-daemon-${String(await deadPid())}`), '', { mode: 0o400 });
+    const claim = claimSandboxTempRoot(root, process.pid, 'files');
+    try {
+      expect(existsSync(envFile)).toBe(false);
+    } finally {
+      claim.release();
+    }
+  });
+
   it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
     // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
     writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');

@@ -1,9 +1,23 @@
-import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { laneWritableRoots, type LaneWritableRoot } from './lane-writable';
-import { prepareYourMcpRun, type UnsandboxedStdioServer } from './your-mcp-launch';
+import {
+  launchYourMcpServers,
+  prepareYourMcpRun,
+  type UnsandboxedStdioServer,
+} from './your-mcp-launch';
 
 let root: TempDir;
 let home: string;
@@ -210,5 +224,98 @@ describe('prepareYourMcpRun', () => {
     expect(reasons.every((r) => r !== null)).toBe(true);
     expect(JSON.stringify(reasons)).not.toContain('sk-canary');
     expect(JSON.stringify(reasons)).not.toContain(checkout);
+  });
+});
+
+describe('launchYourMcpServers', () => {
+  let filesRoot: string;
+  beforeEach(() => {
+    filesRoot = join(realpathSync(root.path), 'run');
+    mkdirSync(filesRoot, { mode: 0o700 });
+  });
+
+  const launch = (servers: Record<string, UnsandboxedStdioServer>) =>
+    launchYourMcpServers({ home, filesRoot, laneWritable, servers });
+
+  it('writes one sealed env file per server, mode 0400, with the cleaned PATH and the home', () => {
+    const launched = launch({
+      a: server({
+        env: { PATH: `${checkout}/bin:${loginPath()}`, TOKEN: 'sk-canary' },
+        declaredEnv: ['TOKEN'],
+      }),
+      b: server(),
+    });
+    const files = readdirSync(filesRoot).sort();
+    expect(files).toHaveLength(2);
+    for (const file of files) {
+      expect(file).toMatch(/^10db-ymcp-[0-9a-f]{12}\.sh$/);
+      expect(statSync(join(filesRoot, file)).mode & 0o777).toBe(0o400);
+    }
+    const envFile = launched.servers['a']?.launch().args[6] ?? '';
+    const content = readFileSync(envFile, 'utf8');
+    expect(content).toContain(`export PATH='${loginPath()}'\n`);
+    expect(content).toContain(`export HOME='${home}'\n`);
+    expect(content).toContain("export TOKEN='sk-canary'\n");
+    launched.dispose();
+  });
+
+  it('the launch’s argv holds no env value', () => {
+    const launched = launch({
+      a: server({
+        cwd: '/srv',
+        env: { TOKEN: 'sk-canary', PATH: loginPath() },
+        declaredEnv: ['TOKEN'],
+      }),
+    });
+    const run = launched.servers['a']?.launch();
+    expect(run).toEqual({
+      command: '/usr/bin/env',
+      args: [
+        '-i',
+        'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+        `HOME=${home}`,
+        '/bin/sh',
+        '-c',
+        'cd -- "$1" && . "$0" && shift && exec "$@"',
+        expect.stringMatching(/10db-ymcp-[0-9a-f]{12}\.sh$/),
+        '/srv',
+        'npx',
+        '-y',
+        'pkg',
+      ],
+    });
+    expect(JSON.stringify(run)).not.toContain('sk-canary');
+    launched.dispose();
+  });
+
+  it('a refused server has a left-out item and no file', () => {
+    const launched = launch({ bad: server({ command: join(checkout, 'tool') }) });
+    expect(launched.servers).toEqual({});
+    expect(launched.leftOut).toEqual([
+      {
+        what: 'your MCP server bad',
+        why: `Its command points at a project's folder${SUFFIX}`,
+      },
+    ]);
+    expect(readdirSync(filesRoot)).toEqual([]);
+  });
+
+  it('a dropped login variable is named in a left-out item, and the server runs', () => {
+    const launched = launch({ a: server({ env: { PATH: loginPath(), PEM: 'x\ny' } }) });
+    expect(Object.keys(launched.servers)).toEqual(['a']);
+    expect(launched.leftOut).toEqual([
+      {
+        what: 'your MCP server a',
+        why: "it runs without PEM from your login environment, which point where an agent can write or can't be passed",
+      },
+    ]);
+    launched.dispose();
+  });
+
+  it('dispose removes the files', () => {
+    const launched = launch({ a: server(), b: server() });
+    const files = readdirSync(filesRoot).map((f) => join(filesRoot, f));
+    launched.dispose();
+    expect(files.some(existsSync)).toBe(false);
   });
 });

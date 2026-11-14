@@ -3,8 +3,11 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { foldPathCase } from '../guard';
 import { shellAssignments } from './env-file';
 import { underLaneWritable, type LaneWritableRoot } from './lane-writable';
+import type { McpLaunch } from './mcp-sandbox';
 import { SandboxProfileError } from './profile';
+import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import { HOST_PATH } from './srt-launch';
+import { removeAll } from './temp-dir';
 
 /**
  * One of the builder's stdio servers as a session runs it, expanded: the structural shape the sandbox
@@ -206,4 +209,109 @@ export function prepareYourMcpRun(
       return { refusal: `Its env variable ${name} can't be passed to it.`, env, dropped };
   }
   return { refusal: null, env, dropped };
+}
+
+const ENV_FILE: SealedFileKind = {
+  prefix: '10db-ymcp-',
+  suffix: '.sh',
+  what: 'your MCP server env file',
+};
+
+/** Claude Code and Codex merge their own environment into a server's, so `env -i` drops it first. */
+const LAUNCHER = '/usr/bin/env';
+/** Changes to the server's folder, sources its sealed env file, and runs it: `$0` is the file, `$1` the folder. */
+const START = 'cd -- "$1" && . "$0" && shift && exec "$@"';
+
+/** The constructor's key. Never exported, so no other module can make a `YourMcpServer`. */
+const MADE_HERE: unique symbol = Symbol('YourMcpServer');
+
+/**
+ * One of the builder's stdio servers as it starts outside the sandbox, from the builder's home with its
+ * sealed env. The launch is a private field, so a look-alike carries none.
+ */
+export class YourMcpServer {
+  readonly #launch: McpLaunch;
+
+  constructor(key: typeof MADE_HERE, launch: McpLaunch) {
+    if (key !== MADE_HERE) {
+      throw new SandboxProfileError('mcp', "only the sandbox makes a builder's MCP server launch");
+    }
+    this.#launch = { command: launch.command, args: Object.freeze([...launch.args]) };
+  }
+
+  /** What Claude Code or Codex runs: a fresh copy each time. */
+  launch(): McpLaunch {
+    return { command: this.#launch.command, args: [...this.#launch.args] };
+  }
+}
+
+/**
+ * Each of the builder's stdio servers that may run, as a launch through `env -i` from the home. Its env is
+ * in a sealed file in the files root, so no value is on its command line and its folder is never a
+ * checkout. A refused server gets no file and a left-out item; a dropped login variable adds one too.
+ * `dispose()` removes the files. Never srt: these run as Claude Code runs them.
+ */
+export function launchYourMcpServers(input: {
+  readonly home: string;
+  readonly filesRoot: string;
+  readonly laneWritable: readonly LaneWritableRoot[];
+  readonly servers: Readonly<Record<string, UnsandboxedStdioServer>>;
+}): {
+  servers: Record<string, YourMcpServer>;
+  leftOut: { what: string; why: string }[];
+  dispose(): void;
+} {
+  const servers: Record<string, YourMcpServer> = {};
+  const leftOut: { what: string; why: string }[] = [];
+  const removals: (() => void)[] = [];
+  const dispose = (): void => {
+    removeAll(removals.splice(0));
+  };
+  try {
+    for (const [name, server] of Object.entries(input.servers)) {
+      const what = `your MCP server ${name}`;
+      const prepared = prepareYourMcpRun(server, input);
+      if (prepared.refusal !== null) {
+        leftOut.push({ what, why: prepared.refusal });
+        continue;
+      }
+      if (prepared.dropped.length > 0)
+        leftOut.push({
+          what,
+          why: `it runs without ${prepared.dropped.join(', ')} from your login environment, which point where an agent can write or can't be passed`,
+        });
+      const envFile = createSealedFile(
+        input.filesRoot,
+        ENV_FILE,
+        shellAssignments(prepared.env)
+          .map((assignment) => `export ${assignment}\n`)
+          .join(''),
+      );
+      removals.push(() => {
+        removeSealedFile(envFile, input.filesRoot, ENV_FILE);
+      });
+      const fromHome = (path: string): string =>
+        path.startsWith('~/') ? join(input.home, path.slice(2)) : path;
+      const cwd = server.cwd === null ? input.home : resolve(input.home, fromHome(server.cwd));
+      servers[name] = new YourMcpServer(MADE_HERE, {
+        command: LAUNCHER,
+        args: [
+          '-i',
+          `PATH=${HOST_PATH}`,
+          `HOME=${input.home}`,
+          '/bin/sh',
+          '-c',
+          START,
+          envFile,
+          cwd,
+          fromHome(server.command),
+          ...server.args,
+        ],
+      });
+    }
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+  return { servers, leftOut, dispose };
 }
