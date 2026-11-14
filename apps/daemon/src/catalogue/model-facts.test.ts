@@ -193,6 +193,13 @@ describe('modelSpeed', () => {
       expected: { tokensPerSecond: 20, source: 'openrouter', provider: null },
     },
     {
+      name: 'a stored throughput of zero is no sample, never the account provider’s speed',
+      rows: [speed('Anthropic', 0), speed('A', 10), speed('B', 30)],
+      provider: 'Anthropic',
+      aa: 50,
+      expected: { tokensPerSecond: 20, source: 'openrouter', provider: null },
+    },
+    {
       name: 'a stale row is ignored',
       rows: [speed('Anthropic', 99, STALE)],
       provider: 'Anthropic',
@@ -237,6 +244,11 @@ describe('openRouterLatencyMs', () => {
       expected: 200,
     },
     { name: 'a stale row is ignored', rows: [at('A', 100, STALE), at('B', 300)], expected: 300 },
+    {
+      name: 'a stored latency of zero is no sample',
+      rows: [at('A', 0), at('B', 300)],
+      expected: 300,
+    },
     { name: 'no latency anywhere is null', rows: [at('A', null)], expected: null },
     { name: 'a score row is not a latency', rows: [relayed({ intelligence: 5 })], expected: null },
   ])('reads $name', ({ rows, expected }) => {

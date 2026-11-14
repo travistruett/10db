@@ -7,6 +7,7 @@ const OFF = "OpenRouter isn't read while 10db runs with TENDB_JUDGE=off or TENDB
 const NO_KEY = 'Add an OpenRouter account for measured speed and eval costs.';
 const NO_CATALOGUE = "The model catalogue hasn't been read yet.";
 const NO_MATCH = 'OpenRouter lists no model that matches this one.';
+const ROUTER = 'OpenRouter measures the model this resolves to, not the router.';
 const NOT_READ = 'Not read from OpenRouter yet.';
 const NO_EVALS = 'OpenRouter has run no evals on this model.';
 
@@ -20,6 +21,14 @@ function empty(accountProvider: string | null, why: string): ModelMeasuresDto {
     speedsMissing: why,
   };
 }
+
+/** A throughput or latency that is not positive is no sample, however it was stored. */
+const positive = (value: number | null): number | null =>
+  value !== null && value > 0 ? value : null;
+
+/** Whether the catalogue lists a model of this id. */
+const inCatalogue = (catalogue: Catalogue, id: string): boolean =>
+  Object.values(catalogue.providers).some((p) => p.models.some((m) => m.id === id));
 
 /** Faster first; a provider with no throughput after those that have one. */
 function byThroughput(
@@ -47,12 +56,18 @@ export function modelMeasures(input: {
   if (input.off) return empty(accountProvider, OFF);
   if (!input.keyed) return empty(accountProvider, NO_KEY);
   const exact = input.rows.filter((row) => row.id === input.model);
-  if (exact.length === 0 && input.catalogue === null) return empty(accountProvider, NO_CATALOGUE);
-  const rows =
-    exact.length > 0
-      ? exact
-      : (groupMeasuresByModel(input.rows, input.catalogue).get(input.model) ?? []);
-  if (rows.length === 0) return empty(accountProvider, NO_MATCH);
+  let rows = exact;
+  if (exact.length === 0) {
+    // An OpenRouter id names its own rows, so with none stored it is not read yet; only a catalogue id needs a join.
+    if (input.model.startsWith('~')) return empty(accountProvider, ROUTER);
+    const isOpenRouterId =
+      input.model.includes('/') &&
+      (input.catalogue === null || !inCatalogue(input.catalogue, input.model));
+    if (isOpenRouterId) return empty(accountProvider, NOT_READ);
+    if (input.catalogue === null) return empty(accountProvider, NO_CATALOGUE);
+    rows = groupMeasuresByModel(input.rows, input.catalogue).get(input.model) ?? [];
+    if (rows.length === 0) return empty(accountProvider, NO_MATCH);
+  }
 
   const evals = rows
     .filter((row) => row.kind === OpenRouterMeasureKind.ScoreOpenRouter)
@@ -67,8 +82,8 @@ export function modelMeasures(input: {
     .filter((row) => row.kind === OpenRouterMeasureKind.Speed)
     .map((row) => ({
       provider: row.key,
-      tokensPerSecond: row.tokensPerSecond,
-      latencyMs: row.latencyMs,
+      tokensPerSecond: positive(row.tokensPerSecond),
+      latencyMs: positive(row.latencyMs),
       measuredAt: row.measuredAt,
     }))
     .sort(byThroughput);

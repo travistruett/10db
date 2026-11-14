@@ -1931,8 +1931,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
-    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
     openRouterOff: opts.judgeOff === true || opts.benchmarksOff === true,
+    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
     openRouterOn: () => {
       if (openRouterSync === null) return false;
       const accountId = getJudgeConfig(state.db).accountId;

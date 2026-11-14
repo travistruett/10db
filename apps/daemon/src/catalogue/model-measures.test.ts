@@ -141,6 +141,21 @@ describe('modelMeasures reasons', () => {
       input: { rows: [] },
       both: 'OpenRouter lists no model that matches this one.',
     },
+    {
+      name: 'an OpenRouter id with no rows stored yet',
+      input: { model: 'maker/new-model', rows: [] },
+      both: 'Not read from OpenRouter yet.',
+    },
+    {
+      name: 'an OpenRouter id with no rows and no catalogue',
+      input: { model: 'maker/new-model', rows: [], catalogue: null },
+      both: 'Not read from OpenRouter yet.',
+    },
+    {
+      name: 'a router id',
+      input: { model: '~maker/new-latest', rows: [] },
+      both: 'OpenRouter measures the model this resolves to, not the router.',
+    },
   ])('says why both sections are empty: $name', ({ input, both }) => {
     const out = run(input);
     expect(out.evals).toEqual([]);
@@ -155,6 +170,19 @@ describe('modelMeasures reasons', () => {
     expect(out.openRouterIds).toEqual(['anthropic/claude-opus-5.5']);
     expect(out.evalsMissing).toBe('Not read from OpenRouter yet.');
     expect(out.speedsMissing).toBe('Not read from OpenRouter yet.');
+  });
+
+  it('reads a stored throughput or latency that is not positive as no sample', () => {
+    const out = run({
+      rows: [
+        row({ id: 'anthropic/claude-opus-5.5', key: 'Zero', tokensPerSecond: 0, latencyMs: 0 }),
+        speed('anthropic/claude-opus-5.5', 'Fast', 90),
+      ],
+    });
+    expect(out.speeds.map((s) => [s.provider, s.tokensPerSecond, s.latencyMs])).toEqual([
+      ['Fast', 90, 100],
+      ['Zero', null, null],
+    ]);
   });
 
   it('keeps exact rows when the catalogue is missing', () => {

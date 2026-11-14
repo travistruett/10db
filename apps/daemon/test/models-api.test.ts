@@ -9,8 +9,9 @@ import {
   mintId,
   ModelMeasuresDto,
   ModelRowDto,
+  SUPPORTED_ACCOUNT_KINDS,
   type AccountInput,
-  type SUPPORTED_ACCOUNT_KINDS,
+  type SupportedAccountKind,
   RolePicksDto,
   type Effort,
 } from '@10db/contracts';
@@ -54,6 +55,7 @@ async function start(
     offline?: { value: boolean };
     openRouterSync?: boolean;
     judgeOff?: boolean;
+    benchmarksOff?: boolean;
   } = {},
 ) {
   const adapter = new FakeAdapter({});
@@ -71,6 +73,7 @@ async function start(
     catalogueSync: opts.catalogueSync ?? true,
     ...(opts.openRouterSync === undefined ? {} : { openRouterSync: opts.openRouterSync }),
     ...(opts.judgeOff === true ? { judgeOff: true } : {}),
+    ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
     fetch: () => {
       fetches += 1;
       if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
@@ -317,7 +320,7 @@ describe('a model’s stored OpenRouter rows over HTTP', () => {
   const AT = '2026-11-13T10:00:00.000Z';
 
   /** Inputs that create one account of each kind a builder can add. */
-  const inputs: Record<(typeof SUPPORTED_ACCOUNT_KINDS)[number], AccountInput> = {
+  const inputs: Record<SupportedAccountKind, AccountInput> = {
     claude_subscription: { kind: 'claude_subscription', label: 'Plan' },
     anthropic_api_key: { kind: 'anthropic_api_key', label: 'Key' },
     bedrock: {
@@ -336,6 +339,7 @@ describe('a model’s stored OpenRouter rows over HTTP', () => {
 
   /** A daemon with an OpenRouter account picked for decisions and one model's rows stored. */
   async function withStoredRows(opts: { pick: boolean } = { pick: true }) {
+    // The sync is on because "an OpenRouter account is picked" needs it; with no key it makes no request.
     const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
       openRouterSync: true,
     });
@@ -376,14 +380,17 @@ describe('a model’s stored OpenRouter rows over HTTP', () => {
     return { api };
   }
 
-  it.each([
-    { kind: 'claude_subscription', provider: 'Anthropic' },
-    { kind: 'anthropic_api_key', provider: 'Anthropic' },
-    { kind: 'bedrock', provider: 'Amazon Bedrock' },
-    { kind: 'codex_signin', provider: 'OpenAI' },
-    { kind: 'gateway', provider: null },
-    { kind: 'openrouter', provider: null },
-  ] as const)(
+  /** The provider each kind's speed is measured on; a new kind fails to compile until it has a row. */
+  const PROVIDER_OF_KIND = {
+    claude_subscription: 'Anthropic',
+    anthropic_api_key: 'Anthropic',
+    bedrock: 'Amazon Bedrock',
+    codex_signin: 'OpenAI',
+    gateway: null,
+    openrouter: null,
+  } satisfies Record<SupportedAccountKind, string | null>;
+
+  it.each(SUPPORTED_ACCOUNT_KINDS.map((kind) => ({ kind, provider: PROVIDER_OF_KIND[kind] })))(
     'serves the seeded rows with $provider as the provider of a $kind account, and reaches nothing',
     async ({ kind, provider }) => {
       const { api } = await withStoredRows();
@@ -428,10 +435,11 @@ describe('a model’s stored OpenRouter rows over HTTP', () => {
     });
   });
 
-  it('returns no stored row with TENDB_JUDGE=off', async () => {
-    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
-      judgeOff: true,
-    });
+  it.each([
+    { name: 'TENDB_JUDGE=off', off: { judgeOff: true } },
+    { name: 'TENDB_BENCHMARKS=off', off: { benchmarksOff: true } },
+  ])('returns no stored row with $name', async ({ off }) => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], off);
     running.state.write((ctx) => {
       replaceEndpointStats(
         ctx,
@@ -442,6 +450,6 @@ describe('a model’s stored OpenRouter rows over HTTP', () => {
     });
     const out = await api.get('/models/measures?model=claude-opus-5-5', ModelMeasuresDto);
     expect(out.speeds).toEqual([]);
-    expect(out.speedsMissing).toContain('TENDB_JUDGE=off');
+    expect(out.speedsMissing).toContain('TENDB_JUDGE=off or TENDB_BENCHMARKS=off');
   });
 });
