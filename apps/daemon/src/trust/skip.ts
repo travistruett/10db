@@ -3,9 +3,6 @@ import type { LimitName, SkipKind } from '@10db/contracts';
 // Trust line §5: what an unattended lane is told when a call is skipped, and the line that hands a
 // skipped call back to auto mode once the builder approves it.
 
-/** How many times a turn a skip stopped is resumed in one step (T4 call 10). */
-export const SKIP_RESUMES_MAX = 2;
-
 const LIMIT_VERBS: Readonly<Record<LimitName, string>> = {
   destroys_data: "destroy data this session didn't create",
   sends_data_out: 'send data out',
