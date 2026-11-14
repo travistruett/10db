@@ -52,6 +52,11 @@ goes into the build.
   the board already keeps. Critical's QA therefore gets 2 rounds of its own after Review's 2.
 - **A rigor change while a task waits for plan approval leaves the card standing.** You answer it.
 - **Plan approval is a new Inbox kind, "plan".** It is not the check card, which approves finished work.
+- **A rigor change applies at the next step boundary.** It does not apply at the moment you save. The runner
+  re-plans the steps still to come each time it moves to another step, so a change can never be overwritten by a
+  step that was already running.
+- **A project's default rigor also reaches its running tasks.** Changing it moves running tasks that have no
+  rigor of their own, from their next step on, the same way.
 
 **Needed from you:** nothing.
 
@@ -142,13 +147,28 @@ runner obeys them`
 
 ### Task 2: Review rounds (Track A)
 
-**Files:** `apps/daemon/src/runner/runner.ts` (`finishReadOnlyStep`, `case 'send_back'`), `limit-ship.ts` if its
-inputs change, `runner.test.ts`, and `packages/contracts/src/review-rounds.ts` doc comments.
+**Files:**
+
+- `apps/daemon/src/runner/runner.ts` (`finishReadOnlyStep`, `case 'send_back'`, and the "retry limit" wording at
+  about 1424);
+- `limit-ship.ts`, if its inputs change;
+- `runner.test.ts`;
+- `packages/contracts/src/review-rounds.ts`: a pure `atRoundLimit(sentBack, rounds)` and its table test;
+- `packages/contracts/src/steps.ts` (`WorkstreamStep.reviewRounds`);
+- `packages/contracts/src/task-state.ts` and its test (the card's "sent back N of 3", 326-331, and "Shipped at the
+  retry limit", 348);
+- `routing/plan-steps.ts`, which stamps `reviewRounds` when it plans.
 
 **Behaviour:**
 
-- A reviewer rejection (Review, QA or Plan Review) is at the limit when `step.sentBack + 1 > rounds`, where
-  `rounds` is `rowProcess(task.effectiveRigor, playbook).reviewRounds`, read live at the rejection.
+- A reviewer rejection (Review, QA or Plan Review) is at the limit when `atRoundLimit(step.sentBack, rounds)`, that
+  is `sentBack + 1 > rounds`. `rounds` is `rowProcess(task.effectiveRigor, playbook).reviewRounds`, read live at
+  the rejection.
+- Each reviewing step carries `reviewRounds?: int` (optional, so stored steps parse). It is stamped when the step is
+  planned, and again whenever the runner writes it, for example at a rejection or a re-plan (Task 6).
+- The card reads "<Role> sent back N of R" per reviewing step, from that step's `sentBack` and `reviewRounds`. A
+  step without `reviewRounds` falls back to `FIX_ATTEMPT_LIMIT`. "Shipped at the retry limit" becomes "Shipped
+  when its review rounds ran out", in the card and in the runner's reason.
 - Below the limit it sends back as today, but does not increment `attempt`.
 - At the limit, today's at-limit branch runs unchanged: ship with a follow-up when `shipsAtRetryLimit`, else fail
   with `RejectedAtLimit`. The reason names the rounds: "rejected the work and the review rounds (N) are used up".
@@ -162,8 +182,10 @@ inputs change, `runner.test.ts`, and `packages/contracts/src/review-rounds.ts` d
 - Standard: one rejection goes back to build. A second rejection ships with a follow-up.
 - Careful: two rejections go back. A third ships.
 - A security task at the limit fails.
-- Two gate failures, then a review rejection: the work still goes back, because the gate used `attempt` and not
-  rounds.
+- Three gate failures with `attempt` at 3, then a review rejection: the work still goes back to Build. Today it
+  fails, which proves the counters are apart.
+- An `atRoundLimit` table: rounds 0 to 3 by `sentBack` 0 to 3.
+- `task-state.test.ts` rows: "sent back 1 of 1" on a Standard review; a step stored without `reviewRounds`.
 - A playbook row set to 0 rounds ships on the first rejection.
 - Extend the existing tests that count send-backs against 3. `runner.test.ts` near 3941 ("counts only the
   send-backs before the limit") and the fix-limit test near 4550 change to round semantics. Say which in the
@@ -187,7 +209,12 @@ where `revise` is handled; tests.
 **Behaviour:**
 
 - Each step records the provider session that last ran it (`WorkstreamStep.providerSessionId`, default null), in
-  the write that marks a session started (`markSessionStarted`).
+  the write that marks a session started (`markSessionStarted`). That write re-reads the workstream's `steps`
+  inside its transaction and changes only that one field of the current step. Built from the row `runSession`
+  read (about 1899), it would overwrite the model `resolvedStep` just saved.
+- `resumedSessionOf` (`next-action.ts:129-146`) returns a revise's `providerSessionId`. Through it the resume
+  (`runner.ts:2017`, `:2141`) and the other-account guard (`:988-991`) apply to a resumed revise.
+  `withUndelivered` passes a revise with an id through. Add table rows for both.
 - On a send-back whose target step has a recorded session and whose row says `fixBy: resumed`:
   - the write sets `nextAction: { kind: 'revise', reviewStep, providerSessionId }`;
   - there is no escalation, so the step keeps its model and effort, and `reason` gains "fixing in its own
@@ -199,6 +226,12 @@ where `revise` is handled; tests.
   - `resolveOn` resolves the step to a model other than the recorded session's model.
 - Crash: `nextActionAfterCrash` handles a revise with an id the way it handles `feedback`. A resumed revise that
   crashed goes fresh. One with null stays as it is.
+- A fresh fix moves up a rung (spec §7.1), whichever way it became fresh. When the launch finds a revise with
+  `providerSessionId: null` on a step that was never escalated for this send-back, it writes the escalated step
+  (`escalated`) before it resolves the model. This covers a crash, another account and model drift.
+- To know whether a step was escalated, the send-back write sets `WorkstreamStep.fixFresh` (`'pending' | 'done'`,
+  optional). The fresh path sets it to `done` once escalated, so a crash after that never steps up twice. A table
+  test covers each of the three fallbacks.
 - The prompt to a resumed session: "<by> rejected the work. Its findings are below. Address each one, commit,
   and end your turn." It is followed by the rejection's findings (`findingNotes`), since the resumed session never
   saw the review. The fresh revise prompt is unchanged. Check `prompts.ts:600-620` (`fromHandoff` predicate):
@@ -261,7 +294,12 @@ no_claim=that the model fixes better resumed`
   - the workstream goes on to it.
 - An unreadable diff adds the review: unlike the old skip, failing safe now means reviewing.
 - The review runs with the task's own row's rounds and fix (Task 2, Task 3).
-- The diff read uses `git.diffSince` as today. A cancel during the read is honoured as the old judge call was.
+- The diff read uses `git.diffSince` with a byte cap, as today: keep `REVIEW_SIZE_DIFF_BYTES`, renamed
+  `FORCED_REVIEW_DIFF_BYTES`. Only `files` is read, so the text is never needed whole. A cancel during the read is
+  honoured as the old judge call was.
+- The safety net's write re-reads the workstream inside its transaction, as Task 6's re-plan does. That is the
+  same step-advancing write, so build both through one helper (Task 6 owns it; build Task 4 against it, or land
+  Task 6 first).
 - A stored judge config that still holds `review_size` parses, and the key is dropped.
 
 **Tests:**
@@ -289,11 +327,17 @@ ships unreviewed; why_new=the rule only fed the judge's skip; no_claim=that the 
 - Daemon:
   - new `runner/plan-approval.ts`, modelled on `builder-check.ts` (`raisePlanApproval`, `livePlanCard`,
     `waitsForPlanApproval`);
-  - `runner.ts`, in `finishReadOnlyStep` `case 'advance'`: when the step is Plan, the row says `approvesPlan`, and
-    the next step is not Plan Review, park instead of `advanceTo`;
+  - `runner.ts`, in `finishReadOnlyStep` `case 'advance'`: park instead of `advanceTo` exactly when the step
+    being advanced to is Build, the row says `approvesPlan`, and the steps before it include Plan. This is the one
+    condition. With Plan Review in the row, the park follows Plan Review's approval;
   - `Runner.approvePlan(ctx, id)` and `Runner.sendBackPlan(ctx, id, note)`;
-  - `runner/check-answer.ts` (or a sibling `plan-answer.ts`), wired where check answers are applied;
-  - `recovery/recover.ts`: keep the card, or raise it again;
+  - a new `runner/plan-answer.ts` (`applyPlanAnswer`), beside `check-answer.ts`;
+  - `inbox/service.ts`, which routes a card's answer by kind: `plan` joins `check` at about 515 (deliver), 720-726
+    (Send Back needs a note) and 743 (its own `onPlanAnswer`). Without it a `plan` answer reaches
+    `onParkedAnswer`/`deliverParkedAnswer` (`runner.ts:4161-4166`) and the task is stranded;
+  - the wiring in `daemon/start.ts` (about 867, beside `onCheckAnswer`);
+  - `recovery/recover.ts`: a `plan_approval` branch placed before the agent-question branch at 172-182. It keeps
+    a present card, or raises a missing one again;
   - the scheduler's waiting filter (`runner.ts:4166`);
   - `next-action.ts`: pass it through, as `builder_review` is.
 - Desktop: `views/inbox/plan-card.tsx` (new), `inbox-card.tsx`, `inbox-rows.ts`, `card-answer.ts`, and the
@@ -310,22 +354,29 @@ ships unreviewed; why_new=the rule only fed the judge's skip; no_claim=that the 
   - keep the claims.
 - **Approve** does what `advanceTo(Build)` does, from the parked state. It throws `ConflictError` unless the
   workstream waits on this card.
-- **Send Back** needs a note, as the check card's does:
+- **Send Back** needs a note, as the check card's does. It follows `Runner.sendBack`'s pattern
+  (`runner.ts:4384-4468`):
   - it records builder evidence with the note;
-  - the Plan step reruns as a revise, with the note under Earlier steps;
-  - it counts `attempt`, because it is the builder's send-back and `FIX_ATTEMPT_LIMIT` applies;
+  - the Plan step reruns with `nextAction: { kind: 'fix', evidenceId }`, so the prompt shows the note
+    (`prompts.ts:636-642`);
+  - it counts `attempt`, because it is the builder's send-back. Past `FIX_ATTEMPT_LIMIT` it fails with
+    `RetryLimit`, as the check card's does;
   - a Plan Review in the row runs again after it.
-- **Recovery** keeps exactly one live card. A missing card is raised again, and the workstream is reported
-  parked.
+- **Recovery** keeps exactly one live card, whether the card is present or missing. A missing card is raised
+  again, and the workstream is reported parked.
 - **Cancel or stop** while parked behaves as for `builder_review`.
 
 **Tests:**
 
-- Pipeline: a Critical task parks after Plan Review with one `plan` card. Approve runs Build. Send Back reruns
-  Plan with the note in its prompt.
+- Pipeline, answering through `inbox.answer` (the real route) and not `runner.approvePlan`:
+  - a Critical task parks after Plan Review with one `plan` card;
+  - Approve runs Build;
+  - Send Back reruns Plan with the note in its prompt.
 - A Careful task does not park.
-- Recovery, on real SQLite: a parked task with its card deleted gets one card back.
-- An answer to an answered card gets a 409.
+- Recovery, on real SQLite, two rows:
+  - card present: the task stays parked, and Approve still works;
+  - card deleted: one card is back.
+- Approving a card whose workstream was cancelled meanwhile is refused, and nothing runs.
 - Desktop: `plan-card.test.tsx`. It renders the plan. Send Back needs a note. Approve calls the route.
 
 **Value:** `protects=Critical build waits for the builder's approval of the plan; fails_when=Build starts
@@ -339,22 +390,38 @@ card's layout`
   - (d) recovery;
   - (e) the card UI.
 
-### Task 6: A rigor change on a started task (Track B)
+### Task 6: A rigor change on a started task (Track A, before Task 4)
 
-**Files:** `apps/daemon/src/team/replan-steps.ts` (new, pure) and its test; `daemon/services.ts` (`patchTask`);
-`daemon/task-rigor-services.test.ts`.
+**Files:** `apps/daemon/src/team/replan-steps.ts` (new, pure) and its test; `runner.ts` (one helper used by every
+write that moves the workstream to another step); `runner.test.ts`.
+
+**Why in the runner:** the runner writes the whole `steps` array back from a row it read earlier:
+
+- `verify` reads at about 3528, runs the gate for minutes, then writes at 3824 and 3843;
+- the send-back writes at 1453-1458;
+- `resolvedStep` writes at 1802-1809.
+
+A re-plan written by `patchTask` outside the runner would be overwritten, so `patchTask` writes no steps. It
+stores the rigor, as it does today.
 
 **Behaviour:**
 
-- `replanSteps(steps, stepIndex, planned): WorkstreamStep[]` keeps `steps[0..stepIndex]` as they are. The tail
-  becomes the planned steps whose role comes after the current step's role in role order, each newly routed.
-- A tail step whose role was already in the old tail keeps its record (`earlier`, `sentBack`) but takes its new
-  model.
-- `patchTask` applies the change in the same write when the task's effective rigor or kinds change and its
-  workstream is active (not `DONE`, `FAILED` or `CANCELLED`). It plans through `planSteps` with the task's new
-  rigor and kinds on the project's account, and saves `steps`.
-- A workstream parked on a plan-approval card keeps its card.
+- `replanSteps(steps, stepIndex, planned): WorkstreamStep[]` keeps every step at or before `stepIndex`. After it,
+  it also keeps every step that has run (status not pending, a `result` or `earlier`, or a `startedAt`). An
+  example is the reviewer whose rejection just sent the work back, which a pending `revise.reviewStep` points at.
+- The remaining pending steps after `stepIndex` are replaced by the planned steps whose role comes after the
+  current step's role in role order and is not already kept. Each comes newly routed, with its `reviewRounds`
+  stamped.
+- `withCurrentPlan(tx, row, steps, toIndex)` lives in `runner.ts`. It re-reads the task, its kinds, the playbook
+  and the project's account in the same transaction, plans through `planSteps`, and applies `replanSteps`. Every
+  step-advancing write calls it on the steps it is about to write: `advanceTo`, the gate-pass advance, the
+  send-back, the plan approval (Task 5) and the safety net (Task 4). These are writes that change `stepIndex`.
+- A write that parks or ends the workstream (`builder_review`, done, failed) does not re-plan. A Review is never
+  added to finished work.
+- A workstream parked on a plan-approval card keeps its card. Its approval's advance re-plans.
 - The review rounds of the new row apply from the next rejection, through Task 2's live read.
+- The same applies when a project's default rigor changes for a task with no rigor of its own: it is the task's
+  effective rigor that is read.
 
 **Tests:**
 
@@ -363,12 +430,16 @@ card's layout`
   - Careful → Light at Build: Review is dropped.
   - Light → Critical at Build: Review and QA are added.
   - At Review, → Light: nothing after it, and the current step is kept.
-- A services test on real SQLite: the patch rewrites the active workstream's tail.
+  - A send-back to Build after Review rejected, → Light: the Review that ran is kept, and the pending QA is
+    dropped.
+- Pipeline: a Light task whose rigor is patched to Standard while its gate runs still gets a Review. Hold the
+  gate on a deferred, as `routed-wait.test.ts` holds work.
 
-**Value:** `protects=a rigor change mid-run changes only steps still to come; fails_when=a running or earlier step
-is replaced or rerun; why_new=steps were planned once at start; no_claim=resize_task (PR 3)`
+**Value:** `protects=a rigor change mid-run changes only steps still to come and survives a running gate;
+fails_when=a running or earlier step is replaced, a pending fix loses its reviewer, or a stale write drops the
+change; why_new=steps were planned once at start; no_claim=resize_task (PR 3)`
 
-- [ ] Red, green, commit `feat(daemon): changing a started task's rigor changes only the steps still to come`.
+- [ ] Red-first, commit `feat(daemon): changing a started task's rigor changes only the steps still to come`.
 
 ### Task 7: The row drawer and table (Track B)
 
@@ -390,23 +461,34 @@ their tests, and the e2e `settings.spec.ts` if it opens the row drawer.
 **Tests:** `playbook-table.test.tsx`: the header line per default row. The drawer: changing rounds sends only
 `reviewRounds`, and a project's "Use global" sends null.
 
+**Value:** `protects=the builder can see and set each rigor's process per scope; fails_when=a field edit sends
+other fields or the header misstates the process; why_new=the drawer only set steps; no_claim=that the runner
+obeys it`
+
 - [ ] Commit `feat(desktop): a rigor's drawer sets its review rounds, how a send-back is fixed and plan approval`.
 
 ### Task 8: Docs (controller)
 
-- `apps/daemon/src/runner/AGENTS.md`: rounds, resumed revise, the safety net and plan approval.
+- `apps/daemon/src/runner/AGENTS.md`: rounds, resumed revise, the safety net, plan approval and the re-plan at
+  step boundaries.
+- `apps/daemon/src/judge/AGENTS.md` and `apps/daemon/AGENTS.md`, where they mention `review_size`.
 - The spec's §12 parity row for the resumed fix, citing this plan's table.
-- The decision `docs/architecture/decisions/2026-11-13-work-is-sized-by-rigor-and-one-playbook.md` gains PR 2b's
-  calls (the brief's "Calls you might disagree with").
+- A **new** decision file, `docs/architecture/decisions/2026-11-13-each-rigor-sets-its-review-rounds-and-fix.md`,
+  amending `2026-11-13-work-is-sized-by-rigor-and-one-playbook.md` (`decisions/README.md` forbids editing a merged
+  one). It records the brief's "Calls you might disagree with", including Light's 1 round and resumed fix, where
+  the spec says none.
 - `apps/desktop` Settings docs if they describe the row drawer.
 
 ## Order and tracks
 
 1. **Task 1**, one implementer, on `feat/process-per-rigor`.
 2. Then two tracks, each in its own worktree branched from it:
-   - **A:** Tasks 2, 3, 4 (runner: send-backs, sessions, gate path).
-   - **B:** Tasks 5, 6, 7 (plan approval, replanning, UI).
-   Both edit `runner.ts` in different functions. The controller merges B into A's branch, then A into
-   `feat/process-per-rigor`.
+   - **A:** Tasks 2, 3, 6, 4, in that order (runner: send-backs, sessions, re-plan, gate path).
+   - **B:** Tasks 5 and 7 (plan approval, then the UI).
+3. Both tracks edit `finishReadOnlyStep`, the `NextAction` contract, `next-action.ts`, `recover.ts` and
+   `e2e/settings.spec.ts`. B's plan-approval advance calls Task 6's `withCurrentPlan` once A has it; until then
+   it calls `advanceTo`'s write, and the controller wires it at the merge.
+4. The controller merges A into `feat/process-per-rigor` first, then B. Generated contracts and migrations are
+   regenerated after each merge and never hand-merged.
 3. Code review (opus) per track, round 1 lists everything, at most two fix rounds. A click-through on a dev daemon
    covers the row drawer, a Critical task's plan card and a Light lockfile change. Then `make gate` and the PR.
