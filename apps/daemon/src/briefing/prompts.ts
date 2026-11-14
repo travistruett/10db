@@ -620,6 +620,7 @@ export function briefedFromHandoff(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'plan_approval':
     case 'pass_review':
       return false;
   }
@@ -758,6 +759,8 @@ function actionSection(input: PromptInput): string {
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
     case 'builder_review':
       return 'The builder is checking the work; there is nothing to do until they answer.';
+    case 'plan_approval':
+      return 'The builder is reading the plan; there is nothing to do until they answer.';
     case 'pass_review':
       return 'The builder is looking at the page; there is nothing to do until they write.';
     case 'revise': {

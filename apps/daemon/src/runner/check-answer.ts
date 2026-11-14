@@ -25,8 +25,8 @@ import type { AfterCommit, Runner } from './runner';
  */
 export class RunnerNotStartedError extends DomainError {
   override readonly name = 'RunnerNotStartedError';
-  constructor() {
-    super('conflict', 'The runner has not started, so the check cannot be answered yet');
+  constructor(what: 'check' | 'plan' = 'check') {
+    super('conflict', `The runner has not started, so the ${what} cannot be answered yet`);
   }
 }
 

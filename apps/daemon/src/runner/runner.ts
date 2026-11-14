@@ -283,6 +283,7 @@ import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
+import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import { FORCED_REVIEW_DIFF_BYTES, forcedReview } from './forced-review';
@@ -476,6 +477,20 @@ export interface Runner {
    * check. The result runs once that write has committed.
    */
   sendBack(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
+  /**
+   * The builder approved the plan: Build starts, as it does after a plan the builder is not asked
+   * about. Runs inside the write that closes the card, and throws `ConflictError` for a workstream that
+   * is not waiting for its plan's approval. The result runs once that write has committed.
+   */
+  approvePlan(ctx: WriteContext, id: WorkstreamId): AfterCommit;
+  /**
+   * The builder sent the plan back with a note: the Plan step runs again with it, and Plan Review after
+   * it when the row has one. Counted against the fix attempts like the check card's send-back, and the
+   * workstream fails past them. Runs inside the write that closes the card, and throws `ConflictError`
+   * for a workstream that is not waiting for its plan's approval. The result runs once that write has
+   * committed.
+   */
+  sendBackPlan(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
   /**
    * Hands the builder's message to a page of a pass (Workbench spec §6.3). A live session gets it at
    * once, after the builder's hand edits are kept and named ahead of it, starting a turn unless one
@@ -1076,6 +1091,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       readonly nextAction?: NextAction;
       readonly stepIndex?: number;
       readonly steps?: WorkstreamStep[];
+      readonly model?: WorkstreamStep['model'];
+      readonly effort?: WorkstreamStep['effort'];
     } = {},
   ): void {
     const reason = failure.reason;
@@ -1335,6 +1352,79 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * Whether the builder approves the plan before step `to` of `row` starts: it is Build, the steps before
+   * it include Plan, and the task's rigor row, read as it stands now, asks for the approval.
+   */
+  function approvesPlanBefore(tx: DbReader, row: WorkstreamRow, to: number): boolean {
+    if (row.steps[to]?.role !== StepRole.Implement) return false;
+    if (!row.steps.slice(0, to).some((s) => s.role === StepRole.Plan)) return false;
+    const rigor = getTask(tx, row.taskId).effectiveRigor;
+    return rowProcess(rigor, playbookInputs(tx, row.projectId).playbook).approvesPlan;
+  }
+
+  /**
+   * Inside the write that ends the planning steps: one `plan` card with the plan, the workstream waiting on
+   * it with no session and no lease, its claims kept. Build starts from the builder's answer (`approvePlan`).
+   */
+  function parkForPlanApproval(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    fence: number | null,
+    row: WorkstreamRow,
+    steps: WorkstreamStep[],
+  ): void {
+    const card = raisePlanApproval(ctx, {
+      workstreamId: id,
+      projectId: row.projectId,
+      taskTitle: getTask(ctx.tx, row.taskId).title,
+      plan: planOf(row),
+    });
+    transitionWorkstream(ctx, id, {
+      to: S.WaitingHuman,
+      fence,
+      patch: {
+        steps,
+        nextAction: { kind: 'plan_approval', inboxId: card.id },
+        currentSessionId: null,
+      },
+      reason: 'waiting for the builder to approve the plan',
+    });
+    clearLease(ctx, id);
+  }
+
+  /**
+   * The approval of a parked plan: the steps are planned again on the project's account, as at every step
+   * boundary, and the step after the plan starts.
+   */
+  function approvePlanAdvance(ctx: WriteContext, parked: WorkstreamRow): void {
+    const row = withCurrentPlan(ctx.tx, parked.id, getProject(ctx.tx, parked.projectId).accountId);
+    const to = row.stepIndex + 1;
+    const next = row.steps[to];
+    if (!next) throw new ConflictError(`Workstream ${row.id} has no step to start after its plan`);
+    transitionWorkstream(ctx, row.id, {
+      to: S.Queued,
+      fence: null,
+      patch: {
+        steps: advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id)),
+        stepIndex: to,
+        // The plan send-backs were the builder's; Build starts with its whole gate budget.
+        attempt: 0,
+        nextAction: actionEntering(ctx, row, to),
+        model: next.model,
+        effort: next.effort,
+      },
+      reason: 'the builder approved the plan',
+    });
+    clearLease(ctx, row.id);
+    ctx.emit({
+      type: EventType.StepChanged,
+      entityType: 'workstream',
+      entityId: row.id,
+      data: { stepIndex: to, role: next.role },
+    });
+  }
+
+  /**
    * A read-only step approved the work, or its rejection used up the review rounds and ships it
    * (`atLimit`, which files its findings as a follow-up task in the same write). The steps are planned
    * again inside the write, and only then is the move chosen from them: the next step runs, or the work is
@@ -1369,6 +1459,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         : current;
       const to = row.stepIndex + 1 < row.steps.length ? row.stepIndex + 1 : -1;
       const next = row.steps[to];
+      if (next && approvesPlanBefore(ctx.tx, row, to)) {
+        parkForPlanApproval(ctx, id, ctl.fence, row, stepsAdvanced(ctx, row, -1, ending.atLimit));
+        return { outcome: 'stop' as const, qaSkipped };
+      }
       if (next) {
         patchWorkstream(ctx, id, ctl.fence, {
           steps: stepsAdvanced(ctx, row, to, ending.atLimit),
@@ -4276,9 +4370,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;
-      // The workstream waits for the builder's check, not for this card; only the check card's own
-      // answer moves it. A Ready pass page waits for the builder's next message.
-      if (row.nextAction.kind === 'builder_review' || row.nextAction.kind === 'pass_review') return;
+      // The workstream waits for the builder's check or plan approval, not for this card; only that
+      // card's own answer moves it. A Ready pass page waits for the builder's next message.
+      if (
+        row.nextAction.kind === 'builder_review' ||
+        row.nextAction.kind === 'plan_approval' ||
+        row.nextAction.kind === 'pass_review'
+      )
+        return;
       const providerSessionId =
         row.nextAction.kind === 'answer' ? row.nextAction.providerSessionId : null;
       opts.state.write((ctx) =>
@@ -4480,6 +4579,97 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       });
       opts.onLaneFreed();
+    },
+    approvePlan(ctx, id) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForPlanApproval(row))
+        throw new ConflictError(
+          `Workstream ${id} is not waiting for the builder to approve the plan`,
+        );
+      approvePlanAdvance(ctx, row);
+      return () => {
+        opts.onLaneFreed();
+      };
+    },
+    sendBackPlan(ctx, id, note) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForPlanApproval(row))
+        throw new ConflictError(
+          `Workstream ${id} is not waiting for the builder to approve the plan`,
+        );
+      const attempt = row.attempt + 1;
+      const evidence = insertEvidence(ctx, {
+        workstreamId: id,
+        kind: 'builder',
+        command: null,
+        exitCode: null,
+        summary: note,
+        logPath: null,
+        commitShas: [],
+      });
+      const targetIndex = row.steps.findLastIndex(
+        (s, i) => i <= row.stepIndex && s.role === StepRole.Plan,
+      );
+      const target = row.steps[targetIndex];
+      if (!target) throw new ConflictError(`Workstream ${id} has no plan step to run again`);
+      if (attempt > opts.limits.maxFixAttempts) {
+        const reason = `The builder sent the plan back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
+        failIn(
+          ctx,
+          id,
+          null,
+          row,
+          { kind: WorkstreamFailure.RetryLimit, reason },
+          {
+            nextAction: { kind: 'fix', evidenceId: evidence.id },
+            stepIndex: targetIndex,
+            model: target.model,
+            effort: target.effort,
+            steps: row.steps.map((s, i) =>
+              i === targetIndex
+                ? { ...s, status: StepStatus.Failed }
+                : i === row.stepIndex
+                  ? { ...s, status: StepStatus.Pending }
+                  : s,
+            ),
+          },
+        );
+        return () => {
+          flagFailed(row, reason);
+          opts.onLaneFreed();
+        };
+      }
+      const up = escalated(
+        row,
+        target,
+        'the builder sent the plan back',
+        getProject(db, row.projectId).accountId,
+      );
+      if (up.moved && target.profileId)
+        recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
+      transitionWorkstream(ctx, id, {
+        to: S.Queued,
+        fence: null,
+        patch: {
+          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          attempt,
+          steps: sendBackSteps(row.steps, row.stepIndex, targetIndex, up.step, entryFor(ctx, id)),
+          stepIndex: targetIndex,
+          model: up.step.model,
+          effort: up.step.effort,
+        },
+        reason: 'the builder sent the plan back',
+      });
+      ctx.emit({
+        type: EventType.StepChanged,
+        entityType: 'workstream',
+        entityId: id,
+        data: { stepIndex: targetIndex, role: target.role, sentBackBy: 'builder' },
+      });
+      clearLease(ctx, id);
+      return () => {
+        opts.onLaneFreed();
+      };
     },
     approveCheck(ctx, id) {
       const row = getWorkstreamRow(ctx.tx, id);
