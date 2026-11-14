@@ -67,7 +67,7 @@ export function FactoryView() {
         </>
       ) : shown.length > 1 ? (
         <Text size="sm" c="dimmed">
-          Choose a project to see how often a person was needed in it.
+          Choose a project to see its work per rigor and how often a person was needed in it.
         </Text>
       ) : null}
     </Stack>

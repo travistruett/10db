@@ -277,6 +277,7 @@ describe('rigorFigures', () => {
     call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-11-02T00:00:00.000Z', c1);
     // Not counted: unanswered, another decision, before the window, another project's task.
     call(JudgeDecision.TaskRigor, JudgeOutcome.FallbackTimeout, '2026-11-03T00:00:00.000Z', l1);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Shadow, '2026-11-03T00:00:00.000Z', l1);
     call(JudgeDecision.TaskRigor, JudgeOutcome.BelowFloor, '2026-11-03T00:00:00.000Z', l1);
     call(JudgeDecision.ReviewSize, JudgeOutcome.Overridden, '2026-11-04T00:00:00.000Z', l1);
     call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-10-30T00:00:00.000Z', l1);
@@ -362,6 +363,48 @@ describe('rigorFigures', () => {
       shippedWithFindings: 0.25,
     });
     expect(figures.judgeOverride).toEqual({ calls: 3, overridden: 1 });
+  });
+
+  it('leaves out the pass-era run of a task taken out of a pass, which then runs as an ordinary task', () => {
+    const project = seedProject(store);
+    const id = task(project.id, 'Taken out', 'light');
+    // The run in the pass's batch, whose pull request is the pass's.
+    const opened = store.write((ctx) =>
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [id],
+        dirt: [],
+      }),
+    ).value;
+    store.write((ctx) =>
+      patchBatch(ctx, opened.batch.id, { prUrl: 'https://example.test/pr/pass' }),
+    );
+    const passRun = run(id, ran(3), 3, opened.batch.id);
+    sentBackBy(passRun, 'review');
+    store.write((ctx) => {
+      ctx.tx.update(schema.tasks).set({ passId: null }).where(eq(schema.tasks.id, id)).run();
+    });
+    run(id, ran(1), 1, batch(project.id, 'own', 'https://example.test/pr/own'));
+    finishAt(id, '2026-11-10T00:00:00.000Z');
+    at(NOW);
+
+    expect(
+      rowOf(rigorFigures(store.db, project.id, new Date(nowMs), 14).rows, 'light'),
+    ).toMatchObject({
+      tasksDone: 1,
+      stepsPerTask: 1,
+      sessionsPerTask: 1,
+      pullRequestsPerTask: 1,
+      sentBackPerTask: 0,
+    });
   });
 
   it('has no override figure when the judge sized nothing in the period', () => {

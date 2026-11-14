@@ -4,7 +4,7 @@ import { Rigor } from './rigor';
 /** The periods, in days, the rigor figures cover. */
 export const RIGOR_FIGURES_PERIODS = [7, 14, 30] as const;
 
-const Period = z.union([z.literal(7), z.literal(14), z.literal(30)]);
+const Period = z.literal(RIGOR_FIGURES_PERIODS);
 export type RigorFiguresPeriod = z.infer<typeof Period>;
 
 /** The period the figures cover when none is asked for. */
@@ -26,7 +26,7 @@ export const ALL_RIGORS = 'all';
 export const RigorFiguresRowDto = z.object({
   rigor: z.union([z.enum(Rigor), z.literal(ALL_RIGORS)]),
   tasksDone: z.int().nonnegative(),
-  /** Steps that ran: a step sent back and run again counts once per run. */
+  /** Steps that ran: each counts once per workstream, however many times it was sent back. */
   stepsPerTask: z.number().nonnegative().nullable(),
   sessionsPerTask: z.number().nonnegative().nullable(),
   /** Distinct pull request URLs that carried a task; a CI-fix or re-cut batch reuses its pull request. */

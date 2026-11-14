@@ -1,6 +1,7 @@
 import {
   ALL_RIGORS,
   RIGOR_FIGURES_PERIODS,
+  rigorTitle,
   type ProjectId,
   type RigorFiguresDto,
   type RigorFiguresPeriod,
@@ -23,13 +24,8 @@ const COLUMNS = [
   'Shipped with findings',
 ] as const;
 
-const ROW_LABEL: Record<RigorFiguresRowDto['rigor'], string> = {
-  light: 'Light',
-  standard: 'Standard',
-  careful: 'Careful',
-  critical: 'Critical',
-  [ALL_RIGORS]: 'All',
-};
+const rowLabel = (rigor: RigorFiguresRowDto['rigor']): string =>
+  rigor === ALL_RIGORS ? 'All' : rigorTitle(rigor);
 
 /** One decimal, none when whole; a dash when there was nothing to average. */
 function figure(value: number | null): string {
@@ -47,7 +43,7 @@ function periodOf(value: string): RigorFiguresPeriod | null {
 function FigureRow({ row }: { readonly row: RigorFiguresRowDto }) {
   return (
     <Table.Tr>
-      <Table.Td>{ROW_LABEL[row.rigor]}</Table.Td>
+      <Table.Td>{rowLabel(row.rigor)}</Table.Td>
       <Table.Td>{row.tasksDone}</Table.Td>
       <Table.Td>{figure(row.stepsPerTask)}</Table.Td>
       <Table.Td>{figure(row.sessionsPerTask)}</Table.Td>

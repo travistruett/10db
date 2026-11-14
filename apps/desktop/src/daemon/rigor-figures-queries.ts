@@ -1,5 +1,5 @@
 import { RigorFiguresDto, type ProjectId, type RigorFiguresPeriod } from '@10db/contracts';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
@@ -14,16 +14,18 @@ export function useRigorFigures(projectId: ProjectId | null, days: RigorFiguresP
   const { client } = useDaemon();
   return useQuery({
     queryKey: projectId ? rigorFiguresKeys.period(projectId, days) : ['rigor-figures', 'none'],
-    queryFn: async () => {
-      if (!projectId) throw new Error('No project chosen');
-      return readJson(
-        await client.projects[':projectId']['rigor-figures'].$get({
-          param: { projectId },
-          query: { days: String(days) },
-        }),
-        RigorFiguresDto,
-      );
-    },
+    queryFn: async () =>
+      projectId
+        ? readJson(
+            await client.projects[':projectId']['rigor-figures'].$get({
+              param: { projectId },
+              query: { days: String(days) },
+            }),
+            RigorFiguresDto,
+          )
+        : { period: days, rows: [], judgeOverride: null },
     enabled: projectId !== null,
+    // The table stays up while another period loads.
+    placeholderData: keepPreviousData,
   });
 }

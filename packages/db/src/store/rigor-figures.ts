@@ -14,10 +14,10 @@ import {
   type TaskId,
   type WorkstreamStep,
 } from '@10db/contracts';
-import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader } from './store';
-import { listTasks } from './tasks';
+import { getTasks } from './tasks';
 
 // What each rigor's finished work took, computed from the tasks, their workstreams' steps, sessions,
 // batches and the judge's call log. Nothing is stored: the figures are recomputed on each read.
@@ -83,21 +83,26 @@ function workOf(db: DbReader, tasks: readonly TaskDto[]): TaskWork[] {
       steps: schema.workstreams.steps,
     })
     .from(schema.workstreams)
-    .where(inArray(schema.workstreams.taskId, ids))
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    // A run in a pass's batch is the pass's, not the rigor's: a task taken out of a pass keeps it on the task.
+    .where(and(inArray(schema.workstreams.taskId, ids), isNull(schema.batches.passId)))
     .all();
-  const sessions =
-    workstreams.length === 0
-      ? []
-      : db
-          .select({ workstreamId: schema.sessions.workstreamId })
-          .from(schema.sessions)
-          .where(
-            inArray(
-              schema.sessions.workstreamId,
-              workstreams.map((w) => w.id),
-            ),
-          )
-          .all();
+  const sessionsOf = new Map<string, number>();
+  for (const s of workstreams.length === 0
+    ? []
+    : db
+        .select({ workstreamId: schema.sessions.workstreamId })
+        .from(schema.sessions)
+        .where(
+          inArray(
+            schema.sessions.workstreamId,
+            workstreams.map((w) => w.id),
+          ),
+        )
+        .all()) {
+    if (s.workstreamId !== null)
+      sessionsOf.set(s.workstreamId, (sessionsOf.get(s.workstreamId) ?? 0) + 1);
+  }
   // A reviewer's send-back is logged with the role that sent it; a builder's own send-back and a gate
   // failure are not the rigor's reviews. `sentBack` on the step is reset by a retry, so it is not read.
   const stepEvents =
@@ -145,7 +150,7 @@ function workOf(db: DbReader, tasks: readonly TaskDto[]): TaskWork[] {
     return {
       task,
       steps: steps.filter((s) => s.startedAt !== null).length,
-      sessions: sessions.filter((s) => own.some((w) => w.id === s.workstreamId)).length,
+      sessions: own.reduce((n, w) => n + (sessionsOf.get(w.id) ?? 0), 0),
       sentBack: own.reduce((sum, w) => sum + (reviewerSendBacks.get(w.id) ?? 0), 0),
       shippedWithFindings: steps.some((s) => s.shippedAtLimit !== undefined),
       pullRequests,
@@ -208,9 +213,23 @@ export function rigorFigures(
 ): RigorFiguresDto {
   const nowMs = now.getTime();
   const from = nowMs - days * DAY_MS;
-  // A task in a Workbench pass never ran a rigor's plan, so it measures nothing about the rigor.
-  const done = listTasks(db, projectId).filter(
-    (t) => t.status === TaskStatus.Done && (t.passId === null || t.passId === undefined),
+  // A task done in the window was last updated in it. A task still in a Workbench pass never ran a
+  // rigor's plan, so it measures nothing about the rigor.
+  const done = getTasks(
+    db,
+    db
+      .select({ id: schema.tasks.id })
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.projectId, projectId),
+          eq(schema.tasks.status, TaskStatus.Done),
+          isNull(schema.tasks.passId),
+          gte(schema.tasks.updatedAt, new Date(from).toISOString()),
+        ),
+      )
+      .all()
+      .map((t) => t.id),
   );
   const doneAt = doneTimes(db, done);
   const inWindow = done.filter((t) => {

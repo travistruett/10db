@@ -1895,7 +1895,9 @@ describe('FactoryView across projects', () => {
     expect(await within(betaGroup).findByRole('button', { name: /^Beta goal/ })).toBeTruthy();
     // Human touch is one project's; with every project shown it says to choose one.
     expect(
-      screen.getByText('Choose a project to see how often a person was needed in it.'),
+      screen.getByText(
+        'Choose a project to see its work per rigor and how often a person was needed in it.',
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Human touch' })).toBeNull();
   });
