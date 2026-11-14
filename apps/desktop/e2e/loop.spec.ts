@@ -96,6 +96,26 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(created.ok()).toBe(true);
   const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
+  // A Board task nobody watches answers a question for the builder at once. One the project routes
+  // to a person with no Slack waits for triage on the builder's card, which this run answers.
+  const person = await request.post(`${daemonUrl}/people`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: { handle: 'tess', name: 'Tess' },
+  });
+  expect(person.ok()).toBe(true);
+  const routed = await request.put(`${daemonUrl}/projects/${projectId}/routing-rules`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      rules: [
+        {
+          category: 'other',
+          area: null,
+          personId: z.object({ id: z.string() }).parse(await person.json()).id,
+        },
+      ],
+    },
+  });
+  expect(routed.ok()).toBe(true);
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -195,7 +215,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page.keyboard.press('2');
   await expect(page.getByRole('radio', { name: /Howdy/ })).toBeChecked();
   await page.keyboard.press('Enter');
-  await expect(page.getByText(QUESTION)).toBeHidden();
+  // The stakeholder's drafted message quotes the question; the card's own line is what goes.
+  await expect(page.getByText(QUESTION, { exact: true })).toBeHidden();
 
   // The work resumes, commits, passes 10db's gate and is DONE.
   await open(page, 'Board');
