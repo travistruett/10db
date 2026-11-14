@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { isEqualOrUnder, type LaneSandboxSpec } from '../sandbox';
+import { isEqualOrUnder, realOrSelf, type LaneSandboxSpec } from '../sandbox';
 
 /**
  * What a path may do. On one path the map keeps deny over write over read; across paths Codex
@@ -14,19 +14,6 @@ const MINIMAL = ':minimal';
 
 /** A pattern the profile holds for Claude Code's sandbox, such as a listing grant; Codex has no match. */
 const isPattern = (path: string): boolean => path.includes('*') || path.includes('[');
-
-/**
- * The real path of `path`. A path that doesn't exist yet is the real path of the nearest dir that does,
- * with the rest appended, so it still sits under the entries its dirs resolve to.
- */
-function realOrSelf(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    const parent = dirname(path);
-    return parent === path ? path : join(realOrSelf(parent), basename(path));
-  }
-}
 
 function isLink(path: string): boolean {
   try {

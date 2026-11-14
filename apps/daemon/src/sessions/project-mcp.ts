@@ -25,14 +25,17 @@ const PROJECT_MCP_FILE = '.mcp.json';
 /** `${NAME}` or `${NAME:-default}`, as Claude Code writes them in `.mcp.json`. */
 const VARIABLE_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** An environment variable's name, as a shell writes it. */
+export const EnvName = z.string().regex(ENV_NAME, 'must be a variable name');
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
-const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
+export const SENSITIVE_NAME =
+  /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
 
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 /** http or https only; a `${VAR}` may stand in the URL, which the URL parser accepts. */
-const RemoteUrl = z.string().refine(
+export const RemoteUrl = z.string().refine(
   (value) => {
     try {
       const protocol = new URL(value).protocol;
@@ -43,7 +46,7 @@ const RemoteUrl = z.string().refine(
   },
   { message: 'must be an http or https URL' },
 );
-const HeaderMap = z.record(
+export const HeaderMap = z.record(
   z.string().regex(HEADER_NAME, 'must be an HTTP header name'),
   z.string(),
 );
@@ -51,7 +54,7 @@ const StdioServer = z.strictObject({
   type: z.literal('stdio').optional(),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string().regex(ENV_NAME, 'must be a variable name'), z.string()).optional(),
+  env: z.record(EnvName, z.string()).optional(),
 });
 const RemoteServer = z.strictObject({
   type: z.enum(['http', 'sse']),

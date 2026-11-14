@@ -19,3 +19,10 @@ export function describeIssues(error: z.ZodError): string {
     .map((i) => `${i.path.map(shownSegment).join('.') || '(root)'}: ${i.message}`)
     .join('; ');
 }
+
+/** Only the paths of a config's validation issues, each escaped, for a reason that may quote no value. */
+export function describeIssuePaths(error: z.ZodError): string {
+  return [...new Set(error.issues.map((i) => i.path.map(shownSegment).join('.') || '(root)'))].join(
+    ', ',
+  );
+}

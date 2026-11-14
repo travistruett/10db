@@ -69,6 +69,14 @@ export type ToolDecision =
       readonly by: DeniedBy;
     };
 
+/** What `~/.codex/config.toml` sets for a server that only Codex applies; null or empty when unset. */
+export interface CodexServerExtras {
+  readonly enabledTools: readonly string[] | null;
+  readonly disabledTools: readonly string[];
+  readonly startupTimeoutSec: number | null;
+  readonly toolTimeoutSec: number | null;
+}
+
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 
