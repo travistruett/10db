@@ -87,6 +87,24 @@ describe('a conversation’s model', () => {
     },
   );
 
+  it.each([
+    { name: 'the same model again', pick: 'claude-opus-5-5', again: 'claude-opus-5-5' },
+    { name: 'the plan role’s again', pick: null, again: null },
+  ])(
+    'starts on the project’s account as it is at the start after $name, never the one a pick saw',
+    async ({ pick, again }) => {
+      f = createServiceFixture({ models: () => MODELS });
+      const shapeId = f.c.shape.id;
+      f.service.chooseModel(shapeId, pick);
+      f.service.chooseModel(shapeId, again);
+      f.launchOn(AccountKind.Bedrock);
+      f.service.send(shapeId, 'First');
+      await f.service.settled(shapeId);
+      const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+      expect(spec.account.kind).toBe(AccountKind.Bedrock);
+    },
+  );
+
   it('refuses a model the project’s account does not offer', () => {
     f = createServiceFixture({
       models: () => ({

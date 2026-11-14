@@ -173,8 +173,10 @@ function starterText(item: ConversationItemRow): string {
 export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
   const { state, log } = deps;
   /**
-   * The launch a start resolved, kept from its first question (limits, resume) to its spec, so one
-   * start resolves the project's launch once, on the model the conversation runs.
+   * The launch a start resolved, kept only for the synchronous run that resolved it. A start asks its
+   * questions (resume, limits, the session row's model) and builds its spec with no await between, so
+   * one start resolves the project's launch once; anything later, a model pick's question included,
+   * resolves it again and sees the project's account as it is then.
    */
   const launches = new Map<
     ShapeId,
@@ -185,7 +187,11 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
     const kept = launches.get(shapeId);
     if (kept?.model === shape.model) return kept.launch;
     const launch = deps.launch(shape.projectId, shape.model);
-    launches.set(shapeId, { model: shape.model, launch });
+    const entry = { model: shape.model, launch };
+    launches.set(shapeId, entry);
+    queueMicrotask(() => {
+      if (launches.get(shapeId) === entry) launches.delete(shapeId);
+    });
     return launch;
   };
 
@@ -413,7 +419,6 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const shapeId = shapeOf(conv);
       const shape = getShape(state.db, shapeId);
       const launch = launchOf(shapeId);
-      launches.delete(shapeId);
       const limits = deps.limitsFor(launch.account.kind);
       // Only this conversation's files: another conversation's, in the same project or not, stay unread.
       // Where the judge is native the session runs in auto mode, with the web (trust line §8, §12).
@@ -711,7 +716,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
     describeModel(conv, model) {
       const shapeId = shapeOf(conv);
       const shape = getShape(state.db, shapeId);
-      // The conversation's own pick is the launch its next start resolves, kept for that start.
+      // The conversation's own pick resolves as its next start would; another resolves as itself.
       const launch =
         model === shape.model ? launchOf(shapeId) : deps.launch(shape.projectId, model);
       return {
