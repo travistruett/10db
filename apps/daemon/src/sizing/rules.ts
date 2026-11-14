@@ -1,10 +1,4 @@
-import {
-  TaskKindSource,
-  type KindDto,
-  type Rigor,
-  type TaskDto,
-  type TaskKind,
-} from '@10db/contracts';
+import { TaskKindSource, type KindDto, type Rigor, type TaskKind } from '@10db/contracts';
 
 /** What the judge answered for a task, already folded: the kinds it gives and the rigor it chose. */
 export interface JudgedSizing {
@@ -30,7 +24,11 @@ const PINNED: readonly TaskKind['source'][] = [TaskKindSource.Builder, TaskKindS
  *   kind the task holds from an earlier sizing is dropped when no answer is given: it was for older text.
  */
 export function sizeByRules(input: {
-  readonly task: Pick<TaskDto, 'areas' | 'kinds' | 'kindsOff'>;
+  readonly task: {
+    readonly areas: readonly string[];
+    readonly kinds: readonly TaskKind[];
+    readonly kindsOff: readonly string[];
+  };
   readonly kinds: readonly Pick<KindDto, 'key' | 'impliedBy'>[];
   readonly judged?: JudgedSizing;
 }): RulesSizing {
