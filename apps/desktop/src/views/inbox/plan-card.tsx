@@ -26,13 +26,18 @@ export function PlanCard({ item, header, note, onNote }: PlanCardProps) {
   const [sendingBack, setSendingBack] = useState(note !== '');
   const [stale, setStale] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const sendBackRef = useRef<HTMLButtonElement>(null);
+  const wasSendingBack = useRef(false);
   // Set by the Send Back button so only a user opening the panel moves focus, not a remount.
   const openedByUser = useRef(false);
   const trimmed = note.trim();
 
   useEffect(() => {
-    if (sendingBack && openedByUser.current) noteRef.current?.focus();
+    if (sendingBack) {
+      if (openedByUser.current) noteRef.current?.focus();
+    } else if (wasSendingBack.current) sendBackRef.current?.focus();
     openedByUser.current = false;
+    wasSendingBack.current = sendingBack;
   }, [sendingBack]);
 
   const respond = (given: { choice: string; note?: string }): void => {
@@ -121,6 +126,7 @@ export function PlanCard({ item, header, note, onNote }: PlanCardProps) {
             ) : (
               <>
                 <Button
+                  ref={sendBackRef}
                   variant="default"
                   disabled={answer.isPending}
                   onClick={() => {

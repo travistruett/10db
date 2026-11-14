@@ -871,7 +871,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
     },
     onPlanAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
+      if (!runner) throw new RunnerNotStartedError('plan');
       return applyPlanAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {

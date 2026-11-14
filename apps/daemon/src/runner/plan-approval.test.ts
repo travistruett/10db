@@ -1,4 +1,15 @@
-import { activeClaims, getWorkstreamRow, listInbox } from '@10db/db';
+import { ConflictError, mintId } from '@10db/contracts';
+import { createDeliveryJobs } from '../delivery';
+import { createGit } from '../git';
+import { silentLogger } from '../log';
+import { recoverOnStartup, systemProcesses } from '../recovery';
+import {
+  activeClaims,
+  updateInboxItem,
+  getWorkstreamRow,
+  listInbox,
+  patchWorkstream,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
@@ -40,13 +51,8 @@ async function runWhileQueued(id: Parameters<typeof ws>[0]): Promise<void> {
 }
 
 /** A Critical task, as its row runs it, with Plan Review before Build. */
-const critical = (approvesPlan: boolean) =>
-  engine.addTask('Alpha', ['api'], [], {
-    flow: 'full',
-    criteria: 4,
-    riskTags: ['security'],
-    approvesPlan,
-  });
+const critical = (approvesPlan: boolean, riskTags: string[] = ['security']) =>
+  engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4, riskTags, approvesPlan });
 
 describe('parking a task for the builder to approve its plan', () => {
   it('parks after Plan Review on one plan card holding the plan, with no lane and the claims kept', async () => {
@@ -109,6 +115,82 @@ describe('parking a task for the builder to approve its plan', () => {
   });
 });
 
+describe('a row with Plan and no Plan Review', () => {
+  it('parks after Plan, and Approve runs Build', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [planResult('op-plan-0041', 'PLAN'), turn],
+        implement('op-plan-0042'),
+        [approve('op-plan-0043'), turn],
+        [approve('op-plan-0044'), turn],
+      ],
+    });
+    const { workstream } = critical(true, []);
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    await runWhileQueued(workstream.id);
+    const [card] = openPlanCards();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      stepIndex: 0,
+      nextAction: { kind: 'plan_approval', inboxId: card?.id },
+    });
+    expect(engine.adapter.prompts).toHaveLength(1);
+    engine.inbox.answer(card?.id ?? mintId('InboxItem'), { choice: 'approve' });
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts).toHaveLength(4);
+  });
+});
+
+describe('Approve after a restart', () => {
+  const restart = () =>
+    recoverOnStartup({
+      state: engine.state,
+      inbox: engine.inbox,
+      git: createGit(),
+      processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: engine.clock,
+      maxRecoveryAttempts: 3,
+      logger: silentLogger,
+    });
+
+  it.each([
+    { name: 'the card is still there', lose: false },
+    { name: 'the card was lost and is raised again', lose: true },
+  ])('starts Build when $name', async ({ lose }) => {
+    engine = await createTestEngine({
+      Alpha: [
+        [planResult('op-plan-0061', 'PLAN'), turn],
+        [approve('op-plan-0062'), turn],
+        implement('op-plan-0063'),
+        [approve('op-plan-0064'), turn],
+        [approve('op-plan-0065'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    const [first] = openPlanCards();
+    if (lose && first)
+      engine.state.write((ctx) => {
+        updateInboxItem(ctx, first.id, { state: 'CANCELLED' });
+      });
+    await restart();
+    const [card] = openPlanCards();
+    expect(openPlanCards()).toHaveLength(1);
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'plan_approval', inboxId: card?.id });
+    engine.inbox.answer(card?.id ?? mintId('InboxItem'), { choice: 'approve' });
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts).toHaveLength(5);
+  });
+});
+
 describe('answering the plan card', () => {
   const openPlanCard = () => {
     const [card] = openPlanCards();
@@ -143,6 +225,28 @@ describe('answering the plan card', () => {
     // Plan, Plan Review, Build, Review and QA each ran once; the answer started nothing itself.
     expect(engine.adapter.prompts).toHaveLength(5);
     expect(planCards()).toHaveLength(1);
+  });
+
+  it('refuses an open card the workstream no longer waits on, and starts nothing', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [planResult('op-plan-0051', 'PLAN'), turn],
+        [approve('op-plan-0052'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    const card = openPlanCard();
+    // The workstream now waits on some other card; this one is stale though still open.
+    engine.state.write((ctx) => {
+      patchWorkstream(ctx, workstream.id, null, {
+        nextAction: { kind: 'plan_approval', inboxId: mintId('InboxItem') },
+      });
+    });
+    expect(() => engine.inbox.answer(card.id, { choice: 'approve' })).toThrow(ConflictError);
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+    expect(openPlanCards()).toHaveLength(1);
+    expect(engine.adapter.prompts).toHaveLength(2);
   });
 
   it('refuses an answer once the task was cancelled, and starts nothing', async () => {
@@ -217,6 +321,51 @@ describe('sending the plan back', () => {
         .steps.slice(0, 2)
         .map((s) => s.status),
     ).toEqual(['done', 'done']);
+  });
+
+  it('gives Build its whole gate budget after the plan was sent back three times', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          ...round(1),
+          ...round(2),
+          ...round(3),
+          ...round(4),
+          implement('op-plan-1501'),
+          [
+            {
+              do: 'tool' as const,
+              toolName: 'Write',
+              input: { file_path: 'src/api/b.txt', content: 'b' },
+            },
+            {
+              do: 'mcp' as const,
+              tool: 'commit',
+              args: { opId: 'op-plan-1502', paths: ['src/api/b.txt'], message: 'b' },
+            },
+            turn,
+          ],
+        ],
+      },
+      { gateCommand: 'test -f src/api/b.txt' },
+    );
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    for (const n of [1, 2, 3]) {
+      engine.inbox.answer(parked().id, { choice: 'send_back', note: `again ${String(n)}` });
+      await runWhileQueued(workstream.id);
+    }
+    expect(ws(workstream.id).attempt).toBe(3);
+    engine.inbox.answer(parked().id, { choice: 'approve' });
+    expect(ws(workstream.id).attempt).toBe(0);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    // The gate failed once: Build is sent back to fix, not failed for the plan's send-backs.
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      attempt: 1,
+      nextAction: { kind: 'fix' },
+    });
   });
 
   it('fails past the retry limit, as the check card does, with the note on the plan to retry', async () => {

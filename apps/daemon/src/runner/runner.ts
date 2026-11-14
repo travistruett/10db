@@ -1296,6 +1296,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       patch: {
         steps: advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id)),
         stepIndex: to,
+        // The plan send-backs were the builder's; Build starts with its whole gate budget.
+        attempt: 0,
         nextAction: actionEntering(ctx, row, to),
         model: next.model,
         effort: next.effort,

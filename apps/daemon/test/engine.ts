@@ -349,7 +349,7 @@ export async function createTestEngine(
     },
     onPlanAnswer: (ctx, item, answer) => {
       const ready = runner;
-      if (!ready) throw new RunnerNotStartedError();
+      if (!ready) throw new RunnerNotStartedError('plan');
       return applyPlanAnswer(ready, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {

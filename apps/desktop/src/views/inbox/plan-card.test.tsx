@@ -71,4 +71,15 @@ describe('PlanCard', () => {
       expect(answers).toEqual([{ choice: 'send_back', note: 'Name the test file' }]);
     });
   });
+
+  it('Cancel closes the note and returns focus to Send Back', async () => {
+    serve();
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('button', { name: 'Send Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    const sendBack = await screen.findByRole('button', { name: 'Send Back' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(sendBack);
+    });
+  });
 });
