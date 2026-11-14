@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { ConversationOwnerKind } from '@10db/contracts';
 import {
   agentKind,
@@ -7,56 +6,41 @@ import {
   ConversationItemKind,
   ConversationProfile,
   ConversationState,
-  mintId,
-  ModelMarkBasis,
   ModelSwitch,
-  providerOf,
-  SessionMode,
   TurnMarker,
-  type AccountId,
-  type AgentAccountKind,
   type ConversationDto,
   type ConversationId,
-  type ConversationItemId,
   type ConversationLiveDto,
-  type InboxItemId,
-  type ProjectId,
-  type SessionId,
 } from '@10db/contracts';
 import {
   conversationCostUsd,
-  deleteItem,
-  endSession,
   getAccountRow,
   getConversation,
   getProject,
-  hasItemOfKind,
   insertItem,
-  insertSession,
-  lastItems,
   listConversationsOfProfile,
   listPushedTurnStarters,
   listQueuedTurnStarters,
-  markFilesInline,
-  markItemPushedUnder,
-  markItemsDelivered,
   markItemsHandedBack,
-  findItemByPushUuid,
   openTurnMarker,
   patchConversation,
-  updateItem,
   type ConversationItemRow,
   type ConversationRow,
 } from '@10db/db';
-import { timerAt, type Clock, type Timer } from '../clock';
-import type { EventBus, LiveFrames, StateStore } from '../events';
-import type { Logger } from '../log';
-import { markModelUnusable } from '../catalogue';
-import { SessionEndReason, type AgentAdapter, type InterruptReceipt } from '../sessions';
-import type { Hold } from '../verify';
-import { clientUuid, pushedAgainAfter } from './delivery-rules';
-import type { ExploreLaunch, ExploreOwnerHooks, Outgoing, TurnEnd } from './explore-hooks';
-import { openSession, type OpenSession } from './explore-session';
+import { pushedAgainAfter } from './delivery-rules';
+import type { ExploreOwnerHooks } from './explore-hooks';
+import { settleRestart } from './explore-recovery';
+import {
+  BUSY,
+  newRuntime,
+  stateWords,
+  type EngineCore,
+  type ExploreEngineDeps,
+  type Runtime,
+  type Taken,
+} from './explore-runtime';
+import { createPauses } from './explore-pauses';
+import { createStarts } from './explore-starts';
 import {
   ExploreEffect,
   reduceExplore,
@@ -64,14 +48,17 @@ import {
   type ExploreFacts,
   type ExploreOutcome,
 } from './explore-state';
-import { pictureLimitsFor, type PictureLimits } from './picture-limits';
-import { settleRestart } from './explore-recovery';
-import { capItemBody, writeFullOutput } from './full-output';
+import { createStops } from './explore-stops';
+import { createTurns } from './explore-turns';
 import { warmToClose } from './warm-cap';
+
+export type { ExploreEngineDeps } from './explore-runtime';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
 // conversation's state moves only through the reducer, is written with the conversation, and its
-// effects run one at a time on the conversation's chain (call 24).
+// effects run one at a time on the conversation's chain (call 24). Its parts: how a session starts
+// (explore-starts), how a turn takes its starters (explore-turns), how a turn stops and is redone
+// (explore-stops), and how a paused account is checked again (explore-pauses).
 
 export const IDLE_MS = 10 * 60_000;
 export const STOP_GRACE_MS = 10_000;
@@ -86,58 +73,9 @@ export const pausedNotice = (until: Date): string =>
 /** What a conversation paused at a metered account's monthly cap reads; it has no time to name. */
 export const CAPPED_NOTICE =
   'Paused: the account reached its monthly limit. What you send waits, and runs once the account can run again.';
-/** How far back a Redo looks for the builder's message it replaces. */
-const REDO_LOOKBACK = 50;
 
 const S = ConversationState;
 const E = ExploreEffect;
-const BUSY: ReadonlySet<ConversationState> = new Set([
-  S.Starting,
-  S.Running,
-  S.WaitingCard,
-  S.Stopping,
-]);
-
-/** What a state is, in the words a refused Send Now gives (call 17). */
-function stateWords(state: ConversationState): string {
-  switch (state) {
-    case S.Starting:
-      return 'the session is starting';
-    case S.Running:
-      return 'a turn runs';
-    case S.WaitingCard:
-      return 'a card waits for your answer';
-    case S.Stopping:
-      return 'the turn is stopping';
-    case S.TakenOver:
-      return 'the session is open in a terminal';
-    case S.PausedAccount:
-      return 'the account is paused';
-    case S.Sealed:
-      return 'this session handed its work to a task';
-    case S.IdleCold:
-    case S.IdleWarm:
-    case S.EndedError:
-      return 'nothing waits';
-  }
-}
-
-/** How a session's own end reads to the reducer (call 7). */
-function endedHow(reason: SessionEndReason): 'error' | 'paused' | 'unasked' {
-  switch (reason) {
-    case SessionEndReason.RateLimited:
-      return 'paused';
-    case SessionEndReason.Completed:
-    case SessionEndReason.Stopped:
-      return 'unasked';
-    case SessionEndReason.Error:
-    case SessionEndReason.BillingRefused:
-    case SessionEndReason.AccountRefused:
-    case SessionEndReason.SandboxRefused:
-    case SessionEndReason.ModelRefused:
-      return 'error';
-  }
-}
 
 export interface ExploreEngine {
   register(
@@ -166,97 +104,6 @@ export interface ExploreEngine {
   close(): Promise<void>;
 }
 
-export interface ExploreEngineDeps {
-  readonly state: StateStore;
-  readonly adapter: AgentAdapter;
-  readonly clock: Clock;
-  readonly log: Logger;
-  readonly dataDir: string;
-  readonly frames: LiveFrames;
-  readonly hold?: Hold;
-  readonly bus: EventBus;
-  /** A token for a session's MCP calls, and the hash its row keeps. */
-  readonly mintToken: () => { readonly token: string; readonly hash: string };
-  readonly accountBlocked: (
-    accountId: AccountId,
-    projectId: ProjectId,
-  ) => { readonly until: Date | null } | null;
-  readonly defaultPauseMs: number;
-  /** Withdraws an Inbox card the session waited on, when Stop or an end leaves it unanswered. */
-  readonly withdrawCard?: (id: InboxItemId) => void;
-  readonly idleMs?: number;
-  readonly stopGraceMs?: number;
-  readonly warmCap?: number;
-}
-
-/** What a reduction saw, for its effects to act on: the starters waiting, and the turn that ended. */
-interface Taken {
-  readonly waiting: ReadonlySet<ConversationItemId>;
-  readonly end: TurnEnd;
-  readonly event: ExploreEvent['type'];
-}
-
-interface Session {
-  readonly open: OpenSession;
-  /** The engine asked it to end: its `ended` is no event of the conversation's. */
-  asked: boolean;
-  /** It reported `started`: the turn its first message began ran on it. */
-  started: boolean;
-  /** Why the engine ended it, kept on its row; its own end reason otherwise. */
-  endReason: string | null;
-  /** Resolves once what the session was prepared with has been released, after its end. */
-  released: Promise<void> | null;
-}
-
-interface Runtime {
-  readonly id: ConversationId;
-  state: ConversationState;
-  session: Session | null;
-  /** The effects, applied one at a time. */
-  chain: Promise<void>;
-  /** Resolves once the session the engine last stopped has ended and released what it held. */
-  closing: Promise<void>;
-  /** The turn starters the running turn began with. */
-  starters: ConversationItemId[];
-  /** A turn has begun and not ended. */
-  inTurn: boolean;
-  /** How the turn that ended last ended, for `on_turn_ended`. */
-  ended: TurnEnd['how'];
-  idle: Timer | null;
-  idleSince: number | null;
-  /** A starter waits on a hold (call 23). */
-  parked: boolean;
-  /** Convert's hold on this conversation. */
-  held: boolean;
-  /** A start under way was cancelled. */
-  cancelled: boolean;
-  /** Ends a stop that neither a receipt nor the turn's end settled in time. */
-  grace: Timer | null;
-  /** What the last interrupt answers. */
-  receipt: Promise<InterruptReceipt> | null;
-  /** The message a Redo replaces, while its stop settles (call 30). */
-  redo: ConversationItemId | null;
-  /** The session the engine last stopped or saw end, whose stream a partial is stored from. */
-  lastSession: Session | null;
-  /** The session starting resumes an earlier one, and has not started yet. */
-  resuming: boolean;
-  /** The reset the session's last refused rate limit named. */
-  rateReset: Date | null;
-  /** While paused: when it resumes, null when it waits on the account; and the timer that checks. */
-  pausedUntil: Date | null;
-  pauseTimer: Timer | null;
-  /** The Inbox card the session waits on. */
-  card: InboxItemId | null;
-  /** A restart found the conversation paused: its account's return waits under Send now. */
-  restartedWhilePaused: boolean;
-  /** Why the next close of a warm session is asked for, when it is not the idle timer's. */
-  closeReason: string | null;
-  /** A parked starter waits for the update hold to clear. */
-  parkWait: boolean;
-  /** Told when the state or the chain moves, for `settled`. */
-  waiters: (() => void)[];
-}
-
 export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const { state, adapter, clock, log } = deps;
   const idleMs = deps.idleMs ?? IDLE_MS;
@@ -265,8 +112,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const owners = new Map<ConversationOwnerKind, ExploreOwnerHooks>();
   const runtimes = new Map<ConversationId, Runtime>();
   let closed = false;
-  /** `closed` read afresh, after an await, where the compiler would still take it as before. */
-  const isClosed = (): boolean => closed;
 
   const conversation = (id: ConversationId): ConversationRow => getConversation(state.db, id);
   // A change to an account (saved, a cap raised, a card answered) checks the conversations paused on it.
@@ -274,14 +119,14 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (event.entityType !== 'account') return;
     for (const rt of runtimes.values())
       if (rt.state === S.PausedAccount && accountOf(conversation(rt.id)).id === event.entityId)
-        recheckPause(rt);
+        pauses.recheckPause(rt);
   });
   const hooksOf = (conv: ConversationRow): ExploreOwnerHooks => {
     const hooks = owners.get(conv.ownerKind);
     if (hooks === undefined) throw new ConflictError(`No explore owner runs a ${conv.ownerKind}`);
     return hooks;
   };
-  const accountOf = (conv: ConversationRow): { id: AccountId; kind: AgentAccountKind } => {
+  const accountOf = (conv: ConversationRow) => {
     const project = getProject(state.db, conv.projectId);
     return {
       id: project.accountId,
@@ -294,34 +139,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const runtimeOf = (id: ConversationId): Runtime => {
     let rt = runtimes.get(id);
     if (rt === undefined) {
-      rt = {
-        id,
-        state: conversation(id).state ?? S.IdleCold,
-        session: null,
-        chain: Promise.resolve(),
-        closing: Promise.resolve(),
-        starters: [],
-        inTurn: false,
-        ended: 'complete',
-        idle: null,
-        idleSince: null,
-        parked: false,
-        held: false,
-        cancelled: false,
-        grace: null,
-        receipt: null,
-        redo: null,
-        lastSession: null,
-        resuming: false,
-        rateReset: null,
-        pausedUntil: null,
-        pauseTimer: null,
-        card: null,
-        restartedWhilePaused: false,
-        closeReason: null,
-        parkWait: false,
-        waiters: [],
-      };
+      rt = newRuntime(id, conversation(id).state ?? S.IdleCold);
       runtimes.set(id, rt);
     }
     return rt;
@@ -410,7 +228,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (outcome.effects.includes(E.CancelStart)) rt.cancelled = true;
     if (outcome.effects.includes(E.DropPendingStart)) rt.parked = false;
     // What streamed is kept as it stands now: the next turn may begin streaming before the chain runs.
-    if (outcome.effects.includes(E.StorePartial)) storePartialNow(rt);
+    if (outcome.effects.includes(E.StorePartial)) turns.storePartialNow(rt);
     if (outcome.effects.includes(E.WithdrawCard) && rt.card !== null) {
       deps.withdrawCard?.(rt.card);
       rt.card = null;
@@ -431,105 +249,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     'effects' in outcome &&
     outcome.effects.some((e) => e === E.Start || e === E.Push || e === E.Inject);
 
-  /** The open "Send now" line is resolved: what waited under it is on its way (calls 12, 29). */
-  const resolveSendNow = (rt: Runtime): void => {
-    const marker = openTurnMarker(state.db, rt.id);
-    if (marker === null) return;
-    state.write((ctx) => {
-      updateItem(ctx, marker.id, {
-        body: { marker: TurnMarker.SendNow, resolvedAt: ctx.now },
-      });
-    });
-  };
-
-  // --- Turn starters ------------------------------------------------------------------------------
-
-  /** Several starters as one message, in `seq` order: what waited goes in one turn. */
-  const combined = (outs: readonly Outgoing[]): Outgoing => ({
-    text: outs.map((o) => o.text).join('\n\n'),
-    images: outs.flatMap((o) => o.images),
-    blocks: outs.flatMap((o) => o.blocks),
-    sent: (ctx) => {
-      for (const o of outs) o.sent(ctx);
-    },
-  });
-
-  /**
-   * Hands a live session starters as one message: pushed under the one uuid before it is handed them
-   * (rule 1), then what the owner marks once they are sent. A send that throws hands them back, tells
-   * nothing, says why, and answers false.
-   */
-  const handTo = (
-    rt: Runtime,
-    session: Session,
-    items: readonly ConversationItemRow[],
-  ): boolean => {
-    const first = items[0];
-    if (first === undefined) return true;
-    const conv = conversation(rt.id);
-    const hooks = hooksOf(conv);
-    const limits = session.open.launch.limits;
-    const out = combined(
-      items.map((item) => hooks.outgoing(conv, item, { fresh: false, digest: null, limits })),
-    );
-    const uuid = clientUuid(first, randomUUID);
-    const ids = items.map((item) => item.id);
-    state.write((ctx) => {
-      for (const id of ids) markItemPushedUnder(ctx, id, uuid);
-    });
-    try {
-      session.open.handle.send(out.text, out.images, uuid);
-    } catch (error) {
-      state.write((ctx) => {
-        markItemsHandedBack(ctx, rt.id, ids);
-      });
-      const reason = error instanceof Error ? error.message : String(error);
-      notice(rt, hooks.words?.startFailed?.(reason) ?? reason);
-      return false;
-    }
-    state.write((ctx) => {
-      out.sent(ctx);
-      markFilesInline(ctx, rt.id, out.blocks, false);
-    });
-    return true;
-  };
-
-  /** Hands the live session every starter waiting, as one message; answers them, or null on a failed send. */
-  const pushWaiting = (rt: Runtime, session: Session): ConversationItemRow[] | null => {
-    const items = unpushed(rt);
-    return handTo(rt, session, items) ? items : null;
-  };
-
-  /** A turn begins with what waits: pushed now, or handed earlier and not taken. */
-  const beginTurn = (rt: Runtime): void => {
-    const session = rt.session;
-    // The state moved on while the effect waited (an end, a close): no turn begins now.
-    if (session === null || rt.state !== S.Running) return;
-    const earlier = handed(rt).map((item) => item.id);
-    const waiting = pushWaiting(rt, session);
-    // A send that failed began no turn: what it carried waits for the next.
-    const pushed = waiting?.map((item) => item.id) ?? [];
-    if (earlier.length === 0 && pushed.length === 0) {
-      // Nothing was left to run: the queue emptied while the effect waited.
-      setState(rt, S.IdleWarm);
-      return;
-    }
-    rt.starters = [...earlier, ...pushed];
-    rt.inTurn = true;
-    session.open.newTurn();
-  };
-
-  /** Every starter the session holds goes back to 10db's queue (call 22). */
-  const handBack = (rt: Runtime): void => {
-    const held = handed(rt).map((item) => item.id);
-    if (held.length > 0)
-      state.write((ctx) => {
-        markItemsHandedBack(ctx, rt.id, held);
-      });
-  };
-
-  // --- Sessions ------------------------------------------------------------------------------------
-
   const notice = (rt: Runtime, text: string): void => {
     state.write((ctx) => {
       insertItem(ctx, rt.id, {
@@ -540,408 +259,41 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     });
   };
 
-  /** Stops a session the engine is done with; `closing` resolves once it has ended. */
-  const stopSession = (rt: Runtime, session: Session, reason: string): Promise<void> => {
-    session.asked = true;
-    session.endReason = reason;
-    session.open.detach();
-    rt.lastSession = session;
-    if (rt.session === session) rt.session = null;
-    rt.resuming = false;
-    const ended = (async () => {
-      try {
-        await session.open.handle.stop();
-      } catch (error) {
-        log.warn({ err: error, conversationId: rt.id }, 'an explore session did not stop cleanly');
-      }
-      await session.open.done;
-      await session.released;
-    })();
-    // A session that does not end within the grace is let go: nothing after it waits on it forever.
-    const stopped = withinGrace(ended, undefined).then(() => undefined);
-    rt.closing = stopped;
-    return stopped;
+  const core: EngineCore = {
+    deps,
+    stopGraceMs,
+    owners,
+    runtimes,
+    isClosed: () => closed,
+    conversation,
+    hooksOf,
+    accountOf,
+    capabilitiesOf,
+    runtimeOf,
+    holding,
+    unpushed,
+    handed,
+    reduce,
+    setState,
+    enqueue,
+    notice,
   };
-
-  /**
-   * Checks again, at the pause's end (or the next month's first instant for a cap), whether the account
-   * can run; a check that finds it still blocked waits silently for the next (call 6).
-   */
-  const armPause = (rt: Runtime): void => {
-    rt.pauseTimer?.cancel();
-    const now = clock.now();
-    const at = rt.pausedUntil ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    rt.pauseTimer = timerAt(clock, at, () => {
-      rt.pauseTimer = null;
-      recheckPause(rt);
-    });
-  };
-
-  const recheckPause = (rt: Runtime): void => {
-    if (rt.state !== S.PausedAccount) return;
-    const conv = conversation(rt.id);
-    const blocked = deps.accountBlocked(accountOf(conv).id, conv.projectId);
-    if (blocked === null) {
-      rt.pauseTimer?.cancel();
-      rt.pauseTimer = null;
-      rt.pausedUntil = null;
-      reduce(rt, { type: 'account_resumed' });
-      rt.restartedWhilePaused = false;
-      return;
-    }
-    rt.pausedUntil = blocked.until;
-    if (rt.pauseTimer === null || blocked.until !== null) armPause(rt);
-  };
-
-  /** The agent has spoken in the conversation, so a fresh session lacks what it said. */
-  const spoke = (rt: Runtime): boolean =>
-    hasItemOfKind(state.db, rt.id, ConversationItemKind.AgentMessage);
-
-  const storePartialNow = (rt: Runtime): void => {
-    (rt.session ?? rt.lastSession)?.open.storePartial();
-  };
-
-  /** The running turn is over: it took what it began with, but for what a receipt says is still queued. */
-  const settleTurn = (
-    rt: Runtime,
-    stillQueued: ReadonlySet<ConversationItemId> = new Set(),
-  ): void => {
-    rt.grace?.cancel();
-    rt.grace = null;
-    rt.inTurn = false;
-    const taken = rt.starters.filter((id) => !stillQueued.has(id));
-    state.write((ctx) => {
-      markItemsDelivered(ctx, rt.id, taken);
-    });
-  };
-
-  /** Strictly past the owner's limit at a turn's end, the next start is fresh from the digest. */
-  const freshIfFull = (rt: Runtime): void => {
-    const conv = conversation(rt.id);
-    const pct = conv.contextPct;
-    if (rt.state === S.IdleWarm && pct !== null && pct > hooksOf(conv).freshAtContextPct)
-      reduce(rt, { type: 'context_full' });
-  };
-
-  /** `p`, or `fallback` once the stop grace has passed without it. */
-  const withinGrace = <T>(p: Promise<T>, fallback: T): Promise<T> =>
-    new Promise((resolve) => {
-      const timer = clock.setTimeout(() => {
-        resolve(fallback);
-      }, stopGraceMs);
-      void p.then((value) => {
-        timer.cancel();
-        resolve(value);
-      });
-    });
-
-  /** The starters a session holds that went under one of `uuids`: every one a combined push carried. */
-  const itemsOf = (rt: Runtime, uuids: readonly string[]): Set<ConversationItemId> => {
-    const named = new Set(uuids);
-    return new Set(
-      handed(rt)
-        .filter((item) => item.pushUuids.some((uuid) => named.has(uuid)))
-        .map((item) => item.id),
-    );
-  };
-
-  /** A receipt that came while the stop waits: it settles the stop, unless a Redo decides first. */
-  const receiptCame = (rt: Runtime, session: Session, receipt: InterruptReceipt): void => {
-    if (rt.session !== session || rt.state !== S.Stopping || !rt.inTurn || rt.redo !== null) return;
-    session.open.skipTurn();
-    settleTurn(rt, itemsOf(rt, receipt?.stillQueued ?? []));
-    rt.ended = 'stopped';
-    reduce(rt, { type: 'stop_settled' });
-    freshIfFull(rt);
-  };
-
-  /** Neither a receipt nor the turn's end came within the grace: the session is stopped. */
-  const graceOver = (rt: Runtime, session: Session): void => {
-    rt.grace = null;
-    if (rt.session !== session || rt.state !== S.Stopping) return;
-    settleTurn(rt);
-    handBack(rt);
-    rt.ended = 'stopped';
-    reduce(rt, { type: 'stop_grace_passed' });
-  };
-
-  /** Pushes again, as one message under a uuid of its own, what an interrupt may have lost (rule 4). */
-  const pushAgain = (
-    rt: Runtime,
-    session: Session,
-    items: readonly ConversationItemRow[],
-  ): void => {
-    handTo(rt, session, items);
-  };
-
-  /** What a start has made so far, for a failure to undo. */
-  interface Made {
-    launch: ExploreLaunch | null;
-    sessionId: SessionId | null;
-    pushed: readonly ConversationItemId[];
-  }
-
-  /**
-   * A start that could not open a session: what it made goes (the row ends, so no live row keeps a
-   * token MCP would accept; the launch is released; what it marked pushed waits again), the builder is
-   * told why, and the conversation ends in error. No failure here is a failed resume.
-   */
-  /** What a start made goes, and its starters wait as they were. */
-  const unmake = async (rt: Runtime, made: Made): Promise<void> => {
-    const { sessionId } = made;
-    state.write((ctx) => {
-      if (sessionId !== null) endSession(ctx, sessionId, 'start_failed');
-      markItemsHandedBack(ctx, rt.id, [...made.pushed]);
-    });
-    if (made.launch !== null) await made.launch.release();
-    rt.session = null;
-    rt.resuming = false;
-    rt.inTurn = false;
-  };
-
-  const startFailed = async (rt: Runtime, made: Made, error: unknown): Promise<void> => {
-    await unmake(rt, made);
-    const reason = error instanceof Error ? error.message : String(error);
-    const words = owners.get(conversation(rt.id).ownerKind)?.words;
-    notice(rt, words?.startFailed?.(reason) ?? reason);
-    reduce(rt, { type: 'ended', how: 'error' });
-  };
-
-  const start = async (rt: Runtime, waiting: ReadonlySet<ConversationItemId>): Promise<void> => {
-    // A new handle never opens on an agent session the last one still holds (call 24).
-    await rt.closing;
-    const made: Made = { launch: null, sessionId: null, pushed: [] };
-    try {
-      await openFor(rt, waiting, made);
-    } catch (error) {
-      await startFailed(rt, made, error);
-    }
-  };
-
-  const openFor = async (
-    rt: Runtime,
-    waiting: ReadonlySet<ConversationItemId>,
-    made: Made,
-  ): Promise<void> => {
-    const cancelled = (): boolean => {
-      if (!rt.cancelled) return false;
-      rt.cancelled = false;
-      return true;
-    };
-    // Once the engine has closed, nothing starts: the starters wait for the next start's Send now.
-    if (cancelled() || closed) return;
-    const items = unpushed(rt).filter((item) => waiting.has(item.id));
-    const first = items[0];
-    if (first === undefined) {
-      setState(rt, S.IdleCold);
-      return;
-    }
-    const conv = conversation(rt.id);
-    const hooks = hooksOf(conv);
-    const account = accountOf(conv);
-    // A start the account runtime holds reads as an end for the limit (call 6): nothing is sent.
-    const blocked = deps.accountBlocked(account.id, conv.projectId);
-    if (blocked !== null) {
-      rt.pausedUntil = blocked.until;
-      rt.inTurn = false;
-      reduce(rt, { type: 'ended', how: 'paused' });
-      return;
-    }
-    // The owner may refuse a resume (what it would carry no longer fits the account): fresh, from the digest.
-    const resume =
-      conv.providerSessionId !== null && hooks.keepsResume?.(conv) === false
-        ? null
-        : conv.providerSessionId;
-    const fresh = resume === null;
-    // A fresh session after the agent has spoken is told what came before; the digest is kept with the
-    // session's row, so a start that fails or is cancelled stores none.
-    const digest = fresh && spoke(rt) ? hooks.digest(conv) : null;
-    const limits: PictureLimits = hooks.limits?.(conv) ?? pictureLimitsFor(account.kind);
-    const out = combined(
-      items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
-    );
-    const uuid = clientUuid(first, randomUUID);
-    const sessionId = mintId('Session');
-    const { token, hash } = deps.mintToken();
-    // The row is written with its token's hash before the session is prepared, as what is prepared
-    // names it; a start that goes no further ends it, so no live row keeps a token MCP would accept.
-    // It bills the project's account as it is now, never the conversation's stored one.
-    const running = hooks.describeModel(conv, conv.model);
-    state.write((ctx) => {
-      insertSession(ctx, {
-        id: sessionId,
-        conversationId: rt.id,
-        provider: providerOf(account.kind),
-        model: running.launchId,
-        effort: running.effort,
-        mode: SessionMode.Managed,
-        mcpTokenHash: hash,
-      });
-    });
-    made.sessionId = sessionId;
-    // Set once the session is made; its events and cards come only after, on a later turn of the loop.
-    let self: Session | null = null;
-    const launch = await hooks.spec(conv, {
-      sessionId,
-      mcpToken: token,
-      resume,
-      digest,
-      first: out,
-      observer: {
-        // A card this session waits on is an item and a state (§6.6).
-        onWaitStart: (item) => {
-          if (self === null || rt.session !== self) return;
-          rt.card = item.id;
-          state.write((ctx) => {
-            insertItem(ctx, rt.id, {
-              author: ConversationItemAuthor.Agent,
-              kind: ConversationItemKind.Card,
-              body: { inboxItemId: item.id },
-            });
-          });
-          reduce(rt, { type: 'card_raised' });
-        },
-        onWaitEnd: (item) => {
-          if (rt.card !== item.id) return;
-          rt.card = null;
-          reduce(rt, { type: 'card_settled' });
-        },
-      },
-    });
-    made.launch = launch;
-    // A start Stop cancelled, or one the engine's close overtook, ends here: the row ends, the
-    // launch is released, and its starters wait as they were.
-    if (cancelled() || isClosed()) {
-      await unmake(rt, made);
-      return;
-    }
-    const kept =
-      digest === null ? null : capItemBody(ConversationItemKind.Digest, { text: digest });
-    const digestItem = state.write((ctx) => {
-      const stored =
-        kept === null
-          ? null
-          : insertItem(ctx, rt.id, {
-              author: ConversationItemAuthor.System,
-              kind: ConversationItemKind.Digest,
-              body: kept.body,
-            });
-      // Pushed under its uuid before the session is handed it (rule 1); what the owner marks told
-      // waits for the handle, so a start that fails tells nothing.
-      for (const item of items) markItemPushedUnder(ctx, item.id, uuid);
-      return stored;
-    });
-    // What the digest's item left out is kept on disk, once the write has committed.
-    if (digestItem !== null && kept?.full != null)
-      writeFullOutput(deps.dataDir, rt.id, digestItem.id, kept.full);
-    made.pushed = items.map((item) => item.id);
-    const handle = adapter.open({ ...launch.spec, promptUuid: uuid });
-    state.write((ctx) => {
-      out.sent(ctx);
-      markFilesInline(ctx, rt.id, out.blocks, fresh);
-    });
-    const open = openSession({
-      state,
-      clock,
-      log,
-      dataDir: deps.dataDir,
-      frames: deps.frames,
-      conversationId: rt.id,
-      sessionId,
-      handle,
-      launch,
-      fresh,
-      sink: {
-        started: () => {
-          if (self === null || rt.session !== self) return;
-          self.started = true;
-          rt.resuming = false;
-          reduce(rt, { type: 'started' });
-        },
-        consumed: (uuids) => {
-          const ids = uuids.flatMap((u) => {
-            const found = findItemByPushUuid(state.db, rt.id, u);
-            return found === null ? [] : [found];
-          });
-          if (ids.length > 0)
-            state.write((ctx) => {
-              markItemsDelivered(ctx, rt.id, ids);
-            });
-        },
-        rateLimited: (resetsAt) => {
-          rt.rateReset = resetsAt;
-        },
-        turnComplete: (event) => {
-          if (rt.session !== self) return;
-          // What the turn dropped untaken goes back to the queue, to be pushed again under a new uuid.
-          const dropped = itemsOf(rt, event.dropped ?? []);
-          if (dropped.size > 0) {
-            state.write((ctx) => {
-              markItemsHandedBack(ctx, rt.id, [...dropped]);
-            });
-            rt.starters = rt.starters.filter((id) => !dropped.has(id));
-          }
-          settleTurn(rt);
-          // A Redo settles its stop once it has read the receipt.
-          if (rt.state === S.Stopping && rt.redo !== null) return;
-          rt.ended =
-            rt.state === S.Stopping ? 'stopped' : event.result === 'error' ? 'failed' : 'complete';
-          reduce(rt, { type: 'turn_complete' });
-          freshIfFull(rt);
-        },
-        ended: (event) => {
-          state.write((ctx) => {
-            endSession(ctx, sessionId, self?.endReason ?? event.reason);
-          });
-          const released = launch.release();
-          if (self !== null) self.released = released;
-          if (self === null || self.asked || rt.session !== self) return;
-          rt.grace?.cancel();
-          rt.grace = null;
-          rt.lastSession = self;
-          // A turn that ran took what it began with; the rest of what the session held goes back to
-          // the queue before it stops counting as live (call 22).
-          if (self.started && rt.inTurn) settleTurn(rt);
-          handBack(rt);
-          rt.session = null;
-          rt.inTurn = false;
-          rt.ended = 'ended';
-          if (event.reason === SessionEndReason.ModelRefused)
-            markModelUnusable(
-              { state, clock },
-              launch.accountId,
-              launch.model,
-              event.refusalBasis ?? ModelMarkBasis.Error,
-            );
-          const how = endedHow(event.reason);
-          // An end in error says why; a limit has its own notice, and an exit says nothing.
-          if (how === 'error') notice(rt, event.message ?? `The session ended (${event.reason}).`);
-          if (how === 'paused')
-            rt.pausedUntil = rt.rateReset ?? new Date(clock.now().getTime() + deps.defaultPauseMs);
-          rt.rateReset = null;
-          reduce(rt, { type: 'ended', how });
-        },
-      },
-    });
-    self = { open, asked: false, started: false, endReason: null, released: null };
-    rt.session = self;
-    rt.resuming = !fresh;
-    rt.starters = items.map((item) => item.id);
-    rt.inTurn = true;
-    open.newTurn();
-  };
+  const turns = createTurns(core);
+  const stops = createStops(core, turns);
+  const pauses = createPauses(core);
+  const starts = createStarts(core, turns);
 
   // --- Effects ---------------------------------------------------------------------------------------
 
   const apply = async (rt: Runtime, effect: ExploreEffect, taken: Taken): Promise<void> => {
     switch (effect) {
       case E.Start:
-        await start(rt, taken.waiting);
+        await starts.start(rt, taken.waiting);
         return;
       case E.Push:
       case E.NextTurn:
         // A session's first message is its prompt, so its turn began with it: `started` pushes nothing.
-        if (taken.event !== 'started' && !rt.inTurn) beginTurn(rt);
+        if (taken.event !== 'started' && !rt.inTurn) turns.beginTurn(rt);
         return;
       case E.OnTurnEnded: {
         const conv = conversation(rt.id);
@@ -951,10 +303,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       case E.Close: {
         const session = rt.session;
         if (session === null) return;
-        handBack(rt);
+        turns.handBack(rt);
         const reason = rt.closeReason ?? (taken.event === 'context_full' ? 'continued' : 'idle');
         rt.closeReason = null;
-        await stopSession(rt, session, reason);
+        await stops.stopSession(rt, session, reason);
         return;
       }
       case E.RunQueue:
@@ -963,7 +315,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       case E.Inject: {
         // One push each, under its own uuid, so a receipt can name each one.
         const session = rt.session;
-        if (session !== null) for (const item of unpushed(rt)) pushAgain(rt, session, [item]);
+        if (session !== null) for (const item of unpushed(rt)) turns.handTo(rt, session, [item]);
         return;
       }
       case E.CancelStart: {
@@ -972,9 +324,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         rt.resuming = false;
         const session = rt.session;
         if (session === null) return;
-        handBack(rt);
+        turns.handBack(rt);
         rt.inTurn = false;
-        await stopSession(rt, session, 'stopped');
+        await stops.stopSession(rt, session, 'stopped');
         return;
       }
       case E.Interrupt: {
@@ -982,12 +334,12 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         if (session === null) return;
         rt.grace?.cancel();
         rt.grace = clock.setTimeout(() => {
-          graceOver(rt, session);
+          stops.graceOver(rt, session);
         }, stopGraceMs);
         const receipt = session.open.handle.interrupt().catch(() => null);
         rt.receipt = receipt;
         void receipt.then((answered) => {
-          receiptCame(rt, session, answered);
+          stops.receiptCame(rt, session, answered);
         });
         return;
       }
@@ -996,11 +348,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         const asked = rt.receipt;
         rt.receipt = null;
         if (session === null) return;
-        const receipt = asked === null ? null : await withinGrace(asked, null);
-        const still = receipt === null ? null : itemsOf(rt, receipt.stillQueued);
+        const receipt = asked === null ? null : await stops.withinGrace(asked, null);
+        const still = receipt === null ? null : turns.itemsOf(rt, receipt.stillQueued);
         const again = pushedAgainAfter(handed(rt), still);
         if (!holding(rt)) {
-          pushAgain(rt, session, again);
+          turns.handTo(rt, session, again);
           return;
         }
         // Under a hold nothing new runs: what may have been lost waits, parked, for the release.
@@ -1018,7 +370,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       }
       case E.StopHandle: {
         const session = rt.session;
-        if (session !== null) await stopSession(rt, session, 'stopped');
+        if (session !== null) await stops.stopSession(rt, session, 'stopped');
         return;
       }
       case E.FreshNext:
@@ -1039,12 +391,12 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         state.write((ctx) => {
           patchConversation(ctx, rt.id, { providerSessionId: null });
         });
-        await start(rt, taken.waiting);
+        await starts.start(rt, taken.waiting);
         return;
       case E.PausedNotice: {
         const until = rt.pausedUntil;
         notice(rt, until === null ? CAPPED_NOTICE : pausedNotice(until));
-        armPause(rt);
+        pauses.armPause(rt);
         return;
       }
       case E.SendNow:
@@ -1088,14 +440,14 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       Date.parse(expiresAt) - CREDENTIALS_MARGIN_MS <= clock.now().getTime()
     )
       reduce(rt, { type: 'idle_close' });
-    if (runs(reduce(rt, { type: 'builder_message' }))) resolveSendNow(rt);
+    if (runs(reduce(rt, { type: 'builder_message' }))) turns.resolveSendNow(rt);
   };
 
   const release = (rt: Runtime): void => {
     if (closed || holding(rt) || !rt.parked) return;
     rt.parked = false;
     if (unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' })))
-      resolveSendNow(rt);
+      turns.resolveSendNow(rt);
     const conv = conversation(rt.id);
     hooksOf(conv).onParked?.(conv, false);
   };
@@ -1128,7 +480,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         rt.pausedUntil =
           deps.accountBlocked(accountOf(conv).id, conv.projectId)?.until ??
           new Date(clock.now().getTime() + deps.defaultPauseMs);
-        armPause(rt);
+        pauses.armPause(rt);
       }
       reduce(rt, { type: 'daemon_restart' });
       // Its Send now line is written before the API serves.
@@ -1151,9 +503,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       if (session === null) continue;
       // Its events stop first (call 25); what it held goes back and what streamed is kept (call 22).
       session.open.detach();
-      handBack(rt);
-      storePartialNow(rt);
-      stopping.push(stopSession(rt, session, 'stopped'));
+      turns.handBack(rt);
+      turns.storePartialNow(rt);
+      stopping.push(stops.stopSession(rt, session, 'stopped'));
     }
     await Promise.all(stopping);
   };
@@ -1174,56 +526,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           enqueue(rt, resolve);
         });
     },
-    async redo(id, post) {
-      const rt = runtimeOf(id);
-      const original =
-        lastItems(state.db, id, REDO_LOOKBACK)
-          .reverse()
-          .find(
-            (item) =>
-              item.author === ConversationItemAuthor.Builder &&
-              item.kind === ConversationItemKind.Message,
-          ) ?? null;
-      rt.redo = original?.id ?? null;
-      reduce(rt, { type: 'stop' });
-      // The interrupt is asked for on the chain; its receipt says whether the agent took the original.
-      await new Promise<void>((resolve) => {
-        enqueue(rt, resolve);
-      });
-      const asked = rt.receipt;
-      const receipt = asked === null ? null : await withinGrace(asked, null);
-      rt.redo = null;
-      const session = rt.session;
-      if (rt.state !== S.Stopping || session === null) {
-        const edit = post();
-        queued(id);
-        return edit;
-      }
-      const untaken =
-        original !== null && receipt !== null && itemsOf(rt, receipt.stillQueued).has(original.id);
-      if (rt.inTurn) {
-        // The turn's own end is still to come: it is dropped when it does, unless its session goes.
-        if (!untaken) session.open.skipTurn();
-        settleTurn(rt, itemsOf(rt, receipt?.stillQueued ?? []));
-      }
-      rt.ended = 'stopped';
-      // The edit is stored first: if it can't be, the original stays. The stop settles either way.
-      try {
-        const edit = post();
-        // The agent would run the original by itself: it goes, and so does its session, so the edit
-        // alone is sent.
-        if (untaken)
-          state.write((ctx) => {
-            deleteItem(ctx, original.id);
-          });
-        return edit;
-      } finally {
-        if (untaken) {
-          handBack(rt);
-          reduce(rt, { type: 'stop_grace_passed' });
-        } else reduce(rt, { type: 'stop_settled' });
-      }
-    },
+    redo: (id, post) => stops.redo(id, post, queued),
     sendNow(id) {
       const rt = runtimeOf(id);
       if (openTurnMarker(state.db, id) === null)
@@ -1234,7 +537,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       if ('refused' in would) throw new ConflictError(would.refused);
       if (!runs(would)) throw new ConflictError(`Nothing can run while ${stateWords(rt.state)}`);
       reduce(rt, { type: 'builder_message' });
-      resolveSendNow(rt);
+      turns.resolveSendNow(rt);
     },
     async modelChanged(id, model) {
       const rt = runtimeOf(id);
