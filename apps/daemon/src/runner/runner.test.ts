@@ -3548,6 +3548,8 @@ describe('flows', () => {
         attempts: 1,
         providerSessionId: build?.providerSessionId,
       });
+      expect(engine.adapter.prompts[2]?.prompt).toContain('Its findings are below.');
+      expect(engine.adapter.prompts[2]?.prompt).toContain('1. The empty state has no test.');
       expect(step(workstream.id, 0)?.reason).toContain('fixing in its own session');
       expect(step(workstream.id, 0)?.reason).not.toContain('escalated');
     });

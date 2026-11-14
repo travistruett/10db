@@ -2467,7 +2467,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       priorResults,
       previousResult: readOnly ? step.result : null,
       earlierResults: step.earlier,
-      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
+      revisedBy: reviser
+        ? {
+            role: reviser.role,
+            personaName: reviser.personaName,
+            ...(reviser.result ? { notes: findingNotes(reviser.result.summary) } : {}),
+          }
+        : null,
       evidence,
       recovery:
         action.kind === 'resume'

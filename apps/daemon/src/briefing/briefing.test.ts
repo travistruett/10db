@@ -1654,6 +1654,31 @@ describe('review rounds in a brief', () => {
   });
 });
 
+describe('a fix that resumes the session that wrote the code', () => {
+  const notes = '1. BLOCKING a.ts:1 stale cache.\n2. NOTE the empty state has no test.';
+  const revisedBy = { role: 'review', personaName: 'Reviewer', notes } as const;
+  const brief = (providerSessionId: string | null) =>
+    buildSessionPrompt({
+      ...base,
+      revisedBy,
+      action: { kind: 'revise', reviewStep: 1, providerSessionId },
+    });
+
+  it('carries the rejection’s findings, which the session never saw', () => {
+    const prompt = brief('p-build');
+    expect(prompt).toContain(
+      'The review step (Reviewer) rejected the work. Its findings are below. Address each one, commit, and end your turn.',
+    );
+    expect(prompt).toContain(notes);
+  });
+
+  it('leaves a fresh fix to the notes under Earlier steps, as before', () => {
+    const prompt = brief(null);
+    expect(prompt).toContain('Its notes are under Earlier steps.');
+    expect(prompt).not.toContain('Its findings are below');
+  });
+});
+
 /**
  * Sentences that tell an agent to run the gate. 10db runs the gate after each implement step, so a
  * sentence that says not to, or that 10db runs it, is fine. In a brief, "run it" can only mean the gate.
