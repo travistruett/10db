@@ -1,5 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { expect, test, type Page } from '@playwright/test';
 import { expectAccessible } from './expect-accessible';
+import { E2E_DATA } from './paths';
 
 const SCOPES = 'Settings scope';
 const SERVICES = ['GitHub', 'Slack', 'Artificial Analysis'] as const;
@@ -76,7 +79,7 @@ test.describe('Settings', () => {
     await expectAccessible(page, 'settings integrations');
   });
 
-  test("Decisions shows Runs on's empty state with Add OpenRouter Account, which opens Add Account on that kind", async ({
+  test("Decisions shows Paid by's empty state with Add OpenRouter Account, which opens Add Account on that kind", async ({
     page,
   }) => {
     await page.goto('/settings/decisions');
@@ -89,5 +92,100 @@ test.describe('Settings', () => {
       dialog.getByRole('checkbox', { name: 'Run decisions on this account' }),
     ).toBeChecked();
     await expectAccessible(page, 'settings decisions');
+  });
+});
+
+/** Invented numbers: 26 calls on who a question goes to and 4 on skipping review. */
+function seededCalls(): readonly Record<string, unknown>[] {
+  const route = Array.from({ length: 26 }, (_, i) => ({
+    decision: 'question_route',
+    model: 'typesafe/jev-1.13',
+    answer: i % 3 === 0 ? 'nobody' : 'category:product',
+    confidence: 0.5 + (i % 10) / 20,
+    outcome: i % 4 === 0 ? 'below_floor' : 'acted',
+    latencyMs: 300 + i,
+    costUsd: 0.00001,
+  }));
+  const review = Array.from({ length: 4 }, (_, i) => ({
+    decision: 'review_size',
+    model: 'typesafe/jev-1.13',
+    answer: i % 2 === 0 ? 'skip' : 'review',
+    confidence: 0.9,
+    outcome: 'acted',
+    latencyMs: 250,
+    costUsd: 0.00002,
+  }));
+  return [...route, ...review];
+}
+
+/** Writes the calls straight into the idle daemon's database; it runs with the judge off and logs none itself. */
+function seedCalls(): void {
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-judge-calls.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({ calls: seededCalls() }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+}
+
+async function openDecisions(page: Page, scheme: 'dark' | 'light'): Promise<void> {
+  await page.addInitScript((value: string) => {
+    window.localStorage.setItem('mantine-color-scheme-value', value);
+  }, scheme);
+  await page.goto('/settings/decisions');
+  await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
+}
+
+test.describe('Settings › Decisions with logged calls', () => {
+  test.beforeAll(() => {
+    seedCalls();
+  });
+
+  test('lists every decision, pages and filters its calls, and opens a decision with its preview', async ({
+    page,
+  }) => {
+    await openDecisions(page, 'dark');
+    const main = page.getByRole('main');
+    const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
+    for (const group of ['Delivery', 'Plan', 'Stakeholder questions']) {
+      await expect(decisions.getByText(group, { exact: true })).toBeVisible();
+    }
+    // The e2e daemon runs with TENDB_JUDGE=off.
+    await expect(decisions.getByText('Off (all decisions)').first()).toBeVisible();
+
+    const recent = main.getByRole('table', { name: 'Recent decisions', exact: true });
+    await expect(main.getByRole('button', { name: 'Next page' })).toBeVisible();
+    await recent.getByRole('button', { name: 'Filter Decision' }).click();
+    await page.getByRole('combobox', { name: 'Decision', exact: true }).click();
+    await page.getByRole('option', { name: 'Skip review for small changes' }).click();
+    await page.keyboard.press('Escape');
+    await expect(
+      recent.getByRole('row').filter({ hasText: 'Skip review for small changes' }),
+    ).toHaveCount(4);
+
+    await decisions.getByRole('button', { name: 'Who a question goes to' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Who a question goes to' });
+    await expect(
+      drawer.getByText(/At 80%, 10db would have acted on \d+ of your last \d+ answers\./),
+    ).toBeVisible();
+    await expectAccessible(page, 'settings decisions drawer dark');
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+    await expectAccessible(page, 'settings decisions dark');
+  });
+
+  test('passes axe in light, with a decision open', async ({ page }) => {
+    await openDecisions(page, 'light');
+    const main = page.getByRole('main');
+    await expect(main.getByRole('table', { name: 'Decisions', exact: true })).toBeVisible();
+    await expectAccessible(page, 'settings decisions light');
+    await main.getByRole('button', { name: 'Skip review for small changes' }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Skip review for small changes' })).toBeVisible();
+    await expectAccessible(page, 'settings decisions drawer light');
   });
 });
