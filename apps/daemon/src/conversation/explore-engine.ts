@@ -17,6 +17,7 @@ import {
   getAccountRow,
   getConversation,
   getProject,
+  getSession,
   insertItem,
   listConversationsOfProfile,
   listPushedTurnStarters,
@@ -605,11 +606,20 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       // The warm session as the pick finds it: a message sent right after queues behind the switch.
       const session = rt.state === S.IdleWarm ? rt.session : null;
       const switching = session !== null && after.model !== before.model;
+      // No agent changes a live session's effort, and some can't change its model: that session
+      // closes at once, before a message sent right after can reach it, and the next start runs the pick.
+      const reEffort =
+        session !== null && getSession(state.db, session.open.sessionId).effort !== after.effort;
+      const closes =
+        reEffort || (switching && capabilitiesOf(conv).modelSwitch !== ModelSwitch.NextTurn);
+      if (closes) {
+        rt.closeReason = 'model changed';
+        reduce(rt, { type: 'idle_close' });
+      }
       await new Promise<void>((resolve, reject) => {
         enqueue(rt, async () => {
           try {
-            const nextTurn = capabilitiesOf(conv).modelSwitch === ModelSwitch.NextTurn;
-            if (switching && nextTurn) await session.open.handle.setModel(after.launchId);
+            if (switching && !closes) await session.open.handle.setModel(after.launchId);
             if (after.model !== before.model)
               state.write((ctx) => {
                 insertItem(ctx, id, {
@@ -618,11 +628,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
                   body: { kind: 'model_change', label: after.label, model: after.model },
                 });
               });
-            // An agent that can't switch a live session closes it; the next start runs the pick.
-            if (switching && !nextTurn) {
-              rt.closeReason = 'model changed';
-              reduce(rt, { type: 'idle_close' });
-            }
             resolve();
           } catch (error) {
             state.write((ctx) => {

@@ -18,6 +18,7 @@ import {
   insertSkipFollowUp,
   insertTask,
   skipFollowUpOf,
+  lastConfigHead,
   lastListed,
   passHoldingTask,
   listSkipsForWorkstream,
@@ -35,8 +36,8 @@ import { checkoutOf } from './checkout';
 import { followUpStart } from './follow-up-start';
 import { sourceStateOf } from './skip-follow-up';
 
-// Trust line §5 and T4 call 12: when an unattended run ends, one Inbox item lists what it skipped,
-// the questions it was answered at once and the config it wrote, each once. It is marked in
+// Trust line §5: when an unattended run ends, one Inbox item lists what it skipped, the questions it
+// was answered at once and the config it wrote, each once. It is marked in
 // `skip_listings` in its own write, so a crash or a retry neither loses it nor repeats it.
 
 /** The item's detail key: the run it lists. Its `skipIds` are the approvable skips it showed. */
@@ -51,7 +52,7 @@ export type SkippedChoice = (typeof SkippedChoice)[keyof typeof SkippedChoice];
 
 export interface SkippedCardDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'changedFilesSince'>;
+  readonly git: Pick<Git, 'changedFilesSince' | 'head'>;
   readonly log: Logger;
 }
 
@@ -147,16 +148,24 @@ function runOption(waits: boolean): InboxOption {
   };
 }
 
-/** The run's changed paths, as the review step reads them; null when they can't be read. */
+/**
+ * The paths the run changed since `since` (its base when null), as the review step reads them, and
+ * the commit they were read through; null when they can't be read.
+ */
 async function changedPaths(
   deps: SkippedCardDeps,
   workstreamId: WorkstreamId,
-): Promise<string[] | null> {
+  since: string | null,
+): Promise<{ readonly paths: string[]; readonly head: string } | null> {
   const db = deps.state.db;
   const row = getWorkstreamRow(db, workstreamId);
-  if (row.baseHead === null) return null;
+  const from = since ?? row.baseHead;
+  if (from === null) return null;
   try {
-    return await deps.git.changedFilesSince(checkoutOf(db, row), row.baseHead);
+    const checkout = checkoutOf(db, row);
+    // Read first: a commit after it is read again by the next check, never skipped.
+    const head = await deps.git.head(checkout);
+    return { paths: await deps.git.changedFilesSince(checkout, from), head };
   } catch (error) {
     deps.log.warn(
       { workstreamId, err: error instanceof Error ? error.message : String(error) },
@@ -180,15 +189,18 @@ export async function raiseSkippedCard(
   const last = lastListed(db, workstreamId);
   const pass = passHoldingTask(db, getTask(db, row.taskId)) !== undefined;
   const skips = pass ? [] : listSkipsForWorkstream(db, workstreamId, last ?? undefined);
-  // Config is listed on the run's first item only.
-  const config = pass || last !== undefined ? [] : await changedPaths(deps, workstreamId);
-  const written = config === null ? null : writtenConfig(config);
+  // Each ending lists the config changed since the last check that read it; a pass lists none.
+  const config = pass
+    ? { paths: [], head: null }
+    : await changedPaths(deps, workstreamId, lastConfigHead(db, workstreamId));
+  const written = config === null ? null : writtenConfig(config.paths);
+  const configHead = config?.head ?? null;
   const through = skips.at(-1)?.id ?? last ?? null;
   deps.state.write((ctx: WriteContext) => {
     // Another check of the run got here first while the paths were read.
     if (lastListed(ctx.tx, workstreamId) !== last) return;
     if (skips.length === 0 && (written === null || written.length === 0)) {
-      markListed(ctx, workstreamId, through, null);
+      markListed(ctx, workstreamId, through, null, configHead);
       return;
     }
     const task = getTask(ctx.tx, row.taskId);
@@ -209,9 +221,9 @@ export async function raiseSkippedCard(
             ],
       recommendation: null,
       detail: { [SKIPPED_DETAIL]: workstreamId, skipIds },
-      foldKey: `skipped:${workstreamId}:${through ?? 'none'}`,
+      foldKey: `skipped:${workstreamId}:${through ?? 'none'}:${configHead ?? 'none'}`,
     });
-    markListed(ctx, workstreamId, through, item.id);
+    markListed(ctx, workstreamId, through, item.id, configHead);
   });
 }
 
@@ -233,6 +245,16 @@ const SkippedDetail = z.object({
   [SKIPPED_DETAIL]: WorkstreamId,
   skipIds: z.array(SkippedActionId),
 });
+
+/** The most of a skip's reason the follow-up's description quotes. */
+const FOLLOW_UP_REASON_MAX = 200;
+
+/**
+ * One approved call in the follow-up's description, its summary and reason quoted as JSON strings,
+ * so agent-written text can't close the quote and read as instructions.
+ */
+const followUpLine = (s: SkippedActionDto): string =>
+  `- ${JSON.stringify(s.summary)}: skipped because ${JSON.stringify(s.reason.slice(0, FOLLOW_UP_REASON_MAX))}`;
 
 /** The longest source title the follow-up's own title quotes whole. */
 const SOURCE_TITLE_MAX = 160;
@@ -264,7 +286,11 @@ export function applySkippedChoice(
   if (existing !== null)
     throw new ConflictError(`"${sourceTask.title}" already has the follow-up "${existing.title}".`);
   const listed = new Set<string>(ids);
-  const approved = listSkipsForWorkstream(ctx.tx, source).filter((s) => listed.has(s.id));
+  // Only what the builder saw whole and may approve; a cut summary is never approvable.
+  const approved = listSkipsForWorkstream(ctx.tx, source).filter(
+    (s) => listed.has(s.id) && s.approval !== Approval.None,
+  );
+  if (approved.length === 0) throw new ConflictError('Nothing this item lists can be run approved');
   const quoted =
     sourceTask.title.length > SOURCE_TITLE_MAX
       ? `${sourceTask.title.slice(0, SOURCE_TITLE_MAX)}…`
@@ -273,14 +299,18 @@ export function applySkippedChoice(
     title: `Run what "${quoted}" skipped`,
     description: [
       `The builder approved these calls, which an earlier run of "${sourceTask.title}" skipped. Run them, then finish what that run left undone because of them.`,
-      ...approved.map((s) => `- \`${oneLine(s.summary)}\`: skipped because ${oneLine(s.reason)}`),
+      ...approved.map(followUpLine),
     ].join('\n'),
     acceptanceCriteria: [
       'Each approved call has run, and what it held up in the earlier run is done.',
     ],
     areas: sourceTask.areas,
   });
-  approveSkips(ctx, task.id, ids);
+  approveSkips(
+    ctx,
+    task.id,
+    approved.map((s) => s.id),
+  );
   insertSkipFollowUp(ctx, {
     taskId: task.id,
     sourceWorkstreamId: source,

@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { InboxKind, type WorkstreamId } from '@10db/contracts';
 import { getWorkstream, listInbox, listSkipsForWorkstream, recordSkip } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,10 +9,10 @@ import { createGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import type { FakeScriptBook } from '../src/sessions';
 import { createTestEngine, type TestEngine } from './engine';
-import { waitFor } from './fixtures';
+import { isolatedGitEnv, waitFor } from './fixtures';
 
-// T4 call 12: every ended unattended run with something new to say raises one item, after a crash,
-// a recovery or a retry too, listing every row and what clears each.
+// Every ended unattended run with something new to say raises one item, after a crash, a recovery or
+// a retry too, listing every row and what clears each.
 
 type FakeStep = FakeScriptBook[string][number][number];
 
@@ -129,7 +132,10 @@ describe('Skipped while you were away', () => {
     await raiseSkippedCard(
       {
         ...deps(),
-        git: { changedFilesSince: () => Promise.reject(new Error('the worktree is gone')) },
+        git: {
+          changedFilesSince: () => Promise.reject(new Error('the worktree is gone')),
+          head: () => Promise.reject(new Error('the worktree is gone')),
+        },
       },
       id,
     );
@@ -235,5 +241,50 @@ describe('Skipped while you were away', () => {
     await raiseSkippedCard(deps(), id);
     await sweepUnlistedRuns(deps());
     expect(items()).toHaveLength(1);
+  });
+
+  // Each ending lists the config written since the last check that read it, so none goes unlisted.
+  it('a later ending lists the config written since the first item, and only that', async () => {
+    const id = await ended([
+      write('.mcp.json'),
+      write('src/api/a.txt'),
+      commit('op-skipped-011', ['.mcp.json', 'src/api/a.txt']),
+      turn,
+    ]);
+    await raiseSkippedCard(deps(), id);
+    mkdirSync(join(engine.repoPath, '.vscode'), { recursive: true });
+    writeFileSync(join(engine.repoPath, '.vscode', 'tasks.json'), '{}');
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], { env: isolatedGitEnv() });
+    git('add', '.vscode/tasks.json');
+    git('commit', '-q', '-m', 'a later ending');
+    await raiseSkippedCard(deps(), id);
+    expect(items().map((i) => i.body)).toEqual([
+      'Config this task wrote, which runs only after you approve it:\n- .mcp.json',
+      'Config this task wrote, which runs only after you approve it:\n- .vscode/tasks.json',
+    ]);
+  });
+
+  it("a check that couldn't read the changed paths leaves them to the next ending", async () => {
+    const id = await ended([
+      write('.mcp.json'),
+      write('src/api/a.txt'),
+      commit('op-skipped-012', ['.mcp.json', 'src/api/a.txt']),
+      turn,
+    ]);
+    await raiseSkippedCard(
+      {
+        ...deps(),
+        git: {
+          changedFilesSince: () => Promise.reject(new Error('the worktree is gone')),
+          head: () => Promise.reject(new Error('the worktree is gone')),
+        },
+      },
+      id,
+    );
+    await raiseSkippedCard(deps(), id);
+    expect(items().map((i) => i.body)).toEqual([
+      'Config this task wrote, which runs only after you approve it:\n- .mcp.json',
+    ]);
   });
 });

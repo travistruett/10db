@@ -5,7 +5,7 @@ import {
   type SkippedActionId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -13,14 +13,16 @@ import type { DbReader, WriteContext } from './store';
 // crash or a retry neither loses one nor repeats it.
 
 /**
- * Marks the run checked through `through`, the newest skip the item covered, in the caller's write:
- * the item's own, or alone when there was nothing new to say (`inboxId` null).
+ * Marks the run checked through `through`, the newest skip the item covered, and its config through
+ * the commit `configHead` (null when the check read none), in the caller's write: the item's own, or
+ * alone when there was nothing new to say (`inboxId` null).
  */
 export function markListed(
   ctx: WriteContext,
   workstreamId: WorkstreamId,
   through: SkippedActionId | null,
   inboxId: InboxItemId | null,
+  configHead: string | null,
 ): void {
   ctx.tx
     .insert(schema.skipListings)
@@ -29,9 +31,30 @@ export function markListed(
       workstreamId,
       throughSkipId: through,
       inboxItemId: inboxId,
+      configHead,
       createdAt: ctx.now,
     })
     .run();
+}
+
+/**
+ * The commit the run's config was last read through, by its newest listing that read one; null when
+ * none did, so the next check reads the run's config from its base.
+ */
+export function lastConfigHead(db: DbReader, workstreamId: WorkstreamId): string | null {
+  const row = db
+    .select({ head: schema.skipListings.configHead })
+    .from(schema.skipListings)
+    .where(
+      and(
+        eq(schema.skipListings.workstreamId, workstreamId),
+        isNotNull(schema.skipListings.configHead),
+      ),
+    )
+    .orderBy(desc(sql`rowid`))
+    .limit(1)
+    .get();
+  return row?.head ?? null;
 }
 
 /** The newest skip the run's last listing covered; null when it covered none, undefined when the run has none. */

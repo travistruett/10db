@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { InboxItemId, ProjectId, WorkstreamId, WorkstreamState } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase } from '../database';
-import { lastListed, markListed, unlistedEndedRuns } from './skip-listings';
+import { lastConfigHead, lastListed, markListed, unlistedEndedRuns } from './skip-listings';
 import { recordSkip } from './skipped-actions';
 import { createStore, type Store } from './store';
 import { insertTask } from './tasks';
@@ -54,9 +54,14 @@ const skip = (id: WorkstreamId, toolUseId: string) =>
     }),
   ).value;
 
-const mark = (id: WorkstreamId, through: ReturnType<typeof skip>, inbox: InboxItemId | null) =>
+const mark = (
+  id: WorkstreamId,
+  through: ReturnType<typeof skip> | null,
+  inbox: InboxItemId | null,
+  configHead: string | null = null,
+) =>
   store.write((ctx) => {
-    markListed(ctx, id, through, inbox);
+    markListed(ctx, id, through, inbox, configHead);
   });
 
 describe('skip listings', () => {
@@ -68,6 +73,15 @@ describe('skip listings', () => {
     const second = skip(run, 'tu-2');
     mark(run, second, null);
     expect(lastListed(store.db, run)).toBe(second);
+  });
+
+  it('the config head is the newest a listing read, past one that read none', () => {
+    const run = runOf(store, seedProject(store).id, 'DONE');
+    expect(lastConfigHead(store.db, run)).toBeNull();
+    mark(run, null, null, 'aaa1');
+    mark(run, null, null, 'bbb2');
+    mark(run, null, null, null);
+    expect(lastConfigHead(store.db, run)).toBe('bbb2');
   });
 
   it('an ended run with skips after its listing is unlisted', () => {

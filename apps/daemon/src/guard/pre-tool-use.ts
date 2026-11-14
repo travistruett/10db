@@ -6,7 +6,7 @@ import { isOwnFile } from './account-rules';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { JudgedRule, judgedRuleApplies } from './judged-rules';
-import { realPathOf } from './paths';
+import { foldPathCase, realPathOf, resolveInRepoReadings } from './paths';
 import { laneReadOnlyWords } from './read-only';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 import { CLAUDE_TOOLS_REVIEWED } from './reviewed-tools';
@@ -145,15 +145,21 @@ interface BrokerAsk {
   readonly reason: string;
 }
 
+const EDITOR_CONFIG_DIRS: ReadonlySet<string> = new Set(['.vscode', '.idea']);
+const namesEditorConfig = (path: string): boolean =>
+  path.split('/').some((part) => EDITOR_CONFIG_DIRS.has(foldPathCase(part)));
+
 /**
  * Which of Claude Code's protected paths a write asks about: editor config the builder's editor
- * runs, a file outside the checkout (a home rc file), or the checkout's own agent config.
+ * runs, a file outside the checkout (a home rc file), or the checkout's own agent config. Inside is
+ * where the path resolves on every reading, links and `..` followed, never how it is spelled; a path
+ * that can't be resolved is outside.
  */
 function protectedWriteKind(path: string, repoPath: string): AskKind {
-  const parts = path.split('/');
-  if (parts.includes('.vscode') || parts.includes('.idea')) return AskKind.EditorConfigWrite;
-  const root = repoPath.endsWith('/') ? repoPath : `${repoPath}/`;
-  return path.startsWith(root) ? AskKind.ConfigWrite : AskKind.HomeRcWrite;
+  const where = resolveInRepoReadings(repoPath, path);
+  if (namesEditorConfig(path) || (where.inside && where.rels.some(namesEditorConfig)))
+    return AskKind.EditorConfigWrite;
+  return where.inside ? AskKind.ConfigWrite : AskKind.HomeRcWrite;
 }
 
 /**

@@ -96,6 +96,27 @@ describe('a conversation’s model', () => {
     },
   );
 
+  // No agent changes a live session's effort, so the warm one closes and the next turn starts on it.
+  it('runs the next turn on an effort chosen alone, in a fresh session', async () => {
+    f = createServiceFixture({ models: () => MODELS });
+    const shapeId = f.c.shape.id;
+    f.service.send(shapeId, 'First');
+    await f.service.settled(shapeId);
+    f.service.chooseModel(shapeId, null, 'low');
+    f.service.send(shapeId, 'Second');
+    await f.service.settled(shapeId);
+    expect(f.adapter.shapeSessions.map((s) => s.spec.prompt)).toEqual([
+      expect.stringContaining('First') as string,
+      expect.stringContaining('Second') as string,
+    ]);
+    const efforts = f.c.store.db
+      .select({ effort: schema.sessions.effort })
+      .from(schema.sessions)
+      .all()
+      .map((r) => r.effort);
+    expect(efforts).toEqual(['high', 'low']);
+  });
+
   it('keeps the effort chosen with the model, and a choice without one clears it', () => {
     f = createServiceFixture({ models: () => MODELS });
     const shapeId = f.c.shape.id;

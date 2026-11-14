@@ -1,3 +1,4 @@
+import { symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ClaimKind, DEFAULT_HAZARDS, JudgeKind, type LimitName } from '@10db/contracts';
@@ -228,6 +229,28 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
     ).toEqual({
       verdict: { decision: 'allow' },
       skip: null,
+    });
+  });
+
+  // Config is the checkout's by where the path resolves, never by how it is spelled.
+  describe('a config write, by where it resolves', () => {
+    const elsewhere = tempDir('unattended-elsewhere');
+    afterAll(() => {
+      elsewhere.cleanup();
+    });
+    const alias = join(elsewhere.path, 'alias');
+    symlinkSync(repo.path, alias);
+    symlinkSync(elsewhere.path, join(repo.path, 'out'));
+    it.each([
+      ['through a link to the checkout is config_write and allowed', () => alias, 'allow'],
+      ['climbing out with .. is never allowed', () => `${repo.path}/../x`, 'deny'],
+      ['through a link out of the checkout is never allowed', () => `${repo.path}/out`, 'deny'],
+    ])('%s', (_name, root, decision) => {
+      const answer = unattended('Write', {
+        file_path: `${root()}/.claude/settings.json`,
+        content: '{}',
+      });
+      expect(answer.verdict.decision).toBe(decision);
     });
   });
 

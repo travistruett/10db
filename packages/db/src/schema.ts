@@ -2550,7 +2550,8 @@ export const skipApprovals = sqliteTable(
 
 /**
  * Each check of an ended unattended run for its Skipped while you were away item: the newest skip it
- * covered, and the item it raised (null when there was nothing new to say). A run is listed once per
+ * covered, the commit its config was read through, and the item it raised (null when there was
+ * nothing new to say). A run is listed once per
  * ending, and a crash between the end and the item leaves no row, so the start-up sweep raises it.
  */
 export const skipListings = sqliteTable(
@@ -2567,6 +2568,11 @@ export const skipListings = sqliteTable(
     inboxItemId: text('inbox_item_id')
       .$type<InboxItemId>()
       .references(() => inboxItems.id),
+    /**
+     * The commit the check read the run's config through; null when it read none (its changed paths
+     * couldn't be read, or a pass lists no config), so the next ending reads from the check before.
+     */
+    configHead: text('config_head'),
     createdAt: createdAt(),
   },
   (t) => [index('skip_listings_workstream_idx').on(t.workstreamId)],

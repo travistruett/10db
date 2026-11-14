@@ -118,14 +118,14 @@ export function createServiceFixture(
         providerOf(launched.kind) === Provider.Codex ? BRAINSTORM_REFUSED_ON_CHATGPT : null,
       launch: (_projectId, chosen, effort) => {
         opts.onLaunch?.(chosen, effort);
-        return launchFor(chosen);
+        return launchFor(chosen, effort);
       },
     });
-  const launchFor = (chosen: string | null): ShapeLaunch => ({
+  const launchFor = (chosen: string | null, effort: Effort | null = null): ShapeLaunch => ({
     cwd: '/repo',
     model: opts.launchId?.(chosen ?? 'claude-opus-5-5') ?? chosen ?? 'claude-opus-5-5',
     modelId: chosen ?? 'claude-opus-5-5',
-    effort: 'high',
+    effort: effort ?? 'high',
     agentModels: shapeAgentModels(launched.kind),
     env: {},
     account: {
