@@ -88,6 +88,8 @@ export interface ExploreWorld extends EngineInstance {
   keep(text: string): ConversationItemRow;
   items(): ConversationItemRow[];
   stateOf(): ConversationState;
+  /** Another Plan conversation in the project, on the same engine. */
+  another(): { readonly conv: ConversationRow; send(text: string): ConversationItemRow };
   /** A second engine over the same store, with its own fake and clock, as a restart is. */
   restart(over?: Partial<ExploreEngineDeps>): EngineInstance;
   close(): void;
@@ -160,6 +162,26 @@ export function exploreWorld(
         }),
       ),
     items: () => listItems(state.db, conv.id),
+    another() {
+      const other = store.write((ctx) =>
+        insertShape(ctx, project.id, { title: 'Another', origin: ShapeOrigin.App }),
+      ).value;
+      const c = shapeConversation(state.db, other.id);
+      return {
+        conv: c,
+        send(text) {
+          const item = state.write((ctx) =>
+            insertItem(ctx, c.id, {
+              author: ConversationItemAuthor.Builder,
+              kind: ConversationItemKind.Message,
+              body: { text },
+            }),
+          );
+          world.engine.queued(c.id);
+          return item;
+        },
+      };
+    },
     stateOf: () => world.engine.view(conv.id).state,
     restart(over = {}) {
       const next = build(over);

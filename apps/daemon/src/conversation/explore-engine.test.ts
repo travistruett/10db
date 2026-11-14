@@ -786,3 +786,80 @@ describe('cards', () => {
     expect(withdrawn).toEqual([first.item.id, second.item.id]);
   });
 });
+
+describe('the warm cap', () => {
+  it('closes the longest idle session when a fifth goes idle, with no notice', async () => {
+    w = exploreWorld();
+    const convs = [
+      { conv: w.conv, send: (t: string) => w.send(t) },
+      ...[1, 2, 3, 4].map(() => w.another()),
+    ];
+    for (const c of convs) {
+      c.send('hello');
+      await w.engine.settled(c.conv.id);
+      w.clock.advance(60_000);
+    }
+    expect(convs.map((c) => w.engine.view(c.conv.id).state)).toEqual([
+      'idle_cold',
+      'idle_warm',
+      'idle_warm',
+      'idle_warm',
+      'idle_warm',
+    ]);
+    expect(w.items().filter((i) => i.kind === 'notice')).toEqual([]);
+    w.send('again');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions.at(-1)?.spec.resumeProviderSessionId).toBe('fake-shape-1');
+  });
+
+  it('never closes a running session for the cap, only an idle one', async () => {
+    w = exploreWorld();
+    const idle = w.another();
+    idle.send('hello');
+    await w.engine.settled(idle.conv.id);
+    const gates = gatedTurns(w);
+    const running = [1, 2, 3, 4].map(() => w.another());
+    for (const c of running) c.send('work');
+    await waitFor(() => gates.length === 4);
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+    w.clock.advance(60_000);
+    w.send('hello');
+    await w.engine.settled(w.conv.id);
+    expect(w.engine.view(idle.conv.id).state).toBe('idle_cold');
+    expect(w.stateOf()).toBe('idle_warm');
+    expect(running.map((c) => w.engine.view(c.conv.id).state)).toEqual([
+      'running',
+      'running',
+      'running',
+      'running',
+    ]);
+    for (const g of gates) g.release();
+    for (const c of running) await w.engine.settled(c.conv.id);
+  });
+
+  it('opens no second handle when a cap close and a message to it land in one tick', async () => {
+    w = exploreWorld();
+    const convs = [
+      { conv: w.conv, send: (t: string) => w.send(t) },
+      ...[1, 2, 3].map(() => w.another()),
+    ];
+    for (const c of convs) {
+      c.send('hello');
+      await w.engine.settled(c.conv.id);
+      w.clock.advance(60_000);
+    }
+    const stopping = gate();
+    w.adapter.shapeStopGate = stopping.promise;
+    const fifth = w.another();
+    fifth.send('hello');
+    await waitFor(() => w.adapter.shapeSessions.length === 5);
+    await waitFor(() => w.engine.view(fifth.conv.id).state === 'idle_warm');
+    w.send('again');
+    stopping.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions.at(-1)?.spec).toMatchObject({
+      resumeProviderSessionId: 'fake-shape-1',
+      prompt: 'again',
+    });
+  });
+});

@@ -66,6 +66,7 @@ import {
   type ExploreFacts,
 } from './explore-state';
 import { pictureLimitsFor, type PictureLimits } from './picture-limits';
+import { warmToClose } from './warm-cap';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
 // conversation's state moves only through the reducer, is written with the conversation, and its
@@ -226,6 +227,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const { state, adapter, clock, log } = deps;
   const idleMs = deps.idleMs ?? IDLE_MS;
   const stopGraceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
+  const warmCap = deps.warmCap ?? WARM_CAP;
   const owners = new Map<ConversationOwnerKind, ExploreOwnerHooks>();
   const runtimes = new Map<ConversationId, Runtime>();
 
@@ -330,6 +332,23 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       }, idleMs);
     }
     wake(rt);
+    if (next === S.IdleWarm) enforceWarmCap();
+  };
+
+  /**
+   * At most `warmCap` sessions stay open app-wide: a session going idle past it closes the one idle
+   * longest, never one in a turn, with no notice (it resumes on its next message).
+   */
+  const enforceWarmCap = (): void => {
+    const all = [...runtimes.values()];
+    const busy = all.filter((rt) => BUSY.has(rt.state) && rt.session !== null).length;
+    const idle = all.flatMap((rt) =>
+      rt.state === S.IdleWarm && rt.idleSince !== null
+        ? [{ id: rt.id, idleSince: rt.idleSince }]
+        : [],
+    );
+    const close = warmToClose(idle, Math.max(0, warmCap - busy));
+    if (close !== null) reduce(runtimeOf(close), { type: 'idle_close' });
   };
 
   const enqueue = (rt: Runtime, work: () => Promise<void> | void): void => {
