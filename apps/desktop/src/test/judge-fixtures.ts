@@ -1,8 +1,11 @@
 import {
   DecisionModelDto,
+  DecisionStatsDto,
+  type DecisionStatsListDto,
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
   JudgeCallDto,
+  JudgeCallsPageQuery,
   JudgeConfigPatch,
   JudgeDecision,
   JudgeStatusDto,
@@ -57,6 +60,26 @@ export function judgeCallDto(overrides: Partial<JudgeCallDto> = {}): JudgeCallDt
   });
 }
 
+/** A decision's last 30 days: no calls unless `overrides` says so. */
+export function decisionStatsDto(
+  decision: JudgeDecision,
+  overrides: Partial<DecisionStatsDto> = {},
+): DecisionStatsDto {
+  return DecisionStatsDto.parse({
+    decision,
+    calls: 0,
+    acted: 0,
+    belowFloor: 0,
+    shadow: 0,
+    stopped: 0,
+    fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
+    costUsd: 0,
+    medianLatencyMs: null,
+    answers: [],
+    ...overrides,
+  });
+}
+
 export function decisionModelDto(overrides: Partial<DecisionModelDto> = {}): DecisionModelDto {
   return DecisionModelDto.parse({
     id: 'typesafe/jev-1.13',
@@ -74,6 +97,8 @@ export interface JudgeRequest {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
+  /** The request's search params, when it has any. */
+  readonly query?: Readonly<Record<string, string>>;
 }
 
 /** A judge that remembers what it was sent, serving status and calls from mutable state. */
@@ -82,6 +107,8 @@ export function serveJudge(initial: {
   readonly calls?: readonly JudgeCallDto[];
   readonly test?: JsonBodyType;
   readonly measures?: ShapeMeasuresDto;
+  /** `GET /judge/decisions`; the daemon leaves out a decision with no calls, so the default lists none. */
+  readonly stats?: DecisionStatsListDto;
   /** The accounts a patch naming `accountId` can resolve to the status's account. */
   readonly accounts?: readonly AccountDto[];
   /** OpenRouter's decision models, as `GET /judge/models` answers them. */
@@ -93,10 +120,12 @@ export function serveJudge(initial: {
   const sent: JudgeRequest[] = [];
   const note = async (request: Request) => {
     const text = await request.text();
+    const params = new URL(request.url).searchParams;
     sent.push({
       method: request.method,
       path: new URL(request.url).pathname,
       body: text === '' ? null : JSON.parse(text),
+      ...(params.size > 0 ? { query: Object.fromEntries(params) } : {}),
     });
   };
   server.use(
@@ -156,6 +185,23 @@ export function serveJudge(initial: {
       return HttpResponse.json(initial.test);
     }),
     http.get(daemonUrl('/judge/calls'), () => HttpResponse.json(initial.calls ?? [])),
+    http.get(daemonUrl('/judge/calls/page'), async ({ request }) => {
+      await note(request);
+      const query = JudgeCallsPageQuery.parse(
+        Object.fromEntries(new URL(request.url).searchParams),
+      );
+      const matching = [...(initial.calls ?? [])]
+        .filter((c) => query.decision === undefined || c.decision === query.decision)
+        .filter((c) => query.outcome === undefined || c.outcome === query.outcome)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return HttpResponse.json({
+        calls: matching.slice(query.offset, query.offset + query.limit),
+        total: matching.length,
+      });
+    }),
+    http.get(daemonUrl('/judge/decisions'), () =>
+      HttpResponse.json(initial.stats ?? { since: '2026-10-14T12:00:00.000Z', decisions: [] }),
+    ),
     http.get(daemonUrl('/judge/models'), () =>
       HttpResponse.json({
         models: initial.models ?? [decisionModelDto()],
