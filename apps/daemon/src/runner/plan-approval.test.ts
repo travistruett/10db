@@ -161,3 +161,82 @@ describe('answering the plan card', () => {
     expect(engine.adapter.prompts).toHaveLength(2);
   });
 });
+
+describe('sending the plan back', () => {
+  const note = 'Cover the empty state too';
+  const parked = () => {
+    const [card] = openPlanCards();
+    if (!card) throw new Error('no open plan card');
+    return card;
+  };
+  /** One more round of planning, as the scripts run it: a plan, then Plan Review's approval. */
+  const round = (n: number) => [
+    [planResult(`op-plan-1${String(n)}1`, `PLAN ${String(n)}`), turn],
+    [approve(`op-plan-1${String(n)}2`), turn],
+  ];
+
+  it('needs a note, and refuses the answer without one', async () => {
+    engine = await createTestEngine({ Alpha: round(1) });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    expect(() => engine.inbox.answer(parked().id, { choice: 'send_back', note: '  ' })).toThrow(
+      /note/,
+    );
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+    expect(openPlanCards()).toHaveLength(1);
+  });
+
+  it('runs Plan again with the note, then Plan Review, and raises a new card for the new plan', async () => {
+    engine = await createTestEngine({ Alpha: [...round(1), ...round(2)] });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    const first = parked();
+    engine.inbox.answer(first.id, { choice: 'send_back', note });
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 0,
+      attempt: 1,
+      nextAction: { kind: 'fix' },
+    });
+    await runWhileQueued(workstream.id);
+    const prompts = engine.adapter.prompts.map((p) => p.prompt);
+    expect(prompts).toHaveLength(4);
+    expect(prompts[2]).toContain('Your step: 1 of 5, plan');
+    expect(prompts[2]).toContain(note);
+    expect(prompts[3]).toContain('plan_review');
+    const [second] = openPlanCards();
+    expect(second?.id).not.toBe(first.id);
+    expect(second?.body).toContain('PLAN 2');
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'plan_approval', inboxId: second?.id },
+    });
+    expect(planCards().map((c) => c.state)).toEqual(['RESOLVED', 'OPEN']);
+    expect(
+      ws(workstream.id)
+        .steps.slice(0, 2)
+        .map((s) => s.status),
+    ).toEqual(['done', 'done']);
+  });
+
+  it('fails past the retry limit, as the check card does, with the note on the plan to retry', async () => {
+    engine = await createTestEngine({
+      Alpha: [...round(1), ...round(2), ...round(3), ...round(4)],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    for (const n of [1, 2, 3]) {
+      engine.inbox.answer(parked().id, { choice: 'send_back', note: `${note} ${String(n)}` });
+      await runWhileQueued(workstream.id);
+    }
+    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', attempt: 3 });
+    engine.inbox.answer(parked().id, { choice: 'send_back', note: 'once more' });
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureKind: 'retry_limit',
+      stepIndex: 0,
+    });
+    expect(ws(workstream.id).steps[0]?.status).toBe('failed');
+    expect(openPlanCards()).toEqual([]);
+  });
+});

@@ -31,9 +31,14 @@ export function applyPlanAnswer(
     const { nextAction } = getWorkstreamRow(ctx.tx, target.workstreamId);
     if (nextAction.kind !== 'plan_approval' || nextAction.inboxId !== item.id)
       throw new ConflictError(`Workstream ${target.workstreamId} is not waiting on this plan card`);
-    if (choice === PlanChoice.Approve)
-      afterCommit.push(runner.approvePlan(ctx, target.workstreamId));
-    else throw new InvalidError('Send Back is not available yet');
+    switch (choice) {
+      case PlanChoice.Approve:
+        afterCommit.push(runner.approvePlan(ctx, target.workstreamId));
+        break;
+      case PlanChoice.SendBack:
+        afterCommit.push(runner.sendBackPlan(ctx, target.workstreamId, answer.note ?? ''));
+        break;
+    }
   }
   return () => {
     for (const run of afterCommit) run();

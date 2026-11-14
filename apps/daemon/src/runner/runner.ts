@@ -485,6 +485,14 @@ export interface Runner {
    */
   approvePlan(ctx: WriteContext, id: WorkstreamId): AfterCommit;
   /**
+   * The builder sent the plan back with a note: the Plan step runs again with it, and Plan Review after
+   * it when the row has one. Counted against the fix attempts like the check card's send-back, and the
+   * workstream fails past them. Runs inside the write that closes the card, and throws `ConflictError`
+   * for a workstream that is not waiting for its plan's approval. The result runs once that write has
+   * committed.
+   */
+  sendBackPlan(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
+  /**
    * Hands the builder's message to a page of a pass (Workbench spec §6.3). A live session gets it at
    * once, after the builder's hand edits are kept and named ahead of it, starting a turn unless one
    * is open; with no session the page is queued to start one with it. The message's row is written.
@@ -1028,6 +1036,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       readonly nextAction?: NextAction;
       readonly stepIndex?: number;
       readonly steps?: WorkstreamStep[];
+      readonly model?: WorkstreamStep['model'];
+      readonly effort?: WorkstreamStep['effort'];
     } = {},
   ): void {
     const reason = failure.reason;
@@ -4460,6 +4470,86 @@ export function createRunner(opts: RunnerOptions): Runner {
           `Workstream ${id} is not waiting for the builder to approve the plan`,
         );
       approvePlanAdvance(ctx, row);
+      return () => {
+        opts.onLaneFreed();
+      };
+    },
+    sendBackPlan(ctx, id, note) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForPlanApproval(row))
+        throw new ConflictError(
+          `Workstream ${id} is not waiting for the builder to approve the plan`,
+        );
+      const attempt = row.attempt + 1;
+      const evidence = insertEvidence(ctx, {
+        workstreamId: id,
+        kind: 'builder',
+        command: null,
+        exitCode: null,
+        summary: note,
+        logPath: null,
+        commitShas: [],
+      });
+      const targetIndex = row.steps.findLastIndex(
+        (s, i) => i <= row.stepIndex && s.role === StepRole.Plan,
+      );
+      const target = row.steps[targetIndex];
+      if (!target) throw new ConflictError(`Workstream ${id} has no plan step to run again`);
+      if (attempt > opts.limits.maxFixAttempts) {
+        const reason = `The builder sent the plan back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
+        failIn(
+          ctx,
+          id,
+          null,
+          row,
+          { kind: WorkstreamFailure.RetryLimit, reason },
+          {
+            nextAction: { kind: 'fix', evidenceId: evidence.id },
+            stepIndex: targetIndex,
+            model: target.model,
+            effort: target.effort,
+            steps: row.steps.map((s, i) =>
+              i === targetIndex
+                ? { ...s, status: StepStatus.Failed }
+                : i === row.stepIndex
+                  ? { ...s, status: StepStatus.Pending }
+                  : s,
+            ),
+          },
+        );
+        return () => {
+          flagFailed(row, reason);
+          opts.onLaneFreed();
+        };
+      }
+      const up = escalated(
+        row,
+        target,
+        'the builder sent the plan back',
+        getProject(db, row.projectId).accountId,
+      );
+      if (up.moved && target.profileId)
+        recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
+      transitionWorkstream(ctx, id, {
+        to: S.Queued,
+        fence: null,
+        patch: {
+          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          attempt,
+          steps: sendBackSteps(row.steps, row.stepIndex, targetIndex, up.step, entryFor(ctx, id)),
+          stepIndex: targetIndex,
+          model: up.step.model,
+          effort: up.step.effort,
+        },
+        reason: 'the builder sent the plan back',
+      });
+      ctx.emit({
+        type: EventType.StepChanged,
+        entityType: 'workstream',
+        entityId: id,
+        data: { stepIndex: targetIndex, role: target.role, sentBackBy: 'builder' },
+      });
+      clearLease(ctx, id);
       return () => {
         opts.onLaneFreed();
       };

@@ -5,6 +5,7 @@ import {
   CARD_RESOLUTION,
   ReleasedWorkstreams,
   CheckChoice,
+  PlanChoice,
   ConflictError,
   InboxAnswer,
   InboxAnswerRefused,
@@ -724,6 +725,12 @@ export function createInboxService(deps: {
         // Send Back is the builder's note to the agent; without one the agent has nothing to act on.
         if (answer.choice === CheckChoice.SendBack && (answer.note ?? '').trim() === '') {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
+        }
+      }
+      if (current.kind === InboxKind.Plan && current.state === InboxState.Open) {
+        assertKnownChoice(current, answer);
+        if (answer.choice === PlanChoice.SendBack && (answer.note ?? '').trim() === '') {
+          throw new InboxAnswerRefused('Send Back needs a note saying what to change in the plan');
         }
       }
       // A reply to a shared-area question is the builder's words to the agent: it needs some.
