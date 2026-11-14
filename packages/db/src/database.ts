@@ -4,6 +4,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { z } from 'zod';
+import { holdsOldRouting, playbookMoveRan } from './old-routing-data';
 import * as schema from './schema';
 
 export type TendbDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
@@ -69,6 +70,21 @@ export class NewerSchemaError extends SchemaMismatchError {
   }
 }
 
+/**
+ * The database still holds routing settings from before the playbook and no 10db build moved them
+ * there; the migration that drops them would lose them.
+ */
+export class PlaybookMoveMissingError extends SchemaMismatchError {
+  override readonly name = 'PlaybookMoveMissingError';
+
+  constructor(path: string) {
+    super(
+      path,
+      `${path} holds model settings that a 10db release made before the playbook and has not moved them to it. Open a 10db build from #608 (f31017b6) through 81715524 once, so it moves the model settings to the playbook, then this one. Nothing was changed.`,
+    );
+  }
+}
+
 /** A migration left rows that reference a row that does not exist; the schema change is unsafe. */
 export class MigrationIntegrityError extends Error {
   override readonly name = 'MigrationIntegrityError';
@@ -109,6 +125,9 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
+  // The old routing tables are dropped by a migration, so settings still in them must have moved first.
+  if (holdsOldRouting(db) && !playbookMoveRan(db))
+    throw new PlaybookMoveMissingError(db.$client.name);
   // SQLite rebuilds a table to drop a NOT NULL, and a rebuilt table that others reference can only be
   // dropped with foreign keys off. The pragma is a no-op inside the migration's transaction, so it is
   // switched off around it and restored after.

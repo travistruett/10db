@@ -1,0 +1,173 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import {
+  migrateDatabase,
+  openDatabase,
+  PlaybookMoveMissingError,
+  SchemaMismatchError,
+  type TendbDatabase,
+} from './index';
+import { migrationsBefore } from './migrations-test-support';
+
+const AT = '2026-11-14T12:00:00.000Z';
+const DROP = '0076_drop_old_routing';
+
+let dir: string;
+let db: TendbDatabase;
+
+beforeEach(() => {
+  // A space in the path mirrors ~/Library/Application Support/10db.
+  dir = mkdtempSync(join(tmpdir(), '10db old routing '));
+  db = openDatabase(join(dir, '10db.sqlite'));
+});
+
+afterEach(() => {
+  db.$client.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const sql = (text: string, ...values: unknown[]) => db.$client.prepare(text).run(...values);
+const names = (text: string) =>
+  z
+    .array(z.object({ name: z.string() }))
+    .parse(db.$client.prepare(text).all())
+    .map((row) => row.name);
+const tables = () => names("SELECT name FROM sqlite_master WHERE type = 'table'");
+const appliedCount = () =>
+  z
+    .array(z.object({ n: z.number() }))
+    .parse(db.$client.prepare('SELECT count(*) AS n FROM __drizzle_migrations').all())[0]?.n;
+
+const OLD_TABLES = ['flows', 'patterns', 'role_settings', 'team_bindings'];
+
+const markMoved = () =>
+  sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
+
+const persona = (pin: string | null, score: number | null) =>
+  sql(
+    `INSERT INTO personas (id, key, name, role, tools, instructions, skills, model_pin, minimum_score,
+       archived, created_at, updated_at)
+     VALUES ('per_a', 'a', 'A', 'review', 'read_only', 'x', '[]', ?, ?, 0, ?, ?)`,
+    pin,
+    score,
+    AT,
+    AT,
+  );
+
+/** A project and a task, so a task column can hold an old value. */
+function task(riskTags: string, flowId: string | null): void {
+  db.$client.pragma('foreign_keys = OFF');
+  sql(
+    `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+     VALUES ('acc_a', 'claude_subscription', 'a', 'me', '{}', 2, ?, ?)`,
+    AT,
+    AT,
+  );
+  sql(
+    `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+       handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+     VALUES ('prj_a', 'a', '/tmp/a', 'true', '[]', '[]', 2, 'claude', 'acc_a', 40, 50, 10, ?, ?)`,
+    AT,
+    AT,
+  );
+  sql(
+    `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+       workspace_mode, risk_tags, flow_id, created_at, updated_at)
+     VALUES ('tsk_a', 'prj_a', 't', '', '[]', '[]', 'ready', 1, 'shared', ?, ?, ?, ?)`,
+    riskTags,
+    flowId,
+    AT,
+    AT,
+  );
+}
+
+/** What an unmoved database can hold, one row each: a table row or a value in an old column. */
+const UNMOVED: readonly (readonly [name: string, seed: () => void])[] = [
+  [
+    'a role setting',
+    () =>
+      sql(
+        `INSERT INTO role_settings (role, project_id, setting, updated_at) VALUES ('review', NULL, '{"kind":"top_of_tier"}', ?)`,
+        AT,
+      ),
+  ],
+  [
+    'a flow',
+    () =>
+      sql(
+        `INSERT INTO flows (id, name, steps, created_at, updated_at) VALUES ('flw_a', 'f', '[]', ?, ?)`,
+        AT,
+        AT,
+      ),
+  ],
+  ['a persona’s model pin', () => persona('{"model":"claude-opus-5-5","effort":"high"}', null)],
+  ['a persona’s minimum score', () => persona(null, 50)],
+  [
+    'a task’s risk tags',
+    () => {
+      task('["security"]', null);
+    },
+  ],
+  [
+    'a task’s flow',
+    () => {
+      task('[]', 'flw_a');
+    },
+  ],
+];
+
+describe('the migration that drops the old routing tables', () => {
+  it('migrates an empty file, a fresh install, with neither the setting nor any old row', () => {
+    migrateDatabase(db);
+    expect(tables()).not.toEqual(expect.arrayContaining(['flows']));
+  });
+
+  it('migrates a database at the previous head whose old tables are empty and the setting is absent', () => {
+    migrateDatabase(db, migrationsBefore(dir, DROP));
+    expect(tables()).toEqual(expect.arrayContaining(OLD_TABLES));
+    persona(null, null);
+    task('[]', null);
+    migrateDatabase(db);
+    expect(tables().filter((name) => OLD_TABLES.includes(name))).toEqual([]);
+    expect(names('SELECT key AS name FROM personas')).toEqual(['a']);
+  });
+
+  it('migrates old rows once the move has run, and keeps the rows the playbook replaced them with', () => {
+    migrateDatabase(db, migrationsBefore(dir, DROP));
+    markMoved();
+    UNMOVED.forEach(([, seed], i) => {
+      if (i < 2) seed();
+    });
+    persona('{"model":"claude-opus-5-5","effort":"high"}', 50);
+    task('["security"]', 'flw_a');
+    migrateDatabase(db);
+    expect(tables().filter((name) => OLD_TABLES.includes(name))).toEqual([]);
+    expect(names('SELECT id AS name FROM tasks')).toEqual(['tsk_a']);
+    expect(names("SELECT name FROM pragma_table_info('personas')")).not.toContain('model_pin');
+  });
+
+  it.each(UNMOVED)(
+    'refuses, and changes nothing, when %s is held and the move has not run',
+    (_name, seed) => {
+      migrateDatabase(db, migrationsBefore(dir, DROP));
+      seed();
+      const before = appliedCount();
+      let refused: unknown;
+      try {
+        migrateDatabase(db);
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toBeInstanceOf(PlaybookMoveMissingError);
+      expect(refused).toBeInstanceOf(SchemaMismatchError);
+      expect(refused instanceof Error ? refused.message : '').toContain(
+        'Open a 10db build from #608 (f31017b6) through 81715524 once',
+      );
+      expect(appliedCount()).toBe(before);
+      expect(tables()).toEqual(expect.arrayContaining(OLD_TABLES));
+    },
+  );
+});

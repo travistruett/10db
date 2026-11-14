@@ -6,10 +6,10 @@ import { AccountSettings, WorkstreamStep } from '@10db/contracts';
 import { z } from 'zod';
 import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
 import { migrationsBefore } from './migrations-test-support';
-import * as schema from './schema';
 
 const AT = '2026-11-13T12:00:00.000Z';
 const MIGRATION = '0067_four_model_rungs';
+const NEXT_MIGRATION = '0068_first_expediter';
 
 let dir: string;
 let db: TendbDatabase;
@@ -36,6 +36,9 @@ const tier = (name: string) => JSON.stringify({ kind: 'tier', tier: name });
 
 function seed(): void {
   db.$client.pragma('foreign_keys = OFF');
+  // The routing tables seeded below are the old ones; saying the move to the playbook ran keeps the
+  // refusal that guards their drop out of a test of this migration.
+  sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
      VALUES ('acc_a', 'gateway', 'both', 'me', ?, 2, ?, ?)`,
@@ -174,7 +177,7 @@ describe('the migration that turns three model tiers into four rungs', () => {
   beforeEach(() => {
     migrateDatabase(db, migrationsBefore(dir, MIGRATION));
     seed();
-    migrateDatabase(db);
+    migrateDatabase(db, migrationsBefore(dir, NEXT_MIGRATION));
   });
 
   it('maps a task’s tier setting and leaves every other kind and none as it was', () => {
@@ -283,30 +286,6 @@ describe('the migration that turns three model tiers into four rungs', () => {
   });
 
   it('leaves every migrated row readable by the code that reads it', () => {
-    expect(
-      db
-        .select()
-        .from(schema.roleSettings)
-        .all()
-        .map((r) => [r.role, r.setting]),
-    ).toEqual(
-      expect.arrayContaining([
-        ['plan', { kind: 'tier', tier: 'capable' }],
-        ['qa', { kind: 'tier', tier: 'efficient' }],
-      ]),
-    );
-    expect(
-      db
-        .select()
-        .from(schema.patterns)
-        .orderBy(schema.patterns.position)
-        .all()
-        .map((p) => p.setting),
-    ).toEqual([
-      { kind: 'tier', tier: 'efficient' },
-      { kind: 'top_of_tier' },
-      { kind: 'tier', tier: 'capable' },
-    ]);
     const settings = rows(
       z.object({ settings: json }),
       'SELECT settings FROM accounts ORDER BY id',

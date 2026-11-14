@@ -4,11 +4,11 @@ export {
   migrateDatabase,
   NewerSchemaError,
   openDatabase,
+  PlaybookMoveMissingError,
   SchemaMismatchError,
   StaleSchemaBaselineError,
   type TendbDatabase,
 } from './database';
 export * as schema from './schema';
-export * from './legacy-types';
 export * from './store';
 export type { Json } from './json';

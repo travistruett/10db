@@ -9,6 +9,7 @@ import { migrationsBefore } from './migrations-test-support';
 const AT = '2026-10-21T12:00:00.000Z';
 const LATER = '2026-11-02T12:00:00.000Z';
 const MIGRATION = '0049_model_ids';
+const NEXT_MIGRATION = '0050_plain_joseph';
 
 let dir: string;
 let db: TendbDatabase;
@@ -55,6 +56,9 @@ const PROFILE = `INSERT INTO model_profiles (id, provider, model, effort, aa_slu
 
 function seed(): void {
   db.$client.pragma('foreign_keys = OFF');
+  // Persona pins are old routing data; saying the move to the playbook ran keeps the refusal that
+  // guards their drop out of a test of this migration.
+  sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
      VALUES ('acc_x', 'gateway', 'gw', 'me', ?, 2, ?, ?)`,
@@ -170,7 +174,7 @@ describe('the migration that renames stored model aliases', () => {
   beforeEach(() => {
     migrateDatabase(db, migrationsBefore(dir, MIGRATION));
     seed();
-    migrateDatabase(db);
+    migrateDatabase(db, migrationsBefore(dir, NEXT_MIGRATION));
   });
 
   const storedSteps = () => {
