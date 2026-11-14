@@ -6,7 +6,7 @@ import {
   PrincipleId,
   ShapeAttachmentId,
   ShapeId,
-  ShapeMessageId,
+  ConversationItemId,
   ShapeProposalId,
   ShapeQuestionId,
   TaskId,
@@ -65,7 +65,7 @@ const proposalFields = {
    */
   mark: z.enum(ShapeRoundMark).nullable(),
   /** The builder's messages it came from; what Why? scrolls to and highlights. Empty for a builder's own row. */
-  sourceMessageIds: z.array(ShapeMessageId),
+  sourceMessageIds: z.array(ConversationItemId),
   /** What it became once accepted; null while it is pending, superseded or rejected. */
   converted: ShapeConvertedDto.nullable(),
   createdAt: Timestamp,

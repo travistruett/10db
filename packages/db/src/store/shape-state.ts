@@ -14,10 +14,10 @@ import {
   type GoalId,
   type PrincipleId,
   type ShapeDto,
-  type ShapeFileId,
+  type ConversationFileId,
   type ShapeLinkId,
   type ShapeMessageDto,
-  type ShapeMessageId,
+  type ConversationItemId,
   type ShapeProposalId,
   type ShapeProposalKind,
   type ShapeQuestionId,
@@ -164,7 +164,7 @@ export function insertShapeMessage(
 export function listShapeMessages(
   db: DbReader,
   shapeId: ShapeId,
-  after?: ShapeMessageId,
+  after?: ConversationItemId,
 ): ShapeMessageDto[] {
   const conversation = shapeConversation(db, shapeId).id;
   if (after === undefined) return toMessageDtos(shapeId, listItems(db, conversation));
@@ -196,7 +196,7 @@ export interface NewShapeProposal {
   readonly pinned: readonly string[];
   readonly body: Json;
   readonly taskHashes: ShapeProposalRow['taskHashes'];
-  readonly sourceMessageIds: readonly ShapeMessageId[];
+  readonly sourceMessageIds: readonly ConversationItemId[];
 }
 
 export function insertShapeProposal(ctx: WriteContext, input: NewShapeProposal): ShapeProposalRow {
@@ -251,7 +251,7 @@ export function listShapeProposals(db: DbReader, shapeId: ShapeId): ShapeProposa
 
 /** A file dropped into a conversation, as Plan reads it. */
 export interface ShapeFileRow {
-  readonly id: ShapeFileId;
+  readonly id: ConversationFileId;
   readonly shapeId: ShapeId;
   readonly name: string;
   readonly mediaType: string;
@@ -305,7 +305,7 @@ export function insertShapeFile(
   return toShapeFile(shapeId, row);
 }
 
-export function getShapeFile(db: DbReader, id: ShapeFileId): ShapeFileRow {
+export function getShapeFile(db: DbReader, id: ConversationFileId): ShapeFileRow {
   const row = getFile(db, id);
   const conversation = getConversation(db, row.conversationId);
   if (conversation.ownerKind !== ConversationOwnerKind.Shape)
@@ -327,12 +327,15 @@ export function listUntoldShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileR
 }
 
 /** Records that a turn carried these files to Claude; one already told keeps its first time. */
-export function markShapeFilesTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
+export function markShapeFilesTold(ctx: WriteContext, ids: readonly ConversationFileId[]): void {
   markFilesTold(ctx, ids);
 }
 
 /** Records that a notice named these images as ones Claude can't Read; one already named keeps its first time. */
-export function markShapeFilesUnreadableTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
+export function markShapeFilesUnreadableTold(
+  ctx: WriteContext,
+  ids: readonly ConversationFileId[],
+): void {
   markFilesUnreadableTold(ctx, ids);
 }
 
@@ -343,7 +346,7 @@ export function markShapeFilesUnreadableTold(ctx: WriteContext, ids: readonly Sh
 export function markShapeFilesInline(
   ctx: WriteContext,
   shapeId: ShapeId,
-  ids: readonly ShapeFileId[],
+  ids: readonly ConversationFileId[],
   fresh: boolean,
 ): void {
   markFilesInline(ctx, shapeConversation(ctx.tx, shapeId).id, ids, fresh);
@@ -411,7 +414,7 @@ export function insertShapeQuestion(
     readonly key: string;
     readonly text: string;
     readonly forWho: string;
-    readonly sourceMessageIds: readonly ShapeMessageId[];
+    readonly sourceMessageIds: readonly ConversationItemId[];
     readonly goalId?: GoalId;
     readonly taskId?: TaskId;
   },

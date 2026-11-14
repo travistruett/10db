@@ -6,7 +6,7 @@ import {
   type WorkspaceMode,
   type PlanDraft,
   type PlanGoal,
-  type ShapeMessageId,
+  type ConversationItemId,
   type TaskId,
 } from '@10db/contracts';
 import { checkBriefRules } from '../goals';
@@ -36,7 +36,7 @@ export interface PlanWorld {
   readonly areaNames: readonly string[];
   readonly people: readonly { readonly handle: string; readonly name: string }[];
   /** The builder's messages in this conversation, and its engine-event notes. */
-  readonly citable: ReadonlySet<ShapeMessageId>;
+  readonly citable: ReadonlySet<ConversationItemId>;
   /** Tasks this conversation already converted, by the key they were proposed under. */
   readonly convertedTasks: ReadonlyMap<string, TaskId>;
   /** Keys in `convertedTasks` whose task is cancelled, by a converted remove_task or by the single-task Remove action. */
@@ -268,7 +268,7 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
   const sources = (
     label: string,
     key: string,
-    ids: readonly ShapeMessageId[] | undefined,
+    ids: readonly ConversationItemId[] | undefined,
   ): void => {
     if (ids === undefined) {
       if (!world.storedSources.has(key)) errors.push(`${label}, sources: cites no message`);

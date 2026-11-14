@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProjectId, ShapeFileId, ShapeId } from './ids';
+import { ProjectId, ConversationFileId, ShapeId } from './ids';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §5.4, §5.6. The files a
 // builder drops into a conversation, and the text a terminal session hands over with start_shape.
@@ -68,7 +68,7 @@ export function shapeFileRefusal(file: {
 }
 
 export const ShapeFileDto = z.object({
-  id: ShapeFileId,
+  id: ConversationFileId,
   shapeId: ShapeId,
   name: z.string(),
   mediaType: z.string(),

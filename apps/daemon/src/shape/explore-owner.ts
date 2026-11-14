@@ -13,7 +13,7 @@ import {
   TrustSurface,
   type AccountKind,
   type ProjectId,
-  type ShapeFileId,
+  type ConversationFileId,
 } from '@10db/contracts';
 import {
   getItem,
@@ -225,7 +225,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
     intake: Intake,
     budget: Budget,
     shown: readonly ShapeFileRow[],
-    sentInline: ReadonlySet<ShapeFileId>,
+    sentInline: ReadonlySet<ConversationFileId>,
     fresh: boolean,
   ): Unreadable => {
     const { limits } = budget;
@@ -294,9 +294,9 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
   const imagesOf = (
     files: readonly ShapeFileRow[],
     budget: Budget,
-  ): { images: ShapeImage[]; ids: ShapeFileId[] } => {
+  ): { images: ShapeImage[]; ids: ConversationFileId[] } => {
     const inline = inlineImageIds(files, budget.spent, budget.limits);
-    const sent: { images: ShapeImage[]; ids: ShapeFileId[] } = { images: [], ids: [] };
+    const sent: { images: ShapeImage[]; ids: ConversationFileId[] } = { images: [], ids: [] };
     for (const file of files) {
       if (!inline.has(file.id)) continue;
       try {

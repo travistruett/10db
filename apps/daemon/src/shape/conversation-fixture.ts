@@ -4,7 +4,7 @@ import {
   ShapeOrigin,
   type ProjectDto,
   type ShapeDto,
-  type ShapeMessageId,
+  type ConversationItemId,
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
@@ -22,7 +22,7 @@ export interface ConversationFixture {
   readonly project: ProjectDto;
   readonly shape: ShapeDto;
   /** A builder message in the conversation, as a proposal may cite it. */
-  say(text?: string): ShapeMessageId;
+  say(text?: string): ConversationItemId;
   close(): void;
 }
 
@@ -57,7 +57,7 @@ export function must<T>(value: T | null | undefined, what: string): T {
 }
 
 /** A draft of loose tasks, each citing `source`; the project's areas are `api` and `ui`. */
-export function looseDraft(source: ShapeMessageId, ...keys: string[]): Record<string, unknown> {
+export function looseDraft(source: ConversationItemId, ...keys: string[]): Record<string, unknown> {
   return {
     looseTasks: keys.map((key) => ({
       key,

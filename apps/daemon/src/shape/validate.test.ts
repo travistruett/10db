@@ -1,10 +1,10 @@
-import { mintId, PlanDraft, type ShapeMessageId, type TaskId } from '@10db/contracts';
+import { mintId, PlanDraft, type ConversationItemId, type TaskId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { validatePlan, type PlanWorld } from './validate';
 
 // Shape spec §6 Validation: every error at once, naming the field.
 
-const message: ShapeMessageId = mintId('ConversationItem');
+const message: ConversationItemId = mintId('ConversationItem');
 const finished: TaskId = mintId('Task');
 const unfinished: TaskId = mintId('Task');
 const converted: TaskId = mintId('Task');

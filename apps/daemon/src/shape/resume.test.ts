@@ -9,7 +9,7 @@ import {
   ShapeState,
   ShapeToolInputs,
   TaskStatus,
-  type ShapeMessageId,
+  type ConversationItemId,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -48,7 +48,7 @@ afterEach(async () => {
 const shapeId = () => f.c.shape.id;
 const write = <T>(fn: (ctx: WriteContext) => T): T => f.c.store.write(fn).value;
 
-const loose = (m: ShapeMessageId, key: string) => ({
+const loose = (m: ConversationItemId, key: string) => ({
   key,
   title: `Task ${key}`,
   criteria: ['It works'],
@@ -475,7 +475,7 @@ describe('telling a reopened conversation what Convert made', () => {
 });
 
 describe('re-planning a reopened conversation', () => {
-  const cite = (): ShapeMessageId => f.service.resume(shapeId(), 'Reopened to re-plan.').id;
+  const cite = (): ConversationItemId => f.service.resume(shapeId(), 'Reopened to re-plan.').id;
 
   it('proposes a change and a removal for tasks that have not started, and a new task', async () => {
     const made = convertTasks('a', 'b');

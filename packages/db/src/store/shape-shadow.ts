@@ -3,7 +3,7 @@ import type {
   ProjectId,
   ShapeId,
   ShapeJudgeDecision,
-  ShapeMessageId,
+  ConversationItemId,
 } from '@10db/contracts';
 import * as schema from '../schema';
 import { getAppSetting, setAppSetting } from './settings';
@@ -24,7 +24,7 @@ export function setShapeJevOptIn(ctx: WriteContext, projectId: ProjectId, enable
 
 export interface NewShadowAnswer {
   readonly shapeId: ShapeId;
-  readonly messageId: ShapeMessageId;
+  readonly messageId: ConversationItemId;
   readonly decision: ShapeJudgeDecision;
   readonly answer: 'yes' | 'no';
   readonly confidence: number;

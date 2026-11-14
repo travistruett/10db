@@ -140,7 +140,6 @@ import type {
   ShapeFindingState,
   ShapeId,
   ShapeLinkId,
-  ShapeMessageId,
   ShapeQuestionId,
   ShapeOrigin,
   ShapeProposalId,
@@ -1446,7 +1445,7 @@ export const shapeProposals = sqliteTable(
       .notNull()
       .default(sql`'{}'`),
     sourceMessageIds: text('source_message_ids', { mode: 'json' })
-      .$type<ShapeMessageId[]>()
+      .$type<ConversationItemId[]>()
       .notNull()
       .default(sql`'[]'`),
     createdAt: createdAt(),
@@ -1659,7 +1658,7 @@ export const shapeQuestions = sqliteTable(
     /** The role or person the question is for. */
     forWho: text('for_who').notNull(),
     sourceMessageIds: text('source_message_ids', { mode: 'json' })
-      .$type<ShapeMessageId[]>()
+      .$type<ConversationItemId[]>()
       .notNull()
       .default(sql`'[]'`),
     goalId: text('goal_id')
@@ -1950,7 +1949,7 @@ export const shapeShadowAnswers = sqliteTable(
       .notNull()
       .references(() => shapes.id),
     messageId: text('message_id')
-      .$type<ShapeMessageId>()
+      .$type<ConversationItemId>()
       .notNull()
       .references((): AnySQLiteColumn => conversationItems.id),
     decision: text('decision').$type<JudgeDecision>().notNull(),

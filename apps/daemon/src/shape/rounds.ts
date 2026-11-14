@@ -8,7 +8,7 @@ import {
   type PlanDraft,
   type ShapeProposalKind,
   type ShapeId,
-  type ShapeMessageId,
+  type ConversationItemId,
   type ShapeProposalId,
 } from '@10db/contracts';
 import {
@@ -215,8 +215,8 @@ function parsedBody(kind: ShapeProposalKind, body: unknown): Record<string, unkn
   return asRecord(ShapeProposalBody[kind].parse(body));
 }
 
-const sourcesOf = (body: Record<string, unknown>): ShapeMessageId[] =>
-  Array.isArray(body['sourceMessageIds']) ? (body['sourceMessageIds'] as ShapeMessageId[]) : [];
+const sourcesOf = (body: Record<string, unknown>): ConversationItemId[] =>
+  Array.isArray(body['sourceMessageIds']) ? (body['sourceMessageIds'] as ConversationItemId[]) : [];
 
 /**
  * One round: merge the draft with what is pinned and stored, validate the result, and either answer
