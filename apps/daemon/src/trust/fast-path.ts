@@ -52,8 +52,10 @@ const SECRET_NAMES: ReadonlySet<string> = new Set([
   '.git-credentials',
 ]);
 
+// Lowercased on every file system, not only where case is folded: on a case-sensitive one `.ENV` is another
+// file, but sending it to the judge costs a call, while fast-pathing a secret would read it unjudged.
 function nameIsSecret(path: string): boolean {
-  const name = foldPathCase(basename(path));
+  const name = foldPathCase(basename(path)).toLowerCase();
   return (
     isSecretFileName(name) ||
     SECRET_NAMES.has(name) ||
