@@ -6,13 +6,15 @@ import {
   type JudgeCallId,
   type Rigor,
   type TaskDto,
+  type GoalId,
+  type PassId,
   type TaskId,
   type TaskKind,
 } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { listKinds } from './kinds';
-import type { WriteContext } from './store';
+import type { DbReader, WriteContext } from './store';
 import { getTask, movedByProposal, type Placement } from './tasks';
 
 /** The judge calls whose answers sizing applied: the rigor call, and one call per kind key. */
@@ -31,6 +33,54 @@ export interface TaskSizing {
   readonly rigor?: Rigor;
   readonly rigorReason?: string;
   readonly sizingCalls?: SizingCalls;
+  /**
+   * Drops a rigor the judge set earlier, for a task whose text changed and whose new answer has not come.
+   * A rigor the builder or an agent set stays.
+   */
+  readonly clearJudged?: boolean;
+}
+
+/** What sizing reads of a task: its text, pins, fingerprint and whether it can still be sized. */
+export interface TaskSizingState {
+  readonly status: TaskStatus;
+  readonly title: string;
+  readonly description: string;
+  readonly acceptanceCriteria: readonly string[];
+  readonly areas: readonly string[];
+  readonly goalId: GoalId | null;
+  readonly passId: PassId | null;
+  readonly rigorSource: RigorSource | null;
+  readonly kinds: readonly TaskKind[];
+  readonly kindsOff: readonly string[];
+  /** The fingerprint of the text last sized; null before the first sizing. */
+  readonly sizedFor: string | null;
+  /** Whether any workstream of the task exists. */
+  readonly started: boolean;
+}
+
+/** The task's sizing state, one light read; null for a task that does not exist. */
+export function readTaskSizing(db: DbReader, taskId: TaskId): TaskSizingState | null {
+  const row = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
+  if (row === undefined) return null;
+  const started = db
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .get();
+  return {
+    status: row.status,
+    title: row.title,
+    description: row.description,
+    acceptanceCriteria: row.acceptanceCriteria,
+    areas: row.areas,
+    goalId: row.goalId,
+    passId: row.passId,
+    rigorSource: row.rigorSource,
+    kinds: row.kinds,
+    kindsOff: row.kindsOff,
+    sizedFor: row.sizedFor,
+    started: started !== undefined,
+  };
 }
 
 /**
@@ -57,7 +107,8 @@ const sameKeys = (a: readonly TaskKind[], b: readonly TaskKind[]): boolean =>
  *
  * - the kinds the builder or an agent gave stay, nothing the builder took off (`kindsOff`) is added, and
  *   a key no kind has is dropped; the rest of the kinds are the sizing's;
- * - a rigor is written only while the task's own is not the builder's or an agent's;
+ * - a rigor is written only while the task's own is not the builder's or an agent's, and `clearJudged`
+ *   drops one the judge set when no new one is given;
  * - the fingerprint is always written;
  * - when the kinds change, `placement` is asked where the task works, and the answer is taken as an edit of
  *   the task's areas or kinds takes it.
@@ -100,6 +151,9 @@ export function applyTaskSizing(
     .set({
       kinds,
       sizedFor: sizing.fingerprint,
+      ...(sizing.clearJudged === true && row.rigorSource === RigorSource.Judge
+        ? { rigor: null, rigorSource: null, rigorReason: null }
+        : {}),
       ...(sizing.sizingCalls === undefined
         ? {}
         : {

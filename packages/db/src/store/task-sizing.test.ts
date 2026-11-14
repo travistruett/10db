@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTaskSizing,
   BUILDER_CHOSE_PLACEMENT,
+  readTaskSizing,
   createTestStore,
   getTask,
   insertKind,
@@ -50,6 +51,73 @@ const stored = (id: TaskId) =>
       'SELECT rigor, rigor_source, rigor_reason, kinds, sized_for, sizing_calls FROM tasks WHERE id = ?',
     )
     .get(id);
+
+describe('applyTaskSizing, resetting an earlier judgement', () => {
+  const judged = (id: TaskId) =>
+    apply(id, {
+      kinds: [sized('security', 'judge')],
+      rigor: 'careful',
+      rigorReason: 'judged Careful (0.86)',
+      sizingCalls: { rigor: call(), kinds: { security: call() } },
+    });
+  const reset = { clearJudged: true, sizingCalls: { rigor: null, kinds: {} } } as const;
+
+  it('drops a judged rigor and the calls, so the task reads as sized by rules again', () => {
+    const task = store.write((ctx) => insertTask(ctx, project().id, brief)).value;
+    judged(task.id);
+    const after = apply(task.id, { fingerprint: 'fp-2', ...reset });
+    expect(after).toMatchObject({
+      rigor: null,
+      rigorSource: null,
+      rigorReason: null,
+      sizedByRules: true,
+      kinds: [],
+    });
+    expect(stored(task.id)).toMatchObject({ sized_for: 'fp-2', rigor: null, rigor_reason: null });
+  });
+
+  it.each(['builder', 'agent'] as const)('keeps a rigor %s set', (pin) => {
+    const task = store.write((ctx) =>
+      insertTask(ctx, project().id, { ...brief, rigor: 'light' }, undefined, pin),
+    ).value;
+    const after = apply(task.id, { fingerprint: 'fp-2', ...reset });
+    expect(after).toMatchObject({ rigor: 'light', rigorSource: pin });
+  });
+
+  it('without the flag leaves a judged rigor alone', () => {
+    const task = store.write((ctx) => insertTask(ctx, project().id, brief)).value;
+    judged(task.id);
+    expect(apply(task.id, { fingerprint: 'fp-2' })).toMatchObject({ rigor: 'careful' });
+  });
+});
+
+describe('readTaskSizing', () => {
+  it('reads what sizing needs of an unstarted task, and says when it has started', () => {
+    const task = store.write((ctx) => insertTask(ctx, project().id, brief)).value;
+    expect(readTaskSizing(store.db, task.id)).toMatchObject({
+      status: 'open',
+      title: 'Alpha',
+      areas: ['api'],
+      sizedFor: null,
+      started: false,
+      passId: null,
+      goalId: null,
+      rigorSource: null,
+      kinds: [],
+      kindsOff: [],
+    });
+    apply(task.id, { fingerprint: 'fp-1' });
+    expect(readTaskSizing(store.db, task.id)?.sizedFor).toBe('fp-1');
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
+    expect(readTaskSizing(store.db, task.id)?.started).toBe(true);
+  });
+
+  it('answers null for a task that does not exist', () => {
+    expect(readTaskSizing(store.db, mintId('Task'))).toBeNull();
+  });
+});
 
 describe('applyTaskSizing', () => {
   it('writes the rules’ kinds, the judge’s rigor and calls, and the fingerprint on an unstarted task', () => {
