@@ -27,8 +27,8 @@ import { pngImage as png } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker, ScreenOutcome, ScreenSpec } from './broker';
-import { pictureLimitsFor } from './picture-limits';
 import { createScreens } from './screens';
+import { pictureLimitsFor } from '../conversation';
 
 // Shape spec §5.5: see_screen. The service asks the window for a picture, checks it, keeps it with the
 // conversation and shows it there; a screen that can't be drawn is a refusal that says why.

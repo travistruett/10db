@@ -135,6 +135,7 @@ afterEach(async () => {
 function specOf(over: Partial<LaneSessionSpec> = {}): LaneSessionSpec {
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: {
       kind: 'lane',

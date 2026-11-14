@@ -1,10 +1,13 @@
-import { Code, List, Table, Text, Title } from '@mantine/core';
+import { Anchor, Code, List, Table, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { Components, ExtraProps } from 'streamdown';
+import { openWebLink } from '../desktop/tauri';
+import { CodeBlock } from './code-block';
 import classes from './markdown.module.css';
 
-// One Mantine element per markdown tag. A link is drawn as its text and its address, never an
-// anchor: nothing in drawn markdown navigates the window until the opener that confirms exists.
+// One Mantine element per markdown tag. A link never navigates the window: a click asks the
+// builder to confirm its host, then opens it in the browser (`openWebLink`), and its address is
+// never in the page.
 
 /** A heading, marked with the source line it starts on so a view can scroll to a section. */
 function Heading(props: {
@@ -28,6 +31,36 @@ function Heading(props: {
   );
 }
 
+type HastNode = NonNullable<ExtraProps['node']>['children'][number];
+
+/** The text under `node`, read with a stack, so a deep tree never recurses. */
+function textOf(node: HastNode): string {
+  let text = '';
+  const stack: HastNode[] = [node];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    if (next.type === 'text') text += next.value;
+    else if (next.type === 'element')
+      for (let i = next.children.length - 1; i >= 0; i -= 1) {
+        const child = next.children[i];
+        if (child !== undefined) stack.push(child);
+      }
+  }
+  return text;
+}
+
+/** A fence's code and the language its `language-…` class names, or null. */
+function fenceOf(pre: ExtraProps['node']): { code: string; language: string | null } {
+  const code = pre?.children.find((c) => c.type === 'element' && c.tagName === 'code');
+  if (code?.type !== 'element')
+    return { code: pre === undefined ? '' : textOf(pre), language: null };
+  const classes = [code.properties.className].flat();
+  const language = classes
+    .map((c) => (typeof c === 'string' && c.startsWith('language-') ? c.slice(9) : null))
+    .find((l) => l !== null);
+  // A fence's text ends in the newline before its closing backticks.
+  return { code: textOf(code).replace(/\n$/, ''), language: language ?? null };
+}
+
 /** A line in place of an image, which is never drawn. */
 function NotShown({ children }: { readonly children: ReactNode }) {
   return (
@@ -37,18 +70,49 @@ function NotShown({ children }: { readonly children: ReactNode }) {
   );
 }
 
-function LinkText({ href, children }: { readonly href: unknown; readonly children: ReactNode }) {
-  // An autolink's text is its address, so the address is shown once.
-  const address = typeof href === 'string' && href !== children ? href : null;
+/** Whether a link's confirm is open: a second click or Enter while it is asks nothing more. */
+let asking = false;
+
+function open(href: string): void {
+  if (asking) return;
+  asking = true;
+  openWebLink(href)
+    .catch((error: unknown) => {
+      console.warn('10db: the link did not open', error);
+    })
+    .finally(() => {
+      asking = false;
+    });
+}
+
+/**
+ * An `https:` link (10db's safety step has unwrapped every other kind). Its address lives only in
+ * this closure and in its title, never in an `href`, so a middle-click, a context menu's Open or a
+ * drag has nothing to open; a click or Enter asks the builder through `openWebLink`.
+ */
+function Link({ href, children }: { readonly href: unknown; readonly children: ReactNode }) {
+  if (typeof href !== 'string') return <>{children}</>;
   return (
-    <>
+    <Anchor
+      role="link"
+      tabIndex={0}
+      // Underlined, so a link in a sentence never relies on color alone (WCAG 1.4.1).
+      underline="always"
+      title={href}
+      style={{ cursor: 'pointer' }}
+      onClick={(event) => {
+        event.preventDefault();
+        open(href);
+      }}
+      onKeyDown={(event) => {
+        // A held Enter repeats; only its first press opens.
+        if (event.key !== 'Enter' || event.repeat) return;
+        event.preventDefault();
+        open(href);
+      }}
+    >
       {children}
-      {address !== null && (
-        <Text span size="xs" c="dimmed">
-          {` (${address})`}
-        </Text>
-      )}
-    </>
+    </Anchor>
   );
 }
 
@@ -100,13 +164,9 @@ export const MARKDOWN_ELEMENTS: Components = {
   ),
   li: ({ children }) => <List.Item>{children}</List.Item>,
   inlineCode: ({ children }) => <Code>{children}</Code>,
-  pre: ({ children }) => (
-    <Code block my={6}>
-      {children}
-    </Code>
-  ),
+  pre: ({ node }) => <CodeBlock {...fenceOf(node)} />,
   code: ({ children }) => <code>{children}</code>,
-  a: ({ href, children }) => <LinkText href={href}>{children}</LinkText>,
+  a: ({ href, children }) => <Link href={href}>{children}</Link>,
   // 10db's safety step marks the line it puts in place of an image.
   span: ({ node, children }) =>
     node?.properties['dataBlocked'] === 'image' ? (

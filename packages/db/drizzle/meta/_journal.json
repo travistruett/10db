@@ -526,6 +526,83 @@
       "when": 1794631720971,
       "tag": "0074_rigor_source_of_set_rigors",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1794674080257,
+      "tag": "0075_conversation_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1794674088002,
+      "tag": "0076_conversation_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1794674088668,
+      "tag": "0077_session_conversation",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1794674095906,
+      "tag": "0078_shadow_answer_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1794674096566,
+      "tag": "0079_pass_turn_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1794674097234,
+      "tag": "0080_drop_old_transcripts",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1794674097900,
+      "tag": "0081_skipped_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1794674106073,
+      "tag": "0082_skip_listings",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1794674106718,
+      "tag": "0083_skip_listings_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1794674107393,
+      "tag": "0084_skip_follow_ups",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1794678805162,
+      "tag": "0085_skip_listing_config_head",
+      "breakpoints": true
     }
   ]
 }

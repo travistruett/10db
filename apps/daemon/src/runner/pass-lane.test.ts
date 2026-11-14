@@ -36,6 +36,7 @@ import {
   insertTask,
   insertWorkstream,
   listInbox,
+  listSkipsForWorkstream,
   listEventsAfter,
   listPassTurns,
   listSharedChanges,
@@ -1123,6 +1124,23 @@ describe('a pass task turn that ends otherwise', () => {
 });
 
 describe('the guard of a pass lane', () => {
+  // T4 leaves attended work as it was: the builder is in a pass, so a web call on rules still cards.
+  it("a pass's WebFetch on rules still cards", async () => {
+    const { id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool', toolName: 'WebFetch', input: { url: 'https://example.net/', prompt: 'x' } },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+    const card = await waitFor(() =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'permission'),
+    );
+    expect(card).toMatchObject({ title: 'Allow WebFetch?' });
+    expect(listSkipsForWorkstream(engine.store.db, id)).toEqual([]);
+    await engine.runner.cancel(id);
+  });
+
   it('denies a page of the pass another task holds, though a shared hold covers it', async () => {
     engine = await createTestEngine(
       {

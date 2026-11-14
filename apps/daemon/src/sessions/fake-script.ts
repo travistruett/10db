@@ -64,6 +64,8 @@ export const FakeStep = z.discriminatedUnion('do', [
     summary: z.string(),
     reason: z.string(),
     by: z.enum(['classifier', 'safety_check']),
+    /** The call it denies, when the script names one the session made. */
+    toolUseId: z.string().optional(),
   }),
   /** The commands running in the background now (none: they all finished). */
   z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),

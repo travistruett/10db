@@ -1,4 +1,4 @@
-import type { PictureLimits } from '../src/screens';
+import type { PictureLimits } from '../src/conversation';
 
 const MIB = 1024 * 1024;
 

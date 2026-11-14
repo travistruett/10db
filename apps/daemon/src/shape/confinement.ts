@@ -73,6 +73,8 @@ export interface ShapeAccess {
   readonly setupReads?: readonly string[];
   /** The Agent tool aliases the project's account takes, which an agent may be launched on; empty when it takes none; every alias when absent. */
   readonly agentModels?: readonly string[];
+  /** Who judges the session's calls (`capabilities.judge`); today's rules where absent. */
+  readonly judge?: JudgeKind;
 }
 
 /** One tool call as the PreToolUse hook sees it; the SDK sets `agentId` only inside a subagent. */
@@ -150,9 +152,12 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
       `${call.toolName} is not available to the ${call.agentType ?? 'this'} agent: only the session and its code researchers run commands.`,
     );
   if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
-  if (flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
+  // A native judge's session may run a command in the background, under the lanes' process tracking:
+  // it stops with the session.
+  const native = access.judge === JudgeKind.Native;
+  if (!native && flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
   const command = stringField(call.toolInput, 'command');
-  if (command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
+  if (!native && command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
   const verdict = judgePreToolUse({
     judge: JudgeKind.Rules,
     coveredByAllowRule: false,
@@ -168,7 +173,9 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     protectedPaths: commands.protectedPaths,
     fileAccess: commands.fileAccess,
   });
-  if (verdict.decision === 'allow' && verdict.settled === undefined) return ask(NOT_READ_ONLY);
+  // A command that is not read-only is the judge's call: auto mode's classifier where it runs, else a card.
+  if (verdict.decision === 'allow' && verdict.settled === undefined && !native)
+    return ask(NOT_READ_ONLY);
   return verdict;
 }
 
@@ -335,23 +342,6 @@ function publicPageProblem(raw: string): string | null {
   return privateHostProblem(raw);
 }
 
-/**
- * The dimmed line for an allowed call that sends something to the researcher or out to the web: the
- * question, a search's query or a fetch's URL; null for any other call.
- */
-export function researchLine(toolName: string, toolInput: unknown): string | null {
-  if (toolName === 'WebSearch') return `WebSearch · ${stringField(toolInput, 'query') ?? ''}`;
-  if (toolName === 'WebFetch') return `WebFetch · ${stringField(toolInput, 'url') ?? ''}`;
-  if (toolName === 'Agent' && stringField(toolInput, 'subagent_type') === SHAPE_RESEARCHER)
-    return `${SHAPE_RESEARCHER} · asked · ${stringField(toolInput, 'prompt') ?? ''}`;
-  return null;
-}
-
-/** Most characters of a command or a tool's input that its dimmed line shows. */
-const LINE_LIMIT = 300;
-const clip = (text: string): string =>
-  text.length > LINE_LIMIT ? `${text.slice(0, LINE_LIMIT)}…` : text;
-
 /** A tool of a project MCP server: `mcp__<server>__<tool>`, any server but 10db's. */
 const isProjectTool = (toolName: string): boolean =>
   toolName.startsWith('mcp__') &&
@@ -359,23 +349,13 @@ const isProjectTool = (toolName: string): boolean =>
   toolName.split('__').length >= 3;
 
 /**
- * The dimmed line for a command or a project tool call the hook let through or sent to the builder,
- * naming the agent that made it when one did; null for any other call.
+ * A web call. On a rules judge only the researcher touches the web. On a native judge the session may
+ * too, and what passes the checks below goes on to Claude Code's own flow, auto mode's classifier
+ * included: a bare allow is no decision (trust line §8). The checks stay 10db's either way, for the
+ * classifier makes none of them: a query's length, a page that is https, public and named.
  */
-export function commandLine(
-  toolName: string,
-  toolInput: unknown,
-  agentType: string | undefined,
-): string | null {
-  const by = agentType === undefined ? '' : `${agentType} · `;
-  if (COMMAND_TOOLS.has(toolName))
-    return `${by}Bash · ${clip(stringField(toolInput, 'command') ?? '')}`;
-  if (isProjectTool(toolName)) return `${by}${toolName} · ${clip(JSON.stringify(toolInput ?? {}))}`;
-  return null;
-}
-
-function judgeWeb(call: ShapeCall): GuardVerdict {
-  if (!isResearcher(call))
+function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
+  if (judge !== JudgeKind.Native && !isResearcher(call))
     return deny(
       `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${SHAPE_RESEARCHER}", and ask it in words.`,
     );
@@ -423,7 +403,7 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
           'The researcher reads no files: it holds neither the project nor the conversation’s files, and answers from the web.',
         )
       : judgeRead(call, access);
-  if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call);
+  if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call, access.judge);
   if (call.toolName === 'Skill') return judgeSkill(call);
   if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
@@ -431,6 +411,6 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
   // A server 10db registered, so one the builder approved for the project.
   if (isProjectTool(call.toolName)) return judgeProjectTool(call, access);
   return deny(
-    `${call.toolName} is not available: a Shape session is read-only. It reads the project and talks; it changes nothing.`,
+    `${call.toolName} is not available: Plan writes no code, so a Shape session is read-only. It reads the project and talks; it changes nothing.`,
   );
 }

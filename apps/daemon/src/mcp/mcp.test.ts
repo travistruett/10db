@@ -18,6 +18,7 @@ import {
   getWorkstream,
   insertBatch,
   insertDecision,
+  insertPerson,
   insertEvidence,
   insertKind,
   insertPrinciple,
@@ -28,6 +29,7 @@ import {
   insertWorkstream,
   listBoardColumns,
   listInbox,
+  listSkipsForWorkstream,
   listTasks,
   listToolOpResults,
   patchTask,
@@ -36,11 +38,13 @@ import {
   schema,
   searchPrinciples,
   seedProject,
+  setRoutingRules,
   setSmallProposalLimit,
   setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   type Store,
+  shapeConversation,
 } from '@10db/db';
 import {
   EventType,
@@ -59,7 +63,13 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  seedWorkstream,
+  tempDir,
+  waitFor,
+} from '../../test/fixtures';
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -73,7 +83,8 @@ import {
 } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
-import type { Logger } from '../log';
+import { silentLogger, type Logger } from '../log';
+import { AWAY_ANSWER, createSkipRecorder, type AwayLane } from '../trust';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
@@ -103,6 +114,8 @@ let workstreamBranch: string | null = 'main';
 let sessionAbort = new AbortController();
 /** One session's own stop, beside `sessionAbort`; a test aborts it to end only that session. */
 const sessionStops = new Map<string, AbortController>();
+/** The sessions of lanes nobody watches, with the recorder their questions are kept by. */
+const awaySessions = new Map<string, AwayLane>();
 /** How long one request_claim call waits before answering "still waiting"; a test shortens it. */
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
@@ -203,6 +216,7 @@ beforeEach(async () => {
     log: capturingLogger,
     waitObserverFor: () => undefined,
     askedToHandOff: () => undefined,
+    awayFor: (id) => awaySessions.get(id),
     sessionSignal: (id) => {
       const own = sessionStops.get(id);
       return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
@@ -377,7 +391,7 @@ describe('MCP auth', () => {
     const { token, hash } = mintSessionToken();
     state.write((ctx) =>
       insertSession(ctx, {
-        shapeId: shape.id,
+        conversationId: shapeConversation(ctx.tx, shape.id).id,
         provider: 'claude',
         model: 'opus',
         effort: 'high',
@@ -534,6 +548,7 @@ describe('MCP tools', () => {
       'propose',
       'record_decision',
       'record_evidence',
+      'report_blocked',
       'report_deviation',
       'report_pages',
       'request_claim',
@@ -2368,6 +2383,126 @@ describe('MCP tools', () => {
     expect(reused.isError).toBe(true);
     expect(reused.text).toContain('already used for record_decision');
     expect(state.db.select().from(schema.deviations).all()).toHaveLength(0);
+  });
+
+  // T4 call 21: a lane nobody watches is answered at once, and the question is kept for the builder.
+  it('an unattended ask_human answers at once with the away answer and records the question', async () => {
+    const s = await seedSession();
+    awaySessions.set(s.session.id, {
+      skips: createSkipRecorder(
+        { state, log: silentLogger },
+        { workstreamId: s.workstream.id, sessionId: s.session.id },
+      ),
+      taskId: s.task.id,
+      projectId: s.project.id,
+      block: () => undefined,
+    });
+    const result = await s.call('ask_human', {
+      opId: 'op-away-0001',
+      category: 'design',
+      question: 'Teal or red?',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+    });
+    expect(result.json).toEqual({ inboxId: null, answer: AWAY_ANSWER, note: null });
+    expect(listInbox(state.db, {})).toEqual([]);
+    expect(listSkipsForWorkstream(state.db, s.workstream.id)).toMatchObject([
+      { toolName: 'ask_human', summary: 'Teal or red?', kind: 'question', source: 'question' },
+    ]);
+  });
+
+  // T4 call 11: a step says it was blocked by a skip; one with no skip behind it, or in a pass, is refused.
+  describe('report_blocked', () => {
+    async function awayLane(skipped: boolean) {
+      const s = await seedSession();
+      const blocked: string[] = [];
+      const skips = createSkipRecorder(
+        { state, log: silentLogger },
+        { workstreamId: s.workstream.id, sessionId: s.session.id },
+      );
+      if (skipped)
+        skips.record({
+          toolName: 'Bash',
+          toolUseId: 'tu-1',
+          callKey: null,
+          summary: 'vercel deploy --prod',
+          kind: 'deploy',
+          limit: 'writes_live',
+          reason: 'a deploy',
+          source: 'guard',
+        });
+      awaySessions.set(s.session.id, {
+        skips,
+        taskId: s.task.id,
+        projectId: s.project.id,
+        block: (reason) => blocked.push(reason),
+      });
+      return { s, blocked };
+    }
+
+    it('with a skip marks the run blocked', async () => {
+      const { s, blocked } = await awayLane(true);
+      const result = await s.call('report_blocked', { reason: 'It needs the deploy' });
+      expect(result.json).toEqual({
+        ok: true,
+        message: 'The step will end failed when this turn ends.',
+      });
+      expect(blocked).toEqual(['It needs the deploy']);
+    });
+
+    it('with none says so and changes nothing', async () => {
+      const { s, blocked } = await awayLane(false);
+      const result = await s.call('report_blocked', { reason: 'It needs the deploy' });
+      expect(result.json).toEqual({
+        ok: false,
+        message: 'Nothing was skipped in this run; finish the step or hand off.',
+      });
+      expect(blocked).toEqual([]);
+    });
+
+    it('in a pass does nothing', async () => {
+      const s = await seedSession();
+      const result = await s.call('report_blocked', { reason: 'It needs the deploy' });
+      expect(result.json).toEqual({
+        ok: false,
+        message: 'report_blocked is for tasks nobody is watching.',
+      });
+    });
+  });
+
+  // A route the builder set names who answers: an unattended lane's question still goes to them.
+  it('an unattended ask_human whose category routes to a person still asks', async () => {
+    const s = await seedSession();
+    awaySessions.set(s.session.id, {
+      skips: createSkipRecorder(
+        { state, log: silentLogger },
+        { workstreamId: s.workstream.id, sessionId: s.session.id },
+      ),
+      taskId: s.task.id,
+      projectId: s.project.id,
+      block: () => undefined,
+    });
+    state.write((ctx) => {
+      const person = insertPerson(ctx, { handle: 'ana', name: 'Ana' });
+      setRoutingRules(ctx, s.project.id, {
+        rules: [{ category: 'design', area: null, personId: person.id }],
+      });
+    });
+    const pending = s.call('ask_human', {
+      opId: 'op-away-0002',
+      category: 'design',
+      question: 'Teal or red?',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+    });
+    await waitFor(() => listInbox(state.db, {})[0]);
+    expect(listSkipsForWorkstream(state.db, s.workstream.id)).toEqual([]);
+    s.stopSession();
+    await pending;
   });
 
   it('waits on ask_human until the builder answers', async () => {

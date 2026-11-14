@@ -1,0 +1,80 @@
+/* One hunk: a gutter of file line numbers beside Mantine's Diff, every row one 20 px line so the
+   two line up. Changed lines are colored text on bg_1, never tinted rows. */
+
+.hunk {
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+  overflow: hidden;
+}
+
+.header {
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.body {
+  display: flex;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.gutter {
+  flex: none;
+  user-select: none;
+  color: var(--mantine-color-dimmed);
+  text-align: right;
+}
+
+.gutterLine {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 20px;
+  padding: 0 6px 0 8px;
+}
+
+.gutterLine[data-kind='added'] {
+  background: var(--tendb-color-panel);
+  color: var(--mantine-color-green-text);
+}
+
+.gutterLine[data-kind='removed'] {
+  background: var(--tendb-color-panel);
+  color: var(--mantine-color-red-text);
+}
+
+.marker {
+  width: 1ch;
+}
+
+.diff {
+  --diff-add-color: var(--tendb-color-panel);
+  --diff-remove-color: var(--tendb-color-panel);
+  --diff-add-highlight-color: var(--mantine-color-default-border);
+  --diff-remove-highlight-color: var(--mantine-color-default-border);
+
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.content {
+  height: 20px;
+  line-height: 20px;
+  white-space: pre;
+  overflow-wrap: normal;
+  color: var(--mantine-color-text);
+}
+
+.content.added {
+  color: var(--mantine-color-green-text);
+}
+
+.content.removed {
+  color: var(--mantine-color-red-text);
+}

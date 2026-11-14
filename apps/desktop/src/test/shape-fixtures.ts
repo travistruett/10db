@@ -1,4 +1,5 @@
 import {
+  ConversationItemDto,
   mintId,
   ShapeFindingDto,
   ShapeDto,
@@ -6,6 +7,7 @@ import {
   ShapePreviewDto,
   ShapeProposalDto,
   ShapeViewDto,
+  type ConversationId,
   type ShapeId,
 } from '@10db/contracts';
 
@@ -33,7 +35,7 @@ export function shapeMessageDto(
   overrides: Partial<ShapeMessageDto> = {},
 ): ShapeMessageDto {
   return ShapeMessageDto.parse({
-    id: mintId('ShapeMessage'),
+    id: mintId('ConversationItem'),
     shapeId,
     author: 'builder',
     kind: 'text',
@@ -52,7 +54,7 @@ interface ProposalOverrides {
   readonly sourceMessageIds?: ShapeProposalDto['sourceMessageIds'];
 }
 
-const SOURCE = mintId('ShapeMessage');
+const SOURCE = mintId('ConversationItem');
 
 const proposalBase = (overrides: ProposalOverrides) => ({
   id: mintId('ShapeProposal'),
@@ -171,13 +173,117 @@ export function landingProposal(key: string, keys: readonly string[]): ShapeProp
   });
 }
 
+/**
+ * What each conversation's `/items` answers in a test, keyed by its id. `shapeViewDto` fills it from
+ * the Plan rows a test gives, so the base handlers serve a view's transcript as the daemon does.
+ */
+const ITEMS = new Map<ConversationId, readonly ConversationItemDto[]>();
+/** Which Plan each fixture's conversation belongs to. */
+const SHAPE_OF = new Map<string, ShapeId>();
+
+/** The Plan a conversation a fixture made belongs to, for a handler that names it by its conversation. */
+export function shapeOfConversation(id: unknown): ShapeId | undefined {
+  return SHAPE_OF.get(String(id));
+}
+
+/** What a send answers: the builder's message, stored. */
+export function sentItemDto(text = 'Sent.'): ConversationItemDto {
+  return ConversationItemDto.parse({
+    id: mintId('ConversationItem'),
+    conversationId: mintId('Conversation'),
+    seq: 1,
+    author: 'builder',
+    partial: false,
+    hasFull: false,
+    deliveredAt: null,
+    createdAt: AT,
+    kind: 'message',
+    text,
+  });
+}
+
+/** The items a test's conversation holds; none for one no fixture made. */
+export const itemsOfConversation = (id: ConversationId): readonly ConversationItemDto[] =>
+  ITEMS.get(id) ?? [];
+
+/** Plan's row as the item the daemon stores it as (`transcript-kinds.ts`). */
+function itemOfMessage(
+  conversationId: ConversationId,
+  m: ShapeMessageDto,
+  seq: number,
+): ConversationItemDto {
+  const author = m.author === 'builder' ? 'builder' : m.author === 'claude' ? 'agent' : 'system';
+  const common = {
+    id: m.id,
+    conversationId,
+    seq,
+    author,
+    partial: false,
+    hasFull: false,
+    deliveredAt: m.createdAt,
+    createdAt: m.createdAt,
+  };
+  switch (m.kind) {
+    case 'text':
+      return ConversationItemDto.parse({
+        ...common,
+        kind: m.author === 'builder' ? 'message' : 'agent_message',
+        text: m.body,
+      });
+    case 'notice':
+    case 'digest':
+      return ConversationItemDto.parse({ ...common, kind: m.kind, text: m.body });
+    case 'tool':
+      return ConversationItemDto.parse({
+        ...common,
+        kind: 'tool_call',
+        call: {
+          kind: 'other',
+          id: `plan-${m.id}`,
+          harnessTool: '10db.plan',
+          name: '10db.plan',
+          status: 'done',
+          title: m.body,
+          inputPreview: m.body.slice(0, 200),
+          startedAt: m.createdAt,
+          durationMs: null,
+          parentId: null,
+          refusal: null,
+          deniedBy: null,
+          limit: null,
+          soft: null,
+        },
+      });
+    case 'propose':
+    case 'rehearse':
+    case 'edit':
+    case 'event':
+    case 'screen':
+      return ConversationItemDto.parse({
+        ...common,
+        kind: 'shape_event',
+        event: m.kind,
+        text: m.body,
+      });
+  }
+}
+
+/**
+ * A conversation's view. `messages` are Plan's rows as a test writes them: they become the items its
+ * conversation serves, as the daemon stores them.
+ */
 export function shapeViewDto(
-  overrides: Partial<ShapeViewDto> & { readonly shape?: Partial<ShapeDto> } = {},
+  overrides: Partial<ShapeViewDto> & {
+    readonly shape?: Partial<ShapeDto>;
+    readonly messages?: readonly ShapeMessageDto[];
+    readonly items?: readonly ConversationItemDto[];
+  } = {},
 ): ShapeViewDto {
-  const { shape: shapeOverrides, ...rest } = overrides;
+  const { shape: shapeOverrides, messages = [], items, ...rest } = overrides;
   const shape = shapeDto(shapeOverrides);
-  return ShapeViewDto.parse({
+  const view = ShapeViewDto.parse({
     shape,
+    conversationId: mintId('Conversation'),
     models: {
       default: 'claude-opus-5-5',
       offered: [
@@ -188,7 +294,6 @@ export function shapeViewDto(
         { model: 'house-model', tier: null },
       ],
     },
-    messages: [],
     proposals: [],
     heard: [],
     files: [],
@@ -208,6 +313,12 @@ export function shapeViewDto(
     tokens: 0,
     ...rest,
   });
+  SHAPE_OF.set(view.conversationId, view.shape.id);
+  ITEMS.set(
+    view.conversationId,
+    items ?? messages.map((m, i) => itemOfMessage(view.conversationId, m, i + 1)),
+  );
+  return view;
 }
 
 /** A preview with nothing placed: no pending task, nothing running. */

@@ -9,19 +9,20 @@ import {
   type SeeScreenInput,
   type ShapeId,
 } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage, pngOfSize } from '../../test/png';
-import {
-  createScreens,
-  pictureLimitsFor,
-  type PictureLimits,
-  type ScreenOutcome,
-  type ScreenService,
-} from '../screens';
+import { createScreens, type ScreenOutcome, type ScreenService } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
-import { inlineImageIds, pathImageReasons, pathReasonText } from './dropped-files';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
+import {
+  inlineImageIds,
+  pathImageReasons,
+  pathReasonText,
+  type PictureLimits,
+  pictureLimitsFor,
+} from '../conversation';
 
 // Shape spec §5.4. A conversation's picture and PDF budget is sized from the request limit of the account it
 // runs on: 128 MB on the Claude API, 20 MB on Amazon Bedrock (docs checked 2026-11-05). A resumed session
@@ -59,9 +60,8 @@ async function nextTurn(text = 'Here you go'): Promise<FakeShapeTurn> {
 }
 
 const notices = (): string[] =>
-  f.service
-    .view(shapeId())
-    .messages.filter((m) => m.kind === ShapeMessageKind.Notice)
+  listShapeMessages(f.c.store.db, shapeId())
+    .filter((m) => m.kind === ShapeMessageKind.Notice)
     .map((m) => m.body);
 
 const read = (path: string, pages?: string) =>

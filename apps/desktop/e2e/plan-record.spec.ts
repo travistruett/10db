@@ -137,7 +137,10 @@ for (const scheme of ['dark', 'light'] as const) {
     // reads as written.
     const body = page.getByRole('region', { name: 'Pairing plan' });
     await expect(body).toContainText('The runner packs once.');
-    await expect(body).toContainText('the guide (https://example.com/guide)');
+    await expect(body.getByRole('link', { name: 'the guide' })).toHaveAttribute(
+      'title',
+      'https://example.com/guide',
+    );
     await expect(body).toContainText('reaching <host>.');
     await expectAccessible(page, `Documents, ${scheme}`);
     for (const tab of TABS.slice(1)) {

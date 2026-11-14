@@ -238,6 +238,13 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     })
     .where(eq(schema.projects.id, id))
     .run();
+  // The project's conversations bill to its account, so they move with it.
+  if (changes.accountId !== undefined && moving)
+    ctx.tx
+      .update(schema.conversations)
+      .set({ accountId: changes.accountId, updatedAt: ctx.now })
+      .where(eq(schema.conversations.projectId, id))
+      .run();
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
 }

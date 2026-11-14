@@ -12,17 +12,18 @@ import {
   type ShapeFileDto,
   type ShapeId,
 } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
-import { createScreens, inlineBytesSpent, type ScreenOutcome } from '../screens';
+import { createScreens, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { jpegOfSize } from '../../test/jpeg';
 import { ROUND_LIMITS } from '../../test/picture-limits';
 import { pngOfSize } from '../../test/png';
 import { webpImage } from '../../test/webp';
-import { readImageSize } from '../screens';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
+import { inlineBytesSpent, readImageSize } from '../conversation';
 
 // Shape spec §5.4 Dropped files and §5.6 Starting from a terminal. These run on round, small limits
 // (`ROUND_LIMITS`) so that the budget can be filled with a few megabytes; `picture-limits.test.ts` checks the
@@ -475,12 +476,14 @@ describe('a large dropped image', () => {
       );
       expect(kept()).toHaveLength(1);
       expect(
-        f.service.view(shapeId()).messages.filter((m) => m.kind === ShapeMessageKind.Screen),
+        listShapeMessages(f.c.store.db, shapeId()).filter(
+          (m) => m.kind === ShapeMessageKind.Screen,
+        ),
       ).toHaveLength(1);
       expect(
-        f.service
-          .view(shapeId())
-          .messages.some((m) => m.body.startsWith('see_screen · refused · ')),
+        listShapeMessages(f.c.store.db, shapeId()).some((m) =>
+          m.body.startsWith('see_screen · refused · '),
+        ),
       ).toBe(true);
     });
 
@@ -543,7 +546,9 @@ describe('a large dropped image', () => {
         const fresh = must(f.adapter.shapeSessions[1], 'a fresh session');
         expect(fresh.spec.resumeProviderSessionId).toBeNull();
         expect(
-          f.service.view(shapeId()).messages.some((m) => m.kind === ShapeMessageKind.Digest),
+          listShapeMessages(f.c.store.db, shapeId()).some(
+            (m) => m.kind === ShapeMessageKind.Digest,
+          ),
         ).toBe(false);
         expect(turn.images).toHaveLength(3);
         // This session carries 6 MiB: the old screens would add 15.7 and 1.4 more to pass the 18.
@@ -803,7 +808,7 @@ describe('start_shape', () => {
       state: 'listening',
       round: 0,
     });
-    const messages = f.service.view(shape.id).messages;
+    const messages = listShapeMessages(f.c.store.db, shape.id);
     expect(messages.map((m) => [m.author, m.kind, m.body])).toEqual([
       [ShapeMessageAuthor.Note, ShapeMessageKind.Notice, 'From a Claude Code session'],
       [
@@ -857,7 +862,7 @@ describe('start_shape', () => {
     );
     const turn = await nextTurn('Let’s go on', shape.id);
     const summaryId = must(
-      f.service.view(shape.id).messages.find((m) => m.body.startsWith('We settled')),
+      listShapeMessages(f.c.store.db, shape.id).find((m) => m.body.startsWith('We settled')),
       'the summary',
     ).id;
     expect(turn.message).toContain(`[m:${summaryId}] We settled on denser cards`);

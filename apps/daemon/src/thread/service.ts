@@ -1,7 +1,6 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import {
   ConflictError,
-  InvalidError,
   NotFoundError,
   PassState,
   TakeOutStep,
@@ -13,7 +12,6 @@ import {
   type TaskMessageDto,
   type TaskMessageId,
   type TaskPictureKind,
-  type PassTurnId,
   type TaskDto,
   type TaskThreadDto,
 } from '@10db/contracts';
@@ -29,21 +27,13 @@ import {
   markPassTurnAnswered,
   passHoldingTask,
   type DbReader,
-  type StoredPicture,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { checkPicture, keepPicture, taskFilesDir, type KeptPicture } from './pictures';
+import { taskFilesDir } from './pictures';
+import { keepBuilderMessage, removeKeptFiles, type PastedFile } from '../conversation';
 
-// Workbench spec §4.3, §11, §12. The builder's side of a task's thread: what a message may carry, and
-// the order its parts are kept in: every picture on disk first, then the rows in one write.
-
-const MIB = 1024 * 1024;
-
-/** A file as the builder pasted it: the name and bytes the request carried. */
-export interface PastedFile {
-  readonly name: string;
-  readonly bytes: Uint8Array;
-}
+// Workbench spec §4.3, §11, §12. The builder's side of a task's thread: the conversation library's
+// intake keeps a message and its pictures; the pass's refusals and the Ready-turn mark are the thread's.
 
 /** How a message reaches a task's page in a Workbench pass: the runner's, injected. */
 export interface PageMessages {
@@ -119,60 +109,29 @@ export function createThreadService(deps: {
       const pass = passHoldingTask(state.db, task);
       if (pass) refusedByPass(state.db, task);
       else if (redo) throw new ConflictError(`${task.title} is in no UI Workbench pass to redo`);
-      const body = input.text.trim();
-      if (body === '' && input.pictures.length === 0)
-        throw new InvalidError('A message needs words or a picture');
-      if (body.length > TASK_MESSAGE_MAX_CHARS)
-        throw new InvalidError(`A message is at most ${String(TASK_MESSAGE_MAX_CHARS)} characters`);
-      if (input.pictures.length > TASK_MESSAGE_PICTURES_MAX)
-        throw new InvalidError(
-          `A message carries at most ${String(TASK_MESSAGE_PICTURES_MAX)} pictures`,
-        );
-      if (
-        input.pictures.reduce((sum, p) => sum + p.bytes.length, 0) > TASK_MESSAGE_PICTURES_MAX_BYTES
-      )
-        throw new InvalidError(
-          `A message's pictures are at most ${String(TASK_MESSAGE_PICTURES_MAX_BYTES / MIB)} MB together`,
-        );
-      const pictures = input.pictures.map(checkPicture);
-      const dir = taskFilesDir(deps.dataDir, taskId);
-      const kept: KeptPicture[] = [];
-      let message: TaskMessageDto;
-      /** The Ready turn this message was the first answer to, if any. */
-      let answered: PassTurnId | null;
-      try {
-        const files: StoredPicture[] = [];
-        for (const picture of pictures) {
-          const at = keepPicture(dir, picture);
-          kept.push(at);
-          files.push({
-            name: picture.name,
-            mediaType: picture.mediaType,
-            size: picture.bytes.length,
-            sha256: at.sha256,
-            storedPath: at.storedPath,
-          });
-        }
-        ({ message, answered } = state.write((ctx) => {
-          // Read again where the message is written, so a take-out or an Abandon that began
-          // meanwhile refuses it too.
-          if (pass) refusedByPass(ctx.tx, task);
-          // The builder's first word after a Ready page is when the page was answered.
-          const latest = pass ? latestPassTurn(ctx.tx, taskId) : undefined;
-          const answers =
-            latest !== undefined && latest.readyAt !== null && latest.answeredAt === null;
-          if (answers) markPassTurnAnswered(ctx, latest.id);
-          return {
-            message: insertBuilderMessage(ctx, taskId, { body, files }),
-            answered: answers ? latest.id : null,
-          };
-        }));
-      } catch (error) {
-        // No row names what this call wrote; a picture kept before for the task stays.
-        for (const picture of kept)
-          if (picture.written) rmSync(picture.storedPath, { force: true });
-        throw error;
-      }
+      const { message, answered } = keepBuilderMessage(input, {
+        limits: {
+          maxChars: TASK_MESSAGE_MAX_CHARS,
+          maxPictures: TASK_MESSAGE_PICTURES_MAX,
+          maxPicturesBytes: TASK_MESSAGE_PICTURES_MAX_BYTES,
+        },
+        filesDir: taskFilesDir(deps.dataDir, taskId),
+        write: (body, files) =>
+          state.write((ctx) => {
+            // Read again where the message is written, so a take-out or an Abandon that began
+            // meanwhile refuses it too.
+            if (pass) refusedByPass(ctx.tx, task);
+            // The builder's first word after a Ready page is when the page was answered.
+            const latest = pass ? latestPassTurn(ctx.tx, taskId) : undefined;
+            const answers =
+              latest !== undefined && latest.readyAt !== null && latest.answeredAt === null;
+            if (answers) markPassTurnAnswered(ctx, latest.id);
+            return {
+              message: insertBuilderMessage(ctx, taskId, { body, files }),
+              answered: answers ? latest.id : null,
+            };
+          }),
+      });
       if (!pass) return message;
       try {
         await deps.pages.deliver(taskId, message.id, { redo });
@@ -188,7 +147,7 @@ export function createThreadService(deps: {
           return paths;
         });
         if (removed === null) return message;
-        for (const path of removed) rmSync(path, { force: true });
+        removeKeptFiles(removed);
         throw error;
       }
       return message;

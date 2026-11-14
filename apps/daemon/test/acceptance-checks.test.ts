@@ -1,13 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  InboxItemDto,
-  PermissionChoice,
-  ProjectDto,
-  TaskDto,
-  WorkstreamDto,
-} from '@10db/contracts';
+import { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -118,22 +112,8 @@ beforeAll(async () => {
     });
     await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
   }
-  // Beta asks a question and then calls a repo MCP tool, which becomes a permission card.
-  const answered = new Set<string>();
-  await waitForAsync(async () => {
-    for (const card of await api.get('/inbox?state=OPEN', z.array(InboxItemDto))) {
-      if (answered.has(card.id)) continue;
-      if (card.kind === 'question')
-        await api.post(`/inbox/${card.id}/answer`, z.unknown(), { choice: 'Howdy' });
-      else if (card.kind === 'permission')
-        await api.post(`/inbox/${card.id}/answer`, z.unknown(), {
-          choice: PermissionChoice.AllowOnce,
-        });
-      else continue;
-      answered.add(card.id);
-    }
-    return answered.size >= 2 ? answered : undefined;
-  });
+  // Beta asks a question and then calls a repo MCP tool. Nobody watches a Board task, so the
+  // question is answered at once and the tool call skipped, both kept (T4).
   await waitForAsync(async () => {
     const all = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
     return all.length === 2 && all.every((w) => w.state === 'DONE') ? all : undefined;
@@ -244,10 +224,10 @@ describe('runAcceptanceChecks', () => {
   });
 
   describe('repo MCP tool gated', () => {
-    // The fake run's Beta session called mcp__mantine__search_mantine_docs, which became a permission card.
+    // The fake run's Beta session called mcp__mantine__search_mantine_docs, which it skipped (T4).
     it.each([
-      { name: 'a card for a tool of the approved server', server: 'mantine', ok: true },
-      { name: 'cards only for another server', server: 'docs', ok: false },
+      { name: 'a skip for a tool of the approved server', server: 'mantine', ok: true },
+      { name: 'skips only for another server', server: 'docs', ok: false },
       { name: 'a server name that is only a prefix of the card tool', server: 'mant', ok: false },
     ])('$name', async ({ server, ok }) => {
       expect((await byName({ server })).get('repo MCP tool gated')).toMatchObject({ ok });

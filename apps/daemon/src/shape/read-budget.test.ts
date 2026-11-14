@@ -6,7 +6,6 @@ import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ROUND_LIMITS } from '../../test/picture-limits';
 import { pngOfSize } from '../../test/png';
-import { poolBytes } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
 import {
@@ -17,6 +16,7 @@ import {
   readCountedLine,
 } from './read-budget';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
+import { poolBytes } from '../conversation';
 
 // Shape spec §5.4: a picture or PDF Claude pulls in with Read is a tool result a resumed session resends, beside
 // the pictures the daemon sends itself. The preToolUse hook counts it and refuses what would pass the total.

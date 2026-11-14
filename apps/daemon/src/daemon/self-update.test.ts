@@ -1,19 +1,22 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import type { ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
   HealthResponse,
+  PersonDto,
   ProjectDto,
   SelfUpdateStatusDto,
   ShapeDto,
-  ShapeMessageDto,
+  ShapeId,
   ShapeViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiClient } from '../../test/api-client';
+import { listShapeMessages } from '@10db/db';
+import { apiClient, sayToPlan } from '../../test/api-client';
 import { FakeGh } from '../../test/fake-gh';
 import { seedProfiles } from '../../test/seed-profiles';
 import {
@@ -41,6 +44,12 @@ const inboxCard = z.object({ title: z.string(), body: z.string(), projectId: z.s
 
 let dir: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
+
+/** The conversation's transcript rows, read from the running daemon's store. */
+function said(shapeId: ShapeId): ShapeMessageDto[] {
+  if (daemon === null) throw new Error('no daemon is running');
+  return listShapeMessages(daemon.state.db, shapeId);
+}
 let repo: { path: string; cleanup(): void };
 let staged: string[];
 let applied: string[];
@@ -167,6 +176,21 @@ async function addProject(api: ReturnType<typeof apiClient>) {
     gateCommand: 'true',
     defaultRigor: 'light',
     areas: [{ name: 'src', globs: ['src/**'] }],
+  });
+}
+
+/**
+ * Routes the project's engineering questions to a person with Slack. A lane nobody watches answers
+ * a question left with the builder at once; this one waits on Tess's card, parked.
+ */
+async function routeEngineering(api: ReturnType<typeof apiClient>, projectId: string) {
+  const person = await api.post('/people', PersonDto, {
+    handle: 'tess',
+    name: 'Tess',
+    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+  });
+  await api.put(`/projects/${projectId}/routing-rules`, z.unknown(), {
+    rules: [{ category: 'engineering', area: null, personId: person.id }],
   });
 }
 
@@ -431,6 +455,7 @@ describe('self-update in the daemon', () => {
           adapter: new FakeAdapter({ Alpha: [[ask, { do: 'turn_complete' }]] }),
         });
         const project = await addProject(api);
+        await routeEngineering(api, project.id);
         const alpha = await startTask(api, project.id, 'Alpha', 'src');
         await waitForAsync(
           async () => (await lanesOf(api)).get(alpha.id)?.state === 'WAITING_HUMAN',
@@ -438,11 +463,12 @@ describe('self-update in the daemon', () => {
         return { api, project, alpha };
       }
 
-      it('says it holds the update, as a lane waiting on a card and not as work running', async () => {
+      // A lane nobody watches parks on a card routed to a person: no session waits on it live.
+      it('counts a lane parked on its card as neither work running nor a live wait', async () => {
         const { api } = await waitingOnCard();
         expect((await selfUpdate(api)).midSession).toEqual({
           working: 0,
-          waitingOnCard: 1,
+          waitingOnCard: 0,
           batches: 0,
           jobs: 0,
           shapes: [],
@@ -607,6 +633,7 @@ describe('self-update in the daemon', () => {
           { name: 'docs', globs: ['docs/**'] },
         ],
       });
+      await routeEngineering(api, project.id);
       const alpha = await startTask(api, project.id, 'Alpha', 'src');
       const beta = await startTask(api, project.id, 'Beta', 'docs');
       await waitFor(() => started.mock.results.length === 2, 30_000);
@@ -802,7 +829,7 @@ describe('self-update in the daemon', () => {
       const project = await addProject(api);
       await waitFor(() => applied.length > 0 && applied);
       const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
-      await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'One more thing.' });
+      await sayToPlan(api, shape.id, 'One more thing.');
       const view = () => api.get(`/shapes/${shape.id}`, ShapeViewDto);
       await waitForAsync(async () => (await view()).turn.queued === 1);
       return { adapter, api, view };
@@ -819,7 +846,7 @@ describe('self-update in the daemon', () => {
       await waitForAsync(async () => (await view()).turn.queued === 0);
     });
 
-    it('says so in the conversation when the install quits the app first', async () => {
+    it('keeps the message queued, starting nothing, when the install quits the app first', async () => {
       const { adapter } = await sendDuringTheInstall();
       await daemon?.stop();
       daemon = null;
@@ -829,8 +856,9 @@ describe('self-update in the daemon', () => {
       const [project] = await next.get('/projects', z.array(ProjectDto));
       const [shape] = await next.get(`/projects/${project?.id ?? ''}/shapes`, z.array(ShapeDto));
       const after = await next.get(`/shapes/${shape?.id ?? ''}`, ShapeViewDto);
-      expect(after.messages.at(-1)?.kind).toBe('notice');
-      expect(after.messages.at(-1)?.body).toContain('One more thing.');
+      // The queue is durable: the message waits under Send now, and nothing runs unattended.
+      expect(said(ShapeId.parse(shape?.id)).at(-1)?.body).toBe('One more thing.');
+      expect(after.turn.queued).toBe(1);
       expect(adapter.shapeSessions).toHaveLength(0);
     });
   });
@@ -849,7 +877,7 @@ describe('self-update in the daemon', () => {
     await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
     const project = await addProject(api);
     const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
-    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Denser board.' });
+    await sayToPlan(api, shape.id, 'Denser board.');
     await waitFor(() => adapter.shapeSessions.length === 1);
     head = NEW;
     await waitForAsync(async () => (await selfUpdate(api)).draining);

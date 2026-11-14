@@ -53,6 +53,7 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 Each view's notes are in its own `src/views/<view>/AGENTS.md` (and a module's in `src/<module>/AGENTS.md`).
 Read the ones for what you touch, and write a view's notes there, not here. This file keeps what crosses views.
 
+- `conversation/`: the conversation kit: markdown, the windowed list, tool call cards (`src/conversation/AGENTS.md`)
 - `screens/`: screens for Plan's `see_screen` (`src/screens/AGENTS.md`)
 - `views/board/`: the Board: columns, cards, task state, holds and batches (`src/views/board/AGENTS.md`)
 - `views/factory/`: Factory: a project's goals (`src/views/factory/AGENTS.md`)

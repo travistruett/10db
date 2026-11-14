@@ -58,6 +58,16 @@ function toHunk(raw: RawHunk, lines: readonly string[]): ToolCallHunk {
   };
 }
 
+/** The hunks as a unified diff's hunk sections. */
+function unifiedOf(raws: readonly RawHunk[]): string {
+  return raws
+    .map(
+      (raw) =>
+        `@@ -${String(raw.oldStart)},${String(raw.oldLines)} +${String(raw.newStart)},${String(raw.newLines)} @@\n${raw.lines.join('\n')}\n`,
+    )
+    .join('');
+}
+
 /** Keeps the hunks, in order, while their changed lines fit the cap; the hunk that crosses it is cut after its last change within it. */
 function capped(raws: readonly RawHunk[], forceTruncated: boolean): EditHunks {
   let addedLines = 0;
@@ -102,38 +112,46 @@ const shifted = (hunk: StructuredPatchHunk, by: number): RawHunk => ({
   lines: hunk.lines,
 });
 
-/**
- * The hunks between two texts; `firstLine` is the file line `before` starts at. Past jsdiff's bounds
- * the whole of `after` shows as added, cut at the cap, and `removedLines` counts `before`'s lines.
- */
-export function hunksOfTexts(before: string, after: string, firstLine = 1): EditHunks {
+/** The raw hunks between two texts; past jsdiff's bounds, null. */
+function rawHunks(before: string, after: string, firstLine: number): RawHunk[] | null {
   const patch = structuredPatch('a', 'b', before, after, undefined, undefined, {
     context: CONTEXT_LINES,
     maxEditLength: DIFF_MAX_EDIT_LENGTH,
     timeout: DIFF_TIMEOUT_MS,
   });
-  const by = firstLine - 1;
-  if (patch !== undefined)
-    return capped(
-      patch.hunks.map((hunk) => shifted(hunk, by)),
-      false,
-    );
+  return patch === undefined ? null : patch.hunks.map((hunk) => shifted(hunk, firstLine - 1));
+}
+
+/** The whole of `after` as one added hunk, for texts jsdiff gave up on. */
+function addedWhole(after: string, firstLine: number): RawHunk[] {
   const added = splitLines(after);
-  const shown = capped(
-    added.length === 0
-      ? []
-      : [
-          {
-            oldStart: firstLine,
-            oldLines: 0,
-            newStart: firstLine,
-            newLines: added.length,
-            lines: added.map((line) => `+${line}`),
-          },
-        ],
-    true,
-  );
+  return added.length === 0
+    ? []
+    : [
+        {
+          oldStart: firstLine,
+          oldLines: 0,
+          newStart: firstLine,
+          newLines: added.length,
+          lines: added.map((line) => `+${line}`),
+        },
+      ];
+}
+
+/**
+ * The hunks between two texts; `firstLine` is the file line `before` starts at. Past jsdiff's bounds
+ * the whole of `after` shows as added, cut at the cap, and `removedLines` counts `before`'s lines.
+ */
+export function hunksOfTexts(before: string, after: string, firstLine = 1): EditHunks {
+  const raws = rawHunks(before, after, firstLine);
+  if (raws !== null) return capped(raws, false);
+  const shown = capped(addedWhole(after, firstLine), true);
   return { ...shown, removedLines: splitLines(before).length };
+}
+
+/** The same edit as `hunksOfTexts` reads it, every line kept, as a unified diff's hunk sections. */
+export function unifiedPatch(before: string, after: string, firstLine = 1): string {
+  return unifiedOf(rawHunks(before, after, firstLine) ?? addedWhole(after, firstLine));
 }
 
 /** A line of a unified diff's file header, which no hunk holds. */

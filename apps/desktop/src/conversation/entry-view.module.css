@@ -1,0 +1,22 @@
+.reply {
+  position: relative;
+}
+
+/* The reply's Copy shows on hover and focus only. */
+.copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+}
+
+.reply:hover .copy,
+.reply:focus-within .copy {
+  opacity: 1;
+}
+
+.reasoning {
+  border-left: 2px solid var(--mantine-color-default-border);
+  padding-left: 10px;
+  color: var(--mantine-color-dimmed);
+}

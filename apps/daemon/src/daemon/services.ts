@@ -91,6 +91,7 @@ import {
   listRoutingRules,
   listTasks,
   listTaskThread,
+  listSkipsForWorkstream,
   listWorkstreams,
   moveTask,
   listPassTasks,
@@ -141,7 +142,7 @@ import {
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
-import type { EventBus, StateStore } from '../events';
+import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
@@ -194,6 +195,7 @@ import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
+import type { ConversationApiServices } from './conversation-services';
 import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
 import type { ListenerReader } from './listening-ports';
@@ -263,6 +265,7 @@ export function createServices(deps: {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly bus: EventBus;
+  readonly liveFrames: LiveFrames;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
@@ -290,6 +293,8 @@ export function createServices(deps: {
   /** People, the Slack connection, timers, routes and sends. */
   readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
+  /** The conversation routes (sessions spec §10), over the explore engine. */
+  readonly conversation: ConversationApiServices;
   /** Importing a planning effort into a Plan. */
   readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
@@ -695,6 +700,10 @@ export function createServices(deps: {
       return getWorkstream(db, id);
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
+    listWorkstreamSkips(id) {
+      getWorkstream(db, id);
+      return listSkipsForWorkstream(db, id);
+    },
     retryWorkstream(id, note) {
       const ws = deps.starter.retry(id, note);
       deps.scheduler.requestTick();
@@ -712,6 +721,7 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
+    subscribeLive: (listener) => deps.liveFrames.subscribe(listener),
     systemCheck: async ({ recheck }) => {
       if (recheck || lastCheck === null) {
         const probing = deps.systemCheck();
@@ -787,6 +797,7 @@ export function createServices(deps: {
     ...deps.trust,
     ...createPlaybookServices(deps.state),
     ...deps.shape,
+    ...deps.conversation,
     ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,

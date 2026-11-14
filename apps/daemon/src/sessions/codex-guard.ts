@@ -158,6 +158,7 @@ export async function judgeHookCall(
       toolName: call.toolName,
       input: call.input,
       ...(hook.cwd === undefined ? {} : { cwd: hook.cwd }),
+      ...(hook.tool_use_id === undefined ? {} : { toolUseId: hook.tool_use_id }),
     });
     if (verdict.decision === 'deny') return refuse(verdict.reason);
     if (verdict.decision === 'allow') continue;

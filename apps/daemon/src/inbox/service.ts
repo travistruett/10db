@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  type ConversationId,
   CARD_PROPOSED_PRINCIPLES,
   CARD_RELEASED_WORKSTREAMS,
   CARD_RESOLUTION,
@@ -90,12 +91,31 @@ export class ParkedError extends Error {
 }
 
 /**
- * Who waits on a card: a lane's workstream, or a Plan conversation, whose card has no target and names
- * the conversation in its detail (`SHAPE_CARD_KEY`).
+ * Rejects an answer promise when the asking session is a lane nobody watches and its question stayed
+ * with the builder: the caller answers the question at once instead (trust line §5).
+ */
+export class AnsweredAwayError extends Error {
+  override readonly name = 'AnsweredAwayError';
+  constructor() {
+    super('Nobody watches this task, so its question is answered at once');
+  }
+}
+
+/**
+ * Who waits on a card: a lane's workstream, or a conversation, whose card has no target and names the
+ * conversation in its detail (`CONVERSATION_CARD_KEY`), and Plan's shape too (`SHAPE_CARD_KEY`).
  */
 type AskOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
-  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+  | {
+      readonly workstreamId: WorkstreamId;
+      readonly conversationId?: never;
+      readonly shapeId?: never;
+    }
+  | {
+      readonly workstreamId: null;
+      readonly conversationId: ConversationId;
+      readonly shapeId?: ShapeId;
+    };
 
 type AskInput = AskOwner & {
   readonly projectId: ProjectId;
@@ -121,6 +141,8 @@ type AskInput = AskOwner & {
 
 /** The detail key naming the Plan conversation whose session asked a card. */
 export const SHAPE_CARD_KEY = 'shapeId';
+/** The detail key naming the conversation whose session asked a card. */
+const CONVERSATION_CARD_KEY = 'conversationId';
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
 interface FlagInput {
@@ -187,6 +209,11 @@ export interface InboxService {
   reword(id: InboxItemId, body: string, card?: Rewording): void;
   /** Closes an open card whose question a later change made moot; a closed card is left as it was. */
   withdraw(id: InboxItemId): void;
+  /**
+   * Ends the wait of each session `away` names on the open question card `id`, with
+   * `AnsweredAwayError`, so each answers at once; a card left with nobody waiting is withdrawn.
+   */
+  answerAwayWaits(id: InboxItemId, away: (sessionId: SessionId) => boolean): void;
   /**
    * Closes an open card as RESOLVED by 10db, because the action it reports as failed has succeeded
    * since. The reason goes in `detail.resolution`, where the resolved view shows it; a card that is
@@ -327,6 +354,8 @@ function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
 
 interface Waiter {
   resolve(answer: InboxAnswer): void;
+  /** Ends the wait with `AnsweredAwayError`. */
+  answerAway(): void;
 }
 
 /**
@@ -469,6 +498,15 @@ export function createInboxService(deps: {
   onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
   /** Acts on an open plan card's answer as `onCheckAnswer` does a check card's, and closes the card the same way. */
   onPlanAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
+  /**
+   * Runs inside the answer's write for a flag whose choice writes rows of its own (Run these now): a
+   * throw refuses the answer and keeps the flag open. What it answers runs once the write committed.
+   */
+  onFlagAnswerInWrite?(
+    ctx: WriteContext,
+    item: InboxItemDto,
+    answer: InboxAnswer,
+  ): (() => void) | undefined;
   /**
    * Runs once the builder answered a lane's question with "Park the task" and the card closed with the
    * answer: the run stops and the task is parked. The asking session is not handed the answer, since
@@ -642,9 +680,13 @@ export function createInboxService(deps: {
           ? null
           : { workstreamId: input.workstreamId, sessionId: input.sessionId };
       const detail =
-        input.shapeId === undefined
+        input.conversationId === undefined
           ? input.detail
-          : { ...input.detail, [SHAPE_CARD_KEY]: input.shapeId };
+          : {
+              ...input.detail,
+              [CONVERSATION_CARD_KEY]: input.conversationId,
+              ...(input.shapeId === undefined ? {} : { [SHAPE_CARD_KEY]: input.shapeId }),
+            };
       const item = deps.state.write((ctx) => {
         const routed = assigneesFor(ctx.tx, {
           projectId: input.projectId,
@@ -696,12 +738,18 @@ export function createInboxService(deps: {
       }
       const answer = new Promise<InboxAnswer>((resolve, reject) => {
         const forItem = waiters.get(item.id) ?? new Map<SessionId, Waiter>();
-        forItem.set(input.sessionId, { resolve });
-        waiters.set(item.id, forItem);
         const onAbort = (): void => {
           forItem.delete(input.sessionId);
           reject(new ParkedError());
         };
+        forItem.set(input.sessionId, {
+          resolve,
+          answerAway: () => {
+            input.signal.removeEventListener('abort', onAbort);
+            reject(new AnsweredAwayError());
+          },
+        });
+        waiters.set(item.id, forItem);
         if (input.signal.aborted) onAbort();
         else input.signal.addEventListener('abort', onAbort, { once: true });
       });
@@ -779,6 +827,7 @@ export function createInboxService(deps: {
           applyGateHostChoice(ctx, updated, answer);
           applyDockerChoice(ctx, updated, answer);
           applyHazardChoice(ctx, updated, answer);
+          afterCommit = deps.onFlagAnswerInWrite?.(ctx, updated, answer);
         }
         return updated;
       });
@@ -894,6 +943,26 @@ export function createInboxService(deps: {
       deps.state.write((ctx) => {
         withdrawCard(ctx, id);
       });
+    },
+
+    answerAwayWaits(id, away) {
+      const forItem = waiters.get(id);
+      if (forItem === undefined) return;
+      const released = [...forItem].filter(([sessionId]) => away(sessionId));
+      if (released.length === 0) return;
+      for (const [sessionId] of released) forItem.delete(sessionId);
+      if (forItem.size === 0) waiters.delete(id);
+      const releasedIds = new Set(released.map(([sessionId]) => sessionId));
+      deps.state.write((ctx) => {
+        // A target parked earlier still waits for the builder's answer, so its card stays.
+        const card = getInboxItem(ctx.tx, id);
+        if (
+          forItem.size === 0 &&
+          card.targets.every((t) => t.sessionId !== null && releasedIds.has(t.sessionId))
+        )
+          withdrawCard(ctx, id);
+      });
+      for (const [, waiter] of released) waiter.answerAway();
     },
 
     resolve(id, reason) {

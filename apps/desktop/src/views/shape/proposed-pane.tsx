@@ -1,12 +1,12 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
+import { useStopConversation } from '../../daemon/conversation-queries';
 import {
   useConvertShape,
   useDismissFinding,
   useRehearseShape,
   useRowChange,
-  useStopShape,
 } from '../../daemon/shape-queries';
 import { shortAgo } from '../factory/short-ago';
 import { useNow } from '../../shell/relative';
@@ -321,7 +321,7 @@ function ConvertPanel({
   readonly onClose: () => void;
 }) {
   const convert = useConvertShape(view.shape.id);
-  const stop = useStopShape();
+  const stop = useStopConversation();
   const rehearse = useRehearseShape(view.shape.id);
   const { mutate: startRehearsal } = rehearse;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
@@ -352,7 +352,7 @@ function ConvertPanel({
         return result;
       }}
       onStop={() => {
-        stop.mutate(view.shape.id);
+        stop.mutate(view.conversationId);
       }}
       onRehearse={(ids) => {
         startRehearsal(ids);

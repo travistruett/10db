@@ -5,6 +5,7 @@ export {
   raiseDockerMayBeNeededNote,
   raiseDockerOnNote,
 } from './docker-card';
+export { leftWithBuilder } from './builder-card';
 export { raiseGateHostCards } from './gate-host-card';
 export {
   HazardChoice,
@@ -27,6 +28,7 @@ export { cardsResolvedByEvent, resolveStaleCards } from './resolve-cards';
 export {
   createInboxService,
   flagCard,
+  AnsweredAwayError,
   ParkedError,
   rewordCard,
   withdrawCard,

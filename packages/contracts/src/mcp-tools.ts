@@ -73,6 +73,7 @@ export const McpToolName = {
   WriteHandoff: 'write_handoff',
   CompleteStep: 'complete_step',
   ReportPages: 'report_pages',
+  ReportBlocked: 'report_blocked',
   ResizeTask: 'resize_task',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
@@ -300,6 +301,7 @@ export const McpToolInputs = {
     summary: z.string().min(1),
   }),
   write_handoff: HandoffInput.extend({ opId: OpId }),
+  report_blocked: z.object({ reason: z.string().min(1).max(2000) }),
   complete_step: z.object({
     opId: OpId,
     summary: z
@@ -402,7 +404,12 @@ export const McpToolOutputs = {
     principles: z.array(PrincipleHit).default([]),
     empty: z.boolean(),
   }),
-  ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
+  ask_human: z.object({
+    // Null when no Inbox item was raised: an unattended lane is answered at once.
+    inboxId: InboxItemId.nullable(),
+    answer: z.string(),
+    note: z.string().nullable(),
+  }),
   record_decision: z.object({ decisionId: DecisionId }),
   // A result recorded before self-filing or principles has neither id; it still parses.
   propose: z.object({
@@ -445,6 +452,7 @@ export const McpToolOutputs = {
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),
+  report_blocked: z.object({ ok: z.boolean(), message: z.string() }),
   complete_step: z.object({
     instruction: z.string(),
     /** The tasks filed from `followUps`; absent in a result recorded before there were any. */

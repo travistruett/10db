@@ -232,8 +232,12 @@ describe('judgeHookCall', () => {
 
   it('on ask waits for canUseTool and passes it the call', async () => {
     const seen: unknown[] = [];
+    const guarded: unknown[] = [];
     const spec: Spec = {
-      preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
+      preToolUse: (req) => {
+        guarded.push(req);
+        return { decision: 'ask', reason: 'unread' };
+      },
       canUseTool: (req) => {
         seen.push({ ...req, signal: undefined });
         return Promise.resolve({ behavior: 'deny', message: 'card said no', by: 'builder' });
@@ -254,6 +258,9 @@ describe('judgeHookCall', () => {
         signal: undefined,
         cwd: '/work',
       },
+    ]); // The guard hears the call's id too, which a skip of it is recorded by.
+    expect(guarded).toEqual([
+      { toolName: 'Bash', input: { command: 'make' }, cwd: '/work', toolUseId: 'call-1' },
     ]);
   });
 

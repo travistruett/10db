@@ -1,3 +1,4 @@
+import { CodeHighlightAdapterProvider } from '@mantine/code-highlight';
 import { MantineProvider } from '@mantine/core';
 import {
   createMemoryHistory,
@@ -7,6 +8,7 @@ import {
 } from '@tanstack/react-router';
 import { act, render } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
+import { shikiAdapter } from '../conversation/shiki';
 import { cssVariablesResolver, theme } from '../theme';
 
 function Themed({ children }: { readonly children: ReactNode }) {
@@ -16,7 +18,7 @@ function Themed({ children }: { readonly children: ReactNode }) {
       cssVariablesResolver={cssVariablesResolver}
       defaultColorScheme="dark"
     >
-      {children}
+      <CodeHighlightAdapterProvider adapter={shikiAdapter}>{children}</CodeHighlightAdapterProvider>
     </MantineProvider>
   );
 }

@@ -21,7 +21,7 @@ import {
   type FakeStep,
 } from './fake-script';
 import { readCheckoutText } from './before-text';
-import { createClaudeToolCalls } from './claude-tool-calls';
+import { claudeToolCall, claudeToolResult, createClaudeToolCalls } from './claude-tool-calls';
 import {
   SessionEndReason,
   type InterruptReceipt,
@@ -110,6 +110,7 @@ export function fakeEndedSession(ended: Extract<SessionEvent, { type: 'ended' }>
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -238,11 +239,14 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
     toolName: string,
     input: Record<string, unknown>,
     reportedMode: ReportedMode | undefined,
+    toolUseId: string,
   ): GuardVerdict => {
     try {
+      // The hook names the call, as Claude Code's does.
       return spec.preToolUse({
         toolName,
         input,
+        toolUseId,
         ...(reportedMode === undefined ? {} : { reportedMode }),
       });
     } catch (error) {
@@ -326,7 +330,11 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
           for (const event of toolCalls.result(toolUseId, { isError: true, content: reason }))
             emit(event);
         };
-        const verdict = guardVerdict(step.toolName, input, step.reportedMode);
+        // The sandbox's request for a host goes to canUseTool alone: it is no tool use, so no hook runs.
+        const verdict: GuardVerdict =
+          step.toolName === 'SandboxNetworkAccess'
+            ? { decision: 'ask', reason: 'network request' }
+            : guardVerdict(step.toolName, input, step.reportedMode, toolUseId);
         if (verdict.decision === 'deny') {
           denied(DeniedBy.TenDb, verdict.reason);
           observe(index, 'denied_by_guard', { reason: verdict.reason });
@@ -457,7 +465,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         emit({
           type: 'judge_denied',
           call: {
-            toolUseId: `fake-denied-${String(index)}`,
+            toolUseId: step.toolUseId ?? `fake-denied-${String(index)}`,
             toolName: step.toolName,
             summary: step.summary,
             reason: step.reason,
@@ -570,6 +578,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
       end('stopped', null);
       await core.done;
     },
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -581,6 +590,13 @@ export interface FakeShapeTurnResult {
   readonly contextPercent?: number;
   /** The account could not run the session's model: the session ends as refused, after no turn. */
   readonly refusedModel?: boolean;
+  /**
+   * The turn ends dropping what it was handed and had not begun, as a Codex turn that fails does: the
+   * messages leave the queue and `turn_complete` names them `dropped`.
+   */
+  readonly dropQueued?: boolean;
+  /** The session ends after the turn's events, with no `turn_complete`: a limit, an error, an exit. */
+  readonly end?: { readonly reason: SessionEndReason; readonly message: string | null };
 }
 
 /** One turn the fake runs for a message it was sent. */
@@ -590,10 +606,14 @@ export interface FakeShapeTurn {
   readonly message: string;
   /** The images sent with it, as image content blocks. */
   readonly images: readonly ShapeImage[];
+  /** The client uuid the message went under, when it carried one. */
+  readonly uuid: string | null;
   /** Which message of this session it is, from 1. */
   readonly number: number;
   /** Aborts when the turn is interrupted. */
   readonly signal: AbortSignal;
+  /** Reports an event of the turn as the agent would: a delta, a tool call, a plan. */
+  emit(event: SessionEvent): void;
   /** The session's PreToolUse hook, as Claude Code runs it before each call. */
   guard(request: ShapeToolRequest): ShapeVerdict;
 }
@@ -611,13 +631,17 @@ export function runFakeExploreSession(
   behaviour: FakeShapeBehaviour,
   providerSessionId: string,
   onEnded: () => void,
+  interruptReceipt: (
+    queued: readonly string[],
+  ) => InterruptReceipt | Promise<InterruptReceipt> = () => null,
+  startGate: () => Promise<void> | null = () => null,
 ): SessionHandle {
   const core = createFakeSessionCore();
   core.onEnd(onEnded);
   const emit = (event: SessionEvent): void => {
     core.emit(event);
   };
-  const queue: { text: string; images: readonly ShapeImage[] }[] = [];
+  const queue: { text: string; images: readonly ShapeImage[]; uuid: string | null }[] = [];
   let wake: (() => void) | null = null;
   let current: AbortController | null = null;
   let number = 0;
@@ -625,17 +649,54 @@ export function runFakeExploreSession(
     wake?.();
   });
 
+  let calls = 0;
+  /** The last subagent the session started, which a subagent's own calls name as their parent. */
+  let agentCall: string | null = null;
+  /**
+   * The session's PreToolUse hook, as Claude Code runs it before a call, and the call as Claude Code's
+   * adapter reports it: running, then done, or denied with the hook's reason.
+   */
   const guard = (request: ShapeToolRequest): ShapeVerdict => {
+    let verdict: ShapeVerdict;
     try {
-      return spec.preToolUse(request);
+      verdict = spec.preToolUse(request);
     } catch (error) {
-      return { decision: 'deny', reason: `guard failed: ${String(error)}` };
+      verdict = { decision: 'deny', reason: `guard failed: ${String(error)}` };
     }
+    calls += 1;
+    const id = `fake-call-${String(calls)}`;
+    const call = claudeToolCall(
+      {
+        id,
+        name: request.toolName,
+        input: request.input,
+        parentId: request.agentId === undefined ? null : agentCall,
+      },
+      { startedAt: new Date(), before: () => ({ kind: 'unread' }) },
+    );
+    emit({ type: 'tool_call', call });
+    if (verdict.decision === 'ask') return verdict;
+    const denial =
+      verdict.decision === 'deny'
+        ? { by: DeniedBy.TenDb, reason: verdict.reason, limit: null, soft: null }
+        : null;
+    if (denial === null && request.toolName === 'Agent') agentCall = id;
+    emit({
+      type: 'tool_call',
+      call: claudeToolResult(
+        call,
+        { isError: denial !== null, content: denial?.reason ?? '', denial },
+        new Date(),
+      ),
+    });
+    return verdict;
   };
 
   const loop = async (): Promise<void> => {
+    await startGate();
+    if (core.ended()) return;
     emit({ type: 'started', providerSessionId, pid: null });
-    queue.push({ text: spec.prompt, images: spec.images ?? [] });
+    queue.push({ text: spec.prompt, images: spec.images ?? [], uuid: spec.promptUuid ?? null });
     while (!core.ended()) {
       const next = queue.shift();
       if (next === undefined) {
@@ -653,9 +714,11 @@ export function runFakeExploreSession(
           spec,
           message: next.text,
           images: next.images,
+          uuid: next.uuid,
           number,
           signal: current.signal,
           guard,
+          emit,
         });
       } catch (error) {
         if (!current.signal.aborted) {
@@ -665,6 +728,10 @@ export function runFakeExploreSession(
       }
       current = null;
       if (core.ended()) break;
+      if (result.end !== undefined) {
+        core.end(result.end.reason, result.end.message);
+        break;
+      }
       if (result.refusedModel === true) {
         core.end(
           'model_refused',
@@ -681,8 +748,13 @@ export function runFakeExploreSession(
         totalTokens: percent * 2_000,
         maxTokens: 200_000,
       });
+      const dropped =
+        result.dropQueued === true
+          ? queue.splice(0).flatMap((m) => (m.uuid === null ? [] : [m.uuid]))
+          : [];
       emit({
         type: 'turn_complete',
+        ...(dropped.length === 0 ? {} : { dropped }),
         ...(failed ? { result: 'error' as const } : {}),
         ...(result.text === undefined ? {} : { text: result.text }),
         inputTokens: 100 * number,
@@ -696,18 +768,28 @@ export function runFakeExploreSession(
 
   return {
     events: core.events,
-    send(text, images = []) {
-      queue.push({ text, images });
+    send(text, images = [], uuid) {
+      queue.push({ text, images, uuid: uuid ?? null });
       wake?.();
     },
-    interrupt() {
+    async interrupt() {
       current?.abort();
-      return Promise.resolve(null);
+      const receipt = await interruptReceipt(
+        queue.flatMap((m) => (m.uuid === null ? [] : [m.uuid])),
+      );
+      // A message the receipt does not name was lost with the interrupted turn, as Claude Code's is.
+      if (receipt !== null) {
+        const named = new Set(receipt.stillQueued);
+        for (const m of [...queue])
+          if (m.uuid !== null && !named.has(m.uuid)) queue.splice(queue.indexOf(m), 1);
+      }
+      return receipt;
     },
     stop() {
       current?.abort();
       core.end('stopped', null);
       return Promise.resolve();
     },
+    setModel: () => Promise.resolve(),
   };
 }

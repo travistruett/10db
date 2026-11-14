@@ -214,7 +214,7 @@ describe('a task thread over HTTP', () => {
   /** Every write to the database fails from now on, as it would on a full disk. */
   const refuseWrites = () => {
     store.db.$client.exec(
-      "CREATE TRIGGER refuse_messages BEFORE INSERT ON task_messages BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+      "CREATE TRIGGER refuse_messages BEFORE INSERT ON conversation_items BEGIN SELECT RAISE(ABORT, 'disk full'); END",
     );
   };
 
@@ -257,7 +257,9 @@ describe('a task thread over HTTP', () => {
     );
     const fileId = posted.files[0]?.id ?? '';
     expect((await get(`/tasks/${otherTaskId}/thread/pictures/${fileId}`)).status).toBe(404);
-    expect((await get(`/tasks/${taskId}/thread/pictures/${mintId('TaskFile')}`)).status).toBe(404);
+    expect(
+      (await get(`/tasks/${taskId}/thread/pictures/${mintId('ConversationFile')}`)).status,
+    ).toBe(404);
     expect((await get(`/tasks/${mintId('Task')}/thread`)).status).toBe(404);
   });
 });

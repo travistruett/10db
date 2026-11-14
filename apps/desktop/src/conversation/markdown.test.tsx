@@ -1,12 +1,15 @@
-import { screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+import { fireEvent, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithTheme } from '../test/theme';
 import { Markdown } from './index';
+import { LinkConfirmHost } from './link-confirm';
 import { MarkdownBoundary } from './markdown-boundary';
 
 // Markdown an agent or a planning effort wrote is drawn, never trusted: no image, frame or script
-// loads, and no link navigates the window. Links render as their text and address until the opener
-// that confirms before it opens exists.
+// loads, and no link navigates the window. An `https:` link reads as a link and opens only after the
+// builder confirms its host, and its address is never in the page, so no middle-click, context menu
+// or drag opens it unasked; every other link is its text.
 
 /** Draws `text` and answers the element that holds it, without the theme's style tags. */
 function draw(text: string): HTMLElement {
@@ -24,8 +27,14 @@ function expectInert(container: HTMLElement): void {
     container.querySelectorAll('img, iframe, script, video, audio, link, object'),
   ).toHaveLength(0);
   expect(container.querySelectorAll('[src]')).toHaveLength(0);
-  expect(container.querySelectorAll('a, [href]')).toHaveLength(0);
+  expect(container.querySelectorAll('[href]')).toHaveLength(0);
 }
+
+/** The links a reader can follow, by their accessible name and the address their title shows. */
+const links = (c: HTMLElement): [string, string | null][] =>
+  within(c)
+    .queryAllByRole('link')
+    .map((a) => [a.textContent, a.getAttribute('title')]);
 
 /** The text a reader sees, with runs of white space as one space. */
 const text = (c: HTMLElement): string => c.textContent.replace(/\s+/g, ' ');
@@ -68,6 +77,7 @@ describe('hostile markdown', () => {
       (c) => {
         expect(text(c)).toContain('click');
         expect(text(c)).not.toContain('javascript');
+        expect(links(c)).toEqual([]);
       },
     ],
     [
@@ -75,6 +85,7 @@ describe('hostile markdown', () => {
       '[plain](http://plain.example/)',
       (c) => {
         expect(text(c)).toContain('plain');
+        expect(links(c)).toEqual([]);
       },
     ],
     [
@@ -96,6 +107,7 @@ describe('hostile markdown', () => {
       '<a href="https://evil.example">raw</a>',
       (c) => {
         expect(text(c)).toContain('<a href="https://evil.example">raw</a>');
+        expect(links(c)).toEqual([]);
       },
     ],
     [
@@ -114,18 +126,17 @@ describe('hostile markdown', () => {
       },
     ],
     [
-      'the text docs and https://ok.example/a show; no link',
+      'https link',
       '[docs](https://ok.example/a)',
       (c) => {
-        expect(text(c)).toContain('docs (https://ok.example/a)');
+        expect(links(c)).toEqual([['docs', 'https://ok.example/a']]);
       },
     ],
     [
-      'an autolink shows its address once; no link',
+      'autolink',
       'see https://ok.example/b',
       (c) => {
-        expect(text(c)).toContain('see https://ok.example/b');
-        expect(c.textContent.match(/ok\.example/g)).toHaveLength(1);
+        expect(links(c)).toEqual([['https://ok.example/b', 'https://ok.example/b']]);
       },
     ],
     [
@@ -141,7 +152,8 @@ describe('hostile markdown', () => {
       MERMAID,
       (c) => {
         expect(c.querySelector('pre')?.textContent).toContain('graph TD; A-->B');
-        expect(c.querySelectorAll('svg')).toHaveLength(0);
+        // The only drawing is the Copy control's icon; a Mermaid diagram would be an svg too.
+        expect(c.querySelectorAll('svg:not(button svg)')).toHaveLength(0);
       },
     ],
   ])('%s', (_, input, also) => {
@@ -184,6 +196,91 @@ describe('markdown elements', () => {
     const c = draw('Here:\n```ts\nconst a =');
     expect(c.querySelector('pre code')?.textContent).toContain('const a =');
     expect(text(c)).not.toContain('```');
+  });
+
+  it('draws a fence as a code block named by its language', () => {
+    const c = draw('```ts\nconst a = 1;\n```');
+    expect(c.querySelector('pre code')?.textContent).toBe('const a = 1;');
+    expect(screen.getByText('ts')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy();
+  });
+});
+
+describe('a link', () => {
+  afterEach(() => {
+    clearMocks();
+    // clearMocks empties the internals but leaves the object, which is what isTauri looks for.
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    vi.restoreAllMocks();
+  });
+
+  it("opens through the shell's confirming command in Tauri, never the opener plugin", async () => {
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return true;
+    });
+    draw('[docs](https://ok.example/a)');
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    await vi.waitFor(() => {
+      expect(calls).toEqual([{ cmd: 'open_web_link', args: { url: 'https://ok.example/a' } }]);
+    });
+  });
+
+  it('is focusable and opens on Enter, with no address in the page to open unasked', async () => {
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return true;
+    });
+    const c = draw('[docs](https://ok.example/a)');
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(c.querySelectorAll('[href]')).toHaveLength(0);
+    expect(link.getAttribute('title')).toBe('https://ok.example/a');
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+    await vi.waitFor(() => {
+      expect(calls).toEqual([{ cmd: 'open_web_link', args: { url: 'https://ok.example/a' } }]);
+    });
+  });
+
+  it('ignores a held Enter, and asks once while a confirm is open', async () => {
+    const calls: string[] = [];
+    let answer: (open: boolean) => void = () => undefined;
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      // The native confirm stays open until the test answers it.
+      return new Promise<boolean>((resolve) => {
+        answer = resolve;
+      });
+    });
+    draw('[docs](https://ok.example/a)');
+    const link = screen.getByRole('link', { name: 'docs' });
+    fireEvent.keyDown(link, { key: 'Enter', repeat: true });
+    expect(calls).toEqual([]);
+    fireEvent.click(link);
+    fireEvent.click(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+    await vi.waitFor(() => {
+      expect(calls).toEqual(['open_web_link']);
+    });
+    answer(false);
+    await vi.waitFor(() => {
+      fireEvent.click(link);
+      expect(calls).toEqual(['open_web_link', 'open_web_link']);
+    });
+    answer(false);
+  });
+
+  it('asks in a browser, naming the address host and not the link text, before it opens', async () => {
+    const open = vi.spyOn(window, 'open');
+    renderWithTheme(<LinkConfirmHost />);
+    draw('[github.com](https://evil.example/x)');
+    fireEvent.click(screen.getByRole('link', { name: 'github.com' }));
+    await screen.findByText('Open evil.example in your browser?');
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   });
 });
 

@@ -1,4 +1,4 @@
-import { ShapeOrigin, ShapeProposalState, type ShapeId } from '@10db/contracts';
+import { idUuid, mintId, ShapeOrigin, ShapeProposalState, type ShapeId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   countShapeFiles,
@@ -14,6 +14,7 @@ import {
   markShapeFilesTold,
   markShapeFilesUnreadableTold,
   seedProject,
+  shapeConversation,
   type Store,
 } from './index';
 
@@ -54,6 +55,20 @@ describe('shape files', () => {
       storedPath: `/data/shapes/${shapeId}/files/a.md`,
     });
     expect(countShapeFiles(store.db, shapeId)).toBe(2);
+  });
+
+  it('lists a file dropped after a migrated one after it, though its id sorts first as text', () => {
+    const migrated = `sfl_${idUuid(mintId('ConversationFile'))}`;
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_files (id, conversation_id, item_id, name, media_type, size, stored_path,
+           created_at)
+         VALUES (?, ?, NULL, 'old.md', 'text/markdown', 3, '/data/old.md', '2026-11-01T00:00:00.000Z')`,
+      )
+      .run(migrated, shapeConversation(store.db, shapeId).id);
+    const fresh = store.write((ctx) => insertShapeFile(ctx, file('new.md'))).value;
+    expect([migrated, fresh.id].sort()).toEqual([fresh.id, migrated]);
+    expect(listShapeFiles(store.db, shapeId).map((f) => f.id)).toEqual([migrated, fresh.id]);
   });
 
   it('counts a conversation’s files alone', () => {

@@ -199,9 +199,13 @@ describe('the migration that renames stored model aliases', () => {
       { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
       { model_pin: null },
     ]);
-    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM shapes')).toEqual([
-      { model: 'claude-opus-5-5' },
-    ]);
+    // A shape's model lives on its conversation since migration 0076.
+    expect(
+      rows(
+        z.object({ model: z.string() }),
+        "SELECT model FROM conversations WHERE owner_kind = 'shape'",
+      ),
+    ).toEqual([{ model: 'claude-opus-5-5' }]);
   });
 
   it('keeps a workstream’s steps in their order', () => {

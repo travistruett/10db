@@ -236,6 +236,31 @@ describe('mapCodexNotification', () => {
     });
   });
 
+  it('keeps a command output longer than the tail whole, and a truncated change as its diff', () => {
+    const long = 'z'.repeat(10_000);
+    const [command] = mapCodexNotification(
+      itemCompleted(lsCommand({ status: 'completed', exitCode: 0, aggregatedOutput: long })),
+      createTurnState(),
+    );
+    expect(command).toMatchObject({ type: 'tool_call', full: { output: long } });
+    const [short] = mapCodexNotification(
+      itemCompleted(lsCommand({ status: 'completed', exitCode: 0, aggregatedOutput: 'a.ts' })),
+      createTurnState(),
+    );
+    expect(short).not.toHaveProperty('full');
+    const diff = 'not a diff the parser reads';
+    const [change] = mapCodexNotification(
+      itemCompleted({
+        type: 'fileChange',
+        id: 'fc_1',
+        status: 'completed',
+        changes: [{ path: 'a.ts', kind: { type: 'update', move_path: null }, diff }],
+      }),
+      createTurnState(),
+    );
+    expect(change).toMatchObject({ call: { truncated: true }, full: { patch: diff } });
+  });
+
   it('offsets message deltas by JS length, then gives the message whole', () => {
     const state = createTurnState();
     const events = [

@@ -23,6 +23,7 @@ import {
   StepRole,
   ToolAccess,
   JudgeKind,
+  SkipKind,
   Urgency,
   WorkspaceMode,
   withKindsNamed,
@@ -37,6 +38,7 @@ import {
   findToolOp,
   FollowUpOrigin,
   getBatch,
+  getInboxItem,
   getProject,
   getSmallProposalLimit,
   getTask,
@@ -63,6 +65,7 @@ import {
   passPageAreas,
   replaceToolOp,
   patchWorkstream,
+  listSkipsForWorkstream,
   releaseClaim,
   setAgentRigor,
   searchDecisions,
@@ -82,8 +85,10 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
+  AnsweredAwayError,
   carriesKinds,
   fileProposalByItself,
+  leftWithBuilder,
   proposalCardBody,
   proposalFiling,
   raisedAsCardLine,
@@ -114,6 +119,7 @@ import {
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
+import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -125,6 +131,8 @@ export interface McpDeps {
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
   /** Tells the runner a tool's answer asked the session to hand off. */
   askedToHandOff(sessionId: SessionId): void;
+  /** The lane nobody watches a session runs in, whose questions are answered at once; absent, it asks. */
+  awayFor?(sessionId: SessionId): AwayLane | undefined;
   /** Every session's claim waits; the daemon shares them with the scheduler. */
   readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
@@ -198,6 +206,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     "Name the app's routes this turn's pictures should load, beyond the page areas your task names: a page area's route with its parameter filled in (/people/42 for /people/[id]), or the pages a change only in shared code shows. Only a page area's route is loaded: each parameter one plain value of letters, digits, _ or -, and your query dropped (the area route's own query is kept); any other path is refused. At most four a turn (a task outside a Workbench pass: a run); a read-only step can't call it. 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
+  report_blocked:
+    "Only in a task nobody is watching: say the step can't do its job without a call 10db or auto mode skipped. The step ends failed when your turn ends, naming your reason and the skipped calls, and the builder can run them. Use it only when carrying on without the call can't do the step's job.",
   resize_task:
     "Change the rigor your own task runs at, when its size is not what it was filed as: a plan or build session only. The steps still to come follow the new rigor, and the builder is told why. You can't go below what the task's kinds ask for, can't change a rigor the builder set, and a Workbench page has none to change. A refusal comes back as the result, with what to do.",
   complete_step:
@@ -393,6 +403,23 @@ export function createToolHandlers(
       const done = prior(input.opId, McpToolName.AskHuman);
       if (done !== undefined) return McpToolOutputs.ask_human.parse(done);
       const { project } = context();
+      const away = deps.awayFor?.(sessionId);
+      if (
+        away !== undefined &&
+        !routedToPerson(
+          deps.state.db,
+          { id: away.taskId, projectId: away.projectId },
+          {
+            category: input.category,
+            topic: input.topic ?? null,
+          },
+        )
+      ) {
+        const answer = answerAway(away, McpToolName.AskHuman, input.question);
+        return deps.state.write((ctx) =>
+          record('ask_human', input.opId, { inboxId: null, answer, note: null }, ctx),
+        );
+      }
       const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
       const { item, answer } = deps.inbox.ask({
         projectId: project.id,
@@ -414,9 +441,24 @@ export function createToolHandlers(
         detail: null,
         signal,
       });
+      // A rule's person with no Slack leaves the card with the builder, whom this lane never waits on.
+      if (away !== undefined && leftWithBuilder(getInboxItem(deps.state.db, item.id)))
+        deps.inbox.answerAwayWaits(item.id, (waiting) => waiting === sessionId);
       const observer = deps.waitObserverFor(sessionId);
       observer?.onWaitStart(item);
-      const result = await answer;
+      let result;
+      try {
+        result = await answer;
+      } catch (error) {
+        // The question was left with the builder, and nobody watches this task.
+        const awayNow = deps.awayFor?.(sessionId);
+        if (!(error instanceof AnsweredAwayError) || awayNow === undefined) throw error;
+        observer?.onWaitEnd(item);
+        const away = answerAway(awayNow, McpToolName.AskHuman, input.question);
+        return deps.state.write((ctx) =>
+          record('ask_human', input.opId, { inboxId: null, answer: away, note: null }, ctx),
+        );
+      }
       observer?.onWaitEnd(item);
       return deps.state.write((ctx) =>
         record(
@@ -1090,6 +1132,28 @@ export function createToolHandlers(
           return reply;
         }),
       );
+    },
+
+    report_blocked: (input) => {
+      const away = deps.awayFor?.(sessionId);
+      if (away === undefined)
+        return Promise.resolve({
+          ok: false,
+          message: 'report_blocked is for tasks nobody is watching.',
+        });
+      const skipped = listSkipsForWorkstream(db, workstreamId).some(
+        (skip) => skip.kind !== SkipKind.Question,
+      );
+      if (!skipped)
+        return Promise.resolve({
+          ok: false,
+          message: 'Nothing was skipped in this run; finish the step or hand off.',
+        });
+      away.block(input.reason);
+      return Promise.resolve({
+        ok: true,
+        message: 'The step will end failed when this turn ends.',
+      });
     },
 
     write_handoff: async ({ opId, ...content }) => {

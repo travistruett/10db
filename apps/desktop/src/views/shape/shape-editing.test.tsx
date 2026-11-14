@@ -7,8 +7,10 @@ import { projectViewDto } from '../../test/fixtures';
 import {
   goalProposal,
   looseTaskProposal,
+  sentItemDto,
   shapeDto,
   shapeMessageDto,
+  shapeOfConversation,
   shapeViewDto,
 } from '../../test/shape-fixtures';
 
@@ -335,7 +337,7 @@ describe('dropping files', () => {
       });
       return HttpResponse.json(
         {
-          id: mintId('ShapeFile'),
+          id: mintId('ConversationFile'),
           shapeId: mintId('Shape'),
           name: url.searchParams.get('name'),
           mediaType: 'text/markdown',
@@ -382,15 +384,15 @@ describe('dropping files', () => {
         await held;
         return HttpResponse.json(made, { status: 201 });
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), ({ params }) => {
-        posted.push(String(params['shapeId']));
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+      http.post(daemonUrl('/conversations/:conversationId/messages'), ({ params }) => {
+        posted.push(String(shapeOfConversation(params['conversationId'])));
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
       http.post(daemonUrl('/shapes/:shapeId/files'), ({ params, request }) => {
         uploaded.push(String(params['shapeId']));
         return HttpResponse.json(
           {
-            id: mintId('ShapeFile'),
+            id: mintId('ConversationFile'),
             shapeId: view.shape.id,
             name: new URL(request.url).searchParams.get('name'),
             mediaType: 'text/markdown',
@@ -429,7 +431,7 @@ describe('dropping files', () => {
       return { held, release };
     };
     const fileDto = (view: ShapeViewDto) => ({
-      id: mintId('ShapeFile'),
+      id: mintId('ConversationFile'),
       shapeId: view.shape.id,
       name: 'brief.md',
       mediaType: 'text/markdown',
@@ -441,9 +443,9 @@ describe('dropping files', () => {
       http.post(daemonUrl('/projects/:projectId/shapes'), () =>
         HttpResponse.json(view.shape, { status: 201 }),
       );
-    const accepted = (view: ShapeViewDto) =>
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
-        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+    const accepted = () =>
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
+        HttpResponse.json(sentItemDto(), { status: 202 }),
       );
     const refused = (message: string) =>
       HttpResponse.json({ error: 'invalid', message }, { status: 400 });
@@ -459,7 +461,7 @@ describe('dropping files', () => {
       serve(
         ...conversation(view),
         created(view),
-        accepted(view),
+        accepted(),
         http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
           await upload.held;
           return refused('brief.md isn’t really Markdown');
@@ -487,7 +489,7 @@ describe('dropping files', () => {
         http.post(daemonUrl('/shapes/:shapeId/files'), () =>
           HttpResponse.json(fileDto(view), { status: 201 }),
         ),
-        http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+        http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
           await message.held;
           return HttpResponse.json(
             { error: 'unavailable', message: 'The daemon is restarting' },
@@ -515,7 +517,7 @@ describe('dropping files', () => {
       serve(
         ...conversation(view),
         created(view),
-        http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
           HttpResponse.json(
             { error: 'unavailable', message: 'The daemon is restarting' },
             { status: 503 },
@@ -546,7 +548,7 @@ describe('dropping files', () => {
       const failingSend = (view: ShapeViewDto, upload: ReturnType<typeof waiting>) => [
         ...conversation(view),
         created(view),
-        http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
           HttpResponse.json(
             { error: 'unavailable', message: 'The daemon is restarting' },
             { status: 503 },
@@ -623,7 +625,7 @@ describe('dropping files', () => {
         ) => [
           ...conversation(view),
           created(view),
-          http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+          http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
             await message.held;
             return answer();
           }),
@@ -659,7 +661,7 @@ describe('dropping files', () => {
           serve(
             ...heldSend(view, message, upload, () => {
               answered = true;
-              return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+              return HttpResponse.json(sentItemDto(), { status: 202 });
             }),
           );
           const kept = await editThenOpen(view, upload);
@@ -698,7 +700,7 @@ describe('dropping files', () => {
         serve(
           ...conversation(view),
           created(view),
-          http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+          http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
             reached.message = true;
             await message.held;
             return HttpResponse.json(
@@ -737,7 +739,7 @@ describe('dropping files', () => {
         serve(
           ...conversation(view),
           created(view),
-          accepted(view),
+          accepted(),
           http.post(daemonUrl('/shapes/:shapeId/files'), async ({ request }) => {
             if (new URL(request.url).searchParams.get('name') === 'brief.md') {
               await first.held;
@@ -779,7 +781,7 @@ describe('dropping files', () => {
       serve(
         ...conversation(view),
         created(view),
-        accepted(view),
+        accepted(),
         http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
           await upload.held;
           return HttpResponse.json(fileDto(view), { status: 201 });
@@ -869,7 +871,7 @@ describe('dropping files', () => {
       ...base,
       files: [
         {
-          id: mintId('ShapeFile'),
+          id: mintId('ConversationFile'),
           shapeId: base.shape.id,
           name: 'brief.md',
           mediaType: 'text/markdown',

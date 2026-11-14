@@ -60,6 +60,7 @@ import {
   listTasks,
   listInbox,
   listSessions,
+  listSkipsForWorkstream,
   listTaskThread,
   listWorkstreams,
   patchAccount,
@@ -139,7 +140,12 @@ import {
   tempDir,
   waitFor,
 } from '../../test/fixtures';
-import { createTestEngine, type TestEngine } from '../../test/engine';
+import {
+  createTestEngine,
+  routeQuestionsAway,
+  triageHeld,
+  type TestEngine,
+} from '../../test/engine';
 import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
 import { importBundle, planImportChanges } from '../plan-record';
@@ -239,6 +245,17 @@ let current: Parameters<typeof getWorkstream>[1];
 const ws0 = () => current;
 const ws = (id: Parameters<typeof getWorkstream>[1]) => getWorkstream(engine.store.db, id);
 const openCard = () => listInbox(engine.store.db, { states: ['OPEN'] })[0];
+/** What a run skipped, oldest first, by the fields the builder is shown. */
+const skipsOf = (id: Parameters<typeof getWorkstream>[1]) =>
+  listSkipsForWorkstream(engine.store.db, id).map(({ toolName, summary, kind, source }) => ({
+    toolName,
+    summary,
+    kind,
+    source,
+  }));
+/** Whether the run ever waited on the builder. */
+const everWaited = (id: Parameters<typeof getWorkstream>[1]) =>
+  transitions(id).some((t) => t.endsWith('->WAITING_HUMAN'));
 const transitions = (id: Parameters<typeof getWorkstream>[1]) =>
   listEventsAfter(engine.store.db, 0, 1000)
     .filter((e) => e.type === 'workstream.changed' && e.entityId === id)
@@ -859,6 +876,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-park-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -946,7 +964,8 @@ describe('runner', () => {
     ])(
       'cancels the run of a live session waiting on $name, with no review round and no new session',
       async ({ ask }) => {
-        engine = await createTestEngine(parkedBook(ask));
+        engine = await createTestEngine(parkedBook(ask), {}, {}, triageHeld());
+        routeQuestionsAway(engine);
         const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
         engine.launch(workstream.id);
         const card = await waitFor(openCard);
@@ -961,6 +980,7 @@ describe('runner', () => {
 
     it('cancels a run already parked in WAITING_HUMAN with no session, and never requeues it', async () => {
       engine = await createTestEngine(parkedBook(askHuman));
+      routeQuestionsAway(engine);
       const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
       engine.launch(workstream.id);
       const card = await waitFor(openCard);
@@ -984,6 +1004,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-pin-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -1018,9 +1039,15 @@ describe('runner', () => {
   });
 
   it('delivers a live answer to the same session', async () => {
-    engine = await createTestEngine({
-      Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
@@ -1036,7 +1063,8 @@ describe('runner', () => {
   });
 
   it('goes STARTING -> RUNNING -> WAITING_HUMAN when the first step is a question', async () => {
-    engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+    engine = await createTestEngine({ Alpha: [[askShip, turn]] }, {}, {}, triageHeld());
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
@@ -1057,6 +1085,7 @@ describe('runner', () => {
         [write('src/api/a.txt'), commit('op-grace-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -1075,38 +1104,32 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
   });
 
-  it.each(['allow_project', 'allow_once'])(
-    'applies %s answered after parking, without asking again',
-    async (choice) => {
-      engine = await createTestEngine({
-        Alpha: [
-          [curl, turn],
-          [curl, write('src/api/a.txt'), commit('op-perm-0001', ['src/api/a.txt']), turn],
-        ],
-      });
-      const { workstream } = engine.addTask('Alpha');
-      engine.launch(workstream.id);
-      const card = await waitFor(openCard);
-      engine.clock.advance(10 * 60_000);
-      await engine.runner.idle();
-      engine.inbox.answer(card.id, { choice });
-      engine.launch(workstream.id);
-      await engine.runner.idle();
+  // T4: an unattended lane never waits on a card; the call is skipped, recorded, and the lane goes on.
+  it('skips a command no rule allows in a lane, never parking, and goes on to its end', async () => {
+    engine = await createTestEngine({
+      Alpha: [[curl, write('src/api/a.txt'), commit('op-perm-0001', ['src/api/a.txt']), turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
 
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
-      expect(
-        engine.adapter.observations.filter(
-          (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
-        ),
-      ).toHaveLength(1);
-      expect(engine.adapter.prompts[1]?.prompt).toContain(
-        'Allow Bash? curl -s https://example.com',
-      );
-    },
-  );
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(everWaited(workstream.id)).toBe(false);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+    expect(skipsOf(workstream.id)).toEqual([
+      {
+        toolName: 'Bash',
+        summary: 'curl -s https://example.com',
+        kind: 'default_mode_card',
+        source: 'broker',
+      },
+    ]);
+    const denied = engine.adapter.observations.find((o) => o.kind === 'tool_denied');
+    expect(String(denied?.detail['message'])).toMatch(/^Skipped: /);
+  });
 
-  it('treats allow_project on a command with no storable rule as allow-once after parking', async () => {
+  // T4: an unattended lane never waits on a card, whether or not the call has a storable rule.
+  it('skips a command with no storable rule in a lane like any other, and goes on', async () => {
     const unstorable = {
       do: 'tool' as const,
       toolName: 'Bash',
@@ -1114,26 +1137,17 @@ describe('runner', () => {
     };
     engine = await createTestEngine({
       Alpha: [
-        [unstorable, turn],
         [unstorable, write('src/api/a.txt'), commit('op-null-0001', ['src/api/a.txt']), turn],
       ],
     });
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    engine.clock.advance(10 * 60_000);
-    await engine.runner.idle();
-    engine.inbox.answer(card.id, { choice: 'allow_project' });
-    engine.launch(workstream.id);
     await engine.runner.idle();
 
     expect(ws(workstream.id).state).toBe('DONE');
+    expect(everWaited(workstream.id)).toBe(false);
     expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
-    expect(
-      engine.adapter.observations.filter(
-        (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
-      ),
-    ).toHaveLength(1);
+    expect(skipsOf(workstream.id)).toMatchObject([{ toolName: 'Bash', summary: 'echo $(date)' }]);
   });
 
   it('runs a listed allowed command without a permission card', async () => {
@@ -1166,20 +1180,25 @@ describe('runner', () => {
     ).toHaveLength(1);
   });
 
-  it('still raises a permission card for a command the project does not allow', async () => {
+  // T4: an unattended lane never waits on a card; the skip keeps its kind and summary for the builder.
+  it('skips a command the project does not allow in a lane, recording its kind and summary, and raises no card', async () => {
     engine = await createTestEngine(
       { Alpha: [[shell('pnpm lint'), turn]] },
       { allowedCommands: ['pnpm exec prettier'] },
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    expect(card).toMatchObject({ kind: 'permission', title: 'Allow Bash?', body: 'pnpm lint' });
-    // The lane waits on the card until a person answers it.
-    await waitFor(() => ws(workstream.id).state === 'WAITING_HUMAN');
+    await engine.runner.idle();
+
+    expect(skipsOf(workstream.id)).toEqual([
+      { toolName: 'Bash', summary: 'pnpm lint', kind: 'default_mode_card', source: 'broker' },
+    ]);
+    expect(listInbox(engine.store.db, {}).filter((i) => i.kind === 'permission')).toEqual([]);
+    expect(everWaited(workstream.id)).toBe(false);
   });
 
-  it('tells every later session of the workstream what the builder denied, with the note', async () => {
+  // T4: a skip is listed for the builder, not a denial: nobody answered it.
+  it('tells no later session the builder denied a call a lane skipped', async () => {
     engine = await createTestEngine(
       {
         Alpha: [
@@ -1203,16 +1222,14 @@ describe('runner', () => {
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    engine.inbox.answer(card.id, { choice: 'deny', note: 'use pnpm exec eslint instead' });
     await engine.runner.idle();
 
     expect(ws(workstream.id).state).toBe('DONE');
-    const later = engine.adapter.prompts[1]?.prompt ?? '';
-    expect(later).toContain('The builder denied these calls in this workstream');
-    expect(later).toContain('Bash: pnpm lint');
-    expect(later).toContain('Note from the builder: use pnpm exec eslint instead');
-    expect(engine.adapter.prompts[0]?.prompt).not.toContain('The builder denied');
+    expect(skipsOf(workstream.id)).toMatchObject([
+      { summary: 'pnpm lint', kind: 'default_mode_card' },
+    ]);
+    expect(engine.adapter.prompts[1]?.prompt).toBeDefined();
+    expect(engine.adapter.prompts[1]?.prompt).not.toContain('The builder denied');
   });
 
   it('leaves a denied read of the worktrees folder outside the copy out of the prompt and the compaction message', async () => {
@@ -1470,6 +1487,7 @@ describe('runner', () => {
         { Alpha: sessions },
         { handoffPct: 12, nudgePct: 90, ...(gateCommand ? { gateCommand } : {}) },
       );
+      routeQuestionsAway(engine);
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await drive(workstream.id);
@@ -1738,7 +1756,8 @@ describe('runner', () => {
     });
   });
 
-  it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
+  // T4: an unattended lane never waits on a card, however many calls ask at once.
+  it('answers two overlapping calls in a lane at once, each its own skip', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
     const start = vi.spyOn(engine.adapter, 'open');
     const { workstream } = engine.addTask('Alpha');
@@ -1755,44 +1774,29 @@ describe('runner', () => {
         escalated: false,
         signal: new AbortController().signal,
       });
-    const first = ask('curl -s https://one.example', 'toolu_1');
-    const second = ask('curl -s https://two.example', 'toolu_2');
-    const cards = await waitFor(() => {
-      const open = listInbox(engine.store.db, { states: ['OPEN'] });
-      return open.length === 2 ? open : undefined;
-    });
-    const one = cards.find((c) => c.body.includes('one.example'));
-    const two = cards.find((c) => c.body.includes('two.example'));
-    if (!one || !two) throw new Error('expected a card per command');
-    engine.inbox.answer(one.id, { choice: 'allow_once' });
-    expect(await first).toMatchObject({ behavior: 'allow' });
-    engine.clock.advance(10 * 60_000);
-    await engine.runner.idle();
-    await second;
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'WAITING_HUMAN',
-      nextAction: { kind: 'answer', inboxId: two.id },
-    });
+    const [first, second] = await Promise.all([
+      ask('curl -s https://one.example', 'toolu_1'),
+      ask('curl -s https://two.example', 'toolu_2'),
+    ]);
+    for (const decision of [first, second])
+      expect(decision.behavior === 'deny' && decision.message.startsWith('Skipped: ')).toBe(true);
+    expect(skipsOf(workstream.id).map((s) => s.summary)).toEqual([
+      'curl -s https://one.example',
+      'curl -s https://two.example',
+    ]);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+    expect(ws(workstream.id).state).toBe('RUNNING');
+    await engine.runner.cancel(workstream.id);
   });
 
-  it('hands an answer and its one-time permission to one session only, so a restart cannot grant it again', async () => {
-    engine = await createTestEngine({
-      Alpha: [
-        [curl, turn],
-        [curl, { do: 'hang' }],
-      ],
-    });
+  // T4: an unattended lane never waits on a card, so a restart finds no answer to hand on.
+  it('leaves no answer or one-time permission behind when a lane skips a call', async () => {
+    engine = await createTestEngine({ Alpha: [[curl, { do: 'hang' }]] });
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    engine.clock.advance(10 * 60_000);
-    await engine.runner.idle();
-    engine.inbox.answer(card.id, { choice: 'allow_once' });
-    engine.launch(workstream.id);
-    await waitFor(() => ws(workstream.id).state === 'RUNNING');
-    // The running session has the answer. Recovery after a restart reads this action, so it must no
-    // longer be `answer`; with no handoff yet it is a fresh start, which recovery turns into a resume.
-    expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
+    await waitFor(() => skipsOf(workstream.id)[0]);
+    // Recovery after a restart reads this action: with no handoff yet it is a fresh start.
+    expect(ws(workstream.id)).toMatchObject({ state: 'RUNNING', nextAction: { kind: 'start' } });
     await engine.runner.stopAll('shutdown');
   });
 
@@ -1893,7 +1897,8 @@ describe('runner', () => {
     ])(
       'parks normally when the turn completes after the wait timer fired, %s',
       async (_name, answerEarly, expected) => {
-        engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+        engine = await createTestEngine({ Alpha: [[askShip, turn]] }, {}, {}, triageHeld());
+        routeQuestionsAway(engine);
         let first = true;
         // The timer's stop is swallowed so the script runs on to turn_complete and a normal end, as a real adapter can.
         interceptStart((h) => ({
@@ -1938,6 +1943,7 @@ describe('runner', () => {
             [write('src/api/a.txt'), commit('op-slow-0001', ['src/api/a.txt']), turn],
           ],
         });
+        routeQuestionsAway(engine);
         let release: () => void = () => undefined;
         const released = new Promise<void>((r) => {
           release = r;
@@ -1975,6 +1981,7 @@ describe('runner', () => {
 
     it('ends the session and frees it for a parked answer when the loop fails while waiting', async () => {
       engine = await createTestEngine({ Alpha: [[askShip, { do: 'hang' }]] });
+      routeQuestionsAway(engine);
       let fail: (error: Error) => void = () => undefined;
       const failed = new Promise<never>((_resolve, reject) => {
         fail = reject;
@@ -2027,19 +2034,12 @@ describe('runner', () => {
     };
     const crash = { do: 'crash' as const, message: 'boom before started' };
 
-    it.each([
-      ['a question answer', askShip, 'Yes', [...doneScript], 'Answer: Yes'],
-      [
-        'an allow_once permission',
-        curl,
-        'allow_once',
-        [curl, ...doneScript],
-        'Allow Bash? curl -s https://example.com',
-      ],
-    ])(
+    // An allow_once permission no longer has a lane path: T4's unattended lane skips the call.
+    it.each([['a question answer', askShip, 'Yes', [...doneScript], 'Answer: Yes']])(
       'carries %s into the next session when the answered session crashes before it starts',
       async (_name, ask, choice, finalScript, promptText) => {
         engine = await createTestEngine({ Alpha: [[ask, turn], [crash], finalScript] });
+        routeQuestionsAway(engine);
         secondSessionNeverStarts();
         const { workstream } = engine.addTask('Alpha');
         engine.launch(workstream.id);
@@ -2639,6 +2639,7 @@ describe('accounts', () => {
         [write('src/api/a.txt'), commit('op-ans-0001', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -3015,6 +3016,7 @@ describe('moving accounts', () => {
         [write('src/api/a.txt'), commit('op-moveask-01', ['src/api/a.txt']), turn],
       ],
     });
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -3145,6 +3147,7 @@ describe('moving accounts', () => {
       },
       { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
     );
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     await engine.runner.idle();
@@ -3239,12 +3242,18 @@ describe('moving accounts', () => {
   });
 
   it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
-    engine = await createTestEngine({
-      Alpha: [
-        [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
-        [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
-      ],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
+          [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
+        ],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const home = engine.project.accountId;
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -3461,12 +3470,18 @@ describe('flows', () => {
         ],
       },
     };
-    engine = await createTestEngine({
-      Alpha: [
-        [ask, ...compacted, ...implement('op-flow-ask-02')],
-        [...compacted, approve('op-flow-ask-03'), turn],
-      ],
-    });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [ask, ...compacted, ...implement('op-flow-ask-02')],
+          [...compacted, approve('op-flow-ask-03'), turn],
+        ],
+      },
+      {},
+      {},
+      triageHeld(),
+    );
+    routeQuestionsAway(engine);
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     engine.launch(workstream.id);
     const card = await waitFor(openCard);
@@ -5007,7 +5022,8 @@ describe('the session guard', () => {
     engine.launch(workstream.id);
   };
   const denials = () => engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
-  it('lets a session read its own saved output', async () => {
+  // T4: the read passes the guard; in a lane the broker then skips the card it would have raised.
+  it('lets a session read its own saved output, which reaches the broker', async () => {
     await start([
       read(() => {
         // Claude Code has written the output by the time the model reads it.
@@ -5016,7 +5032,8 @@ describe('the session guard', () => {
         return path;
       }),
     ]);
-    await waitFor(openCard);
+    await waitFor(() => skipsOf(workstreamId)[0]);
+    expect(skipsOf(workstreamId)).toMatchObject([{ toolName: 'Read', source: 'broker' }]);
     expect(denials().map((d) => d.detail['reason'])).toEqual([]);
   });
 
@@ -5026,7 +5043,8 @@ describe('the session guard', () => {
     expect(String(denials()[0]?.detail['reason'])).toContain('sign-in');
   });
 
-  it('asks the broker about a call it must see, whatever the permission mode', async () => {
+  // T4 call 2: a guard ask in a lane is answered at once by the unattended table.
+  it('skips a call the broker must see in a lane, whatever the permission mode', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
     const specs: LaneSessionSpec[] = [];
     engine.adapter.seen = (spec) => {
@@ -5038,9 +5056,23 @@ describe('the session guard', () => {
     const spec = await waitFor(() => specs[0]);
     const decision = (toolName: string, input: Record<string, unknown>) =>
       spec.preToolUse({ toolName, input }).decision;
-    expect(decision('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toBe('ask');
-    expect(decision('WebFetch', { url: 'https://example.net/', prompt: 'x' })).toBe('ask');
+    expect(decision('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toBe('deny');
+    expect(decision('WebFetch', { url: 'https://example.net/', prompt: 'x' })).toBe('deny');
     expect(decision('Bash', { command: 'pnpm test' })).toBe('allow');
+    expect(skipsOf(workstream.id)).toEqual([
+      {
+        toolName: 'Bash',
+        summary: 'SUB=add; pnpm $SUB left-pad@1.3.0',
+        kind: 'unread_hazard',
+        source: 'guard',
+      },
+      {
+        toolName: 'WebFetch',
+        summary: 'https://example.net/',
+        kind: 'web_or_mcp',
+        source: 'guard',
+      },
+    ]);
     await engine.runner.cancel(workstream.id);
   });
 });
@@ -5418,10 +5450,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       reportedMode: 'auto' as const,
     };
 
-    it('a gateway lane with web on still cards WebFetch', async () => {
+    // T4 call 2: on the rules floor a web call is a skip, recorded by its call id, and the lane goes on.
+    it("a gateway lane's WebFetch is skipped and recorded, and the lane goes on to its end", async () => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
-        { Alpha: [[turn]] },
+        { Alpha: [[{ do: 'tool', ...fetchCall }, turn]] },
         {},
         { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
         {
@@ -5438,9 +5471,26 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
       expect(spec.profile.lanePermissionMode).toBe('auto');
-      expect(spec.preToolUse(fetchCall).decision).toBe('ask');
-      expect(spec.prompt).toContain('WebFetch, WebSearch and repo MCP tools wait on a card');
+      // A lane nobody watches waits on no card: the floor's line says a refused call is skipped.
+      expect(spec.prompt).toContain('A call 10db or auto mode refuses with "Skipped:" is left out');
       await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(skipsOf(workstream.id)).toEqual([
+        {
+          toolName: 'WebFetch',
+          summary: 'https://example.net/',
+          kind: 'web_or_mcp',
+          source: 'guard',
+        },
+      ]);
+      expect(
+        engine.store.db
+          .select({ id: schema.skippedActions.toolUseId })
+          .from(schema.skippedActions)
+          .all(),
+      ).toEqual([{ id: 'fake-tool-0' }]);
+      expect(everWaited(workstream.id)).toBe(false);
     });
 
     it('a subscription lane in auto mode runs WebFetch without a card', async () => {
@@ -5465,7 +5515,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       await engine.runner.idle();
     });
 
-    it('a subscription lane with the Web switch off cards WebFetch', async () => {
+    // T4 call 2: with the Web switch off no judge sees a web call, so a lane skips it.
+    it('a subscription lane with the Web switch off skips WebFetch, never handing it to the classifier', async () => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
         { Alpha: [[turn]] },
@@ -5481,7 +5532,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
-      expect(spec.preToolUse(fetchCall).decision).toBe('ask');
+      expect(spec.preToolUse(fetchCall).decision).toBe('deny');
+      expect(skipsOf(workstream.id)).toMatchObject([{ toolName: 'WebFetch', kind: 'web_or_mcp' }]);
       await engine.runner.idle();
     });
   });
@@ -5550,7 +5602,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(floorNotices(task.id)).toEqual([]);
     });
 
-    it("a lane's denial makes no notice", async () => {
+    // T4 Task 6: an unattended lane's denial is a skip, not only a log line.
+    it("a lane's denial makes no notice and is one skip with a null limit", async () => {
       const { task, workstream } = await start(
         PLAN,
         {},
@@ -5577,6 +5630,43 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         ),
       ).toEqual([]);
       expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+        {
+          toolName: 'Bash',
+          summary: 'npx vercel deploy --prod --yes',
+          kind: 'classifier',
+          source: 'auto_mode',
+          limit: null,
+          reason: 'The classifier judged this action dangerous',
+        },
+      ]);
+    });
+
+    // T4 call 9: one row per call, whichever channel reports it first.
+    it('a safety check denying a call the guard already skipped stays one row', async () => {
+      const { workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [
+              shell('SUB=add; pnpm $SUB left-pad'),
+              {
+                do: 'judge_denied' as const,
+                toolName: 'Bash',
+                summary: 'SUB=add; pnpm $SUB left-pad',
+                reason: 'Only a person may approve this',
+                by: 'safety_check' as const,
+                toolUseId: 'fake-tool-0',
+              },
+              turn,
+            ],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toHaveLength(1);
     });
 
     it('a gateway lane refuses the same deploy and says why once', async () => {
@@ -5705,6 +5795,38 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(dirname(probe.sessions[0]?.tmpDir ?? '')).toBe(probe.codexLanes);
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(readdirSync(probe.codexLanes)).toEqual([]);
+  });
+
+  // T4 call 2: Codex's guard hook carries the call's id, and an unknown tool on the rules floor is a skip.
+  it("a codex lane's unknown tool is skipped and recorded by its call id", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[{ do: 'hang' }]] },
+      {},
+      { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+    );
+    confirmIdentity();
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const spec = await waitFor(() => specs[0]);
+    const verdict = spec.preToolUse({
+      toolName: 'frobnicate',
+      input: { x: 1 },
+      toolUseId: 'call-1',
+    });
+    expect(verdict.decision === 'deny' && verdict.reason.startsWith('Skipped: ')).toBe(true);
+    expect(skipsOf(workstream.id)).toMatchObject([
+      { toolName: 'frobnicate', kind: 'unknown_tool', source: 'guard' },
+    ]);
+    expect(
+      engine.store.db
+        .select({ id: schema.skippedActions.toolUseId })
+        .from(schema.skippedActions)
+        .all(),
+    ).toEqual([{ id: 'call-1' }]);
+    await engine.runner.cancel(workstream.id);
   });
 
   it('warns once per skill a ChatGPT lane is briefed without, naming it', async () => {
@@ -6151,6 +6273,19 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     },
   );
 
+  it("frees the account's start and the temp dir when reading the lane's approved calls throws", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    // A real read failure: the table the approvals are read from is gone.
+    engine.store.db.$client.exec('DROP TABLE skip_approvals');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    // A leaked start slot would leave this acquire pending forever.
+    (await engine.startGate.acquire(engine.project.accountId))();
+  });
+
   it('leaves no temp dir behind when the adapter throws on start', async () => {
     const probe = sandboxProbe();
     engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
@@ -6177,6 +6312,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       send: () => undefined,
       interrupt: () => Promise.resolve(null),
       stop: () => Promise.resolve(),
+      setModel: () => Promise.resolve(),
     }));
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -7539,6 +7675,7 @@ describe('without a gate command', () => {
           { Alpha: [implement('op-check-0060'), [askShip, turn], implement('op-check-0061')] },
           noGate,
         );
+        routeQuestionsAway(engine);
         const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
         await runToWait(workstream.id);
         exhaust(workstream.id);
@@ -7813,6 +7950,7 @@ describe('without a gate command', () => {
           { Alpha: [implement('op-check-0030'), [askShip, turn], implement('op-check-0031')] },
           noGate,
         );
+        routeQuestionsAway(engine);
         const { workstream } = engine.addTask('Alpha');
         await runToWait(workstream.id);
         answerCheck('send_back', note);

@@ -18,7 +18,7 @@ import type { Json } from '../json';
 import * as schema from '../schema';
 import { getBatch } from './batches';
 import type { DbReader, WriteContext } from './store';
-import { insertAgentReply } from './task-thread';
+import { insertAgentReply, markTaskMessageTurn } from './task-thread';
 import { getWorkstreamRow } from './workstreams';
 
 // Workbench spec §6.2, §11, §12: a pass task's turns. A turn's end is two writes, the end with its
@@ -113,17 +113,7 @@ export function insertPassTurn(ctx: WriteContext, input: PassTurnInsert): PassTu
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.passTurns).values(row).run();
-  if (input.messageId !== null)
-    ctx.tx
-      .update(schema.taskMessages)
-      .set({ turnId: row.id })
-      .where(
-        and(
-          eq(schema.taskMessages.id, input.messageId),
-          eq(schema.taskMessages.taskId, input.taskId),
-        ),
-      )
-      .run();
+  if (input.messageId !== null) markTaskMessageTurn(ctx, input.taskId, input.messageId, row.id);
   const turn = toPassTurnDto(row);
   emitTurn(ctx, EventType.PassTurnStarted, turn);
   return turn;

@@ -2,7 +2,15 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { InboxItemId, mintId, Rigor, RoutedBy, StepRole, TaskKindSource } from '@10db/contracts';
+import {
+  InboxItemId,
+  mintId,
+  QuestionCategory,
+  Rigor,
+  RoutedBy,
+  StepRole,
+  TaskKindSource,
+} from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -27,6 +35,7 @@ import {
   updatePerson,
   getTask,
   getWorkstreamRow,
+  insertPerson,
   insertTask,
   insertWorkstream,
   patchAccount,
@@ -34,6 +43,7 @@ import {
   recordAccountSecret,
   seedAccount,
   seedProject,
+  setRoutingRules,
   transitionWorkstream,
   type Store,
   setPlaybook,
@@ -63,7 +73,7 @@ import {
   type Keychain,
 } from '../src/environment';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
-import { createDeliveryJobs } from '../src/delivery';
+import { applySkippedChoice, createDeliveryJobs, skipFollowUpStarter } from '../src/delivery';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
@@ -81,7 +91,12 @@ import {
   type TimerWatch,
 } from '../src/stakeholders';
 import type { SlackClient } from '../src/slack';
-import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
+import {
+  createInboxService,
+  createParkAnswers,
+  leftWithBuilder,
+  type InboxService,
+} from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
@@ -102,6 +117,46 @@ import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
 import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
+
+/**
+ * A triage judge that answers nothing until its timeout on the engine's clock, which then routes by
+ * the rules. A lane nobody watches waits live only on a card triage has yet to route, so a row about
+ * a live wait or a live answer asks one of those.
+ */
+export function triageHeld(): { readonly openRouter: { readonly fetch: typeof fetch } } {
+  return {
+    openRouter: {
+      fetch: (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new Error('triage was stopped'));
+          });
+        }),
+    },
+  };
+}
+
+/**
+ * Routes every category of the project's questions to a stakeholder with Slack. A lane nobody watches
+ * answers a question left with the builder at once; one routed to a person who has Slack still waits on
+ * them, parked, so a row about parking and answers asks one of those.
+ */
+export function routeQuestionsAway(engine: Pick<TestEngine, 'state' | 'project'>): void {
+  engine.state.write((ctx) => {
+    const person = insertPerson(ctx, {
+      handle: 'stakeholder',
+      name: 'Stakeholder',
+      slack: { teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 },
+    });
+    setRoutingRules(ctx, engine.project.id, {
+      rules: Object.values(QuestionCategory).map((category) => ({
+        category,
+        area: null,
+        personId: person.id,
+      })),
+    });
+  });
+}
 
 export interface TestEngine {
   readonly store: Store;
@@ -302,8 +357,13 @@ export async function createTestEngine(
     log: silentLogger,
     afterRouted: (id) => {
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
-      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      // Read after the draft, which hands a person's card back to the builder for want of Slack. A
+      // card that now goes to someone else parks its sessions; one left with the builder waits live,
+      // except in a lane nobody watches, which answers at once.
+      const routed = getInboxItem(state.db, id);
+      if (routedAway(routed)) runner?.parkFor(id);
+      else if (leftWithBuilder(routed))
+        inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
   });
@@ -312,9 +372,24 @@ export async function createTestEngine(
     const id = InboxItemId.safeParse(event.entityId);
     if (id.success) sends.onCardChanged(getInboxItem(state.db, id.data)).catch(() => undefined);
   });
+  // Run these now's follow-up starts as the Board's Start does; the engine has no batch starter.
+  const startFollowUps = skipFollowUpStarter({
+    state,
+    log: silentLogger,
+    starts: {
+      join: () => {
+        throw new Error('the test engine starts no batch');
+      },
+      base: (taskId) => {
+        startTaskWithPlan(state, taskId);
+      },
+    },
+  });
   const inbox = createInboxService({
     state,
     judgeOff: triageJudge.off,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      applySkippedChoice(ctx, item, answer) ? startFollowUps : undefined,
     parkWaiting: (id) => {
       runner?.parkFor(id);
     },
@@ -444,6 +519,7 @@ export async function createTestEngine(
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      awayFor: (id) => live.get(id)?.away,
       // As the daemon does: a builder message the MCP side writes goes to the page's session.
       deliverMessage: (taskId, messageId) =>
         created.deliverMessage(taskId, messageId, { redo: false }),

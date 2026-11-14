@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TRUST_DEFAULTS } from '@10db/contracts';
 import type { LaneSandboxSpec } from '../sandbox';
 import { buildTrustPolicy } from '../trust';
-import { renderClaudeAutoMode } from './claude-auto-mode';
+import { renderClaudeAutoMode, type ClaudeAutoModeSettings } from './claude-auto-mode';
 import {
   claudeQueryOptions,
   type ClaudeProfile,
@@ -61,7 +61,10 @@ const lane = (permissionMode: LanePermissionMode, setup = noSetup): ClaudeProfil
   autoMode: rendered,
   setup,
 });
-const explore = (setup = noSetup): ClaudeProfile => ({
+const explore = (
+  setup = noSetup,
+  autoMode: ClaudeAutoModeSettings | null = null,
+): ClaudeProfile => ({
   kind: 'explore',
   systemPrompt: 'You are Shape.',
   tools: ['Read', 'Grep'],
@@ -69,6 +72,7 @@ const explore = (setup = noSetup): ClaudeProfile => ({
   disallowedTools: ['Edit'],
   agents: { scope: { description: 'Scope', prompt: 'Review', tools: ['Read'] } },
   setup,
+  autoMode,
 });
 const harness = [{ type: 'local', path: '/harness' }];
 const agents = {
@@ -201,13 +205,41 @@ describe('claudeQueryOptions', () => {
     ['unsandboxed', null],
     ['sandboxed', sandbox],
   ])(
-    'never gives the explore profile project settings, auto mode or the harness plugin dir (%s)',
+    'gives the explore profile on a rules or 10db judge default mode and no auto mode rules (%s)',
     (_name, s) => {
       const options = claudeQueryOptions(explore(withSetup), s);
-      expect(options.settingSources).toEqual([]);
       expect(options.permissionMode).toBe('default');
-      expect(options.plugins ?? []).not.toContainEqual({ type: 'local', path: '/harness' });
       expect(options).not.toHaveProperty('settings.autoMode');
+    },
+  );
+
+  it.each([
+    ['unsandboxed', null],
+    ['sandboxed', sandbox],
+  ])(
+    'runs the explore profile on a native judge in auto mode, under the attended policy (%s)',
+    (_name, s) => {
+      const options = claudeQueryOptions(explore(withSetup, rendered), s);
+      expect(options.permissionMode).toBe('auto');
+      expect(options.settings).toMatchObject({ autoMode: rendered });
+      expect(rendered.allow[0]).toBe('$defaults');
+      expect(rendered.soft_deny[0]).toBe('$defaults');
+      if (s !== null)
+        expect(options.sandboxEnv).toMatchObject({ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0' });
+    },
+  );
+
+  it.each([
+    ['unsandboxed, rules', null, null],
+    ['sandboxed, rules', sandbox, null],
+    ['unsandboxed, native', null, rendered],
+    ['sandboxed, native', sandbox, rendered],
+  ] as const)(
+    'never gives the explore profile project settings or the harness plugin dir (%s)',
+    (_name, s, autoMode) => {
+      const options = claudeQueryOptions(explore(withSetup, autoMode), s);
+      expect(options.settingSources).toEqual([]);
+      expect(options.plugins ?? []).not.toContainEqual({ type: 'local', path: '/harness' });
     },
   );
 

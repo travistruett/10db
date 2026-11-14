@@ -1,5 +1,12 @@
 import { ShapeMessageKind } from '@10db/contracts';
-import { getSession, insertInboxItem, listShapeMessages } from '@10db/db';
+import {
+  getSession,
+  insertInboxItem,
+  listItems,
+  listShapeMessages,
+  sessionShapeId,
+  shapeConversation,
+} from '@10db/db';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -159,9 +166,11 @@ describe('a conversation’s prepared session', () => {
     }
   });
 
-  it('shows each command and project tool call, who made it, and a card it waits on', async () => {
+  it('writes no line for a command or project tool call, and stores a card it waits on as an item', async () => {
     const p = preparing();
     f = createServiceFixture({ prepare: p.prepare });
+    // On a rules judge a command that is not read-only is carded; a native one hands it to auto mode.
+    f.adapter.capabilityOverrides = { judge: 'rules' };
     f.service.send(f.c.shape.id, 'Look at the git history.');
     await tick();
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
@@ -199,11 +208,10 @@ describe('a conversation’s prepared session', () => {
     const lines = listShapeMessages(f.c.store.db, f.c.shape.id)
       .filter((m) => m.kind === ShapeMessageKind.Tool)
       .map((m) => m.body);
-    expect(lines).toEqual([
-      'Bash · git log -3',
-      'code-researcher · Bash · pnpm test',
-      'mcp__docs__search · {"q":"x"}',
-      'Allow Bash? · waiting for your answer in the Inbox',
+    expect(lines).toEqual([]);
+    const items = listItems(f.c.store.db, shapeConversation(f.c.store.db, f.c.shape.id).id);
+    expect(items.filter((i) => i.kind === 'card').map((i) => i.body)).toEqual([
+      { inboxItemId: card.id },
     ]);
   });
 
@@ -344,6 +352,8 @@ describe('a conversation’s prepared session', () => {
         })
       ).behavior,
     ).toBe('deny');
-    expect(getSession(f.c.store.db, spec.sessionId).shapeId).toBe(f.c.shape.id);
+    expect(sessionShapeId(f.c.store.db, getSession(f.c.store.db, spec.sessionId))).toBe(
+      f.c.shape.id,
+    );
   });
 });

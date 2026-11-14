@@ -156,6 +156,49 @@ const base = {
   contextPack: emptyPack,
 };
 
+// T4 call 21: a lane nobody watches is told its questions are answered at once; a pass keeps asking.
+describe('a question in a task nobody watches', () => {
+  const ASK_LINE =
+    'When a decision is not yours to make, ask with ask_human (or your question tool).';
+  const AWAY_LINE =
+    'Nobody is watching this task: a question gets "The builder is away. Make the call yourself and say in your handoff what you decided and why." at once. Decide yourself, and say in your handoff what you decided and why.';
+
+  it('an unattended lane is told questions are answered at once', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' }, attended: false });
+    expect(prompt).toContain(AWAY_LINE);
+    expect(prompt).not.toContain(ASK_LINE);
+  });
+
+  it('a pass keeps its ask line', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass: true });
+    expect(prompt).toContain(ASK_LINE);
+    expect(prompt).not.toContain(AWAY_LINE);
+  });
+});
+
+// T4 Task 7: a lane nobody watches is told a skip is deliberate, on every judge; a pass keeps its cards.
+describe('what a lane nobody watches is told of a skip', () => {
+  const SKIPPED =
+    'Nobody is watching this task. A call 10db or auto mode refuses with "Skipped:" is left out on purpose: carry on without it, and list each skipped call in your handoff. If the step\'s job can\'t be done without it, call report_blocked with the reason.';
+  const CARD = 'wait on a card from the builder.';
+  const lane = { ...base, action: { kind: 'start' as const }, sandboxed: true };
+
+  it.each([
+    ['an unattended judged lane is told what a skip is', true],
+    ['an unattended rules lane is told the same', false],
+  ])('%s', (_name, judged) => {
+    const prompt = buildSessionPrompt({ ...lane, judged, attended: false });
+    expect(prompt).toContain(SKIPPED);
+    expect(prompt).not.toContain(CARD);
+  });
+
+  it('a pass keeps its card line', () => {
+    const prompt = buildSessionPrompt({ ...lane, judged: true, inPass: true });
+    expect(prompt).toContain(CARD);
+    expect(prompt).not.toContain(SKIPPED);
+  });
+});
+
 describe('telling the lane who answers its questions', () => {
   const at = '2026-11-12T10:00:00.000Z';
   const person = (handle: string, name: string) => ({

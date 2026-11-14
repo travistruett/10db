@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   AccountKind,
@@ -11,6 +19,7 @@ import {
 import { createTestStore, insertShape, listInbox, recordMcpApproval, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fixtures';
+import { SECRET_VARIABLES } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService } from '../inbox';
@@ -203,6 +212,32 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
+  });
+
+  it('gives a Plan command none of an account credential, though the session env holds them all', async () => {
+    // Auto mode turns Claude Code's own env scrub off, so the sandbox's deny by name is what keeps
+    // the session's credentials from a command.
+    const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
+    const owner = conversation({ mcpServers: {} });
+    const { prepare } = preparer();
+    const prepared = await prepare(
+      inputFor(owner, AccountKind.AnthropicApiKey, {
+        ...launchEnv(),
+        ...Object.fromEntries(names.map((name) => [name, `secret-${name}`])),
+      }),
+    );
+    try {
+      const sandbox = prepared.sandbox;
+      if (sandbox === null) throw new Error('A Plan session runs in its sandbox here');
+      const denied = new Set(sandbox.settings.credentials.envVars.map((entry) => entry.name));
+      const envFile = readFileSync(sandbox.env['CLAUDE_ENV_FILE'] ?? '', 'utf8');
+      for (const name of names) {
+        expect(denied.has(name), `${name} is denied to Bash`).toBe(true);
+        expect(envFile).not.toContain(`secret-${name}`);
+      }
+    } finally {
+      await prepared.release();
+    }
   });
 
   it('starts a Plan session with the instructions, the builder’s skills and their reads', async () => {

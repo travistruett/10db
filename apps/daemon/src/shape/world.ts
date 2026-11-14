@@ -11,7 +11,7 @@ import {
   type DecisionId,
   type LandingTarget,
   type ShapeId,
-  type ShapeMessageId,
+  type ConversationItemId,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -58,7 +58,7 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
     }
     if (link.goalId !== null) convertedGoals.add(link.goalId);
   }
-  const citable = new Set<ShapeMessageId>(
+  const citable = new Set<ConversationItemId>(
     listShapeMessages(db, shapeId)
       .filter(
         (m) =>

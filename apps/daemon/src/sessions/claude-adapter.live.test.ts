@@ -83,6 +83,7 @@ async function liveSession(spec: {
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: {
       kind: 'lane',
@@ -159,10 +160,10 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
   );
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are helping plan work. Answer briefly.',
       tools: ['Read'],
       allowedTools: [],
@@ -235,9 +236,9 @@ describe.skipIf(!live)('Claude adapter, live', () => {
   // Workbench spec §6.3: a builder message is delivered on the evidence a turn took it, the uuid an
   // assistant message stamps in `user_message_uuids`, never because it was pushed.
   it('stamps the uuid of a message sent mid-turn and of one sent as a turn ends, and answers an interrupt with a receipt', async () => {
-    const prompt = idUuid(mintId('TaskMessage'));
-    const midTurn = idUuid(mintId('TaskMessage'));
-    const atTurnEnd = idUuid(mintId('TaskMessage'));
+    const prompt = idUuid(mintId('ConversationItem'));
+    const midTurn = idUuid(mintId('ConversationItem'));
+    const atTurnEnd = idUuid(mintId('ConversationItem'));
     const { handle, cleanup } = await liveSession({
       prompt: 'Write the numbers from 1 to 30, one per line, and nothing else.',
       promptUuid: prompt,
@@ -276,8 +277,8 @@ describe.skipIf(!live)('Claude adapter, live', () => {
   // The pinned Claude Code stamps it on no later assistant message of a turn a typed prompt started:
   // the turn's result lists it, after the prompt's uuid.
   it("lists a message folded into a turn that makes tool calls on that turn's result", async () => {
-    const prompt = idUuid(mintId('TaskMessage'));
-    const folded = idUuid(mintId('TaskMessage'));
+    const prompt = idUuid(mintId('ConversationItem'));
+    const folded = idUuid(mintId('ConversationItem'));
     const repo = createTempRepo();
     for (const [name, word] of [
       ['one.txt', 'apple'],
@@ -318,8 +319,8 @@ describe.skipIf(!live)('Claude adapter, live', () => {
   // resumed session sent its first prompt's uuid again start no turn). A message is sent again,
   // into a resumed conversation or after an interrupt, under a uuid of its own.
   it('runs a turn for a message sent again into a resumed conversation under a uuid of its own', async () => {
-    const first = idUuid(mintId('TaskMessage'));
-    const again = idUuid(mintId('TaskMessage'));
+    const first = idUuid(mintId('ConversationItem'));
+    const again = idUuid(mintId('ConversationItem'));
     const repo = createTempRepo();
     const one = await liveSession({
       prompt: 'Reply with the single word: ready',

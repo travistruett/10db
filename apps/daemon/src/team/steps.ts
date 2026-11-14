@@ -24,6 +24,7 @@ import {
 } from '@10db/contracts';
 import {
   getBatch,
+  skipFollowUpOf,
   getEvidence,
   getProject,
   getTask,
@@ -280,6 +281,12 @@ export function retryWorkstream(
   if (task.workstreamId !== id)
     throw new ConflictError(
       `${task.title} has a newer workstream; retry that one or start the task`,
+    );
+  // A follow-up of Run these now runs what this run skipped: a retry would run beside it.
+  const followUp = skipFollowUpOf(state.db, id);
+  if (followUp !== null)
+    throw new ConflictError(
+      `Retry waits for the follow-up "${followUp.title}": remove it, or let it finish.`,
     );
   const batch = row.batchId ? getBatch(state.db, row.batchId) : null;
   if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed)

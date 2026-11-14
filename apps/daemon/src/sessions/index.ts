@@ -22,6 +22,7 @@ export {
 } from './types';
 export type {
   AccountLogin,
+  AgentCommand,
   ConversationReadSpec,
   InterruptReceipt,
   LanePermissionMode,
@@ -37,6 +38,7 @@ export type {
   ShapeImage,
   ShapeToolRequest,
   ShapeVerdict,
+  ToolCallFull,
   ToolDecision,
   ToolRequest,
   TurnResult,

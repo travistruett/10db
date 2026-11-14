@@ -1,5 +1,14 @@
 import type {
   AaModelDto,
+  ChatId,
+  ConversationFileId,
+  ConversationId,
+  ConversationItemAuthor,
+  ConversationItemId,
+  ConversationItemKind,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   AbandonStep,
   AccountId,
   AppUrl,
@@ -61,6 +70,11 @@ import type {
   PassTurnId,
   TakeOutStep,
   TaskPageReportId,
+  SkippedActionId,
+  SkipListingId,
+  SkipKind,
+  SkipSource,
+  LimitName,
   PatternId,
   ModelProfileId,
   NextAction,
@@ -101,7 +115,6 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
-  TaskFileId,
   TaskScreenId,
   ScreenKind,
   ScreenTheme,
@@ -109,10 +122,7 @@ import type {
   ScreensMatrix,
   TaskKind,
   TaskLanding,
-  TaskMessageAuthor,
   TaskMessageId,
-  TaskMessageKind,
-  TaskPictureKind,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -133,17 +143,13 @@ import type {
   ShapeEntryVersionId,
   ShapeFindingReviewer,
   TaskContextCheckId,
-  ShapeFileId,
   ShapeFindingId,
   ShapeFindingKind,
   ShapeFindingSeverity,
   ShapeFindingState,
   ShapeId,
   ShapeLinkId,
-  ShapeMessageAuthor,
-  ShapeMessageId,
   ShapeQuestionId,
-  ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalId,
   ShapeProposalKind,
@@ -654,8 +660,8 @@ export const workstreams = sqliteTable(
 );
 
 /**
- * A session runs a lane's workstream or a Shape conversation, never both and never neither (Shape
- * spec §5.1), so a Shape session takes the project's account and counts in its usage like a lane's.
+ * A session runs a lane's workstream, a conversation, or both (a lane of a task with a thread), never
+ * neither, so a Plan session takes the project's account and counts in its usage like a lane's.
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -664,9 +670,10 @@ export const sessions = sqliteTable(
     workstreamId: text('workstream_id')
       .$type<WorkstreamId>()
       .references(() => workstreams.id),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
-      .references((): AnySQLiteColumn => shapes.id),
+    /** The conversation the session runs; a lane of a task with a thread names it beside its workstream. */
+    conversationId: text('conversation_id')
+      .$type<ConversationId>()
+      .references((): AnySQLiteColumn => conversations.id),
     accountId: text('account_id')
       .$type<AccountId>()
       .notNull()
@@ -706,9 +713,12 @@ export const sessions = sqliteTable(
   },
   (t) => [
     index('sessions_workstream_idx').on(t.workstreamId),
-    index('sessions_shape_idx').on(t.shapeId),
+    index('sessions_conversation_idx').on(t.conversationId),
     index('sessions_account_started_idx').on(t.accountId, t.startedAt),
-    check('sessions_one_owner', sql`(${t.workstreamId} IS NULL) <> (${t.shapeId} IS NULL)`),
+    check(
+      'sessions_has_owner',
+      sql`${t.conversationId} IS NOT NULL OR ${t.workstreamId} IS NOT NULL`,
+    ),
   ],
 );
 
@@ -1530,14 +1540,10 @@ export const shapes = sqliteTable(
     title: text('title').notNull(),
     state: text('state').$type<ShapeState>().notNull(),
     origin: text('origin').$type<ShapeOrigin>().notNull(),
-    /** The Claude Agent SDK session it resumes; null before the first turn. */
-    sdkSessionId: text('sdk_session_id'),
     /** Set by the builder's first Propose, for good. */
     proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
     /** The last reconciled round; 0 before the first proposal. */
     round: integer('round').notNull().default(0),
-    /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
-    model: text('model'),
     /** The effort the builder chose for the conversation; null follows the model's own default. */
     effort: text('effort').$type<Effort>(),
     /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
@@ -1553,23 +1559,6 @@ export const shapes = sqliteTable(
       .on(t.projectId, t.bundleId)
       .where(sql`${t.bundleId} IS NOT NULL`),
   ],
-);
-
-/** The conversation's transcript (§5.3): append-only, so it renders and reopens however old it is. */
-export const shapeMessages = sqliteTable(
-  'shape_messages',
-  {
-    id: text('id').$type<ShapeMessageId>().primaryKey(),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
-      .notNull()
-      .references(() => shapes.id),
-    author: text('author').$type<ShapeMessageAuthor>().notNull(),
-    kind: text('kind').$type<ShapeMessageKind>().notNull(),
-    body: text('body').notNull(),
-    createdAt: createdAt(),
-  },
-  (t) => [index('shape_messages_shape_idx').on(t.shapeId, t.id)],
 );
 
 /** Per task key: the content hash a round last wrote and the fields it changed (§6 Rows). */
@@ -1609,7 +1598,7 @@ export const shapeProposals = sqliteTable(
       .notNull()
       .default(sql`'{}'`),
     sourceMessageIds: text('source_message_ids', { mode: 'json' })
-      .$type<ShapeMessageId[]>()
+      .$type<ConversationItemId[]>()
       .notNull()
       .default(sql`'[]'`),
     createdAt: createdAt(),
@@ -1618,94 +1607,141 @@ export const shapeProposals = sqliteTable(
   (t) => [uniqueIndex('shape_proposals_key_unique').on(t.shapeId, t.key)],
 );
 
-/** A file the builder dropped into a conversation (§5.4), or a terminal session handed over (§5.6). */
-export const shapeFiles = sqliteTable(
-  'shape_files',
+/**
+ * A conversation (sessions spec §9.1): a chat's, a Plan's or a task's transcript, and what its next
+ * session resumes. One per owner.
+ */
+export const conversations = sqliteTable(
+  'conversations',
   {
-    id: text('id').$type<ShapeFileId>().primaryKey(),
-    shapeId: text('shape_id')
-      .$type<ShapeId>()
+    id: text('id').$type<ConversationId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
       .notNull()
-      .references(() => shapes.id),
-    name: text('name').notNull(),
-    mediaType: text('media_type').notNull(),
-    size: integer('size').notNull(),
-    /** Where the daemon copied it, under the data directory. */
-    storedPath: text('stored_path').notNull(),
-    /** When a turn first carried it to Claude; null until then, so a restart still tells it. */
-    toldAt: text('told_at'),
-    /**
-     * Whether the live session's history holds this file as an image block. Set when a turn sends it
-     * inline, cleared for the whole conversation when a fresh session starts, so the image budget
-     * counts what a resumed session resends and nothing else.
-     */
-    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
-    /**
-     * When a notice first told the builder Claude can't or couldn't Read this image; null until then.
-     * A file has its own mark because a name can repeat in a conversation, and can hold any punctuation.
-     */
-    unreadableToldAt: text('unreadable_told_at'),
+      .references(() => projects.id),
+    ownerKind: text('owner_kind').$type<ConversationOwnerKind>().notNull(),
+    /** A ShapeId, TaskId or ChatId, by `owner_kind`. */
+    ownerId: text('owner_id').notNull(),
+    profile: text('profile').$type<ConversationProfile>().notNull(),
+    accountId: text('account_id')
+      .$type<AccountId>()
+      .notNull()
+      .references(() => accounts.id),
+    /** The model the builder chose; null runs it on its role's. */
+    model: text('model'),
+    /** The agent session the next one resumes; null before the first turn. */
+    providerSessionId: text('provider_session_id'),
+    /** §6.7; null for a task, whose state is the runner's. */
+    state: text('state').$type<ConversationState>(),
+    contextPct: real('context_pct'),
+    /** The `seq` the next item takes. */
+    nextSeq: integer('next_seq').notNull().default(1),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
+  (t) => [
+    uniqueIndex('conversations_owner_unique').on(t.ownerKind, t.ownerId),
+    index('conversations_project_idx').on(t.projectId),
+  ],
 );
 
-/**
- * A task's thread (Workbench spec §4.3, §6.3): the builder's messages, the agent's replies and the
- * notices, oldest first by id.
- */
-export const taskMessages = sqliteTable(
-  'task_messages',
+/** A conversation's transcript, in `seq` order, never by id: a migrated row keeps its older id. */
+export const conversationItems = sqliteTable(
+  'conversation_items',
   {
-    id: text('id').$type<TaskMessageId>().primaryKey(),
-    taskId: text('task_id')
-      .$type<TaskId>()
+    id: text('id').$type<ConversationItemId>().primaryKey(),
+    conversationId: text('conversation_id')
+      .$type<ConversationId>()
       .notNull()
-      .references(() => tasks.id),
-    author: text('author').$type<TaskMessageAuthor>().notNull(),
-    kind: text('kind').$type<TaskMessageKind>().notNull(),
-    body: text('body').notNull(),
-    createdAt: createdAt(),
-    /** When it was handed to the session; that alone proves nothing reached a turn. */
-    pushedAt: text('pushed_at'),
-    /** When a turn took it in; a message pushed and not delivered is sent again. */
-    deliveredAt: text('delivered_at'),
-    /**
-     * Every client uuid a push of it went under, oldest first: after a restart, a conversation that
-     * holds one of them took the message (Workbench spec §12).
-     */
-    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
+      .references(() => conversations.id),
+    seq: integer('seq').notNull(),
+    author: text('author').$type<ConversationItemAuthor>().notNull(),
+    kind: text('kind').$type<ConversationItemKind>().notNull(),
+    /** Parsed with `ConversationItemBody[kind]` on read. */
+    body: text('body', { mode: 'json' }).$type<Json>().notNull(),
+    /** The pass turn a task's item started or answers; null outside a pass's turns. */
     turnId: text('turn_id')
       .$type<PassTurnId>()
       .references((): AnySQLiteColumn => passTurns.id),
+    /** Whether the item was cut short by a stop or a crash. */
+    partial: integer('partial', { mode: 'boolean' }).notNull().default(false),
+    /** When it was handed to the session; that alone proves nothing reached a turn. */
+    pushedAt: text('pushed_at'),
+    /** Every client uuid a push of it went under, oldest first. */
+    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** When a turn took it in; a message pushed and not delivered is sent again. */
+    deliveredAt: text('delivered_at'),
+    /** When a queued message was handed back to the builder untaken. */
+    handedBackAt: text('handed_back_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
+  (t) => [uniqueIndex('conversation_items_seq_unique').on(t.conversationId, t.seq)],
 );
 
-/** A picture the builder pasted into a task's thread, kept under the data directory by its hash. */
-export const taskFiles = sqliteTable(
-  'task_files',
+/** A file in a conversation: one the builder dropped into Plan, or a picture pasted with a message. */
+export const conversationFiles = sqliteTable(
+  'conversation_files',
   {
-    id: text('id').$type<TaskFileId>().primaryKey(),
-    taskId: text('task_id')
-      .$type<TaskId>()
+    id: text('id').$type<ConversationFileId>().primaryKey(),
+    conversationId: text('conversation_id')
+      .$type<ConversationId>()
       .notNull()
-      .references(() => tasks.id),
-    messageId: text('message_id')
-      .$type<TaskMessageId>()
-      .notNull()
-      .references(() => taskMessages.id),
+      .references(() => conversations.id),
+    /** The message it came with; null for a Plan file, which belongs to the conversation. */
+    itemId: text('item_id')
+      .$type<ConversationItemId>()
+      .references(() => conversationItems.id),
     name: text('name').notNull(),
-    mediaType: text('media_type').$type<TaskPictureKind>().notNull(),
+    mediaType: text('media_type').notNull(),
     size: integer('size').notNull(),
-    sha256: text('sha256').notNull(),
+    /** Null for a file copied from Plan, which never hashed its files. */
+    sha256: text('sha256'),
+    /** Where the daemon copied it, under the data directory. */
     storedPath: text('stored_path').notNull(),
-    /** Whether the live session's history holds it as an image block, as `shape_files.inline_sent`. */
+    /** Whether the live session's history holds it as an image block. */
     inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
+    /** When a turn first carried it to the agent; null until then, so a restart still tells it. */
+    toldAt: text('told_at'),
+    /** When a notice first told the builder the agent can't read this image; null until then. */
+    unreadableToldAt: text('unreadable_told_at'),
     createdAt: createdAt(),
   },
-  (t) => [index('task_files_task_idx').on(t.taskId, t.id)],
+  (t) => [index('conversation_files_conversation_idx').on(t.conversationId, t.createdAt, t.id)],
+);
+
+/** A chat (sessions spec §7.1): a tab of its own over a conversation, until Do it hands it to a task. */
+export const chats = sqliteTable(
+  'chats',
+  {
+    id: text('id').$type<ChatId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    conversationId: text('conversation_id')
+      .$type<ConversationId>()
+      .notNull()
+      .references(() => conversations.id),
+    /** Null until the agent or the builder names the chat. */
+    title: text('title'),
+    titleSource: text('title_source').$type<'agent' | 'builder'>(),
+    mode: text('mode').$type<'explore' | 'hands_on'>().notNull(),
+    /** The task Do it in a separate copy made, and its pass. */
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    /** Null when the tab is closed. */
+    tabPosition: integer('tab_position'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    lastActivityAt: text('last_activity_at').notNull(),
+    archivedAt: text('archived_at'),
+  },
+  (t) => [index('chats_project_idx').on(t.projectId)],
 );
 
 /**
@@ -1775,7 +1811,7 @@ export const shapeQuestions = sqliteTable(
     /** The role or person the question is for. */
     forWho: text('for_who').notNull(),
     sourceMessageIds: text('source_message_ids', { mode: 'json' })
-      .$type<ShapeMessageId[]>()
+      .$type<ConversationItemId[]>()
       .notNull()
       .default(sql`'[]'`),
     goalId: text('goal_id')
@@ -2066,9 +2102,9 @@ export const shapeShadowAnswers = sqliteTable(
       .notNull()
       .references(() => shapes.id),
     messageId: text('message_id')
-      .$type<ShapeMessageId>()
+      .$type<ConversationItemId>()
       .notNull()
-      .references(() => shapeMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     decision: text('decision').$type<JudgeDecision>().notNull(),
     /** `yes` or `no`. */
     answer: text('answer').$type<'yes' | 'no'>().notNull(),
@@ -2185,7 +2221,7 @@ export const passTurns = sqliteTable(
     seq: integer('seq').notNull(),
     messageId: text('message_id')
       .$type<TaskMessageId>()
-      .references((): AnySQLiteColumn => taskMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     startedAt: text('started_at').notNull(),
     endedAt: text('ended_at'),
     ending: text('ending').$type<PassTurnEnding>(),
@@ -2422,7 +2458,7 @@ export const passPreviewMarks = sqliteTable(
       .references(() => inboxItems.id),
     noticeId: text('notice_id')
       .$type<TaskMessageId>()
-      .references(() => taskMessages.id),
+      .references((): AnySQLiteColumn => conversationItems.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -2457,3 +2493,107 @@ export const taskPageReports = sqliteTable(
   },
   (t) => [index('task_page_reports_task_idx').on(t.taskId, t.workstreamId)],
 );
+
+/**
+ * A call an unattended lane skipped, or a question it was answered at once (trust line §5): a record,
+ * written once. One row per tool use id in a run, so a call the broker skipped and Claude Code then
+ * reports as denied is one row.
+ */
+export const skippedActions = sqliteTable(
+  'skipped_actions',
+  {
+    id: text('id').$type<SkippedActionId>().primaryKey(),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    toolName: text('tool_name').notNull(),
+    toolUseId: text('tool_use_id'),
+    /** The call's key (`callKey`); null for a question, which nothing approves. */
+    callKey: text('call_key'),
+    summary: text('summary').notNull(),
+    /** The summary was cut: the builder never sees the whole call, so intent can't approve it. */
+    summaryCut: integer('summary_cut', { mode: 'boolean' }).notNull().default(false),
+    kind: text('kind').$type<SkipKind>().notNull(),
+    /** Not `limit`, a word hand-written SQL reserves. */
+    limitName: text('limit_name').$type<LimitName>(),
+    reason: text('reason').notNull(),
+    source: text('source').$type<SkipSource>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('skipped_actions_one_per_call')
+      .on(t.workstreamId, t.toolUseId)
+      .where(sql`tool_use_id IS NOT NULL`),
+    index('skipped_actions_workstream_idx').on(t.workstreamId),
+  ],
+);
+
+/** The skips the builder approved for a follow-up task, by Run these now. */
+export const skipApprovals = sqliteTable(
+  'skip_approvals',
+  {
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    skippedActionId: text('skipped_action_id')
+      .$type<SkippedActionId>()
+      .notNull()
+      .references(() => skippedActions.id),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.skippedActionId] })],
+);
+
+/**
+ * Each check of an ended unattended run for its Skipped while you were away item: the newest skip it
+ * covered, the commit its config was read through, and the item it raised (null when there was
+ * nothing new to say). A run is listed once per
+ * ending, and a crash between the end and the item leaves no row, so the start-up sweep raises it.
+ */
+export const skipListings = sqliteTable(
+  'skip_listings',
+  {
+    id: text('id').$type<SkipListingId>().primaryKey(),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    throughSkipId: text('through_skip_id')
+      .$type<SkippedActionId>()
+      .references(() => skippedActions.id),
+    inboxItemId: text('inbox_item_id')
+      .$type<InboxItemId>()
+      .references(() => inboxItems.id),
+    /**
+     * The commit the check read the run's config through; null when it read none (its changed paths
+     * couldn't be read, or a pass lists no config), so the next ending reads from the check before.
+     */
+    configHead: text('config_head'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('skip_listings_workstream_idx').on(t.workstreamId)],
+);
+
+/**
+ * A follow-up Run these now made: the run whose skips it runs, approved, and that run's batch,
+ * stamped once when it starts. Pending while unstarted and its task neither done nor removed.
+ */
+export const skipFollowUps = sqliteTable('skip_follow_ups', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  sourceWorkstreamId: text('source_workstream_id')
+    .$type<WorkstreamId>()
+    .notNull()
+    .references(() => workstreams.id),
+  sourceBatchId: text('source_batch_id')
+    .$type<BatchId>()
+    .references(() => batches.id),
+  startedAt: text('started_at'),
+  createdAt: createdAt(),
+});

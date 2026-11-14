@@ -1,5 +1,8 @@
 import {
   BundleOrigin,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   EventType,
   mintId,
   NotFoundError,
@@ -9,15 +12,30 @@ import {
   type ShapeId,
   type ShapeOrigin,
 } from '@10db/contracts';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { conversationOf, insertConversation, type ConversationRow } from './conversations';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §13. The daemon's
 // shape module owns the conversation's state; these are its rows.
 
-type ShapeRow = typeof schema.shapes.$inferSelect;
+type ShapeRow = typeof schema.shapes.$inferSelect & { readonly model: string | null };
+
+/** A shape's row with the model its conversation holds. */
+const shapeColumns = { ...getTableColumns(schema.shapes), model: schema.conversations.model };
+const selectShapes = (db: DbReader) =>
+  db
+    .select(shapeColumns)
+    .from(schema.shapes)
+    .leftJoin(
+      schema.conversations,
+      and(
+        eq(schema.conversations.ownerKind, ConversationOwnerKind.Shape),
+        eq(schema.conversations.ownerId, schema.shapes.id),
+      ),
+    );
 
 const toShapeDto = (row: ShapeRow): ShapeDto => ({
   id: row.id,
@@ -35,8 +53,8 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
 });
 
 /**
- * Writes a conversation that is listening: no proposal yet, Propose still locked. An imported Plan
- * gives its state, round and bundle.
+ * Writes a conversation that is listening: no proposal yet, Propose still locked, and its conversation
+ * row, on the project's account. An imported Plan gives its state, round and bundle.
  */
 export function insertShape(
   ctx: WriteContext,
@@ -52,16 +70,14 @@ export function insertShape(
   },
 ): ShapeDto {
   getProject(ctx.tx, projectId);
-  const row: ShapeRow = {
+  const row: typeof schema.shapes.$inferSelect = {
     id: mintId('Shape'),
     projectId,
     title: input.title,
     state: input.state ?? ShapeState.Listening,
     origin: input.origin,
-    sdkSessionId: null,
     proposeUnlocked: false,
     round: input.round ?? 0,
-    model: null,
     effort: null,
     bundleId: input.bundleId ?? null,
     bundleOrigin: input.bundleOrigin ?? null,
@@ -70,13 +86,26 @@ export function insertShape(
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.shapes).values(row).run();
+  insertConversation(ctx, {
+    projectId,
+    owner: { kind: ConversationOwnerKind.Shape, id: row.id },
+    profile: ConversationProfile.Explore,
+    state: ConversationState.IdleCold,
+  });
   ctx.emit({
     type: EventType.ShapeChanged,
     entityType: 'shape',
     entityId: row.id,
     data: { projectId },
   });
-  return toShapeDto(row);
+  return toShapeDto({ ...row, model: null });
+}
+
+/** The conversation a shape owns; every shape has one. */
+export function shapeConversation(db: DbReader, id: ShapeId): ConversationRow {
+  const conversation = conversationOf(db, { kind: ConversationOwnerKind.Shape, id });
+  if (conversation === null) throw new NotFoundError('shape conversation', id);
+  return conversation;
 }
 
 /** The Plan a bundle id was imported into in a project, if any. */
@@ -85,9 +114,7 @@ export function getShapeByBundle(
   projectId: ProjectId,
   bundleId: string,
 ): ShapeDto | undefined {
-  const row = db
-    .select()
-    .from(schema.shapes)
+  const row = selectShapes(db)
     .where(and(eq(schema.shapes.projectId, projectId), eq(schema.shapes.bundleId, bundleId)))
     .get();
   return row ? toShapeDto(row) : undefined;
@@ -104,7 +131,7 @@ export function getShapeBundleOrigin(db: DbReader, id: ShapeId): BundleOrigin | 
 }
 
 export function getShape(db: DbReader, id: ShapeId): ShapeDto {
-  const row = db.select().from(schema.shapes).where(eq(schema.shapes.id, id)).get();
+  const row = selectShapes(db).where(eq(schema.shapes.id, id)).get();
   if (!row) throw new NotFoundError('shape', id);
   return toShapeDto(row);
 }
@@ -121,16 +148,20 @@ export function shapeTokens(db: DbReader, id: ShapeId): number {
       total: sql<number>`coalesce(sum(${schema.sessions.inputTokens} + ${schema.sessions.outputTokens}), 0)`,
     })
     .from(schema.sessions)
-    .where(eq(schema.sessions.shapeId, id))
+    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.sessions.conversationId))
+    .where(
+      and(
+        eq(schema.conversations.ownerKind, ConversationOwnerKind.Shape),
+        eq(schema.conversations.ownerId, id),
+      ),
+    )
     .get();
   return row?.total ?? 0;
 }
 
 /** The project's conversations, oldest first. */
 export function listShapes(db: DbReader, projectId: ProjectId): ShapeDto[] {
-  return db
-    .select()
-    .from(schema.shapes)
+  return selectShapes(db)
     .where(eq(schema.shapes.projectId, projectId))
     .orderBy(asc(schema.shapes.createdAt), asc(schema.shapes.id))
     .all()

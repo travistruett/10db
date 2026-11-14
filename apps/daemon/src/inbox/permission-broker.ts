@@ -1,4 +1,12 @@
 import {
+  Approval,
+  approvalOf,
+  LimitName,
+  SkipKind,
+  SkipSource,
+  type ConversationId,
+  type TaskId,
+  type JudgeKind,
   DeniedBy,
   PermissionChoice,
   MCP_TOOL_GRANT_DETAIL,
@@ -43,6 +51,7 @@ import {
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import {
+  isEqualOrUnder,
   isSecretOnCard,
   outsideCopyRefusal,
   readAccess,
@@ -53,18 +62,28 @@ import {
   type FileAccessContext,
 } from '../sandbox';
 import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
+import { answerAway, callKey, routedToPerson, skipMessage, type SkipRecorder } from '../trust';
 import { foundHostReason } from './gate-host-card';
-import { ParkedError, type InboxService } from './service';
+import { leftWithBuilder } from './builder-card';
+import { AnsweredAwayError, ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
   onWaitStart(item: InboxItemDto): void;
   onWaitEnd(item: InboxItemDto): void;
 }
 
-/** Whose session asks: a lane's workstream, or a Plan conversation, which offers no workstream rule. */
+/** Whose session asks: a lane's workstream, or a conversation (Plan's), which offers no workstream rule. */
 type BrokerOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
-  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+  | {
+      readonly workstreamId: WorkstreamId;
+      readonly conversationId?: never;
+      readonly shapeId?: never;
+    }
+  | {
+      readonly workstreamId: null;
+      readonly conversationId: ConversationId;
+      readonly shapeId?: ShapeId;
+    };
 
 type BrokerContext = BrokerOwner & {
   readonly projectId: ProjectId;
@@ -113,6 +132,19 @@ type BrokerContext = BrokerOwner & {
     readonly baseBranch: string;
     /** Runs the allowed call as the builder (`runPassGit`), or says why 10db still won't. */
     run(call: Extract<PassGitCall, { kind: 'run' }>): Promise<BuilderRun | BuilderRefusal>;
+  };
+  /**
+   * Present for a lane nobody watches (trust line §5): no call waits on a card. What would raise one
+   * is skipped and recorded, unless the builder approved that exact call (Run these now).
+   */
+  readonly unattended?: {
+    readonly judge: JudgeKind;
+    readonly checkout: string;
+    readonly approvedKeys: readonly string[];
+    readonly skips: SkipRecorder;
+    /** The run's task, whose question routes say who still answers a question. */
+    readonly taskId: TaskId;
+    readonly projectId: ProjectId;
   };
 };
 
@@ -231,7 +263,48 @@ interface Ask {
    * next such call is asked about again (an endless background loop).
    */
   readonly onceOnly?: boolean;
+  /** What an unattended lane records it as, when it is skipped. */
+  readonly kind?: SkipKind;
 }
+
+/** Why an unattended lane skipped what would have been a card, by kind; null where the kind says it. */
+function unattendedReason(kind: SkipKind, path: string | null): string {
+  switch (kind) {
+    case SkipKind.Escalation:
+      return 'Auto mode sent this call to a person, and nobody is watching this task.';
+    case SkipKind.HazardCard:
+      return 'This changes a dependency or a migration; use the install_dependencies tool, which runs it for the task.';
+    case SkipKind.UnreadHazard:
+      return "10db can't read whether this changes a dependency or a migration this task hasn't claimed. Write the command out plainly, or claim the hazard first.";
+    case SkipKind.EndlessLoop:
+      return 'This starts something in the background that never ends.';
+    case SkipKind.ReadOutside:
+      return `${path ?? 'This path'} is outside what a task reads without asking. Read it with a Bash command, which the sandbox bounds.`;
+    case SkipKind.EditorConfigWrite:
+      return `${path ?? 'This path'} is editor config, which runs outside the sandbox when the builder opens the folder.`;
+    case SkipKind.PassGit:
+      return 'A commit, push or merge waits for the builder in a pass; nobody is here to allow it.';
+    case SkipKind.DefaultModeCard:
+    case SkipKind.Classifier:
+    case SkipKind.ConfigWrite:
+    case SkipKind.Deploy:
+    case SkipKind.DockerOff:
+    case SkipKind.HomeRcWrite:
+    case SkipKind.Host:
+    case SkipKind.MonitorNoCommand:
+    case SkipKind.MonitorSocket:
+    case SkipKind.Question:
+    case SkipKind.SafetyCheck:
+    case SkipKind.SecretRead:
+    case SkipKind.UnknownTool:
+    case SkipKind.UnreadEditPath:
+    case SkipKind.WebOrMcp:
+      return "This call needs a person's approval on this account, and nobody is watching this task.";
+  }
+}
+
+const unattendedLimit = (kind: SkipKind): LimitName | null =>
+  kind === SkipKind.MonitorSocket ? LimitName.SendsDataOut : null;
 
 /**
  * A command nested deeply enough to overflow the stack in a shell scanner is one nothing can
@@ -292,7 +365,11 @@ export function createPermissionBroker(
   let allowOnce = ctx.allowOnce ?? null;
   const owner: BrokerOwner =
     ctx.workstreamId === null
-      ? { workstreamId: null, shapeId: ctx.shapeId }
+      ? {
+          workstreamId: null,
+          conversationId: ctx.conversationId,
+          ...(ctx.shapeId === undefined ? {} : { shapeId: ctx.shapeId }),
+        }
       : { workstreamId: ctx.workstreamId };
   // A conversation has no workstream, so it is never offered a rule for one.
   const optionsFor = (storable: boolean): InboxOption[] =>
@@ -338,6 +415,19 @@ export function createPermissionBroker(
       };
     }
     const answers: Record<string, string> = {};
+    const away = ctx.unattended;
+    if (
+      away !== undefined &&
+      !routedToPerson(
+        deps.state.db,
+        { id: away.taskId, projectId: ctx.projectId },
+        { category: QuestionCategory.Other, topic: null },
+      )
+    ) {
+      for (const q of parsed.data.questions)
+        answers[q.question] = answerAway(away, req.toolName, q.question);
+      return { behavior: 'allow', updatedInput: { ...req.input, answers } };
+    }
     for (const q of parsed.data.questions) {
       const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,
@@ -353,7 +443,19 @@ export function createPermissionBroker(
         detail: null,
         signal: ctx.signal,
       });
-      const result = await wait(item, answer);
+      // A rule's person with no Slack leaves the card with the builder, whom this lane never waits on.
+      if (away !== undefined && leftWithBuilder(getInboxItem(deps.state.db, item.id)))
+        deps.inbox.answerAwayWaits(item.id, (waiting) => waiting === ctx.sessionId);
+      let result;
+      try {
+        result = await wait(item, answer);
+      } catch (error) {
+        // The question was left with the builder, and nobody watches this task.
+        if (!(error instanceof AnsweredAwayError) || away === undefined) throw error;
+        ctx.observer.onWaitEnd(item);
+        answers[q.question] = answerAway(away, req.toolName, q.question);
+        continue;
+      }
       answers[q.question] = result.note ? `${result.choice} (${result.note})` : result.choice;
     }
     return { behavior: 'allow', updatedInput: { ...req.input, answers } };
@@ -390,6 +492,31 @@ export function createPermissionBroker(
     }
   }
 
+  /** A card an unattended lane can't wait on: skipped and recorded, or allowed when approved. */
+  function skipUnattended(
+    req: ToolRequest,
+    ask: Ask | null,
+    unattended: NonNullable<BrokerContext['unattended']>,
+  ): ToolDecision {
+    const kind = req.escalated ? SkipKind.Escalation : (ask?.kind ?? SkipKind.DefaultModeCard);
+    const key = callKey(req.toolName, req.input, unattended.checkout);
+    if (approvalOf(kind, false) === Approval.Exact && unattended.approvedKeys.includes(key))
+      return { behavior: 'allow' };
+    const limit = unattendedLimit(kind);
+    const reason = unattendedReason(kind, ask?.realPaths?.[0] ?? null);
+    unattended.skips.record({
+      toolName: req.toolName,
+      toolUseId: req.toolUseId,
+      callKey: key,
+      summary: ask?.summary ?? summarize(req),
+      kind,
+      limit,
+      reason,
+      source: SkipSource.Broker,
+    });
+    return { behavior: 'deny', message: skipMessage(limit, reason), by: DeniedBy.TenDb };
+  }
+
   async function askPermission(req: ToolRequest, ask: Ask | null = null): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
@@ -409,6 +536,7 @@ export function createPermissionBroker(
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
       return { behavior: 'allow' };
     }
+    if (ctx.unattended !== undefined) return skipUnattended(req, ask, ctx.unattended);
     const storable =
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
     // Only a project MCP server's tool, listed by this session, whose server runs at an approved config.
@@ -566,14 +694,20 @@ export function createPermissionBroker(
         background: req.toolName === 'Monitor' || runsInBackground(req.input),
       })
     ) {
-      return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
+      return {
+        summary: command,
+        body: `${command}\n\n${LOOP_CARD_BODY}`,
+        onceOnly: true,
+        kind: SkipKind.EndlessLoop,
+      };
     }
     if (sandbox.commandsAsk === true) return { summary: command };
     if (hit === null && !req.escalated && unread === null && unreadable === null)
       return { behavior: 'allow' };
+    const kind = hit !== null ? SkipKind.HazardCard : SkipKind.UnreadHazard;
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
-      ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
-      : { summary: command };
+      ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}`, kind }
+      : { summary: command, kind };
   }
 
   /**
@@ -589,7 +723,7 @@ export function createPermissionBroker(
     const command = req.input['command'];
     if (typeof command !== 'string') return null;
     if (!Object.keys(req.input).every((key) => MONITOR_INPUT_KEYS.has(key))) {
-      return { summary: command };
+      return { summary: command, kind: SkipKind.MonitorSocket };
     }
     return judgeBash(req, sandbox);
   }
@@ -641,6 +775,7 @@ export function createPermissionBroker(
       summary: first ?? summarize(req),
       ...(body === undefined ? {} : { body }),
       realPaths: asking,
+      kind: SkipKind.ReadOutside,
     };
   }
 
@@ -651,8 +786,23 @@ export function createPermissionBroker(
     const path = stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path');
     if (path === null) return UNJUDGED_PATH;
     try {
-      const { realPath } = writeAccess(path, sandbox.fileAccess);
-      return { summary: realPath, realPaths: [realPath] };
+      const { realPath, access } = writeAccess(path, sandbox.fileAccess);
+      const parts = realPath.split('/');
+      const editor = parts.includes('.vscode') || parts.includes('.idea');
+      // Unattended, the checkout's own agent config is written without a card: none of
+      // it runs before the builder approves it.
+      if (
+        ctx.unattended !== undefined &&
+        !editor &&
+        access === 'claude-protected' &&
+        isEqualOrUnder(realPath, sandbox.fileAccess.checkout)
+      )
+        return { behavior: 'allow' };
+      return {
+        summary: realPath,
+        realPaths: [realPath],
+        ...(editor ? { kind: SkipKind.EditorConfigWrite } : {}),
+      };
     } catch {
       return UNJUDGED_PATH;
     }
@@ -675,6 +825,8 @@ export function createPermissionBroker(
   ): Promise<ToolDecision> {
     // The words 10db runs: a comment or spacing on the line as written runs nothing.
     const line = builderCommandLine(call.argv);
+    if (ctx.unattended !== undefined)
+      return skipUnattended(req, { summary: line, kind: SkipKind.PassGit }, ctx.unattended);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,

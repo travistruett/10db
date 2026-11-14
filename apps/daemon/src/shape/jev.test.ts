@@ -4,7 +4,7 @@ import {
   PlanDraft,
   ShapeMessageAuthor,
   ShapeMessageKind,
-  type ShapeMessageId,
+  type ConversationItemId,
 } from '@10db/contracts';
 import {
   insertShapeMessage,
@@ -65,7 +65,7 @@ const optIn = (enabled = true): void => {
     setShapeJevOptIn(ctx, c.project.id, enabled);
   });
 };
-const note = (kind: ShapeMessageKind): ShapeMessageId =>
+const note = (kind: ShapeMessageKind): ConversationItemId =>
   state.write((ctx) =>
     insertShapeMessage(ctx, c.shape.id, { author: ShapeMessageAuthor.Note, kind, body: kind }),
   ).id;
@@ -132,7 +132,7 @@ describe('scoring', () => {
       decision,
     );
 
-  function record(m: ShapeMessageId, key: string): void {
+  function record(m: ConversationItemId, key: string): void {
     state.write((ctx) => {
       patchShape(ctx, c.shape.id, { proposeUnlocked: true });
       const out = reconcileDraft(
