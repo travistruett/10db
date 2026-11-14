@@ -1,5 +1,7 @@
 # apps/daemon/src/mcp
 
+- `resize_task { rigor, why, opId }` (`mcp/tools.ts`, `setAgentRigor` in `packages/db`): a plan or build session sets its own task's rigor (source `agent`, reason `why`) and the next step boundary re-plans. Refusals are results (`resized: false`, `message`), never errors: any other step, a Workbench page (`task.passId`), a rigor the builder pinned (`rigorSource` builder), and a rigor below the kinds' minimum (`refuseRigorBelowKinds`). A success is recorded under its `opId` in the same write as the rigor, so a replay answers the first result and raises nothing; the notice (`InboxService.flag`, one option "Got it", `foldKey` `resize:<taskId>`, refreshed by a later resize) is a second write, so a crash between the two loses the notice while the card still shows the agent's reason.
+
 - `report_pages` (`mcp/report-pages.ts`,
   `decisions/2026-11-10-report-pages-loads-only-a-page-areas-route.md`): the browser loads a reported route
   signed in, so `keptRoute` keeps only a page area's route, each parameter (`[id]`, `[...slug]`, `:id`) one

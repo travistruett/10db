@@ -307,7 +307,7 @@ export interface ApiServices extends PlanRecordServices {
   /**
    * Throws InvalidError when the task's landing names a branch origin does not have, so the
    * answer may come after asking origin. A rigor in `input` is pinned as `rigorSource` says: the builder's
-   * when left out, the agent's for the builder MCP.
+   * when left out, which is how the builder's own sessions (the Board, the API and the builder MCP) set it; a proposal's is the agent's.
    */
   createTask(
     projectId: ProjectId,

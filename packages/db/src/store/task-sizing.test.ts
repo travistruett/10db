@@ -2,6 +2,7 @@ import { mintId, type JudgeCallId, type TaskId, type TaskKind } from '@10db/cont
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTaskSizing,
+  setAgentRigor,
   BUILDER_CHOSE_PLACEMENT,
   listUnsizedTasks,
   readTaskSizing,
@@ -310,5 +311,41 @@ describe('listUnsizedTasks', () => {
       { id: first.id, createdAt: first.createdAt },
       { id: second.id, createdAt: second.createdAt },
     ]);
+  });
+});
+
+describe('setAgentRigor', () => {
+  it('pins the rigor as the agent’s with its reason, on a task that has started, and announces it', () => {
+    const task = store.write((ctx) => insertTask(ctx, project().id, brief)).value;
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
+    const after = store.write((ctx) =>
+      setAgentRigor(ctx, task.id, 'standard', 'It touches two areas'),
+    ).value;
+    expect(after).toMatchObject({
+      rigor: 'standard',
+      rigorSource: 'agent',
+      rigorReason: 'It touches two areas',
+      effectiveRigor: 'standard',
+      effectiveRigorSource: 'agent',
+    });
+    expect(stored(task.id)).toMatchObject({
+      rigor: 'standard',
+      rigor_source: 'agent',
+      rigor_reason: 'It touches two areas',
+    });
+    expect(
+      listEventsAfter(store.db, 0, 100).some(
+        (e) => e.type === 'task.changed' && e.entityId === task.id,
+      ),
+    ).toBe(true);
+  });
+
+  it('replaces an earlier agent’s or the judge’s rigor and reason', () => {
+    const task = store.write((ctx) => insertTask(ctx, project().id, brief)).value;
+    store.write((ctx) => setAgentRigor(ctx, task.id, 'careful', 'first'));
+    store.write((ctx) => setAgentRigor(ctx, task.id, 'light', 'second'));
+    expect(stored(task.id)).toMatchObject({ rigor: 'light', rigor_reason: 'second' });
   });
 });

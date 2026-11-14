@@ -2,7 +2,6 @@ import {
   BoardStatus,
   BuilderToolName,
   mintId,
-  RigorSource,
   TaskStatus,
   WorkstreamState,
   type TaskDto,
@@ -159,7 +158,7 @@ describe('create_task and edit_task', () => {
   const projectId = mintId('Project');
   const created = { id: taskId, title: 'the task', status: TaskStatus.Open } as TaskDto;
 
-  it('give the task service the agent as the source of a rigor they set', async () => {
+  it('leave a rigor they set to the task service as the builder’s own, which pins it', async () => {
     const createTask = vi.fn(() => created);
     const patchTask = vi.fn(() => created);
     const tools = createBuilderTools({
@@ -178,8 +177,7 @@ describe('create_task and edit_task', () => {
     expect(createTask).toHaveBeenCalledWith(
       projectId,
       expect.objectContaining({ rigor: 'careful' }),
-      RigorSource.Agent,
     );
-    expect(patchTask).toHaveBeenCalledWith(taskId, { rigor: 'light' }, RigorSource.Agent);
+    expect(patchTask).toHaveBeenCalledWith(taskId, { rigor: 'light' });
   });
 });

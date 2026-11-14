@@ -378,6 +378,24 @@ describe('MCP tool inputs', () => {
     expect(call(['http://elsewhere.test/'])).toBe(true);
   });
 
+  it.each([
+    { name: 'a rigor and a reason', input: { rigor: 'light', why: 'Small' }, ok: true },
+    {
+      name: 'a reason of 300 characters',
+      input: { rigor: 'careful', why: 'x'.repeat(300) },
+      ok: true,
+    },
+    { name: 'no reason', input: { rigor: 'light', why: '' }, ok: false },
+    {
+      name: 'a reason over 300 characters',
+      input: { rigor: 'light', why: 'x'.repeat(301) },
+      ok: false,
+    },
+    { name: 'a rigor that does not exist', input: { rigor: 'huge', why: 'Big' }, ok: false },
+  ])('takes $name on resize_task', ({ input, ok }) => {
+    expect(McpToolInputs.resize_task.safeParse({ opId: 'op-00000001', ...input }).success).toBe(ok);
+  });
+
   it('requires a next action in the handoff', () => {
     const handoff = {
       objective: { task: 't', acceptanceCriteria: ['a'], nonGoals: [] },

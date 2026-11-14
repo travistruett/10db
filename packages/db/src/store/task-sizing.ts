@@ -190,3 +190,28 @@ export function applyTaskSizing(
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
   return getTask(ctx.tx, taskId);
 }
+
+/**
+ * Sets the rigor an agent chose for its own task, with the reason it gave, replacing any the judge or an
+ * earlier agent set. The caller has already checked the pins and the kinds' floor; a task that has started
+ * is the one an agent resizes, so unlike sizing this does not refuse one.
+ */
+export function setAgentRigor(
+  ctx: WriteContext,
+  taskId: TaskId,
+  rigor: Rigor,
+  reason: string,
+): TaskDto {
+  ctx.tx
+    .update(schema.tasks)
+    .set({
+      rigor,
+      rigorSource: RigorSource.Agent,
+      rigorReason: reason,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.tasks.id, taskId))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
+  return getTask(ctx.tx, taskId);
+}
