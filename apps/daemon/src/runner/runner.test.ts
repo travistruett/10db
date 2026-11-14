@@ -31,6 +31,7 @@ import {
   ReviewCardDetail,
   reviewRounds,
   type AccountId,
+  type Rigor,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -64,6 +65,7 @@ import {
   listWorkstreams,
   patchAccount,
   patchProject,
+  patchTask,
   patchWorkstream,
   schema,
   seedAccount,
@@ -4332,6 +4334,154 @@ describe('flows', () => {
       await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
       expect(ws(workstream.id).state).toBe('DONE');
       expect(step(workstream.id, 1)?.sentBack).toBe(0);
+    });
+  });
+
+  describe('a rigor change on a started task changes only the steps still to come', () => {
+    const planStep = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-replan-plan', summary: '1. Put it in src/api/a.txt.', verdict: null },
+    };
+    const passing: GateResult = {
+      exitCode: 0,
+      durationMs: 1,
+      tail: 'ok',
+      logPath: '/dev/null',
+      timedOut: false,
+      aborted: false,
+      blockedHosts: [],
+    };
+    const setRigor = (taskId: Parameters<typeof patchTask>[1], rigor: Rigor) =>
+      engine.state.write((ctx) => patchTask(ctx, taskId, { rigor }));
+    /** An engine whose gate waits for `release()`, after telling the test it started. */
+    const heldGate = async (script: FakeScriptBook) => {
+      let release: () => void = () => undefined;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started: () => void = () => undefined;
+      const gateStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      engine = await createTestEngine(
+        script,
+        { gateCommand: 'true' },
+        {
+          gate: {
+            run: async () => {
+              started();
+              await released;
+              return passing;
+            },
+          },
+        },
+      );
+      return { release, gateStarted };
+    };
+
+    it('gives a Light task patched to Standard while its gate runs a Review instead of done', async () => {
+      const held = await heldGate({
+        Alpha: [implement('op-replan-0011'), [approve('op-replan-0012'), turn]],
+      });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+      engine.launch(workstream.id);
+      await held.gateStarted;
+      setRigor(task.id, 'standard');
+      held.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+      expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
+      expect(step(workstream.id, 1)).toMatchObject({ reviewRounds: 1 });
+      expect(ws(workstream.id).model).toBe(step(workstream.id, 1)?.model);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('finishes a Careful task patched to Light while its gate runs, with no stale step to enter', async () => {
+      const held = await heldGate({ Alpha: [[planStep, turn], implement('op-replan-0021')] });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'careful' });
+      // The lane goes from the plan into the build in one launch, and its gate is where it waits.
+      engine.launch(workstream.id);
+      await held.gateStarted;
+      setRigor(task.id, 'light');
+      held.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(ws(workstream.id).steps.map((s) => [s.role, s.status])).toEqual([
+        ['plan', 'done'],
+        ['implement', 'done'],
+      ]);
+    });
+
+    it('leaves a running step and every step before it as they were', async () => {
+      const held = await heldGate({
+        Alpha: [implement('op-replan-0031'), [approve('op-replan-0032'), turn]],
+      });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+      engine.launch(workstream.id);
+      await held.gateStarted;
+      const before = step(workstream.id, 0);
+      setRigor(task.id, 'critical');
+      held.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review', 'qa']);
+      expect(step(workstream.id, 0)).toMatchObject({
+        model: before?.model,
+        effort: before?.effort,
+        personaName: before?.personaName,
+        reason: before?.reason,
+        startedAt: before?.startedAt,
+      });
+    });
+
+    it('moves a gateless task patched to Standard on to a Review rather than waiting for the builder', async () => {
+      engine = await createTestEngine(
+        { Alpha: [implement('op-replan-0041'), [approve('op-replan-0042'), turn]] },
+        { gateCommand: null },
+        {
+          afterSession: (id) => {
+            // The implement step's session just ended; its end has not been written yet.
+            if (ws(id).stepIndex === 0) setRigor(ws(id).taskId, 'standard');
+            return Promise.resolve();
+          },
+        },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+      expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
+    });
+
+    it('keeps the Review that rejected, and plans the steps after it again, on a send-back', async () => {
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-replan-0051'),
+            [reject('op-replan-0052'), turn],
+            implement('op-replan-0053'),
+          ],
+        },
+        {},
+        {
+          afterSession: (id) => {
+            if (ws(id).stepIndex === 1) setRigor(ws(id).taskId, 'critical');
+            return Promise.resolve();
+          },
+        },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      // The lane carried on into the fix, whose gate passed: the Review is next again, and QA follows it.
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+      expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review', 'qa']);
+      expect(step(workstream.id, 1)).toMatchObject({ sentBack: 1, reviewRounds: 2 });
+      expect(step(workstream.id, 1)?.earlier).toHaveLength(1);
     });
   });
 

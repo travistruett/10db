@@ -112,6 +112,7 @@ import {
   latestPassTurn,
   latestToolOp,
   listPermissionRules,
+  listPersonas,
   listSessions,
   listEvidence,
   listKinds,
@@ -234,7 +235,7 @@ import {
   projectInstructionsLoaded,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
-import { escalateStep, resolveSteps, rowProcess } from '../routing';
+import { escalateStep, planSteps, resolveSteps, rowProcess } from '../routing';
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
@@ -263,6 +264,7 @@ import {
   failStep,
   moveAfter,
   playbookInputs,
+  replanSteps,
   routingInputs,
   sendBackSteps,
   sendBackTarget,
@@ -1205,35 +1207,51 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
-   * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
-   * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
-   * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
-   * plan, as a step an existing skip rule drops never enters one, and the reason is logged. A review
-   * that rejects at the retry limit and ships anyway hands over to QA as an approval does, so it
-   * gets the same check (`shipping`).
+   * The workstream as the task's rigor and the playbook plan it now, read inside the write that ends a
+   * step: the step at the row's index and every step before it, and every step that has run, stay, and the
+   * steps still to come are planned again for the account the lane is leased on. Reading it there is what
+   * lets a rigor changed while a session or the gate ran apply at the next step boundary, whatever the
+   * runner read before.
    */
-  async function withoutDocsOnlyQa(
+  function withCurrentPlan(tx: DbReader, id: WorkstreamId, leased: AccountId): WorkstreamRow {
+    const row = getWorkstreamRow(tx, id);
+    if (row.steps.length === 0) return row;
+    const task = getTask(tx, row.taskId);
+    const project = getProject(tx, row.projectId);
+    const plan = planSteps({
+      rigor: task.effectiveRigor,
+      task,
+      taskKinds: task.kinds,
+      project,
+      personas: listPersonas(tx),
+      ...playbookInputs(tx, project.id),
+      ...routingInputs(tx, { ...project, accountId: leased }),
+    });
+    return { ...row, steps: replanSteps(row.steps, row.stepIndex, plan.steps) };
+  }
+
+  /**
+   * Whether an approving step has only Markdown to show for it, so that a QA step after it has no behavior to
+   * exercise. Known only after implement, from the paths the commits touched, so it is read before the write
+   * that ends the step, and only when the plan as it stands has a QA step next. A rejection that ships at the
+   * round limit hands over to QA as an approval does (`shipping`).
+   */
+  async function qaSkippedForDocs(
     id: WorkstreamId,
+    ctl: Control,
     row: WorkstreamRow,
     step: WorkstreamStep,
     shipping = step.result?.verdict === Verdict.Approve,
-  ): Promise<WorkstreamRow> {
-    const qaIndex = row.stepIndex + 1;
-    if (
-      step.role !== StepRole.Review ||
-      !shipping ||
-      row.steps[qaIndex]?.role !== StepRole.Qa ||
-      row.baseHead === null
-    )
-      return row;
-    if (!(await changesOnlyMarkdown(row, checkoutOf(db, row)))) return row;
-    opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
-    return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
+  ): Promise<boolean> {
+    if (step.role !== StepRole.Review || !shipping || row.baseHead === null) return false;
+    const now = withCurrentPlan(db, id, ctl.accountId);
+    if (now.steps[now.stepIndex + 1]?.role !== StepRole.Qa) return false;
+    return changesOnlyMarkdown(row, checkoutOf(db, row));
   }
 
   /**
    * The steps once the current one is done and step `to` entered (-1: none). A rejection at the
-   * retry limit (`atLimit`) files its findings as a follow-up task in the same write and names it on
+   * round limit (`atLimit`) files its findings as a follow-up task in the same write and names it on
    * the step.
    */
   function stepsAdvanced(
@@ -1252,63 +1270,61 @@ export function createRunner(opts: RunnerOptions): Runner {
     );
   }
 
-  /** Done with the current step: step `to` runs next, as it would after an approval. */
-  function advanceTo(
-    id: WorkstreamId,
-    ctl: Control,
-    row: WorkstreamRow,
-    step: WorkstreamStep,
-    to: number,
-    atLimit: RetryLimitFindings | null,
-  ): 'next' | 'stop' {
-    const next = row.steps[to];
-    if (!next) return 'stop';
-    opts.state.write((ctx) => {
-      countFinished(ctx, step);
-      patchWorkstream(ctx, id, ctl.fence, {
-        steps: stepsAdvanced(ctx, row, to, atLimit),
-        stepIndex: to,
-        nextAction: actionEntering(ctx, row, to),
-        model: next.model,
-        effort: next.effort,
-      });
-      ctx.emit({
-        type: EventType.StepChanged,
-        entityType: 'workstream',
-        entityId: id,
-        data: { stepIndex: to, role: next.role },
-      });
-    });
-    return 'next';
-  }
-
   /**
-   * The last read-only step is over and the work is done: DONE, or waiting for the builder's check
-   * when the project has no gate. A rejection at the retry limit (`atLimit`) ships the same way and,
-   * in the same write, files its findings as a follow-up task and names it on the step.
+   * A read-only step approved the work, or its rejection used up the review rounds and ships it
+   * (`atLimit`, which files its findings as a follow-up task in the same write). The steps are planned
+   * again inside the write, and only then is the move chosen from them: the next step runs, or the work is
+   * done (DONE, or waiting for the builder's check when the project has no gate). `skipQa` drops a QA step
+   * that follows when only docs changed.
    */
-  async function completeReadOnlySteps(
+  async function finishApproved(
     id: WorkstreamId,
     ctl: Control,
-    row: WorkstreamRow,
+    started: WorkstreamRow,
     step: WorkstreamStep,
-    ending: { readonly reason: string; readonly atLimit: RetryLimitFindings | null },
-  ): Promise<'stop'> {
-    const gateless = getProject(db, row.projectId).gateCommand === null;
+    ending: {
+      readonly reason: (qaSkipped: boolean) => string;
+      readonly atLimit: RetryLimitFindings | null;
+      readonly skipQa: boolean;
+    },
+  ): Promise<'next' | 'stop'> {
+    const gateless = getProject(db, started.projectId).gateCommand === null;
     // Nothing checked a read-only approval either: the builder checks what the steps produced.
-    const facts = gateless ? await checkFacts(row, checkoutOf(db, row)) : null;
+    const facts = gateless ? await checkFacts(started, checkoutOf(db, started)) : null;
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);
       return 'stop';
     }
-    opts.state.write((ctx) => {
+    const ended = opts.state.write((ctx) => {
       countFinished(ctx, step);
-      patchWorkstream(ctx, id, ctl.fence, {
-        steps: stepsAdvanced(ctx, row, -1, ending.atLimit),
-      });
+      const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
+      const qaAt = current.stepIndex + 1;
+      const qaSkipped = ending.skipQa && current.steps[qaAt]?.role === StepRole.Qa;
+      const row = qaSkipped
+        ? { ...current, steps: current.steps.filter((_, i) => i !== qaAt) }
+        : current;
+      const to = row.stepIndex + 1 < row.steps.length ? row.stepIndex + 1 : -1;
+      const next = row.steps[to];
+      if (next) {
+        patchWorkstream(ctx, id, ctl.fence, {
+          steps: stepsAdvanced(ctx, row, to, ending.atLimit),
+          stepIndex: to,
+          nextAction: actionEntering(ctx, row, to),
+          model: next.model,
+          effort: next.effort,
+        });
+        ctx.emit({
+          type: EventType.StepChanged,
+          entityType: 'workstream',
+          entityId: id,
+          data: { stepIndex: to, role: next.role },
+        });
+        return { outcome: 'next' as const, qaSkipped };
+      }
+      patchWorkstream(ctx, id, ctl.fence, { steps: stepsAdvanced(ctx, row, -1, ending.atLimit) });
       if (facts) {
         waitForBuilder(ctx, id, ctl.fence, row, facts);
-        return;
+        return { outcome: 'stop' as const, qaSkipped };
       }
       // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
       transitionWorkstream(ctx, id, {
@@ -1316,9 +1332,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         fence: ctl.fence,
         reason: 'steps complete',
       });
-      markDone(ctx, id, ctl.fence, row, ending.reason);
+      markDone(ctx, id, ctl.fence, row, ending.reason(qaSkipped));
+      return { outcome: 'stop' as const, qaSkipped };
     });
-    return 'stop';
+    if (ended.qaSkipped)
+      opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+    return ended.outcome;
   }
 
   /**
@@ -1396,8 +1415,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     wrote: string,
   ): Promise<'next' | 'stop'> {
     const step = currentStep(started);
-    const row = await withoutDocsOnlyQa(id, started, step);
-    const docsOnly = row.steps.length < started.steps.length;
+    const row = started;
+    const docsOnly = await qaSkippedForDocs(id, ctl, row, step);
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
     const floorSession = (sessionId: SessionId) =>
       (listSessions(db, id).find((x) => x.id === sessionId)?.sequence ?? 0) > step.sessionFloor;
@@ -1450,12 +1469,13 @@ export function createRunner(opts: RunnerOptions): Runner {
         return 'stop';
       }
       case 'done':
-        return completeReadOnlySteps(id, ctl, row, step, {
-          reason: `${step.role} approved${docsOnly ? '; QA skipped: only docs changed' : ''}`,
-          atLimit: null,
-        });
       case 'advance':
-        return advanceTo(id, ctl, row, step, move.to, null);
+        return finishApproved(id, ctl, row, step, {
+          reason: (qaSkipped) =>
+            `${step.role} approved${qaSkipped ? '; QA skipped: only docs changed' : ''}`,
+          atLimit: null,
+          skipQa: docsOnly,
+        });
       case 'send_back': {
         // A reviewer's rejections count against the rigor's rounds, read live; the gate's and the
         // builder's send-backs use `attempt`, which this never touches.
@@ -1481,13 +1501,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             // The move an approval would get: a step that follows (QA after review) still runs. One
             // that rejects there is past the limit too, so it ships the same way with its own follow-up.
             // A change of Markdown files alone skips QA here as it does after an approval.
-            const shipped = await withoutDocsOnlyQa(id, row, step, true);
-            const skippedQa = shipped.steps.length < row.steps.length;
-            const to = shipped.stepIndex + 1;
-            if (to < shipped.steps.length) return advanceTo(id, ctl, shipped, step, to, atLimit);
-            return completeReadOnlySteps(id, ctl, shipped, step, {
-              reason: `${step.role} rejected the work and the review rounds (${String(rounds)}) are used up; shipped with its findings filed as a follow-up task${skippedQa ? '; QA skipped: only docs changed' : ''}`,
+            return finishApproved(id, ctl, row, step, {
+              reason: (qaSkipped) =>
+                `${step.role} rejected the work and the review rounds (${String(rounds)}) are used up; shipped with its findings filed as a follow-up task${qaSkipped ? '; QA skipped: only docs changed' : ''}`,
               atLimit,
+              skipQa: await qaSkippedForDocs(id, ctl, row, step, true),
             });
           }
           fail(
@@ -1529,10 +1547,13 @@ export function createRunner(opts: RunnerOptions): Runner {
         opts.state.write((ctx) => {
           if (up.moved && target.profileId)
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
+          // The steps still to come are planned again for the rigor as it is now; the rejecting step and
+          // every step before it stay, so the target and the pending fix's reviewer keep their places.
+          const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
           patchWorkstream(ctx, id, ctl.fence, {
             steps: countSendBack(
-              sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
-              row.stepIndex,
+              sendBackSteps(current.steps, current.stepIndex, move.to, up.step, entryFor(ctx, id)),
+              current.stepIndex,
               rounds,
             ),
             stepIndex: move.to,
@@ -3604,17 +3625,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     const step = currentStep(row);
-    const move = moveAfter(row.steps, row.stepIndex);
-    const next = move.kind === 'advance' ? row.steps[move.to] : undefined;
     opts.state.write((ctx) => {
       countFinished(ctx, step);
+      // Planned again first: a rigor changed while the session ran decides whether a step follows.
+      const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
+      const move = moveAfter(current.steps, current.stepIndex);
+      const next = move.kind === 'advance' ? current.steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
         transitionWorkstream(ctx, id, {
           to: S.Queued,
           fence: ctl.fence,
           patch: {
             nextAction: { kind: 'start' },
-            steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+            steps: advanceSteps(current.steps, current.stepIndex, move.to, entryFor(ctx, id)),
             stepIndex: move.to,
             model: next.model,
             effort: next.effort,
@@ -3624,11 +3647,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         clearLease(ctx, id);
         return;
       }
-      if (row.steps.length > 0)
+      if (current.steps.length > 0)
         patchWorkstream(ctx, id, ctl.fence, {
-          steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+          steps: advanceSteps(current.steps, current.stepIndex, -1, entryFor(ctx, id)),
         });
-      waitForBuilder(ctx, id, ctl.fence, row, facts);
+      waitForBuilder(ctx, id, ctl.fence, current, facts);
     });
   }
 
@@ -3919,52 +3942,55 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // Shutdown cut the call short: record nothing, and recovery runs the gate again.
       if (stopRequested(ctl) === 'shutdown') return;
-      const dropped = new Set<number>();
-      if (skipped !== null && move.kind === 'advance') {
-        dropped.add(move.to);
-        if (skipsQa) {
-          dropped.add(move.to + 1);
-          opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+      opts.state.write((ctx) => {
+        insertEvidence(ctx, evidence);
+        countFinished(ctx, step);
+        // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
+        // decides whether a Review follows or the work is done. The judge's skip applies only to a
+        // Review that is still next.
+        const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
+        const reviewAt = current.stepIndex + 1;
+        const dropped = new Set<number>();
+        if (skipped !== null && current.steps[reviewAt]?.role === StepRole.Review) {
+          dropped.add(reviewAt);
+          if (skipsQa && current.steps[reviewAt + 1]?.role === StepRole.Qa) {
+            dropped.add(reviewAt + 1);
+            opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+          }
         }
-      }
-      const steps = row.steps.filter((_, i) => !dropped.has(i));
-      const next = move.kind === 'advance' ? steps[move.to] : undefined;
-      if (move.kind === 'advance' && next) {
-        opts.state.write((ctx) => {
-          insertEvidence(ctx, evidence);
-          countFinished(ctx, step);
+        const steps = current.steps.filter((_, i) => !dropped.has(i));
+        const after = moveAfter(steps, current.stepIndex);
+        const next = after.kind === 'advance' ? steps[after.to] : undefined;
+        const skippedNote = dropped.size === 0 ? null : skipped;
+        if (after.kind === 'advance' && next) {
           transitionWorkstream(ctx, id, {
             to: S.Queued,
             fence: ctl.fence,
             patch: {
               nextAction: { kind: 'start' },
-              steps: advanceSteps(steps, row.stepIndex, move.to, entryFor(ctx, id)),
-              stepIndex: move.to,
+              steps: advanceSteps(steps, current.stepIndex, after.to, entryFor(ctx, id)),
+              stepIndex: after.to,
               model: next.model,
               effort: next.effort,
             },
             reason:
-              skipped === null
+              skippedNote === null
                 ? `gate passed; next: ${next.role}`
-                : `gate passed; ${skipped}; next: ${next.role}`,
+                : `gate passed; ${skippedNote}; next: ${next.role}`,
           });
           clearLease(ctx, id);
-        });
-        return;
-      }
-      opts.state.write((ctx) => {
-        insertEvidence(ctx, evidence);
-        countFinished(ctx, step);
+          return;
+        }
         if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(steps, row.stepIndex, -1, entryFor(ctx, id)),
+            steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
         markDone(
           ctx,
           id,
           ctl.fence,
-          row,
-          skipped === null ? 'gate passed' : `gate passed; ${skipped}`,
+          current,
+          skippedNote === null ? 'gate passed' : `gate passed; ${skippedNote}`,
         );
       });
       return;
