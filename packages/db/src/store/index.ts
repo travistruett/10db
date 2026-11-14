@@ -23,7 +23,6 @@ export * from './principles';
 export * from './landing-groups';
 export * from './lane-times';
 export * from './legacy-routing';
-export * from './legacy-routing-fixtures';
 export * from './plan-record';
 export * from './shape-review';
 export * from './shape-shadow';

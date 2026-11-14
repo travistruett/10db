@@ -5,16 +5,18 @@ import {
   insertTask,
   patchTask,
   readLegacyRouting,
+  seedProject,
+  type LegacyRiskTag,
+  type Store,
+} from '@10db/db';
+import {
   seedLegacyBinding,
   seedLegacyDefaultFlows,
   seedLegacyPatterns,
   seedLegacyPersonaPin,
   seedLegacyRoleSetting,
   seedLegacyTaskRouting,
-  seedProject,
-  type LegacyRiskTag,
-  type Store,
-} from '@10db/db';
+} from './legacy-rows';
 import type { StateStore } from '../src/events';
 
 export interface MovedTask {

@@ -19,6 +19,11 @@ import {
   listInbox,
   listKinds,
   readLegacyRouting,
+  seedProject,
+  type LegacyRiskTag,
+} from '@10db/db';
+import {
+  type LegacyPatternSeed,
   seedLegacyBinding,
   seedLegacyDefaultFlows,
   seedLegacyFlow,
@@ -27,10 +32,7 @@ import {
   seedLegacyProjectFlow,
   seedLegacyRoleSetting,
   seedLegacyTaskRouting,
-  seedProject,
-  type LegacyPatternSeed,
-  type LegacyRiskTag,
-} from '@10db/db';
+} from '../../test/legacy-rows';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
