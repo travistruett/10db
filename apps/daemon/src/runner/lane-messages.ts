@@ -12,6 +12,7 @@ import {
   type TaskMessageRow,
 } from '@10db/db';
 import {
+  builderMessageText,
   createDelivery,
   outgoingMessage as deliveryOutgoing,
   type OutgoingMessage as DeliveryOutgoingMessage,
@@ -19,7 +20,6 @@ import {
 } from '../conversation';
 import type { StateStore } from '../events';
 import type { SessionHandle } from '../sessions';
-import { builderMessageText } from '../thread';
 
 // Workbench spec §6.3. A builder message is pushed to a lane session under a client uuid, and is
 // delivered only when a turn is seen to take it: pushing puts it in a channel in the daemon's memory,

@@ -31,6 +31,7 @@ import {
   findItemByPushUuid,
   getItem,
   insertItem,
+  lastItems,
   listItems,
   listUndeliveredMessages,
   markItemPushedUnder,
@@ -161,8 +162,11 @@ export function taskConversationOf(db: DbReader, taskId: TaskId): ConversationRo
   return conversationOf(db, { kind: ConversationOwnerKind.Task, id: taskId });
 }
 
-/** The task's thread's conversation, made by its first item, in the caller's write. */
-function taskConversation(ctx: WriteContext, taskId: TaskId): ConversationRow {
+/**
+ * The task's thread's conversation, made by its first item or by a lane whose session streams into it,
+ * in the caller's write.
+ */
+export function ensureTaskConversation(ctx: WriteContext, taskId: TaskId): ConversationRow {
   const task = getTask(ctx.tx, taskId);
   return (
     taskConversationOf(ctx.tx, taskId) ??
@@ -234,7 +238,7 @@ function appendToThread(
   },
 ): TaskMessageRow {
   const task = getTask(ctx.tx, taskId);
-  const conversation = taskConversation(ctx, taskId);
+  const conversation = ensureTaskConversation(ctx, taskId);
   const item = insertItem(ctx, conversation.id, {
     ...taskItemOf(message),
     turnId: message.turnId ?? null,
@@ -542,12 +546,36 @@ export function insertSystemNotice(
   );
 }
 
-/** Appends the agent's reply at the end of a pass turn, naming the turn, in the caller's write. */
+/**
+ * The agent's reply at the end of a pass turn, naming the turn, in the caller's write. A reply the
+ * session already streamed into the thread, as its latest item, is that item, marked as the turn's.
+ */
 export function insertAgentReply(
   ctx: WriteContext,
   taskId: TaskId,
   input: { readonly body: string; readonly turnId: PassTurnId },
 ): TaskMessageDto {
+  const conversation = taskConversationOf(ctx.tx, taskId);
+  const [latest] = conversation === null ? [] : lastItems(ctx.tx, conversation.id, 1);
+  if (
+    latest?.author === ConversationItemAuthor.Agent &&
+    latest.kind === ConversationItemKind.AgentMessage &&
+    !latest.partial &&
+    (latest.turnId === null || latest.turnId === input.turnId) &&
+    taskMessageOf(latest)?.body === input.body
+  ) {
+    markTaskMessageTurn(ctx, taskId, latest.id, input.turnId);
+    const task = getTask(ctx.tx, taskId);
+    ctx.emit({
+      type: EventType.TaskMessageAdded,
+      entityType: 'task',
+      entityId: taskId,
+      data: { projectId: task.projectId, messageId: latest.id },
+    });
+    const row = toTaskMessage(taskId, getItem(ctx.tx, latest.id), []);
+    if (row === null) throw new NotFoundError('task message', latest.id);
+    return toMessageDto(row);
+  }
   return toMessageDto(
     appendToThread(ctx, taskId, {
       author: TaskMessageAuthor.Agent,

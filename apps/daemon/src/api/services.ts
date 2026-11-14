@@ -172,7 +172,7 @@ import type {
   StartTaskInput,
   SystemCheckDto,
   TaskDto,
-  TaskFileId,
+  ConversationFileId,
   TaskId,
   PersonId,
   QuestionRouteDto,
@@ -189,7 +189,6 @@ import type {
   TaskScreenId,
   TaskScreensDto,
   PicturesStatusDto,
-  TaskThreadDto,
   TaskInput,
   RunNextResult,
   TaskMove,
@@ -516,8 +515,6 @@ export interface ApiServices extends PlanRecordServices {
     shapeId: ShapeId,
     file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
   ): ShapeFileDto;
-  /** A task's thread, oldest first; throws NotFoundError for an unknown task. */
-  taskThread(taskId: TaskId): TaskThreadDto;
   /**
    * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or
@@ -537,11 +534,6 @@ export interface ApiServices extends PlanRecordServices {
    * a page with no running turn is left as it is. Refused (409) for a task no open pass holds.
    */
   stopPage(taskId: TaskId): Promise<void>;
-  /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
-  taskPicture(
-    taskId: TaskId,
-    fileId: TaskFileId,
-  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
   /** A task's pictures of the builder's app (Workbench spec §10), oldest first. */
   taskScreens(taskId: TaskId): TaskScreensDto;
   /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
@@ -606,7 +598,7 @@ export interface ApiServices extends PlanRecordServices {
   conversationLive(id: ConversationId): ConversationLiveDto;
   /**
    * A builder message, stored queued and taken by the conversation's owner, with the paths its `@`
-   * mentions name and its pictures (a chat's); ConflictError for a task's.
+   * mentions name and its pictures; a task's goes to its page's session as its thread's does.
    */
   postConversationMessage(
     id: ConversationId,
@@ -615,7 +607,12 @@ export interface ApiServices extends PlanRecordServices {
       readonly mentions: readonly string[];
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
     },
-  ): ConversationItemDto;
+  ): Promise<ConversationItemDto>;
+  /** A picture sent with one of the conversation's messages; NotFoundError for any other file. */
+  conversationPicture(
+    id: ConversationId,
+    fileId: ConversationFileId,
+  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
   /** The tracked files of the conversation's checkout an `@` query matches (sessions spec §11). */
   conversationFiles(id: ConversationId, q: string): Promise<ProjectFileMatchDto[]>;
   /** Sessions (spec §7.1, §10): the open tabs in strip order, across every project. */
@@ -638,8 +635,14 @@ export interface ApiServices extends PlanRecordServices {
   sendConversationNow(id: ConversationId): ConversationDto;
   /** Stops the turn; answers once it is stopping or settled. */
   stopConversation(id: ConversationId): Promise<ConversationDto>;
-  /** Stops the turn and sends the edited message as the next. */
-  redoConversation(id: ConversationId, text: string): Promise<ConversationItemDto>;
+  /** Stops the turn and sends the edited message, with its pictures, as the next. */
+  redoConversation(
+    id: ConversationId,
+    message: {
+      readonly text: string;
+      readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+    },
+  ): Promise<ConversationItemDto>;
   /** What an item keeps on disk past what it holds; NotFoundError when it keeps nothing. */
   conversationFull(id: ConversationId, itemId: ConversationItemId): ConversationFullDto;
   /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */

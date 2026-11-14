@@ -3,16 +3,22 @@ import {
   createTestStore,
   getItem,
   getMessageRow,
+  insertBuilderMessage,
   insertItem,
   insertShape,
+  insertTask,
+  listUndeliveredTaskMessages,
+  markItemsTakenUnder,
   seedProject,
   shapeConversation,
+  taskConversationOf,
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import type { InterruptReceipt } from '../sessions';
 import { createDelivery, type DeliveryDeps } from './delivery';
+import { readBackAsk } from './delivery-rules';
 import { STRICTEST_LIMITS } from './picture-limits';
 
 // Sessions spec §6.2: the delivery rules over any conversation. A Plan conversation here, so the
@@ -131,5 +137,47 @@ describe('a conversation’s delivery', () => {
     const rec = recordingHandle();
     delivery(rec.handle, { conversation: () => null }).pushUntaken();
     expect(rec.sent).toEqual([]);
+  });
+});
+
+// Sessions spec §6.1, §6.2: a task's conversation takes its builder messages by the same rules, and
+// after a restart rule 5 reads back what the agent took of them.
+describe('a task conversation’s delivery', () => {
+  it('pushes again what an interrupt may have lost, and rule 5 delivers what the agent shows it took', async () => {
+    const project = seedProject(store, { name: 'beta' });
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings page',
+        acceptanceCriteria: ['x'],
+        areas: ['ui'],
+      }),
+    ).value;
+    const write = (body: string) =>
+      state.write((ctx) => insertBuilderMessage(ctx, task.id, { body, files: [] })).id;
+    const first = write('Make it smaller');
+    const second = write('And darker');
+    const rec = recordingHandle(null);
+    const d = delivery(rec.handle, {
+      conversation: () => taskConversationOf(state.db, task.id)?.id ?? null,
+    });
+    d.pushUntaken();
+    expect(d.consumed([idUuid(first)])).toEqual([first]);
+    // No receipt: the second may have been lost with the turn, so it goes again under a fresh uuid.
+    await d.interrupt();
+    const again = rec.sent.at(-1)?.uuid ?? '';
+    expect(rec.sent.map((s) => s.uuid)).toEqual([idUuid(first), idUuid(second), again]);
+
+    // The daemon restarts: the agent's conversation holds the fresh uuid, so the second was taken.
+    const inDoubt = listUndeliveredTaskMessages(state.db, task.id);
+    expect(readBackAsk(inDoubt)).toEqual({
+      wanted: [idUuid(second), again],
+      since: getItem(state.db, second).createdAt,
+    });
+    const conversationId = taskConversationOf(state.db, task.id)?.id;
+    if (conversationId === undefined) throw new Error('no conversation');
+    expect(state.write((ctx) => markItemsTakenUnder(ctx, conversationId, [again]))).toEqual([
+      second,
+    ]);
+    expect(listUndeliveredTaskMessages(state.db, task.id)).toEqual([]);
   });
 });

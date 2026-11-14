@@ -35,6 +35,7 @@ import {
   listSignOffWaits,
   listTaskThreadRows,
   openHolds,
+  taskConversationOf,
   openPreviewMark,
   type DbReader,
 } from '@10db/db';
@@ -120,6 +121,7 @@ function pageView(
     state: run?.state ?? null,
     nextActionKind: run?.nextAction.kind ?? null,
     spokenTo,
+    conversationId: taskConversationOf(db, task.id)?.id ?? null,
     turn:
       turn === undefined
         ? null

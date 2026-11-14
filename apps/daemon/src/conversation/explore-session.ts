@@ -1,34 +1,20 @@
 import {
-  ConversationItemAuthor,
-  ConversationItemKind,
   EventType,
-  mintId,
-  ToolCallStatus,
   type ConversationId,
   type ConversationItemId,
   type SessionId,
-  type ToolCallView,
 } from '@10db/contracts';
-import {
-  markSessionStarted,
-  patchConversation,
-  putItem,
-  updateSessionUsage,
-  type Json,
-  type WriteContext,
-} from '@10db/db';
+import { markSessionStarted, patchConversation, updateSessionUsage } from '@10db/db';
 import type { Clock } from '../clock';
 import type { LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
-import type { AgentCommand, SessionEvent, SessionHandle, ToolCallFull } from '../sessions';
+import type { AgentCommand, SessionEvent, SessionHandle } from '../sessions';
 import type { ExploreLaunch } from './explore-hooks';
-import { boundedOutput, capItemBody, writeFullOutput, type FullOutput } from './full-output';
-import { createLiveBuffers, type LiveBuffers } from './live-buffers';
-import { storePartial } from './partial';
+import { createItemRecorder } from './item-recorder';
+import type { LiveBuffers } from './live-buffers';
 
-// Sessions spec §6.5, §6.6: one open explore session. Its events stream into live buffers, and each
-// finished item is stored under the id its buffer minted (call 3), capped (call 31), with what the cap
-// or the view cut off on disk. What the reducer needs (started, a turn's end, the session's end) goes
+// Sessions spec §6.5, §6.6: one open explore session. Its items are the library's item recorder's
+// (each stored under the id its buffer minted, call 3, capped, call 31). What the reducer needs (started, a turn's end, the session's end) goes
 // to the engine.
 
 type TurnComplete = Extract<SessionEvent, { type: 'turn_complete' }>;
@@ -83,93 +69,18 @@ export interface OpenSessionDeps {
 
 export function openSession(deps: OpenSessionDeps): OpenSession {
   const { state, conversationId, sessionId, sink } = deps;
-  const buffers = createLiveBuffers({
-    conversationId,
+  const items = createItemRecorder({
+    state,
     clock: deps.clock,
-    send: (frame) => {
-      deps.frames.publish(frame);
-    },
+    log: deps.log,
+    dataDir: deps.dataDir,
+    frames: deps.frames,
+    conversationId,
   });
   let detached = false;
   /** Turns whose remaining events are dropped, oldest first: each ends with its `turn_complete`. */
   let skipping = 0;
   let commands: readonly AgentCommand[] = [];
-  /** The adapter ids of reasoning items in flight, stored when the next item begins. */
-  const reasoning = new Set<string>();
-  let planItem: ConversationItemId | null = null;
-
-  /** What a write left for the disk, put there once the write has committed. */
-  let disk: [ConversationItemId, FullOutput][] = [];
-  /** Runs `fn` in one write, then writes what its items keep on disk, outside the transaction. */
-  const write = <T>(fn: (ctx: WriteContext) => T): T => {
-    const value = state.write(fn);
-    const pending = disk;
-    disk = [];
-    for (const [id, full] of pending)
-      try {
-        writeFullOutput(deps.dataDir, conversationId, id, full);
-      } catch (error) {
-        deps.log.warn({ err: error, conversationId }, 'an item’s full output could not be kept');
-      }
-    return value;
-  };
-
-  const store = (
-    ctx: WriteContext,
-    id: ConversationItemId,
-    kind: ConversationItemKind,
-    body: Json,
-    full: ToolCallFull | null,
-    partial = false,
-  ): void => {
-    const capped = capItemBody(kind, body);
-    putItem(ctx, conversationId, {
-      id,
-      author: ConversationItemAuthor.Agent,
-      kind,
-      body: capped.body,
-      partial,
-    });
-    // The adapter's own output and patch are whole; the cap's text is what the item left out.
-    const output = full?.output;
-    const onDisk: FullOutput = {
-      ...capped.full,
-      ...(full?.patch === undefined ? {} : { patch: full.patch }),
-      ...(output === undefined ? {} : { output: boundedOutput(output) }),
-    };
-    if (Object.keys(onDisk).length > 0) disk.push([id, onDisk]);
-  };
-
-  /** Stores each text in flight: reasoning complete (call 10), a reply with no `message` partial. */
-  const storeTexts = (ctx: WriteContext, except?: string, replies = false): void => {
-    for (const adapterId of [...reasoning]) {
-      if (adapterId === except) continue;
-      reasoning.delete(adapterId);
-      const held = buffers.finish(adapterId);
-      if (held?.kind !== 'reasoning' || held.text === '') continue;
-      store(ctx, held.itemId, ConversationItemKind.Reasoning, { text: held.text }, null);
-    }
-    if (!replies) return;
-    for (const held of buffers.inFlight())
-      if (held.kind === 'agent_message' && held.text !== '')
-        store(ctx, held.itemId, ConversationItemKind.AgentMessage, { text: held.text }, null, true);
-  };
-
-  /** A new item begins: the reasoning before it is complete. */
-  const nextItem = (adapterId: string): void => {
-    if ([...reasoning].some((id) => id !== adapterId))
-      write((ctx) => {
-        storeTexts(ctx, adapterId);
-      });
-  };
-
-  const finishedCall = (call: ToolCallView, full: ToolCallFull | undefined): void => {
-    const id = buffers.itemIdOf(call.id);
-    buffers.finish(call.id);
-    write((ctx) => {
-      store(ctx, id, ConversationItemKind.ToolCall, { ...call }, full ?? null);
-    });
-  };
 
   const onEvent = (event: SessionEvent): void => {
     if (detached && event.type !== 'ended') return;
@@ -187,43 +98,12 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         sink.started(event.providerSessionId);
         return;
       case 'text_delta':
-        nextItem(event.itemId);
-        buffers.text(event.itemId, 'agent_message', event.offset, event.text);
-        return;
       case 'reasoning_delta':
-        nextItem(event.itemId);
-        reasoning.add(event.itemId);
-        buffers.text(event.itemId, 'reasoning', event.offset, event.text);
-        return;
-      case 'message': {
-        nextItem(event.itemId);
-        const id = buffers.itemIdOf(event.itemId);
-        buffers.finish(event.itemId);
-        write((ctx) => {
-          store(ctx, id, ConversationItemKind.AgentMessage, { text: event.text }, null);
-        });
-        return;
-      }
+      case 'message':
       case 'tool_call':
-        nextItem(event.call.id);
-        buffers.call(event.call, event.appended);
-        if (event.call.status !== ToolCallStatus.Running) finishedCall(event.call, event.full);
+      case 'plan_update':
+        items.record(event);
         return;
-      case 'plan_update': {
-        const id = (planItem ??= mintId('ConversationItem'));
-        write((ctx) => {
-          store(
-            ctx,
-            id,
-            ConversationItemKind.Plan,
-            {
-              steps: event.steps.map((s) => ({ text: s.text, status: s.status })),
-            },
-            null,
-          );
-        });
-        return;
-      }
       case 'commands':
         commands = event.commands;
         // Kept on the conversation, so a cold one still offers `/`; the screen reads the view again.
@@ -254,8 +134,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         return;
       case 'turn_complete':
         // What streamed with no `message` to finish it is kept, so no turn end loses text.
-        write((ctx) => {
-          storeTexts(ctx, undefined, true);
+        items.turnEnded((ctx) => {
           updateSessionUsage(ctx, sessionId, {
             inputTokens: event.inputTokens,
             outputTokens: event.outputTokens,
@@ -292,7 +171,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     } catch (error) {
       deps.log.error({ err: error, conversationId }, 'explore session events failed');
     } finally {
-      buffers.dispose();
+      items.dispose();
     }
   })();
 
@@ -300,7 +179,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     sessionId,
     handle: deps.handle,
     launch: deps.launch,
-    buffers,
+    buffers: items.buffers,
     fresh: deps.fresh,
     commands: () => commands,
     detach() {
@@ -309,18 +188,9 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     skipTurn() {
       skipping += 1;
     },
-    storePartial() {
-      reasoning.clear();
-      const ids = write((ctx) =>
-        storePartial(ctx, conversationId, buffers.inFlight(), (id, full) => {
-          disk.push([id, full]);
-        }),
-      );
-      buffers.dispose();
-      return ids;
-    },
+    storePartial: () => items.storePartial(),
     newTurn() {
-      planItem = null;
+      items.newTurn();
     },
     done,
   };

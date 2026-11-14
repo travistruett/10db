@@ -198,7 +198,12 @@ import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler, createBuilderTools } from '../builder';
-import { createExploreEngine, pictureLimitsFor } from '../conversation';
+import {
+  createExploreEngine,
+  createLiveRegistry,
+  createTaskThread,
+  pictureLimitsFor,
+} from '../conversation';
 import {
   chatHooks,
   chatsUnavailable,
@@ -320,7 +325,6 @@ import {
   routingInputs,
   seedTeam,
 } from '../team';
-import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -1589,6 +1593,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
+  // What each task conversation's session streams now; the runner owns those sessions.
+  const laneLive = createLiveRegistry();
   const createdRunner = createRunner({
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
@@ -1615,6 +1621,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     exportAwsCredentials,
     dataDir: opts.dataDir,
     live,
+    frames: liveFrames,
+    laneLive,
     limits,
     mcpUrl: () => mcpUrl,
     skillBody: (name) => readSkillBody(name, opts.harnessDir ?? HARNESS_PLUGIN_DIR),
@@ -1986,6 +1994,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
     },
   });
+  const thread = createTaskThread({
+    state,
+    dataDir: opts.dataDir,
+    pages: {
+      deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
+    },
+  });
   const services = createServices({
     state,
     github: {
@@ -2070,6 +2085,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       chat,
       files: (id, q) => Promise.resolve(conversationFiles(id, q)),
       dataDir: opts.dataDir,
+      laneLive,
+      task: {
+        post: (taskId, message, how) => thread.postTaskMessage(taskId, message, how),
+      },
     }),
     chat: createChatApiServices({
       state,
@@ -2087,13 +2106,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pictures,
     preview: previewNow,
     daemonPort: () => listenPort,
-    thread: createThreadService({
-      state,
-      dataDir: opts.dataDir,
-      pages: {
-        deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
-      },
-    }),
+    thread,
     knowledge: createKnowledgeServices({
       state,
       searchAvailable: knowledgeIndex.failed.length === 0,

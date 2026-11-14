@@ -19,7 +19,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
-import { buildThreadDigest, builderMessageText } from './session-text';
+import { buildThreadDigest, builderMessageText } from './lane-text';
 
 // Workbench spec §6.3: a fresh session starts from the thread's digest, built from rows, after the
 // latest handoff when there is one, with each pasted picture named by where it is kept.

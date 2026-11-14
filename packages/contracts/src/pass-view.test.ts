@@ -136,6 +136,7 @@ describe("a pass lane's activity and turns", () => {
           state: 'RUNNING',
           nextActionKind: 'start',
           spokenTo: true,
+          conversationId: null,
           turn: {
             id: turnId,
             seq: 1,

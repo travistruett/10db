@@ -3,6 +3,7 @@ import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { stubServices } from '../../test/api-stub';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { createLiveRegistry } from '../conversation';
 import { createApp } from '../api';
 import { createConversationServices } from '../daemon';
 
@@ -40,6 +41,8 @@ function appOf(world: ChatWorld) {
         chat: world.chat,
         files: () => Promise.resolve([]),
         dataDir: world.dataDir,
+        laneLive: createLiveRegistry(),
+        task: { post: () => Promise.reject(new Error('no task here')) },
       }),
     ),
     upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),

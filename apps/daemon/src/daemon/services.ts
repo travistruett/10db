@@ -174,7 +174,7 @@ import {
 } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
-import type { ThreadService } from '../thread';
+import type { TaskThread } from '../conversation';
 import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
@@ -238,7 +238,7 @@ export function createServices(deps: {
   /** Importing a planning effort into a Plan. */
   readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
-  readonly thread: ThreadService;
+  readonly thread: TaskThread;
   readonly pictures: Pictures;
   /** The dev server 10db runs for a project while a pass is open. */
   readonly preview: Preview;

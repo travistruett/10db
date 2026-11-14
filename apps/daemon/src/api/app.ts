@@ -104,7 +104,7 @@ import {
   SystemCheckDto,
   TakeOutRequest,
   PassCloseRequest,
-  TaskFileId,
+  ConversationFileId,
   TaskScreenId,
   TaskId,
   TaskInput,
@@ -129,7 +129,7 @@ import {
   ConversationFilesQuery,
   SessionsSettingsDto,
 } from '@10db/contracts';
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
@@ -285,6 +285,24 @@ function pastedPictures(
       bytes: new Uint8Array(await file.arrayBuffer()),
     })),
   );
+}
+
+/**
+ * A builder message as a conversation route takes it: JSON for words alone, a multipart form when
+ * pictures go with them.
+ */
+async function builderMessage(c: Context): Promise<{
+  readonly text: string;
+  readonly mentions: readonly string[];
+  readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+}> {
+  if ((c.req.header('content-type') ?? '').startsWith('multipart/form-data')) {
+    const form = ConversationMessageForm.parse(await c.req.parseBody({ all: true }));
+    const { mentions } = PostConversationMessage.parse({ text: form.text, mentions: form.mention });
+    return { text: form.text, mentions, pictures: await pastedPictures(form.picture) };
+  }
+  const body = PostConversationMessage.parse(await c.req.json());
+  return { text: body.text, mentions: body.mentions, pictures: [] };
 }
 
 /** `GET /chats?open=1`: the open tabs, the only list this route serves. */
@@ -630,30 +648,18 @@ export function createApp(deps: ApiDeps) {
     // JSON for words alone, a multipart form when pictures go with them.
     .post('/conversations/:conversationId/messages', async (c) => {
       const id = ConversationId.parse(c.req.param('conversationId'));
-      if ((c.req.header('content-type') ?? '').startsWith('multipart/form-data')) {
-        const form = ConversationMessageForm.parse(await c.req.parseBody({ all: true }));
-        const { mentions } = PostConversationMessage.parse({
-          text: form.text,
-          mentions: form.mention,
-        });
-        return c.json(
-          deps.services.postConversationMessage(id, {
-            text: form.text,
-            mentions,
-            pictures: await pastedPictures(form.picture),
-          }),
-          202,
-        );
-      }
-      const body = PostConversationMessage.parse(await c.req.json());
-      return c.json(
-        deps.services.postConversationMessage(id, {
-          text: body.text,
-          mentions: body.mentions,
-          pictures: [],
-        }),
-        202,
+      return c.json(await deps.services.postConversationMessage(id, await builderMessage(c)), 202);
+    })
+    .get('/conversations/:conversationId/files/:fileId', (c) => {
+      const picture = deps.services.conversationPicture(
+        ConversationId.parse(c.req.param('conversationId')),
+        ConversationFileId.parse(c.req.param('fileId')),
       );
+      return c.body(picture.bytes, 200, {
+        'content-type': picture.mediaType,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      });
     })
     .get(
       '/conversations/:conversationId/files',
@@ -717,18 +723,16 @@ export function createApp(deps: ApiDeps) {
         await deps.services.stopConversation(ConversationId.parse(c.req.param('conversationId'))),
       ),
     )
-    .post(
-      '/conversations/:conversationId/redo',
-      validator('json', (value): PostConversationMessage => PostConversationMessage.parse(value)),
-      async (c) =>
-        c.json(
-          await deps.services.redoConversation(
-            ConversationId.parse(c.req.param('conversationId')),
-            c.req.valid('json').text,
-          ),
-          202,
+    .post('/conversations/:conversationId/redo', async (c) => {
+      const message = await builderMessage(c);
+      return c.json(
+        await deps.services.redoConversation(
+          ConversationId.parse(c.req.param('conversationId')),
+          message,
         ),
-    )
+        202,
+      );
+    })
     .get('/conversations/:conversationId/items/:itemId/full', (c) =>
       c.json(
         deps.services.conversationFull(
@@ -1572,10 +1576,8 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
-    // A task's thread (Workbench spec §4.3): the builder's messages and the pictures pasted with them.
-    .get('/tasks/:taskId/thread', (c) =>
-      c.json(deps.services.taskThread(TaskId.parse(c.req.param('taskId')))),
-    )
+    // A task's thread (Workbench spec §4.3): the builder's message and the pictures pasted with it, as
+    // `POST /conversations/:id/messages` takes it for the task's conversation.
     .post(
       '/tasks/:taskId/thread',
       validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
@@ -1590,36 +1592,9 @@ export function createApp(deps: ApiDeps) {
         );
       },
     )
-    // Stop and Redo on a page of a Workbench pass: its running turn stops, then the message goes in.
-    .post(
-      '/tasks/:taskId/thread/redo',
-      validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
-      async (c) => {
-        const { text, picture } = c.req.valid('form');
-        return c.json(
-          await deps.services.postTaskMessage(
-            TaskId.parse(c.req.param('taskId')),
-            { text, pictures: await pastedPictures(picture) },
-            { redo: true },
-          ),
-          201,
-        );
-      },
-    )
     .post('/tasks/:taskId/stop', async (c) => {
       await deps.services.stopPage(TaskId.parse(c.req.param('taskId')));
       return c.body(null, 204);
-    })
-    .get('/tasks/:taskId/thread/pictures/:fileId', (c) => {
-      const picture = deps.services.taskPicture(
-        TaskId.parse(c.req.param('taskId')),
-        TaskFileId.parse(c.req.param('fileId')),
-      );
-      return c.body(picture.bytes, 200, {
-        'content-type': picture.mediaType,
-        'cache-control': 'private, max-age=31536000, immutable',
-        'x-content-type-options': 'nosniff',
-      });
     })
     // Pictures of the builder's app (Workbench spec §10): a task's, one picture's bytes, and Settings'
     // status line for a project's browser and sign-in.

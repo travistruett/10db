@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, mintId, TaskMessageDto, TaskThreadDto, type TaskId } from '@10db/contracts';
+import { ConflictError, mintId, TaskMessageDto, type TaskId } from '@10db/contracts';
 import {
   createTestStore,
   endPassTurn,
@@ -11,8 +11,10 @@ import {
   insertPassTurn,
   insertTask,
   insertWorkstream,
+  listTaskThread,
   seedProject,
   settlePassTurn,
+  taskConversationOf,
   type Store,
 } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -24,11 +26,11 @@ import { pngOfSize } from '../../test/png';
 import { webpImage } from '../../test/webp';
 import { createApp, type ApiServices } from '../api';
 import { createEventBus, createStateStore } from '../events';
-import { createThreadService } from './index';
+import { createTaskThread, readConversationPicture } from './index';
 
 // Workbench spec §4.3, §11, §12, §13: a task's thread over HTTP. The builder's message and its pasted
 // pictures are kept, each picture checked by its bytes and stored under the task's own directory in
-// the data directory, and read back by id from that task only.
+// the data directory, and read back by id from the task's own conversation only.
 
 const TOKEN = 'ui';
 const auth = { Authorization: `Bearer ${TOKEN}` };
@@ -42,7 +44,7 @@ let otherTaskId: TaskId;
 /** What the API answered 500 for; a test that expects one takes it out. */
 let unexpected: unknown[];
 /** How a message reaches a page of a pass, as the runner hands it. */
-let deliver: Parameters<typeof createThreadService>[0]['pages']['deliver'];
+let deliver: Parameters<typeof createTaskThread>[0]['pages']['deliver'];
 beforeEach(() => {
   unexpected = [];
   const test = createTestStore();
@@ -58,7 +60,7 @@ beforeEach(() => {
   otherTaskId = task('Board page');
   // These tasks are in no pass, so no message is handed to a page unless a test puts one in one.
   deliver = () => Promise.reject(new Error('no page takes a message here'));
-  const thread = createThreadService({
+  const thread = createTaskThread({
     state: createStateStore(test.store, createEventBus()),
     dataDir: data.path,
     pages: { deliver: (...a) => deliver(...a) },
@@ -67,8 +69,11 @@ beforeEach(() => {
     startedAt: new Date(),
     allowedOrigins: [],
     token: TOKEN,
-    // Only the thread's routes are reached; every other service is absent.
-    services: thread as ApiServices,
+    // Only the thread's routes and the pictures' are reached; every other service is absent.
+    services: {
+      ...thread,
+      conversationPicture: (id, fileId) => readConversationPicture(test.store.db, id, fileId),
+    } as Partial<ApiServices> as ApiServices,
     upgradeWebSocket: defineWebSocketHelper(() => undefined as never) as never,
     mcp: () => Promise.resolve(new Response()),
     onUnexpectedError: (error) => {
@@ -95,6 +100,11 @@ function post(task: TaskId, text: string | null, pictures: readonly Picture[] = 
 }
 
 const get = (path: string) => app.request(path, { headers: auth });
+/** The task's thread, oldest first, as its conversation keeps it. */
+const threadOf = (task: TaskId) => listTaskThread(store.db, task);
+/** Where the task's conversation serves a picture its builder sent. */
+const pictureUrl = (task: TaskId, fileId: string) =>
+  `/conversations/${taskConversationOf(store.db, task)?.id ?? mintId('Conversation')}/files/${fileId}`;
 const filesDir = (task: TaskId) => join(data.path, 'tasks', task, 'files');
 const PNG = new Uint8Array(pngOfSize(120, 80));
 
@@ -115,14 +125,13 @@ describe('a task thread over HTTP', () => {
     ]);
     expect((await post(taskId, 'And the footer')).status).toBe(201);
 
-    const thread = TaskThreadDto.parse(await (await get(`/tasks/${taskId}/thread`)).json());
-    expect(thread.messages.map((m) => [m.body, m.files.length])).toEqual([
+    expect(threadOf(taskId).map((m) => [m.body, m.files.length])).toEqual([
       ['Make the header smaller', 1],
       ['And the footer', 0],
     ]);
 
     const fileId = first.files[0]?.id ?? '';
-    const picture = await get(`/tasks/${taskId}/thread/pictures/${fileId}`);
+    const picture = await get(pictureUrl(taskId, fileId));
     expect(picture.status).toBe(200);
     expect(picture.headers.get('content-type')).toBe('image/png');
     expect(new Uint8Array(await picture.arrayBuffer())).toEqual(PNG);
@@ -199,10 +208,7 @@ describe('a task thread over HTTP', () => {
       expect(res.status).toBe(status);
       expect(Refusal.parse(await res.json()).message).toContain(says);
       expect(existsSync(join(data.path, 'tasks'))).toBe(false);
-      if (which === 'own')
-        expect(
-          TaskThreadDto.parse(await (await get(`/tasks/${taskId}/thread`)).json()).messages,
-        ).toEqual([]);
+      if (which === 'own') expect(threadOf(taskId)).toEqual([]);
     },
   );
 
@@ -237,7 +243,7 @@ describe('a task thread over HTTP', () => {
     refuseWrites();
     expect((await post(taskId, 'three', [{ name: 'third.png', bytes: PNG }])).status).toBe(500);
     expect(unexpected.splice(0)).toEqual([expect.objectContaining({ message: 'disk full' })]);
-    const picture = await get(`/tasks/${taskId}/thread/pictures/${first.files[0]?.id ?? ''}`);
+    const picture = await get(pictureUrl(taskId, first.files[0]?.id ?? ''));
     expect(picture.status).toBe(200);
     expect(new Uint8Array(await picture.arrayBuffer())).toEqual(PNG);
   });
@@ -247,20 +253,18 @@ describe('a task thread over HTTP', () => {
       await (await post(taskId, 'mine', [{ name: 'shot.png', bytes: PNG }])).json(),
     );
     rmSync(filesDir(taskId), { recursive: true });
-    const res = await get(`/tasks/${taskId}/thread/pictures/${posted.files[0]?.id ?? ''}`);
+    const res = await get(pictureUrl(taskId, posted.files[0]?.id ?? ''));
     expect(res.status).toBe(404);
   });
 
-  it('serves a picture to its own task alone', async () => {
+  it("serves a picture to its own task's conversation alone", async () => {
     const posted = TaskMessageDto.parse(
       await (await post(taskId, 'mine', [{ name: 'shot.png', bytes: PNG }])).json(),
     );
+    expect((await post(otherTaskId, 'theirs')).status).toBe(201);
     const fileId = posted.files[0]?.id ?? '';
-    expect((await get(`/tasks/${otherTaskId}/thread/pictures/${fileId}`)).status).toBe(404);
-    expect(
-      (await get(`/tasks/${taskId}/thread/pictures/${mintId('ConversationFile')}`)).status,
-    ).toBe(404);
-    expect((await get(`/tasks/${mintId('Task')}/thread`)).status).toBe(404);
+    expect((await get(pictureUrl(otherTaskId, fileId))).status).toBe(404);
+    expect((await get(pictureUrl(taskId, mintId('ConversationFile')))).status).toBe(404);
   });
 });
 
@@ -303,8 +307,7 @@ describe('a message to a page of a pass', () => {
     const res = await post(taskId, 'Make it bigger', [{ name: 'shot.png', bytes: PNG }]);
 
     expect(res.status).toBe(409);
-    const thread = TaskThreadDto.parse(await (await get(`/tasks/${taskId}/thread`)).json());
-    expect(thread.messages).toEqual([]);
+    expect(threadOf(taskId)).toEqual([]);
     expect(readdirSync(filesDir(taskId))).toEqual([]);
     // Nothing answered the Ready page either.
     expect(getPassTurn(store.db, ready.id).answeredAt).toBeNull();

@@ -27,7 +27,7 @@ import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs, waitFor } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
-import { FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
+import { FRESH_SESSION_NOTICE, taskFilesDir } from '../conversation';
 import { THREAD_UNREAD_NOTICE, TURN_CUT_SHORT } from './read-back';
 
 // Workbench spec §6.3, §12: a builder message from the task's thread, as the `feedback` action. A

@@ -94,6 +94,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     state: 'QUEUED',
     nextActionKind: 'start',
     spokenTo: false,
+    conversationId: null,
     turn: null,
     pausedUntil: null,
     failure: null,
@@ -127,6 +128,7 @@ export function pagesByStatus() {
     route: '/billing',
     state: 'RUNNING',
     spokenTo: true,
+    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 4, activity: turnActivity() }),
   });
   const ready = passPageDto({
@@ -136,6 +138,7 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
     spokenTo: true,
+    conversationId: null,
     turn: pageTurn({
       startedMinutesAgo: 12,
       endedAt: minutesBeforeNow(3),
@@ -149,6 +152,7 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'answer',
     spokenTo: true,
+    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 6 }),
   });
   const failed = passPageDto({
@@ -158,6 +162,7 @@ export function pagesByStatus() {
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
     spokenTo: true,
+    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 9, endedAt: minutesBeforeNow(8) }),
     failure: { failureKind: 'session_failed', retryItemId: mintId('InboxItem') },
   });
@@ -168,6 +173,7 @@ export function pagesByStatus() {
     state: 'PAUSED_LIMIT',
     nextActionKind: 'resume',
     spokenTo: true,
+    conversationId: null,
     turn: pageTurn({ startedMinutesAgo: 15 }),
     pausedUntil: '2026-11-09T15:40:00.000Z',
   });

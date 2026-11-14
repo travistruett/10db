@@ -19,6 +19,7 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import type { AgentAdapter } from '../sessions';
 import type { AgentCapabilitiesDto } from '@10db/contracts';
+import { readBackAsk } from './delivery-rules';
 import type { ExploreOwnerHooks } from './explore-hooks';
 
 // Sessions spec §6.3, §6.4: what a start does for an explore conversation before its state is reduced
@@ -82,10 +83,9 @@ export async function settleRestart(
     endConversationSessions(ctx, conv.id, 'daemon_restart');
   });
   // Rule 5: what the agent's own conversation shows taken is delivered; the rest waits again.
-  const pushed = listPushedTurnStarters(state.db, conv.id);
-  const oldest = pushed[0];
+  const ask = readBackAsk(listPushedTurnStarters(state.db, conv.id));
   if (
-    oldest !== undefined &&
+    ask !== null &&
     capabilities.readBack &&
     conv.providerSessionId !== null &&
     hooks.readBackSpec !== undefined
@@ -95,8 +95,7 @@ export async function settleRestart(
       const held = await deps.adapter.readClientUuids({
         ...spec,
         providerSessionId: conv.providerSessionId,
-        wanted: pushed.flatMap((item) => item.pushUuids),
-        since: oldest.createdAt,
+        ...ask,
       });
       state.write((ctx) => markItemsTakenUnder(ctx, conv.id, held));
     } catch (error) {

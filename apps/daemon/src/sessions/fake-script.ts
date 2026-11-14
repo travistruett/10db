@@ -29,7 +29,12 @@ export const FakeStep = z.discriminatedUnion('do', [
   /** The slash commands the session offers, each described by its own name. */
   z.object({ do: z.literal('commands'), names: z.array(z.string().min(1)) }),
   /** A tool call as an adapter would report it, as it is. */
-  z.object({ do: z.literal('tool_call'), call: ToolCallView }),
+  z.object({
+    do: z.literal('tool_call'),
+    call: ToolCallView,
+    /** What the call keeps whole past its view, as an adapter reports it. */
+    full: z.object({ output: z.string().optional(), patch: z.string().optional() }).optional(),
+  }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
   /** Waits until the test calls `signal` with this name, so a test can place the next step exactly. */
   z.object({ do: z.literal('await_signal'), name: z.string() }),

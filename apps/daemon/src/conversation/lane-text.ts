@@ -6,7 +6,7 @@ import {
   type TaskMessageId,
 } from '@10db/contracts';
 import { listTaskThreadRows, type DbReader, type TaskFileRow } from '@10db/db';
-import type { DeliverableMessage } from '../conversation';
+import type { DeliverableMessage } from './delivery-rules';
 
 // Workbench spec §6.3: how a task's thread reads to a lane session. A picture the builder pasted is
 // named by where it is kept, which the session's Read may open (§13); only a message sent now carries

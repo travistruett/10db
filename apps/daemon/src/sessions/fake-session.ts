@@ -416,7 +416,18 @@ export function runFakeLaneSession(
         });
         return 'continue';
       case 'tool_call':
-        emit({ type: 'tool_call', call: step.call });
+        emit({
+          type: 'tool_call',
+          call: step.call,
+          ...(step.full === undefined
+            ? {}
+            : {
+                full: {
+                  ...(step.full.output === undefined ? {} : { output: step.full.output }),
+                  ...(step.full.patch === undefined ? {} : { patch: step.full.patch }),
+                },
+              }),
+        });
         return 'continue';
       case 'mcp': {
         const args = taskRefs.resolve(step.args);

@@ -6,6 +6,7 @@ import {
   patchWorkstream,
   type AccountRow,
 } from '@10db/db';
+import { readBackAsk } from '../conversation';
 import { AccountLaunchError, KeychainError, type Launcher } from '../environment';
 import type { StateStore } from '../events';
 import { ConversationUnreadError, type AgentAdapter } from '../sessions';
@@ -65,12 +66,9 @@ export async function readBackThread(
     !deps.adapter.capabilities({ kind: agentKind(input.account.kind) }, null).readBack
   )
     return unchanged;
-  // Oldest first, so the first was written earliest.
-  const inDoubt = listUndeliveredTaskMessages(deps.state.db, input.taskId).filter(
-    (m) => m.pushUuids.length > 0,
-  );
-  const [oldest] = inDoubt;
-  if (oldest === undefined) return unchanged;
+  // Rule 5 through the library: the uuids of the task's messages pushed and never seen taken.
+  const ask = readBackAsk(listUndeliveredTaskMessages(deps.state.db, input.taskId));
+  if (ask === null) return unchanged;
   let launch;
   try {
     launch = deps.launcher.probe(input.account);
@@ -86,8 +84,7 @@ export async function readBackThread(
       env: launch.env,
       cwd: input.cwd,
       providerSessionId: thread,
-      wanted: inDoubt.flatMap((m) => m.pushUuids),
-      since: oldest.createdAt,
+      ...ask,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch (error) {

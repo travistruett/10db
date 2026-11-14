@@ -1,39 +1,33 @@
-import { readFileSync } from 'node:fs';
 import {
   ConflictError,
-  NotFoundError,
   PassState,
   TakeOutStep,
   TASK_MESSAGE_MAX_CHARS,
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
-  type TaskFileId,
   type TaskId,
   type TaskMessageDto,
   type TaskMessageId,
-  type TaskPictureKind,
   type TaskDto,
-  type TaskThreadDto,
 } from '@10db/contracts';
 import {
   clearPassTurnAnswered,
   deleteUnsentBuilderMessage,
   getTask,
-  getTaskFile,
   insertBuilderMessage,
   lastTakeOut,
   latestPassTurn,
-  listTaskThread,
   markPassTurnAnswered,
   passHoldingTask,
   type DbReader,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { taskFilesDir } from './pictures';
-import { keepBuilderMessage, removeKeptFiles, type PastedFile } from '../conversation';
+import { keepBuilderMessage, removeKeptFiles, type PastedFile } from './intake';
+import { taskFilesDir } from './task-files';
 
-// Workbench spec §4.3, §11, §12. The builder's side of a task's thread: the conversation library's
-// intake keeps a message and its pictures; the pass's refusals and the Ready-turn mark are the thread's.
+// Workbench spec §4.3, §11, §12, sessions spec §6.1. The builder's side of a task's conversation: the
+// library's intake keeps a message and its pictures; the pass's refusals and the Ready-turn mark are
+// the task's, and the runner, injected, hands the message to the page's session.
 
 /** How a message reaches a task's page in a Workbench pass: the runner's, injected. */
 export interface PageMessages {
@@ -45,10 +39,8 @@ export interface PageMessages {
   ): Promise<void>;
 }
 
-/** The thread's routes, named as the HTTP API's services name them. */
-export interface ThreadService {
-  /** A task's thread, oldest first; throws NotFoundError for an unknown task. */
-  taskThread(taskId: TaskId): TaskThreadDto;
+/** How the builder writes to a task's conversation, named as the HTTP API's services name it. */
+export interface TaskThread {
   /**
    * Keeps the builder's message and its pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for a message with neither words nor a picture or for a
@@ -62,11 +54,6 @@ export interface ThreadService {
     input: { readonly text: string; readonly pictures: readonly PastedFile[] },
     opts?: { readonly redo?: boolean },
   ): Promise<TaskMessageDto>;
-  /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
-  taskPicture(
-    taskId: TaskId,
-    fileId: TaskFileId,
-  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
 }
 
 /**
@@ -85,22 +72,14 @@ function refusedByPass(db: DbReader, task: TaskDto): void {
     throw new ConflictError(`${task.title} is being taken out of its pass`);
 }
 
-const isMissingFile = (error: unknown) =>
-  error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
-export function createThreadService(deps: {
+export function createTaskThread(deps: {
   readonly state: StateStore;
   /** The daemon's data directory; a task's pictures go under `tasks/<task id>/files/` in it. */
   readonly dataDir: string;
   readonly pages: PageMessages;
-}): ThreadService {
+}): TaskThread {
   const { state } = deps;
   return {
-    taskThread(taskId) {
-      getTask(state.db, taskId);
-      return { taskId, messages: listTaskThread(state.db, taskId) };
-    },
-
     async postTaskMessage(taskId, input, opts = {}) {
       const task = getTask(state.db, taskId);
       const redo = opts.redo === true;
@@ -151,18 +130,6 @@ export function createThreadService(deps: {
         throw error;
       }
       return message;
-    },
-
-    taskPicture(taskId, fileId) {
-      const row = getTaskFile(state.db, fileId);
-      if (row.taskId !== taskId) throw new NotFoundError('task file', fileId);
-      try {
-        return { bytes: readFileSync(row.storedPath), mediaType: row.mediaType };
-      } catch (error) {
-        // A picture removed from the data directory by hand is gone, not a fault of the daemon.
-        if (isMissingFile(error)) throw new NotFoundError('task file', fileId);
-        throw error;
-      }
     },
   };
 }
