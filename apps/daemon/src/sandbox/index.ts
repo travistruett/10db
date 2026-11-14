@@ -80,9 +80,5 @@ export type { SetupInput } from './setup-input';
 export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
 export { writeSecretRead } from './secret-reads';
-export { laneWritableRoots, type LaneWritableRoot } from './lane-writable';
-export {
-  launchYourMcpServers,
-  YourMcpServer,
-  type UnsandboxedStdioServer,
-} from './your-mcp-launch';
+export { laneWritableRoots } from './lane-writable';
+export { launchYourMcpServers } from './your-mcp-launch';
