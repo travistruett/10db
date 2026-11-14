@@ -1,12 +1,14 @@
 import { PlanDraft, ShapeMessageAuthor, ShapeMessageKind } from '@10db/contracts';
-import { listShapeMessages } from '@10db/db';
+import { listItems, listShapeMessages, shapeConversation } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDrain, type Drain } from '../self-update';
+import type { FakeShapeBehaviour } from '../sessions';
 import { reconcileDraft } from './rounds';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
-// A turn the drain holds has begun nothing, so the install does not wait for it. The queue is memory
-// only: the quit ends it, and nothing may go missing without a word to the builder.
+// Sessions spec §6.3, §6.4 through Plan: the queue is durable. What waits when 10db quits is kept,
+// and after the restart it waits under one "Send now" line: nothing runs unattended, and nothing is
+// lost without a word to the builder.
 
 let f: ServiceFixture;
 let drain: Drain;
@@ -20,123 +22,101 @@ afterEach(async () => {
 });
 
 const shapeId = () => f.c.shape.id;
+const conversation = () => shapeConversation(f.c.store.db, shapeId()).id;
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 const notices = () =>
   listShapeMessages(f.c.store.db, shapeId())
     .filter((m) => m.author === ShapeMessageAuthor.Note && m.kind === ShapeMessageKind.Notice)
     .map((m) => m.body);
+const sendNowLines = () =>
+  listItems(f.c.store.db, conversation()).filter((i) => i.kind === 'turn_marker');
 
-describe('a turn held by the drain when 10db quits', () => {
-  it('is reported in the conversation, naming the message, and no session starts for it', async () => {
-    drain.begin(new Date(0));
-    f.service.send(shapeId(), 'One more thing.');
-    f.service.send(shapeId(), 'And another.');
+/** Turns that wait until the session is stopped. */
+const hanging: FakeShapeBehaviour = (turn) =>
+  new Promise((resolve) => {
+    turn.signal.addEventListener('abort', () => {
+      resolve({});
+    });
+  });
+
+function proposedTask(): void {
+  const m = f.c.say();
+  f.c.store.write((ctx) =>
+    reconcileDraft(
+      ctx,
+      shapeId(),
+      PlanDraft.parse({
+        looseTasks: [
+          {
+            key: 'a',
+            title: 'Task a',
+            criteria: ['It works'],
+            areas: ['api'],
+            size: 'S',
+            ceremony: 'direct',
+            sourceMessageIds: [m],
+          },
+        ],
+      }),
+    ),
+  );
+}
+
+describe('what waits when 10db quits', () => {
+  it('keeps a message queued behind a running turn under one Send now, and Send Now sends it', async () => {
+    f.adapter.shapeBehaviour = hanging;
+    f.service.send(shapeId(), 'One thing.');
+    await tick();
+    const queued = f.service.send(shapeId(), 'One more thing.');
     await tick();
     await f.restart();
-    drain.end();
+    expect(notices().filter((n) => n.startsWith('10db quit'))).toEqual([]);
+    expect(f.adapter.shapeSessions).toHaveLength(1);
+    expect(sendNowLines()).toHaveLength(1);
+    expect(f.service.view(shapeId()).turn.queued).toBeGreaterThanOrEqual(1);
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Both read.' });
+    f.engine.sendNow(conversation());
     await f.service.settled(shapeId());
-    expect(notices()).toEqual([
-      '10db quit before Claude read “One more thing.”, so it went unanswered. Send it again.',
-      '10db quit before Claude read “And another.”, so it went unanswered. Send it again.',
-    ]);
-    expect(f.adapter.shapeSessions).toHaveLength(0);
+    expect(f.adapter.shapeSessions).toHaveLength(2);
+    expect(f.adapter.shapeSessions[1]?.spec.prompt).toContain(`[m:${queued.id}] One more thing.`);
   });
 
-  it('is reported when it was a Propose', async () => {
-    drain.begin(new Date(0));
-    expect(f.service.propose(shapeId())).toEqual({ status: 'started' });
+  it.each([
+    ['a Propose', 'propose'],
+    ['a rehearsal', 'rehearse'],
+  ] as const)('keeps %s queued behind a running turn under Send now', async (_name, press) => {
+    if (press === 'rehearse') proposedTask();
+    f.adapter.shapeBehaviour = hanging;
+    f.service.send(shapeId(), 'One thing.');
+    await tick();
+    if (press === 'propose') expect(f.service.propose(shapeId())).toEqual({ status: 'started' });
+    else expect(f.service.rehearse(shapeId()).status).toBe('started');
     await tick();
     await f.restart();
-    expect(notices()).toEqual(['10db quit before Claude could propose. Press Propose again.']);
-  });
-
-  it('is reported when it was a rehearsal', async () => {
-    const m = f.c.say();
-    f.c.store.write((ctx) =>
-      reconcileDraft(
-        ctx,
-        shapeId(),
-        PlanDraft.parse({
-          looseTasks: [
-            {
-              key: 'a',
-              title: 'Task a',
-              criteria: ['It works'],
-              areas: ['api'],
-              size: 'S',
-              ceremony: 'direct',
-              sourceMessageIds: [m],
-            },
-          ],
-        }),
-      ),
+    expect(notices().filter((n) => n.startsWith('10db quit'))).toEqual([]);
+    expect(sendNowLines()).toHaveLength(1);
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
+    f.engine.sendNow(conversation());
+    await f.service.settled(shapeId());
+    expect(f.adapter.shapeSessions[1]?.spec.prompt).toMatch(
+      press === 'propose' ? /pressed Propose/ : /rehears/i,
     );
-    drain.begin(new Date(0));
-    expect(f.service.rehearse(shapeId()).status).toBe('started');
-    await tick();
-    await f.restart();
-    expect(notices()).toEqual(['10db quit before the rehearsal ran. Press Rehearse again.']);
   });
 
-  it('is reported when it was sent after the service closed, and the hold letting go starts no session for it', async () => {
+  it('keeps a message sent after the service closed queued, and runs nothing until Send now', async () => {
     drain.begin(new Date(0));
     await f.service.close();
-    // The HTTP server still takes a message while the daemon stops; close has already emptied the queue.
+    // The HTTP server still takes a message while the daemon stops.
     f.service.send(shapeId(), 'Too late.');
     await tick();
     drain.stop();
     await f.service.settled(shapeId());
-    expect(notices()).toEqual([
-      '10db quit before Claude read “Too late.”, so it went unanswered. Send it again.',
-    ]);
-    expect(f.adapter.shapeSessions).toHaveLength(0);
-  });
-
-  it('is reported when it was sent after the service closed with no hold up, and starts no session', async () => {
-    await f.service.close();
-    f.service.send(shapeId(), 'Too late.');
-    await f.service.settled(shapeId());
-    expect(notices()).toEqual([
-      '10db quit before Claude read “Too late.”, so it went unanswered. Send it again.',
-    ]);
     expect(f.adapter.shapeSessions).toHaveLength(0);
     expect(f.service.turnsInProgress()).toBe(0);
-  });
-
-  it('is reported when a Propose came after the service closed, and starts no session', async () => {
-    await f.service.close();
-    f.service.propose(shapeId());
-    await f.service.settled(shapeId());
-    expect(notices()).toEqual(['10db quit before Claude could propose. Press Propose again.']);
+    await f.restart();
     expect(f.adapter.shapeSessions).toHaveLength(0);
-  });
-
-  it('is reported when a rehearsal was asked for after the service closed, and starts no session', async () => {
-    const m = f.c.say();
-    f.c.store.write((ctx) =>
-      reconcileDraft(
-        ctx,
-        shapeId(),
-        PlanDraft.parse({
-          looseTasks: [
-            {
-              key: 'a',
-              title: 'Task a',
-              criteria: ['It works'],
-              areas: ['api'],
-              size: 'S',
-              ceremony: 'direct',
-              sourceMessageIds: [m],
-            },
-          ],
-        }),
-      ),
-    );
-    await f.service.close();
-    expect(f.service.rehearse(shapeId()).status).toBe('started');
-    await f.service.settled(shapeId());
-    expect(notices()).toEqual(['10db quit before the rehearsal ran. Press Rehearse again.']);
-    expect(f.adapter.shapeSessions).toHaveLength(0);
+    expect(sendNowLines()).toHaveLength(1);
+    expect(notices()).toEqual([]);
   });
 
   it('says nothing when the turn ran before the quit', async () => {
@@ -147,6 +127,7 @@ describe('a turn held by the drain when 10db quits', () => {
     await f.service.settled(shapeId());
     await f.restart();
     expect(notices()).toEqual([]);
+    expect(sendNowLines()).toEqual([]);
     expect(f.adapter.shapeSessions).toHaveLength(1);
   });
 });

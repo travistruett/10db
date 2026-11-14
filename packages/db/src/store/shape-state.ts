@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  ConversationItemKind,
   ConversationOwnerKind,
   EventType,
   mintId,
@@ -118,14 +119,37 @@ export function insertShapeMessage(
     readonly author: ShapeMessageAuthor;
     readonly kind: ShapeMessageKind;
     readonly body: string;
+    /** A builder message waits for a turn to take it, rather than reading as delivered now. */
+    readonly queued?: boolean;
+    /** What a press asks the session to do, which makes it a turn starter (Propose, Rehearse). */
+    readonly prompt?: string;
+    /** The tasks a Rehearse press lists, each at the hash it was proposed at. */
+    readonly rehearsing?: readonly { readonly taskKey: string; readonly hash: string }[];
   },
 ): ShapeMessageDto {
+  const { queued, prompt, rehearsing, ...message } = input;
   const shape = getShape(ctx.tx, shapeId);
   const builderText =
-    input.author === ShapeMessageAuthor.Builder && input.kind === ShapeMessageKind.Text;
-  const item = insertItem(ctx, shapeConversation(ctx.tx, shapeId).id, {
-    ...shapeItemOf({ ...input, createdAt: ctx.now }, randomUUID()),
-    deliveredAt: builderText ? ctx.now : null,
+    message.author === ShapeMessageAuthor.Builder && message.kind === ShapeMessageKind.Text;
+  const item = shapeItemOf({ ...message, createdAt: ctx.now }, randomUUID());
+  const pressed =
+    item.kind === ConversationItemKind.ShapeEvent &&
+    typeof item.body === 'object' &&
+    item.body !== null &&
+    !Array.isArray(item.body) &&
+    (prompt !== undefined || rehearsing !== undefined)
+      ? {
+          ...item.body,
+          ...(prompt === undefined ? {} : { prompt }),
+          ...(rehearsing === undefined
+            ? {}
+            : { rehearsing: rehearsing.map((t) => ({ taskKey: t.taskKey, hash: t.hash })) }),
+        }
+      : item.body;
+  const row = insertItem(ctx, shapeConversation(ctx.tx, shapeId).id, {
+    ...item,
+    body: pressed,
+    deliveredAt: builderText && queued !== true ? ctx.now : null,
   });
   ctx.emit({
     type: EventType.ShapeChanged,
@@ -133,7 +157,7 @@ export function insertShapeMessage(
     entityId: shapeId,
     data: { projectId: shape.projectId },
   });
-  return { id: item.id, shapeId, ...input, createdAt: item.createdAt };
+  return { id: row.id, shapeId, ...message, createdAt: row.createdAt };
 }
 
 /** The conversation's transcript, oldest first; `after` skips up to and including that message. */

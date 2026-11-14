@@ -21,7 +21,7 @@ import {
   type FakeStep,
 } from './fake-script';
 import { readCheckoutText } from './before-text';
-import { createClaudeToolCalls } from './claude-tool-calls';
+import { claudeToolCall, claudeToolResult, createClaudeToolCalls } from './claude-tool-calls';
 import {
   SessionEndReason,
   type InterruptReceipt,
@@ -642,12 +642,47 @@ export function runFakeExploreSession(
     wake?.();
   });
 
+  let calls = 0;
+  /** The last subagent the session started, which a subagent's own calls name as their parent. */
+  let agentCall: string | null = null;
+  /**
+   * The session's PreToolUse hook, as Claude Code runs it before a call, and the call as Claude Code's
+   * adapter reports it: running, then done, or denied with the hook's reason.
+   */
   const guard = (request: ShapeToolRequest): ShapeVerdict => {
+    let verdict: ShapeVerdict;
     try {
-      return spec.preToolUse(request);
+      verdict = spec.preToolUse(request);
     } catch (error) {
-      return { decision: 'deny', reason: `guard failed: ${String(error)}` };
+      verdict = { decision: 'deny', reason: `guard failed: ${String(error)}` };
     }
+    calls += 1;
+    const id = `fake-call-${String(calls)}`;
+    const call = claudeToolCall(
+      {
+        id,
+        name: request.toolName,
+        input: request.input,
+        parentId: request.agentId === undefined ? null : agentCall,
+      },
+      { startedAt: new Date(), before: () => ({ kind: 'unread' }) },
+    );
+    emit({ type: 'tool_call', call });
+    if (verdict.decision === 'ask') return verdict;
+    const denial =
+      verdict.decision === 'deny'
+        ? { by: DeniedBy.TenDb, reason: verdict.reason, limit: null, soft: null }
+        : null;
+    if (denial === null && request.toolName === 'Agent') agentCall = id;
+    emit({
+      type: 'tool_call',
+      call: claudeToolResult(
+        call,
+        { isError: denial !== null, content: denial?.reason ?? '', denial },
+        new Date(),
+      ),
+    });
+    return verdict;
   };
 
   const loop = async (): Promise<void> => {

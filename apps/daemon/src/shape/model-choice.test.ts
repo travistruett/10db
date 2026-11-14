@@ -32,17 +32,24 @@ describe('a conversation’s model', () => {
     expect(f.service.view(shapeId).shape.model).toBeNull();
     f.service.send(shapeId, 'First');
     await f.service.settled(shapeId);
+    expect(launched).toEqual([null]);
     expect(f.service.chooseModel(shapeId, 'claude-sonnet-5-5').model).toBe('claude-sonnet-5-5');
     expect(getShape(f.c.store.db, shapeId).model).toBe('claude-sonnet-5-5');
     expect(f.service.view(shapeId).shape.model).toBe('claude-sonnet-5-5');
     f.service.send(shapeId, 'Second');
     await f.service.settled(shapeId);
-    expect(launched).toEqual([null, 'claude-sonnet-5-5']);
-    const [first, second] = f.adapter.shapeSessions;
+    // The warm session takes the pick for its next turn (sessions call 13): no second session.
+    const [first, ...rest] = f.adapter.shapeSessions;
     expect(must(first, 'first').spec.model).toBe('claude-opus-5-5');
-    // The new session resumes the conversation, on the model picked.
-    expect(must(second, 'second').spec.model).toBe('claude-sonnet-5-5');
-    expect(must(second, 'second').spec.resumeProviderSessionId).toBe('fake-shape-1');
+    expect(must(first, 'first').models).toEqual(['claude-sonnet-5-5']);
+    expect(must(first, 'first').sent).toHaveLength(1);
+    expect(rest).toEqual([]);
+    expect(
+      f.service
+        .view(shapeId)
+        .messages.filter((m) => m.kind === 'notice')
+        .map((m) => m.body),
+    ).toEqual(['Now on claude-sonnet-5-5 · claude-sonnet-5-5']);
   });
 
   it('goes back to the plan role’s when the pick is cleared', () => {

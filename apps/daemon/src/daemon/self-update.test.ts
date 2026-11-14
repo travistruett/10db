@@ -819,7 +819,7 @@ describe('self-update in the daemon', () => {
       await waitForAsync(async () => (await view()).turn.queued === 0);
     });
 
-    it('says so in the conversation when the install quits the app first', async () => {
+    it('keeps the message queued, starting nothing, when the install quits the app first', async () => {
       const { adapter } = await sendDuringTheInstall();
       await daemon?.stop();
       daemon = null;
@@ -829,8 +829,9 @@ describe('self-update in the daemon', () => {
       const [project] = await next.get('/projects', z.array(ProjectDto));
       const [shape] = await next.get(`/projects/${project?.id ?? ''}/shapes`, z.array(ShapeDto));
       const after = await next.get(`/shapes/${shape?.id ?? ''}`, ShapeViewDto);
-      expect(after.messages.at(-1)?.kind).toBe('notice');
-      expect(after.messages.at(-1)?.body).toContain('One more thing.');
+      // The queue is durable: the message waits under Send now, and nothing runs unattended.
+      expect(after.messages.at(-1)?.body).toBe('One more thing.');
+      expect(after.turn.queued).toBe(1);
       expect(adapter.shapeSessions).toHaveLength(0);
     });
   });

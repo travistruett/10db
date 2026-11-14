@@ -1,5 +1,12 @@
 import { ShapeMessageKind } from '@10db/contracts';
-import { getSession, insertInboxItem, listShapeMessages, sessionShapeId } from '@10db/db';
+import {
+  getSession,
+  insertInboxItem,
+  listItems,
+  listShapeMessages,
+  sessionShapeId,
+  shapeConversation,
+} from '@10db/db';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -159,7 +166,7 @@ describe('a conversation’s prepared session', () => {
     }
   });
 
-  it('shows each command and project tool call, who made it, and a card it waits on', async () => {
+  it('writes no line for a command or project tool call, and stores a card it waits on as an item', async () => {
     const p = preparing();
     f = createServiceFixture({ prepare: p.prepare });
     f.service.send(f.c.shape.id, 'Look at the git history.');
@@ -199,11 +206,10 @@ describe('a conversation’s prepared session', () => {
     const lines = listShapeMessages(f.c.store.db, f.c.shape.id)
       .filter((m) => m.kind === ShapeMessageKind.Tool)
       .map((m) => m.body);
-    expect(lines).toEqual([
-      'Bash · git log -3',
-      'code-researcher · Bash · pnpm test',
-      'mcp__docs__search · {"q":"x"}',
-      'Allow Bash? · waiting for your answer in the Inbox',
+    expect(lines).toEqual([]);
+    const items = listItems(f.c.store.db, shapeConversation(f.c.store.db, f.c.shape.id).id);
+    expect(items.filter((i) => i.kind === 'card').map((i) => i.body)).toEqual([
+      { inboxItemId: card.id },
     ]);
   });
 

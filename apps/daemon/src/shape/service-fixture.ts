@@ -10,7 +10,9 @@ import {
   type AgentAccountKind,
 } from '@10db/contracts';
 import { ManualClock } from '../clock';
-import { createEventBus, createStateStore, type StateStore } from '../events';
+import { createExploreEngine, type ExploreEngine } from '../conversation';
+import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../events';
+import { mintSessionToken } from '../mcp';
 import { silentLogger } from '../log';
 import type { ScreenService } from '../screens';
 import { FakeAdapter } from '../sessions';
@@ -34,12 +36,17 @@ export interface ServiceFixture {
   readonly adapter: FakeAdapter;
   /** The service running now; `restart` replaces it. */
   readonly service: ShapeService;
+  /** The explore engine the service runs on now; `restart` replaces it too. */
+  readonly engine: ExploreEngine;
   /** The root the service keeps each conversation's dropped files under. */
   readonly filesDir: string;
   readonly events: DaemonEvent[];
   /** Moves the project to an account of this kind, as a plan falling back to Bedrock does: the next start sees it. */
   launchOn(kind: AgentAccountKind): void;
-  /** Closes the service and builds a new one over the same database, as quitting and reopening 10db does. */
+  /**
+   * Closes the service and its engine and builds new ones over the same database, as quitting and
+   * reopening 10db does: the new engine recovers before anything is asked of it.
+   */
   restart(): Promise<void>;
   close(): Promise<void>;
 }
@@ -73,11 +80,28 @@ export function createServiceFixture(
   const state = createStateStore(c.store, bus);
   const adapter = new FakeAdapter({});
   const filesDir = mkdtempSync(join(tmpdir(), 'shape-files-'));
+  const clock = new ManualClock();
+  const engineOf = (): ExploreEngine =>
+    createExploreEngine({
+      state,
+      adapter,
+      clock,
+      log: silentLogger,
+      dataDir: filesDir,
+      frames: createLiveFrames(),
+      bus,
+      mintToken: mintSessionToken,
+      accountBlocked: () => null,
+      defaultPauseMs: 30 * 60_000,
+      ...(opts.hold === undefined ? {} : { hold: opts.hold }),
+    });
+  let engine = engineOf();
   const make = (): ShapeService =>
     createShapeService({
       state,
       adapter,
-      clock: new ManualClock(),
+      engine,
+      clock,
       log: silentLogger,
       filesDir,
       joiningProblem: opts.joiningProblem ?? (() => null),
@@ -124,6 +148,9 @@ export function createServiceFixture(
     get service() {
       return service;
     },
+    get engine() {
+      return engine;
+    },
     filesDir,
     events,
     launchOn(kind) {
@@ -131,7 +158,9 @@ export function createServiceFixture(
     },
     async restart() {
       await service.close();
+      engine = engineOf();
       service = make();
+      await engine.recover();
     },
     async close() {
       await service.close();

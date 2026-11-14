@@ -12,6 +12,7 @@ import {
   type ShapeMessageDto,
 } from '@10db/contracts';
 import {
+  listQueuedTurnStarters,
   getLiveSessionByTokenHash,
   getSession,
   getShape,
@@ -650,7 +651,7 @@ describe('idle and resume', () => {
     expect(adapter.shapeSessions).toHaveLength(2);
   });
 
-  it('starts no session for a turn waiting on a closing one when the service closes, and reports it', async () => {
+  it('starts no session for a turn waiting on a closing one when the service closes, and keeps it queued', async () => {
     service.send(shapeId, 'one');
     await service.settled(shapeId);
     const closing = gate();
@@ -660,7 +661,7 @@ describe('idle and resume', () => {
     adapter.shapeStopGate = closing.wait;
     clock.advance(10 * 60_000);
     await tick();
-    service.send(shapeId, 'two');
+    const two = service.send(shapeId, 'two');
     await tick();
     expect(adapter.shapeSessions).toHaveLength(1);
 
@@ -672,9 +673,12 @@ describe('idle and resume', () => {
     await tick();
 
     expect(adapter.shapeSessions).toHaveLength(1);
-    expect(notices()).toEqual([
-      '10db quit before Claude read “two”, so it went unanswered. Send it again.',
-    ]);
+    // The queue is durable (sessions call 1): the message waits for the next start's Send now.
+    expect(notices()).toEqual([]);
+    expect(transcript().find((m) => m.id === two.id)).toBeDefined();
+    expect(
+      listQueuedTurnStarters(c.store.db, shapeConversation(c.store.db, shapeId).id),
+    ).toHaveLength(1);
   });
 
   it('ends the running turn when the service closes', async () => {

@@ -280,7 +280,12 @@ export function exploreWorld(
         }),
       describeModel: (_c, model) => {
         const id = model ?? 'claude-opus-5-5';
-        return { model: id, label: MODEL_LABELS[id] ?? id, launchId: `launch:${id}` };
+        return {
+          model: id,
+          label: MODEL_LABELS[id] ?? id,
+          launchId: `launch:${id}`,
+          effort: 'high',
+        };
       },
     };
   }

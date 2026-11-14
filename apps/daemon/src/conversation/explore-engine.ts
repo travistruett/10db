@@ -47,7 +47,6 @@ import {
   updateItem,
   type ConversationItemRow,
   type ConversationRow,
-  type WriteContext,
 } from '@10db/db';
 import { timerAt, type Clock, type Timer } from '../clock';
 import type { EventBus, LiveFrames, StateStore } from '../events';
@@ -194,6 +193,7 @@ export interface ExploreEngineDeps {
 interface Taken {
   readonly waiting: ReadonlySet<ConversationItemId>;
   readonly end: TurnEnd;
+  readonly event: ExploreEvent['type'];
 }
 
 interface Session {
@@ -202,6 +202,10 @@ interface Session {
   asked: boolean;
   /** It reported `started`: the turn its first message began ran on it. */
   started: boolean;
+  /** Why the engine ended it, kept on its row; its own end reason otherwise. */
+  endReason: string | null;
+  /** Resolves once what the session was prepared with has been released, after its end. */
+  released: Promise<void> | null;
 }
 
 interface Runtime {
@@ -245,6 +249,10 @@ interface Runtime {
   card: InboxItemId | null;
   /** A restart found the conversation paused: its account's return waits under Send now. */
   restartedWhilePaused: boolean;
+  /** Why the next close of a warm session is asked for, when it is not the idle timer's. */
+  closeReason: string | null;
+  /** A parked starter waits for the update hold to clear. */
+  parkWait: boolean;
   /** Told when the state or the chain moves, for `settled`. */
   waiters: (() => void)[];
 }
@@ -257,6 +265,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const owners = new Map<ConversationOwnerKind, ExploreOwnerHooks>();
   const runtimes = new Map<ConversationId, Runtime>();
   let closed = false;
+  /** `closed` read afresh, after an await, where the compiler would still take it as before. */
+  const isClosed = (): boolean => closed;
 
   const conversation = (id: ConversationId): ConversationRow => getConversation(state.db, id);
   // A change to an account (saved, a cap raised, a card answered) checks the conversations paused on it.
@@ -308,6 +318,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         pauseTimer: null,
         card: null,
         restartedWhilePaused: false,
+        closeReason: null,
+        parkWait: false,
         waiters: [],
       };
       runtimes.set(id, rt);
@@ -360,6 +372,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     }
     wake(rt);
     if (next === S.IdleWarm) enforceWarmCap();
+    if (!BUSY.has(next)) waitOutHold(rt);
   };
 
   /**
@@ -406,6 +419,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const taken: Taken = {
       waiting: new Set(unpushed(rt).map((item) => item.id)),
       end: { how: rt.ended, starters: [...rt.starters] },
+      event: event.type,
     };
     setState(rt, outcome.next);
     for (const effect of outcome.effects) enqueue(rt, () => apply(rt, effect, taken));
@@ -440,25 +454,18 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
   });
 
-  /** Marks each starter pushed under the one uuid, before a session is handed them (rule 1). */
-  const markPushed = (
-    ctx: WriteContext,
+  /**
+   * Hands a live session starters as one message: pushed under the one uuid before it is handed them
+   * (rule 1), then what the owner marks once they are sent. A send that throws hands them back, tells
+   * nothing, says why, and answers false.
+   */
+  const handTo = (
     rt: Runtime,
+    session: Session,
     items: readonly ConversationItemRow[],
-    out: Outgoing,
-    uuid: string,
-    fresh: boolean,
-  ): void => {
-    for (const item of items) markItemPushedUnder(ctx, item.id, uuid);
-    out.sent(ctx);
-    markFilesInline(ctx, rt.id, out.blocks, fresh);
-  };
-
-  /** Hands the live session every starter waiting, as one message; answers them. */
-  const pushWaiting = (rt: Runtime, session: Session): ConversationItemRow[] => {
-    const items = unpushed(rt);
+  ): boolean => {
     const first = items[0];
-    if (first === undefined) return [];
+    if (first === undefined) return true;
     const conv = conversation(rt.id);
     const hooks = hooksOf(conv);
     const limits = session.open.launch.limits;
@@ -466,19 +473,42 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       items.map((item) => hooks.outgoing(conv, item, { fresh: false, digest: null, limits })),
     );
     const uuid = clientUuid(first, randomUUID);
+    const ids = items.map((item) => item.id);
     state.write((ctx) => {
-      markPushed(ctx, rt, items, out, uuid, false);
+      for (const id of ids) markItemPushedUnder(ctx, id, uuid);
     });
-    session.open.handle.send(out.text, out.images, uuid);
-    return items;
+    try {
+      session.open.handle.send(out.text, out.images, uuid);
+    } catch (error) {
+      state.write((ctx) => {
+        markItemsHandedBack(ctx, rt.id, ids);
+      });
+      const reason = error instanceof Error ? error.message : String(error);
+      notice(rt, hooks.words?.startFailed?.(reason) ?? reason);
+      return false;
+    }
+    state.write((ctx) => {
+      out.sent(ctx);
+      markFilesInline(ctx, rt.id, out.blocks, false);
+    });
+    return true;
+  };
+
+  /** Hands the live session every starter waiting, as one message; answers them, or null on a failed send. */
+  const pushWaiting = (rt: Runtime, session: Session): ConversationItemRow[] | null => {
+    const items = unpushed(rt);
+    return handTo(rt, session, items) ? items : null;
   };
 
   /** A turn begins with what waits: pushed now, or handed earlier and not taken. */
   const beginTurn = (rt: Runtime): void => {
     const session = rt.session;
-    if (session === null) return;
+    // The state moved on while the effect waited (an end, a close): no turn begins now.
+    if (session === null || rt.state !== S.Running) return;
     const earlier = handed(rt).map((item) => item.id);
-    const pushed = pushWaiting(rt, session).map((item) => item.id);
+    const waiting = pushWaiting(rt, session);
+    // A send that failed began no turn: what it carried waits for the next.
+    const pushed = waiting?.map((item) => item.id) ?? [];
     if (earlier.length === 0 && pushed.length === 0) {
       // Nothing was left to run: the queue emptied while the effect waited.
       setState(rt, S.IdleWarm);
@@ -511,8 +541,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   };
 
   /** Stops a session the engine is done with; `closing` resolves once it has ended. */
-  const stopSession = (rt: Runtime, session: Session): Promise<void> => {
+  const stopSession = (rt: Runtime, session: Session, reason: string): Promise<void> => {
     session.asked = true;
+    session.endReason = reason;
     session.open.detach();
     rt.lastSession = session;
     if (rt.session === session) rt.session = null;
@@ -524,6 +555,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         log.warn({ err: error, conversationId: rt.id }, 'an explore session did not stop cleanly');
       }
       await session.open.done;
+      await session.released;
     })();
     // A session that does not end within the grace is let go: nothing after it waits on it forever.
     const stopped = withinGrace(ended, undefined).then(() => undefined);
@@ -639,19 +671,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     session: Session,
     items: readonly ConversationItemRow[],
   ): void => {
-    const first = items[0];
-    if (first === undefined) return;
-    const conv = conversation(rt.id);
-    const hooks = hooksOf(conv);
-    const limits = session.open.launch.limits;
-    const out = combined(
-      items.map((item) => hooks.outgoing(conv, item, { fresh: false, digest: null, limits })),
-    );
-    const uuid = clientUuid(first, randomUUID);
-    state.write((ctx) => {
-      markPushed(ctx, rt, items, out, uuid, false);
-    });
-    session.open.handle.send(out.text, out.images, uuid);
+    handTo(rt, session, items);
   };
 
   /** What a start has made so far, for a failure to undo. */
@@ -666,7 +686,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
    * token MCP would accept; the launch is released; what it marked pushed waits again), the builder is
    * told why, and the conversation ends in error. No failure here is a failed resume.
    */
-  const startFailed = async (rt: Runtime, made: Made, error: unknown): Promise<void> => {
+  /** What a start made goes, and its starters wait as they were. */
+  const unmake = async (rt: Runtime, made: Made): Promise<void> => {
     const { sessionId } = made;
     state.write((ctx) => {
       if (sessionId !== null) endSession(ctx, sessionId, 'start_failed');
@@ -676,7 +697,13 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     rt.session = null;
     rt.resuming = false;
     rt.inTurn = false;
-    notice(rt, error instanceof Error ? error.message : String(error));
+  };
+
+  const startFailed = async (rt: Runtime, made: Made, error: unknown): Promise<void> => {
+    await unmake(rt, made);
+    const reason = error instanceof Error ? error.message : String(error);
+    const words = owners.get(conversation(rt.id).ownerKind)?.words;
+    notice(rt, words?.startFailed?.(reason) ?? reason);
     reduce(rt, { type: 'ended', how: 'error' });
   };
 
@@ -701,7 +728,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       rt.cancelled = false;
       return true;
     };
-    if (cancelled()) return;
+    // Once the engine has closed, nothing starts: the starters wait for the next start's Send now.
+    if (cancelled() || closed) return;
     const items = unpushed(rt).filter((item) => waiting.has(item.id));
     const first = items[0];
     if (first === undefined) {
@@ -719,18 +747,38 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       reduce(rt, { type: 'ended', how: 'paused' });
       return;
     }
-    const resume = conv.providerSessionId;
+    // The owner may refuse a resume (what it would carry no longer fits the account): fresh, from the digest.
+    const resume =
+      conv.providerSessionId !== null && hooks.keepsResume?.(conv) === false
+        ? null
+        : conv.providerSessionId;
     const fresh = resume === null;
     // A fresh session after the agent has spoken is told what came before; the digest is kept with the
     // session's row, so a start that fails or is cancelled stores none.
     const digest = fresh && spoke(rt) ? hooks.digest(conv) : null;
-    const limits: PictureLimits = pictureLimitsFor(account.kind);
+    const limits: PictureLimits = hooks.limits?.(conv) ?? pictureLimitsFor(account.kind);
     const out = combined(
       items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
     );
     const uuid = clientUuid(first, randomUUID);
     const sessionId = mintId('Session');
     const { token, hash } = deps.mintToken();
+    // The row is written with its token's hash before the session is prepared, as what is prepared
+    // names it; a start that goes no further ends it, so no live row keeps a token MCP would accept.
+    // It bills the project's account as it is now, never the conversation's stored one.
+    const running = hooks.describeModel(conv, conv.model);
+    state.write((ctx) => {
+      insertSession(ctx, {
+        id: sessionId,
+        conversationId: rt.id,
+        provider: providerOf(account.kind),
+        model: running.launchId,
+        effort: running.effort,
+        mode: SessionMode.Managed,
+        mcpTokenHash: hash,
+      });
+    });
+    made.sessionId = sessionId;
     // Set once the session is made; its events and cards come only after, on a later turn of the loop.
     let self: Session | null = null;
     const launch = await hooks.spec(conv, {
@@ -761,15 +809,16 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       },
     });
     made.launch = launch;
-    if (cancelled()) {
-      made.launch = null;
-      await launch.release();
+    // A start Stop cancelled, or one the engine's close overtook, ends here: the row ends, the
+    // launch is released, and its starters wait as they were.
+    if (cancelled() || isClosed()) {
+      await unmake(rt, made);
       return;
     }
     const kept =
       digest === null ? null : capItemBody(ConversationItemKind.Digest, { text: digest });
     const digestItem = state.write((ctx) => {
-      const item =
+      const stored =
         kept === null
           ? null
           : insertItem(ctx, rt.id, {
@@ -777,25 +826,20 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
               kind: ConversationItemKind.Digest,
               body: kept.body,
             });
-      insertSession(ctx, {
-        id: sessionId,
-        conversationId: rt.id,
-        provider: providerOf(launch.spec.account.kind),
-        model: launch.spec.model,
-        effort: launch.spec.effort,
-        mode: SessionMode.Managed,
-        mcpTokenHash: hash,
-        accountId: launch.accountId,
-      });
-      markPushed(ctx, rt, items, out, uuid, fresh);
-      return item;
+      // Pushed under its uuid before the session is handed it (rule 1); what the owner marks told
+      // waits for the handle, so a start that fails tells nothing.
+      for (const item of items) markItemPushedUnder(ctx, item.id, uuid);
+      return stored;
     });
     // What the digest's item left out is kept on disk, once the write has committed.
     if (digestItem !== null && kept?.full != null)
       writeFullOutput(deps.dataDir, rt.id, digestItem.id, kept.full);
-    made.sessionId = sessionId;
     made.pushed = items.map((item) => item.id);
     const handle = adapter.open({ ...launch.spec, promptUuid: uuid });
+    state.write((ctx) => {
+      out.sent(ctx);
+      markFilesInline(ctx, rt.id, out.blocks, fresh);
+    });
     const open = openSession({
       state,
       clock,
@@ -847,9 +891,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         },
         ended: (event) => {
           state.write((ctx) => {
-            endSession(ctx, sessionId, event.reason);
+            endSession(ctx, sessionId, self?.endReason ?? event.reason);
           });
-          void launch.release();
+          const released = launch.release();
+          if (self !== null) self.released = released;
           if (self === null || self.asked || rt.session !== self) return;
           rt.grace?.cancel();
           rt.grace = null;
@@ -869,6 +914,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
               event.refusalBasis ?? ModelMarkBasis.Error,
             );
           const how = endedHow(event.reason);
+          // An end in error says why; a limit has its own notice, and an exit says nothing.
+          if (how === 'error') notice(rt, event.message ?? `The session ended (${event.reason}).`);
           if (how === 'paused')
             rt.pausedUntil = rt.rateReset ?? new Date(clock.now().getTime() + deps.defaultPauseMs);
           rt.rateReset = null;
@@ -876,7 +923,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         },
       },
     });
-    self = { open, asked: false, started: false };
+    self = { open, asked: false, started: false, endReason: null, released: null };
     rt.session = self;
     rt.resuming = !fresh;
     rt.starters = items.map((item) => item.id);
@@ -893,8 +940,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         return;
       case E.Push:
       case E.NextTurn:
-        // A session's first message is its prompt, so its turn has begun by `started`.
-        if (!rt.inTurn) beginTurn(rt);
+        // A session's first message is its prompt, so its turn began with it: `started` pushes nothing.
+        if (taken.event !== 'started' && !rt.inTurn) beginTurn(rt);
         return;
       case E.OnTurnEnded: {
         const conv = conversation(rt.id);
@@ -905,7 +952,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         const session = rt.session;
         if (session === null) return;
         handBack(rt);
-        await stopSession(rt, session);
+        const reason = rt.closeReason ?? (taken.event === 'context_full' ? 'continued' : 'idle');
+        rt.closeReason = null;
+        await stopSession(rt, session, reason);
         return;
       }
       case E.RunQueue:
@@ -925,7 +974,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         if (session === null) return;
         handBack(rt);
         rt.inTurn = false;
-        await stopSession(rt, session);
+        await stopSession(rt, session, 'stopped');
         return;
       }
       case E.Interrupt: {
@@ -969,7 +1018,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       }
       case E.StopHandle: {
         const session = rt.session;
-        if (session !== null) await stopSession(rt, session);
+        if (session !== null) await stopSession(rt, session, 'stopped');
         return;
       }
       case E.FreshNext:
@@ -978,7 +1027,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
           insertItem(ctx, rt.id, {
             author: ConversationItemAuthor.System,
             kind: ConversationItemKind.Notice,
-            body: { text: FRESH_SESSION_NOTICE },
+            body: {
+              text: hooksOf(conversation(rt.id)).words?.freshSession ?? FRESH_SESSION_NOTICE,
+            },
           });
         });
         return;
@@ -1025,10 +1076,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const rt = runtimeOf(id);
     if (holding(rt)) {
       rt.parked = true;
-      if (!rt.held && deps.hold !== undefined)
-        void deps.hold.untilClear().then(() => {
-          release(rt);
-        });
+      const conv = conversation(id);
+      hooksOf(conv).onParked?.(conv, true);
+      waitOutHold(rt);
       return;
     }
     const expiresAt = rt.session?.open.launch.expiresAt ?? null;
@@ -1046,6 +1096,21 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     rt.parked = false;
     if (unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' })))
       resolveSendNow(rt);
+    const conv = conversation(rt.id);
+    hooksOf(conv).onParked?.(conv, false);
+  };
+
+  /**
+   * A parked starter waits on the update hold only once no turn runs: while one does, the drain waits
+   * for that turn, and a waiter here would count it parked twice.
+   */
+  const waitOutHold = (rt: Runtime): void => {
+    if (!rt.parked || rt.parkWait || deps.hold === undefined || BUSY.has(rt.state)) return;
+    rt.parkWait = true;
+    void deps.hold.untilClear().then(() => {
+      rt.parkWait = false;
+      release(rt);
+    });
   };
 
   const recover = async (): Promise<void> => {
@@ -1055,6 +1120,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       const found = await settleRestart({ state, adapter, log }, conv, hooks, capabilitiesOf(conv));
       for (const card of found.cards) deps.withdrawCard?.(card);
       const rt = runtimeOf(conv.id);
+      // The restart row reads the state the conversation was left in.
       rt.state = conversation(conv.id).state ?? S.IdleCold;
       if (rt.state === S.PausedAccount) {
         // The reset a pause waited for is not kept: it is checked again after the default pause.
@@ -1070,7 +1136,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     }
   };
 
-  const close = async (): Promise<void> => {
+  let closedDown: Promise<void> | null = null;
+  const close = (): Promise<void> => (closedDown ??= closeDown());
+  const closeDown = async (): Promise<void> => {
     closed = true;
     unsubscribeAccounts();
     const stopping: Promise<void>[] = [];
@@ -1085,7 +1153,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       session.open.detach();
       handBack(rt);
       storePartialNow(rt);
-      stopping.push(stopSession(rt, session));
+      stopping.push(stopSession(rt, session, 'stopped'));
     }
     await Promise.all(stopping);
   };
@@ -1098,10 +1166,13 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     /** Resolves once the stop's effects have been applied: the interrupt asked, or the start cancelled. */
     async stop(id) {
       const rt = runtimeOf(id);
-      reduce(rt, { type: 'stop' });
-      await new Promise<void>((resolve) => {
-        enqueue(rt, resolve);
-      });
+      const outcome = reduce(rt, { type: 'stop' });
+      // An interrupt is asked for on the chain; a cancelled start answers at once, as its preparation
+      // may still be under way.
+      if ('effects' in outcome && outcome.effects.includes(E.Interrupt))
+        await new Promise<void>((resolve) => {
+          enqueue(rt, resolve);
+        });
     },
     async redo(id, post) {
       const rt = runtimeOf(id);
@@ -1168,32 +1239,41 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     async modelChanged(id, model) {
       const rt = runtimeOf(id);
       if (BUSY.has(rt.state)) throw new ConflictError('Stop first');
-      // On the chain, so no effect runs between the switch and its notice; both only once it took.
+      const conv = conversation(id);
+      const hooks = hooksOf(conv);
+      const before = hooks.describeModel(conv, conv.model);
+      const after = hooks.describeModel(conv, model);
+      // The pick is the conversation's at once; a warm session takes it on the chain, and only once it
+      // has is the change noted. A switch that fails puts the old pick back.
+      state.write((ctx) => {
+        patchConversation(ctx, id, { model });
+      });
+      // The warm session as the pick finds it: a message sent right after queues behind the switch.
+      const session = rt.state === S.IdleWarm ? rt.session : null;
+      const switching = session !== null && after.model !== before.model;
       await new Promise<void>((resolve, reject) => {
         enqueue(rt, async () => {
           try {
-            const conv = conversation(id);
-            const hooks = hooksOf(conv);
-            const before = hooks.describeModel(conv, conv.model);
-            const after = hooks.describeModel(conv, model);
-            const session = rt.session;
-            const switching =
-              rt.state === S.IdleWarm && session !== null && after.model !== before.model;
             const nextTurn = capabilitiesOf(conv).modelSwitch === ModelSwitch.NextTurn;
             if (switching && nextTurn) await session.open.handle.setModel(after.launchId);
-            state.write((ctx) => {
-              patchConversation(ctx, id, { model });
-              if (after.model !== before.model)
+            if (after.model !== before.model)
+              state.write((ctx) => {
                 insertItem(ctx, id, {
                   author: ConversationItemAuthor.System,
                   kind: ConversationItemKind.Notice,
                   body: { kind: 'model_change', label: after.label, model: after.model },
                 });
-            });
+              });
             // An agent that can't switch a live session closes it; the next start runs the pick.
-            if (switching && !nextTurn) reduce(rt, { type: 'idle_close' });
+            if (switching && !nextTurn) {
+              rt.closeReason = 'model changed';
+              reduce(rt, { type: 'idle_close' });
+            }
             resolve();
           } catch (error) {
+            state.write((ctx) => {
+              patchConversation(ctx, id, { model: conv.model });
+            });
             reject(error instanceof Error ? error : new Error(String(error)));
           }
         });
@@ -1237,7 +1317,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       for (;;) {
         const chain = rt.chain;
         await chain;
-        if (rt.chain === chain && !BUSY.has(rt.state)) return;
+        // Once closed, nothing moves the state again: a restart's recovery settles it.
+        if (rt.chain === chain && (!BUSY.has(rt.state) || closed)) return;
         if (rt.chain === chain)
           await new Promise<void>((resolve) => {
             rt.waiters.push(resolve);

@@ -335,44 +335,11 @@ function publicPageProblem(raw: string): string | null {
   return privateHostProblem(raw);
 }
 
-/**
- * The dimmed line for an allowed call that sends something to the researcher or out to the web: the
- * question, a search's query or a fetch's URL; null for any other call.
- */
-export function researchLine(toolName: string, toolInput: unknown): string | null {
-  if (toolName === 'WebSearch') return `WebSearch · ${stringField(toolInput, 'query') ?? ''}`;
-  if (toolName === 'WebFetch') return `WebFetch · ${stringField(toolInput, 'url') ?? ''}`;
-  if (toolName === 'Agent' && stringField(toolInput, 'subagent_type') === SHAPE_RESEARCHER)
-    return `${SHAPE_RESEARCHER} · asked · ${stringField(toolInput, 'prompt') ?? ''}`;
-  return null;
-}
-
-/** Most characters of a command or a tool's input that its dimmed line shows. */
-const LINE_LIMIT = 300;
-const clip = (text: string): string =>
-  text.length > LINE_LIMIT ? `${text.slice(0, LINE_LIMIT)}…` : text;
-
 /** A tool of a project MCP server: `mcp__<server>__<tool>`, any server but 10db's. */
 const isProjectTool = (toolName: string): boolean =>
   toolName.startsWith('mcp__') &&
   !toolName.startsWith(MCP_PREFIX) &&
   toolName.split('__').length >= 3;
-
-/**
- * The dimmed line for a command or a project tool call the hook let through or sent to the builder,
- * naming the agent that made it when one did; null for any other call.
- */
-export function commandLine(
-  toolName: string,
-  toolInput: unknown,
-  agentType: string | undefined,
-): string | null {
-  const by = agentType === undefined ? '' : `${agentType} · `;
-  if (COMMAND_TOOLS.has(toolName))
-    return `${by}Bash · ${clip(stringField(toolInput, 'command') ?? '')}`;
-  if (isProjectTool(toolName)) return `${by}${toolName} · ${clip(JSON.stringify(toolInput ?? {}))}`;
-  return null;
-}
 
 function judgeWeb(call: ShapeCall): GuardVerdict {
   if (!isResearcher(call))

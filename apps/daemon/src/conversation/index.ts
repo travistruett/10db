@@ -25,6 +25,7 @@ export type {
   ExploreModel,
   ExploreOwnerHooks,
   ExploreStart,
+  ExploreWords,
   Outgoing,
   TurnEnd,
 } from './explore-hooks';

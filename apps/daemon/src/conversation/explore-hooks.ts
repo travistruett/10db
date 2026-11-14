@@ -1,4 +1,10 @@
-import type { AccountId, ConversationFileId, ConversationItemId, SessionId } from '@10db/contracts';
+import type {
+  AccountId,
+  ConversationFileId,
+  ConversationItemId,
+  Effort,
+  SessionId,
+} from '@10db/contracts';
 import type { ConversationItemRow, ConversationRow, WriteContext } from '@10db/db';
 import type { WaitObserver } from '../inbox';
 import type { ConversationReadSpec, ExploreSessionSpec, ShapeImage } from '../sessions';
@@ -51,11 +57,23 @@ export interface TurnEnd {
   readonly starters: readonly ConversationItemId[];
 }
 
-/** A model the conversation can run on: its id, its display name, and what the account launches it as. */
+/**
+ * A model the conversation can run on: its id, its display name, what the account launches it as, and
+ * the effort it runs at.
+ */
 export interface ExploreModel {
   readonly model: string;
   readonly label: string;
   readonly launchId: string;
+  readonly effort: Effort;
+}
+
+/** The owner's words for what the engine tells the builder; the engine's own where none are given. */
+export interface ExploreWords {
+  /** The notice that the next start is fresh, past the context limit. */
+  readonly freshSession: string;
+  /** The notice of a start that could not open a session, from why. */
+  startFailed(reason: string): string;
 }
 
 export interface ExploreOwnerHooks {
@@ -81,4 +99,17 @@ export interface ExploreOwnerHooks {
   /** The model a pick runs on (null: the role's), for a warm session's switch and the change's notice. */
   describeModel(conv: ConversationRow, model: string | null): ExploreModel;
   readonly freshAtContextPct: number;
+  /**
+   * The picture limits the conversation's next session runs under, for the first message it is sent
+   * before its launch is known; the account kind's own where absent.
+   */
+  limits?(conv: ConversationRow): PictureLimits;
+  /**
+   * Whether the next start may resume the agent session it would; false starts it fresh, from the
+   * digest. Asked only when there is one to resume; resumed where absent.
+   */
+  keepsResume?(conv: ConversationRow): boolean;
+  readonly words?: Partial<ExploreWords>;
+  /** Told when a starter begins and ends waiting on a hold, for a view that says so. */
+  onParked?(conv: ConversationRow, parked: boolean): void;
 }

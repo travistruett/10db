@@ -183,11 +183,13 @@ import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
+import { createExploreEngine } from '../conversation';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
   forgetEndedYields,
+  mintSessionToken,
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
@@ -1374,17 +1376,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       : { model: choice.model, effort: choice.effort };
   };
   const laneSandbox = sandboxes?.lane ?? null;
+  // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
+  const exploreEngine = createExploreEngine({
+    state,
+    adapter,
+    clock,
+    log: logger.child({ component: 'explore' }),
+    dataDir: opts.dataDir,
+    frames: liveFrames,
+    // A waiting update starts no new turn: a conversation's session is no lane, and the install
+    // would cut off one that began during the drain, or while the install starts.
+    hold: holdBoth([updateDrain, installHold]),
+    bus,
+    mintToken: mintSessionToken,
+    // A start the account runtime holds (a pause, a monthly cap) waits it out, as a lane's does.
+    accountBlocked: (accountId, projectId) =>
+      accounts.blocked(getAccountRow(db, accountId), projectId),
+    defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+    withdrawCard: (id) => {
+      inbox.withdraw(id);
+    },
+  });
   const shape = createShapeService({
     state,
     adapter,
+    engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
-    // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
-    // install would cut off one that began during the drain, or while the install starts.
-    hold: holdBoth([updateDrain, installHold]),
     jev: createShapeJev({
       state,
       judge,
@@ -2164,6 +2185,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       shapeTools: shape.toolsFor,
     }),
   });
+  // What a restart found of each explore conversation is settled before the API serves it.
+  await exploreEngine.recover();
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
     fetch: app.fetch,
@@ -2293,6 +2316,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
       await shape.close();
+      await exploreEngine.close();
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();

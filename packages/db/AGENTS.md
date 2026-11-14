@@ -88,3 +88,8 @@ only process that writes the database.
   `task_messages` and `task_files`; `store/shape-state.ts` and `store/task-thread.ts` keep their names and
   signatures over the conversation repositories (`store/conversations.ts`, `conversation-items.ts`,
   `conversation-files.ts`), which order by `seq` and files by `created_at`, never by id.
+  An item is announced by id alone: `conversation.item_added` (with its `seq` and kind) and
+  `conversation.item_updated`, and a change of an explore conversation's state as `conversation.state`;
+  `putItem` stores an item under a caller's id, or updates it there. The explore queue is read from rows:
+  `listQueuedTurnStarters` (builder messages and prompted presses neither pushed nor delivered) and
+  `listPushedTurnStarters` (handed to a session, not taken); `openTurnMarker` is the open "Send now" line.

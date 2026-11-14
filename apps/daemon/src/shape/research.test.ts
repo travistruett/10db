@@ -1,5 +1,5 @@
-import { mintId, ShapeMessageAuthor, ShapeMessageKind, type ShapeId } from '@10db/contracts';
-import { listShapeMessages } from '@10db/db';
+import { mintId, ToolCallView, type ShapeId } from '@10db/contracts';
+import { listItems, shapeConversation } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
@@ -9,8 +9,8 @@ import { seedConversation, type ConversationFixture } from './conversation-fixtu
 import { createShapeService, type ShapeService } from './service';
 import { SHAPE_AGENT_MODELS } from './confinement';
 
-// Shape spec §5.2: the researcher reaches the web, and every search, fetch and refusal shows in the
-// conversation as a dimmed line (a Tool message from Claude).
+// Shape spec §5.2: the researcher reaches the web, and every search, fetch and refusal is in the
+// conversation as the call the session reported: done, or denied by 10db with the guard's reason.
 
 let c: ConversationFixture;
 let adapter: FakeAdapter;
@@ -57,10 +57,12 @@ afterEach(async () => {
   c.close();
 });
 
-const dimmed = (): string[] =>
-  listShapeMessages(c.store.db, shapeId)
-    .filter((m) => m.author === ShapeMessageAuthor.Claude && m.kind === ShapeMessageKind.Tool)
-    .map((m) => m.body);
+/** The calls the session reported, as stored: the adapter's own, not Plan's lines. */
+const calls = (): ToolCallView[] =>
+  listItems(c.store.db, shapeConversation(c.store.db, shapeId).id)
+    .filter((i) => i.kind === 'tool_call')
+    .map((i) => ToolCallView.parse(i.body))
+    .filter((call) => call.harnessTool !== '10db.plan');
 
 /** Runs one turn in which the model makes these calls through the hook, as Claude Code would. */
 async function turnWith(
@@ -82,7 +84,7 @@ async function turnWith(
 const RESEARCHER = { agentId: 'agent-1', agentType: 'researcher' } as const;
 
 describe('a research turn', () => {
-  it('shows the question the session handed the researcher, each search and each fetch', async () => {
+  it('stores the call that handed the researcher its question, then each search and fetch under it', async () => {
     await turnWith([
       {
         toolName: 'Agent',
@@ -95,11 +97,24 @@ describe('a research turn', () => {
         ...RESEARCHER,
       },
     ]);
-    expect(dimmed()).toEqual([
-      'researcher · asked · How does Vega-Lite order ties?',
-      'WebSearch · vega-lite stack order ties',
-      'WebFetch · https://vega.github.io/vega-lite/docs/stack.html',
-    ]);
+    const [agent, search, fetch] = calls();
+    expect(agent).toMatchObject({
+      kind: 'subagent',
+      status: 'done',
+      promptPreview: 'How does Vega-Lite order ties?',
+    });
+    expect(search).toMatchObject({
+      kind: 'web',
+      status: 'done',
+      query: 'vega-lite stack order ties',
+      parentId: agent?.id,
+    });
+    expect(fetch).toMatchObject({
+      kind: 'web',
+      status: 'done',
+      url: 'https://vega.github.io/vega-lite/docs/stack.html',
+      parentId: agent?.id,
+    });
   });
 
   it.each([
@@ -107,37 +122,47 @@ describe('a research turn', () => {
     ['the scope reviewer', { agentId: 'a', agentType: 'scope' }],
     ['the engineering reviewer', { agentId: 'a', agentType: 'engineering' }],
     ['the rehearsal reviewer', { agentId: 'a', agentType: 'rehearsal' }],
-  ])('refuses a search and a fetch from %s, with a dimmed line each', async (_who, who) => {
+  ])('refuses a search and a fetch from %s, each a call 10db denied', async (_who, who) => {
     await turnWith([
       { toolName: 'WebSearch', input: { query: 'x' }, ...who },
       { toolName: 'WebFetch', input: { url: 'https://example.com/' }, ...who },
     ]);
-    const lines = dimmed();
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/^WebSearch · refused · /);
-    expect(lines[1]).toMatch(/^WebFetch · refused · /);
+    expect(calls().map((call) => [call.status, call.deniedBy, call.refusal !== null])).toEqual([
+      ['denied', '10db', true],
+      ['denied', '10db', true],
+    ]);
   });
 
-  it('refuses the researcher’s Read of the checkout and of the conversation’s files, with a dimmed line each', async () => {
+  it('refuses the researcher’s Read of the checkout and of the conversation’s files, each a call 10db denied', async () => {
     await turnWith([
       { toolName: 'Read', input: { file_path: '/repo/src/a.ts' }, ...RESEARCHER },
       { toolName: 'Read', input: { file_path: '/files/brief.md' }, ...RESEARCHER },
     ]);
-    expect(dimmed()).toEqual([
-      expect.stringMatching(/^Read · refused · The researcher reads no files/),
-      expect.stringMatching(/^Read · refused · The researcher reads no files/),
+    expect(
+      calls().map((call) => [
+        call.status,
+        call.deniedBy,
+        call.refusal?.startsWith('The researcher reads no files'),
+      ]),
+    ).toEqual([
+      ['denied', '10db', true],
+      ['denied', '10db', true],
     ]);
   });
 
-  it('shows a refused fetch as a refusal and not as a fetch', async () => {
+  it('stores a refused fetch as a denied call and not as a fetch', async () => {
     await turnWith([
       { toolName: 'WebFetch', input: { url: 'https://127.0.0.1:4317/mcp' }, ...RESEARCHER },
     ]);
-    expect(dimmed()).toEqual([expect.stringMatching(/^WebFetch · refused · /)]);
+    expect(calls().map((call) => [call.kind, call.status, call.deniedBy])).toEqual([
+      ['web', 'denied', '10db'],
+    ]);
   });
 
-  it('does not repeat the question of an Agent call it refused', async () => {
+  it('stores a refused Agent call once, denied', async () => {
     await turnWith([{ toolName: 'Agent', input: { subagent_type: 'researcher', prompt: ' ' } }]);
-    expect(dimmed()).toEqual([expect.stringMatching(/^Agent · refused · /)]);
+    expect(calls().map((call) => [call.kind, call.status, call.deniedBy])).toEqual([
+      ['subagent', 'denied', '10db'],
+    ]);
   });
 });
