@@ -2,8 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "flowName": {
-      "type": "string"
+    "rigor": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "light",
+            "standard",
+            "careful",
+            "critical"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "steps": {
       "type": "array",
@@ -82,6 +95,11 @@
                       "kind": {
                         "type": "string",
                         "const": "automatic"
+                      },
+                      "minimum": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
                       }
                     },
                     "required": [
@@ -116,6 +134,15 @@
                       "kind": {
                         "type": "string",
                         "const": "top_of_tier"
+                      },
+                      "tier": {
+                        "type": "string",
+                        "enum": [
+                          "efficient",
+                          "balanced",
+                          "capable",
+                          "frontier"
+                        ]
                       }
                     },
                     "required": [
@@ -334,7 +361,7 @@
     }
   },
   "required": [
-    "flowName",
+    "rigor",
     "steps",
     "overBudget"
   ]

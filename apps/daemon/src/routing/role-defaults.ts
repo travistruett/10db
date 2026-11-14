@@ -43,13 +43,9 @@ export function pickByDefault(
   return {
     profile,
     tier: pool.tier,
-    reason: `by role default: the ${top ? 'top' : 'cheapest'} model of the ${pool.tier} tier${raised}`,
+    reason: `by the rigor’s fallback rung: the ${top ? 'top' : 'cheapest'} model of the ${pool.tier} tier${raised}`,
   };
 }
-
-/** The tier a role runs on, which a floor moves to the top one. */
-export const defaultTier = (role: StepRole, floored: boolean): ModelTier =>
-  floored ? ModelTier.Frontier : ROLE_DEFAULT[role].tier;
 
 /**
  * One rung up from a profile: the top model of its tier when it is not already there, then the cheapest model of

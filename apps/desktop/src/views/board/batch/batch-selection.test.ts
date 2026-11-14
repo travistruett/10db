@@ -16,7 +16,7 @@ const proposal = PickerProposalDto.parse({
     candidate(two, { proposed: false, conflict: 'Area src is shared with One, picked before it' }),
     candidate(three, {
       proposed: false,
-      plan: { flowName: 'standard', steps: [], overBudget: [0] },
+      plan: { rigor: 'standard', steps: [], overBudget: [0] },
       conflict: 'Over the budget ceiling: step 1 (implement)',
     }),
   ],

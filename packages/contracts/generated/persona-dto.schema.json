@@ -39,42 +39,6 @@
         "type": "string"
       }
     },
-    "minimumScore": {
-      "type": [
-        "number",
-        "null"
-      ]
-    },
-    "modelPin": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "model": {
-              "type": "string",
-              "minLength": 1
-            },
-            "effort": {
-              "type": "string",
-              "enum": [
-                "low",
-                "medium",
-                "high",
-                "xhigh",
-                "max"
-              ]
-            }
-          },
-          "required": [
-            "model",
-            "effort"
-          ]
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "archived": {
       "type": "boolean"
     },
@@ -97,8 +61,6 @@
     "tools",
     "instructions",
     "skills",
-    "minimumScore",
-    "modelPin",
     "archived",
     "createdAt",
     "updatedAt"

@@ -180,7 +180,7 @@ describe('the builder MCP endpoint', () => {
         { name: 'src', globs: ['src/**'] },
         { name: 'docs', globs: ['docs/**'] },
       ],
-      flowId: project.flowId,
+      defaultRigor: project.defaultRigor,
       delivery: project.delivery,
     });
     expect(projects[0]?.['hazards']).toContainEqual(
@@ -215,9 +215,22 @@ describe('the builder MCP endpoint', () => {
     ]);
   });
 
-  it('lists flows', async () => {
-    const flows = z.array(z.object({ id: z.string(), name: z.string() }).loose());
-    expect(flows.parse(await callJson('list_flows')).length).toBeGreaterThan(0);
+  it('lists the kinds with what each changes', async () => {
+    const kinds = z.array(
+      z
+        .object({
+          key: z.string(),
+          minimumRigor: z.string().nullable(),
+          alwaysReviewed: z.boolean(),
+        })
+        .loose(),
+    );
+    const listed = kinds.parse(await callJson('list_kinds'));
+    expect(listed.find((k) => k.key === 'security')).toMatchObject({
+      minimumRigor: 'careful',
+      alwaysReviewed: true,
+    });
+    expect(listed.find((k) => k.key === 'ui')).toMatchObject({ minimumRigor: null });
   });
 
   it('lists a project’s open tasks only', async () => {
@@ -247,8 +260,6 @@ describe('the builder MCP endpoint', () => {
             acceptanceCriteria: ['  one ', '', 'two'],
             areas: ['src'],
             dependsOn: [first.id],
-            riskTags: ['security'],
-            flowId: project.flowId,
           }),
         );
       expect(created.title).toBe('Search is fast');
@@ -259,10 +270,51 @@ describe('the builder MCP endpoint', () => {
         acceptanceCriteria: ['one', 'two'],
         areas: ['src'],
         dependsOn: [first.id],
-        riskTags: ['security'],
-        flowId: project.flowId,
         boardStatus: created.boardStatus,
       });
+    });
+
+    it('stores the rigor and the kinds an agent names, as kinds an agent set', async () => {
+      const project = await seedProject();
+      const created = z.object({ id: z.string() }).parse(
+        await callJson('create_task', {
+          projectId: project.id,
+          title: 'Rotate the token',
+          acceptanceCriteria: ['one'],
+          areas: ['src'],
+          rigor: 'critical',
+          kinds: [{ key: 'security' }, { key: 'ui', source: 'builder' }],
+        }),
+      );
+      expect((await tasksOf(project.id)).find((t) => t.id === created.id)).toMatchObject({
+        rigor: 'critical',
+        effectiveRigor: 'critical',
+        kinds: [
+          { key: 'security', source: 'agent' },
+          { key: 'ui', source: 'agent' },
+        ],
+      });
+    });
+
+    it.each([
+      {
+        name: 'a rigor below the minimum of a kind, naming the kind',
+        args: { rigor: 'light', kinds: [{ key: 'security' }] },
+        text: /Security/,
+      },
+      { name: 'a kind no kind has', args: { kinds: [{ key: 'nonsense' }] }, text: /nonsense/ },
+    ])('refuses $name', async ({ args, text }) => {
+      const project = await seedProject();
+      const refused = await call('create_task', {
+        projectId: project.id,
+        title: 'Rotate the token',
+        acceptanceCriteria: ['one'],
+        areas: ['src'],
+        ...args,
+      });
+      expect(refused).toMatchObject({ isError: true });
+      expect(refused.text).toMatch(text);
+      expect(await tasksOf(project.id)).toEqual([]);
     });
 
     it('stores a trimmed headline and why, as the REST API does', async () => {
@@ -356,7 +408,6 @@ describe('the builder MCP endpoint', () => {
       { name: 'an unknown dependency', body: { dependsOn: [mintId('Task')] } },
       { name: 'a title with a newline', body: { title: 'one\ntwo' } },
       { name: 'an empty title', body: { title: '' } },
-      { name: 'an unknown flow', body: { flowId: mintId('Flow') } },
     ])('refuses $name as the REST API does', async ({ body }) => {
       const project = await seedProject();
       const input = { title: 't', acceptanceCriteria: ['a'], areas: ['src'], ...body };
@@ -388,12 +439,12 @@ describe('the builder MCP endpoint', () => {
         taskId: task.id,
         title: ' after ',
         acceptanceCriteria: [' new '],
-        riskTags: ['auth'],
+        why: ' because ',
       });
       expect((await tasksOf(project.id))[0]).toMatchObject({
         title: 'after',
         acceptanceCriteria: ['new'],
-        riskTags: ['auth'],
+        why: 'because',
         areas: ['src'],
       });
     });
@@ -410,6 +461,42 @@ describe('the builder MCP endpoint', () => {
         text,
       });
       expect((await tasksOf(project.id))[0]?.acceptanceCriteria).toEqual(['x']);
+    });
+
+    it('replaces the kinds by key, and a kind the task had keeps who set it', async () => {
+      const project = await seedProject();
+      const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Pinned',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+        kinds: [{ key: 'ui', source: 'builder' }],
+      });
+      await callJson('edit_task', { taskId: task.id, kinds: [{ key: 'ui' }, { key: 'docs' }] });
+      expect((await tasksOf(project.id))[0]).toMatchObject({
+        kinds: [
+          { key: 'ui', source: 'builder' },
+          { key: 'docs', source: 'agent' },
+        ],
+      });
+    });
+
+    it('refuses a rigor below the task’s kinds, and hands the rigor back with null', async () => {
+      const project = await seedProject();
+      const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Guarded',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+        kinds: [{ key: 'security', source: 'builder' }],
+        rigor: 'critical',
+      });
+      const refused = await call('edit_task', { taskId: task.id, rigor: 'light' });
+      expect(refused).toMatchObject({ isError: true });
+      expect(refused.text).toMatch(/Security/);
+      await callJson('edit_task', { taskId: task.id, rigor: null });
+      expect((await tasksOf(project.id))[0]).toMatchObject({
+        rigor: null,
+        effectiveRigor: 'careful',
+      });
     });
 
     it('sets a headline and why, keeps the title, and clears the why with an empty string', async () => {

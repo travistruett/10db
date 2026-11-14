@@ -1,7 +1,4 @@
-import { EvidenceKind, RiskTag, StepRole, type EvidenceDto } from '@10db/contracts';
-
-/** Risks whose work must not ship with a finding left open: a rejection at the limit still fails it. */
-const NEVER_SHIPS_OPEN: readonly RiskTag[] = [RiskTag.Security, RiskTag.Auth];
+import { EvidenceKind, StepRole, type EvidenceDto, type KindDto } from '@10db/contracts';
 
 /** Steps that judge built work; a plan review judges a plan, and nothing is built to ship yet. */
 const JUDGES_BUILT_WORK: readonly StepRole[] = [StepRole.Review, StepRole.Qa];
@@ -14,12 +11,13 @@ const JUDGES_BUILT_WORK: readonly StepRole[] = [StepRole.Review, StepRole.Qa];
 export function shipsAtRetryLimit(input: {
   /** The step that rejected the work. */
   readonly role: StepRole;
-  readonly riskTags: readonly RiskTag[];
+  /** The kinds the task has: one that fails at the limit means a rejection there still fails the task. */
+  readonly kinds: readonly Pick<KindDto, 'failsAtLimit'>[];
   /** The workstream's evidence, oldest first. */
   readonly evidence: readonly Pick<EvidenceDto, 'kind' | 'exitCode'>[];
 }): boolean {
   if (!JUDGES_BUILT_WORK.includes(input.role)) return false;
-  if (input.riskTags.some((tag) => NEVER_SHIPS_OPEN.includes(tag))) return false;
+  if (input.kinds.some((kind) => kind.failsAtLimit)) return false;
   const latestGate = input.evidence.filter((e) => e.kind === EvidenceKind.Gate).at(-1);
   return latestGate === undefined || latestGate.exitCode === 0;
 }

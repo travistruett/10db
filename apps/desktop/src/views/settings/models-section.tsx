@@ -1,4 +1,4 @@
-import type { AccountId, ModelRowDto, StepRole } from '@10db/contracts';
+import { RIGORS, Rigor, type AccountId, type ModelRowDto, type StepRole } from '@10db/contracts';
 import {
   ActionIcon,
   Anchor,
@@ -22,6 +22,7 @@ import {
   useModels,
   useRefreshModels,
 } from '../../daemon/model-queries';
+import { usePlaybook } from '../../daemon/playbook-queries';
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
@@ -38,12 +39,15 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { KindsSection } from './kinds-section';
+import { MoveReportNote } from './move-report-note';
 import { ModelsTable } from './models-table';
+import { PlaybookTable } from './playbook-table';
+import { rigorLabel } from './rigor-labels';
 import { RaisedPanel } from './raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
-import { RolePicksPanel } from './role-picks-panel';
 import { SettingsSectionKey } from './sections';
 
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
@@ -56,11 +60,13 @@ const DOTS_LABELS = [
 const isDotsMode = (value: string): value is DotsMode =>
   Object.values(DotsMode).some((mode) => mode === value);
 
+const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === value);
+
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
 /**
- * Settings › Models: who each role gets on one account, then Intelligence against cost per task,
- * then every model the account runs. A model's detail is in the drawer.
+ * Settings › Models: the playbook and the kinds on one account, then Intelligence against cost per task with
+ * the picks of one rigor drawn on it, then every model the account runs. A model's detail is in the drawer.
  */
 export function ModelsSection() {
   const now = useNow();
@@ -72,7 +78,10 @@ export function ModelsSection() {
     live.find((a) => a.id === chosen) ?? live.find((a) => a.isDefault) ?? live[0] ?? null;
   const accountId = account?.id ?? null;
   const models = useModels(accountId, accountId !== null);
-  const picks = useModelPicks(accountId);
+  // The chart's rings follow one rigor; Standard is the one most work gets.
+  const [rigor, setRigor] = useState<Rigor>(Rigor.Standard);
+  const picks = useModelPicks(accountId, rigor, null);
+  const playbook = usePlaybook(null);
   const offers = useModelOffers();
   const status = useCatalogueStatus();
   const refresh = useRefreshModels();
@@ -81,7 +90,6 @@ export function ModelsSection() {
     column: ModelColumn.Intelligence,
     direction: SortDirection.Descending,
   });
-  const [role, setRole] = useState<StepRole | null>(null);
   const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
   const [selected, setSelected] = useState<ModelRowDto | null>(null);
   const [opened, setOpened] = useState(false);
@@ -235,9 +243,12 @@ export function ModelsSection() {
   // A refresh can shrink the list under the page; the page shown is never past the last one.
   const page = Math.min(paging.page, Math.max(1, Math.ceil(families.length / paging.pageSize)));
   const shownFamilies = families.slice((page - 1) * paging.pageSize, page * paging.pageSize);
-  const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
-  const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role, dots });
-  const names = new Map(everyModel.map((r) => [r.model, r.name]));
+  // Only the roles the rigor's row runs are ringed and counted as using a model.
+  const runs = playbook.data?.rows.find((r) => r.rigor === rigor)?.steps.value ?? null;
+  const drawnPicks = settling
+    ? []
+    : (picks.data?.picks ?? []).filter((p) => runs === null || runs.includes(p.role));
+  const result = rightsizingSeries({ rows: accountRows, picks: drawnPicks, role: null, dots });
   const usedBy = new Map<string, string[]>();
   for (const pick of drawnPicks)
     if (pick.model !== null)
@@ -246,48 +257,53 @@ export function ModelsSection() {
   return (
     <Stack gap="lg">
       {header}
-      {picks.isError ? (
-        <Group gap="sm">
-          <Text size="sm" c="red" role="alert">
-            {picks.error.message}
-          </Text>
-          <Button
-            variant="default"
-            size="xs"
-            onClick={() => {
-              void picks.refetch();
-            }}
-          >
-            Try Again
-          </Button>
-        </Group>
-      ) : picks.data === undefined || settling ? (
-        <Text size="sm" c="dimmed">
-          Reading what each role gets…
+      <MoveReportNote />
+      <Stack gap="xs" component="section" aria-label="Playbook section">
+        <Title order={4} size="md" fw={600}>
+          Playbook
+        </Title>
+        <Text size="xs" c="dimmed">
+          Each rigor runs the steps in its row. A cell shows the model and effort it resolves to on{' '}
+          {account.label}, and the setting behind it; open a cell to change it, a rigor to change
+          its steps.
         </Text>
-      ) : (
-        <RolePicksPanel
-          picks={picks.data.picks}
-          names={names}
-          notOnChart={result.notOnChart}
-          selected={role}
-          onSelect={setRole}
-        />
-      )}
+        <PlaybookTable projectId={null} accountId={accountId} />
+      </Stack>
+      <KindsSection />
       <Stack gap="xs">
         <Group justify="space-between">
           <Title order={4} size="md" fw={600}>
             Intelligence and cost
           </Title>
-          <SegmentedControl
-            size="xs"
-            aria-label="Dots"
-            data={[...DOTS_LABELS]}
-            value={dots}
-            onChange={(value) => {
-              if (isDotsMode(value)) setDots(value);
-            }}
-          />
+          <Group gap="xs" wrap="nowrap">
+            <Select
+              aria-label="Rigor for the rings"
+              size="xs"
+              w={190}
+              leftSection={
+                <Text size="xs" c="dimmed">
+                  Rings
+                </Text>
+              }
+              leftSectionWidth={56}
+              leftSectionPointerEvents="none"
+              allowDeselect={false}
+              data={RIGORS.map((r) => ({ value: r, label: rigorLabel(r) }))}
+              value={rigor}
+              onChange={(value) => {
+                if (value !== null && isRigor(value)) setRigor(value);
+              }}
+            />
+            <SegmentedControl
+              size="xs"
+              aria-label="Dots"
+              data={[...DOTS_LABELS]}
+              value={dots}
+              onChange={(value) => {
+                if (isDotsMode(value)) setDots(value);
+              }}
+            />
+          </Group>
         </Group>
         <RaisedPanel>
           <RightsizingChart
@@ -297,7 +313,8 @@ export function ModelsSection() {
           />
         </RaisedPanel>
         <Text size="xs" c="dimmed">
-          Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account.
+          Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account at
+          the rigor chosen.
           {result.omitted > 0
             ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
             : ''}

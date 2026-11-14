@@ -12,7 +12,7 @@ import {
 } from './ids';
 import { TopicKey } from './knowledge';
 import { PlanAlternative, PlanAnchor, PlanRef } from './plan-record';
-import { KnowledgeScope, PrincipleKind } from './states';
+import { Effort, KnowledgeScope, PrincipleKind } from './states';
 import { SeeScreenInput } from './shape-screens';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
@@ -317,6 +317,8 @@ export const ShapeDto = z.object({
   round: z.int().min(0),
   /** The model ID the builder chose for the conversation; null runs it on the `plan` role's. */
   model: z.string().nullable().default(null),
+  /** The effort the builder chose for the conversation; null follows the model's own default. */
+  effort: z.enum(Effort).nullable().default(null),
   /** When the Plan was imported from a bundle; null for a conversation. */
   importedAt: Timestamp.nullable().default(null),
   createdAt: Timestamp,
@@ -327,8 +329,14 @@ export type ShapeDto = z.infer<typeof ShapeDto>;
 /** A model the builder may choose for a conversation (Shape spec §5.1): any model ID the project's account lists. */
 export const ShapeModel = z.string().trim().min(1).max(200);
 
-/** `PUT /shapes/:id/model`: the model ID to run the conversation on, or null for the `plan` role's. */
-export const ShapeModelInput = z.strictObject({ model: ShapeModel.nullable() });
+/**
+ * `PUT /shapes/:id/model`: the model ID to run the conversation on, or null for the `plan` role's, and the
+ * effort to run it at, or null for the model's own default.
+ */
+export const ShapeModelInput = z.strictObject({
+  model: ShapeModel.nullable(),
+  effort: z.enum(Effort).nullable().default(null),
+});
 export type ShapeModelInput = z.infer<typeof ShapeModelInput>;
 
 export const ShapeMessageDto = z.object({

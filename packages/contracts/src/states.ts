@@ -26,6 +26,8 @@ export const InboxKind = {
   Flag: 'flag',
   /** A finished task in a project with no gate, waiting for the builder to approve or send it back. */
   Check: 'check',
+  /** What the move to the playbook could not carry over for a project; the builder reads it and dismisses it. */
+  PlaybookMoveReport: 'playbook_move_report',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 
@@ -279,15 +281,6 @@ export const REVIEW_ROLES: readonly StepRole[] = [
 
 export const ToolAccess = { ReadOnly: 'read_only', Edit: 'edit' } as const;
 export type ToolAccess = ValueOf<typeof ToolAccess>;
-
-/** Risks that raise a step's floor (spec §5.2: trust boundaries, migrations, auth). */
-export const RiskTag = {
-  Security: 'security',
-  Auth: 'auth',
-  Migration: 'migration',
-  Dependency: 'dependency',
-} as const;
-export type RiskTag = ValueOf<typeof RiskTag>;
 
 export const Verdict = { Approve: 'approve', Reject: 'reject' } as const;
 export type Verdict = ValueOf<typeof Verdict>;

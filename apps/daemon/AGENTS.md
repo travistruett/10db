@@ -103,7 +103,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `plan-record/`: a Plan's whole record and how it reaches the lanes (`src/plan-record/AGENTS.md`)
 - `preview/`: runs a project's preview command while a pass is open (`src/preview/AGENTS.md`)
 - `priority/`: CPU priority for lane and gate processes (`src/priority/AGENTS.md`)
-- `routing/`: flows, floors and the router that picks a model per role (pure) (`src/routing/AGENTS.md`)
+- `routing/`: the playbook and the router that picks a model per role (pure) (`src/routing/AGENTS.md`)
 - `runner/`: runs a workstream step by step: checks, messages and launches (`src/runner/AGENTS.md`)
 - `runtime-files/`: the data directory's runtime files and tokens (`src/runtime-files/AGENTS.md`)
 - `sandbox/`: the lane, gate and MCP sandboxes (srt and Seatbelt profiles) (`src/sandbox/AGENTS.md`)

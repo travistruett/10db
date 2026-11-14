@@ -15,6 +15,7 @@ import {
   type PersonId,
   InvalidError,
   isParkChoice,
+  kindsOfTask,
   MCP_TOOL_GRANT_DETAIL,
   McpToolGrant,
   PermissionChoice,
@@ -56,6 +57,7 @@ import {
   insertPermissionRule,
   insertSource,
   insertTaskFromProposal,
+  listKinds,
   listInbox,
   openItemsForWorkstream,
   resolveProposal,
@@ -73,7 +75,7 @@ import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
 import { applyMcpApproval } from './mcp-approval';
-import { declaredRiskTags, taskFieldsFromProposal } from './proposal-task';
+import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
 /** The detail key, and fold key prefix, of the flag that offers to deliver a stored answer again. */
 const REDELIVER_KEY = 'redeliverCard';
@@ -432,9 +434,10 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     rationale: answer.note ?? null,
   });
   if (accepted && proposal.kind === ProposalKind.NewTask) {
-    // The task is stored with the areas of the lane that raised it, so the placement rule sees those,
-    // as it does the risk tags the lane declared, which are kept on the card and the task carries.
-    const riskTags = declaredRiskTags(item.detail);
+    // The task is stored with the areas of the lane that raised it, so the placement rule sees those, as it
+    // does the kinds the lane declared, which are kept on the card and the task has.
+    const all = listKinds(ctx.tx);
+    const kinds = declaredKinds(item.detail, all);
     const project = getProject(ctx.tx, proposal.projectId);
     insertTaskFromProposal(
       ctx,
@@ -442,11 +445,11 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
         proposalId: proposal.id,
         projectId: proposal.projectId,
         ...taskFieldsFromProposal(proposal),
-        riskTags,
+        kinds,
       },
       proposePlacement(project, {
         areas: areasForProposal(ctx.tx, proposal.id, project),
-        riskTags,
+        kinds: kindsOfTask(kinds, all),
       }),
     );
   }

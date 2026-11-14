@@ -1,5 +1,6 @@
 import {
   InvalidError,
+  kindsOfTask,
   KnowledgeScope,
   PrincipleKind,
   PrincipleStatus,
@@ -30,6 +31,7 @@ import {
   findDocument,
   getAttachmentRevision,
   getProject,
+  listKinds,
   getShape,
   getShapeEntry,
   getTask,
@@ -477,7 +479,7 @@ export function convertProposals(
       const briefKeys = new Set(goal.tasks.map((t) => t.key));
       const written = insertGoal(ctx, project.id, {
         brief: goalBrief(goal),
-        placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
+        placeTask: (areas) => proposePlacement(project, { areas, kinds: [] }),
         outsideKeys: new Map(
           [...taskIds].filter(([key]) => !(briefKeys.has(key) && removed.has(key))),
         ),
@@ -521,7 +523,7 @@ export function convertProposals(
       };
       const input = { ...base, acceptanceCriteria: task.criteria, areas: task.areas };
       // The placement rule runs on every task Convert makes (task placement spec, P2).
-      const placement = proposePlacement(project, { areas: task.areas, riskTags: [] });
+      const placement = proposePlacement(project, { areas: task.areas, kinds: [] });
       const written =
         task.goalId === undefined
           ? insertTask(ctx, project.id, input, placement)
@@ -636,7 +638,10 @@ export function convertProposals(
         fields,
         change.areas === undefined || before === undefined
           ? undefined
-          : proposePlacement(project, { areas: change.areas, riskTags: before.riskTags }),
+          : proposePlacement(project, {
+              areas: change.areas,
+              kinds: kindsOfTask(before.kinds, listKinds(ctx.tx)),
+            }),
       );
     const held = getTaskContext(ctx.tx, change.taskId);
     if (change.planRef !== undefined)

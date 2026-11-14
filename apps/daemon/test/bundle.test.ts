@@ -181,7 +181,7 @@ describe('the bundled daemon', () => {
       });
       const listed = await rpc.request('tools/list');
       expect(listed.message.error).toBeUndefined();
-      const called = await rpc.request('tools/call', { name: 'list_flows', arguments: {} });
+      const called = await rpc.request('tools/call', { name: 'list_kinds', arguments: {} });
       expect(called.id).toBe(3);
       expect(called.message.id).toBe(3);
       expect(called.message.error?.message).toContain('10db is not running');

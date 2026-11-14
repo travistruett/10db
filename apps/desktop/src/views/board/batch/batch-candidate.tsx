@@ -1,22 +1,9 @@
-import { RiskTag, type FlowId, type PickerCandidate } from '@10db/contracts';
-import {
-  Alert,
-  Badge,
-  Checkbox,
-  Code,
-  Group,
-  MultiSelect,
-  Paper,
-  Select,
-  Stack,
-  Text,
-} from '@mantine/core';
-import { useFlows, usePatchTask } from '../../../daemon/queries';
+import type { PickerCandidate } from '@10db/contracts';
+import { Alert, Badge, Checkbox, Code, Group, Paper, Stack, Text } from '@mantine/core';
+import { usePatchTask } from '../../../daemon/queries';
 import { PlacementChoice } from '../placement-choice';
+import { KindsSelect, RigorSelect } from '../task-fields';
 import { BatchSteps } from './batch-steps';
-
-const RISK_TAGS: readonly RiskTag[] = Object.values(RiskTag);
-const isRiskTag = (value: string): value is RiskTag => RISK_TAGS.some((t) => t === value);
 
 export interface BatchCandidateProps {
   readonly candidate: PickerCandidate;
@@ -26,7 +13,7 @@ export interface BatchCandidateProps {
   readonly onToggle: () => void;
 }
 
-/** One Ready task on the sheet: its tick, why the picker placed it, where it runs, its flow and risk tags, its steps. */
+/** One Ready task on the sheet: its tick, why the picker placed it, where it runs, its rigor and kinds, its steps. */
 export function BatchCandidate({
   candidate,
   placementEditable,
@@ -34,10 +21,7 @@ export function BatchCandidate({
   onToggle,
 }: BatchCandidateProps) {
   const { task } = candidate;
-  const flows = useFlows();
   const patch = usePatchTask();
-  // The Select offers only IDs the daemon sent, so the lookup returns the branded ID without a cast.
-  const flowById = new Map<string, FlowId>((flows.data ?? []).map((f) => [f.id, f.id]));
   return (
     <Paper withBorder radius="md" p="sm">
       <Stack gap="xs">
@@ -81,28 +65,22 @@ export function BatchCandidate({
           />
         ) : null}
         <Group grow>
-          <Select
-            aria-label={`Flow for ${task.title}`}
+          <RigorSelect
+            aria-label={`Rigor for ${task.title}`}
             size="sm"
-            placeholder="Project default flow"
-            clearable
-            data={(flows.data ?? []).map((f) => ({ value: f.id, label: f.name }))}
-            value={task.flowId}
-            onChange={(v) => {
-              patch.mutate({
-                taskId: task.id,
-                patch: { flowId: v === null ? null : (flowById.get(v) ?? null) },
-              });
+            value={task.rigor}
+            projectId={task.projectId}
+            kindKeys={task.kinds.map((k) => k.key)}
+            onChange={(rigor) => {
+              patch.mutate({ taskId: task.id, patch: { rigor } });
             }}
           />
-          <MultiSelect
-            aria-label={`Risk tags for ${task.title}`}
+          <KindsSelect
+            aria-label={`Kinds for ${task.title}`}
             size="sm"
-            placeholder="Risk tags"
-            data={[...RISK_TAGS]}
-            value={[...task.riskTags]}
-            onChange={(values) => {
-              patch.mutate({ taskId: task.id, patch: { riskTags: values.filter(isRiskTag) } });
+            value={task.kinds}
+            onChange={(kinds) => {
+              patch.mutate({ taskId: task.id, patch: { kinds } });
             }}
           />
         </Group>

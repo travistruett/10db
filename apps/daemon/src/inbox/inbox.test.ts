@@ -51,6 +51,7 @@ import {
   markSent,
   patchJudgeConfig,
   setRoutingRules,
+  insertKind,
   insertProposal,
   insertSource,
   listDecisions,
@@ -827,6 +828,15 @@ describe('a question left to triage', () => {
 });
 
 describe('proposal verdicts', () => {
+  beforeEach(() => {
+    // The kinds a card names are the builder's: the ones seeded for the words risk tags used to be.
+    state.write((ctx) => {
+      insertKind(ctx, { key: 'security', label: 'Security', toInbox: true });
+      insertKind(ctx, { key: 'migration', label: 'Migration', toInbox: true, ownCopy: true });
+      insertKind(ctx, { key: 'dependency', label: 'Dependency', toInbox: true, ownCopy: true });
+    });
+  });
+
   function proposalCard(
     ws: ReturnType<typeof seedWorkstream>,
     kind: ProposalKind,
@@ -899,14 +909,27 @@ describe('proposal verdicts', () => {
     },
   );
 
-  it('files an accepted task with the risk tags the lane declared', () => {
+  it.each([
+    { name: 'the kinds the card holds', detail: { kinds: ['security', 'migration'] } },
+    {
+      name: 'the risk tags an older card holds, as the kinds that replaced them',
+      detail: { riskTags: ['security', 'migration'] },
+    },
+    {
+      name: 'both, once each',
+      detail: { kinds: ['security'], riskTags: ['security', 'migration'] },
+    },
+  ])('files an accepted task with $name, as kinds an agent gave', ({ detail }) => {
     const ws = seedWorkstream(base);
-    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
-      riskTags: ['security', 'migration'],
-    });
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', detail);
     inbox.answer(card.id, { choice: 'accept' });
     expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
-      { riskTags: ['security', 'migration'] },
+      {
+        kinds: [
+          { key: 'security', source: 'agent' },
+          { key: 'migration', source: 'agent' },
+        ],
+      },
     );
   });
 
@@ -1018,23 +1041,42 @@ describe('proposal verdicts', () => {
     });
   });
 
-  it('files an accepted task with no risk tags when the card declares none', () => {
+  it('places an accepted task by a custom kind that asks for its own copy', () => {
+    state.write((ctx) => insertKind(ctx, { key: 'payments', label: 'Payments', ownCopy: true }));
+    const project = seedProject(base, {
+      delivery: 'pull_request',
+      workspaceMode: 'shared',
+      prTitlePrefix: 'feat(app)',
+    });
+    const ws = seedWorkstream(base, { project });
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      kinds: ['payments'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches Payments',
+    });
+  });
+
+  it('files an accepted task with no kinds when the card declares none', () => {
     const ws = seedWorkstream(base);
     const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
     inbox.answer(card.id, { choice: 'accept' });
     expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
-      { riskTags: [] },
+      { kinds: [] },
     );
   });
 
-  it('ignores a card whose declared risk tags are not risk tags', () => {
+  it('ignores a card whose declared kinds are not kinds', () => {
     const ws = seedWorkstream(base);
     const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      kinds: ['nonsense'],
       riskTags: ['nonsense'],
     });
     inbox.answer(card.id, { choice: 'accept' });
     expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
-      { riskTags: [] },
+      { kinds: [] },
     );
   });
 

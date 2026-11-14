@@ -16,8 +16,6 @@ import {
   RoutedBy,
   agentKind,
   providerOf,
-  StepRole,
-  type Effort,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -232,7 +230,7 @@ import {
 } from '../pictures';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
+import { offeredModels } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
@@ -289,7 +287,13 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { routingInputs, seedTeam } from '../team';
+import {
+  conversationRun,
+  moveToPlaybook,
+  planConversationModel,
+  routingInputs,
+  seedTeam,
+} from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -617,6 +621,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  // Settings made before the playbook move into it once, after the seeded kinds exist for the move to name.
+  state.write((ctx) => {
+    moveToPlaybook(ctx);
+  });
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
   state.write((ctx) => {
     addStockHazardCommands(ctx);
@@ -1406,23 +1414,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
-  // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
-  // default and never by score, so a conversation is never refused for want of one. Undefined when the account
-  // offers nothing to run it on.
-  const planModel = (project: ProjectDto): { model: string; effort: Effort } | undefined => {
-    const choice = chooseModel({
-      ...routingInputs(db, project),
-      def: { role: StepRole.Plan, need: PLAN_NEED },
-      persona: undefined,
-      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-      project,
-      stakes: { retry: false },
-      byScore: false,
-    });
-    return choice.profile === null && choice.model === choice.tier
-      ? undefined
-      : { model: choice.model, effort: choice.effort };
-  };
   const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,
@@ -1471,28 +1462,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const project = getProject(db, projectId);
       const inputs = routingInputs(db, project);
       return {
-        default: planModel(project)?.model ?? null,
+        default: planConversationModel(db, project, null)?.model ?? null,
         offered: offeredModels(inputs.profiles),
       };
     },
-    launch(projectId, chosen) {
+    launch(projectId, chosen, effort) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = planModel(project);
-      if (profile === undefined)
-        throw new InvalidError(`${row.label} offers no model for planning`);
-      // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
-      // stopped offering since gives way to the role's.
-      const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
-      const modelId = chosen !== null && offered.includes(chosen) ? chosen : profile.model;
+      const run = conversationRun(db, project, chosen, effort);
+      if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
+      // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
+      // account has stopped offering gives way to the Plan cell's model.
+      const modelId = run.model;
       const session = launcher.session(row, modelId, listAccountModels(db, row.id));
       return {
         cwd: project.repoPath,
         model: session.model,
         modelId,
-        effort: profile.effort,
+        effort: run.effort,
         agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,

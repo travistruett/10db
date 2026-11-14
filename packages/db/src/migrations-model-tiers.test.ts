@@ -6,7 +6,7 @@ import { AccountSettings, WorkstreamStep } from '@10db/contracts';
 import { z } from 'zod';
 import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
 import { migrationsBefore } from './migrations-test-support';
-import { listPatterns, listRoleSettings } from './store/model-settings';
+import * as schema from './schema';
 
 const AT = '2026-11-13T12:00:00.000Z';
 const MIGRATION = '0067_four_model_rungs';
@@ -283,13 +283,26 @@ describe('the migration that turns three model tiers into four rungs', () => {
   });
 
   it('leaves every migrated row readable by the code that reads it', () => {
-    expect(listRoleSettings(db).map((r) => [r.role, r.setting])).toEqual(
+    expect(
+      db
+        .select()
+        .from(schema.roleSettings)
+        .all()
+        .map((r) => [r.role, r.setting]),
+    ).toEqual(
       expect.arrayContaining([
         ['plan', { kind: 'tier', tier: 'capable' }],
         ['qa', { kind: 'tier', tier: 'efficient' }],
       ]),
     );
-    expect(listPatterns(db).map((p) => p.setting)).toEqual([
+    expect(
+      db
+        .select()
+        .from(schema.patterns)
+        .orderBy(schema.patterns.position)
+        .all()
+        .map((p) => p.setting),
+    ).toEqual([
       { kind: 'tier', tier: 'efficient' },
       { kind: 'top_of_tier' },
       { kind: 'tier', tier: 'capable' },

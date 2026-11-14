@@ -2,7 +2,6 @@ import {
   BatchDto,
   BoardColumnDto,
   DaemonEvent,
-  FlowDto,
   InboxItemDto,
   mintId,
   PickerCandidate,
@@ -40,7 +39,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     handoffPct: 40,
     nudgePct: 50,
     humanWaitMinutes: 10,
-    flowId: null,
+    defaultRigor: 'standard',
     budgetCeiling: null,
     delivery: 'local',
     baseBranch: 'main',
@@ -113,8 +112,10 @@ export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
     description: '',
     acceptanceCriteria: ['src/greeting/hello.txt exists'],
     areas: ['src'],
-    riskTags: [],
-    flowId: null,
+    rigor: null,
+    effectiveRigor: 'standard',
+    kinds: [],
+    effortPin: null,
     landing: { kind: 'base' },
     workspaceMode: 'shared',
     placementReason: null,
@@ -235,7 +236,7 @@ export function candidate(
     claims: task.areas.map((name) => ({ kind: 'area', name })),
     conflict: null,
     plan: {
-      flowName: 'standard',
+      rigor: 'standard',
       steps: [
         stepDto(),
         stepDto({
@@ -247,17 +248,6 @@ export function candidate(
       overBudget: [],
     },
     planError: null,
-    ...overrides,
-  });
-}
-
-export function flowDto(overrides: Partial<FlowDto> = {}): FlowDto {
-  return FlowDto.parse({
-    id: mintId('Flow'),
-    name: 'quick',
-    steps: [{ role: 'implement', need: 40, skip: [], persona: null }],
-    createdAt: AT,
-    updatedAt: AT,
     ...overrides,
   });
 }

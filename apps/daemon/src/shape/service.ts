@@ -234,9 +234,10 @@ export interface ShapeServiceDeps {
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
-   * role's; throws when its account can't start a session.
+   * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
+   * start a session.
    */
-  launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   /**
    * Why a project's account can't run a conversation, or null. Reads the project and its account row
    * only, so asking costs no Keychain read.
@@ -341,11 +342,12 @@ export interface ShapeService {
   /** Interrupts the turn that is running; the queue runs next. */
   stop(shapeId: ShapeId): Promise<void>;
   /**
-   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null (§5.1).
+   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null (§5.1), at `effort`
+   * or, with null, the model's own default.
    * Throws InvalidError for a model the account doesn't offer and ConflictError while a turn runs or
    * waits; an idle session closes, and the next turn resumes it on the new model.
    */
-  chooseModel(shapeId: ShapeId, model: string | null): ShapeDto;
+  chooseModel(shapeId: ShapeId, model: string | null, effort?: Effort | null): ShapeDto;
   /** Everything the screen renders for the conversation, with where its session is. */
   view(shapeId: ShapeId): ShapeViewDto;
   /** The project's conversations, the one touched last first. */
@@ -634,7 +636,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const launchLimits = (shapeId: ShapeId): PictureLimits => {
     try {
       const shape = getShape(state.db, shapeId);
-      return limitsFor(deps.launch(shape.projectId, shape.model).account.kind);
+      return limitsFor(deps.launch(shape.projectId, shape.model, shape.effort).account.kind);
     } catch {
       return STRICTEST_LIMITS;
     }
@@ -975,7 +977,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     intake: Intake,
   ): Promise<void> => {
     const shape = getShape(state.db, shapeId);
-    const launch = deps.launch(shape.projectId, shape.model);
+    const launch = deps.launch(shape.projectId, shape.model, shape.effort);
     // Only this conversation's files: another conversation's, in the same project or not, stay unread.
     const fileAccess: ShapeAccess = {
       ...launch.access,
@@ -1763,7 +1765,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       runtimeOf(shapeId).notes.push(note);
     },
 
-    chooseModel(shapeId, model) {
+    chooseModel(shapeId, model, effort = null) {
       const { projectId } = getShape(state.db, shapeId);
       refuseChatGptAccount(projectId);
       const offered = (deps.models?.(projectId).offered ?? []).map((o) => o.model);
@@ -1776,7 +1778,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         throw new ConflictError(
           'The model changes between turns: wait for the turn to end, or stop it, then choose again.',
         );
-      const shape = state.write((ctx) => patchShape(ctx, shapeId, { model }));
+      const shape = state.write((ctx) => patchShape(ctx, shapeId, { model, effort }));
       // A live session runs on the model it started with; the next turn resumes it on the new one.
       if (rt?.live) void closeLive(rt, 'model changed');
       return shape;

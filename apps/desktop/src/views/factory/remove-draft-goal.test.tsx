@@ -82,7 +82,6 @@ function serve(
     http.get(daemonUrl('/projects/:projectId/goals'), () =>
       HttpResponse.json(goalListDto(...summaries)),
     ),
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     ...baseHandlers(),
   );
   return daemon;

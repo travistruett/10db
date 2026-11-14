@@ -14,6 +14,7 @@ import {
   TaskId,
   WorkstreamId,
 } from './ids';
+import { HyphenatedKey } from './keys';
 import { PrincipleDraft } from './knowledge';
 import {
   AnchorCheckDto,
@@ -30,7 +31,6 @@ import {
   ProposalKind,
   QUESTION_CATEGORY_HINTS,
   QuestionCategory,
-  RiskTag,
   Severity,
   Urgency,
   Verdict,
@@ -255,10 +255,17 @@ export const McpToolInputs = {
     title: z.string().min(1),
     body: z.string().min(1),
     /**
-     * The risks the proposed work carries. A small new-task proposal with none is filed to the Icebox
-     * without a card; one with a tag always raises a card.
+     * The keys of the kinds the proposed work has (security, auth, migration, dependency, ui, docs, or one
+     * the builder made). A small new-task proposal whose kinds need no card is filed to the Icebox without
+     * one; a kind that asks for a card always raises it. A key no kind has is ignored.
      */
-    riskTags: z.array(z.enum(RiskTag)).optional(),
+    kinds: z.array(HyphenatedKey).optional(),
+    /**
+     * The name `kinds` had when a risk tag was a fixed list. Lanes still holding the older tool text send
+     * it; each tag is the key of the kind seeded in its place, so it is read as `kinds`. Removed once a
+     * release has gone out with the tool text that says `kinds`.
+     */
+    riskTags: z.array(z.enum(['security', 'auth', 'migration', 'dependency'])).optional(),
     /** Set when the work must join a batch that is already running; a person decides that. */
     joinsRunningBatch: z.boolean().optional(),
     principle: PrincipleDraft.optional().describe(

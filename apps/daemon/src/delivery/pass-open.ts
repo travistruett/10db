@@ -137,12 +137,12 @@ export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
   const at = plan.steps.findIndex((step) => step.role === StepRole.Implement);
   const step = plan.steps[at];
   if (step === undefined)
-    throw new InvalidError(`The ${plan.flowName} flow of "${task.title}" has no implement step`);
+    throw new InvalidError(`The steps of "${task.title}" have no implement step`);
   if (plan.overBudget.includes(at))
     throw new InvalidError(
-      `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling, lower the need or pin a persona.`,
+      `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling or lower the need in Settings › Models.`,
     );
-  return { flowName: plan.flowName, steps: [step], overBudget: [] };
+  return { rigor: plan.rigor, steps: [step], overBudget: [] };
 }
 
 /** Throws what refuses these tasks a pass in the project, read from the database; writes nothing. */

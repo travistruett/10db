@@ -196,7 +196,8 @@ describe('the model list over HTTP', () => {
 
   it('answers what routing picks for each role on an account, and refuses a bad or archived one', async () => {
     const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
-    // Invented measurements: low scores 45, high 51, so the roles that need 48 are the ones that go up.
+    // Invented measurements: low scores 45, high 51, so the roles that need more than 45 go up. A Standard review
+    // needs 40, so it stays low: "Standard reviews need at least 40 (48)" in the plan's Brief.
     measureForTests(running.state);
     const [account] = await api.get('/accounts', z.array(AccountDto));
     if (!account) throw new Error('the daemon has no default account');
@@ -206,7 +207,7 @@ describe('the model list over HTTP', () => {
       'plan:claude-opus-5-5@low',
       'plan_review:claude-opus-5-5@high',
       'implement:claude-opus-5-5@low',
-      'review:claude-opus-5-5@high',
+      'review:claude-opus-5-5@low',
       'qa:claude-opus-5-5@low',
     ]);
     expect(picks[0]).toMatchObject({ intelligence: 45, costPerTaskUsd: 1 });

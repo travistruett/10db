@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { AccountId, ModelProfileId, PatternId, ProjectId } from './ids';
+import { AccountId, ModelProfileId } from './ids';
 import { ModelSources, noModelSources } from './model-sources';
-import { Effort, RiskTag, StepRole } from './states';
+import { Effort, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
 
@@ -72,74 +72,18 @@ export type ModelMarkBasis = ValueOf<typeof ModelMarkBasis>;
 
 const Timestamp = z.iso.datetime();
 
-/** What a step, role or pattern asks of the router: leave it to 10db, a tier, the best, or one model. */
+/**
+ * What a step, role, pattern or playbook cell asks of the router: leave it to 10db (with the lowest
+ * Intelligence Index score the step needs, when it has one), a tier, the best of a tier (of any, when none is
+ * named), or one model.
+ */
 export const ModelSetting = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('automatic') }),
+  z.object({ kind: z.literal('automatic'), minimum: z.number().min(0).max(100).optional() }),
   z.object({ kind: z.literal('tier'), tier: z.enum(ModelTier) }),
-  z.object({ kind: z.literal('top_of_tier') }),
+  z.object({ kind: z.literal('top_of_tier'), tier: z.enum(ModelTier).optional() }),
   z.object({ kind: z.literal('model'), model: z.string().min(1) }),
 ]);
 export type ModelSetting = z.infer<typeof ModelSetting>;
-
-/** The setting for a role, for one project or (with no project) everywhere. */
-export const RoleSettingDto = z.object({
-  role: z.enum(StepRole),
-  projectId: ProjectId.nullable(),
-  setting: ModelSetting,
-});
-export type RoleSettingDto = z.infer<typeof RoleSettingDto>;
-
-/** What a pattern applies to. An empty list, or false, means any. */
-export const PatternMatch = z.object({
-  roles: z.array(z.enum(StepRole)).default([]),
-  riskTags: z.array(z.enum(RiskTag)).default([]),
-  areas: z.array(z.string().min(1)).default([]),
-  retryOnly: z.boolean().default(false),
-});
-export type PatternMatch = z.infer<typeof PatternMatch>;
-
-/** A rule that gives matching steps a setting; the lowest position that matches wins. */
-export const PatternDto = z.object({
-  id: PatternId,
-  projectId: ProjectId.nullable(),
-  name: z.string().min(1),
-  match: PatternMatch,
-  setting: ModelSetting,
-  position: z.int().min(0),
-});
-export type PatternDto = z.infer<typeof PatternDto>;
-
-/** A pattern as the builder writes it; the daemon gives it an id and its place in the list. */
-export const PatternInput = z.object({
-  name: z.string().trim().min(1),
-  match: PatternMatch.prefault({}),
-  setting: ModelSetting,
-});
-export type PatternInput = z.infer<typeof PatternInput>;
-
-/** The role settings and patterns of one scope: a project's own, or the ones that apply everywhere. */
-export const ModelSettingsDto = z.object({
-  roles: z.array(RoleSettingDto),
-  patterns: z.array(PatternDto),
-});
-export type ModelSettingsDto = z.infer<typeof ModelSettingsDto>;
-
-const noRoleTwice = (roles: readonly { readonly role: string }[]) =>
-  new Set(roles.map((r) => r.role)).size === roles.length;
-
-/**
- * What a form changes in one scope's settings. A role listed here is set, or, with a null setting,
- * cleared: a project's role then uses the global setting, and a global role 10db's default. A role
- * left out keeps its setting. `patterns`, when given, replaces the whole list in the order sent.
- */
-export const ModelSettingsInput = z.object({
-  roles: z
-    .array(z.object({ role: z.enum(StepRole), setting: ModelSetting.nullable() }))
-    .refine(noRoleTwice, { message: 'A role is set twice' })
-    .default([]),
-  patterns: z.array(PatternInput).optional(),
-});
-export type ModelSettingsInput = z.infer<typeof ModelSettingsInput>;
 
 /** A model an account can run, as that account reports it. */
 export const AccountModelDto = z.object({
@@ -226,10 +170,6 @@ export const ModelRowDto = z.object({
   firstSeenAt: Timestamp.nullable(),
 });
 export type ModelRowDto = z.infer<typeof ModelRowDto>;
-
-/** Which account's offer the router's picks are made on. */
-export const ModelPicksQuery = z.strictObject({ account: AccountId });
-export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
 
 /** What routing chooses for one role at its starting need. */
 export const RolePickDto = z.object({

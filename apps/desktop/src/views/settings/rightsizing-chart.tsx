@@ -2,7 +2,7 @@ import { ScatterChart } from '@mantine/charts';
 import { Paper, Text } from '@mantine/core';
 import { z } from 'zod';
 import { formatCost, formatScore } from './model-format';
-import { PICK_COLOR } from './role-picks-panel';
+import { PICK_COLOR } from './pick-color';
 import { costTickLabel, type RightsizingSeries } from './rightsizing-series';
 
 const TooltipPoint = z.object({ id: z.number() });

@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { InboxItemId, mintId, RoutedBy } from '@10db/contracts';
+import { InboxItemId, mintId, Rigor, RoutedBy, StepRole, TaskKindSource } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -12,7 +12,6 @@ import type {
   ProjectDto,
   ProjectId,
   ProjectInput,
-  RiskTag,
   TaskDto,
   WorkstreamDto,
   WorkstreamId,
@@ -22,7 +21,6 @@ import {
   acquireLease,
   claimRequestsForTask,
   createTestStore,
-  findFlowByName,
   getProject,
   getInboxItem,
   listPeople,
@@ -38,6 +36,7 @@ import {
   seedProject,
   transitionWorkstream,
   type Store,
+  setPlaybook,
 } from '@10db/db';
 import { readDefaultPersonas, readSkillBody } from '@10db/harness';
 import {
@@ -137,7 +136,8 @@ export interface TestEngine {
     title: string,
     areas?: string[],
     dependsOn?: TaskDto['id'][],
-    plan?: { flow: string; riskTags?: RiskTag[]; criteria?: number },
+    /** `riskTags` shape the steps a scripted `full` flow runs; `kinds` are the keys the task is filed with. */
+    plan?: { flow: string; riskTags?: string[]; kinds?: string[]; criteria?: number },
     batchId?: BatchId,
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
@@ -145,6 +145,34 @@ export interface TestEngine {
   /** Retries a failed workstream the way the API does. */
   retry(id: WorkstreamId, note?: string): WorkstreamDto;
   close(): Promise<void>;
+}
+
+/** The rigor a test's old flow name stands for. */
+function rigorOfFlow(flow: string): Rigor {
+  switch (flow) {
+    case 'quick':
+      return Rigor.Light;
+    case 'standard':
+      return Rigor.Standard;
+    case 'full':
+      return Rigor.Critical;
+    default:
+      throw new Error(`no rigor stands for the flow ${flow}`);
+  }
+}
+
+/** What the old full flow ran: a plan and QA for more than three criteria, a plan review for risky ones. */
+function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[] {
+  const long = criteria > 3;
+  return [
+    ...(long ? [StepRole.Plan] : []),
+    ...(long && riskTags.some((t) => ['security', 'auth', 'migration'].includes(t))
+      ? [StepRole.PlanReview]
+      : []),
+    StepRole.Implement,
+    StepRole.Review,
+    ...(long ? [StepRole.Qa] : []),
+  ];
 }
 
 /** A judge that is off: every decision keeps today's rule. */
@@ -515,16 +543,24 @@ export async function createTestEngine(
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
         i === 0 ? 'it works' : `criterion ${String(i + 1)}`,
       );
-      const flowId = plan ? findFlowByName(store.db, plan.flow)?.id : null;
-      if (flowId === undefined) throw new Error(`no seeded flow is named ${plan?.flow ?? ''}`);
+      const rigor = plan ? rigorOfFlow(plan.flow) : null;
+      // The old full flow's steps, as a project override of Critical's row, for the tests that script them.
+      if (plan?.flow === 'full')
+        state.write((ctx) =>
+          setPlaybook(ctx, seeded.id, {
+            rows: [
+              { rigor: Rigor.Critical, steps: fullFlowSteps(plan.riskTags ?? [], criteria.length) },
+            ],
+          }),
+        );
       const task = state.write((ctx) =>
         insertTask(ctx, seeded.id, {
           title,
           acceptanceCriteria: criteria,
           areas,
           dependsOn,
-          riskTags: plan?.riskTags ?? [],
-          flowId,
+          rigor,
+          kinds: (plan?.kinds ?? []).map((key) => ({ key, source: TaskKindSource.Builder })),
         }),
       );
       const workstream = plan

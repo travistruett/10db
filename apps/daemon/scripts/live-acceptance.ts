@@ -10,7 +10,6 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import {
-  FlowDto,
   HealthResponse,
   InboxItemDto,
   MCP_APPROVAL_DETAIL,
@@ -404,13 +403,11 @@ async function main(): Promise<void> {
   );
 
   // The run stays implement-only until review sessions join it.
-  const quick = (await api(z.array(FlowDto), '/flows')).find((f) => f.name === 'quick');
-  if (!quick) throw new Error('the quick flow was not seeded');
   const project = await api(ProjectDto, '/projects', {
     method: 'POST',
     body: JSON.stringify({
       name: 'live-acceptance',
-      flowId: quick.id,
+      defaultRigor: 'light',
       repoPath: repo,
       gateCommand: 'sh check.sh',
       maxLanes: 3,

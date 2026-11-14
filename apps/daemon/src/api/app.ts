@@ -26,9 +26,6 @@ import {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
-  FlowId,
-  FlowInput,
-  FlowPatch,
   FolderInspectInput,
   GoalAdoptInput,
   PlanExportInput,
@@ -47,6 +44,11 @@ import {
   ModelPicksQuery,
   ModelsQuery,
   KeepAwakeInput,
+  KindId,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  PlaybookInput,
   LanePermissionsDto,
   LiveSystemsDto,
   TrustOverrides,
@@ -67,7 +69,6 @@ import {
   PickSize,
   ProjectId,
   ProjectInput,
-  ModelSettingsInput,
   ProjectPatch,
   PROTOCOL_VERSION,
   RetryInput,
@@ -111,7 +112,6 @@ import {
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   TaskMove,
   TaskPatch,
-  TeamInput,
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
@@ -605,6 +605,7 @@ export function createApp(deps: ApiDeps) {
           deps.services.chooseShapeModel(
             ShapeId.parse(c.req.param('shapeId')),
             c.req.valid('json').model,
+            c.req.valid('json').effort,
           ),
         ),
     )
@@ -994,7 +995,6 @@ export function createApp(deps: ApiDeps) {
       async (c) =>
         c.json(await deps.services.proposeAreas(c.req.valid('json').path, c.req.raw.signal)),
     )
-    .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
       '/projects/:projectId',
       validator('json', (value): ProjectPatch => ProjectPatch.parse(value)),
@@ -1111,17 +1111,6 @@ export function createApp(deps: ApiDeps) {
             AccountId.parse(c.req.param('accountId')),
             c.req.valid('query').month ?? null,
           ),
-        ),
-    )
-    .get('/projects/:projectId/team', (c) =>
-      c.json(deps.services.getTeam(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .put(
-      '/projects/:projectId/team',
-      validator('json', (value): TeamInput => TeamInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.setTeam(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
         ),
     )
     .get('/projects/:projectId/routing-rules', (c) =>
@@ -1263,37 +1252,49 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
-    .post(
-      '/flows',
-      validator('json', (value): FlowInput => FlowInput.parse(value)),
-      (c) => c.json(deps.services.createFlow(c.req.valid('json')), 201),
-    )
-    .patch(
-      '/flows/:flowId',
-      validator('json', (value): FlowPatch => FlowPatch.parse(value)),
-      (c) =>
-        c.json(deps.services.patchFlow(FlowId.parse(c.req.param('flowId')), c.req.valid('json'))),
-    )
-    .get('/model-settings', (c) => c.json(deps.services.getModelSettings(null)))
+    .get('/playbook', (c) => c.json(deps.services.getPlaybook(null)))
     .put(
-      '/model-settings',
-      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
-      (c) => c.json(deps.services.setGlobalModelSettings(c.req.valid('json'))),
+      '/playbook',
+      validator('json', (value): PlaybookInput => PlaybookInput.parse(value)),
+      (c) => c.json(deps.services.setPlaybook(null, c.req.valid('json'))),
     )
-    .get('/projects/:projectId/model-settings', (c) =>
-      c.json(deps.services.getModelSettings(ProjectId.parse(c.req.param('projectId')))),
+    .get('/projects/:projectId/playbook', (c) =>
+      c.json(deps.services.getPlaybook(ProjectId.parse(c.req.param('projectId')))),
     )
     .put(
-      '/projects/:projectId/model-settings',
-      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
+      '/projects/:projectId/playbook',
+      validator('json', (value): PlaybookInput => PlaybookInput.parse(value)),
       (c) =>
         c.json(
-          deps.services.setProjectModelSettings(
-            ProjectId.parse(c.req.param('projectId')),
-            c.req.valid('json'),
-          ),
+          deps.services.setPlaybook(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
         ),
     )
+    .get('/playbook/move-report', (c) => c.json(deps.services.playbookMoveReport()))
+    .delete('/playbook/move-report', (c) => {
+      deps.services.dismissPlaybookMoveReport();
+      return c.body(null, 204);
+    })
+    .get('/kinds', (c) => c.json(deps.services.listKinds()))
+    .post(
+      '/kinds',
+      validator('json', (value): KindInput => KindInput.parse(value)),
+      (c) => c.json(deps.services.createKind(c.req.valid('json')), 201),
+    )
+    .put(
+      '/kinds/order',
+      validator('json', (value): KindOrderInput => KindOrderInput.parse(value)),
+      (c) => c.json(deps.services.moveKind(c.req.valid('json'))),
+    )
+    .patch(
+      '/kinds/:kindId',
+      validator('json', (value): KindPatch => KindPatch.parse(value)),
+      (c) =>
+        c.json(deps.services.patchKind(KindId.parse(c.req.param('kindId')), c.req.valid('json'))),
+    )
+    .delete('/kinds/:kindId', (c) => {
+      deps.services.deleteKind(KindId.parse(c.req.param('kindId')));
+      return c.body(null, 204);
+    })
     .get('/model-profiles', (c) => c.json(deps.services.listModelProfiles()))
     .patch(
       '/model-profiles/:profileId',
@@ -1341,7 +1342,10 @@ export function createApp(deps: ApiDeps) {
     .get(
       '/models/picks',
       validator('query', (query) => ModelPicksQuery.parse(query)),
-      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
+      (c) => {
+        const { account, rigor, project } = c.req.valid('query');
+        return c.json(deps.services.modelPicks(account, rigor, project));
+      },
     )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))

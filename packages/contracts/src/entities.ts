@@ -4,13 +4,13 @@ import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
+import { Rigor, TaskKind } from './rigor';
 import { ScreensMatrix } from './task-screens';
 import {
   AccountId,
   BatchId,
   BoardColumnId,
   EvidenceId,
-  FlowId,
   GoalId,
   HandoffId,
   InboxItemId,
@@ -34,7 +34,6 @@ import {
   KnowledgeScope,
   Provider,
   QuestionCategory,
-  RiskTag,
   RoutedBy,
   TaskStatus,
   Urgency,
@@ -546,7 +545,8 @@ export const ProjectInput = z
     handoffPct: z.int().min(5).max(95).default(40),
     nudgePct: z.int().min(6).max(98).default(50),
     humanWaitMinutes: z.int().min(1).max(240).default(10),
-    flowId: FlowId.nullable().default(null),
+    /** The rigor a task gets when nothing else sets one. */
+    defaultRigor: z.enum(Rigor).default(Rigor.Standard),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable().default(null),
     /** How finished work leaves the machine: on the checked-out branch, or as a batch's pull request. */
@@ -707,7 +707,7 @@ export const ProjectDto = z.object({
   handoffPct: z.int(),
   nudgePct: z.int(),
   humanWaitMinutes: z.int(),
-  flowId: FlowId.nullable(),
+  defaultRigor: z.enum(Rigor),
   budgetCeiling: z.number().nullable(),
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
@@ -759,7 +759,7 @@ export const ProjectPatch = z
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),
     humanWaitMinutes: z.int().min(1).max(240),
-    flowId: FlowId.nullable(),
+    defaultRigor: z.enum(Rigor),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable(),
     delivery: z.enum(Delivery),
@@ -816,8 +816,11 @@ export const TaskInput = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   areas: z.array(Name).min(1),
   dependsOn: z.array(TaskId).default([]),
-  riskTags: z.array(z.enum(RiskTag)).default([]),
-  flowId: FlowId.nullable().default(null),
+  /** The builder's rigor for the task; null leaves it to the project's default and the task's kinds. */
+  rigor: z.enum(Rigor).nullable().default(null),
+  kinds: z.array(TaskKind).default([]),
+  /** The builder's effort for every step of the task; null is no pin. */
+  effortPin: z.enum(Effort).nullable().default(null),
   /** Where the work lands; absent starts from what the project does by default. */
   landing: TaskLanding.optional(),
   /** Where the task works; absent takes the project's default. A copy needs pull request delivery. */
@@ -838,8 +841,13 @@ export const TaskDto = z.object({
   description: z.string(),
   acceptanceCriteria: z.array(z.string()),
   areas: z.array(z.string()),
-  riskTags: z.array(z.enum(RiskTag)),
-  flowId: FlowId.nullable(),
+  /** The rigor set on the task; null follows the project's default and the task's kinds. */
+  rigor: z.enum(Rigor).nullable(),
+  /** The rigor the task runs at: its own or the project's, never below its kinds' minimum. */
+  effectiveRigor: z.enum(Rigor),
+  kinds: z.array(TaskKind),
+  /** The builder's effort for every step of the task; null is no pin. */
+  effortPin: z.enum(Effort).nullable(),
   landing: TaskLanding,
   /**
    * Where the task runs when it is next started: the project's checkout (`shared`, "Your folder")
@@ -885,8 +893,9 @@ export const TaskPatchFields = z.object({
   why: Why,
   description: z.string(),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
-  riskTags: z.array(z.enum(RiskTag)),
-  flowId: FlowId.nullable(),
+  rigor: z.enum(Rigor).nullable(),
+  kinds: z.array(TaskKind),
+  effortPin: z.enum(Effort).nullable(),
   /** Replaces the task's areas; only while the task has never started, and only with the project's own. */
   areas: z.array(Name).min(1),
 });

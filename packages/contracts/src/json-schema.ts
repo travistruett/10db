@@ -105,19 +105,12 @@ import {
 import {
   AccountModelDto,
   CatalogueStatusDto,
-  ModelSettingsInput,
   ModelEffortDto,
   ModelRowDto,
-  ModelPicksQuery,
   ModelsQuery,
   RolePickDto,
   RolePicksDto,
   ModelSetting,
-  ModelSettingsDto,
-  PatternDto,
-  PatternInput,
-  PatternMatch,
-  RoleSettingDto,
 } from './catalogue';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
@@ -136,7 +129,15 @@ import {
   WorkstreamDto,
 } from './entities';
 import { DaemonEvent } from './events';
-import { FlowDto, FlowInput, FlowPatch } from './flows';
+import {
+  KindDto,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  ModelPicksQuery,
+  PlaybookDto,
+  PlaybookInput,
+} from './rigor';
 import {
   AreaProposalInput,
   AreaProposalResult,
@@ -236,8 +237,6 @@ import {
   RoutingRuleDto,
   RoutingRulesInput,
   StakeholderTimersDto,
-  TeamDto,
-  TeamInput,
 } from './team';
 import {
   EventsHead,
@@ -347,9 +346,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'board-column-patch': BoardColumnPatch,
   'task-move': TaskMove,
   'run-next-result': RunNextResult,
-  'flow-dto': FlowDto,
-  'flow-input': FlowInput,
-  'flow-patch': FlowPatch,
+  'kind-dto': KindDto,
+  'kind-input': KindInput,
+  'kind-patch': KindPatch,
+  'kind-order-input': KindOrderInput,
+  'playbook-dto': PlaybookDto,
+  'playbook-input': PlaybookInput,
   'folder-inspect-input': FolderInspectInput,
   'folder-inspection': FolderInspection,
   'folder-inspect-result': FolderInspectResult,
@@ -364,12 +366,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'role-pick-dto': RolePickDto,
   'role-picks-dto': RolePicksDto,
   'model-setting': ModelSetting,
-  'pattern-dto': PatternDto,
-  'pattern-match': PatternMatch,
-  'pattern-input': PatternInput,
-  'model-settings-dto': ModelSettingsDto,
-  'model-settings-input': ModelSettingsInput,
-  'role-setting-dto': RoleSettingDto,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
@@ -410,8 +406,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'slack-token-input': SlackTokenInput,
   'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
-  'team-dto': TeamDto,
-  'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
   'goal-adopt-error': GoalAdoptError,
   'goal-adopt-input': GoalAdoptInput,

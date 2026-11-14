@@ -15,7 +15,7 @@ export {
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
-  carriesRiskTags,
+  carriesKinds,
   fileProposalByItself,
   proposalCardBody,
   proposalFiling,

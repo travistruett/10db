@@ -180,15 +180,13 @@
       "minimum": -9007199254740991,
       "maximum": 9007199254740991
     },
-    "flowId": {
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^flw_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        {
-          "type": "null"
-        }
+    "defaultRigor": {
+      "type": "string",
+      "enum": [
+        "light",
+        "standard",
+        "careful",
+        "critical"
       ]
     },
     "budgetCeiling": {
@@ -1291,7 +1289,7 @@
     "handoffPct",
     "nudgePct",
     "humanWaitMinutes",
-    "flowId",
+    "defaultRigor",
     "budgetCeiling",
     "delivery",
     "baseBranch",

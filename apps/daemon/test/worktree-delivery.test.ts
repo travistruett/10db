@@ -23,7 +23,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { parseWorktreeList } from '../src/git';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { FakeGh } from './fake-gh';
 import {
   createTempClone,
@@ -117,7 +117,7 @@ async function start(gateCommand = 'true', maxLanes = 3) {
     name: 'shop',
     repoPath: remote.repo.path,
     gateCommand,
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     maxLanes,
     areas: [{ name: 'ui', globs: ['src/ui/**'] }],
     delivery: 'pull_request',

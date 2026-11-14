@@ -3,7 +3,7 @@ import { mintId, PASS_RETRY_TURN_CHOICE, PASS_SIGN_OFF_CHOICE } from '@10db/cont
 import { describe, expect, it } from 'vitest';
 import { inboxItemDto } from '../../test/fixtures';
 import { sendDto } from '../../test/people-fixtures';
-import { inboxRows, openCount, splitInbox } from './inbox-rows';
+import { inboxRows, isDismissable, openCount, splitInbox } from './inbox-rows';
 
 const project = mintId('Project');
 const flag = (title: string, body: string, overrides: Partial<InboxItemDto> = {}): InboxItemDto =>
@@ -135,6 +135,26 @@ describe('inboxRows', () => {
     expect(both?.key).toBe(later?.key);
     expect(both?.passId).toBe(pass);
     expect(inboxRows([question])[0]?.passId).toBeNull();
+  });
+});
+
+describe('isDismissable', () => {
+  it.each([
+    { name: 'a flag with no options', kind: 'flag', options: 0, expected: true },
+    { name: 'a flag with options', kind: 'flag', options: 1, expected: false },
+    {
+      name: 'a move report with no options',
+      kind: 'playbook_move_report',
+      options: 0,
+      expected: true,
+    },
+    { name: 'a question with no options', kind: 'question', options: 0, expected: false },
+  ] as const)('$name: $expected', ({ kind, options, expected }) => {
+    const item = inboxItemDto({
+      kind,
+      options: Array.from({ length: options }, () => ({ label: 'Go', description: '' })),
+    });
+    expect(isDismissable(item)).toBe(expected);
   });
 });
 

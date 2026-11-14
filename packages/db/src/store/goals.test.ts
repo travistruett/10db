@@ -9,7 +9,7 @@ import {
   type PersonDto,
   type ProjectDto,
 } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../schema';
 import {
   getGoal,
@@ -444,5 +444,18 @@ describe('markGoalViewed', () => {
     expect(() => store.write((ctx) => markGoalViewed(ctx, mintId('Goal'), builder.id))).toThrow(
       NotFoundError,
     );
+  });
+});
+
+describe('listing a goal’s tasks', () => {
+  it('reads the kinds and the project’s default rigor once for the whole list', () => {
+    const goal = store.write((ctx) => insertGoal(ctx, project.id, { brief: brief() })).value.goal;
+    const prepared = vi.spyOn(store.db.$client, 'prepare');
+    const tasks = listGoalTasks(store.db, goal.id);
+    const reads = (table: string) =>
+      prepared.mock.calls.filter(([sql]) => sql.includes(`from "${table}"`)).length;
+    expect(tasks.map((t) => t.id)).toEqual(goal.taskIds);
+    expect(reads('kinds')).toBe(1);
+    expect(reads('projects')).toBe(1);
   });
 });

@@ -16,6 +16,8 @@ import {
   NotFoundError,
   providerOf,
   isDaemonAddress,
+  kindsOfTask,
+  refuseRigorBelowKinds,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
@@ -51,17 +53,16 @@ import {
   getPass,
   getPassProgress,
   getTask,
-  getTeam,
   getWorkstream,
   holdTask,
   insertBoardColumn,
   insertBuilderMessage,
-  insertFlow,
   insertPerson,
   insertPersona,
   insertProject,
   insertTask,
   latestEventSeq,
+  listKinds,
   humanTouchDays,
   latestWorkstreamOf,
   openGoalDigest,
@@ -74,7 +75,6 @@ import {
   listBatches,
   listBoardColumns,
   listEventsAfter,
-  listFlows,
   listGoalSummaries,
   listInbox,
   listModelProfiles,
@@ -91,7 +91,6 @@ import {
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
-  patchFlow,
   patchModelProfile,
   patchPersona,
   patchProject,
@@ -100,7 +99,6 @@ import {
   resumeTask,
   runNext,
   setRoutingRules,
-  setTeam,
   takeOffer,
   undoHazardAddition,
   isAllowThisOffer,
@@ -161,7 +159,13 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { rolePicks } from '../routing';
-import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } from '../team';
+import {
+  playbookInputs,
+  proposeCandidates,
+  resolveStepPlan,
+  routingInputs,
+  startTaskWithPlan,
+} from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
@@ -170,7 +174,7 @@ import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
-import { createModelSettingsServices } from './model-settings-services';
+import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
@@ -355,18 +359,21 @@ export function createServices(deps: {
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) =>
-        insertTask(
+      const task = deps.state.write((ctx) => {
+        const known = listKinds(ctx.tx);
+        const kinds = input.kinds ?? [];
+        refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
+        return insertTask(
           ctx,
           projectId,
-          input,
+          { ...input, kinds },
           proposePlacement(getProject(ctx.tx, projectId), {
             areas: input.areas,
-            riskTags: input.riskTags ?? [],
+            kinds: kindsOfTask(kinds, known),
             workspaceMode: input.workspaceMode,
           }),
-        ),
-      );
+        );
+      });
       deps.scheduler.requestTick();
       return task;
     },
@@ -602,7 +609,6 @@ export function createServices(deps: {
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
     getGoal: (id) => getGoal(db, id),
-    listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
@@ -693,15 +699,13 @@ export function createServices(deps: {
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
     listPeople: () => listPeople(db),
     createPerson: (input) => deps.state.write((ctx) => insertPerson(ctx, input)),
-    createFlow: (input) => deps.state.write((ctx) => insertFlow(ctx, input)),
-    patchFlow: (id, patch) => deps.state.write((ctx) => patchFlow(ctx, id, patch)),
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
     ...deps.github,
     ...deps.stakeholders,
     ...deps.trust,
-    ...createModelSettingsServices(deps.state),
+    ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.planRecord,
     ...deps.knowledge,
@@ -728,14 +732,19 @@ export function createServices(deps: {
         now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
-    modelPicks: (accountId) => {
+    modelPicks: (accountId, rigor, projectId) => {
       const account = liveAccount(db, accountId);
+      // A missing project is a 404, not the global playbook.
+      if (projectId !== undefined) getProject(db, projectId);
       return {
         accountId,
-        picks: rolePicks({
-          ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
-          personas: listPersonas(db),
-        }),
+        picks: rolePicks(
+          {
+            ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
+            playbook: playbookInputs(db, projectId ?? null).playbook,
+          },
+          rigor,
+        ),
       };
     },
     listAccountOffers: () => listAccountModels(db),
@@ -769,11 +778,6 @@ export function createServices(deps: {
     accountUsage: (id, month) => deps.accounts.usage(id, month),
     listAccountPauses: () => deps.accounts.pauses(),
     resumeAccount: (id) => deps.accounts.resume(id),
-    getTeam(projectId) {
-      getProject(db, projectId);
-      return getTeam(db, projectId);
-    },
-    setTeam: (projectId, input) => deps.state.write((ctx) => setTeam(ctx, projectId, input)),
     listRoutingRules(projectId) {
       getProject(db, projectId);
       return listRoutingRules(db, projectId);
@@ -801,16 +805,26 @@ export function createServices(deps: {
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
         deps.starter.refuseIfJoining(id);
-      // The areas or risk tags can now match the placement rule. The store moves the task to a separate
+      // The areas or kinds can now match the placement rule. The store moves the task to a separate
       // copy only if it hasn't started and the builder hasn't placed it.
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
+        const known = listKinds(ctx.tx);
+        const kinds = patch.kinds ?? task.kinds;
+        // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
+        if (patch.rigor !== undefined || patch.kinds !== undefined)
+          refuseRigorBelowKinds({
+            rigor: patch.rigor === undefined ? task.rigor : patch.rigor,
+            taskKinds: kinds,
+            kinds: known,
+          });
+        // The areas or kinds can now match the placement rule, so it is asked again.
         const proposed =
-          patch.areas === undefined && patch.riskTags === undefined
+          patch.areas === undefined && patch.kinds === undefined
             ? undefined
             : proposePlacement(getProject(ctx.tx, task.projectId), {
                 areas: patch.areas ?? task.areas,
-                riskTags: patch.riskTags ?? task.riskTags,
+                kinds: kindsOfTask(kinds, known),
               });
         // A join still pending has not written yet, so the move would collide with it.
         // The same holds for any move the rule makes: a task the builder placed never moves, and one with
@@ -822,7 +836,12 @@ export function createServices(deps: {
           (task.placementReason !== null || proposed.reason !== null)
         )
           deps.starter.refuseIfJoining(id);
-        return patchTask(ctx, id, patch, proposed);
+        return patchTask(
+          ctx,
+          id,
+          patch.kinds === undefined ? patch : { ...patch, kinds },
+          proposed,
+        );
       });
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

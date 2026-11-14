@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { FakeGh } from './fake-gh';
 import {
   createTempRepoWithOrigin,
@@ -60,7 +60,7 @@ async function start(projectLanding?: 'merge' | 'hold') {
     name: 'shop',
     repoPath: remote.repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api),
+    defaultRigor: 'light',
     areas: [{ name: 'api', globs: ['src/api/**'] }],
     delivery: 'pull_request',
     prTitlePrefix: 'feat(app)',

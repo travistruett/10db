@@ -1,10 +1,7 @@
 import { z } from 'zod';
 import { GoalId, PersonaId, PersonId, ProjectId, RoutingRuleId, TaskId } from './ids';
 import { HyphenatedKey } from './keys';
-import { Effort, QuestionCategory, SendMode, StepRole, ToolAccess } from './states';
-
-export const ModelPin = z.object({ model: z.string().min(1), effort: z.enum(Effort) });
-export type ModelPin = z.infer<typeof ModelPin>;
+import { QuestionCategory, SendMode, StepRole, ToolAccess } from './states';
 
 /** Implementers edit; every other role is read-only, so a reviewer never changes what it judges. */
 const roleMatchesTools = (p: { role: StepRole; tools: ToolAccess }) =>
@@ -23,9 +20,6 @@ export const PersonaInput = z
     /** The persona prompt: how this persona works, sent with every session it runs. */
     instructions: z.string().min(1).max(8000),
     skills: z.array(HyphenatedKey).max(10).default([]),
-    /** A floor, in its role's index points, for any step this persona runs. */
-    minimumScore: z.number().min(0).max(100).nullable().default(null),
-    modelPin: ModelPin.nullable().default(null),
   })
   .refine(roleMatchesTools, ROLE_TOOLS);
 export type PersonaInput = z.input<typeof PersonaInput>;
@@ -35,8 +29,6 @@ export const PersonaPatch = z
     name: z.string().min(1).max(80),
     instructions: z.string().min(1).max(8000),
     skills: z.array(HyphenatedKey).max(10),
-    minimumScore: z.number().min(0).max(100).nullable(),
-    modelPin: ModelPin.nullable(),
     archived: z.boolean(),
   })
   .partial()
@@ -51,8 +43,6 @@ export const PersonaDto = z.object({
   tools: z.enum(ToolAccess),
   instructions: z.string(),
   skills: z.array(z.string()),
-  minimumScore: z.number().nullable(),
-  modelPin: ModelPin.nullable(),
   /** An archived persona stays so workstreams that ran on it still name it; no new plan, binding or flow step uses it. */
   archived: z.boolean(),
   createdAt: z.iso.datetime(),
@@ -94,22 +84,6 @@ export const PersonDto = z.object({
   updatedAt: z.iso.datetime(),
 });
 export type PersonDto = z.infer<typeof PersonDto>;
-
-export const TeamBinding = z.object({ role: z.enum(StepRole), personaId: PersonaId });
-export type TeamBinding = z.infer<typeof TeamBinding>;
-
-export const TeamInput = z.object({
-  bindings: z
-    .array(TeamBinding)
-    .refine((b) => new Set(b.map((x) => x.role)).size === b.length, 'One persona per role'),
-  members: z
-    .array(PersonId)
-    .refine((m) => new Set(m).size === m.length, 'A member is listed twice'),
-});
-export type TeamInput = z.infer<typeof TeamInput>;
-
-export const TeamDto = TeamInput.extend({ projectId: ProjectId });
-export type TeamDto = z.infer<typeof TeamDto>;
 
 /**
  * A rule names one category or one topic, and the scope it holds in: the project, a goal or a task.

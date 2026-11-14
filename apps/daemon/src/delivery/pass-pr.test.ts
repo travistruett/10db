@@ -13,7 +13,6 @@ import {
 import { AbandonStep } from '@10db/contracts';
 import {
   abandonPassAndBatch,
-  findFlowByName,
   setAbandonStep,
   setPassNotice,
   getBatch,
@@ -421,8 +420,8 @@ describe('Open Pull Request', () => {
         },
       },
     );
-    const standard = findFlowByName(h.store.db, 'standard');
-    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    // A pass review needs a review step: Standard runs Build and Review.
+    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
     const { passId, settings } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
 
@@ -519,8 +518,8 @@ describe('Open Pull Request', () => {
 
   it('logs, and leaves nothing unhandled, when what follows a review fails', async () => {
     setup({ gateCommand: null });
-    const standard = findFlowByName(h.store.db, 'standard');
-    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    // A pass review needs a review step: Standard runs Build and Review.
+    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
     const { passId, settings } = await openedPass();
     const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     const unhandled: unknown[] = [];
@@ -814,8 +813,8 @@ describe('Open Pull Request', () => {
         },
       },
     );
-    const standard = findFlowByName(h.store.db, 'standard');
-    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    // A pass review needs a review step: Standard runs Build and Review.
+    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
     const { passId, settings, people } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     await prs.open(passId);
@@ -852,8 +851,8 @@ describe('Open Pull Request', () => {
         },
       },
     );
-    const standard = findFlowByName(h.store.db, 'standard');
-    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    // A pass review needs a review step: Standard runs Build and Review.
+    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
     const { passId, settings } = await openedPass();
     // About 500 kB of diff over five files: more than one review reads.
     const long = (name: string) => `${`${name} ${'x'.repeat(100)}\n`.repeat(1_000)}${name}-end\n`;

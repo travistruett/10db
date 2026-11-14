@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
-import { PersonaInput, PersonInput, RoutingRulesInput, TeamInput } from './team';
+import { PersonaInput, PersonInput, RoutingRulesInput } from './team';
 
 const persona = {
   key: 'security-reviewer',
@@ -13,13 +13,11 @@ const persona = {
 describe('team inputs', () => {
   it.each([
     {
-      name: 'a persona with skills, a minimum score and a pin',
+      name: 'a persona with skills',
       parse: () =>
         PersonaInput.safeParse({
           ...persona,
           skills: ['review-checklist'],
-          minimumScore: 52,
-          modelPin: { model: 'opus', effort: 'high' },
         }),
       ok: true,
     },
@@ -40,11 +38,6 @@ describe('team inputs', () => {
       ok: false,
     },
     {
-      name: 'a minimum score above 100',
-      parse: () => PersonaInput.safeParse({ ...persona, minimumScore: 101 }),
-      ok: false,
-    },
-    {
       name: 'a skill name with a slash',
       parse: () => PersonaInput.safeParse({ ...persona, skills: ['../etc'] }),
       ok: false,
@@ -52,18 +45,6 @@ describe('team inputs', () => {
     {
       name: 'a person handle with an at sign',
       parse: () => PersonInput.safeParse({ handle: '@sam', name: 'Sam' }),
-      ok: false,
-    },
-    {
-      name: 'a team binding two personas to one role',
-      parse: () =>
-        TeamInput.safeParse({
-          bindings: [
-            { role: 'review', personaId: mintId('Persona') },
-            { role: 'review', personaId: mintId('Persona') },
-          ],
-          members: [],
-        }),
       ok: false,
     },
     {

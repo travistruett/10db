@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
 import { createEventBus, createStateStore } from '../src/events';
 import type { FakeScriptBook } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
 import { seedProfiles } from './seed-profiles';
 
@@ -175,7 +175,7 @@ describe('kill -9 mid-step', () => {
         name: 'crash',
         repoPath: repo.path,
         gateCommand: 'test -f src/x/two.txt',
-        flowId: await quickFlowId(api),
+        defaultRigor: 'light',
         areas: [{ name: 'x', globs: ['src/x/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

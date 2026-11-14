@@ -332,24 +332,26 @@ describe('useEventStream', () => {
     }
   });
 
-  it('refetches the Models page when a profile, an account or its list, a role setting, a pattern or a persona changes', () => {
+  it('refetches the Models page when a profile, an account or its list, a persona, the playbook or a kind changes', () => {
     // The router's picks read all of them.
     for (const entity of [
       'model_profile',
       'account_models',
       'account',
-      'role_setting',
-      'pattern',
       'persona',
+      'playbook',
+      'kind',
     ]) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['models']]));
     }
   });
 
-  it('refetches the role settings and patterns when either changes', () => {
-    for (const entity of ['role_setting', 'pattern']) {
-      expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['model-settings']]));
-    }
+  it.each([
+    { entity: 'playbook', key: ['playbook'] },
+    { entity: 'kind', key: ['kinds'] },
+    { entity: 'persona', key: ['personas'] },
+  ])('refetches the $entity lists the settings page reads when one changes', ({ entity, key }) => {
+    expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([key]));
   });
 
   it("refetches a pass on every pass event, and a task's thread and turns when a message joins it", () => {

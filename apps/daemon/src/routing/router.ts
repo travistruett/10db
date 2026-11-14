@@ -1,21 +1,14 @@
 import type { AccountModelDto, ModelProfileDto, StepRole, WorkstreamStep } from '@10db/contracts';
 import { costOnAccount } from './cost-on-account';
-import type { Floor } from './floors';
 import { automatic } from './pools';
 import { ROLE_DEFAULT, strongerDefault } from './role-defaults';
 
 export interface RouteInput {
   readonly role: StepRole;
   readonly need: number;
-  readonly floor: Floor;
   readonly budgetCeiling: number | null;
   /** The profiles to choose among: the caller has already narrowed them to the account and the setting. */
   readonly profiles: readonly ModelProfileDto[];
-  /**
-   * What to do when none reaches the minimum score: refuse, or, for a pool a setting narrowed, take the one that
-   * scores highest, since the builder asked for that pool.
-   */
-  readonly shortfall: 'refuse' | 'strongest';
   /**
    * The account's own list. Where it prices a model, the ceiling is compared with the cost per task scaled to
    * that price (`costOnAccount`); without it, or for a model it prices at nothing, with the maker's figure.
@@ -27,11 +20,6 @@ export interface RouteChoice {
   readonly profile: ModelProfileDto;
   readonly reason: string;
   readonly overBudget: boolean;
-}
-
-/** No profile can run a step: measured ones exist but none reaches its minimum score. */
-export class NoProfileError extends Error {
-  override name = 'NoProfileError';
 }
 
 /** No profile has a cost and an Intelligence score to compare on yet: there is nothing to route on. */
@@ -69,20 +57,17 @@ const costNote = (p: ModelProfileDto, accountModels?: readonly AccountModelDto[]
 
 /** The cheapest measured profile at or above the step's need and floor, within the ceiling. */
 export function route(input: RouteInput): RouteChoice {
-  const candidates = measured(input.profiles);
-  if (candidates.length === 0)
-    throw new UnmeasuredError('No profile has an intelligence score yet');
-  const minimum = Math.max(input.need, input.floor.minimum);
+  const [first, ...others] = measured(input.profiles);
+  if (first === undefined) throw new UnmeasuredError('No profile has an intelligence score yet');
+  const candidates = [first, ...others];
+  const minimum = input.need;
   const priced = input.accountModels;
   const able = candidates.filter((p) => (score(p) ?? 0) >= minimum).sort(preference(priced));
   const best = able.find((p) => withinCeiling(p, input.budgetCeiling, priced)) ?? able[0];
   if (!best) {
-    if (input.shortfall === 'refuse')
-      throw new NoProfileError(`No profile reaches ${String(minimum)} intelligence`);
-    const strongest = [...candidates].sort(
-      (a, b) => (score(b) ?? 0) - (score(a) ?? 0) || preference(priced)(a, b),
-    )[0];
-    if (!strongest) throw new NoProfileError(`No profile reaches ${String(minimum)} intelligence`);
+    const strongerFirst = (a: ModelProfileDto, b: ModelProfileDto): number =>
+      (score(b) ?? 0) - (score(a) ?? 0) || preference(priced)(a, b);
+    const strongest = candidates.reduce((top, p) => (strongerFirst(p, top) < 0 ? p : top), first);
     return {
       profile: strongest,
       overBudget: !withinCeiling(strongest, input.budgetCeiling, priced),
@@ -90,8 +75,6 @@ export function route(input: RouteInput): RouteChoice {
     };
   }
   const overBudget = !withinCeiling(best, input.budgetCeiling, priced);
-  const floor =
-    input.floor.why && input.floor.minimum > input.need ? ` (floor: ${input.floor.why})` : '';
   const budget =
     overBudget && input.budgetCeiling !== null
       ? `; over the budget ceiling of ${dollars(input.budgetCeiling)}${costNote(best, priced)}`
@@ -99,7 +82,7 @@ export function route(input: RouteInput): RouteChoice {
   return {
     profile: best,
     overBudget,
-    reason: `by score: cheapest profile at or above ${String(minimum)} intelligence${floor}${budget}`,
+    reason: `by score: cheapest profile at or above ${String(minimum)} intelligence${budget}`,
   };
 }
 

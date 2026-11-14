@@ -1,18 +1,10 @@
-import {
-  EventType,
-  InvalidError,
-  mintId,
-  NotFoundError,
-  type ProjectDto,
-  type WorkstreamStep,
-} from '@10db/contracts';
+import { EventType, InvalidError, type WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { insertFlow } from './flows';
 import { insertHandoff, latestHandoffForStep } from './handoffs';
 import { getProject, patchProject } from './projects';
 import { insertSession } from './sessions';
-import type { Store, WriteContext } from './store';
-import { getTask, insertTask, patchTask } from './tasks';
+import type { Store } from './store';
+import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { getWorkstream, getWorkstreamRow, insertWorkstream, patchWorkstream } from './workstreams';
 
@@ -51,17 +43,12 @@ const step = (role: WorkstreamStep['role'], sessionFloor = 0): WorkstreamStep =>
 });
 
 describe('planning fields', () => {
-  it('defaults a project to no flow and no ceiling, and patches both with an event', () => {
+  it('defaults a project to no ceiling, and patches it with an event', () => {
     const project = seedProject(store);
-    expect(project).toMatchObject({ flowId: null, budgetCeiling: null });
-    const flow = store.write((ctx) =>
-      insertFlow(ctx, { name: 'quick', steps: [{ role: 'implement', need: 40 }] }),
-    ).value;
-    const { events } = store.write((ctx) =>
-      patchProject(ctx, project.id, { flowId: flow.id, budgetCeiling: 2.5 }),
-    );
+    expect(project).toMatchObject({ budgetCeiling: null });
+    const { events } = store.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 2.5 }));
     expect(events.map((e) => e.type)).toEqual([EventType.ProjectChanged]);
-    expect(getProject(store.db, project.id)).toMatchObject({ flowId: flow.id, budgetCeiling: 2.5 });
+    expect(getProject(store.db, project.id)).toMatchObject({ budgetCeiling: 2.5 });
   });
 
   it.each([
@@ -70,36 +57,6 @@ describe('planning fields', () => {
   ])('refuses $name, checked against the stored values', ({ patch }) => {
     const project = seedProject(store); // handoff 40, nudge 50
     expect(() => store.write((ctx) => patchProject(ctx, project.id, patch))).toThrow(InvalidError);
-  });
-
-  it.each([
-    {
-      name: 'a project patch',
-      write: (ctx: WriteContext, project: ProjectDto) =>
-        patchProject(ctx, project.id, { flowId: mintId('Flow') }),
-    },
-    {
-      name: 'a new task',
-      write: (ctx: WriteContext, project: ProjectDto) =>
-        insertTask(ctx, project.id, { ...task, flowId: mintId('Flow') }),
-    },
-  ])('answers not found for a flow that does not exist, in $name', ({ write }) => {
-    const project = seedProject(store);
-    expect(() => store.write((ctx) => write(ctx, project))).toThrow(NotFoundError);
-  });
-
-  it('stores a task’s risk tags and flow from the input, and patches them', () => {
-    const project = seedProject(store);
-    const flow = store.write((ctx) =>
-      insertFlow(ctx, { name: 'quick', steps: [{ role: 'implement', need: 40 }] }),
-    ).value;
-    const created = store.write((ctx) =>
-      insertTask(ctx, project.id, { ...task, riskTags: ['auth'], flowId: flow.id }),
-    ).value;
-    expect(created).toMatchObject({ riskTags: ['auth'], flowId: flow.id });
-    const { events } = store.write((ctx) => patchTask(ctx, created.id, { riskTags: ['security'] }));
-    expect(events.map((e) => e.type)).toEqual([EventType.TaskChanged]);
-    expect(getTask(store.db, created.id).riskTags).toEqual(['security']);
   });
 
   it('starts a workstream with no steps at index 0, and stores a patched step plan', () => {

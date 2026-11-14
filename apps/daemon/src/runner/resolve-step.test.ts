@@ -7,8 +7,6 @@ import {
   type AccountModelDto,
   type ModelProfileDto,
   type ModelSetting,
-  type PatternDto,
-  type PersonaDto,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
@@ -81,8 +79,7 @@ const profileOf = (name: string): ModelProfileDto => {
   return found;
 };
 
-function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
-  const profile = profileOf(name);
+function profileStep(profile: ModelProfileDto, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
   return {
     role: 'implement',
     personaId: null,
@@ -107,13 +104,16 @@ function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamSt
   };
 }
 
+function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamStep {
+  return profileStep(profileOf(name), over);
+}
+
 const context = (over: Partial<StepContext> = {}): StepContext => ({
-  persona: undefined,
-  task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-  project: { id: mintId('Project'), budgetCeiling: null },
-  roleSettings: [],
-  patterns: [],
+  task: { modelSetting: null, effortPin: null },
+  project: { budgetCeiling: null },
   tierOverrides: {},
+  effort: null,
+  fallback: null,
   ...over,
 });
 
@@ -184,66 +184,26 @@ describe('resolveStep', () => {
   });
 
   describe('the reason names where a re-resolved step’s setting came from', () => {
-    const pattern = (name: string, setting: ModelSetting): PatternDto => ({
-      id: mintId('Pattern'),
-      projectId: null,
-      name,
-      match: { roles: [], riskTags: [], areas: [], retryOnly: false },
-      setting,
-      position: 0,
-    });
     const ELSEWHERE = 'big is not offered by Bedrock, so the step was resolved again: ';
     const ROUTED =
-      'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
-    it.each<{
-      name: string;
-      over: Partial<StepContext>;
-      setting: ModelSetting;
-      source: string;
-    }>([
+      'by the rigor’s fallback rung: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
+    it.each<{ name: string; over: Partial<StepContext>; source: string }>([
       {
         name: 'the task’s own setting',
-        over: {
-          task: {
-            riskTags: [],
-            acceptanceCriteria: [],
-            areas: [],
-            modelSetting: tier(ModelTier.Balanced),
-          },
-        },
-        setting: tier(ModelTier.Balanced),
-        source: "the task's own setting",
+        over: { task: { modelSetting: tier(ModelTier.Balanced), effortPin: null } },
+        source: "the task's own setting: ",
       },
-      {
-        name: 'a pattern that still gives it',
-        over: { patterns: [pattern('High-risk work', tier(ModelTier.Balanced))] },
-        setting: tier(ModelTier.Balanced),
-        source: 'the pattern "High-risk work"',
-      },
-      {
-        name: 'a role setting that still gives it',
-        over: {
-          roleSettings: [{ role: 'implement', projectId: null, setting: tier(ModelTier.Balanced) }],
-        },
-        setting: tier(ModelTier.Balanced),
-        source: "the role's setting",
-      },
-      {
-        name: 'a setting nothing gives any more',
-        over: {},
-        setting: tier(ModelTier.Balanced),
-        source: 'its planned setting (the balanced tier)',
-      },
-    ])('for $name', ({ over, setting, source }) => {
+      { name: 'the setting the step was planned with', over: {}, source: '' },
+    ])('for $name', ({ over, source }) => {
       const { rows, profiles } = offering([row('small'), row('mid')]);
       const out = resolveStep(
-        planned('big@high', { setting }),
+        planned('big@high', { setting: tier(ModelTier.Balanced) }),
         ACCOUNT,
         profiles,
         rows,
         context(over),
       );
-      expect(out.reason).toBe(`${ELSEWHERE}${source}: ${ROUTED}`);
+      expect(out.reason).toBe(`${ELSEWHERE}${source}${ROUTED}`);
     });
   });
 
@@ -271,6 +231,33 @@ describe('resolveStep', () => {
     expect(out.model).toBe('peak');
   });
 
+  it('falls back to the next model the account runs when it refuses a Frontier pick, and says why', () => {
+    const apex: ModelProfileDto[] = everything
+      .filter((p) => p.model === 'peak')
+      .map((p) => ({ ...p, id: mintId('ModelProfile'), model: 'apex', tier: ModelTier.Frontier }));
+    const profilesAll = [...everything, ...apex];
+    const rows = [row('big'), row('apex', { unusable: true })];
+    const profiles = offeredProfiles(profilesAll, rows, 'claude');
+    const planned = apex.find((p) => p.effort === 'high');
+    if (!planned) throw new Error('no apex@high');
+    const out = resolveStep(
+      {
+        ...profileStep(planned),
+        setting: tier(ModelTier.Frontier),
+      },
+      ACCOUNT,
+      profiles,
+      rows,
+      context({ plannedTier: ModelTier.Frontier }),
+    );
+    expect(out.model).toBe('big');
+    expect(out.reason).toContain(
+      'apex is marked unusable on Bedrock, so the step was resolved again',
+    );
+    expect(out.reason).toContain("the refused model's tier (frontier)");
+    expect(out.reason).toContain('the cheapest model of the capable tier');
+  });
+
   it.each<{ name: string; rows: AccountModelDto[]; setting: ModelSetting }>([
     {
       name: 'every model is marked unusable',
@@ -294,22 +281,30 @@ describe('resolveStep', () => {
     expect(out.reason).toMatch(/no model offered/);
   });
 
-  it('re-chooses by the persona’s pin when the pinned model is gone, and says the pin was missed', () => {
+  it('releases a held model the account has lost, and says the model is not offered', () => {
     const { rows, profiles } = offering([row('small'), row('mid')]);
-    const persona = {
-      key: 'ada',
-      minimumScore: null,
-      modelPin: { model: 'big', effort: 'high' },
-    } as unknown as PersonaDto;
     const out = resolveStep(
       planned('big@high', { pinned: true, setting: { kind: 'model', model: 'big' } }),
       ACCOUNT,
       profiles,
       rows,
-      context({ persona }),
+      context(),
     );
     expect(out.pinned).toBe(false);
-    expect(out.reason).toMatch(/ada pins big, which this account does not offer/);
+    expect(out.reason).toMatch(/big is not offered by this account, so the balanced tier/);
+  });
+
+  it('keeps a held model held when it is still offered at another effort', () => {
+    const { rows, profiles } = offering([row('big', { efforts: [Effort.High] })]);
+    const out = resolveStep(
+      planned('big@max', { pinned: true, setting: { kind: 'model', model: 'big' } }),
+      ACCOUNT,
+      profiles,
+      rows,
+      context({ effort: Effort.Max }),
+    );
+    expect(out.pinned).toBe(true);
+    expect(ran(out)).toBe('big@high');
   });
 
   it.each<{
@@ -363,7 +358,7 @@ describe('resolveStep', () => {
     expect(out.model).toBe('peak');
     expect(out.setting).toEqual({ kind: 'automatic' });
     expect(out.reason).toBe(
-      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (capable): by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
+      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (capable): by the rigor’s fallback rung: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
     );
   });
 

@@ -84,16 +84,16 @@ describe('routing ignores what OpenRouter measures', () => {
     const pick = () =>
       chooseModel({
         def: { role: 'implement', need: 40 },
-        persona: undefined,
-        task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-        project: { id: null, budgetCeiling: null },
+        requirements: [{ kind: 'automatic' }],
+        effort: null,
+        fallback: null,
+        pinned: false,
+        task: { modelSetting: null, effortPin: null },
+        project: { budgetCeiling: null },
         profiles: listModelProfiles(state.db).filter(
           (p) => p.effort === 'high' && (p.model === A || p.model === B),
         ),
-        roleSettings: [],
-        patterns: [],
         tierOverrides: {},
-        stakes: { retry: false },
       }).model;
     expect(pick()).toBe(A);
 

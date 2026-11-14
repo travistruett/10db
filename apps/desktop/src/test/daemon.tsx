@@ -1,4 +1,5 @@
 import {
+  AccountId,
   EventsHead,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -6,6 +7,7 @@ import {
   PlanRecordDto,
   PROTOCOL_VERSION,
   SelfUpdateStatusDto,
+  StepRole,
   SystemCheckDto,
   TaskScreensDto,
 } from '@10db/contracts';
@@ -28,6 +30,8 @@ import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
 import { githubStatusDto } from './github-fixtures';
+import { rolePickDto, rolePicksDto } from './model-fixtures';
+import { playbookDto } from './playbook-fixtures';
 import { projectViewDto } from './fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
 
@@ -121,15 +125,26 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/hazard-assessment', base), () =>
       HttpResponse.json({ additions: [], assessedAt: null, commit: null, pendingRemovals: 0 }),
     ),
-    // The model list and the role settings and patterns of Settings › Team and Personas and flows; none yet.
+    // The model list the task drawer reads; none yet.
     http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
     // and what each account offers, which an account's tier overrides read; none yet.
     http.get(daemonUrl('/models/offers', base), () => HttpResponse.json([])),
-    http.get(daemonUrl('/model-settings', base), () =>
-      HttpResponse.json({ roles: [], patterns: [] }),
+    // Settings › Models and a project's Models by role read the playbook, the kinds, the personas and what
+    // each cell resolves to; 10db's defaults, no kinds and nothing chosen.
+    http.get(daemonUrl('/playbook', base), () => HttpResponse.json(playbookDto())),
+    http.get(daemonUrl('/projects/:projectId/playbook', base), () =>
+      HttpResponse.json(playbookDto()),
     ),
-    http.get(daemonUrl('/projects/:projectId/model-settings', base), () =>
-      HttpResponse.json({ roles: [], patterns: [] }),
+    http.get(daemonUrl('/playbook/move-report', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/kinds', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/personas', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/models/picks', base), ({ request }) =>
+      HttpResponse.json(
+        rolePicksDto(
+          AccountId.parse(new URL(request.url).searchParams.get('account')),
+          Object.values(StepRole).map((role) => rolePickDto({ role })),
+        ),
+      ),
     ),
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),

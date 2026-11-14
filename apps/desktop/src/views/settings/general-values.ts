@@ -13,7 +13,6 @@ import {
   ProjectPatch,
   ScreensMatrix,
   WorkspaceMode,
-  type FlowId,
   type ScreenTheme,
   type ProjectDto,
 } from '@10db/contracts';
@@ -62,7 +61,6 @@ export interface GeneralValues {
   readonly handoffPct: number | '';
   readonly nudgePct: number | '';
   readonly humanWaitMinutes: number | '';
-  readonly flowId: FlowId | null;
   /** '' means no ceiling. */
   readonly budgetCeiling: number | '';
   readonly delivery: Delivery;
@@ -119,7 +117,6 @@ export function generalValues(project: ProjectDto): GeneralValues {
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
     humanWaitMinutes: project.humanWaitMinutes,
-    flowId: project.flowId,
     budgetCeiling: project.budgetCeiling ?? '',
     delivery: project.delivery,
     baseBranch: project.baseBranch,
@@ -257,7 +254,6 @@ export function checkGeneral(
     patch.nudgePct = values.nudgePct;
   if (values.humanWaitMinutes !== '' && values.humanWaitMinutes !== project.humanWaitMinutes)
     patch.humanWaitMinutes = values.humanWaitMinutes;
-  if (values.flowId !== project.flowId) patch.flowId = values.flowId;
   const ceiling = values.budgetCeiling === '' ? null : values.budgetCeiling;
   if (ceiling !== project.budgetCeiling) patch.budgetCeiling = ceiling;
   if (values.delivery !== project.delivery) patch.delivery = values.delivery;

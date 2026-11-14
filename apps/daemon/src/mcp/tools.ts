@@ -21,6 +21,7 @@ import {
   JudgeKind,
   Urgency,
   WorkspaceMode,
+  withKindsNamed,
   type McpToolInputs,
   type SessionId,
   type TaskId,
@@ -49,6 +50,7 @@ import {
   insertTaskPageReports,
   insertToolOp,
   listEvidence,
+  listKinds,
   listTaskPageReports,
   listToolOps,
   listStepToolOpResults,
@@ -75,7 +77,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
-  carriesRiskTags,
+  carriesKinds,
   fileProposalByItself,
   proposalCardBody,
   proposalFiling,
@@ -176,7 +178,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
@@ -470,9 +472,12 @@ export function createToolHandlers(
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
+          const declared = [...new Set([...(input.kinds ?? []), ...(input.riskTags ?? [])])];
+          const known = listKinds(ctx.tx);
+          const taskKinds = withKindsNamed([], declared, known, 'agent');
           if (draft) {
-            // Every principle gets a card, so its tags are the one thing the card must add.
-            const carries = carriesRiskTags(input.riskTags);
+            // Every principle gets a card, so its kinds are the one thing the card must add.
+            const carries = carriesKinds(declared, known);
             const { proposalId, principle } = proposePrinciple(ctx, {
               projectId: project.id,
               title: input.title,
@@ -500,15 +505,16 @@ export function createToolHandlers(
             kind: input.kind,
             title: input.title,
             body: input.body,
-            riskTags: input.riskTags,
+            kinds: declared,
+            known,
             joinsRunningBatch: input.joinsRunningBatch,
             limit: getSmallProposalLimit(ctx.tx, project.id),
             stepCapReached:
               stepFilings(ctx.tx, getWorkstreamRow(ctx.tx, workstreamId)) >= MAX_FOLLOW_UPS,
           });
           if (filing.file) {
-            // A small proposal with no risk tag: the card would guard nothing the Icebox does not.
-            const task = fileProposalByItself(ctx, proposalId);
+            // A small proposal with no kind that asks for a card would guard nothing the Icebox does not.
+            const task = fileProposalByItself(ctx, proposalId, taskKinds);
             return record(
               'propose',
               input.opId,
@@ -528,8 +534,8 @@ export function createToolHandlers(
             recommendation: null,
             category: QuestionCategory.Product,
             urgency: Urgency.Low,
-            // The declared risk tags ride on the card, so accepting it files a task that carries them.
-            detail: { proposalId, riskTags: [...new Set(input.riskTags ?? [])] },
+            // The declared kinds ride on the card, so accepting it files a task that has them.
+            detail: { proposalId, kinds: taskKinds.map((k) => k.key) },
             foldKey: null,
             targets: [],
           });

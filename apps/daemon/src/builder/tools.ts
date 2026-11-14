@@ -20,6 +20,7 @@ import {
   ProposalListQuery,
   SearchMatch,
   TaskInput,
+  TaskKindSource,
   TaskMove,
   TaskPatch,
   TaskStatus,
@@ -32,7 +33,7 @@ import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../ap
 export type BuilderServices = Pick<
   ApiServices,
   | 'listProjects'
-  | 'listFlows'
+  | 'listKinds'
   | 'listTasks'
   | 'createTask'
   | 'patchTask'
@@ -109,16 +110,21 @@ export function createBuilderTools(
         columns: services
           .listBoardColumns(project.id)
           .map((column) => ({ id: column.id, name: column.name })),
-        flowId: project.flowId,
+        defaultRigor: project.defaultRigor,
         delivery: project.delivery,
       }));
     },
-    [BuilderToolName.ListFlows]: (args) => {
-      BuilderToolInputs.list_flows.parse(args);
-      return services.listFlows().map((flow) => ({
-        id: flow.id,
-        name: flow.name,
-        steps: flow.steps.map((step) => step.role),
+    [BuilderToolName.ListKinds]: (args) => {
+      BuilderToolInputs.list_kinds.parse(args);
+      return services.listKinds().map((kind) => ({
+        key: kind.key,
+        label: kind.label,
+        description: kind.description,
+        minimumRigor: kind.minimumRigor,
+        alwaysReviewed: kind.alwaysReviewed,
+        failsAtLimit: kind.failsAtLimit,
+        ownCopy: kind.ownCopy,
+        toInbox: kind.toInbox,
       }));
     },
     // Finished tasks keep their full text; after a few days of filing they would flood the client.
@@ -134,16 +140,19 @@ export function createBuilderTools(
           description: task.description,
           acceptanceCriteria: task.acceptanceCriteria,
           areas: task.areas,
-          riskTags: task.riskTags,
-          flowId: task.flowId,
+          rigor: task.rigor,
+          effectiveRigor: task.effectiveRigor,
+          kinds: task.kinds.map((kind) => kind.key),
           dependsOn: task.dependsOn,
           boardStatus: task.boardStatus,
           boardColumnId: task.boardColumnId,
         })),
     [BuilderToolName.CreateTask]: async (args) => {
-      const { projectId, ...loose } = BuilderToolInputs.create_task.parse(args);
+      const { projectId, kinds: named, ...loose } = BuilderToolInputs.create_task.parse(args);
       const trimmed = {
         ...loose,
+        // The agent names kinds by key; who set them is 10db's to record. Keys no kind has are refused.
+        kinds: named.map(({ key }) => ({ key, source: TaskKindSource.Agent })),
         title: loose.title.trim(),
         headline: loose.headline.trim(),
         why: loose.why.trim(),
@@ -155,8 +164,16 @@ export function createBuilderTools(
       return taskSummary(await services.createTask(projectId, TaskInput.parse(trimmed)));
     },
     [BuilderToolName.EditTask]: async (args) => {
-      const { taskId, ...changes } = BuilderToolInputs.edit_task.parse(args);
+      const { taskId, kinds: named, ...changes } = BuilderToolInputs.edit_task.parse(args);
       const patch: Record<string, unknown> = { ...changes };
+      if (named !== undefined) {
+        // A kind the task already had keeps who set it, so an agent's edit never takes a pin from the builder.
+        const held = services.getTask(taskId).kinds;
+        patch['kinds'] = named.map(
+          ({ key }) =>
+            held.find((kind) => kind.key === key) ?? { key, source: TaskKindSource.Agent },
+        );
+      }
       if (changes.title !== undefined) patch['title'] = changes.title.trim();
       if (changes.headline !== undefined) patch['headline'] = changes.headline.trim();
       if (changes.why !== undefined) patch['why'] = changes.why.trim();

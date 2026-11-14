@@ -1,9 +1,10 @@
 import {
   ConflictError,
-  RiskTag,
+  TaskKindSource,
   WorkspaceMode,
   type BatchDto,
   type TaskDto,
+  type TaskKind,
 } from '@10db/contracts';
 import { getBatch, getTask, schema, transitionBatch } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,6 +30,8 @@ function taskService() {
   return createServices(wiring as unknown as Parameters<typeof createServices>[0]);
 }
 
+const builderKind = (key: string): TaskKind => ({ key, source: TaskKindSource.Builder });
+
 const ids = (...tasks: TaskDto[]) => tasks.map((t) => t.id);
 
 function one(batches: readonly BatchDto[]): BatchDto {
@@ -47,10 +50,10 @@ function hold(key: string): () => void {
   return release;
 }
 
-describe('a risk tag edit through the task service', () => {
+describe('a kinds edit through the task service', () => {
   it('moves an unstarted shared task to a separate copy with a reason', async () => {
     const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
-    const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Migration] });
+    const patched = await taskService().patchTask(task.id, { kinds: [builderKind('migration')] });
     expect(patched).toMatchObject({
       workspaceMode: WorkspaceMode.Worktree,
       placementReason: 'touches migrations',
@@ -58,37 +61,37 @@ describe('a risk tag edit through the task service', () => {
     expect(getTask(h.store.db, task.id).workspaceMode).toBe(WorkspaceMode.Worktree);
   });
 
-  it('does the same for a dependency tag', async () => {
+  it('does the same for the dependency kind', async () => {
     const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
-    const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Dependency] });
+    const patched = await taskService().patchTask(task.id, { kinds: [builderKind('dependency')] });
     expect(patched).toMatchObject({
       workspaceMode: WorkspaceMode.Worktree,
       placementReason: 'touches dependencies',
     });
   });
 
-  it('refreshes the reason when the tag changes, and clears it with the tag', async () => {
+  it('refreshes the reason when the kind changes, and clears it with the kind', async () => {
     const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
-    await taskService().patchTask(task.id, { riskTags: [RiskTag.Migration] });
-    const changed = await taskService().patchTask(task.id, { riskTags: [RiskTag.Dependency] });
+    await taskService().patchTask(task.id, { kinds: [builderKind('migration')] });
+    const changed = await taskService().patchTask(task.id, { kinds: [builderKind('dependency')] });
     expect(changed).toMatchObject({
       workspaceMode: WorkspaceMode.Worktree,
       placementReason: 'touches dependencies',
     });
-    const cleared = await taskService().patchTask(task.id, { riskTags: [] });
+    const cleared = await taskService().patchTask(task.id, { kinds: [] });
     expect(cleared).toMatchObject({ workspaceMode: WorkspaceMode.Shared, placementReason: null });
   });
 
-  it('leaves a placement the builder chose, and a tag that the rule ignores, alone', async () => {
+  it('leaves a placement the builder chose, and a kind that the rule ignores, alone', async () => {
     const chosen = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
     await taskService().patchTask(chosen.id, { workspaceMode: WorkspaceMode.Shared });
-    const patched = await taskService().patchTask(chosen.id, { riskTags: [RiskTag.Migration] });
+    const patched = await taskService().patchTask(chosen.id, { kinds: [builderKind('migration')] });
     expect(patched).toMatchObject({
       workspaceMode: WorkspaceMode.Shared,
       placementReason: 'chosen by the builder',
     });
     const other = h.addTask('Beta', { workspaceMode: WorkspaceMode.Shared });
-    const unrelated = await taskService().patchTask(other.id, { riskTags: [RiskTag.Security] });
+    const unrelated = await taskService().patchTask(other.id, { kinds: [builderKind('security')] });
     expect(unrelated).toMatchObject({ workspaceMode: WorkspaceMode.Shared, placementReason: null });
   });
 
@@ -104,9 +107,9 @@ describe('a risk tag edit through the task service', () => {
     const release = hold(jobKey(getBatch(h.store.db, batch.id), JobQueue.Cut));
     h.starter.startBatch(h.project.id, { title: 'Beta', taskIds: ids(beta) });
     await expect(
-      taskService().patchTask(beta.id, { riskTags: [RiskTag.Migration] }),
+      taskService().patchTask(beta.id, { kinds: [builderKind('migration')] }),
     ).rejects.toThrow(/Beta.*joining/);
-    expect(getTask(h.store.db, beta.id).riskTags).toEqual([]);
+    expect(getTask(h.store.db, beta.id).kinds).toEqual([]);
     release();
     await h.jobs.idle();
   });
@@ -134,12 +137,12 @@ describe('a placement patch through the task service during a pending join', () 
     return { batch, beta, release };
   }
 
-  it('accepts a risk tag edit when the task is already a separate copy', async () => {
+  it('accepts a kinds edit when the task is already a separate copy', async () => {
     const { beta, release } = await pendingJoin();
     // A task backfilled to a separate copy has no reason; the store changes only the reason.
     // (Every task in this project changes; Alpha has already started and is not patched.)
     h.store.db.update(schema.tasks).set({ workspaceMode: WorkspaceMode.Worktree }).run();
-    const patched = await taskService().patchTask(beta.id, { riskTags: [RiskTag.Migration] });
+    const patched = await taskService().patchTask(beta.id, { kinds: [builderKind('migration')] });
     expect(patched).toMatchObject({
       workspaceMode: WorkspaceMode.Worktree,
       placementReason: 'touches migrations',
@@ -182,18 +185,18 @@ describe('a placement patch through the task service during a pending join', () 
 
     it('leaves a shared task where it is when the rule does not match', async () => {
       const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
-      const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Security] });
+      const patched = await taskService().patchTask(task.id, { kinds: [builderKind('security')] });
       expect(patched).toMatchObject({
         workspaceMode: WorkspaceMode.Shared,
         placementReason: null,
       });
     });
 
-    it('accepts a tag the rule ignores while a shared task is joining', async () => {
+    it('accepts a kind the rule ignores while a shared task is joining', async () => {
       const { beta, release } = await pendingJoin();
-      const patched = await taskService().patchTask(beta.id, { riskTags: [RiskTag.Security] });
+      const patched = await taskService().patchTask(beta.id, { kinds: [builderKind('security')] });
       expect(patched).toMatchObject({
-        riskTags: [RiskTag.Security],
+        kinds: [builderKind('security')],
         workspaceMode: WorkspaceMode.Shared,
         placementReason: null,
       });

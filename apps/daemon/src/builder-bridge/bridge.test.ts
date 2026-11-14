@@ -79,7 +79,7 @@ async function daemonAnswering(
 }
 
 const callCreate = () =>
-  client.callTool({ name: 'list_flows', arguments: {} }).then(
+  client.callTool({ name: 'list_kinds', arguments: {} }).then(
     () => null,
     (error: unknown) => (error instanceof Error ? error.message : String(error)),
   );
@@ -123,21 +123,21 @@ describe('the builder bridge with a daemon', () => {
   it('forwards a call with the UI token and returns the result', async () => {
     await daemonAnswering({ status: 200, body: ok });
     await connect();
-    const result = await client.callTool({ name: 'list_flows', arguments: {} });
+    const result = await client.callTool({ name: 'list_kinds', arguments: {} });
     expect(result.content).toEqual([{ type: 'text', text: '[]' }]);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.authorization).toBe('Bearer the-ui-token');
     expect(JSON.parse(seen[0]?.body ?? '')).toMatchObject({
       jsonrpc: '2.0',
       method: 'tools/call',
-      params: { name: 'list_flows', arguments: {} },
+      params: { name: 'list_kinds', arguments: {} },
     });
   });
 
   it('rereads the runtime files on every call', async () => {
     await daemonAnswering({ status: 200, body: ok });
     await connect();
-    await client.callTool({ name: 'list_flows', arguments: {} });
+    await client.callTool({ name: 'list_kinds', arguments: {} });
     rmSync(join(dir.path, 'daemon.json'));
     expect(await callCreate()).toContain(NOT_RUNNING);
   });
