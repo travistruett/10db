@@ -1,4 +1,4 @@
-import { insertBuilderMessage, listSessions } from '@10db/db';
+import { getWorkstream, insertBuilderMessage, listSessions } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs, waitFor } from '../../test/fixtures';
@@ -130,6 +130,27 @@ describe('a turn a skip stopped', () => {
     engine.adapter.signal('stop');
     await cancelled;
     await engine.runner.idle();
+    expect(resumes()).toEqual([]);
+  });
+});
+
+// T4 call 11: a step that can't do its job without a skipped call says so, and fails naming both.
+describe('a blocked step', () => {
+  it('fails naming the reason and its skips', async () => {
+    const { workstream } = await run({
+      Alpha: [
+        [
+          curl,
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'It needs the network' } },
+          turn,
+        ],
+      ],
+    });
+    expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureReason:
+        "The implement step couldn't do its job without a call 10db skipped: It needs the network. Skipped: curl -s https://example.com",
+    });
     expect(resumes()).toEqual([]);
   });
 });

@@ -285,13 +285,21 @@ const AUTO_MODE_REFUSES =
 
 const AUTO_MODE_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.`;
 
-/** Where a judge settles the lane's calls: the limits it holds and what to do at one. */
-const judgedAutoModeRule = (refusedCall: string): string =>
-  `Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. ${refusedCall} A dependency change and a loop with no end in the background wait on a card from the builder.`;
+const WAITS_ON_A_CARD =
+  'A dependency change and a loop with no end in the background wait on a card from the builder.';
 
-const JUDGED_LANE_RULE = judgedAutoModeRule(
-  "Don't retry a refused call another way; carry on without it and say in your handoff what it was.",
-);
+/** Where a judge settles the lane's calls: the limits it holds and what to do at one. */
+const judgedAutoModeRule = (refusedCall: string, tail: string = WAITS_ON_A_CARD): string =>
+  `Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. ${refusedCall} ${tail}`;
+
+const LANE_REFUSED_CALL =
+  "Don't retry a refused call another way; carry on without it and say in your handoff what it was.";
+
+const JUDGED_LANE_RULE = judgedAutoModeRule(LANE_REFUSED_CALL);
+
+/** A lane nobody watches waits on no card: what would raise one is skipped (trust line §5). */
+const SKIPPED_RULE =
+  'Nobody is watching this task. A call 10db or auto mode refuses with "Skipped:" is left out on purpose: carry on without it, and list each skipped call in your handoff. If the step\'s job can\'t be done without it, call report_blocked with the reason.';
 
 /** A pass has the builder in it, who can allow a refused call. */
 const JUDGED_PASS_RULE = judgedAutoModeRule(
@@ -429,12 +437,18 @@ interface SetupLines {
   readonly judged: boolean;
   readonly inPass: boolean;
   readonly webJudged: boolean;
+  readonly attended: boolean;
 }
 
 /** The auto-mode line: the limits a judge holds, or what the rules floor refuses and cards. */
 function autoModeLine(setup: SetupLines): string {
-  if (!setup.judged) return AUTO_MODE_RULE;
-  const limits = setup.inPass ? JUDGED_PASS_RULE : JUDGED_LANE_RULE;
+  if (!setup.judged)
+    return setup.attended ? AUTO_MODE_RULE : `${AUTO_MODE_REFUSES} ${SKIPPED_RULE}`;
+  const limits = setup.inPass
+    ? JUDGED_PASS_RULE
+    : setup.attended
+      ? JUDGED_LANE_RULE
+      : judgedAutoModeRule(LANE_REFUSED_CALL, SKIPPED_RULE);
   return setup.webJudged ? `${limits} ${WEB_JUDGED_SENTENCE}` : limits;
 }
 
@@ -864,6 +878,7 @@ export function buildSessionPrompt(input: PromptInput): string {
       judged: input.judged === true,
       inPass: input.inPass === true,
       webJudged: input.webJudged === true,
+      attended: input.attended !== false,
     },
   );
   const rules =

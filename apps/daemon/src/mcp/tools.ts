@@ -19,6 +19,7 @@ import {
   StepRole,
   ToolAccess,
   JudgeKind,
+  SkipKind,
   Urgency,
   WorkspaceMode,
   type McpToolInputs,
@@ -57,6 +58,7 @@ import {
   passPageAreas,
   replaceToolOp,
   patchWorkstream,
+  listSkipsForWorkstream,
   releaseClaim,
   searchDecisions,
   searchPrinciples,
@@ -195,6 +197,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     "Name the app's routes this turn's pictures should load, beyond the page areas your task names: a page area's route with its parameter filled in (/people/42 for /people/[id]), or the pages a change only in shared code shows. Only a page area's route is loaded: each parameter one plain value of letters, digits, _ or -, and your query dropped (the area route's own query is kept); any other path is refused. At most four a turn (a task outside a Workbench pass: a run); a read-only step can't call it. 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
+  report_blocked:
+    "Only in a task nobody is watching: say the step can't do its job without a call 10db or auto mode skipped. The step ends failed when your turn ends, naming your reason and the skipped calls, and the builder can run them. Use it only when carrying on without the call can't do the step's job.",
   complete_step:
     'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
@@ -1066,6 +1070,28 @@ export function createToolHandlers(
           return reply;
         }),
       );
+    },
+
+    report_blocked: (input) => {
+      const away = deps.awayFor?.(sessionId);
+      if (away === undefined)
+        return Promise.resolve({
+          ok: false,
+          message: 'report_blocked is for tasks nobody is watching.',
+        });
+      const skipped = listSkipsForWorkstream(db, workstreamId).some(
+        (skip) => skip.kind !== SkipKind.Question,
+      );
+      if (!skipped)
+        return Promise.resolve({
+          ok: false,
+          message: 'Nothing was skipped in this run; finish the step or hand off.',
+        });
+      away.block(input.reason);
+      return Promise.resolve({
+        ok: true,
+        message: 'The step will end failed when this turn ends.',
+      });
     },
 
     write_handoff: async ({ opId, ...content }) => {

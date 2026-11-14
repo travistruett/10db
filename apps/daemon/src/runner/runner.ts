@@ -145,6 +145,7 @@ import {
   type WorkstreamRow,
   type WriteContext,
   approvedCallKeys,
+  listSkipsForWorkstream,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -760,6 +761,8 @@ interface Control {
   idleTimer: Timer | null;
   /** How often each step's turn a skip stopped was resumed, by step index, across the run's sessions. */
   readonly skipResumes: Map<number, number>;
+  /** Set when the step said it can't do its job without a skipped call: it fails when the turn ends. */
+  blockedReason: string | null;
   done: Promise<void>;
 }
 
@@ -2555,6 +2558,9 @@ export function createRunner(opts: RunnerOptions): Runner {
           approvedKeys,
           taskId: task.id,
           projectId: project.id,
+          block: (reason: string) => {
+            ctl.blockedReason = reason;
+          },
         };
     opts.live.register(session.id, {
       signal: abort.signal,
@@ -3167,6 +3173,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A lane nobody watches whose turn ended on a skip, often because the judge said to stop, is
             // told to carry on, a bounded number of times per step (T4 call 10). A handoff, a background
             // hold, a builder message or a stop has the turn end as it would.
+            if (ctl.blockedReason !== null) {
+              const skipped = listSkipsForWorkstream(db, id)
+                .filter((skip) => skip.kind !== SkipKind.Question)
+                .map((skip) => skip.summary);
+              st.outcome = {
+                kind: 'refused',
+                message: `The ${step.role} step couldn't do its job without a call 10db skipped: ${ctl.blockedReason}. Skipped: ${skipped.join('; ')}`,
+                providerSessionId: st.providerSessionId,
+              };
+              await handle.stop();
+              break;
+            }
             const resumed = ctl.skipResumes.get(row.stepIndex) ?? 0;
             if (
               turnSkips !== null &&
@@ -4199,6 +4217,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         builderStop: false,
         idleTimer: null,
         skipResumes: new Map(),
+        blockedReason: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);

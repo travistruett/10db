@@ -19,6 +19,8 @@ export interface AwayLane {
   readonly skips: SkipRecorder;
   readonly taskId: TaskId;
   readonly projectId: ProjectId;
+  /** The step can't do its job without a call that was skipped: it ends failed when the turn ends. */
+  block(reason: string): void;
 }
 
 /**
@@ -41,7 +43,11 @@ export function routedToPerson(
 }
 
 /** Records the question a lane nobody watches would have asked, and answers it. */
-export function answerAway(away: AwayLane, toolName: string, question: string): string {
+export function answerAway(
+  away: Pick<AwayLane, 'skips'>,
+  toolName: string,
+  question: string,
+): string {
   away.skips.record({
     toolName,
     toolUseId: null,

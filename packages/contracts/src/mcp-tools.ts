@@ -72,6 +72,7 @@ export const McpToolName = {
   WriteHandoff: 'write_handoff',
   CompleteStep: 'complete_step',
   ReportPages: 'report_pages',
+  ReportBlocked: 'report_blocked',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
 
@@ -291,6 +292,7 @@ export const McpToolInputs = {
     summary: z.string().min(1),
   }),
   write_handoff: HandoffInput.extend({ opId: OpId }),
+  report_blocked: z.object({ reason: z.string().min(1).max(2000) }),
   complete_step: z.object({
     opId: OpId,
     summary: z
@@ -432,6 +434,7 @@ export const McpToolOutputs = {
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),
+  report_blocked: z.object({ ok: z.boolean(), message: z.string() }),
   complete_step: z.object({
     instruction: z.string(),
     /** The tasks filed from `followUps`; absent in a result recorded before there were any. */
