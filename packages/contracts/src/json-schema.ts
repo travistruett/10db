@@ -94,26 +94,39 @@ import {
   AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
-import { AaModelDto, BenchmarkKeyInput, BenchmarkStatusDto } from './benchmarks';
+import {
+  AaModelDto,
+  BenchmarkKeyInput,
+  BenchmarkStatusDto,
+  OpenRouterSyncStatusDto,
+} from './benchmarks';
 import { GithubSigninDto, GithubStatusDto } from './github';
-import { JudgeCallDto, JudgeConfigPatch, JudgeStatusDto, JudgeTestResultDto } from './judge';
+import { DecisionModelListDto } from './decision-models';
+import { DecisionStatsListDto } from './decision-stats';
+import {
+  JudgeCallDto,
+  JudgeCallsPageDto,
+  JudgeCallsPageQuery,
+  JudgeConfigPatch,
+  JudgeStatusDto,
+  JudgeTestResultDto,
+} from './judge';
 import {
   AccountModelDto,
   CatalogueStatusDto,
-  ModelSettingsInput,
   ModelEffortDto,
   ModelRowDto,
-  ModelPicksQuery,
   ModelsQuery,
   RolePickDto,
   RolePicksDto,
   ModelSetting,
-  ModelSettingsDto,
-  PatternDto,
-  PatternInput,
-  PatternMatch,
-  RoleSettingDto,
 } from './catalogue';
+import {
+  ModelEvalDto,
+  ModelMeasuresDto,
+  ModelMeasuresQuery,
+  ProviderSpeedDto,
+} from './model-measures';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
@@ -131,7 +144,15 @@ import {
   WorkstreamDto,
 } from './entities';
 import { DaemonEvent } from './events';
-import { FlowDto, FlowInput, FlowPatch } from './flows';
+import {
+  KindDto,
+  KindInput,
+  KindOrderInput,
+  KindPatch,
+  ModelPicksQuery,
+  PlaybookDto,
+  PlaybookInput,
+} from './rigor';
 import {
   AreaProposalInput,
   AreaProposalResult,
@@ -231,8 +252,6 @@ import {
   RoutingRuleDto,
   RoutingRulesInput,
   StakeholderTimersDto,
-  TeamDto,
-  TeamInput,
 } from './team';
 import {
   EventsHead,
@@ -335,7 +354,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'benchmark-status-dto': BenchmarkStatusDto,
   'github-signin-dto': GithubSigninDto,
   'github-status-dto': GithubStatusDto,
+  'decision-model-list-dto': DecisionModelListDto,
+  'decision-stats-list-dto': DecisionStatsListDto,
   'judge-call-dto': JudgeCallDto,
+  'judge-calls-page-dto': JudgeCallsPageDto,
+  'judge-calls-page-query': JudgeCallsPageQuery,
+  'openrouter-sync-status-dto': OpenRouterSyncStatusDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-status-dto': JudgeStatusDto,
   'judge-test-result-dto': JudgeTestResultDto,
@@ -345,9 +369,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'board-column-patch': BoardColumnPatch,
   'task-move': TaskMove,
   'run-next-result': RunNextResult,
-  'flow-dto': FlowDto,
-  'flow-input': FlowInput,
-  'flow-patch': FlowPatch,
+  'kind-dto': KindDto,
+  'kind-input': KindInput,
+  'kind-patch': KindPatch,
+  'kind-order-input': KindOrderInput,
+  'playbook-dto': PlaybookDto,
+  'playbook-input': PlaybookInput,
   'folder-inspect-input': FolderInspectInput,
   'folder-inspection': FolderInspection,
   'folder-inspect-result': FolderInspectResult,
@@ -358,16 +385,14 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'model-effort-dto': ModelEffortDto,
   'model-row-dto': ModelRowDto,
   'models-query': ModelsQuery,
+  'model-measures-query': ModelMeasuresQuery,
+  'model-measures-dto': ModelMeasuresDto,
+  'model-eval-dto': ModelEvalDto,
+  'provider-speed-dto': ProviderSpeedDto,
   'model-picks-query': ModelPicksQuery,
   'role-pick-dto': RolePickDto,
   'role-picks-dto': RolePicksDto,
   'model-setting': ModelSetting,
-  'pattern-dto': PatternDto,
-  'pattern-match': PatternMatch,
-  'pattern-input': PatternInput,
-  'model-settings-dto': ModelSettingsDto,
-  'model-settings-input': ModelSettingsInput,
-  'role-setting-dto': RoleSettingDto,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
@@ -408,8 +433,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'slack-token-input': SlackTokenInput,
   'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
-  'team-dto': TeamDto,
-  'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
   'goal-adopt-error': GoalAdoptError,
   'goal-adopt-input': GoalAdoptInput,

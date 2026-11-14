@@ -1,18 +1,16 @@
-import type { ModelSettingsDto, PatternMatch } from '@10db/contracts';
 import {
   AccountModelDto,
   CatalogueStatusDto,
   ModelEffortDto,
+  ModelMeasuresDto,
   ModelProfileDto,
   ModelRowDto,
-  PatternDto,
   RolePickDto,
   RolePicksDto,
   mintId,
   type AccountId,
   type StepRole,
 } from '@10db/contracts';
-import type { z } from 'zod';
 
 const AT = '2026-10-01T10:00:00.000Z';
 
@@ -126,20 +124,15 @@ export function modelProfileDto(over: Partial<ModelProfileDto> & Pick<ModelProfi
   });
 }
 
-export function patternDto(
-  over: Partial<Omit<PatternDto, 'match'>> & {
-    name: string;
-    match?: z.input<typeof PatternMatch>;
-  },
-): PatternDto {
-  return PatternDto.parse({
-    id: mintId('Pattern'),
-    projectId: null,
-    match: {},
-    setting: { kind: 'automatic' },
-    position: 0,
+/** What the daemon answers for a model with nothing stored; a test names what it is about. */
+export function modelMeasuresDto(over: Partial<ModelMeasuresDto> = {}): ModelMeasuresDto {
+  return ModelMeasuresDto.parse({
+    openRouterIds: [],
+    accountProvider: null,
+    evals: [],
+    speeds: [],
+    evalsMissing: 'Not read from OpenRouter yet.',
+    speedsMissing: 'Not read from OpenRouter yet.',
     ...over,
   });
 }
-
-export const noModelSettings = (): ModelSettingsDto => ({ roles: [], patterns: [] });

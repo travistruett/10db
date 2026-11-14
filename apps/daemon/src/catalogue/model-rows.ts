@@ -11,8 +11,10 @@ import {
   type ModelRowDto,
   type Provider,
 } from '@10db/contracts';
+import type { OpenRouterMeasure } from '@10db/db';
 import { costOnAccount, offeredProfiles } from '../routing';
 import { joinModel, RUNTIME_MAKER, runnability } from './join';
+import { effortFacts, modelSpeed, speedProviderFor } from './model-facts';
 import type { Catalogue, CatalogueModel } from './source';
 
 /** What the list needs to know of an account: which it is, and whether it still counts. */
@@ -29,6 +31,13 @@ export interface ModelRowsInput {
    * model keeps every effort at the maker's cost. Without one, costs are the maker's.
    */
   readonly account?: ModelRowAccount;
+  /**
+   * What OpenRouter measures, by catalogue model id: its relayed Artificial Analysis scores, which show on a
+   * model's Max effort when AA has none, and each provider's speed. Without it every figure is AA's.
+   */
+  readonly openRouter?: ReadonlyMap<string, readonly OpenRouterMeasure[]>;
+  /** The time a speed row's age is judged against. */
+  readonly now: Date;
 }
 
 const EFFORT_ORDER: readonly Effort[] = Object.values(Effort);
@@ -41,9 +50,27 @@ const effortLevel = (effort: Effort): number => EFFORT_ORDER.indexOf(effort);
 function listEfforts(
   profiles: readonly ModelProfileDto[],
   accountModels: readonly AccountModelDto[] | undefined,
+  measured: {
+    readonly openRouter: readonly OpenRouterMeasure[];
+    readonly provider: string | null;
+    readonly now: Date;
+  },
 ): ModelEffortDto[] {
-  const withCost = profiles.map((p) => ({ p, cost: costOnAccount(p, accountModels) }));
-  withCost.sort((a, b) => {
+  const withFacts = profiles.map((p) => {
+    const cost = costOnAccount(p, accountModels);
+    return {
+      p,
+      cost,
+      facts: effortFacts({
+        aa: p,
+        isMax: p.effort === Effort.Max,
+        costPerTaskUsd: cost,
+        ...measured,
+      }),
+    };
+  });
+  // Ranked on Artificial Analysis's own score, so numbers arriving from OpenRouter never move the headline.
+  withFacts.sort((a, b) => {
     const x = a.p.scores.intelligence;
     const y = b.p.scores.intelligence;
     if (x === null || y === null) {
@@ -57,12 +84,10 @@ function listEfforts(
       effortLevel(b.p.effort) - effortLevel(a.p.effort)
     );
   });
-  return withCost.map(({ p, cost }) => ({
+  return withFacts.map(({ p, facts }) => ({
     profileId: p.id,
     effort: p.effort,
-    intelligence: p.scores.intelligence,
-    costPerTaskUsd: cost,
-    outputTokensPerSecond: p.outputTokensPerSecond,
+    ...facts,
     stepsRun: p.stepsRun,
     firstPassSteps: p.firstPassSteps,
   }));
@@ -160,15 +185,31 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       (accountOffers.length === 0
         ? profiles.some((p) => p.provider === accountProvider)
         : accountOffers.some((o) => o.model === model && !o.unusable));
+    const measured = {
+      openRouter: input.openRouter?.get(model) ?? [],
+      provider: account === undefined ? null : speedProviderFor(account.kind),
+      now: input.now,
+    };
     const efforts = listEfforts(
       offeredToAccount && accountProvider !== undefined
         ? offeredProfiles(profiles, accountOffers, accountProvider)
         : profiles,
       // A model the account does not offer, or offers unusably, keeps the maker's price.
       offeredToAccount ? accountOffers : undefined,
+      measured,
     );
     const first = efforts[0];
+    // Only the Max effort can carry OpenRouter's Coding and Agentic, so the row reads them there.
+    const max = efforts.find((e) => e.effort === Effort.Max);
 
+    // Speed is the model's: OpenRouter's, else Artificial Analysis's from the first effort or any profile.
+    const speed = modelSpeed({
+      ...measured,
+      aaSpeed:
+        first?.outputTokensPerSecond ??
+        profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
+        null,
+    });
     rows.push({
       model,
       name: entry?.name ?? model,
@@ -182,10 +223,21 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       outputPrice: described?.outputPrice ?? null,
       intelligence: first?.intelligence ?? null,
       costPerTaskUsd: first?.costPerTaskUsd ?? null,
-      outputTokensPerSecond:
-        first?.outputTokensPerSecond ??
-        profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
-        null,
+      outputTokensPerSecond: speed.tokensPerSecond,
+      coding: first?.coding ?? max?.coding ?? null,
+      agentic: first?.agentic ?? max?.agentic ?? null,
+      sources: {
+        intelligence: first?.sources.intelligence ?? null,
+        coding:
+          first?.coding === null ? (max?.sources.coding ?? null) : (first?.sources.coding ?? null),
+        agentic:
+          first?.agentic === null
+            ? (max?.sources.agentic ?? null)
+            : (first?.sources.agentic ?? null),
+        costPerTask: first?.sources.costPerTask ?? null,
+        speed: speed.source,
+      },
+      speedProvider: speed.provider,
       efforts,
       stepsRun: profiles.reduce((sum, p) => sum + p.stepsRun, 0),
       firstSeenAt: firstSeen(profiles),

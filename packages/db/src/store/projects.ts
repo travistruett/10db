@@ -29,7 +29,6 @@ import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseOpenRouterForAgents } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
-import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
 
 /** The account a new project binds to: the one it names, else the default; never an archived one. */
@@ -65,7 +64,6 @@ function checkFallback(
 
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
-  if (config.flowId) getFlow(ctx.tx, config.flowId);
   const existing = ctx.tx
     .select({ name: schema.projects.name })
     .from(schema.projects)
@@ -99,14 +97,21 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   return row;
 }
 
+/** The row without `flow_id`, a column of the flows the playbook replaced that only the legacy store reads. */
+function projectDto(row: typeof schema.projects.$inferSelect): ProjectDto {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the legacy column is dropped, not used
+  const { flowId, ...dto } = row;
+  return dto;
+}
+
 export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
   const row = db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
   if (!row) throw new NotFoundError('project', id);
-  return row;
+  return projectDto(row);
 }
 
 export function listProjects(db: DbReader): ProjectDto[] {
-  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
+  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all().map(projectDto);
 }
 
 /**
@@ -160,8 +165,6 @@ function checkClaimedNames(
 
 export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPatch): ProjectDto {
   const changes = ProjectPatch.parse(patch);
-  // A stale flow id answers 404, not a foreign-key failure.
-  if (changes.flowId) getFlow(ctx.tx, changes.flowId);
   const current = getProject(ctx.tx, id);
   const nudgePct = changes.nudgePct ?? current.nudgePct;
   const handoffPct = changes.handoffPct ?? current.handoffPct;

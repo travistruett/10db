@@ -2,14 +2,18 @@ import { z } from 'zod';
 import {
   InvalidError,
   ProposalKind,
-  RiskTag,
+  kindsOfTask,
+  withKindsNamed,
+  type KindDto,
   type ProposalId,
   type TaskDto,
+  type TaskKind,
 } from '@10db/contracts';
 import {
   areasForProposal,
   getProject,
   getProposal,
+  listKinds,
   insertTaskFromProposal,
   proposalSourceTask,
   resolveProposal,
@@ -17,16 +21,19 @@ import {
 } from '@10db/db';
 import { proposePlacement } from '../placement';
 
+/** The kinds a proposal can ask a card for: those that ask for one, by key. */
+type KnownKind = Pick<KindDto, 'key' | 'toInbox'>;
+
 /**
- * The words of a proposal that name a risk when the lane left the tag off. Whole words only, so
- * "author" is not "auth"; a miss costs a card nobody needed, and a hit on a harmless word does too, but
- * a risk filed without a card costs more.
+ * The words of a proposal that name a risk when the lane left the kind off, by the key of the kind they
+ * stand for. Whole words only, so "author" is not "auth"; a miss costs a card nobody needed, and a hit on a
+ * harmless word does too, but a risk filed without a card costs more. A kind the builder made has no words.
  */
-const RISK_WORDS: Readonly<Record<RiskTag, RegExp>> = {
-  [RiskTag.Security]: /\b(security|vulnerab\w*|credentials?|secrets?)\b/i,
-  [RiskTag.Auth]: /\b(auth|authn|authz|authenticat\w*|authoriz\w*|authoris\w*|oauth|passwords?)\b/i,
-  [RiskTag.Migration]: /\bmigrat\w*\b/i,
-  [RiskTag.Dependency]: /\b(dependenc\w*|lockfile|package\.json|pnpm-lock\S*)\b/i,
+const RISK_WORDS: Readonly<Record<string, RegExp>> = {
+  security: /\b(security|vulnerab\w*|credentials?|secrets?)\b/i,
+  auth: /\b(auth|authn|authz|authenticat\w*|authoriz\w*|authoris\w*|oauth|passwords?)\b/i,
+  migration: /\bmigrat\w*\b/i,
+  dependency: /\b(dependenc\w*|lockfile|package\.json|pnpm-lock\S*)\b/i,
 };
 
 /**
@@ -34,7 +41,11 @@ const RISK_WORDS: Readonly<Record<RiskTag, RegExp>> = {
  * caller's write. The task's description opens with a line, shown in the task drawer, saying 10db filed
  * it and which task's lane proposed it.
  */
-export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId): TaskDto {
+export function fileProposalByItself(
+  ctx: WriteContext,
+  proposalId: ProposalId,
+  kinds: readonly TaskKind[] = [],
+): TaskDto {
   const proposal = getProposal(ctx.tx, proposalId);
   const lane = proposalSourceTask(ctx.tx, proposalId);
   const fields = taskFieldsFromProposal(proposal);
@@ -48,18 +59,19 @@ export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId):
       proposalId,
       projectId: proposal.projectId,
       title: fields.title,
-      description: `Filed by 10db without an Inbox card, ${origin}. It is small and carries no risk tag.\n\n${fields.description}`,
+      description: `Filed by 10db without an Inbox card, ${origin}. It is small and none of its kinds needs a card.\n\n${fields.description}`,
       parkInIcebox: true,
+      kinds,
     },
     // The task is stored with the areas of the lane that raised it, so the rule sees those.
     proposePlacement(project, {
       areas: areasForProposal(ctx.tx, proposalId, project),
-      riskTags: [],
+      kinds: kindsOfTask(kinds, listKinds(ctx.tx)),
     }),
   );
   resolveProposal(ctx, proposalId, {
     status: 'accepted',
-    rationale: 'Filed by 10db: small and no risk tag',
+    rationale: 'Filed by 10db: small and no kind that needs a card',
   });
   return task;
 }
@@ -81,43 +93,53 @@ export function proposalCardBody(body: string, reason: string): string {
   return `${body}\n\n${raisedAsCardLine(reason)}`;
 }
 
-const RiskTagSchema = z.enum(RiskTag);
+const KeyList = z.array(z.string().min(1));
 
 /**
- * The risk tags a lane declared, kept on the proposal's card so accepting it files a task that
- * carries them. Anything in the card's detail that is not a risk tag is dropped.
+ * The kinds a lane declared, kept on the proposal's card so accepting it files a task that has them. The
+ * card holds their keys; a card made before kinds holds the risk words the lane declared, which are the
+ * keys of the kinds seeded in their place. A key no kind has is dropped, since a task can't name it.
  */
-export function declaredRiskTags(detail: Readonly<Record<string, unknown>> | null): RiskTag[] {
-  const declared: unknown = detail?.['riskTags'];
-  if (!Array.isArray(declared)) return [];
-  const known = new Set<RiskTag>();
-  for (const tag of declared as unknown[]) {
-    const parsed = RiskTagSchema.safeParse(tag);
-    if (parsed.success) known.add(parsed.data);
-  }
-  return [...known];
+export function declaredKinds(
+  detail: Readonly<Record<string, unknown>> | null,
+  known: readonly { readonly key: string }[],
+): TaskKind[] {
+  const keys = [detail?.['kinds'], detail?.['riskTags']].flatMap((held) => {
+    const parsed = KeyList.safeParse(held);
+    return parsed.success ? parsed.data : [];
+  });
+  return withKindsNamed([], keys, known, 'agent');
+}
+
+/** The declared keys that name a kind asking for a card, each once, in the order declared. */
+function askingForCard(declared: readonly string[] | undefined, known: readonly KnownKind[]) {
+  const asking = new Set(known.filter((k) => k.toInbox).map((k) => k.key));
+  return [...new Set(declared ?? [])].filter((key) => asking.has(key));
 }
 
 /**
  * Decides whether a lane's proposal is filed to the Icebox without a card. Only a new-task proposal
  * can be, and only when the project's limit is above zero, it is no longer than the limit (title and
- * body in characters), it declares no risk tag, its text names none, and it does not ask to join a
- * running batch. Anything else raises the card a person answers. When the proposal declares risk
- * tags, the reason names all of them, then any other rule that also raised the card.
+ * body in characters), it declares no kind that asks for a card, its text names none, and it does not ask to join a
+ * running batch. Anything else raises the card a person answers. When the proposal declares kinds that
+ * ask for a card, the reason names all of them, then any other rule that also raised the card.
  */
 export function proposalFiling(proposal: {
   readonly kind: ProposalKind;
   readonly title: string;
   readonly body: string;
-  readonly riskTags?: readonly RiskTag[] | undefined;
+  /** The keys of the kinds the lane declared. */
+  readonly kinds?: readonly string[] | undefined;
+  /** The builder's kinds: which of them ask for a card decides this. */
+  readonly known: readonly KnownKind[];
   readonly joinsRunningBatch?: boolean | undefined;
   readonly limit: number;
   /** Set when the step the lane is in has already filed as many tasks as a step may. */
   readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
-  const carries = carriesRiskTags(proposal.riskTags);
+  const carries = carriesKinds(proposal.kinds, proposal.known);
   const structural = structuralReason(proposal);
-  // A risk the lane declared is stated once, in the clause naming the tags; this one names only the
+  // A risk the lane declared is stated once, in the clause naming the kinds; this one names only the
   // risks its text mentions that it did not declare.
   const named = namesRisks(undeclaredRisksNamed(proposal));
   // Over the limit only counts when nothing else already sends the proposal to a person.
@@ -127,7 +149,7 @@ export function proposalFiling(proposal: {
     proposal.title.length + proposal.body.length > proposal.limit
       ? 'it is over the limit for filing by itself'
       : null;
-  // A declared tag is what the builder most needs to see, so the card names every one of them first,
+  // A declared kind is what the builder most needs to see, so the card names every one of them first,
   // whichever other rule also raised it.
   const clauses = [carries, structural, named, size].filter((c): c is string => c !== null);
   // The step cap is the last rule: it only names a proposal that would otherwise have been filed, so
@@ -140,11 +162,14 @@ export function proposalFiling(proposal: {
 const STEP_CAP_REASON =
   'this step has already filed as many tasks as a step may, so a person decides';
 
-/** The clause naming every risk tag a proposal declared; null when it declared none. */
-export function carriesRiskTags(riskTags: readonly RiskTag[] | undefined): string | null {
-  const declared = [...new Set(riskTags ?? [])];
-  if (declared.length === 0) return null;
-  return `it carries the ${listWords(declared)} risk tag${declared.length === 1 ? '' : 's'}`;
+/** The clause naming every declared kind that asks for a card; null when none does. */
+export function carriesKinds(
+  declared: readonly string[] | undefined,
+  known: readonly KnownKind[],
+): string | null {
+  const asking = askingForCard(declared, known);
+  if (asking.length === 0) return null;
+  return `it carries the ${listWords(asking)} kind${asking.length === 1 ? '' : 's'}`;
 }
 
 /** The first kind, limit or batch rule that keeps a proposal from being filed; null when none does. */
@@ -159,19 +184,24 @@ function structuralReason(proposal: {
   return null;
 }
 
-/** The risks the proposal's text names that its lane did not declare, once each. */
+/** The risks the proposal's text names, for kinds that ask for a card, that its lane did not declare, once each. */
 function undeclaredRisksNamed(proposal: {
   readonly title: string;
   readonly body: string;
-  readonly riskTags?: readonly RiskTag[] | undefined;
-}): RiskTag[] {
-  const declared = new Set<RiskTag>(proposal.riskTags);
-  const text = `${proposal.title}\n${proposal.body}`;
-  return Object.values(RiskTag).filter((tag) => !declared.has(tag) && RISK_WORDS[tag].test(text));
+  readonly kinds?: readonly string[] | undefined;
+  readonly known: readonly KnownKind[];
+}): string[] {
+  const declared = new Set(proposal.kinds);
+  const asking = new Set(proposal.known.filter((k) => k.toInbox).map((k) => k.key));
+  const text = `${proposal.title}
+${proposal.body}`;
+  return Object.entries(RISK_WORDS)
+    .filter(([key, words]) => asking.has(key) && !declared.has(key) && words.test(text))
+    .map(([key]) => key);
 }
 
 /** The clause naming risks the text mentions; null when there are none. */
-function namesRisks(risks: readonly RiskTag[]): string | null {
+function namesRisks(risks: readonly string[]): string | null {
   if (risks.length === 0) return null;
   return `it names the ${listWords(risks)} risk${risks.length === 1 ? '' : 's'}`;
 }

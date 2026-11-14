@@ -2,17 +2,28 @@ import {
   AccountKind,
   ConflictError,
   InvalidError,
+  JudgeDecision,
+  UpstreamError,
   type AccountId,
+  type DecisionModelListDto,
+  type JudgeConfig,
+  type JudgeConfigPatch,
   type JudgeStatusDto,
 } from '@10db/contracts';
 import {
   findAccountRow,
   getAccountRow,
   getJudgeConfig,
+  judgeCallModelStats,
+  judgeDecisionStats,
   listJudgeCalls,
+  listOpenRouterMeasures,
+  pageJudgeCalls,
   patchJudgeConfig,
 } from '@10db/db';
 import type { ApiServices } from '../api';
+import { openRouterLatencyMs } from '../catalogue';
+import type { Clock } from '../clock';
 import {
   KeychainError,
   readAccountSecretAsync,
@@ -20,13 +31,35 @@ import {
   type Keychain,
 } from '../environment';
 import type { StateStore } from '../events';
-import type { JudgeService } from '../judge';
+import {
+  decisionModelNumbers,
+  JUDGE_LOG_RETENTION_MS,
+  typicalDecisionTokens,
+  type DecisionModelList,
+  type JudgeService,
+} from '../judge';
 
 /** The judge's side of the HTTP API: its config, the account it runs on, the account test and the call log. */
 export type JudgeApiServices = Pick<
   ApiServices,
-  'judgeStatus' | 'patchJudge' | 'testAccount' | 'listJudgeCalls'
+  | 'judgeStatus'
+  | 'patchJudge'
+  | 'testAccount'
+  | 'listJudgeCalls'
+  | 'pageJudgeCalls'
+  | 'judgeDecisionStats'
+  | 'listDecisionModels'
 >;
+
+/** The models a patch sets that differ from the ones saved, each once. */
+function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
+  const models = new Set<string>();
+  for (const decision of Object.values(JudgeDecision)) {
+    const model = patch.decisions?.[decision]?.model;
+    if (model !== undefined && model !== config.decisions[decision].model) models.add(model);
+  }
+  return [...models];
+}
 
 /** A Keychain that refuses is a conflict the builder can act on, not a server fault. */
 async function keychainConflict<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -61,8 +94,14 @@ export function createJudgeServices(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
   readonly judge: Pick<JudgeService, 'test'>;
+  /** OpenRouter's decision models, for the picker. */
+  readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
   readonly off: boolean;
+  /** Called after a patch changed the account decisions run on, so a sync can read with the new key. */
+  readonly onAccountChanged?: () => void;
+  /** The time the 30-day window of the builder's own calls and the age of OpenRouter's latencies are judged by. */
+  readonly clock: Clock;
 }): JudgeApiServices {
   const status = async (): Promise<JudgeStatusDto> => {
     const config = getJudgeConfig(deps.state.db);
@@ -85,10 +124,59 @@ export function createJudgeServices(deps: {
       off: deps.off,
     };
   };
+  /** A new list with each model's cost and time added; the list held is never changed. */
+  const withNumbers = (list: DecisionModelListDto): DecisionModelListDto => {
+    const now = deps.clock.now();
+    const stats = judgeCallModelStats(
+      deps.state.db,
+      new Date(now.getTime() - JUDGE_LOG_RETENTION_MS).toISOString(),
+    );
+    const priceOf = (model: string): number | null =>
+      list.models.find((m) => m.id === model)?.inputUsdPerMillion ?? null;
+    const typical = typicalDecisionTokens(stats, priceOf);
+    const byModel = new Map(stats.map((s) => [s.model, s]));
+    const measures = listOpenRouterMeasures(deps.state.db);
+    return {
+      ...list,
+      models: list.models.map((model) => ({
+        ...model,
+        ...decisionModelNumbers(
+          model,
+          byModel.get(model.id),
+          typical.tokens,
+          openRouterLatencyMs(
+            measures.filter((m) => m.id === model.id),
+            now,
+          ),
+          typical.assumed,
+        ),
+      })),
+    };
+  };
   return {
     judgeStatus: status,
     async patchJudge(patch) {
+      // A model is saved only once it has answered a test decision with the key decisions will run on, so a setting
+      // is never left naming a model 10db can't use.
+      const config = getJudgeConfig(deps.state.db);
+      const accountId = patch.accountId === undefined ? config.accountId : patch.accountId;
+      const models = newModels(config, patch);
+      if (deps.off && models.length > 0)
+        throw new ConflictError(
+          'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
+        );
+      for (const model of models) {
+        const result =
+          accountId === null
+            ? { ok: false as const, error: 'No OpenRouter key is set' }
+            : await keychainConflict(() => deps.judge.test(accountId, model));
+        if (!result.ok)
+          throw new InvalidError(
+            `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
+          );
+      }
       deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
+      if (accountId !== config.accountId) deps.onAccountChanged?.();
       return status();
     },
     testAccount(id) {
@@ -99,5 +187,23 @@ export function createJudgeServices(deps: {
       return keychainConflict(() => deps.judge.test(id));
     },
     listJudgeCalls: (limit) => listJudgeCalls(deps.state.db, limit),
+    pageJudgeCalls: (query) => pageJudgeCalls(deps.state.db, query),
+    judgeDecisionStats() {
+      const since = new Date(deps.clock.now().getTime() - JUDGE_LOG_RETENTION_MS).toISOString();
+      return { since, decisions: judgeDecisionStats(deps.state.db, since) };
+    },
+    async listDecisionModels() {
+      if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
+      let list: DecisionModelListDto;
+      try {
+        list = await deps.models.list();
+      } catch (error) {
+        throw new UpstreamError(
+          error instanceof Error ? error.message : "OpenRouter's model list could not be read",
+        );
+      }
+      // Outside the try: a fault of our own database is not OpenRouter's.
+      return withNumbers(list);
+    },
   };
 }

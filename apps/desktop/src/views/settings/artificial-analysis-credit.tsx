@@ -5,7 +5,12 @@ export function ArtificialAnalysisCredit() {
   return (
     <>
       Scores and speed:{' '}
-      <ExternalLink size="xs" url="https://artificialanalysis.ai/" label="Artificial Analysis" />
+      <ExternalLink
+        size="xs"
+        inText
+        url="https://artificialanalysis.ai/"
+        label="Artificial Analysis"
+      />
     </>
   );
 }

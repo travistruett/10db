@@ -175,7 +175,7 @@ describe('task placement', () => {
   describe('a placement proposed again with a patch', () => {
     const proposed: Placement = { workspaceMode: 'worktree', reason: 'touches migrations' };
     const edit = (id: TaskId, placement: Placement = proposed) =>
-      store.write((ctx) => patchTask(ctx, id, { riskTags: ['migration'] }, placement)).value;
+      store.write((ctx) => patchTask(ctx, id, { headline: 'Edited' }, placement)).value;
 
     it('moves an unstarted shared task to a separate copy with the reason', () => {
       const task = addTask(project().id);
@@ -238,11 +238,11 @@ describe('task placement', () => {
         return task;
       };
 
-      it('replaces it with the reason for the new tags', () => {
+      it('replaces it with the reason for the new kinds', () => {
         const task = moved();
         const deps: Placement = { workspaceMode: 'worktree', reason: 'touches dependencies' };
         const patched = store.write((ctx) =>
-          patchTask(ctx, task.id, { riskTags: ['dependency'] }, deps),
+          patchTask(ctx, task.id, { headline: 'Edited again' }, deps),
         ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
@@ -253,7 +253,9 @@ describe('task placement', () => {
       it('returns the task to the default placement with no reason once the rule no longer matches', () => {
         const task = moved();
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({ workspaceMode: 'shared', placementReason: null });
         expect(getTask(store.db, task.id)).toMatchObject({
           workspaceMode: 'shared',
@@ -265,7 +267,9 @@ describe('task placement', () => {
         const task = moved();
         runIn(task.id, 'RUNNING');
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
           placementReason: 'touches migrations',
@@ -276,7 +280,9 @@ describe('task placement', () => {
         const task = moved();
         place(task.id, 'worktree');
         const none: Placement = { workspaceMode: 'shared', reason: null };
-        const patched = store.write((ctx) => patchTask(ctx, task.id, { riskTags: [] }, none)).value;
+        const patched = store.write((ctx) =>
+          patchTask(ctx, task.id, { headline: 'Edited once more' }, none),
+        ).value;
         expect(patched).toMatchObject({
           workspaceMode: 'worktree',
           placementReason: 'chosen by the builder',

@@ -1,8 +1,8 @@
 {
-  "id": "8c6ffc96-06d0-4a4d-b7b5-e250503a6261",
-  "prevId": "dbf1b340-03a2-4c06-aca2-9ef6c770fd66",
   "version": "6",
   "dialect": "sqlite",
+  "id": "fd856130-c7e4-4e33-bed9-1d6db1a0869a",
+  "prevId": "4fd4bc4e-b207-45d6-a495-9a75e96107bd",
   "tables": {
     "aa_models": {
       "name": "aa_models",
@@ -115,15 +115,15 @@
         "account_models_account_id_accounts_id_fk": {
           "name": "account_models_account_id_accounts_id_fk",
           "tableFrom": "account_models",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -537,65 +537,65 @@
             "ci_fix_of",
             "ci_fix_head"
           ],
-          "where": "ci_fix_of IS NOT NULL AND ci_fix_head IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "ci_fix_of IS NOT NULL AND ci_fix_head IS NOT NULL"
         },
         "batches_one_unfinished": {
           "name": "batches_one_unfinished",
           "columns": [
             "project_id"
           ],
-          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL"
         },
         "batches_pass_idx": {
           "name": "batches_pass_idx",
           "columns": [
             "pass_id"
           ],
-          "where": "pass_id IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "pass_id IS NOT NULL"
         }
       },
       "foreignKeys": {
         "batches_project_id_projects_id_fk": {
           "name": "batches_project_id_projects_id_fk",
           "tableFrom": "batches",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "batches_ci_fix_of_batches_id_fk": {
           "name": "batches_ci_fix_of_batches_id_fk",
           "tableFrom": "batches",
+          "tableTo": "batches",
           "columnsFrom": [
             "ci_fix_of"
           ],
-          "tableTo": "batches",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "batches_pass_id_passes_id_fk": {
           "name": "batches_pass_id_passes_id_fk",
           "tableFrom": "batches",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -662,177 +662,15 @@
         "board_columns_project_id_projects_id_fk": {
           "name": "board_columns_project_id_projects_id_fk",
           "tableFrom": "board_columns",
-          "columnsFrom": [
-            "project_id"
-          ],
           "tableTo": "projects",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chats": {
-      "name": "chats",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "title_source": {
-          "name": "title_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "pass_id": {
-          "name": "pass_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tab_position": {
-          "name": "tab_position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_activity_at": {
-          "name": "last_activity_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chats_project_idx": {
-          "name": "chats_project_idx",
-          "columns": [
-            "project_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chats_project_id_projects_id_fk": {
-          "name": "chats_project_id_projects_id_fk",
-          "tableFrom": "chats",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "chats_conversation_id_conversations_id_fk": {
-          "name": "chats_conversation_id_conversations_id_fk",
-          "tableFrom": "chats",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "tableTo": "conversations",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "chats_task_id_tasks_id_fk": {
-          "name": "chats_task_id_tasks_id_fk",
-          "tableFrom": "chats",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "tableTo": "tasks",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "chats_pass_id_passes_id_fk": {
-          "name": "chats_pass_id_passes_id_fk",
-          "tableFrom": "chats",
-          "columnsFrom": [
-            "pass_id"
-          ],
-          "tableTo": "passes",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -929,8 +767,8 @@
             "kind",
             "name"
           ],
-          "where": "released_at IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "released_at IS NULL"
         },
         "claims_workstream_idx": {
           "name": "claims_workstream_idx",
@@ -944,451 +782,28 @@
         "claims_project_id_projects_id_fk": {
           "name": "claims_project_id_projects_id_fk",
           "tableFrom": "claims",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "claims_workstream_id_workstreams_id_fk": {
           "name": "claims_workstream_id_workstreams_id_fk",
           "tableFrom": "claims",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "conversation_files": {
-      "name": "conversation_files",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "media_type": {
-          "name": "media_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "size": {
-          "name": "size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stored_path": {
-          "name": "stored_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "inline_sent": {
-          "name": "inline_sent",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "told_at": {
-          "name": "told_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "unreadable_told_at": {
-          "name": "unreadable_told_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "conversation_files_conversation_idx": {
-          "name": "conversation_files_conversation_idx",
-          "columns": [
-            "conversation_id",
-            "created_at",
-            "id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "conversation_files_conversation_id_conversations_id_fk": {
-          "name": "conversation_files_conversation_id_conversations_id_fk",
-          "tableFrom": "conversation_files",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "tableTo": "conversations",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "conversation_files_item_id_conversation_items_id_fk": {
-          "name": "conversation_files_item_id_conversation_items_id_fk",
-          "tableFrom": "conversation_files",
-          "columnsFrom": [
-            "item_id"
-          ],
-          "tableTo": "conversation_items",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "conversation_items": {
-      "name": "conversation_items",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "seq": {
-          "name": "seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "author": {
-          "name": "author",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "partial": {
-          "name": "partial",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "pushed_at": {
-          "name": "pushed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "push_uuids": {
-          "name": "push_uuids",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "handed_back_at": {
-          "name": "handed_back_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "conversation_items_seq_unique": {
-          "name": "conversation_items_seq_unique",
-          "columns": [
-            "conversation_id",
-            "seq"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "conversation_items_conversation_id_conversations_id_fk": {
-          "name": "conversation_items_conversation_id_conversations_id_fk",
-          "tableFrom": "conversation_items",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "tableTo": "conversations",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "conversation_items_turn_id_pass_turns_id_fk": {
-          "name": "conversation_items_turn_id_pass_turns_id_fk",
-          "tableFrom": "conversation_items",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "tableTo": "pass_turns",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "conversations": {
-      "name": "conversations",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_kind": {
-          "name": "owner_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "profile": {
-          "name": "profile",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "provider_session_id": {
-          "name": "provider_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "context_pct": {
-          "name": "context_pct",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "next_seq": {
-          "name": "next_seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "conversations_owner_unique": {
-          "name": "conversations_owner_unique",
-          "columns": [
-            "owner_kind",
-            "owner_id"
-          ],
-          "isUnique": true
-        },
-        "conversations_project_idx": {
-          "name": "conversations_project_idx",
-          "columns": [
-            "project_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "conversations_project_id_projects_id_fk": {
-          "name": "conversations_project_id_projects_id_fk",
-          "tableFrom": "conversations",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "tableTo": "projects",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "conversations_account_id_accounts_id_fk": {
-          "name": "conversations_account_id_accounts_id_fk",
-          "tableFrom": "conversations",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "tableTo": "accounts",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1524,41 +939,41 @@
         "decisions_project_id_projects_id_fk": {
           "name": "decisions_project_id_projects_id_fk",
           "tableFrom": "decisions",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "decisions_source_id_sources_id_fk": {
           "name": "decisions_source_id_sources_id_fk",
           "tableFrom": "decisions",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "decisions_withdrawn_source_id_sources_id_fk": {
           "name": "decisions_withdrawn_source_id_sources_id_fk",
           "tableFrom": "decisions",
+          "tableTo": "sources",
           "columnsFrom": [
             "withdrawn_source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1644,28 +1059,28 @@
         "deviations_project_id_projects_id_fk": {
           "name": "deviations_project_id_projects_id_fk",
           "tableFrom": "deviations",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "deviations_source_id_sources_id_fk": {
           "name": "deviations_source_id_sources_id_fk",
           "tableFrom": "deviations",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1806,15 +1221,15 @@
         "evidence_workstream_id_workstreams_id_fk": {
           "name": "evidence_workstream_id_workstreams_id_fk",
           "tableFrom": "evidence",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2000,41 +1415,41 @@
         "goal_criteria_goal_id_goals_id_fk": {
           "name": "goal_criteria_goal_id_goals_id_fk",
           "tableFrom": "goal_criteria",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "goal_criteria_task_id_tasks_id_fk": {
           "name": "goal_criteria_task_id_tasks_id_fk",
           "tableFrom": "goal_criteria",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "goal_criteria_person_id_people_id_fk": {
           "name": "goal_criteria_person_id_people_id_fk",
           "tableFrom": "goal_criteria",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2085,28 +1500,28 @@
         "goal_views_goal_id_goals_id_fk": {
           "name": "goal_views_goal_id_goals_id_fk",
           "tableFrom": "goal_views",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "goal_views_person_id_people_id_fk": {
           "name": "goal_views_person_id_people_id_fk",
           "tableFrom": "goal_views",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2217,28 +1632,28 @@
         "goals_project_id_projects_id_fk": {
           "name": "goals_project_id_projects_id_fk",
           "tableFrom": "goals",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "goals_owner_id_people_id_fk": {
           "name": "goals_owner_id_people_id_fk",
           "tableFrom": "goals",
+          "tableTo": "people",
           "columnsFrom": [
             "owner_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2310,28 +1725,28 @@
         "handoffs_workstream_id_workstreams_id_fk": {
           "name": "handoffs_workstream_id_workstreams_id_fk",
           "tableFrom": "handoffs",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "handoffs_session_id_sessions_id_fk": {
           "name": "handoffs_session_id_sessions_id_fk",
           "tableFrom": "handoffs",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2513,15 +1928,15 @@
         "inbox_items_project_id_projects_id_fk": {
           "name": "inbox_items_project_id_projects_id_fk",
           "tableFrom": "inbox_items",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2637,6 +2052,129 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "kinds": {
+      "name": "kinds",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "minimum_rigor": {
+          "name": "minimum_rigor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "always_reviewed": {
+          "name": "always_reviewed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "fails_at_limit": {
+          "name": "fails_at_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "own_copy": {
+          "name": "own_copy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "to_inbox": {
+          "name": "to_inbox",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "adds_steps": {
+          "name": "adds_steps",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "overrides": {
+          "name": "overrides",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "kinds_key_unique": {
+          "name": "kinds_key_unique",
+          "columns": [
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "landing_groups": {
       "name": "landing_groups",
       "columns": {
@@ -2696,28 +2234,28 @@
         "landing_groups_project_id_projects_id_fk": {
           "name": "landing_groups_project_id_projects_id_fk",
           "tableFrom": "landing_groups",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "landing_groups_shape_id_shapes_id_fk": {
           "name": "landing_groups_shape_id_shapes_id_fk",
           "tableFrom": "landing_groups",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2790,15 +2328,15 @@
         "mcp_server_approvals_project_id_projects_id_fk": {
           "name": "mcp_server_approvals_project_id_projects_id_fk",
           "tableFrom": "mcp_server_approvals",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3006,6 +2544,102 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "openrouter_measures": {
+      "name": "openrouter_measures",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intelligence": {
+          "name": "intelligence",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "coding": {
+          "name": "coding",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentic": {
+          "name": "agentic",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "accuracy": {
+          "name": "accuracy",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_per_task_usd": {
+          "name": "cost_per_task_usd",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tokens_per_second": {
+          "name": "tokens_per_second",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "latency_ms": {
+          "name": "latency_ms",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "measured_at": {
+          "name": "measured_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "openrouter_measures_id_kind_key_pk": {
+          "columns": [
+            "id",
+            "kind",
+            "key"
+          ],
+          "name": "openrouter_measures_id_kind_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "pass_dirt": {
       "name": "pass_dirt",
       "columns": {
@@ -3043,15 +2677,15 @@
         "pass_dirt_pass_id_passes_id_fk": {
           "name": "pass_dirt_pass_id_passes_id_fk",
           "tableFrom": "pass_dirt",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3103,15 +2737,15 @@
         "pass_hold_paths_claim_id_pass_holds_claim_id_fk": {
           "name": "pass_hold_paths_claim_id_pass_holds_claim_id_fk",
           "tableFrom": "pass_hold_paths",
+          "tableTo": "pass_holds",
           "columnsFrom": [
             "claim_id"
           ],
-          "tableTo": "pass_holds",
           "columnsTo": [
             "claim_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3229,54 +2863,54 @@
         "pass_holds_claim_id_claims_id_fk": {
           "name": "pass_holds_claim_id_claims_id_fk",
           "tableFrom": "pass_holds",
+          "tableTo": "claims",
           "columnsFrom": [
             "claim_id"
           ],
-          "tableTo": "claims",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_holds_pass_id_passes_id_fk": {
           "name": "pass_holds_pass_id_passes_id_fk",
           "tableFrom": "pass_holds",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_holds_task_id_tasks_id_fk": {
           "name": "pass_holds_task_id_tasks_id_fk",
           "tableFrom": "pass_holds",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_holds_workstream_id_workstreams_id_fk": {
           "name": "pass_holds_workstream_id_workstreams_id_fk",
           "tableFrom": "pass_holds",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3386,75 +3020,75 @@
             "pass_id",
             "task_id"
           ],
-          "where": "mended_at IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "mended_at IS NULL"
         }
       },
       "foreignKeys": {
         "pass_preview_marks_pass_id_passes_id_fk": {
           "name": "pass_preview_marks_pass_id_passes_id_fk",
           "tableFrom": "pass_preview_marks",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_preview_marks_task_id_tasks_id_fk": {
           "name": "pass_preview_marks_task_id_tasks_id_fk",
           "tableFrom": "pass_preview_marks",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_preview_marks_turn_id_pass_turns_id_fk": {
           "name": "pass_preview_marks_turn_id_pass_turns_id_fk",
           "tableFrom": "pass_preview_marks",
+          "tableTo": "pass_turns",
           "columnsFrom": [
             "turn_id"
           ],
-          "tableTo": "pass_turns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_preview_marks_card_id_inbox_items_id_fk": {
           "name": "pass_preview_marks_card_id_inbox_items_id_fk",
           "tableFrom": "pass_preview_marks",
+          "tableTo": "inbox_items",
           "columnsFrom": [
             "card_id"
           ],
-          "tableTo": "inbox_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_preview_marks_notice_id_task_messages_id_fk": {
           "name": "pass_preview_marks_notice_id_task_messages_id_fk",
           "tableFrom": "pass_preview_marks",
+          "tableTo": "task_messages",
           "columnsFrom": [
             "notice_id"
           ],
-          "tableTo": "task_messages",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3555,28 +3189,28 @@
         "pass_shared_changes_pass_id_passes_id_fk": {
           "name": "pass_shared_changes_pass_id_passes_id_fk",
           "tableFrom": "pass_shared_changes",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_shared_changes_task_id_tasks_id_fk": {
           "name": "pass_shared_changes_task_id_tasks_id_fk",
           "tableFrom": "pass_shared_changes",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3628,41 +3262,41 @@
         "pass_sign_offs_task_id_tasks_id_fk": {
           "name": "pass_sign_offs_task_id_tasks_id_fk",
           "tableFrom": "pass_sign_offs",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_sign_offs_pass_id_passes_id_fk": {
           "name": "pass_sign_offs_pass_id_passes_id_fk",
           "tableFrom": "pass_sign_offs",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_sign_offs_waits_for_pass_holds_claim_id_fk": {
           "name": "pass_sign_offs_waits_for_pass_holds_claim_id_fk",
           "tableFrom": "pass_sign_offs",
+          "tableTo": "pass_holds",
           "columnsFrom": [
             "waits_for"
           ],
-          "tableTo": "pass_holds",
           "columnsTo": [
             "claim_id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3751,28 +3385,28 @@
         "pass_take_outs_task_id_tasks_id_fk": {
           "name": "pass_take_outs_task_id_tasks_id_fk",
           "tableFrom": "pass_take_outs",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_take_outs_pass_id_passes_id_fk": {
           "name": "pass_take_outs_pass_id_passes_id_fk",
           "tableFrom": "pass_take_outs",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3946,62 +3580,62 @@
           "columns": [
             "task_id"
           ],
-          "where": "ended_at IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "ended_at IS NULL"
         }
       },
       "foreignKeys": {
         "pass_turns_task_id_tasks_id_fk": {
           "name": "pass_turns_task_id_tasks_id_fk",
           "tableFrom": "pass_turns",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_turns_workstream_id_workstreams_id_fk": {
           "name": "pass_turns_workstream_id_workstreams_id_fk",
           "tableFrom": "pass_turns",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_turns_session_id_sessions_id_fk": {
           "name": "pass_turns_session_id_sessions_id_fk",
           "tableFrom": "pass_turns",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "pass_turns_message_id_task_messages_id_fk": {
           "name": "pass_turns_message_id_task_messages_id_fk",
           "tableFrom": "pass_turns",
+          "tableTo": "task_messages",
           "columnsFrom": [
             "message_id"
           ],
-          "tableTo": "task_messages",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4189,49 +3823,49 @@
           "columns": [
             "project_id"
           ],
-          "where": "state IN ('OPEN', 'CLOSING', 'ABANDONING')",
-          "isUnique": true
+          "isUnique": true,
+          "where": "state IN ('OPEN', 'CLOSING', 'ABANDONING')"
         }
       },
       "foreignKeys": {
         "passes_project_id_projects_id_fk": {
           "name": "passes_project_id_projects_id_fk",
           "tableFrom": "passes",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "passes_batch_id_batches_id_fk": {
           "name": "passes_batch_id_batches_id_fk",
           "tableFrom": "passes",
+          "tableTo": "batches",
           "columnsFrom": [
             "batch_id"
           ],
-          "tableTo": "batches",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "passes_stacked_on_passes_id_fk": {
           "name": "passes_stacked_on_passes_id_fk",
           "tableFrom": "passes",
+          "tableTo": "passes",
           "columnsFrom": [
             "stacked_on"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4312,15 +3946,15 @@
         "patterns_project_id_projects_id_fk": {
           "name": "patterns_project_id_projects_id_fk",
           "tableFrom": "patterns",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4460,15 +4094,15 @@
         "permission_rules_project_id_projects_id_fk": {
           "name": "permission_rules_project_id_projects_id_fk",
           "tableFrom": "permission_rules",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4562,15 +4196,15 @@
         "person_contacts_person_id_people_id_fk": {
           "name": "person_contacts_person_id_people_id_fk",
           "tableFrom": "person_contacts",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4677,6 +4311,182 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "playbook_cells": {
+      "name": "playbook_cells",
+      "columns": {
+        "rigor": {
+          "name": "rigor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "persona_id": {
+          "name": "persona_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "effort": {
+          "name": "effort",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "playbook_cells_project_idx": {
+          "name": "playbook_cells_project_idx",
+          "columns": [
+            "rigor",
+            "role",
+            "project_id"
+          ],
+          "isUnique": true,
+          "where": "\"playbook_cells\".\"project_id\" is not null"
+        },
+        "playbook_cells_global_idx": {
+          "name": "playbook_cells_global_idx",
+          "columns": [
+            "rigor",
+            "role"
+          ],
+          "isUnique": true,
+          "where": "\"playbook_cells\".\"project_id\" is null"
+        }
+      },
+      "foreignKeys": {
+        "playbook_cells_project_id_projects_id_fk": {
+          "name": "playbook_cells_project_id_projects_id_fk",
+          "tableFrom": "playbook_cells",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "playbook_cells_persona_id_personas_id_fk": {
+          "name": "playbook_cells_persona_id_personas_id_fk",
+          "tableFrom": "playbook_cells",
+          "tableTo": "personas",
+          "columnsFrom": [
+            "persona_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "playbook_rows": {
+      "name": "playbook_rows",
+      "columns": {
+        "rigor": {
+          "name": "rigor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "steps": {
+          "name": "steps",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "playbook_rows_project_idx": {
+          "name": "playbook_rows_project_idx",
+          "columns": [
+            "rigor",
+            "project_id"
+          ],
+          "isUnique": true,
+          "where": "\"playbook_rows\".\"project_id\" is not null"
+        },
+        "playbook_rows_global_idx": {
+          "name": "playbook_rows_global_idx",
+          "columns": [
+            "rigor"
+          ],
+          "isUnique": true,
+          "where": "\"playbook_rows\".\"project_id\" is null"
+        }
+      },
+      "foreignKeys": {
+        "playbook_rows_project_id_projects_id_fk": {
+          "name": "playbook_rows_project_id_projects_id_fk",
+          "tableFrom": "playbook_rows",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -4890,67 +4700,67 @@
         "principles_project_id_projects_id_fk": {
           "name": "principles_project_id_projects_id_fk",
           "tableFrom": "principles",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "principles_source_id_sources_id_fk": {
           "name": "principles_source_id_sources_id_fk",
           "tableFrom": "principles",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "principles_confirmed_source_id_sources_id_fk": {
           "name": "principles_confirmed_source_id_sources_id_fk",
           "tableFrom": "principles",
+          "tableTo": "sources",
           "columnsFrom": [
             "confirmed_source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "principles_retired_source_id_sources_id_fk": {
           "name": "principles_retired_source_id_sources_id_fk",
           "tableFrom": "principles",
+          "tableTo": "sources",
           "columnsFrom": [
             "retired_source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "principles_withdrawn_source_id_sources_id_fk": {
           "name": "principles_withdrawn_source_id_sources_id_fk",
           "tableFrom": "principles",
+          "tableTo": "sources",
           "columnsFrom": [
             "withdrawn_source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5126,6 +4936,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "default_rigor": {
+          "name": "default_rigor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'standard'"
+        },
         "budget_ceiling": {
           "name": "budget_ceiling",
           "type": "real",
@@ -5268,54 +5086,54 @@
         "projects_account_id_accounts_id_fk": {
           "name": "projects_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_moved_from_account_id_accounts_id_fk": {
           "name": "projects_moved_from_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "moved_from_account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_fallback_account_id_accounts_id_fk": {
           "name": "projects_fallback_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "fallback_account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_flow_id_flows_id_fk": {
           "name": "projects_flow_id_flows_id_fk",
           "tableFrom": "projects",
+          "tableTo": "flows",
           "columnsFrom": [
             "flow_id"
           ],
-          "tableTo": "flows",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5408,41 +5226,41 @@
         "proposals_project_id_projects_id_fk": {
           "name": "proposals_project_id_projects_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_principle_id_principles_id_fk": {
           "name": "proposals_principle_id_principles_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "principles",
           "columnsFrom": [
             "principle_id"
           ],
-          "tableTo": "principles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_source_id_sources_id_fk": {
           "name": "proposals_source_id_sources_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5488,31 +5306,31 @@
             "role",
             "project_id"
           ],
-          "where": "\"role_settings\".\"project_id\" is not null",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"role_settings\".\"project_id\" is not null"
         },
         "role_settings_global_idx": {
           "name": "role_settings_global_idx",
           "columns": [
             "role"
           ],
-          "where": "\"role_settings\".\"project_id\" is null",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"role_settings\".\"project_id\" is null"
         }
       },
       "foreignKeys": {
         "role_settings_project_id_projects_id_fk": {
           "name": "role_settings_project_id_projects_id_fk",
           "tableFrom": "role_settings",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5606,54 +5424,54 @@
         "routing_rules_project_id_projects_id_fk": {
           "name": "routing_rules_project_id_projects_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "routing_rules_goal_id_goals_id_fk": {
           "name": "routing_rules_goal_id_goals_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "routing_rules_task_id_tasks_id_fk": {
           "name": "routing_rules_task_id_tasks_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "routing_rules_person_id_people_id_fk": {
           "name": "routing_rules_person_id_people_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5684,13 +5502,6 @@
         },
         "shape_id": {
           "name": "shape_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "conversation_id": {
-          "name": "conversation_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -5875,13 +5686,6 @@
           ],
           "isUnique": false
         },
-        "sessions_conversation_idx": {
-          "name": "sessions_conversation_idx",
-          "columns": [
-            "conversation_id"
-          ],
-          "isUnique": false
-        },
         "sessions_account_started_idx": {
           "name": "sessions_account_started_idx",
           "columns": [
@@ -5895,54 +5699,41 @@
         "sessions_workstream_id_workstreams_id_fk": {
           "name": "sessions_workstream_id_workstreams_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "sessions_shape_id_shapes_id_fk": {
           "name": "sessions_shape_id_shapes_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "sessions_conversation_id_conversations_id_fk": {
-          "name": "sessions_conversation_id_conversations_id_fk",
-          "tableFrom": "sessions",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "tableTo": "conversations",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "sessions_account_id_accounts_id_fk": {
           "name": "sessions_account_id_accounts_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6057,23 +5848,23 @@
             "attachment_id",
             "bundle_number"
           ],
-          "where": "\"shape_attachment_revisions\".\"bundle_number\" IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"shape_attachment_revisions\".\"bundle_number\" IS NOT NULL"
         }
       },
       "foreignKeys": {
         "shape_attachment_revisions_attachment_id_shape_attachments_id_fk": {
           "name": "shape_attachment_revisions_attachment_id_shape_attachments_id_fk",
           "tableFrom": "shape_attachment_revisions",
+          "tableTo": "shape_attachments",
           "columnsFrom": [
             "attachment_id"
           ],
-          "tableTo": "shape_attachments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6177,8 +5968,8 @@
             "key",
             "kind"
           ],
-          "where": "\"shape_attachments\".\"kind\" IN ('spec', 'eval')",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"shape_attachments\".\"kind\" IN ('spec', 'eval')"
         },
         "shape_attachments_doc_key_unique": {
           "name": "shape_attachments_doc_key_unique",
@@ -6186,49 +5977,49 @@
             "shape_id",
             "doc_key"
           ],
-          "where": "\"shape_attachments\".\"doc_key\" IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"shape_attachments\".\"doc_key\" IS NOT NULL"
         }
       },
       "foreignKeys": {
         "shape_attachments_shape_id_shapes_id_fk": {
           "name": "shape_attachments_shape_id_shapes_id_fk",
           "tableFrom": "shape_attachments",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_attachments_goal_id_goals_id_fk": {
           "name": "shape_attachments_goal_id_goals_id_fk",
           "tableFrom": "shape_attachments",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_attachments_task_id_tasks_id_fk": {
           "name": "shape_attachments_task_id_tasks_id_fk",
           "tableFrom": "shape_attachments",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6344,15 +6135,15 @@
         "shape_entries_shape_id_shapes_id_fk": {
           "name": "shape_entries_shape_id_shapes_id_fk",
           "tableFrom": "shape_entries",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6412,15 +6203,15 @@
         "shape_entry_versions_entry_id_shape_entries_id_fk": {
           "name": "shape_entry_versions_entry_id_shape_entries_id_fk",
           "tableFrom": "shape_entry_versions",
+          "tableTo": "shape_entries",
           "columnsFrom": [
             "entry_id"
           ],
-          "tableTo": "shape_entries",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6516,15 +6307,15 @@
         "shape_files_shape_id_shapes_id_fk": {
           "name": "shape_files_shape_id_shapes_id_fk",
           "tableFrom": "shape_files",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6697,36 +6488,36 @@
             "shape_id",
             "bundle_key"
           ],
-          "where": "\"shape_findings\".\"bundle_key\" IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"shape_findings\".\"bundle_key\" IS NOT NULL"
         }
       },
       "foreignKeys": {
         "shape_findings_shape_id_shapes_id_fk": {
           "name": "shape_findings_shape_id_shapes_id_fk",
           "tableFrom": "shape_findings",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_findings_revision_id_shape_attachment_revisions_id_fk": {
           "name": "shape_findings_revision_id_shape_attachment_revisions_id_fk",
           "tableFrom": "shape_findings",
+          "tableTo": "shape_attachment_revisions",
           "columnsFrom": [
             "revision_id"
           ],
-          "tableTo": "shape_attachment_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6835,93 +6626,93 @@
         "shape_links_shape_id_shapes_id_fk": {
           "name": "shape_links_shape_id_shapes_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_proposal_id_shape_proposals_id_fk": {
           "name": "shape_links_proposal_id_shape_proposals_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "shape_proposals",
           "columnsFrom": [
             "proposal_id"
           ],
-          "tableTo": "shape_proposals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_goal_id_goals_id_fk": {
           "name": "shape_links_goal_id_goals_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_task_id_tasks_id_fk": {
           "name": "shape_links_task_id_tasks_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_decision_id_decisions_id_fk": {
           "name": "shape_links_decision_id_decisions_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "decisions",
           "columnsFrom": [
             "decision_id"
           ],
-          "tableTo": "decisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_principle_id_principles_id_fk": {
           "name": "shape_links_principle_id_principles_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "principles",
           "columnsFrom": [
             "principle_id"
           ],
-          "tableTo": "principles",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_links_question_id_shape_questions_id_fk": {
           "name": "shape_links_question_id_shape_questions_id_fk",
           "tableFrom": "shape_links",
+          "tableTo": "shape_questions",
           "columnsFrom": [
             "question_id"
           ],
-          "tableTo": "shape_questions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6993,15 +6784,15 @@
         "shape_messages_shape_id_shapes_id_fk": {
           "name": "shape_messages_shape_id_shapes_id_fk",
           "tableFrom": "shape_messages",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7121,15 +6912,15 @@
         "shape_proposals_shape_id_shapes_id_fk": {
           "name": "shape_proposals_shape_id_shapes_id_fk",
           "tableFrom": "shape_proposals",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7225,54 +7016,54 @@
         "shape_questions_shape_id_shapes_id_fk": {
           "name": "shape_questions_shape_id_shapes_id_fk",
           "tableFrom": "shape_questions",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_questions_proposal_id_shape_proposals_id_fk": {
           "name": "shape_questions_proposal_id_shape_proposals_id_fk",
           "tableFrom": "shape_questions",
+          "tableTo": "shape_proposals",
           "columnsFrom": [
             "proposal_id"
           ],
-          "tableTo": "shape_proposals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_questions_goal_id_goals_id_fk": {
           "name": "shape_questions_goal_id_goals_id_fk",
           "tableFrom": "shape_questions",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_questions_task_id_tasks_id_fk": {
           "name": "shape_questions_task_id_tasks_id_fk",
           "tableFrom": "shape_questions",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7330,15 +7121,15 @@
         "shape_rehearsals_shape_id_shapes_id_fk": {
           "name": "shape_rehearsals_shape_id_shapes_id_fk",
           "tableFrom": "shape_rehearsals",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -7412,28 +7203,28 @@
         "shape_shadow_answers_shape_id_shapes_id_fk": {
           "name": "shape_shadow_answers_shape_id_shapes_id_fk",
           "tableFrom": "shape_shadow_answers",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "shape_shadow_answers_message_id_shape_messages_id_fk": {
           "name": "shape_shadow_answers_message_id_shape_messages_id_fk",
           "tableFrom": "shape_shadow_answers",
+          "tableTo": "shape_messages",
           "columnsFrom": [
             "message_id"
           ],
-          "tableTo": "shape_messages",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -7516,6 +7307,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "effort": {
+          "name": "effort",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "bundle_id": {
           "name": "bundle_id",
           "type": "text",
@@ -7566,23 +7364,23 @@
             "project_id",
             "bundle_id"
           ],
-          "where": "\"shapes\".\"bundle_id\" IS NOT NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"shapes\".\"bundle_id\" IS NOT NULL"
         }
       },
       "foreignKeys": {
         "shapes_project_id_projects_id_fk": {
           "name": "shapes_project_id_projects_id_fk",
           "tableFrom": "shapes",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7678,28 +7476,28 @@
         "stakeholder_send_people_send_id_stakeholder_sends_id_fk": {
           "name": "stakeholder_send_people_send_id_stakeholder_sends_id_fk",
           "tableFrom": "stakeholder_send_people",
+          "tableTo": "stakeholder_sends",
           "columnsFrom": [
             "send_id"
           ],
-          "tableTo": "stakeholder_sends",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "stakeholder_send_people_person_id_people_id_fk": {
           "name": "stakeholder_send_people_person_id_people_id_fk",
           "tableFrom": "stakeholder_send_people",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -7999,23 +7797,23 @@
           "columns": [
             "inbox_item_id"
           ],
-          "where": "\"stakeholder_sends\".\"state\" IN ('draft', 'sending', 'sent')",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"stakeholder_sends\".\"state\" IN ('draft', 'sending', 'sent')"
         }
       },
       "foreignKeys": {
         "stakeholder_sends_inbox_item_id_inbox_items_id_fk": {
           "name": "stakeholder_sends_inbox_item_id_inbox_items_id_fk",
           "tableFrom": "stakeholder_sends",
+          "tableTo": "inbox_items",
           "columnsFrom": [
             "inbox_item_id"
           ],
-          "tableTo": "inbox_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8108,54 +7906,54 @@
         "task_context_task_id_tasks_id_fk": {
           "name": "task_context_task_id_tasks_id_fk",
           "tableFrom": "task_context",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_context_shape_id_shapes_id_fk": {
           "name": "task_context_shape_id_shapes_id_fk",
           "tableFrom": "task_context",
+          "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
           ],
-          "tableTo": "shapes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_context_revision_id_shape_attachment_revisions_id_fk": {
           "name": "task_context_revision_id_shape_attachment_revisions_id_fk",
           "tableFrom": "task_context",
+          "tableTo": "shape_attachment_revisions",
           "columnsFrom": [
             "revision_id"
           ],
-          "tableTo": "shape_attachment_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_context_packed_workstream_id_workstreams_id_fk": {
           "name": "task_context_packed_workstream_id_workstreams_id_fk",
           "tableFrom": "task_context",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "packed_workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8264,28 +8062,28 @@
         "task_context_checks_task_id_tasks_id_fk": {
           "name": "task_context_checks_task_id_tasks_id_fk",
           "tableFrom": "task_context_checks",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_context_checks_workstream_id_workstreams_id_fk": {
           "name": "task_context_checks_workstream_id_workstreams_id_fk",
           "tableFrom": "task_context_checks",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8315,28 +8113,28 @@
         "task_deps_task_id_tasks_id_fk": {
           "name": "task_deps_task_id_tasks_id_fk",
           "tableFrom": "task_deps",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_deps_depends_on_id_tasks_id_fk": {
           "name": "task_deps_depends_on_id_tasks_id_fk",
           "tableFrom": "task_deps",
+          "tableTo": "tasks",
           "columnsFrom": [
             "depends_on_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -8440,28 +8238,28 @@
         "task_files_task_id_tasks_id_fk": {
           "name": "task_files_task_id_tasks_id_fk",
           "tableFrom": "task_files",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_files_message_id_task_messages_id_fk": {
           "name": "task_files_message_id_task_messages_id_fk",
           "tableFrom": "task_files",
+          "tableTo": "task_messages",
           "columnsFrom": [
             "message_id"
           ],
-          "tableTo": "task_messages",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8520,28 +8318,28 @@
         "task_lane_times_workstream_id_workstreams_id_fk": {
           "name": "task_lane_times_workstream_id_workstreams_id_fk",
           "tableFrom": "task_lane_times",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_lane_times_task_id_tasks_id_fk": {
           "name": "task_lane_times_task_id_tasks_id_fk",
           "tableFrom": "task_lane_times",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8637,28 +8435,28 @@
         "task_messages_task_id_tasks_id_fk": {
           "name": "task_messages_task_id_tasks_id_fk",
           "tableFrom": "task_messages",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_messages_turn_id_pass_turns_id_fk": {
           "name": "task_messages_turn_id_pass_turns_id_fk",
           "tableFrom": "task_messages",
+          "tableTo": "pass_turns",
           "columnsFrom": [
             "turn_id"
           ],
-          "tableTo": "pass_turns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8725,41 +8523,41 @@
         "task_page_reports_task_id_tasks_id_fk": {
           "name": "task_page_reports_task_id_tasks_id_fk",
           "tableFrom": "task_page_reports",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_page_reports_workstream_id_workstreams_id_fk": {
           "name": "task_page_reports_workstream_id_workstreams_id_fk",
           "tableFrom": "task_page_reports",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_page_reports_turn_id_pass_turns_id_fk": {
           "name": "task_page_reports_turn_id_pass_turns_id_fk",
           "tableFrom": "task_page_reports",
+          "tableTo": "pass_turns",
           "columnsFrom": [
             "turn_id"
           ],
-          "tableTo": "pass_turns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8896,28 +8694,28 @@
         "task_screens_task_id_tasks_id_fk": {
           "name": "task_screens_task_id_tasks_id_fk",
           "tableFrom": "task_screens",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_screens_turn_id_pass_turns_id_fk": {
           "name": "task_screens_turn_id_pass_turns_id_fk",
           "tableFrom": "task_screens",
+          "tableTo": "pass_turns",
           "columnsFrom": [
             "turn_id"
           ],
-          "tableTo": "pass_turns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8995,6 +8793,28 @@
         },
         "flow_id": {
           "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rigor": {
+          "name": "rigor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kinds": {
+          "name": "kinds",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "effort_pin": {
+          "name": "effort_pin",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -9141,93 +8961,93 @@
         "tasks_project_id_projects_id_fk": {
           "name": "tasks_project_id_projects_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_flow_id_flows_id_fk": {
           "name": "tasks_flow_id_flows_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "flows",
           "columnsFrom": [
             "flow_id"
           ],
-          "tableTo": "flows",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_proposal_id_proposals_id_fk": {
           "name": "tasks_proposal_id_proposals_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "proposals",
           "columnsFrom": [
             "proposal_id"
           ],
-          "tableTo": "proposals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_board_column_id_board_columns_id_fk": {
           "name": "tasks_board_column_id_board_columns_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "board_columns",
           "columnsFrom": [
             "board_column_id"
           ],
-          "tableTo": "board_columns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_goal_id_goals_id_fk": {
           "name": "tasks_goal_id_goals_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "goals",
           "columnsFrom": [
             "goal_id"
           ],
-          "tableTo": "goals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_landing_group_id_landing_groups_id_fk": {
           "name": "tasks_landing_group_id_landing_groups_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "landing_groups",
           "columnsFrom": [
             "landing_group_id"
           ],
-          "tableTo": "landing_groups",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_pass_id_passes_id_fk": {
           "name": "tasks_pass_id_passes_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "passes",
           "columnsFrom": [
             "pass_id"
           ],
-          "tableTo": "passes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9264,28 +9084,28 @@
         "team_bindings_project_id_projects_id_fk": {
           "name": "team_bindings_project_id_projects_id_fk",
           "tableFrom": "team_bindings",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "team_bindings_persona_id_personas_id_fk": {
           "name": "team_bindings_persona_id_personas_id_fk",
           "tableFrom": "team_bindings",
+          "tableTo": "personas",
           "columnsFrom": [
             "persona_id"
           ],
-          "tableTo": "personas",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -9323,28 +9143,28 @@
         "team_members_project_id_projects_id_fk": {
           "name": "team_members_project_id_projects_id_fk",
           "tableFrom": "team_members",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "team_members_person_id_people_id_fk": {
           "name": "team_members_person_id_people_id_fk",
           "tableFrom": "team_members",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -9426,15 +9246,15 @@
         "tool_ops_workstream_id_workstreams_id_fk": {
           "name": "tool_ops_workstream_id_workstreams_id_fk",
           "tableFrom": "tool_ops",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9684,41 +9504,41 @@
         "workstreams_task_id_tasks_id_fk": {
           "name": "workstreams_task_id_tasks_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "workstreams_project_id_projects_id_fk": {
           "name": "workstreams_project_id_projects_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "workstreams_batch_id_batches_id_fk": {
           "name": "workstreams_batch_id_batches_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "batches",
           "columnsFrom": [
             "batch_id"
           ],
-          "tableTo": "batches",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9729,9 +9549,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

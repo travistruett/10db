@@ -566,7 +566,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         w,
         task.id,
         {
-          flowName: 'merge',
+          rigor: null,
           overBudget: [],
           steps: [
             {

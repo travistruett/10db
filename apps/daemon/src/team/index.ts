@@ -1,5 +1,8 @@
 export { proposeCandidates } from './candidates';
-export { routingInputs } from './routing-inputs';
+export { moveToPlaybook, PLAYBOOK_MOVE_REPORT_KEY } from './move-to-playbook';
+export { conversationRun, planConversationModel } from './plan-conversation';
+export { playbookInputs, routingInputs } from './routing-inputs';
+export { SEEDED_KINDS } from './seed-kinds';
 export { seedTeam } from './seed';
 export {
   actionEntering,

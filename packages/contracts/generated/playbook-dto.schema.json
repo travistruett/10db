@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rigor": {
+            "type": "string",
+            "enum": [
+              "light",
+              "standard",
+              "careful",
+              "critical"
+            ]
+          },
+          "steps": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "plan",
+                    "plan_review",
+                    "implement",
+                    "review",
+                    "qa"
+                  ]
+                }
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          }
+        },
+        "required": [
+          "rigor",
+          "steps"
+        ]
+      }
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rigor": {
+            "type": "string",
+            "enum": [
+              "light",
+              "standard",
+              "careful",
+              "critical"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "plan_review",
+              "implement",
+              "review",
+              "qa"
+            ]
+          },
+          "personaId": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^per_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "automatic"
+                          },
+                          "minimum": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "tier"
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "efficient",
+                              "balanced",
+                              "capable",
+                              "frontier"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "tier"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "top_of_tier"
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "efficient",
+                              "balanced",
+                              "capable",
+                              "frontier"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "model"
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "model"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          },
+          "effort": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          }
+        },
+        "required": [
+          "rigor",
+          "role",
+          "personaId",
+          "model",
+          "effort"
+        ]
+      }
+    }
+  },
+  "required": [
+    "rows",
+    "cells"
+  ]
+}

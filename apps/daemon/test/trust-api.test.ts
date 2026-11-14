@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from './fixtures';
 
@@ -103,7 +103,7 @@ const project = async (path: string, name: string) =>
     name,
     repoPath: path,
     gateCommand: 'true',
-    flowId: await quickFlowId(api()),
+    defaultRigor: 'light',
     areas: [{ name: 'src', globs: ['src/**'] }],
   });
 

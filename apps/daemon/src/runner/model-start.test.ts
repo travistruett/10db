@@ -20,6 +20,7 @@ import {
   replaceAccountModels,
   schema,
   seedAccount,
+  setPlaybook,
   WORDING_MARK_MS,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -227,6 +228,18 @@ describe('a step the gate sends back for another try', () => {
       }
       return {};
     };
+    // Light's default build needs 35, which Sonnet meets at low effort; this test climbs from its high one.
+    engine.state.write((ctx) =>
+      setPlaybook(ctx, null, {
+        cells: [
+          {
+            rigor: 'light',
+            role: 'implement',
+            model: { kind: 'automatic', minimum: 40 },
+          },
+        ],
+      }),
+    );
     const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
     const planned = ws(workstream.id).steps[0]?.model ?? '';
     second.id = secondPlan().id;

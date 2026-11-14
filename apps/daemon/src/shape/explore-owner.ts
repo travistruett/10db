@@ -13,6 +13,7 @@ import {
   TrustSurface,
   type AccountKind,
   type AgentAccountKind,
+  type Effort,
   type JudgeKind,
   type ProjectId,
   type ConversationFileId,
@@ -116,8 +117,11 @@ export interface ShapeOwnerDeps {
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   readonly filesDir: string;
-  /** Resolves a project's launch, on `model` or, with null, on the `plan` role's. */
-  launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  /**
+   * Resolves a project's launch, on `model` or, with null, on the `plan` role's, at `effort` or, with
+   * null, the role's.
+   */
+  launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
@@ -181,14 +185,14 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
    */
   const launches = new Map<
     ShapeId,
-    { readonly model: string | null; readonly launch: ShapeLaunch }
+    { readonly model: string | null; readonly effort: Effort | null; readonly launch: ShapeLaunch }
   >();
   const launchOf = (shapeId: ShapeId): ShapeLaunch => {
     const shape = getShape(state.db, shapeId);
     const kept = launches.get(shapeId);
-    if (kept?.model === shape.model) return kept.launch;
-    const launch = deps.launch(shape.projectId, shape.model);
-    const entry = { model: shape.model, launch };
+    if (kept?.model === shape.model && kept.effort === shape.effort) return kept.launch;
+    const launch = deps.launch(shape.projectId, shape.model, shape.effort);
+    const entry = { model: shape.model, effort: shape.effort, launch };
     launches.set(shapeId, entry);
     queueMicrotask(() => {
       if (launches.get(shapeId) === entry) launches.delete(shapeId);
@@ -718,7 +722,9 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const shape = getShape(state.db, shapeId);
       // The conversation's own pick resolves as its next start would; another resolves as itself.
       const launch =
-        model === shape.model ? launchOf(shapeId) : deps.launch(shape.projectId, model);
+        model === shape.model
+          ? launchOf(shapeId)
+          : deps.launch(shape.projectId, model, shape.effort);
       // The name the catalogue gives the model, else its ID.
       const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
       return {

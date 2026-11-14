@@ -68,7 +68,7 @@ export function createShapeServices(deps: {
       }),
     getShapeView: (id) => shape.view(id),
     proposeShape: (id) => shape.propose(id),
-    chooseShapeModel: (id, model) => shape.chooseModel(id, model),
+    chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
       const outcome = await shape.convert(
         id,

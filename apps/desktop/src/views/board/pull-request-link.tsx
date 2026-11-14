@@ -11,10 +11,13 @@ export function ExternalLink({
   url,
   label,
   size = 'sm',
+  inText = false,
 }: {
   readonly url: string;
   readonly label: string;
   readonly size?: 'xs' | 'sm';
+  /** Inside a line of text, where only an underline tells the link from the words around it. */
+  readonly inText?: boolean;
 }) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   return (
@@ -24,6 +27,7 @@ export function ExternalLink({
         target="_blank"
         rel="noreferrer"
         size={size}
+        underline={inText ? 'always' : 'hover'}
         onClick={(event) => {
           // A browser opens the tab itself; the desktop app's webview would follow nothing.
           if (!isTauri()) return;

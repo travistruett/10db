@@ -3,11 +3,16 @@ import { join } from 'node:path';
 import {
   AccountCreatedDto,
   AccountDto,
+  DecisionModelListDto,
+  DecisionStatsListDto,
+  JudgeCallsPageDto,
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
   JudgeStatusDto,
   JudgeTestResultDto,
   mintId,
+  type JudgeDecision,
+  type JudgeOutcome,
 } from '@10db/contracts';
 import { insertJudgeCall } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,11 +31,29 @@ let data: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
 let openRouterRequests: { url: string; authorization: string | null }[];
 let openRouterAnswer: () => Response;
+let modelListAnswer: () => Response;
+
+const MODEL_LIST_URL = 'https://openrouter.ai/api/v1/models?output_modalities=decisions';
+const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
+const decisionModel = (id: string, name: string) => ({
+  id,
+  name,
+  architecture: { input_modalities: ['text'], output_modalities: ['decisions'] },
+  pricing: { prompt: '0.000000042', completion: '0' },
+  endpoints: ['/api/alpha/decisions'],
+});
 
 beforeEach(() => {
   data = tempDir('judge api');
   daemon = null;
   openRouterRequests = [];
+  modelListAnswer = () =>
+    Response.json({
+      data: [
+        decisionModel('typesafe/jev-1.14', 'TypeSafe: Jev 1.14'),
+        decisionModel('liquid/d1', 'Liquid: D1'),
+      ],
+    });
   openRouterAnswer = () =>
     Response.json({
       model: 'typesafe/jev-1.13-20260917',
@@ -66,7 +89,7 @@ async function start(opts: { keychain?: Keychain; judgeOff?: boolean } = {}) {
         url,
         authorization: new Headers(init?.headers).get('authorization'),
       });
-      return Promise.resolve(openRouterAnswer());
+      return Promise.resolve(url === MODEL_LIST_URL ? modelListAnswer() : openRouterAnswer());
     },
     ...QUIET,
   });
@@ -221,17 +244,93 @@ describe('PATCH /judge', () => {
     const { api } = await start();
     const status = await api.patch('/judge', JudgeStatusDto, {
       enabled: false,
-      decisions: { review_size: { floor: 0.95, model: 'anthropic/claude-haiku-5.5' } },
+      decisions: { review_size: { floor: 0.95, enabled: false } },
     });
     expect(status.config).toEqual({
       enabled: false,
       accountId: null,
       decisions: {
         ...DEFAULT_JUDGE_CONFIG.decisions,
-        review_size: { enabled: true, model: 'anthropic/claude-haiku-5.5', floor: 0.95 },
+        review_size: { enabled: false, model: 'typesafe/jev-1.13', floor: 0.95 },
       },
     });
     expect(await api.get('/judge', JudgeStatusDto)).toEqual(status);
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it('saves a new model only after it answers one test decision with the key decisions run on', async () => {
+    const { api } = await start();
+    await openRouterAccount(api);
+    const status = await api.patch('/judge', JudgeStatusDto, {
+      decisions: { review_size: { model: 'liquid/d1' } },
+    });
+    expect(status.config.decisions.review_size.model).toBe('liquid/d1');
+    expect(openRouterRequests).toEqual([
+      { url: MODEL_LIST_URL, authorization: null },
+      { url: DECISIONS_URL, authorization: `Bearer ${KEY}` },
+    ]);
+  });
+
+  it('answers 409 for a new model with the judge off, saving nothing and asking nothing', async () => {
+    const { api, raw } = await start({ judgeOff: true });
+    await openRouterAccount(api);
+    expect(
+      (await raw('PATCH', '/judge', { decisions: { review_size: { model: 'liquid/d1' } } })).status,
+    ).toBe(409);
+    expect((await api.get('/judge', JudgeStatusDto)).config.decisions.review_size.model).toBe(
+      'typesafe/jev-1.13',
+    );
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it('asks nothing when the model stays the same', async () => {
+    const { api } = await start();
+    await openRouterAccount(api);
+    await api.patch('/judge', JudgeStatusDto, {
+      decisions: { review_size: { model: 'typesafe/jev-1.13', floor: 0.9 } },
+    });
+    expect(openRouterRequests).toEqual([]);
+  });
+
+  it.each([
+    {
+      case: 'the model fails the test decision',
+      account: true,
+      answer: () =>
+        Response.json({ error: { message: 'Model does not answer choice' } }, { status: 400 }),
+      says: /liquid\/d1 didn't answer a test decision.*Model does not answer choice/,
+    },
+    {
+      case: 'the model answers without a confidence',
+      account: true,
+      answer: () =>
+        Response.json({
+          model: 'liquid/d1',
+          answers: { decision: { type: 'choice', choice: 'skip' } },
+          usage: {},
+        }),
+      says: /without a confidence/,
+    },
+    {
+      case: 'there is no key to test it with',
+      account: false,
+      answer: () => Response.json({}),
+      says: /No OpenRouter key is set/,
+    },
+  ])('refuses a model when $case, and keeps the one saved', async ({ account, answer, says }) => {
+    openRouterAnswer = answer;
+    const { api, raw } = await start();
+    if (account) await openRouterAccount(api);
+    const res = await raw('PATCH', '/judge', {
+      enabled: false,
+      decisions: { review_size: { model: 'liquid/d1' } },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(says);
+    expect((await api.get('/judge', JudgeStatusDto)).config).toMatchObject({
+      enabled: true,
+      decisions: { review_size: { model: 'typesafe/jev-1.13' } },
+    });
   });
 
   it('runs decisions on an OpenRouter account, keeps it through a patch that names none, and clears it', async () => {
@@ -401,6 +500,141 @@ describe('POST /accounts/:id/test', () => {
         : which();
     expect((await raw('POST', `/accounts/${id}/test`)).status).toBe(status);
     expect(openRouterRequests).toEqual([]);
+  });
+});
+
+describe('GET /judge/models', () => {
+  it("lists OpenRouter's decision models without a key, reading them once for a few hours", async () => {
+    const { api } = await start();
+    const first = await api.get('/judge/models', DecisionModelListDto);
+    expect(first.models).toEqual([
+      expect.objectContaining({ id: 'liquid/d1', maker: 'Liquid', cantCall: null }),
+      expect.objectContaining({ id: 'typesafe/jev-1.14', inputUsdPerMillion: 0.042 }),
+    ]);
+    expect(await api.get('/judge/models', DecisionModelListDto)).toEqual(first);
+    expect(openRouterRequests).toEqual([{ url: MODEL_LIST_URL, authorization: null }]);
+  });
+
+  it("gives each model its cost and time, from the builder's own calls when it has any, and never changes the list held", async () => {
+    const { api, daemon: d } = await start();
+    const before = await api.get('/judge/models', DecisionModelListDto);
+    expect(before.models.find((m) => m.id === 'liquid/d1')).toMatchObject({
+      costSource: 'assumed',
+      timeSource: null,
+    });
+    d.state.write((ctx) => {
+      insertJudgeCall(ctx, {
+        decision: 'review_size',
+        model: 'liquid/d1',
+        state: 's',
+        question: 'q',
+        answer: 'skip',
+        confidence: 0.9,
+        outcome: 'acted',
+        latencyMs: 250,
+        costUsd: 0.000002,
+        workstreamId: null,
+        taskId: null,
+      });
+      insertJudgeCall(ctx, {
+        decision: 'review_size',
+        model: 'liquid/d1',
+        state: 's',
+        question: 'q',
+        answer: null,
+        confidence: null,
+        outcome: 'fallback_timeout',
+        latencyMs: 4000,
+        costUsd: 9,
+        workstreamId: null,
+        taskId: null,
+      });
+    });
+    const first = await api.get('/judge/models', DecisionModelListDto);
+    expect(first.models.find((m) => m.id === 'liquid/d1')).toMatchObject({
+      costPerMillionUsd: 2,
+      costSource: 'your_calls',
+      secondsPerDecision: 0.25,
+      timeSource: 'your_calls',
+    });
+    // The other model has no calls: its price over the size your calls show.
+    expect(first.models.find((m) => m.id === 'typesafe/jev-1.14')).toMatchObject({
+      costSource: 'openrouter_price',
+    });
+    expect(await api.get('/judge/models', DecisionModelListDto)).toEqual(first);
+    expect(openRouterRequests).toEqual([{ url: MODEL_LIST_URL, authorization: null }]);
+  });
+
+  it('answers 502 naming why when OpenRouter cannot be read', async () => {
+    modelListAnswer = () => new Response('down', { status: 503 });
+    const { raw } = await start();
+    const res = await raw('GET', '/judge/models');
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain('503');
+  });
+
+  it('answers 409 with the judge off, and asks OpenRouter nothing', async () => {
+    const { raw } = await start({ judgeOff: true });
+    expect((await raw('GET', '/judge/models')).status).toBe(409);
+    expect(openRouterRequests).toEqual([]);
+  });
+});
+
+describe('the call log, paged, and the decision stats', () => {
+  function seed(d: RunningDaemon, calls: { decision: JudgeDecision; outcome: JudgeOutcome }[]) {
+    calls.forEach((c, i) => {
+      d.state.write((ctx) => {
+        insertJudgeCall(ctx, {
+          ...c,
+          model: 'liquid/d1',
+          state: 'SECRET TASK TEXT',
+          question: `q${String(i)}`,
+          answer: 'skip',
+          confidence: 0.8,
+          latencyMs: 100 * (i + 1),
+          costUsd: 0.001,
+          workstreamId: null,
+          taskId: null,
+        });
+      });
+    });
+  }
+  const mix: { decision: JudgeDecision; outcome: JudgeOutcome }[] = [
+    { decision: 'review_size', outcome: 'acted' },
+    { decision: 'shape_ready', outcome: 'below_floor' },
+    { decision: 'review_size', outcome: 'stopped' },
+    { decision: 'review_size', outcome: 'fallback_timeout' },
+    { decision: 'review_size', outcome: 'acted' },
+  ];
+
+  it('reads the seeded calls back filtered and paged, with the total of the filter', async () => {
+    const { api, daemon: d } = await start();
+    seed(d, mix);
+    const page = await api.get(
+      '/judge/calls/page?decision=review_size&limit=2&offset=1',
+      JudgeCallsPageDto,
+    );
+    expect(page.calls.map((c) => c.question)).toEqual(['q3', 'q2']);
+    expect(page.total).toBe(4);
+    expect(JSON.stringify(page)).not.toContain('SECRET TASK TEXT');
+    const acted = await api.get('/judge/calls/page?outcome=acted', JudgeCallsPageDto);
+    expect(acted.calls.map((c) => c.question)).toEqual(['q4', 'q0']);
+    expect(acted.total).toBe(2);
+  });
+
+  it('counts a stopped call apart from the fallbacks', async () => {
+    const { api, daemon: d } = await start();
+    seed(d, mix);
+    const stats = await api.get('/judge/decisions', DecisionStatsListDto);
+    expect(stats.decisions.find((s) => s.decision === 'review_size')).toMatchObject({
+      calls: 4,
+      acted: 2,
+      stopped: 1,
+      fallbacks: { off: 0, no_key: 0, timeout: 1, error: 0 },
+    });
+    expect(stats.decisions.find((s) => s.decision === 'shape_ready')).toMatchObject({
+      belowFloor: 1,
+    });
   });
 });
 

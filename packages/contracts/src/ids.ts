@@ -58,6 +58,7 @@ const ID_SCHEMAS = {
   TaskContextCheck: idSchema(['tcx'], 'TaskContextCheckId'),
   LandingGroup: idSchema(['lgp'], 'LandingGroupId'),
   Pattern: idSchema(['pat'], 'PatternId'),
+  Kind: idSchema(['knd'], 'KindId'),
   Pass: idSchema(['pas'], 'PassId'),
   PassTurn: idSchema(['ptn'], 'PassTurnId'),
   TaskScreen: idSchema(['tsc'], 'TaskScreenId'),
@@ -111,6 +112,7 @@ const ID_PREFIX = {
   TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
   Pattern: 'pat',
+  Kind: 'knd',
   Pass: 'pas',
   PassTurn: 'ptn',
   TaskScreen: 'tsc',
@@ -225,6 +227,8 @@ export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const PatternId = ID_SCHEMAS.Pattern;
 export type PatternId = IdOf<'Pattern'>;
+export const KindId = ID_SCHEMAS.Kind;
+export type KindId = IdOf<'Kind'>;
 export const PassId = ID_SCHEMAS.Pass;
 export type PassId = IdOf<'Pass'>;
 export const PassTurnId = ID_SCHEMAS.PassTurn;

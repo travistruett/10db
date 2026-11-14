@@ -16,7 +16,7 @@ import { migrateDatabase, openDatabase, type TendbDatabase } from './index';
 import { migrationsBefore } from './migrations-test-support';
 import { shapeItemOf, taskItemOf } from './store/transcript-kinds';
 
-const MIGRATION = '0069_conversation_tables';
+const MIGRATION = '0071_conversation_tables';
 
 let dir: string;
 let db: TendbDatabase;
@@ -364,7 +364,7 @@ const itemsOf = (conversation: string) =>
     conversation,
   );
 
-describe('migration 0070, the conversation copy', () => {
+describe('migration 0072, the conversation copy', () => {
   it('makes one conversation per shape and per task with a thread, under its owner’s uuid', () => {
     const fields =
       'id, project_id, owner_kind, owner_id, profile, account_id, model, provider_session_id, state, next_seq';

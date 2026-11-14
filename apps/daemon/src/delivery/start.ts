@@ -1,5 +1,6 @@
 import {
   ACTIVE_STATES,
+  kindsOfTask,
   BatchStartInput,
   BatchState,
   ConflictError,
@@ -28,6 +29,7 @@ import {
   findUnfinishedBatch,
   getBatch,
   getBoardColumn,
+  listKinds,
   getProject,
   getTask,
   getWorkstream,
@@ -322,12 +324,17 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   ): Map<TaskId, PlacementProposal> {
     const proposals = new Map<TaskId, PlacementProposal>();
     if (passHoldingFolder(db, project.id) === undefined) return proposals;
+    const kinds = listKinds(db);
     for (const task of tasks) {
       if (task.workspaceMode !== WorkspaceMode.Shared) continue;
       if (task.placementReason === BUILDER_CHOSE_PLACEMENT) continue;
       const proposal = proposePlacement(
         { ...project, passHoldsFolder: true },
-        { areas: task.areas, riskTags: task.riskTags, workspaceMode: WorkspaceMode.Shared },
+        {
+          areas: task.areas,
+          kinds: kindsOfTask(task.kinds, kinds),
+          workspaceMode: WorkspaceMode.Shared,
+        },
       );
       if (proposal.workspaceMode === WorkspaceMode.Worktree) proposals.set(task.id, proposal);
     }

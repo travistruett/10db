@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_JUDGE_CONFIG,
   JudgeCallDto,
+  JudgeCallsPageQuery,
   JudgeConfig,
   JudgeConfigPatch,
   JudgeTestResultDto,
@@ -135,5 +136,32 @@ describe('judge results', () => {
     };
     expect(JudgeCallDto.parse(call)).toEqual(call);
     expect(JudgeCallDto.safeParse({ ...call, outcome: 'maybe' }).success).toBe(false);
+  });
+});
+
+describe('judge calls page query', () => {
+  it.each([
+    ['nothing', {}, { limit: 20, offset: 0 }],
+    ['a limit over 100', { limit: '500' }, { limit: 100, offset: 0 }],
+    ['a limit that is not a number', { limit: 'lots' }, { limit: 20, offset: 0 }],
+    [
+      'an offset and a decision',
+      { offset: '40', decision: 'review_size' },
+      {
+        limit: 20,
+        offset: 40,
+        decision: 'review_size',
+      },
+    ],
+  ])('reads %s', (_name, input, expected) => {
+    expect(JudgeCallsPageQuery.parse(input)).toEqual(expected);
+  });
+
+  it.each([
+    ['an unknown decision', { decision: 'nope' }],
+    ['an unknown outcome', { outcome: 'nope' }],
+    ['a negative offset', { offset: '-1' }],
+  ])('rejects %s', (_name, input) => {
+    expect(JudgeCallsPageQuery.safeParse(input).success).toBe(false);
   });
 });

@@ -45,25 +45,59 @@
         "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       }
     },
-    "riskTags": {
-      "default": [],
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "security",
-          "auth",
-          "migration",
-          "dependency"
-        ]
-      }
-    },
-    "flowId": {
+    "rigor": {
       "default": null,
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^flw_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          "enum": [
+            "light",
+            "standard",
+            "careful",
+            "critical"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kinds": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,39}$"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "builder",
+              "agent"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "source"
+        ]
+      }
+    },
+    "effortPin": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         },
         {
           "type": "null"

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   PassNoticeKind,
+  Rigor,
   TaskMessageAuthor,
   type AreaDef,
   type Finding,
@@ -10,13 +11,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import {
-  findFlowByName,
-  getPassProgress,
-  listTaskThread,
-  offeredText,
-  patchProject,
-} from '@10db/db';
+import { getPassProgress, listTaskThread, offeredText, patchProject } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
@@ -91,9 +86,7 @@ function setup(answer: string): {
   h = createDeliveryHarness({ areas: AREAS } satisfies Partial<ProjectInput>);
   scratch = tempDir('review-scratch');
   made = true;
-  const standard = findFlowByName(h.store.db, 'standard');
-  if (!standard) throw new Error('the standard flow was not seeded');
-  h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+  h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: Rigor.Standard }));
   h.commit('src/settings/page.tsx', 'settings\n');
   h.commit('src/people/page.tsx', 'people\n');
   h.git$('push', '-q', 'origin', 'main');
@@ -307,11 +300,9 @@ describe('reviewPassTip', () => {
     expect(getPassProgress(h.store.db, passId).notices).toEqual([]);
   });
 
-  it('runs no review for a flow with no review step', async () => {
+  it('runs no review for a rigor with no review step', async () => {
     const { deps, asked } = setup('No findings.');
-    const quick = findFlowByName(h.store.db, 'quick');
-    if (!quick) throw new Error('the quick flow was not seeded');
-    h.state.write((w) => patchProject(w, h.project.id, { flowId: quick.id }));
+    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: Rigor.Light }));
     const { passId } = await openedPass();
     const tip = h.commit('src/settings/page.tsx', 'signed off\n');
 

@@ -1,13 +1,16 @@
 import {
   BoardStatus,
+  Rigor,
   TaskStatus,
   type BatchDto,
+  type KindDto,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { ciResult } from './ci-line';
+import { rigorLabel } from '../settings/rigor-labels';
 import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -26,6 +29,10 @@ export interface TaskCardProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus'>>;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
   readonly startNote?: StartNote | null | undefined;
+  /** The builder's kinds: a card's kind badges read their labels here. */
+  readonly kinds?: readonly KindDto[] | undefined;
+  /** The project's default rigor: a card shows its rigor only when it is not this one. */
+  readonly defaultRigor?: Rigor | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
   /** The title of the goal the task belongs to, shown as a short badge; none under a Goal filter. */
@@ -125,6 +132,8 @@ function indicatorsOf(
   batches: readonly BatchDto[],
   sharedWith: number,
   goalTitle: string | undefined,
+  kinds: readonly KindDto[],
+  defaultRigor: Rigor,
 ): Indicator[] {
   const waits = waitsOn(task, peers);
   const ci = ciResult(batch, batches);
@@ -166,6 +175,24 @@ function indicatorsOf(
     task.status === TaskStatus.Cancelled
       ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }
       : null,
+    // The project's default rigor is the baseline every card has; one the builder set, or a kind raised, is worth saying.
+    task.rigor !== null || task.effectiveRigor !== defaultRigor
+      ? {
+          kind: 'rigor',
+          label: rigorLabel(task.effectiveRigor),
+          color: 'gray',
+          tooltip:
+            task.rigor === null
+              ? 'Rigor, from the project and the task’s kinds'
+              : 'Rigor the builder set',
+        }
+      : null,
+    ...task.kinds.map((k) => ({
+      kind: `kind-${k.key}`,
+      label: kinds.find((kind) => kind.key === k.key)?.label ?? k.key,
+      color: 'gray',
+      tooltip: k.source === 'builder' ? 'Kind set by the builder' : 'Kind an agent gave the task',
+    })),
   ].filter((indicator) => indicator !== null);
 }
 
@@ -186,6 +213,8 @@ export function TaskCard({
   place,
   goalTitle,
   batchTaskCount = 1,
+  kinds = [],
+  defaultRigor = Rigor.Standard,
 }: TaskCardProps) {
   const state = startNote
     ? noteState(startNote)
@@ -195,7 +224,16 @@ export function TaskCard({
   const colored = state !== null && state.color !== 'gray' && state.plainBorder !== true;
   const waiting = colored && state.color === 'yellow';
   const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
-  const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount, goalTitle);
+  const indicators = indicatorsOf(
+    task,
+    peers,
+    batch,
+    batches,
+    batchTaskCount,
+    goalTitle,
+    kinds,
+    defaultRigor,
+  );
   return (
     <Paper
       withBorder

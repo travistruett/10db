@@ -1,13 +1,14 @@
 import {
   mintId,
   type JudgeCallDto,
+  type JudgeCallsPageDto,
   type JudgeCallId,
   type JudgeDecision,
   type JudgeOutcome,
   type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, count, desc, eq, lt, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -47,7 +48,24 @@ export function recordJudgeOutcome(
 
 /** The most recent calls, newest first. The state sent is left out: it is task text and a diff. */
 export function listJudgeCalls(db: DbReader, limit: number): JudgeCallDto[] {
-  return db
+  return pageJudgeCalls(db, { limit, offset: 0 }).calls;
+}
+
+/** One page of the call log, newest first, with every call the filters match counted in `total`. */
+export function pageJudgeCalls(
+  db: DbReader,
+  q: {
+    readonly limit: number;
+    readonly offset: number;
+    readonly decision?: JudgeDecision | undefined;
+    readonly outcome?: JudgeOutcome | undefined;
+  },
+): JudgeCallsPageDto {
+  const filters: SQL[] = [];
+  if (q.decision !== undefined) filters.push(eq(schema.judgeCalls.decision, q.decision));
+  if (q.outcome !== undefined) filters.push(eq(schema.judgeCalls.outcome, q.outcome));
+  const where = filters.length > 0 ? and(...filters) : undefined;
+  const calls = db
     .select({
       id: schema.judgeCalls.id,
       decision: schema.judgeCalls.decision,
@@ -63,9 +81,13 @@ export function listJudgeCalls(db: DbReader, limit: number): JudgeCallDto[] {
       createdAt: schema.judgeCalls.createdAt,
     })
     .from(schema.judgeCalls)
+    .where(where)
     .orderBy(desc(schema.judgeCalls.createdAt), desc(schema.judgeCalls.id))
-    .limit(limit)
+    .limit(q.limit)
+    .offset(q.offset)
     .all();
+  const total = db.select({ n: count() }).from(schema.judgeCalls).where(where).get()?.n ?? 0;
+  return { calls, total };
 }
 
 /** Deletes calls made before `cutoff` (an ISO time) and answers how many. */

@@ -1,7 +1,7 @@
 import {
   DEFAULT_HAZARDS,
-  RiskTag,
   type HazardDef,
+  type KindDto,
   type TaskDto,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -9,14 +9,6 @@ import type { Git } from '../git';
 import { classifyPath } from '../guard';
 
 type DiffSince = Awaited<ReturnType<Git['diffSince']>>;
-
-/** Risks whose changes always get an independent review. */
-const FORCING_RISKS: readonly RiskTag[] = [
-  RiskTag.Security,
-  RiskTag.Auth,
-  RiskTag.Migration,
-  RiskTag.Dependency,
-];
 
 /**
  * Files whose change decides what runs or ships beyond the code a model reads: manifests and lockfiles
@@ -66,22 +58,22 @@ export const REVIEW_SIZE_DIFF_BYTES = 24 * 1024;
 export const REVIEW_SIZE_QUESTION =
   'Does this change need an independent code review before it ships, or is it small, clear and covered by its tests?';
 
-type TaskText = Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria' | 'riskTags'>;
+type TaskText = Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria'>;
 type Changes = Pick<DiffSince, 'files'>;
 
 /**
- * Whether the review step is asked about at all. A review the rules force runs with no call: a risk
- * tag that needs a second reader, a pinned step, a change too large to judge at a glance, a change to
+ * Whether the review step is asked about at all. A review the rules force runs with no call: a kind
+ * whose work is always reviewed (the task's kinds are given as the kinds they name), a pinned step, a change too large to judge at a glance, a change to
  * a file a model cannot weigh from a diff (a binary file, a manifest, a migration, CI, a hazard path),
  * and a review that already ran and sent the work back, whose rework must be read again.
  */
 export function reviewSizeRule(
-  task: Pick<TaskText, 'riskTags'>,
+  task: { readonly kinds: readonly Pick<KindDto, 'alwaysReviewed'>[] },
   changes: Changes,
   step: Pick<WorkstreamStep, 'pinned' | 'result' | 'earlier'>,
   projectHazards: readonly HazardDef[],
 ): 'review' | 'ask' {
-  if (task.riskTags.some((tag) => FORCING_RISKS.includes(tag))) return 'review';
+  if (task.kinds.some((kind) => kind.alwaysReviewed)) return 'review';
   if (step.pinned) return 'review';
   if (step.result !== null || step.earlier.length > 0) return 'review';
   if (changes.files.length > REVIEW_SIZE_MAX_FILES) return 'review';

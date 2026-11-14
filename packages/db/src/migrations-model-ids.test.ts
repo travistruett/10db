@@ -199,7 +199,7 @@ describe('the migration that renames stored model aliases', () => {
       { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
       { model_pin: null },
     ]);
-    // A shape's model lives on its conversation since migration 0070.
+    // A shape's model lives on its conversation since migration 0072.
     expect(
       rows(
         z.object({ model: z.string() }),

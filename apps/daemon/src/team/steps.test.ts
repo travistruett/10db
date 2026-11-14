@@ -10,7 +10,6 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
-  findFlowByName,
   getBatch,
   getWorkstream,
   getWorkstreamRow,
@@ -76,37 +75,54 @@ const addTask = () =>
   state.write((ctx) =>
     insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['api'] }),
   );
-const flowId = (name: string) => {
-  const flow = findFlowByName(state.db, name);
-  if (!flow) throw new Error(name);
-  return flow.id;
-};
 
 describe('resolveStepPlan', () => {
   it.each([
     {
-      name: 'the standard flow by default',
-      projectFlow: null,
-      taskFlow: null,
+      name: 'the project’s default rigor, Standard to start',
+      projectRigor: null,
+      taskRigor: null,
+      kinds: [],
       roles: ['implement', 'review'],
     },
     {
-      name: "the project's flow over the default",
-      projectFlow: 'quick',
-      taskFlow: null,
+      name: 'a project’s default over Standard',
+      projectRigor: 'light',
+      taskRigor: null,
+      kinds: [],
       roles: ['implement'],
     },
     {
-      name: "the task's flow over the project's",
-      projectFlow: 'quick',
-      taskFlow: 'standard',
+      name: 'the task’s rigor over the project’s',
+      projectRigor: 'light',
+      taskRigor: 'standard',
+      kinds: [],
       roles: ['implement', 'review'],
     },
-  ])('uses $name', ({ projectFlow, taskFlow, roles }) => {
+    {
+      name: 'a kind that raises a Light task to Careful',
+      projectRigor: 'light',
+      taskRigor: null,
+      kinds: ['security'],
+      roles: ['plan', 'implement', 'review'],
+    },
+    {
+      name: 'a kind that adds a plan review to a Careful task',
+      projectRigor: 'careful',
+      taskRigor: null,
+      kinds: ['migration'],
+      roles: ['plan', 'plan_review', 'implement', 'review'],
+    },
+  ] as const)('runs the steps of $name', ({ projectRigor, taskRigor, kinds, roles }) => {
     const task = addTask();
-    if (projectFlow)
-      state.write((ctx) => patchProject(ctx, project.id, { flowId: flowId(projectFlow) }));
-    if (taskFlow) state.write((ctx) => patchTask(ctx, task.id, { flowId: flowId(taskFlow) }));
+    if (projectRigor)
+      state.write((ctx) => patchProject(ctx, project.id, { defaultRigor: projectRigor }));
+    state.write((ctx) =>
+      patchTask(ctx, task.id, {
+        ...(taskRigor ? { rigor: taskRigor } : {}),
+        kinds: kinds.map((key) => ({ key, source: 'agent' as const })),
+      }),
+    );
     expect(resolveStepPlan(state.db, task.id).steps.map((s) => s.role)).toEqual(roles);
   });
 
@@ -115,7 +131,8 @@ describe('resolveStepPlan', () => {
     const plan = resolveStepPlan(state.db, addTask().id);
     expect(plan.steps.map((s) => `${s.model}@${s.effort}`)).toEqual([
       'claude-sonnet-5-5@high',
-      'claude-opus-5-5@medium',
+      // Standard's review needs at least 40, which Sonnet at high effort meets.
+      'claude-sonnet-5-5@high',
     ]);
   });
 
@@ -234,27 +251,34 @@ describe('startTaskWithPlan', () => {
 
   it('refuses to start a task over budget, naming the step', () => {
     measureForTests(state);
-    const task = addTask();
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'T',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+        rigor: 'careful',
+      }),
+    );
     state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1 }));
     expect(() => startTaskWithPlan(state, task.id)).toThrow(InvalidError);
     expect(() => startTaskWithPlan(state, task.id)).toThrow(
-      'Step 2 (review, need 48 intelligence) has no profile within the budget ceiling of $1: by score: cheapest profile at or above 48 intelligence; over the budget ceiling of $1',
+      'Step 3 (review, need 48 intelligence) has no profile within the budget ceiling of $1: by score: cheapest profile at or above 48 intelligence; over the budget ceiling of $1',
     );
   });
 
-  it('names the risk floor that binds, and inserts no workstream, when the floor causes the refusal', () => {
+  it('names the step a kind’s Frontier review puts over the ceiling, and inserts no workstream', () => {
     measureForTests(state);
     const task = state.write((ctx) =>
       insertTask(ctx, project.id, {
         title: 'T',
         acceptanceCriteria: ['x'],
         areas: ['api'],
-        riskTags: ['security'],
+        kinds: [{ key: 'security', source: 'builder' }],
       }),
     );
     state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1.5 }));
     expect(() => startTaskWithPlan(state, task.id)).toThrow(
-      /Step 2 \(review.*at or above 52 intelligence \(floor: .*\); over the budget ceiling/,
+      /Step 3 \(review, need 48 intelligence\) has no profile within the budget ceiling of \$1\.5/,
     );
     expect(listWorkstreams(state.db, {})).toEqual([]);
   });
@@ -817,14 +841,9 @@ describe('retryWorkstream', () => {
     });
 
     const REDO = 'Redo the work and commit it with the commit tool';
-    /** Four criteria keep the full flow's plan step, so the run starts on a read-only step. */
+    /** A Careful task plans first, so the run starts on a read-only step. */
     const fullFlowPlan = (taskId: TaskId) => {
-      state.write((ctx) =>
-        patchTask(ctx, taskId, {
-          flowId: flowId('full'),
-          acceptanceCriteria: ['a', 'b', 'c', 'd'],
-        }),
-      );
+      state.write((ctx) => patchTask(ctx, taskId, { rigor: 'careful' }));
       const plan = resolveStepPlan(state.db, taskId);
       expect(plan.steps[0]?.role).toBe('plan');
       return plan;

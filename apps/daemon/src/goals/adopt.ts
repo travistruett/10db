@@ -55,7 +55,7 @@ export async function adoptGoal(
       brief: parsed.brief,
       description: parsed.notes,
       // Task placement spec P2: the rule runs when a task is made, and adoption makes tasks.
-      placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
+      placeTask: (areas) => proposePlacement(project, { areas, kinds: [] }),
     }),
   );
   return { kind: 'adopted', goal };

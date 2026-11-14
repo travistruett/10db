@@ -165,7 +165,6 @@ describe('insertRetryLimitFollowUp', () => {
       landing: { kind: 'base' },
       areas: ['api'],
       dependsOn: [],
-      riskTags: [],
     });
     expect(filed.title).toContain(source.title);
     expect(filed.description).toContain(source.title);

@@ -1,5 +1,5 @@
-import { AccountKind, ConflictError, InvalidError } from '@10db/contracts';
-import { getShape, setAppSetting, listShapeMessages } from '@10db/db';
+import { AccountKind, ConflictError, InvalidError, type Effort } from '@10db/contracts';
+import { getShape, listShapeMessages, schema, setAppSetting } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { must } from './conversation-fixture';
@@ -78,6 +78,34 @@ describe('a conversation’s model', () => {
         .filter((m) => m.kind === 'notice')
         .map((m) => m.body),
     ).toEqual(['Now on Claude Sonnet 5.5 · claude-sonnet-5-5']);
+  });
+
+  it.each([null, 'low'] as const)(
+    'launches on the conversation’s own effort, which is %s',
+    async (effort) => {
+      const launched: (Effort | null)[] = [];
+      f = createServiceFixture({ onLaunch: (_model, e) => launched.push(e) });
+      const shapeId = f.c.shape.id;
+      f.c.store.write((ctx) => {
+        // The fixture holds one conversation.
+        ctx.tx.update(schema.shapes).set({ effort }).run();
+      });
+      f.service.send(shapeId, 'First');
+      await f.service.settled(shapeId);
+      expect(launched).toEqual([effort]);
+    },
+  );
+
+  it('keeps the effort chosen with the model, and a choice without one clears it', () => {
+    f = createServiceFixture({ models: () => MODELS });
+    const shapeId = f.c.shape.id;
+    expect(f.service.chooseModel(shapeId, 'claude-opus-5-5', 'high').effort).toBe('high');
+    expect(getShape(f.c.store.db, shapeId).effort).toBe('high');
+    expect(f.service.chooseModel(shapeId, 'claude-opus-5-5').effort).toBeNull();
+    expect(f.service.chooseModel(shapeId, null, 'low')).toMatchObject({
+      model: null,
+      effort: 'low',
+    });
   });
 
   it('goes back to the plan role’s when the pick is cleared', () => {

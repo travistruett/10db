@@ -1,0 +1,3 @@
+# apps/desktop/src/views/first-run
+
+- The first run (`views/first-run/`) replaces the app shell while `GET /projects` has loaded empty on a live connection (`shell/app-layout.tsx`); while the list loads, or the daemon connects or reconnects, the shell shows. Its three steps are Welcome, Check your setup (`use-setup-check.ts`, rows in `claude-row.ts` and `tool-rows.ts`) and Add a project. The Claude Code login probe starts Claude Code, so it runs once on entering the check and on each Agents recheck, never on a render; nothing in the first run patches the default account (a login added with Add Another Login is a new account, edited like any other).

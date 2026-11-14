@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
-import { apiClient, quickFlowId } from './api-client';
+import { apiClient } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -50,7 +50,7 @@ async function project(extra: Record<string, unknown> = {}) {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
-    flowId: await quickFlowId(a),
+    defaultRigor: 'light',
     areas: [
       { name: 'app', globs: ['app/**'] },
       { name: 'contracts', globs: ['contracts/**'] },
@@ -63,17 +63,23 @@ async function project(extra: Record<string, unknown> = {}) {
 
 interface Made {
   readonly areas: string[];
-  readonly riskTags?: string[];
+  /** The keys of the kinds the task is made with. */
+  readonly kinds?: string[];
   readonly workspaceMode?: 'shared' | 'worktree';
 }
 const base = { title: 'Alpha', acceptanceCriteria: ['it exists'] };
 
 /** Makes the same task through the task API and through the builder MCP's create_task. */
 async function makeBoth(projectId: string, made: Made) {
-  const viaApi = await api().post(`/projects/${projectId}/tasks`, TaskDto, { ...base, ...made });
+  const { kinds = [], ...rest } = made;
+  const viaApi = await api().post(`/projects/${projectId}/tasks`, TaskDto, {
+    ...base,
+    ...rest,
+    kinds: kinds.map((key) => ({ key, source: 'builder' })),
+  });
   const result = await client.callTool({
     name: BuilderToolName.CreateTask,
-    arguments: { projectId, ...base, ...made },
+    arguments: { projectId, ...base, ...rest, kinds: kinds.map((key) => ({ key })) },
   });
   const text = Text.parse(result.content)
     .map((c) => c.text)
@@ -106,10 +112,10 @@ describe('the placement proposed when a task is made', () => {
       { areas: ['migrations'], workspaceMode: 'shared' },
       MIGRATIONS,
     ],
-    ['a migration risk tag', { areas: ['app'], riskTags: ['migration'] }, MIGRATIONS],
+    ['a migration kind', { areas: ['app'], kinds: ['migration'] }, MIGRATIONS],
     [
-      'a dependency risk tag, though shared is asked for',
-      { areas: ['app'], riskTags: ['dependency'], workspaceMode: 'shared' },
+      'a dependency kind, though shared is asked for',
+      { areas: ['app'], kinds: ['dependency'], workspaceMode: 'shared' },
       { workspaceMode: 'worktree', placementReason: 'touches dependencies' },
     ],
     [
@@ -187,7 +193,7 @@ describe('the placement proposed when a task is made', () => {
     const { id } = await project({ delivery: 'local', prTitlePrefix: undefined });
     const { viaApi, viaMcp } = await makeBoth(id, {
       areas: ['migrations'],
-      riskTags: ['migration'],
+      kinds: ['migration'],
       workspaceMode: 'worktree',
     });
     for (const made of [viaApi, viaMcp])

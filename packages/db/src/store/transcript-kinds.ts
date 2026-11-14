@@ -14,7 +14,7 @@ import type { Json } from '../json';
 import type { schema } from '../index';
 
 // The maps between Plan's and the threads' rows and conversation items. Migration
-// 0070_conversation_copy makes the same choices in SQL, and its test checks every copied row
+// 0072_conversation_copy makes the same choices in SQL, and its test checks every copied row
 // against these.
 
 /** The harness name of a Plan tool line, a finished call of 10db's own. */

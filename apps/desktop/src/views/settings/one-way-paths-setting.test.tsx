@@ -19,7 +19,6 @@ describe('Settings › Planning › One-way paths', () => {
         put.push(body);
         return HttpResponse.json(body);
       }),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
       ...baseHandlers(),
     );
     renderApp('/settings/planning');

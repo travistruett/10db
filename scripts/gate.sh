@@ -4,6 +4,7 @@
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (a Linux machine with no Tauri system libraries).
 # GATE_TEST_ARGS="--shard=1/4" adds arguments to the test step, split on spaces (CI's test shards).
+# GATE_E2E_ARGS="--shard=1/2" does the same for the e2e step (CI's e2e shards).
 # Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it; any other value runs it) e2e is
 # reported as skipped. Each failing step gets a line naming the command that reruns it and its log
 # ("FAILED lint: pnpm lint (log .gate/lint.log)"), which 10db's fix brief reads; with CI set, each
@@ -17,6 +18,7 @@ mkdir -p .gate
 ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
 read -r -a steps <<< "${GATE_STEPS:-${ALL_STEPS[*]}}"
 read -r -a test_args <<< "${GATE_TEST_ARGS:-}"
+read -r -a e2e_args <<< "${GATE_E2E_ARGS:-}"
 start=$SECONDS
 # One entry per step, passed or failed: "lint 31s" or "rust skipped".
 steps_run=()
@@ -63,7 +65,7 @@ for step in "${steps[@]}"; do
       if [[ "${TENDB_SANDBOX:-}" == 1 ]]; then
         steps_run+=("e2e skipped (sandboxed)")
       else
-        run_step e2e pnpm -s --filter @10db/desktop e2e
+        run_step e2e pnpm -s --filter @10db/desktop e2e ${e2e_args[@]+"${e2e_args[@]}"}
       fi
       ;;
     drift) run_step drift pnpm -s drift ;;

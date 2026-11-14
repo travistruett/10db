@@ -5,17 +5,17 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
+  AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
   InboxItemId,
+  noOpenRouterSync,
   PROTOCOL_VERSION,
   Provider,
   RoutedBy,
   agentKind,
   providerOf,
-  StepRole,
-  type Effort,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -40,7 +40,10 @@ import {
   getAccountRow,
   listModelProfiles,
   listAccountModels,
+  listAccounts,
   getAppSetting,
+  findAccountRow,
+  getJudgeConfig,
   getProject,
   listPermissionRules,
   listProjects,
@@ -70,7 +73,12 @@ import {
   type AccountLimits,
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
-import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import {
+  createBenchmarkSync,
+  createOpenRouterSync,
+  type BenchmarkSync,
+  type OpenRouterSync,
+} from '../benchmarks';
 import {
   createAccountLists,
   createCatalogueSync,
@@ -79,7 +87,12 @@ import {
   resumeModelMarks,
   type Catalogue,
 } from '../catalogue';
-import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import {
+  createDecisionModelList,
+  createJudge,
+  JUDGE_LOG_RETENTION_MS,
+  type JudgeService,
+} from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { createJudgeKeyReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
@@ -225,7 +238,7 @@ import {
 } from '../pictures';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
+import { offeredModels } from '../routing';
 import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
@@ -283,7 +296,13 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { AgentAdapter } from '../sessions';
-import { routingInputs, seedTeam } from '../team';
+import {
+  conversationRun,
+  moveToPlaybook,
+  planConversationModel,
+  routingInputs,
+  seedTeam,
+} from '../team';
 import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -409,6 +428,12 @@ export interface DaemonOptions {
   readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
+  /**
+   * Read OpenRouter's scores and per-provider speed with the decisions account's key. Off unless given, so a
+   * test never reaches the network; the entry point turns it on unless a kill switch is set. Never runs with
+   * `judgeOff` or `benchmarksOff`.
+   */
+  readonly openRouterSync?: boolean;
   /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
   readonly listeners?: ListenerReader;
   /** Whether a loopback address answers, for the Workbench setup's app address; one GET unless given. */
@@ -612,6 +637,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  // Settings made before the playbook move into it once, after the seeded kinds exist for the move to name.
+  state.write((ctx) => {
+    moveToPlaybook(ctx);
+  });
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
   state.write((ctx) => {
     addStockHazardCommands(ctx);
@@ -664,14 +693,54 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
+  const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
+  const readJudgeKey = createJudgeKeyReader({
+    state,
+    keychain: judgeKeychain,
+    off: opts.judgeOff === true,
+  });
   const judge = createJudge({
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    readKey: createJudgeKeyReader({ state, keychain: judgeKeychain, off: opts.judgeOff === true }),
+    decisionModelIds: () => decisionModels.ids(),
+    readKey: readJudgeKey,
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  // OpenRouter's scores and speeds are read with the decisions account's key, and never under either kill switch.
+  const openRouterSync: OpenRouterSync | null =
+    opts.openRouterSync === true && opts.judgeOff !== true && opts.benchmarksOff !== true
+      ? createOpenRouterSync({
+          state,
+          clock,
+          fetch: opts.fetch ?? fetch,
+          readKey: () => readJudgeKey(getJudgeConfig(state.db).accountId),
+          offered: () => {
+            const live = new Set(
+              listAccounts(state.db)
+                .filter((a) => !a.archived)
+                .map((a) => a.id),
+            );
+            return new Set(
+              listAccountModels(state.db)
+                .filter((m) => !m.unusable && live.has(m.accountId))
+                .map((m) => m.model),
+            );
+          },
+          catalogue: () => catalogue.catalogue(),
+          decisionModelIds: async () => {
+            try {
+              return (await decisionModels.list()).models
+                .filter((m) => m.cantCall === null)
+                .map((m) => m.id);
+            } catch {
+              return [];
+            }
+          },
+          logger: logger.child({ component: 'benchmarks' }),
+        })
+      : null;
   // With the judge off no Keychain item is read, `openrouter-api-key` included.
   if (opts.judgeOff !== true)
     await moveOpenRouterKey({
@@ -679,6 +748,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keychain: judgeKeychain,
       logger: logger.child({ component: 'judge' }),
     });
+  // After the key move, so the first run sees the account a key left in the old item became.
+  openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(
       ctx,
@@ -1359,23 +1430,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
-  // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
-  // default and never by score, so a conversation is never refused for want of one. Undefined when the account
-  // offers nothing to run it on.
-  const planModel = (project: ProjectDto): { model: string; effort: Effort } | undefined => {
-    const choice = chooseModel({
-      ...routingInputs(db, project),
-      def: { role: StepRole.Plan, need: PLAN_NEED },
-      persona: undefined,
-      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
-      project,
-      stakes: { retry: false },
-      byScore: false,
-    });
-    return choice.profile === null && choice.model === choice.tier
-      ? undefined
-      : { model: choice.model, effort: choice.effort };
-  };
   const laneSandbox = sandboxes?.lane ?? null;
   // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
   const exploreEngine = createExploreEngine({
@@ -1443,28 +1497,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const project = getProject(db, projectId);
       const inputs = routingInputs(db, project);
       return {
-        default: planModel(project)?.model ?? null,
+        default: planConversationModel(db, project, null)?.model ?? null,
         offered: offeredModels(inputs.profiles),
       };
     },
-    launch(projectId, chosen) {
+    launch(projectId, chosen, effort) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = planModel(project);
-      if (profile === undefined)
-        throw new InvalidError(`${row.label} offers no model for planning`);
-      // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
-      // stopped offering since gives way to the role's.
-      const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
-      const modelId = chosen !== null && offered.includes(chosen) ? chosen : profile.model;
+      const run = conversationRun(db, project, chosen, effort);
+      if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
+      // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
+      // account has stopped offering gives way to the Plan cell's model.
+      const modelId = run.model;
       const session = launcher.session(row, modelId, listAccountModels(db, row.id));
       return {
         cwd: project.repoPath,
         model: session.model,
         modelId,
-        effort: profile.effort,
+        effort: run.effort,
         agentModels: shapeAgentModels(agentKind(row.kind)),
         env: session.env,
         account: session.expect,
@@ -1906,10 +1958,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       benchmarks,
       keychain: judgeKeychain,
       off: opts.benchmarksOff === true,
+      openRouter: () =>
+        openRouterSync?.status() ?? {
+          ...noOpenRouterSync(),
+          off: opts.judgeOff === true || opts.benchmarksOff === true,
+        },
     }),
     catalogue,
     refreshModels,
     catalogueOn: modelRefreshOn,
+    openRouterOff: opts.judgeOff === true || opts.benchmarksOff === true,
+    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
+    openRouterOn: () => {
+      if (openRouterSync === null) return false;
+      const accountId = getJudgeConfig(state.db).accountId;
+      const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
+      return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
+    },
     trust: createTrustServices({
       state,
       builderHome,
@@ -1922,7 +1987,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       keychain: judgeKeychain,
       judge,
+      models: decisionModels,
       off: opts.judgeOff === true,
+      onAccountChanged: () => {
+        void openRouterSync?.poke();
+      },
+      clock,
     }),
     stakeholders: createStakeholderApiServices({
       state,
@@ -2310,6 +2380,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
+      openRouterSync?.stop();
+      await openRouterSync?.idle();
       catalogue.stop();
       await listRefresh.stop();
       accountPauses.stop();

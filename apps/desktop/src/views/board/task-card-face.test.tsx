@@ -3,6 +3,7 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { batchDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { kindDto } from '../../test/playbook-fixtures';
 import { theme } from '../../theme';
 import { cardSummary, TaskCard } from './task-card';
 
@@ -262,5 +263,48 @@ describe('TaskCard face: indicators', () => {
   it('shows a Cancelled indicator for a cancelled task', () => {
     card({ task: taskDto({ status: 'cancelled' }) });
     expect(screen.getByTestId('indicator-row').textContent).toContain('Cancelled');
+  });
+});
+
+describe('TaskCard face: rigor and kinds', () => {
+  it('shows the rigor a builder set and each kind by its label, a key no kind has as the key', () => {
+    card({
+      kinds: [kindDto({ key: 'ui', label: 'UI' })],
+      task: taskDto({
+        rigor: 'careful',
+        effectiveRigor: 'careful',
+        kinds: [
+          { key: 'ui', source: 'agent' },
+          { key: 'gone-kind', source: 'builder' },
+        ],
+      }),
+    });
+    expect(screen.getByTestId('indicator-rigor').textContent).toBe('Careful');
+    expect(screen.getByTestId('indicator-kind-ui').textContent).toBe('UI');
+    expect(screen.getByTestId('indicator-kind-gone-kind').textContent).toBe('gone-kind');
+  });
+
+  it('says nothing for a task at the project’s default rigor with no kinds', () => {
+    card({});
+    expect(screen.queryByTestId('indicator-rigor')).toBeNull();
+    expect(screen.queryByTestId('indicator-row')).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'hides the rigor a task has from its project',
+      defaultRigor: 'careful',
+      effective: 'careful',
+      shown: false,
+    },
+    {
+      name: 'shows a rigor that differs from the project’s, Standard included',
+      defaultRigor: 'careful',
+      effective: 'standard',
+      shown: true,
+    },
+  ] as const)('$name', ({ defaultRigor, effective, shown }) => {
+    card({ defaultRigor, task: taskDto({ rigor: null, effectiveRigor: effective }) });
+    expect(screen.queryByTestId('indicator-rigor') !== null).toBe(shown);
   });
 });

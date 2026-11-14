@@ -2,6 +2,16 @@ import { InvalidError } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { proposalCardBody, proposalFiling, taskFieldsFromProposal } from './proposal-task';
 
+/** The kinds the builder has; the first four ask for a card, as the seeded ones do. */
+const KNOWN = [
+  { key: 'security', toInbox: true },
+  { key: 'auth', toInbox: true },
+  { key: 'migration', toInbox: true },
+  { key: 'dependency', toInbox: true },
+  { key: 'payments', toInbox: true },
+  { key: 'ui', toInbox: false },
+] as const;
+
 const words = (count: number) => Array.from({ length: count }, () => 'word').join(' ');
 
 describe('taskFieldsFromProposal', () => {
@@ -38,9 +48,10 @@ describe('proposalFiling', () => {
     kind: 'new_task',
     title: 'Reword the criterion',
     body: 'It is unclear.',
+    known: KNOWN,
   } as const;
 
-  it('files a small new-task proposal with no risk tag by itself', () => {
+  it('files a small new-task proposal with no kind that needs a card by itself', () => {
     expect(proposalFiling({ ...small, limit: 1200 })).toEqual({ file: true });
   });
 
@@ -61,33 +72,71 @@ describe('proposalFiling', () => {
   });
 
   it.each(['security', 'auth', 'migration', 'dependency'] as const)(
-    'raises a card for a proposal that declares the %s risk tag',
+    'raises a card for a proposal that declares the %s kind',
     (tag) => {
-      expect(proposalFiling({ ...small, riskTags: [tag], limit: 1200 })).toEqual({
+      expect(proposalFiling({ ...small, kinds: [tag], limit: 1200 })).toEqual({
         file: false,
-        reason: `it carries the ${tag} risk tag`,
+        reason: `it carries the ${tag} kind`,
       });
     },
   );
 
-  it('names every declared risk tag', () => {
-    expect(proposalFiling({ ...small, riskTags: ['security', 'auth'], limit: 1200 })).toEqual({
+  it('names every declared kind', () => {
+    expect(proposalFiling({ ...small, kinds: ['security', 'auth'], limit: 1200 })).toEqual({
       file: false,
-      reason: 'it carries the security and auth risk tags',
+      reason: 'it carries the security and auth kinds',
     });
     expect(
-      proposalFiling({ ...small, riskTags: ['security', 'auth', 'migration'], limit: 1200 }),
+      proposalFiling({ ...small, kinds: ['security', 'auth', 'migration'], limit: 1200 }),
     ).toEqual({
       file: false,
-      reason: 'it carries the security, auth and migration risk tags',
+      reason: 'it carries the security, auth and migration kinds',
     });
   });
 
-  it('names the declared risk tags when the limit is zero', () => {
-    expect(proposalFiling({ ...small, riskTags: ['security'], limit: 0 })).toEqual({
+  it('names the declared kinds when the limit is zero', () => {
+    expect(proposalFiling({ ...small, kinds: ['security'], limit: 0 })).toEqual({
       file: false,
       reason:
-        'it carries the security risk tag, and filing small proposals by itself is off for this project',
+        'it carries the security kind, and filing small proposals by itself is off for this project',
+    });
+  });
+
+  describe('what the builder’s own kinds change', () => {
+    it('raises a card for a custom kind that asks for one, naming it', () => {
+      expect(proposalFiling({ ...small, kinds: ['payments'], limit: 1200 })).toEqual({
+        file: false,
+        reason: 'it carries the payments kind',
+      });
+    });
+
+    it.each([
+      { name: 'a declared kind that asks for no card', kinds: ['ui'], title: small.title },
+      { name: 'a declared key no kind has', kinds: ['gone'], title: small.title },
+    ])('files $name by itself', ({ kinds, title }) => {
+      expect(proposalFiling({ ...small, title, kinds, limit: 1200 })).toEqual({ file: true });
+    });
+
+    it('names only the declared kinds that ask for a card when it also declares one that does not', () => {
+      expect(proposalFiling({ ...small, kinds: ['ui', 'auth'], limit: 1200 })).toEqual({
+        file: false,
+        reason: 'it carries the auth kind',
+      });
+    });
+
+    it('ignores a risk word whose kind asks for no card, or that the builder deleted', () => {
+      const known = KNOWN.map((k) => (k.key === 'security' ? { ...k, toInbox: false } : k));
+      expect(
+        proposalFiling({ ...small, known, title: 'Tighten the security check', limit: 1200 }),
+      ).toEqual({ file: true });
+      expect(
+        proposalFiling({
+          ...small,
+          known: KNOWN.filter((k) => k.key !== 'security'),
+          title: 'Tighten the security check',
+          limit: 1200,
+        }),
+      ).toEqual({ file: true });
     });
   });
 
@@ -97,10 +146,10 @@ describe('proposalFiling', () => {
         proposalFiling({
           ...small,
           title: 'Tighten the security check',
-          riskTags: ['security'],
+          kinds: ['security'],
           limit: 1200,
         }),
-      ).toEqual({ file: false, reason: 'it carries the security risk tag' });
+      ).toEqual({ file: false, reason: 'it carries the security kind' });
     });
 
     it('names a risk in the text that was not declared, and not the declared one', () => {
@@ -108,12 +157,12 @@ describe('proposalFiling', () => {
         proposalFiling({
           ...small,
           title: 'Tighten the security and auth checks',
-          riskTags: ['security'],
+          kinds: ['security'],
           limit: 1200,
         }),
       ).toEqual({
         file: false,
-        reason: 'it carries the security risk tag, and it names the auth risk',
+        reason: 'it carries the security kind, and it names the auth risk',
       });
     });
 
@@ -129,12 +178,12 @@ describe('proposalFiling', () => {
         proposalFiling({
           ...small,
           title: 'Auth migration for the zod dependency',
-          riskTags: ['migration'],
+          kinds: ['migration'],
           limit: 1200,
         }),
       ).toEqual({
         file: false,
-        reason: 'it carries the migration risk tag, and it names the auth and dependency risks',
+        reason: 'it carries the migration kind, and it names the auth and dependency risks',
       });
     });
 
@@ -143,50 +192,45 @@ describe('proposalFiling', () => {
         proposalFiling({
           ...small,
           title: 'Tighten the security and auth checks',
-          riskTags: ['security'],
+          kinds: ['security'],
           limit: 0,
         }),
       ).toEqual({
         file: false,
         reason:
-          'it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk',
+          'it carries the security kind, and filing small proposals by itself is off for this project, and it names the auth risk',
       });
       expect(
         proposalFiling({
           ...small,
           kind: 'change_task',
           title: 'Tighten the security and auth checks',
-          riskTags: ['security'],
+          kinds: ['security'],
           limit: 1200,
         }),
       ).toEqual({
         file: false,
         reason:
-          'it carries the security risk tag, and it is not a new task, and it names the auth risk',
+          'it carries the security kind, and it is not a new task, and it names the auth risk',
       });
     });
   });
 
   // A principle proposal takes its own path to the card: mcp.test.ts covers its tags.
-  it.each(['change_task', 'note'] as const)(
-    'names the declared risk tags of a %s proposal',
-    (kind) => {
-      expect(
-        proposalFiling({ ...small, kind, riskTags: ['security', 'auth'], limit: 1200 }),
-      ).toEqual({
-        file: false,
-        reason: 'it carries the security and auth risk tags, and it is not a new task',
-      });
-    },
-  );
+  it.each(['change_task', 'note'] as const)('names the declared kinds of a %s proposal', (kind) => {
+    expect(proposalFiling({ ...small, kind, kinds: ['security', 'auth'], limit: 1200 })).toEqual({
+      file: false,
+      reason: 'it carries the security and auth kinds, and it is not a new task',
+    });
+  });
 
   describe('past the step cap', () => {
     const capped = { ...small, limit: 1200, stepCapReached: true };
 
-    it('names the declared risk tags, not the cap', () => {
-      expect(proposalFiling({ ...capped, riskTags: ['auth'] })).toEqual({
+    it('names the declared kinds, not the cap', () => {
+      expect(proposalFiling({ ...capped, kinds: ['auth'] })).toEqual({
         file: false,
-        reason: 'it carries the auth risk tag',
+        reason: 'it carries the auth kind',
       });
     });
 
@@ -263,8 +307,8 @@ describe('proposalFiling', () => {
   );
 
   it('puts the reason on the card body after the proposal text', () => {
-    expect(proposalCardBody('Why.', 'it carries the auth risk tag')).toBe(
-      'Why.\n\nRaised as a card because it carries the auth risk tag.',
+    expect(proposalCardBody('Why.', 'it carries the auth kind')).toBe(
+      'Why.\n\nRaised as a card because it carries the auth kind.',
     );
   });
 });

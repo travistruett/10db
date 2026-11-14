@@ -6,6 +6,7 @@ import {
   ConflictError,
   DEFAULT_BOARD_COLUMN,
   Delivery,
+  effectiveRigor,
   EventType,
   InvalidError,
   isTerminal,
@@ -27,6 +28,7 @@ import {
   WorkstreamId,
   WorkstreamState,
   type GoalId,
+  type KindDto,
   type BoardColumnId,
   type CiStopped,
   type PassId,
@@ -34,16 +36,17 @@ import {
   type ProjectDto,
   type ProjectId,
   type ProposalId,
-  type RiskTag,
+  Rigor,
   type TaskConfig,
   type TaskDto,
   type TaskId,
+  type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
-import { getFlow } from './flows';
+import { checkTaskKinds, listKinds } from './kinds';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -186,7 +189,7 @@ export function insertTask(
 ): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
-  if (config.flowId) getFlow(ctx.tx, config.flowId);
+  const kinds = checkTaskKinds(ctx.tx, config.kinds);
   refuseUnknownAreas(project, config.areas);
   if (config.dependsOn.length > 0) {
     const deps = ctx.tx
@@ -206,6 +209,7 @@ export function insertTask(
   }
   return writeTask(ctx, projectId, {
     ...config,
+    kinds,
     landing: config.landing ?? taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, config.workspaceMode), reason: null }),
     proposalId: null,
@@ -252,8 +256,6 @@ export function insertGoalTask(
     acceptanceCriteria: [...input.acceptanceCriteria],
     areas: [...input.areas],
     dependsOn: [...input.dependsOn],
-    riskTags: [],
-    flowId: null,
     landing: taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     proposalId: null,
@@ -279,8 +281,6 @@ export function insertPassPageTask(
     acceptanceCriteria: [],
     areas: [input.area],
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     landing: taskLandingFor(project),
     workspaceMode: WorkspaceMode.Shared,
     reason: null,
@@ -374,8 +374,8 @@ export function insertTaskFromProposal(
     readonly title: string;
     readonly description: string;
     readonly parkInIcebox?: boolean;
-    /** The risk tags the lane declared when it proposed the task; none when left out. */
-    readonly riskTags?: readonly RiskTag[];
+    /** The kinds the lane declared when it proposed the task, each a kind that exists; none when left out. */
+    readonly kinds?: readonly TaskKind[];
   },
   placement?: Placement,
 ): TaskDto {
@@ -389,8 +389,7 @@ export function insertTaskFromProposal(
     acceptanceCriteria: [],
     areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
-    riskTags: [...(input.riskTags ?? [])],
-    flowId: null,
+    kinds: checkTaskKinds(ctx.tx, input.kinds ?? []),
     proposalId: input.proposalId,
   });
 }
@@ -446,8 +445,6 @@ export function insertFollowUpTask(
     acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
     areas: source.areas,
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     proposalId: null,
     boardColumnId: iceboxColumnId(ctx.tx, source.projectId),
   });
@@ -496,8 +493,6 @@ export function insertRetryLimitFollowUp(
         : ['The findings in the description are fixed'],
     areas: source.areas,
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     proposalId: null,
     boardColumnId: null,
   });
@@ -507,8 +502,11 @@ export function insertRetryLimitFollowUp(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing' | 'workspaceMode' | 'headline' | 'why'> &
-    Partial<Pick<TaskConfig, 'headline' | 'why'>> &
+  config: Omit<
+    TaskConfig,
+    'landing' | 'workspaceMode' | 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'
+  > &
+    Partial<Pick<TaskConfig, 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'>> &
     Placement & {
       readonly landing: TaskLanding;
       readonly proposalId: ProposalId | null;
@@ -531,8 +529,9 @@ function writeTask(
     description: config.description,
     acceptanceCriteria: config.acceptanceCriteria,
     areas: config.areas,
-    riskTags: config.riskTags,
-    flowId: config.flowId,
+    rigor: config.rigor ?? null,
+    kinds: config.kinds ?? [],
+    effortPin: config.effortPin ?? null,
     proposalId: config.proposalId,
     ...landingColumns(config.landing),
     status: TaskStatus.Open,
@@ -612,7 +611,26 @@ function passHolds(db: DbReader, passId: PassId | null): boolean {
   return pass !== undefined && passHoldsTasks(pass.state);
 }
 
-function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
+/** What a task's effective rigor reads besides the task: the kinds and its project's default. */
+interface RigorInputs {
+  readonly kinds: readonly KindDto[];
+  readonly projectDefault: Rigor;
+}
+
+function rigorInputs(db: DbReader, projectId: ProjectId): RigorInputs {
+  const row = db
+    .select({ defaultRigor: schema.projects.defaultRigor })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .get();
+  return { kinds: listKinds(db), projectDefault: row?.defaultRigor ?? Rigor.Standard };
+}
+
+function toTaskDto(
+  db: DbReader,
+  row: typeof schema.tasks.$inferSelect,
+  inputs: RigorInputs = rigorInputs(db, row.projectId),
+): TaskDto {
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
     .from(schema.taskDeps)
@@ -642,8 +660,15 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     description: row.description,
     acceptanceCriteria: row.acceptanceCriteria,
     areas: row.areas,
-    riskTags: row.riskTags,
-    flowId: row.flowId,
+    rigor: row.rigor,
+    effectiveRigor: effectiveRigor({
+      rigor: row.rigor,
+      projectDefault: inputs.projectDefault,
+      taskKinds: row.kinds,
+      kinds: inputs.kinds,
+    }),
+    kinds: row.kinds,
+    effortPin: row.effortPin,
     landing: landingOf(row),
     workspaceMode: row.workspaceMode,
     placementReason: row.placementReason,
@@ -678,8 +703,24 @@ export function getTask(db: DbReader, id: TaskId): TaskDto {
   return toTaskDto(db, row);
 }
 
+/**
+ * The tasks with these ids, in that order, reading the kinds and each project's default once for the whole
+ * list rather than once per task.
+ */
+export function getTasks(db: DbReader, ids: readonly TaskId[]): TaskDto[] {
+  const inputs = new Map<ProjectId, RigorInputs>();
+  return ids.map((id) => {
+    const row = db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
+    if (!row) throw new NotFoundError('task', id);
+    const known = inputs.get(row.projectId) ?? rigorInputs(db, row.projectId);
+    inputs.set(row.projectId, known);
+    return toTaskDto(db, row, known);
+  });
+}
+
 /** The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed. */
 export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
+  const inputs = rigorInputs(db, projectId);
   return db
     .select()
     .from(schema.tasks)
@@ -688,7 +729,7 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
     )
     .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
     .all()
-    .map((row) => toTaskDto(db, row));
+    .map((row) => toTaskDto(db, row, inputs));
 }
 
 /**
@@ -1007,9 +1048,10 @@ export function patchTask(
   proposed?: Placement,
 ): TaskDto {
   const changes = TaskPatch.parse(patch);
+  if (changes.kinds !== undefined)
+    changes.kinds = checkTaskKinds(ctx.tx, changes.kinds, getTask(ctx.tx, id).kinds);
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
-  if (changes.flowId) getFlow(ctx.tx, changes.flowId);
   const { landing, ...fields } = changes;
   if (landing !== undefined) {
     // The branch is cut and the pull request opened for the task's batch, so once the task has run

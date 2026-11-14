@@ -14,6 +14,7 @@ import { createJudge, type JudgeRequest } from './index';
 
 const KEY = 'router-test-key-0123';
 const SYSTEM_ONE_URL = 'https://openrouter.ai/api/v1/systemone';
+const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
 const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface Seen {
@@ -59,6 +60,8 @@ let keyAsked: (AccountId | null)[];
 let key: string | null;
 let keyError: Error | null;
 let keyHangs: boolean;
+/** OpenRouter's decision models as the judge's list reads them; null when the list can't be read. */
+let decisionModels: ReadonlySet<string> | null;
 
 function build(options: { off?: boolean } = {}) {
   return createJudge({
@@ -84,6 +87,7 @@ function build(options: { off?: boolean } = {}) {
       if (keyHangs) return new Promise<string | null>(() => undefined);
       return Promise.resolve(key);
     },
+    decisionModelIds: () => decisionModels,
     off: options.off ?? false,
     logger: silentLogger,
   });
@@ -108,6 +112,7 @@ beforeEach(() => {
   key = KEY;
   keyError = null;
   keyHangs = false;
+  decisionModels = new Set(['typesafe/jev-1.13', 'liquid/d1']);
   handler = () => json(systemOneBody({ review: 0.07, skip: 0.93 }));
 });
 afterEach(() => {
@@ -192,6 +197,79 @@ describe('judge.choose with a System One model', () => {
     await judge.choose(request);
     await judge.choose(request);
     expect(keyReads).toBe(2);
+  });
+});
+
+describe('judge.choose with another decision model', () => {
+  beforeEach(() => {
+    store.write((ctx) =>
+      patchJudgeConfig(ctx, { decisions: { review_size: { model: 'liquid/d1' } } }),
+    );
+  });
+
+  const decisionsBody = (answer: Record<string, unknown>) => ({
+    id: 'gen-dec-2',
+    model: 'liquid/d1',
+    answers: { decision: { type: 'choice', ...answer } },
+    usage: { input_tokens: 80, output_tokens: 1, cost: 0.000002 },
+  });
+
+  it('asks the decisions endpoint the System One question and answers with the chosen probability', async () => {
+    handler = () =>
+      json(decisionsBody({ choice: 'skip', probabilities: { review: 0.2, skip: 0.8 } }));
+    expect(await build().choose(request)).toMatchObject({
+      kind: 'answered',
+      choice: 'skip',
+      confidence: 0.8,
+      model: 'liquid/d1',
+      costUsd: 0.000002,
+    });
+    expect(seen.map((s) => s.url)).toEqual([DECISIONS_URL]);
+    expect(seen[0]?.body).toEqual({
+      model: 'liquid/d1',
+      state: request.state,
+      questions: {
+        decision: {
+          type: 'choice',
+          instructions: request.question,
+          // Some makers (Parallel, ScaleDown) refuse a null criterion: an option with none is described by its name.
+          criteria: { review: 'review', skip: 'skip' },
+        },
+      },
+    });
+  });
+
+  it('reads the confidence when the answer has no probabilities', async () => {
+    handler = () => json(decisionsBody({ choice: 'review', confidence: 0.6 }));
+    expect(await build().choose(request)).toMatchObject({ choice: 'review', confidence: 0.6 });
+  });
+
+  it('falls back on an answer with no confidence, which no floor can be checked against', async () => {
+    handler = () => json(decisionsBody({ choice: 'skip' }));
+    const answer = await build().choose(request);
+    expect(answer).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(answer.kind === 'fallback' && answer.detail).toMatch(/without a confidence/);
+  });
+
+  it.each([
+    ['a decision model', 'liquid/d1', DECISIONS_URL],
+    ['a model the list leaves out', 'anthropic/claude-haiku-5.5', CHAT_URL],
+    ['a TypeSafe model the list leaves out', 'typesafe/jev-2', SYSTEM_ONE_URL],
+  ])('sends %s to its endpoint', async (_name, model, url) => {
+    store.write((ctx) => patchJudgeConfig(ctx, { decisions: { review_size: { model } } }));
+    await build().choose(request);
+    expect(seen.map((s) => s.url)).toEqual([url]);
+  });
+
+  it('takes a model to be a decision model when the list cannot be read', async () => {
+    decisionModels = null;
+    store.write((ctx) =>
+      patchJudgeConfig(ctx, {
+        decisions: { review_size: { model: 'anthropic/claude-haiku-5.5' } },
+      }),
+    );
+    await build().choose(request);
+    expect(seen.map((s) => s.url)).toEqual([DECISIONS_URL]);
   });
 });
 
@@ -498,6 +576,20 @@ describe('judge.test', () => {
     handler = () => json({ error: { message: 'No auth credentials found' } }, 401);
     const result = await build().test(mintId('Account'));
     expect(!result.ok && result.error).toMatch(/401/);
+  });
+
+  it('tests the model it is given instead of the review model', async () => {
+    handler = () =>
+      json({
+        model: 'liquid/d1',
+        answers: { decision: { type: 'choice', choice: 'review', confidence: 0.7 } },
+        usage: {},
+      });
+    expect(await build().test(mintId('Account'), 'liquid/d1')).toMatchObject({
+      ok: true,
+      model: 'liquid/d1',
+    });
+    expect(seen.map((s) => [s.url, s.body['model']])).toEqual([[DECISIONS_URL, 'liquid/d1']]);
   });
 
   it('still tests with the decision switched off', async () => {

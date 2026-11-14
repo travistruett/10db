@@ -11,11 +11,11 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon
 import {
   batchDto,
   candidate,
-  flowDto,
   projectViewDto,
   taskDto,
   workstreamDto,
 } from '../../../test/fixtures';
+import { kindDto } from '../../../test/playbook-fixtures';
 
 const local = projectViewDto({ maxLanes: 2, gateCommand: 'make gate', delivery: 'local' });
 const one = taskDto({ projectId: local.id, title: 'One', boardStatus: 'ready', boardOrder: 1 });
@@ -67,7 +67,6 @@ function serve(
     http.get(daemonUrl('/projects/:projectId/tasks'), () =>
       HttpResponse.json(opts.tasks ?? [one, two]),
     ),
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
       const size = Number(new URL(request.url).searchParams.get('size'));
       opts.sizes?.push(size);
@@ -559,26 +558,26 @@ describe('BatchSheet', () => {
     ).toBeTruthy();
   });
 
-  it('changes a task’s flow from the sheet', async () => {
-    const quick = flowDto({ name: 'quick' });
+  it('changes a task’s kinds from the sheet', async () => {
+    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: unknown[] = [];
     serve(
       local,
       {},
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([quick])),
+      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
       http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
         patched.push(await request.json());
         return HttpResponse.json(one);
       }),
     );
     const sheet = await openSheet();
-    await pick(await within(sheet).findByLabelText('Flow for One'), 'quick');
+    await pick(await within(sheet).findByLabelText('Kinds for One'), 'Security');
     await waitFor(() => {
-      expect(patched).toEqual([{ flowId: quick.id }]);
+      expect(patched).toEqual([{ kinds: [{ key: 'security', source: 'builder' }] }]);
     });
   });
 
-  it('changes a task’s risk tags from the sheet', async () => {
+  it('changes a task’s rigor from the sheet', async () => {
     const patched: unknown[] = [];
     serve(
       local,
@@ -589,9 +588,9 @@ describe('BatchSheet', () => {
       }),
     );
     const sheet = await openSheet();
-    await pick(await within(sheet).findByLabelText('Risk tags for One'), 'auth');
+    await pick(await within(sheet).findByLabelText('Rigor for One'), 'Careful');
     await waitFor(() => {
-      expect(patched).toEqual([{ riskTags: ['auth'] }]);
+      expect(patched).toEqual([{ rigor: 'careful' }]);
     });
   });
 });

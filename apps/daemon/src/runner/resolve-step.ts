@@ -7,12 +7,15 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
-import { chooseModel, NoProfileError, type ChooseInput } from '../routing';
+import { chooseModel, type ChooseInput } from '../routing';
 
-/** What choosing again needs besides what the account offers: the step's task, project and the builder's settings. */
+/**
+ * What choosing again needs besides what the account offers: the step's task and project, and the effort and
+ * fallback rung the playbook gives the step now.
+ */
 export interface StepContext extends Pick<
   ChooseInput,
-  'persona' | 'task' | 'project' | 'roleSettings' | 'patterns' | 'tierOverrides'
+  'task' | 'project' | 'tierOverrides' | 'effort' | 'fallback'
 > {
   /**
    * The tier the planned model is in, for a step whose model the account refused: the step starts over in
@@ -67,25 +70,16 @@ export function resolveStep(
   if (offered(step, profiles, accountModels)) return step;
   const refused = accountModels.some((m) => m.model === step.model && m.unusable);
   const startOverTier = refused ? context.plannedTier : undefined;
-  const choose = (byScore: boolean) =>
-    chooseModel({
-      ...context,
-      def: { role: step.role, need: step.need },
-      accountModels,
-      profiles,
-      stakes: { retry: false },
-      byScore,
-      plannedSetting: step.setting,
-      ...(startOverTier === undefined ? {} : { startOverTier }),
-    });
-  let choice;
-  try {
-    choice = choose(true);
-  } catch (error) {
-    // A step that already started must not be refused for want of a score that clears its need.
-    if (!(error instanceof NoProfileError)) throw error;
-    choice = choose(false);
-  }
+  // The setting the step was planned with stands for what the playbook asked: it is applied again.
+  const choice = chooseModel({
+    ...context,
+    def: { role: step.role, need: step.need },
+    requirements: [step.setting ?? { kind: 'automatic' }],
+    pinned: step.pinned,
+    accountModels,
+    profiles,
+    ...(startOverTier === undefined ? {} : { startOverTier }),
+  });
   const profileId = choice.profile?.id ?? null;
   if (choice.model === step.model && choice.effort === step.effort && profileId === step.profileId)
     return step;

@@ -24,7 +24,6 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
-  findFlowByName,
   getWorkstreamRow,
   insertTask,
   listInbox,
@@ -313,14 +312,12 @@ export function createDeliveryHarness(
   const gh = new FakeGh();
   const jobs = createDeliveryJobs(silentLogger);
   const ticks = { count: 0 };
-  const quick = findFlowByName(store.db, 'quick');
-  if (!quick) throw new Error('the quick flow was not seeded');
   const seeded = seedProject(store, {
     repoPath: remote.repo.path,
     gateCommand: 'true',
     delivery: 'pull_request',
     prTitlePrefix: 'feat(app)',
-    flowId: quick.id,
+    defaultRigor: 'light',
     areas: [
       { name: 'api', globs: ['src/api/**'] },
       { name: 'ui', globs: ['src/ui/**'] },

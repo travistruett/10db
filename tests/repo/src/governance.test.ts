@@ -127,7 +127,7 @@ describe('rulesets', () => {
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as { integration_id?: number }[];
-    expect(checks.length).toBe(12);
+    expect(checks.length).toBe(13);
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 

@@ -2,8 +2,10 @@ import {
   isMetered,
   ModelStatus,
   type AccountDto,
+  type AccountId,
   type AccountModelDto,
   type ModelRowDto,
+  type ModelSource,
   type RolePickDto,
 } from '@10db/contracts';
 import { Badge, Drawer, Stack, Table, Text, Title } from '@mantine/core';
@@ -14,6 +16,9 @@ import { absoluteTime, fromNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { formatCost, formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
+import { ModelMeasuresPanel } from './model-measures-panel';
+import { modelSourceText } from './number-source';
+import { SourcedNumber } from './sourced-number';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, intelligenceAxis, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
@@ -131,6 +136,11 @@ function Accounts({
   );
 }
 
+const sourceWords = (
+  source: ModelSource | null,
+  field: 'intelligence' | 'coding' | 'agentic' | 'costPerTask',
+): string | null => (source === null ? null : modelSourceText(source, field, null));
+
 /** One line per effort, low to max, the order of the chart above it from left to right. */
 function Efforts({ row }: { readonly row: ModelRowDto }) {
   return (
@@ -150,8 +160,18 @@ function Efforts({ row }: { readonly row: ModelRowDto }) {
           .map((e) => (
             <Table.Tr key={e.profileId}>
               <Table.Td>{e.effort}</Table.Td>
-              <Table.Td ta="right">{formatScore(e.intelligence)}</Table.Td>
-              <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
+              <Table.Td ta="right">
+                <SourcedNumber
+                  text={formatScore(e.intelligence)}
+                  source={sourceWords(e.sources.intelligence, 'intelligence')}
+                />
+              </Table.Td>
+              <Table.Td ta="right">
+                <SourcedNumber
+                  text={formatCost(e.costPerTaskUsd)}
+                  source={sourceWords(e.sources.costPerTask, 'costPerTask')}
+                />
+              </Table.Td>
               <Table.Td ta="right">{e.stepsRun}</Table.Td>
               <Table.Td ta="right">{formatFirstPass(e.firstPassSteps, e.stepsRun)}</Table.Td>
             </Table.Tr>
@@ -165,10 +185,12 @@ function DrawerBody({
   row,
   now,
   picks,
+  account,
 }: {
   readonly row: ModelRowDto;
   readonly now: number;
   readonly picks: readonly RolePickDto[];
+  readonly account: AccountId | null;
 }) {
   const accounts = useAccounts();
   const offers = useModelOffers();
@@ -233,9 +255,40 @@ function DrawerBody({
         ) : null}
         <Text size="sm" c="dimmed">
           List price per 1M tokens: {formatPrice(row.inputPrice)} in ·{' '}
-          {formatPrice(row.outputPrice)} out · speed {formatScore(row.outputTokensPerSecond)}{' '}
+          {formatPrice(row.outputPrice)} out · speed{' '}
+          <SourcedNumber
+            text={formatScore(row.outputTokensPerSecond)}
+            source={
+              row.sources.speed === null
+                ? null
+                : modelSourceText(row.sources.speed, 'speed', row.speedProvider)
+            }
+          />{' '}
           tokens/s
         </Text>
+        {row.coding === null && row.agentic === null ? null : (
+          <Text size="sm" c="dimmed">
+            {row.coding === null ? null : (
+              <>
+                Coding{' '}
+                <SourcedNumber
+                  text={formatScore(row.coding)}
+                  source={sourceWords(row.sources.coding, 'coding')}
+                />
+              </>
+            )}
+            {row.coding !== null && row.agentic !== null ? ' · ' : null}
+            {row.agentic === null ? null : (
+              <>
+                Agentic{' '}
+                <SourcedNumber
+                  text={formatScore(row.agentic)}
+                  source={sourceWords(row.sources.agentic, 'agentic')}
+                />
+              </>
+            )}
+          </Text>
+        )}
       </Stack>
       <Stack gap="xs">
         <Title order={4}>What each effort buys</Title>
@@ -258,6 +311,7 @@ function DrawerBody({
           <ArtificialAnalysisCredit />
         </Text>
       </Stack>
+      <ModelMeasuresPanel model={row.model} account={account} />
       <Stack gap="xs">
         <Title order={4}>Offered by</Title>
         <Accounts row={row} offers={mine} accounts={accountList} now={now} />
@@ -273,6 +327,7 @@ export function ModelDrawer({
   onClose,
   now,
   picks,
+  account,
 }: {
   readonly row: ModelRowDto | null;
   readonly opened: boolean;
@@ -280,6 +335,8 @@ export function ModelDrawer({
   readonly now: number;
   /** The router's picks on the page's account, whose rings the model's chart draws. */
   readonly picks: readonly RolePickDto[];
+  /** The page's account, whose provider the model's speed is marked for. */
+  readonly account: AccountId | null;
 }) {
   return (
     <Drawer
@@ -290,7 +347,9 @@ export function ModelDrawer({
       title={row?.name ?? 'Model'}
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
-      {row ? <DrawerBody key={row.model} row={row} now={now} picks={picks} /> : null}
+      {row ? (
+        <DrawerBody key={row.model} row={row} now={now} picks={picks} account={account} />
+      ) : null}
     </Drawer>
   );
 }

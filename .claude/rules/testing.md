@@ -42,6 +42,11 @@
 - **Table-driven tests** for state machines, rules and parsers: one row per case, named.
 - **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,
   not on which private function ran.
+- **Size the unit of work to the risk.** Concurrent state machines, git, recovery, claims and
+  permissions go in small steps, one commit and one red-first test per behavior. Routes, wiring and
+  views go as one vertical slice with a test through the real daemon, in a handful of commits. A
+  review round's minor fixes (wording, a color, a missing row, a rename) go in one commit with one
+  value card for the round; a change that alters no behavior needs no new test.
 - **Match rigor to impact.** Recovery, permissions, claims and the git guard get exhaustive cases;
   a label component gets one render test.
 - **Tests never inherit `GIT_*` from the environment.** Git exports `GIT_DIR` and more to hooks,

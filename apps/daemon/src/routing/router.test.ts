@@ -1,20 +1,13 @@
 import { mintId, type AccountModelDto, type StepRole, type WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { escalateStep, NoProfileError, route, UnmeasuredError } from './router';
+import { escalateStep, route, UnmeasuredError } from './router';
 import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
-const none = { minimum: 0, why: null };
-const at = (
-  role: StepRole,
-  need: number,
-  opts: { floor?: { minimum: number; why: string }; ceiling?: number | null } = {},
-) => ({
+const at = (role: StepRole, need: number, opts: { ceiling?: number | null } = {}) => ({
   role,
   need,
-  floor: opts.floor ?? none,
   budgetCeiling: opts.ceiling ?? null,
   profiles: testCatalogue(),
-  shortfall: 'refuse' as const,
 });
 
 describe('route', () => {
@@ -32,12 +25,6 @@ describe('route', () => {
       over: false,
     },
     { name: 'QA on intelligence', input: at('qa', 35), want: 'mid@low', over: false },
-    {
-      name: 'the floor over a lower need',
-      input: at('review', 48, { floor: { minimum: 52, why: 'security-sensitive review' } }),
-      want: 'big@max',
-      over: false,
-    },
     {
       name: 'the cheapest of all for a small need',
       input: at('implement', 15),
@@ -91,20 +78,14 @@ describe('route', () => {
   });
 
   it('explains its choice', () => {
-    const choice = route(
-      at('review', 48, { floor: { minimum: 52, why: 'security-sensitive review' }, ceiling: 3 }),
-    );
+    const choice = route(at('review', 52, { ceiling: 3 }));
     expect(choice.reason).toBe(
-      'by score: cheapest profile at or above 52 intelligence (floor: security-sensitive review); over the budget ceiling of $3',
+      'by score: cheapest profile at or above 52 intelligence; over the budget ceiling of $3',
     );
   });
 
-  it('throws NoProfileError when measured profiles exist but none reaches the minimum', () => {
-    expect(() => route(at('implement', 99))).toThrow(NoProfileError);
-  });
-
-  it('takes the highest scoring profile when none reaches the minimum and the caller allows it', () => {
-    const choice = route({ ...at('review', 99), shortfall: 'strongest' });
+  it('takes the highest scoring profile when none reaches the minimum', () => {
+    const choice = route(at('review', 99));
     expect(label(choice.profile)).toBe('big@max');
     expect(choice.reason).toBe('by score: none reaches 99 intelligence, so the highest scoring');
   });
@@ -247,7 +228,7 @@ describe('escalateStep without scores', () => {
       model: p.model,
       effort: p.effort,
       need: 40,
-      reason: 'by role default: the balanced model offered',
+      reason: 'by the rigor’s fallback rung: the balanced model offered',
       overBudget: false,
       pinned: false,
       status: 'running',
@@ -331,7 +312,7 @@ describe('escalateStep on a profile it cannot compare', () => {
       model: here.model,
       effort: here.effort,
       need: 40,
-      reason: 'by role default: the balanced model offered',
+      reason: 'by the rigor’s fallback rung: the balanced model offered',
       overBudget: false,
       pinned: false,
       status: 'running',

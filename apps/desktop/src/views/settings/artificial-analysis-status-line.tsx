@@ -16,7 +16,10 @@ function sentence(status: BenchmarkStatusDto): { text: string; link: string | nu
     };
   if (!status.keyConfigured)
     return {
-      text: 'No Artificial Analysis key: models are compared without scores',
+      text:
+        status.openRouter.outcome === 'ok'
+          ? 'No Artificial Analysis key: scores at max effort only, through OpenRouter'
+          : 'No Artificial Analysis key: models are compared without scores',
       link: 'Add Key',
     };
   const synced = status.syncing

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
+import { Rigor } from './rigor';
 import { Effort, StepRole, StepStatus, ToolAccess, Verdict } from './states';
 
 /** Longest result a step may record: a plan or a review's notes. */
@@ -71,7 +72,8 @@ export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 
 /** What starting a task would run, before it runs (the M2b approval sheet edits this). */
 export const StepPlanDto = z.object({
-  flowName: z.string(),
+  /** The rigor the steps came from; null for a plan no rigor made, such as a merge fix. */
+  rigor: z.enum(Rigor).nullable(),
   steps: z.array(WorkstreamStep),
   /** Steps whose need no profile within the budget ceiling meets; starting is refused while any remain. */
   overBudget: z.array(z.int().min(0)),

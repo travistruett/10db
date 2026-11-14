@@ -5,6 +5,19 @@
     "account": {
       "type": "string",
       "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "rigor": {
+      "type": "string",
+      "enum": [
+        "light",
+        "standard",
+        "careful",
+        "critical"
+      ]
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     }
   },
   "required": [

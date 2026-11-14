@@ -33,7 +33,7 @@ import { findUnfinishedBatch, getBatchRow, insertBatch, transitionBatch } from '
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { dropAllowThisOffers } from './task-thread';
-import { getTask } from './tasks';
+import { getTask, getTasks } from './tasks';
 
 type PassRow = typeof schema.passes.$inferSelect;
 
@@ -227,13 +227,16 @@ export function insertPass(
 
 /** The tasks in the pass now, oldest first: a task that left it is not one. */
 export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
-  return db
+  const rows = db
     .select({ id: schema.tasks.id })
     .from(schema.tasks)
     .where(and(eq(schema.tasks.passId, passId), ne(schema.tasks.status, TaskStatus.Cancelled)))
     .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
-    .all()
-    .map((row) => getTask(db, row.id));
+    .all();
+  return getTasks(
+    db,
+    rows.map((row) => row.id),
+  );
 }
 
 /**

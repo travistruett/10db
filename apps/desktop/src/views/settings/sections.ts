@@ -18,7 +18,6 @@ export const SettingsSectionKey = {
   Accounts: 'accounts',
   Decisions: 'decisions',
   Models: 'models',
-  PersonasAndFlows: 'personas-and-flows',
 } as const;
 export type SettingsSectionKey = (typeof SettingsSectionKey)[keyof typeof SettingsSectionKey];
 
@@ -70,7 +69,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     Project,
     'Agents',
     'Models by role',
-    "Not built yet: which persona runs each role, and the project's human members.",
+    "Not built yet: the project's human members.",
   ),
   section(SettingsSectionKey.ProjectTrust, Project, 'Agents', 'Trust'),
   section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network hosts'),
@@ -78,13 +77,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   section(SettingsSectionKey.Accounts, App, 'AI', 'Accounts'),
   section(SettingsSectionKey.Models, App, 'AI', 'Models'),
   section(SettingsSectionKey.Decisions, App, 'AI', 'Decisions'),
-  section(
-    SettingsSectionKey.PersonasAndFlows,
-    App,
-    'AI',
-    'Models by role',
-    'Not built yet: personas, their instructions and pins, and the flows of steps.',
-  ),
   section(SettingsSectionKey.LanePermissions, App, 'Agents', 'Lane permissions'),
   section(SettingsSectionKey.Trust, App, 'Agents', 'Trust'),
   section(SettingsSectionKey.Integrations, App, 'Connections', 'Integrations'),
@@ -94,6 +86,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 ];
 
 const KEYS = new Set<string>(Object.values(SettingsSectionKey));
+
+/** Sections that no longer exist, by the address they had, and the section their content moved to. */
+const RETIRED_SECTIONS: Readonly<Record<string, SettingsSectionKey>> = {
+  'personas-and-flows': SettingsSectionKey.Models,
+};
+
+/** Where an address that is not a section now lands: the section that took over its content, else General. */
+export function sectionForAddress(value: string): SettingsSectionKey {
+  return RETIRED_SECTIONS[value] ?? SettingsSectionKey.General;
+}
 
 export function isSettingsSectionKey(value: string): value is SettingsSectionKey {
   return KEYS.has(value);

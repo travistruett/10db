@@ -4,12 +4,8 @@ import {
   CatalogueStatusDto,
   isPickableModel,
   ModelStatus,
-  ModelSettingsInput,
   ModelRowDto,
   ModelSetting,
-  PatternDto,
-  PatternMatch,
-  RoleSettingDto,
 } from './catalogue';
 import { mintId } from './ids';
 import { WorkstreamStep } from './steps';
@@ -61,108 +57,6 @@ describe('ModelSetting', () => {
       kind: 'tier',
       tier: 'frontier',
     });
-  });
-});
-
-describe('PatternMatch', () => {
-  it('defaults every field, and the defaults mean any', () => {
-    expect(PatternMatch.parse({})).toEqual({
-      roles: [],
-      riskTags: [],
-      areas: [],
-      retryOnly: false,
-    });
-  });
-
-  it('rejects a role that is not a step role', () => {
-    expect(PatternMatch.safeParse({ roles: ['janitor'] }).success).toBe(false);
-  });
-});
-
-describe('PatternDto', () => {
-  it('parses a pattern with an empty match', () => {
-    const parsed = PatternDto.parse({
-      id: mintId('Pattern'),
-      projectId: null,
-      name: 'Migrations',
-      match: {},
-      setting: { kind: 'top_of_tier' },
-      position: 0,
-    });
-    expect(parsed.match.retryOnly).toBe(false);
-  });
-});
-
-describe('RoleSettingDto', () => {
-  it('pairs a role and a project with a setting', () => {
-    const dto = {
-      role: 'review',
-      projectId: mintId('Project'),
-      setting: { kind: 'automatic' },
-    };
-    expect(RoleSettingDto.parse(dto)).toEqual(dto);
-  });
-});
-
-describe('the model settings a form sends', () => {
-  const automatic = { kind: 'automatic' };
-  it.each([
-    {
-      name: 'a global role set',
-      input: { roles: [{ role: 'review', setting: automatic }] },
-      ok: true,
-    },
-    {
-      name: 'a global role handed back to 10db’s default',
-      input: { roles: [{ role: 'review', setting: null }] },
-      ok: true,
-    },
-    {
-      name: 'a global list of patterns',
-      input: { patterns: [{ name: 'Risky', setting: automatic }] },
-      ok: true,
-    },
-    {
-      name: 'a pattern with a blank name',
-      input: { patterns: [{ name: '   ', setting: automatic }] },
-      ok: false,
-    },
-    {
-      name: 'a role that is not a step role',
-      input: { roles: [{ role: 'janitor', setting: automatic }] },
-      ok: false,
-    },
-    {
-      name: 'a role set twice',
-      input: {
-        roles: [
-          { role: 'review', setting: automatic },
-          { role: 'review', setting: automatic },
-        ],
-      },
-      ok: false,
-    },
-  ])('global: $name parses $ok', ({ input, ok }) => {
-    expect(ModelSettingsInput.safeParse(input).success).toBe(ok);
-  });
-
-  it('lets a project hand a role back to the global setting with null', () => {
-    const parsed = ModelSettingsInput.parse({ roles: [{ role: 'review', setting: null }] });
-    expect(parsed.roles).toEqual([{ role: 'review', setting: null }]);
-    expect(parsed.patterns).toBeUndefined();
-  });
-
-  it('fills a pattern’s match and trims its name', () => {
-    const parsed = ModelSettingsInput.parse({
-      patterns: [{ name: ' Risky ', setting: automatic }],
-    });
-    expect(parsed.patterns).toEqual([
-      {
-        name: 'Risky',
-        match: { roles: [], riskTags: [], areas: [], retryOnly: false },
-        setting: automatic,
-      },
-    ]);
   });
 });
 
@@ -226,7 +120,38 @@ describe('ModelRowDto', () => {
       stepsRun: 0,
       firstSeenAt: '2026-11-06T12:00:00.000Z',
     };
-    expect(ModelRowDto.parse(row)).toEqual(row);
+    expect(ModelRowDto.parse(row)).toMatchObject(row);
+  });
+
+  it('reads a row from before the sources existed with null scores and no sources', () => {
+    const row = ModelRowDto.parse({
+      model: 'mystery-1',
+      name: 'Mystery 1',
+      maker: null,
+      family: null,
+      tier: null,
+      status: 'unknown',
+      availableOn: [],
+      providers: [],
+      inputPrice: null,
+      outputPrice: null,
+      intelligence: 40,
+      costPerTaskUsd: null,
+      outputTokensPerSecond: null,
+      efforts: [],
+      stepsRun: 0,
+      firstSeenAt: null,
+    });
+    expect(row.coding).toBeNull();
+    expect(row.agentic).toBeNull();
+    expect(row.speedProvider).toBeNull();
+    expect(row.sources).toEqual({
+      intelligence: null,
+      coding: null,
+      agentic: null,
+      costPerTask: null,
+      speed: null,
+    });
   });
 
   it('accepts a model with no first-seen time: it has no profile to date it by', () => {

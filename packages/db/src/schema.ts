@@ -18,6 +18,7 @@ import type {
   WorkstreamFailure,
   BatchId,
   BatchState,
+  CellSetting,
   CiStopped,
   BoardColumnId,
   ClaimId,
@@ -32,7 +33,6 @@ import type {
   StoredRequiredChecks,
   FailingCheckDto,
   FlowId,
-  FlowStepDef,
   GoalBudget,
   GoalCriterionId,
   GoalId,
@@ -49,12 +49,12 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  KindId,
   KnowledgeScope,
   LandingGroupId,
   JudgeDecision,
   JudgeOutcome,
   McpVerdict,
-  ModelPin,
   ModelSetting,
   ModelStatus,
   ModelTier,
@@ -75,7 +75,6 @@ import type {
   SkipSource,
   LimitName,
   PatternId,
-  PatternMatch,
   ModelProfileId,
   NextAction,
   Notice,
@@ -101,7 +100,7 @@ import type {
   ProposalKind,
   Provider,
   QuestionCategory,
-  RiskTag,
+  Rigor,
   RoutingRuleId,
   SessionId,
   SessionMode,
@@ -116,6 +115,7 @@ import type {
   ScreenTheme,
   ScreenViewport,
   ScreensMatrix,
+  TaskKind,
   TaskLanding,
   TaskMessageId,
   TaskStatus,
@@ -152,6 +152,12 @@ import type {
   ShapeState,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
+import type {
+  LegacyFlowStep,
+  LegacyModelPin,
+  LegacyPatternMatch,
+  LegacyRiskTag,
+} from './legacy-types';
 import { sql } from 'drizzle-orm';
 import {
   type AnySQLiteColumn,
@@ -165,6 +171,7 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import type { OpenRouterMeasureKind } from './openrouter-measure-kind';
 import type { Json } from './json';
 
 const createdAt = () => text('created_at').notNull();
@@ -194,7 +201,7 @@ export const appSettings = sqliteTable('app_settings', {
 export const flows = sqliteTable('flows', {
   id: text('id').$type<FlowId>().primaryKey(),
   name: text('name').notNull().unique(),
-  steps: text('steps', { mode: 'json' }).$type<FlowStepDef[]>().notNull(),
+  steps: text('steps', { mode: 'json' }).$type<LegacyFlowStep[]>().notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -268,6 +275,8 @@ export const projects = sqliteTable('projects', {
   flowId: text('flow_id')
     .$type<FlowId>()
     .references(() => flows.id),
+  /** The rigor a task gets when nothing else sets one. */
+  defaultRigor: text('default_rigor').$type<Rigor>().notNull().default('standard'),
   budgetCeiling: real('budget_ceiling'),
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
@@ -435,12 +444,20 @@ export const tasks = sqliteTable(
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),
     riskTags: text('risk_tags', { mode: 'json' })
-      .$type<RiskTag[]>()
+      .$type<LegacyRiskTag[]>()
       .notNull()
       .default(sql`'[]'`),
     flowId: text('flow_id')
       .$type<FlowId>()
       .references(() => flows.id),
+    /** The rigor set on the task; null follows the project's default and the task's kinds. */
+    rigor: text('rigor').$type<Rigor>(),
+    kinds: text('kinds', { mode: 'json' })
+      .$type<TaskKind[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The builder's effort for every step of the task; null is no pin. */
+    effortPin: text('effort_pin').$type<Effort>(),
     /** The accepted proposal this task was filed from; null for a task made by hand. */
     proposalId: text('proposal_id')
       .$type<ProposalId>()
@@ -978,7 +995,7 @@ export const personas = sqliteTable('personas', {
     .notNull()
     .default(sql`'[]'`),
   minimumScore: real('minimum_score'),
-  modelPin: text('model_pin', { mode: 'json' }).$type<ModelPin>(),
+  modelPin: text('model_pin', { mode: 'json' }).$type<LegacyModelPin>(),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1243,6 +1260,77 @@ export const roleSettings = sqliteTable(
   ],
 );
 
+/** A kind of work: its minimum rigor, safety switches, extra steps and per-role overrides. Global. */
+export const kinds = sqliteTable('kinds', {
+  id: text('id').$type<KindId>().primaryKey(),
+  key: text('key').notNull().unique(),
+  label: text('label').notNull(),
+  description: text('description').notNull().default(''),
+  minimumRigor: text('minimum_rigor').$type<Rigor>(),
+  alwaysReviewed: integer('always_reviewed', { mode: 'boolean' }).notNull().default(false),
+  failsAtLimit: integer('fails_at_limit', { mode: 'boolean' }).notNull().default(false),
+  ownCopy: integer('own_copy', { mode: 'boolean' }).notNull().default(false),
+  toInbox: integer('to_inbox', { mode: 'boolean' }).notNull().default(false),
+  addsSteps: text('adds_steps', { mode: 'json' })
+    .$type<StepRole[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  overrides: text('overrides', { mode: 'json' })
+    .$type<Partial<Record<StepRole, CellSetting>>>()
+    .notNull()
+    .default(sql`'{}'`),
+  position: integer('position').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** The steps a rigor runs, as one scope overrides 10db's default: one row per rigor and project, and one per rigor with none. */
+export const playbookRows = sqliteTable(
+  'playbook_rows',
+  {
+    rigor: text('rigor').$type<Rigor>().notNull(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    steps: text('steps', { mode: 'json' }).$type<StepRole[]>().notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('playbook_rows_project_idx')
+      .on(t.rigor, t.projectId)
+      .where(sql`${t.projectId} is not null`),
+    uniqueIndex('playbook_rows_global_idx')
+      .on(t.rigor)
+      .where(sql`${t.projectId} is null`),
+  ],
+);
+
+/** Who runs a step at a rigor, as one scope overrides 10db's default; a null field leaves it to the scope above. */
+export const playbookCells = sqliteTable(
+  'playbook_cells',
+  {
+    rigor: text('rigor').$type<Rigor>().notNull(),
+    role: text('role').$type<StepRole>().notNull(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    personaId: text('persona_id')
+      .$type<PersonaId>()
+      .references(() => personas.id),
+    model: text('model', { mode: 'json' }).$type<ModelSetting>(),
+    effort: text('effort').$type<Effort>(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('playbook_cells_project_idx')
+      .on(t.rigor, t.role, t.projectId)
+      .where(sql`${t.projectId} is not null`),
+    uniqueIndex('playbook_cells_global_idx')
+      .on(t.rigor, t.role)
+      .where(sql`${t.projectId} is null`),
+  ],
+);
+
 /** A rule that gives matching steps a model setting; the lowest position within its scope that matches wins. */
 export const patterns = sqliteTable(
   'patterns',
@@ -1252,7 +1340,7 @@ export const patterns = sqliteTable(
       .$type<ProjectId>()
       .references(() => projects.id),
     name: text('name').notNull(),
-    match: text('match', { mode: 'json' }).$type<PatternMatch>().notNull(),
+    match: text('match', { mode: 'json' }).$type<LegacyPatternMatch>().notNull(),
     setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
     position: integer('position').notNull(),
     createdAt: createdAt(),
@@ -1267,6 +1355,29 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * What OpenRouter measures, kept only on this machine and read with the builder's own key: Artificial Analysis's
+ * scores as OpenRouter relays them, OpenRouter's own benchmark results, and each provider's p50 speed.
+ * `key` is the benchmark name for `score_openrouter`, the provider for `speed` and `''` for `score_aa`.
+ */
+export const openrouterMeasures = sqliteTable(
+  'openrouter_measures',
+  {
+    id: text('id').notNull(),
+    kind: text('kind').$type<OpenRouterMeasureKind>().notNull(),
+    key: text('key').notNull(),
+    intelligence: real('intelligence'),
+    coding: real('coding'),
+    agentic: real('agentic'),
+    accuracy: real('accuracy'),
+    costPerTaskUsd: real('cost_per_task_usd'),
+    tokensPerSecond: real('tokens_per_second'),
+    latencyMs: real('latency_ms'),
+    measuredAt: text('measured_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.id, t.kind, t.key] })],
+);
 
 /** An outcome 10db pursues across many tasks (goals spec §4). Phase 1 writes only `draft`. */
 export const goals = sqliteTable(
@@ -1397,6 +1508,8 @@ export const shapes = sqliteTable(
     proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
     /** The last reconciled round; 0 before the first proposal. */
     round: integer('round').notNull().default(0),
+    /** The effort the builder chose for the conversation; null follows the model's own default. */
+    effort: text('effort').$type<Effort>(),
     /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
     bundleId: text('bundle_id'),
     bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),

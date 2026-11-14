@@ -17,7 +17,11 @@ import { recordSearch } from './views/shape/record/record-tabs';
 import { RecordView } from './views/shape/record/record-view';
 import { ShapeView } from './views/shape/shape-view';
 import { settingsSearch } from './views/settings/focus-target';
-import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
+import {
+  isSettingsSectionKey,
+  sectionForAddress,
+  SettingsSectionKey,
+} from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
 import { workbenchSearch } from './views/workbench/workbench-search';
 import { WorkbenchView } from './views/workbench/workbench-view';
@@ -226,7 +230,10 @@ const settingsRoute = createRoute({
   beforeLoad: ({ params }) => {
     if (!isSettingsSectionKey(params.section))
       // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
-      throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
+      throw redirect({
+        to: '/settings/$section',
+        params: { section: sectionForAddress(params.section) },
+      });
   },
   component: SettingsPage,
 });

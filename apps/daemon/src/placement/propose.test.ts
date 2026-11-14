@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Delivery, WorkspaceMode, type RiskTag } from '@10db/contracts';
+import { Delivery, WorkspaceMode, type KindDto } from '@10db/contracts';
 import { proposePlacement } from './propose';
 
 interface Row {
@@ -12,12 +12,24 @@ interface Row {
   };
   readonly task: {
     readonly areas?: readonly string[];
-    readonly riskTags?: readonly RiskTag[];
+    /** Kind keys, read against `KINDS`. */
+    readonly kinds?: readonly string[];
     readonly workspaceMode?: WorkspaceMode;
   };
   readonly mode: WorkspaceMode;
   readonly reason: string | null;
 }
+
+/** The kinds the builder has, in their order. */
+const KINDS: readonly Pick<KindDto, 'key' | 'label' | 'ownCopy'>[] = [
+  { key: 'security', label: 'Security', ownCopy: false },
+  { key: 'auth', label: 'Auth', ownCopy: false },
+  { key: 'migration', label: 'Migration', ownCopy: true },
+  { key: 'dependency', label: 'Dependency', ownCopy: true },
+  { key: 'payments', label: 'Payments', ownCopy: true },
+  { key: 'billing', label: 'Billing', ownCopy: true },
+];
+const kindsNamed = (keys: readonly string[]) => KINDS.filter((k) => keys.includes(k.key));
 
 const rows: readonly Row[] = [
   {
@@ -41,26 +53,50 @@ const rows: readonly Row[] = [
   },
   { name: 'the deps hazard', task: { areas: ['deps'] }, mode: 'worktree', reason: 'touches deps' },
   {
-    name: 'a migration risk tag',
-    task: { areas: ['app'], riskTags: ['migration'] },
+    name: 'a migration kind',
+    task: { areas: ['app'], kinds: ['migration'] },
     mode: 'worktree',
     reason: 'touches migrations',
   },
   {
-    name: 'a dependency risk tag',
-    task: { areas: ['app'], riskTags: ['dependency'] },
+    name: 'a dependency kind',
+    task: { areas: ['app'], kinds: ['dependency'] },
     mode: 'worktree',
     reason: 'touches dependencies',
   },
   {
-    name: 'a security risk tag is no match',
-    task: { areas: ['app'], riskTags: ['security', 'auth'] },
+    name: 'a custom kind that asks for its own copy',
+    task: { areas: ['app'], kinds: ['payments'] },
+    mode: 'worktree',
+    reason: 'touches Payments',
+  },
+  {
+    name: 'a custom kind whose label does not end in s, read as written',
+    task: { areas: ['app'], kinds: ['billing'] },
+    mode: 'worktree',
+    reason: 'touches Billing',
+  },
+  {
+    name: 'a kind that was deleted asks for nothing',
+    task: { areas: ['app'], kinds: ['gone'] },
+    mode: 'shared',
+    reason: null,
+  },
+  {
+    name: 'two kinds name both in the builder’s order, whatever order the task lists them',
+    task: { areas: ['app'], kinds: ['dependency', 'migration'] },
+    mode: 'worktree',
+    reason: 'touches migrations, dependencies',
+  },
+  {
+    name: 'kinds that ask for nothing are no match',
+    task: { areas: ['app'], kinds: ['security', 'auth'] },
     mode: 'shared',
     reason: null,
   },
   {
     name: 'two matches name both, each once',
-    task: { areas: ['deps', 'migrations'], riskTags: ['migration'] },
+    task: { areas: ['deps', 'migrations'], kinds: ['migration'] },
     mode: 'worktree',
     reason: 'touches deps, migrations',
   },
@@ -78,7 +114,7 @@ const rows: readonly Row[] = [
     reason: 'touches contracts',
   },
   {
-    name: 'an emptied list leaves only the risk tags',
+    name: 'an emptied list leaves only the kinds',
     project: { isolate: [] },
     task: { areas: ['migrations'] },
     mode: 'shared',
@@ -91,8 +127,8 @@ const rows: readonly Row[] = [
     reason: 'touches migrations',
   },
   {
-    name: 'a risk tag match beats an explicit shared',
-    task: { areas: ['app'], riskTags: ['dependency'], workspaceMode: 'shared' },
+    name: 'a kind match beats an explicit shared',
+    task: { areas: ['app'], kinds: ['dependency'], workspaceMode: 'shared' },
     mode: 'worktree',
     reason: 'touches dependencies',
   },
@@ -140,7 +176,7 @@ const rows: readonly Row[] = [
   {
     name: 'local delivery is always shared, even for a match',
     project: { delivery: 'local' },
-    task: { areas: ['migrations'], riskTags: ['migration'], workspaceMode: 'worktree' },
+    task: { areas: ['migrations'], kinds: ['migration'], workspaceMode: 'worktree' },
     mode: 'shared',
     reason: null,
   },
@@ -156,7 +192,7 @@ describe('proposePlacement', () => {
           isolate: ['migrations', 'deps'],
           ...project,
         },
-        { areas: [], riskTags: [], ...task },
+        { areas: [], ...task, kinds: kindsNamed(task.kinds ?? []) },
       ),
     ).toEqual({ workspaceMode: mode, reason });
   });

@@ -64,7 +64,6 @@ function serve(...overrides: RequestHandler[]): void {
     http.get(daemonUrl('/projects/:projectId/goals'), () =>
       HttpResponse.json(goalListDto(greetings, farewells, cleanup)),
     ),
-    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     ...baseHandlers(),
   );
 }

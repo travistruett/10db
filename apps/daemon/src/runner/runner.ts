@@ -13,6 +13,7 @@ import {
   InboxKind,
   RoutedBy,
   isModelTier,
+  kindsOfTask,
   JudgeCallId,
   JudgeDecision,
   JudgeOutcome,
@@ -116,6 +117,7 @@ import {
   listPermissionRules,
   listSessions,
   listEvidence,
+  listKinds,
   listTaskFileRows,
   listUndeliveredTaskMessages,
   markSessionStarted,
@@ -236,7 +238,7 @@ import {
   projectInstructionsLoaded,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
-import { retryStep } from '../routing';
+import { escalateStep, resolveSteps } from '../routing';
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
@@ -264,6 +266,7 @@ import {
   countSendBack,
   failStep,
   moveAfter,
+  playbookInputs,
   routingInputs,
   sendBackSteps,
   sendBackTarget,
@@ -1102,20 +1105,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     const project = getProject(db, row.projectId);
     // The account the lane ran on, as `resolveOn` reads it, which differs from the project's after a move.
     const inputs = routingInputs(db, { ...project, accountId: leased });
-    const result = retryStep(step, {
-      choose: {
-        ...inputs,
-        def: { role: step.role, need: step.need },
-        persona: step.personaId ? getPersona(db, step.personaId) : undefined,
-        task: getTask(db, row.taskId),
-        project,
-      },
-      escalate: {
-        budgetCeiling: project.budgetCeiling,
-        profiles: inputs.profiles,
-        ...(inputs.accountModels === undefined ? {} : { accountModels: inputs.accountModels }),
-        why,
-      },
+    const result = escalateStep(step, {
+      budgetCeiling: project.budgetCeiling,
+      profiles: inputs.profiles,
+      ...(inputs.accountModels === undefined ? {} : { accountModels: inputs.accountModels }),
+      why,
     });
     return { step: result.step, moved: result.escalated };
   }
@@ -1306,7 +1300,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
       return null;
     }
-    if (reviewSizeRule(task, changes, review, getProject(db, row.projectId).hazards) === 'review')
+    if (
+      reviewSizeRule(
+        { kinds: kindsOfTask(task.kinds, listKinds(db)) },
+        changes,
+        review,
+        getProject(db, row.projectId).hazards,
+      ) === 'review'
+    )
       return null;
     const answer = await opts.judge.choose({
       decision: JudgeDecision.ReviewSize,
@@ -1414,7 +1415,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             result &&
             shipsAtRetryLimit({
               role: step.role,
-              riskTags: getTask(db, row.taskId).riskTags,
+              kinds: kindsOfTask(getTask(db, row.taskId).kinds, listKinds(db)),
               evidence: listEvidence(db, id),
             })
           ) {
@@ -1832,13 +1833,19 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A step whose model the account refused starts over in that model's tier.
     const plannedTier =
       listModelProfiles(db).find((p) => p.model === step.model)?.tier ?? undefined;
+    const task = getTask(db, row.taskId);
+    // The effort and fallback rung the playbook gives this role now; the step keeps what it was planned with.
+    const resolved = resolveSteps({
+      rigor: task.effectiveRigor,
+      taskKinds: task.kinds,
+      ...playbookInputs(db, project.id),
+    }).find((s) => s.role === step.role);
     return resolveStep(step, account, inputs.profiles, accountModels, {
       plannedTier,
-      persona: step.personaId ? getPersona(db, step.personaId) : undefined,
-      task: getTask(db, row.taskId),
+      task,
       project,
-      roleSettings: inputs.roleSettings,
-      patterns: inputs.patterns,
+      effort: resolved?.effort ?? null,
+      fallback: resolved?.fallback ?? null,
       tierOverrides: inputs.tierOverrides,
     });
   }
