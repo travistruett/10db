@@ -274,7 +274,7 @@ describe('the builder MCP endpoint', () => {
       });
     });
 
-    it('stores the rigor and the kinds an agent names, as kinds an agent set', async () => {
+    it('stores the rigor and the kinds it names as the builder’s own, as its session acts for the builder', async () => {
       const project = await seedProject();
       const created = z.object({ id: z.string() }).parse(
         await callJson('create_task', {
@@ -290,8 +290,8 @@ describe('the builder MCP endpoint', () => {
         rigor: 'critical',
         effectiveRigor: 'critical',
         kinds: [
-          { key: 'security', source: 'agent' },
-          { key: 'ui', source: 'agent' },
+          { key: 'security', source: 'builder' },
+          { key: 'ui', source: 'builder' },
         ],
       });
     });
@@ -463,7 +463,7 @@ describe('the builder MCP endpoint', () => {
       expect((await tasksOf(project.id))[0]?.acceptanceCriteria).toEqual(['x']);
     });
 
-    it('replaces the kinds by key, and a kind the task had keeps who set it', async () => {
+    it('replaces the kinds by key, each the builder’s own, as its session acts for the builder', async () => {
       const project = await seedProject();
       const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
         title: 'Pinned',
@@ -475,7 +475,7 @@ describe('the builder MCP endpoint', () => {
       expect((await tasksOf(project.id))[0]).toMatchObject({
         kinds: [
           { key: 'ui', source: 'builder' },
-          { key: 'docs', source: 'agent' },
+          { key: 'docs', source: 'builder' },
         ],
       });
     });
