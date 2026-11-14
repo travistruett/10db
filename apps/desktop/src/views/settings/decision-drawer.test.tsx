@@ -300,7 +300,86 @@ describe('DecisionDrawer', () => {
     const models = [
       decisionModelDto(),
       decisionModelDto({ id: '~typesafe/jev-latest', name: 'Jev Latest', latest: true }),
+      decisionModelDto({
+        id: 'respan/span-01-lite:free',
+        name: 'Span 01 Lite (free)',
+        maker: 'Respan',
+        inputUsdPerMillion: 0,
+      }),
+      decisionModelDto({
+        id: 'cloudflare/clairic',
+        name: 'Clairic',
+        maker: 'Cloudflare',
+        inputUsdPerMillion: 0.1,
+        cantCall:
+          "10db can't call this model yet: OpenRouter serves it for extractions, not decisions.",
+      }),
     ];
+
+    it("lists OpenRouter's decision models with their price, the latest and the ones 10db can't call", async () => {
+      serveJudge({ status: keyedStatus(), accounts: [work], models });
+      await renderWithDaemonAndRouter(<Harness />);
+      const select = await screen.findByRole('combobox', { name: 'Model' });
+      await waitFor(() => {
+        expect(select).toHaveProperty('value', 'Jev 1.13');
+      });
+      fireEvent.click(select);
+      const latest = await screen.findByRole('option', { name: /Jev Latest/, hidden: true });
+      expect(
+        within(latest).getByText(/Always TypeSafe's newest · \$0\.042 per million input tokens/),
+      ).toBeTruthy();
+      const free = screen.getByRole('option', { name: /Span 01 Lite/, hidden: true });
+      expect(within(free).getByText(/respan\/span-01-lite:free · Free/)).toBeTruthy();
+      const clairic = screen.getByRole('option', { name: /Clairic/, hidden: true });
+      expect(
+        clairic.getAttribute('aria-disabled') ?? clairic.getAttribute('data-combobox-disabled'),
+      ).toBeTruthy();
+      expect(within(clairic).getByText(/can't call this model yet/)).toBeTruthy();
+    });
+
+    it('keeps the saved model in view and offers Try Again when the list cannot be read', async () => {
+      serveJudge({ status: keyedStatus(), accounts: [work], models });
+      let failing = true;
+      server.use(
+        http.get(daemonUrl('/judge/models'), () =>
+          failing
+            ? HttpResponse.json({ error: 'upstream', message: 'HTTP 503' }, { status: 502 })
+            : HttpResponse.json({ models, fetchedAt: '2026-11-13T12:00:00.000Z' }),
+        ),
+      );
+      await renderWithDaemonAndRouter(<Harness />);
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
+      expect(screen.getByText('typesafe/jev-1.13')).toBeTruthy();
+      failing = false;
+      fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+      expect(await screen.findByRole('combobox', { name: 'Model' })).toBeTruthy();
+    });
+
+    it("says so when the saved model is one 10db can't call", async () => {
+      const keyed = keyedStatus();
+      serveJudge({
+        status: {
+          ...keyed,
+          config: {
+            ...keyed.config,
+            decisions: {
+              ...keyed.config.decisions,
+              question_route: { enabled: true, model: 'cloudflare/clairic', floor: 0.8 },
+            },
+          },
+        },
+        accounts: [work],
+        models,
+      });
+      await renderWithDaemonAndRouter(<Harness />);
+      // Beside the field, not only in its closed list's option.
+      await waitFor(() => {
+        const beside = screen
+          .getAllByText(/OpenRouter serves it for extractions/)
+          .filter((el) => el.closest('[role="option"]') === null);
+        expect(beside).toHaveLength(1);
+      });
+    });
 
     it('sends the model picked, which the daemon saves once it answers a test decision', async () => {
       const sent = serveJudge({ status: keyedStatus(), accounts: [work], models });
