@@ -1099,7 +1099,8 @@ const PUSH_FORCE_OPTIONS = [
 const SEVERITY = { warn: 1, ask: 2, deny: 3 };
 
 /**
- * @typedef {{ decision: 'deny' | 'ask' | 'warn', reason: string }} Verdict
+ * @typedef {{ decision: 'deny' | 'ask' | 'warn', reason: string, instead?: string }} Verdict
+ * `instead` names a way to reach the same end that needs no approval, for a subagent that can't ask.
  * @param {string} command
  * @param {string} cwd
  * @param {string} [whole] the command as the agent ran it, when `command` is a script nested in it
@@ -1394,6 +1395,9 @@ function judge(command, cwd, whole = command, startDir = cwd) {
           reason: pushesMain
             ? 'main changes only through a pull request.'
             : `git ${git.verb} ${a.join(' ')} cannot be undone easily.`,
+          instead: pushesMain
+            ? 'Push your branch and open a pull request.'
+            : insteadOf(git.verb, rewritesRefs),
         });
       }
     }
@@ -1413,7 +1417,56 @@ function judge(command, cwd, whole = command, startDir = cwd) {
   if (verdicts.length === 0) return null;
   const worst = Math.max(...verdicts.map((v) => SEVERITY[v.decision]));
   const top = verdicts.filter((v) => SEVERITY[v.decision] === worst);
-  return { decision: top[0].decision, reason: top.map((v) => v.reason).join(' ') };
+  const instead = [...new Set(top.flatMap((v) => (v.instead ? [v.instead] : [])))].join(' ');
+  return {
+    decision: top[0].decision,
+    reason: top.map((v) => v.reason).join(' '),
+    ...(instead ? { instead } : {}),
+  };
+}
+
+/**
+ * A way to the same end that needs no approval, for an irreversible git call made where nobody
+ * can approve it. Undefined when there is none to suggest.
+ * @param {string} verb
+ * @param {boolean} rewritesRefs a push that forces or deletes a remote ref
+ * @returns {string | undefined}
+ */
+function insteadOf(verb, rewritesRefs) {
+  if (verb === 'push' && rewritesRefs) return 'Push the rewritten history to a new branch instead.';
+  if (verb === 'checkout' || verb === 'restore') {
+    return 'To discard one file, write its committed copy over it: git show HEAD:<path> > <path>.';
+  }
+  if (verb === 'reset') return 'Undo committed work with git revert, which makes a new commit.';
+  if (verb === 'stash') {
+    return 'Commit the work to your branch, or save it as a patch with git diff > <file> in your scratchpad.';
+  }
+  if (verb === 'clean') return 'Remove the untracked files you made by name: rm <path>.';
+  if (verb === 'rebase') return 'Bring main in with git merge origin/main instead.';
+  if (verb === 'commit') return 'Make a new commit with the fix.';
+  if (verb === 'branch') return 'Leave the branch; it can be deleted once its pull request merges.';
+  return undefined;
+}
+
+/**
+ * The verdict for a subagent, which nobody watches: an ask would wait for hours, so it becomes a
+ * deny that keeps the rule's reason and says what to do instead.
+ * @param {Verdict} verdict
+ * @returns {Verdict}
+ */
+function unattended(verdict) {
+  if (verdict.decision !== 'ask') return verdict;
+  return {
+    decision: 'deny',
+    reason: [
+      'Nobody can approve a prompt inside a subagent, so this is denied instead of asked.',
+      verdict.reason,
+      verdict.instead,
+      'If no other way works, stop and report it as blocked, quoting the command.',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  };
 }
 
 function main() {
@@ -1421,8 +1474,11 @@ function main() {
   const input = JSON.parse(readFileSync(0, 'utf8'));
   if (input?.tool_name !== 'Bash' || typeof input?.tool_input?.command !== 'string') return;
   const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
-  const verdict = judge(input.tool_input.command, cwd);
-  if (!verdict) return;
+  const judged = judge(input.tool_input.command, cwd);
+  if (!judged) return;
+  // The hook input carries agent_id only inside a subagent (or an in-process teammate).
+  const inSubagent = typeof input.agent_id === 'string' && input.agent_id !== '';
+  const verdict = inSubagent ? unattended(judged) : judged;
   const hookSpecificOutput =
     verdict.decision === 'warn'
       ? { hookEventName: 'PreToolUse', additionalContext: verdict.reason }

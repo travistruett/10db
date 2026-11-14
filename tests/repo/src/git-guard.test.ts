@@ -67,12 +67,13 @@ function runHook(
   return { outcome: 'warn', reason: specific.additionalContext ?? '', exit: result.status };
 }
 
-const bash = (command: string, cwd: string): string =>
+const bash = (command: string, cwd: string, extra: Record<string, unknown> = {}): string =>
   JSON.stringify({
     hook_event_name: 'PreToolUse',
     tool_name: 'Bash',
     cwd,
     tool_input: { command },
+    ...extra,
   });
 
 describe('git guard decisions', () => {
@@ -1111,6 +1112,53 @@ describe('git guard deleting a branch whose pull request merged', () => {
       // The first lookup takes 1 s and confirms; the second gets the 0.5 s left, is cut off and asks.
       expect(slowOutcome('1500')).toBe('ask');
     });
+  });
+});
+
+// Nobody answers a prompt raised inside a subagent, so there every ask becomes a deny whose reason
+// names a way that needs no approval. The hook input carries agent_id only inside a subagent.
+describe('git guard inside a subagent', () => {
+  const asAgent = (command: string, agentId: unknown) =>
+    runHook(bash(command, clean, { agent_id: agentId }));
+
+  it.each<[string, string, Outcome, string]>([
+    ['a whole-tree discard', 'git checkout -- .', 'deny', 'git show HEAD:<path> > <path>'],
+    [
+      'a named-file discard outside an agent worktree',
+      'git restore a.ts',
+      'deny',
+      'git show HEAD:<path> > <path>',
+    ],
+    ['a hard reset', 'git reset --hard HEAD', 'deny', 'git revert'],
+    ['a stash', 'git stash', 'deny', 'git diff > <file>'],
+    ['a clean', 'git clean -fd', 'deny', 'rm <path>'],
+    ['a rebase', 'git rebase main', 'deny', 'git merge origin/main'],
+    ['an amend', "git commit --amend -m 'x'", 'deny', 'new commit'],
+    ['a push to main', 'git push origin HEAD:main', 'deny', 'pull request'],
+    ['a force push', 'git push --force origin feat/x', 'deny', 'new branch'],
+    ['an admin merge', 'gh pr merge 1 --admin', 'deny', 'blocked'],
+    ['a deny stays a deny', 'git add -A', 'deny', 'Name each path'],
+    ['an allow stays an allow', "git add a.ts && git commit -m 'x'", 'allow', ''],
+    ['a warn stays a warn', 'pnpm vitest run | tail -5', 'warn', 'tail'],
+  ])('%s', (_name, command, expected, inReason) => {
+    const { outcome, reason } = asAgent(command, 'a1b2c3');
+    expect(outcome).toBe(expected);
+    expect(reason).toContain(inReason);
+  });
+
+  it('says why it denies and keeps the rule it would have asked about', () => {
+    const { reason } = asAgent('git rebase main', 'a1b2c3');
+    expect(reason).toContain('Nobody can approve a prompt inside a subagent');
+    expect(reason).toContain('cannot be undone easily');
+    expect(reason).toContain('report it as blocked');
+  });
+
+  it.each<[string, unknown]>([
+    ['no agent_id', undefined],
+    ['an empty agent_id', ''],
+    ['a non-string agent_id', 7],
+  ])('still asks in the main session: %s', (_name, agentId) => {
+    expect(asAgent('git rebase main', agentId).outcome).toBe('ask');
   });
 });
 
