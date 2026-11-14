@@ -1,10 +1,19 @@
 import type { AgentCapabilitiesDto } from '@10db/contracts';
-import { ActionIcon, Box, Button, CloseButton, Group, Stack, Text, Textarea } from '@mantine/core';
+import { ActionIcon, Box, Button, CloseButton, Group, Stack, Text } from '@mantine/core';
 import { IconPaperclip } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type Ref } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type RefObject,
+} from 'react';
+import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import type { ComposerPhase } from './composer-phase';
 import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
 import { isSendKey } from './escape';
+import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
 
 // Sessions UI spec §7.9, §7.11: one frame holding the input and its bar, with the hint under it. ⌘↩
@@ -14,8 +23,11 @@ import { pickerAccept, withPictures } from './pictures';
 export interface ComposerProps {
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
-  /** What the agent takes: Attach shows only with a picture format. */
-  readonly capabilities: Pick<AgentCapabilitiesDto, 'images'>;
+  /** What the agent takes: Attach shows only with a picture format, `/` only with slash commands. */
+  readonly capabilities: Pick<AgentCapabilitiesDto, 'images'> &
+    Partial<Pick<AgentCapabilitiesDto, 'slashCommands'>>;
+  /** What `@` and `/` list; without it the input is plain text with ⌘↩, IME and pictures. */
+  readonly mentions?: ComposerMentions;
   readonly phase: ComposerPhase;
   /** Why Send is off (reconnecting, a removed project); the input still takes text. */
   readonly disabledReason: string | null;
@@ -29,9 +41,21 @@ export interface ComposerProps {
   readonly onStop: () => void;
   /** Stops the turn and sends the draft as the next one. */
   readonly onRedo: (draft: Draft) => Promise<void> | void;
-  readonly inputRef?: Ref<HTMLTextAreaElement>;
+  readonly inputRef?: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   /** The input's accessible name. */
   readonly label?: string;
+}
+
+/** Whether the input's suggestion list is open: the list it controls is in the page only then. */
+function suggestionsOpen(input: HTMLElement): boolean {
+  const list = input.getAttribute('aria-controls');
+  return list !== null && document.getElementById(list) !== null;
+}
+
+/** The draft as it goes: its text as the builder sees it, and the files its `@` mentions name. */
+function outgoing(draft: Draft): Draft {
+  const { text, mentions } = mentionText(draft.text);
+  return { ...draft, text, mentions };
 }
 
 /** A 56 px thumbnail of a picture waiting to be sent. */
@@ -80,6 +104,7 @@ export function Composer({
   onStop,
   onRedo,
   inputRef,
+  mentions,
   label = 'Message',
 }: ComposerProps) {
   const [busy, setBusy] = useState<'send' | 'stop' | null>(null);
@@ -115,10 +140,10 @@ export function Composer({
   };
   const send = (): void => {
     if (locked || disabledReason !== null || !filled || busy !== null) return;
-    void run('send', () => onSend(draft), true);
+    void run('send', () => onSend(outgoing(draft)), true);
   };
   const stop = (): void => {
-    if (phase.stop === 'stop_and_redo') void run('stop', () => onRedo(draft), true);
+    if (phase.stop === 'stop_and_redo') void run('stop', () => onRedo(outgoing(draft)), true);
     else {
       onStop();
     }
@@ -184,20 +209,18 @@ export function Composer({
           outlineOffset: 2,
         }}
       >
-        <Textarea
-          ref={inputRef}
-          aria-label={label}
-          aria-describedby={phase.hint === null ? undefined : 'composer-hint'}
-          variant="unstyled"
-          autosize
-          minRows={2}
-          maxRows={10}
-          placeholder={phase.placeholder}
+        <ComposerInput
           value={draft.text}
-          disabled={locked}
-          onChange={(event) => {
-            onDraft({ ...draft, text: event.currentTarget.value });
+          onValue={(text) => {
+            onDraft({ ...draft, text, mentions: mentionText(text).mentions });
           }}
+          mentions={mentions}
+          slashCommands={capabilities.slashCommands === true}
+          label={label}
+          describedBy={phase.hint === null ? undefined : 'composer-hint'}
+          placeholder={phase.placeholder}
+          disabled={locked}
+          inputRef={inputRef}
           onPaste={onPaste}
           onKeyDown={(event) => {
             // An IME's Enter picks a candidate; it is never a send. Safari ends a composition with a
@@ -205,6 +228,8 @@ export function Composer({
             // eslint-disable-next-line @typescript-eslint/no-deprecated -- keyCode 229 is the only signal.
             if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (!isSendKey(event)) return;
+            // With a suggestion list open ⌘↩ belongs to the list, which picks the highlighted one.
+            if (suggestionsOpen(event.currentTarget)) return;
             event.preventDefault();
             send();
           }}

@@ -55,7 +55,7 @@ export function FreshTab({
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
   const [createError, setCreateError] = useState<string | null>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   // The chat being made, shared by an `@` and a send that come together, so there is only ever one.
   const making = useRef<{ promise: Promise<ChatDto>; want: { send: boolean } } | null>(null);
 

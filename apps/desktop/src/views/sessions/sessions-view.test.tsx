@@ -164,8 +164,10 @@ describe('Sessions: a fresh tab', () => {
     });
   });
 
-  it('a first @ makes the chat before any send', async () => {
-    const { chat, router } = open('/sessions');
+  it('a first @ makes the chat before any send, then lists the files of its conversation', async () => {
+    const { chat, router } = open('/sessions', {
+      files: [{ path: 'src/login.ts', matches: [[4, 9]] }],
+    });
     await screen.findByRole('textbox', { name: 'Message' });
     type('look at @');
     await waitFor(() => {
@@ -174,6 +176,11 @@ describe('Sessions: a fresh tab', () => {
     expect(chat.created).toHaveLength(1);
     expect(chat.messages).toHaveLength(0);
     expect((composer() as HTMLTextAreaElement).value).toBe('look at @');
+    // The chat's composer takes over the words; the next key lists the files of its conversation.
+    type('look at @log');
+    expect(await screen.findByRole('option', { name: /login\.ts/, hidden: true })).toBeTruthy();
+    expect(chat.fileQueries).toEqual([{ conversationId: chat.chats[0]?.conversationId, q: 'log' }]);
+    expect(screen.queryByRole('combobox', { name: 'Project' })).toBeNull();
   });
 
   it('on a ChatGPT-plan project says the chats wait, keeps Recent, and posts nothing', async () => {

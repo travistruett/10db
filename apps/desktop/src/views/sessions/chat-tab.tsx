@@ -10,7 +10,7 @@ import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
-import { usePatchChat } from '../../daemon/chat-queries';
+import { fetchConversationFiles, usePatchChat } from '../../daemon/chat-queries';
 import {
   useConversation,
   useConversationItemsState,
@@ -21,7 +21,7 @@ import {
   useStopConversation,
   useToolCallFull,
 } from '../../daemon/conversation-queries';
-import { useDaemonStatus } from '../../daemon/provider';
+import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
 import { chatEntries } from './chat-entries';
 import { SessionBar } from './session-bar';
@@ -92,6 +92,7 @@ export function ChatTab({ chat, project, onAnnounce }: ChatTabProps) {
   const loadFull = useToolCallFull(chat.conversationId, items);
   const narrow = useMediaQuery(NARROW_QUERY);
   const daemon = useDaemonStatus();
+  const { client } = useDaemon();
   const key = draftKey.chat(chat.id);
   const [draft, setDraft] = useSessionDraft(key);
   const send = useSendConversationMessage();
@@ -104,7 +105,7 @@ export function ChatTab({ chat, project, onAnnounce }: ChatTabProps) {
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
@@ -117,6 +118,11 @@ export function ChatTab({ chat, project, onAnnounce }: ChatTabProps) {
       pictures: d.pictures,
     });
   };
+
+  // The composer takes the cursor when the tab is shown (a chat made from a fresh tab keeps typing).
+  useEffect(() => {
+    input.current?.focus();
+  }, [chat.id]);
 
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
   // draft here, so the next send goes to this conversation and never to a second chat.
@@ -301,6 +307,11 @@ export function ChatTab({ chat, project, onAnnounce }: ChatTabProps) {
                 setDraft(next);
               }}
               capabilities={caps}
+              mentions={{
+                files: (q, signal) =>
+                  fetchConversationFiles(client, chat.conversationId, q, signal),
+                commands: conversation.commands,
+              }}
               phase={phase}
               disabledReason={disabledReason}
               error={sendError}
