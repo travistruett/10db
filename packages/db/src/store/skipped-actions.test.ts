@@ -139,6 +139,34 @@ describe('skipped_actions', () => {
   });
 });
 
+describe('one call reported twice', () => {
+  it.each<[string, Partial<SkipInput>, Partial<SkipInput>]>([
+    ['as approvable, then as not', { kind: 'deploy' }, { kind: 'docker_off', source: 'broker' }],
+    ['as not approvable, then as approvable', { kind: 'docker_off' }, { kind: 'deploy' }],
+    [
+      'uncut, then with its summary cut',
+      { kind: 'classifier', source: 'auto_mode' },
+      { kind: 'classifier', source: 'auto_mode', summaryCut: true },
+    ],
+  ])('keeps the stricter record: %s', (_name, first, second) => {
+    const project = seedProject(store);
+    const ws = runOf(taskOf(project.id));
+    const ids = store.write((ctx) => [
+      recordSkip(ctx, skip(ws, first)),
+      recordSkip(ctx, skip(ws, second)),
+    ]).value;
+    const id = ids[0];
+    if (id === null || id === undefined) throw new Error('no skip');
+    expect(listSkipsForWorkstream(store.db, ws).map((s) => s.approval)).toEqual(['none']);
+    const followUp = taskOf(project.id, 'Follow-up');
+    expect(() =>
+      store.write((ctx) => {
+        approveSkips(ctx, followUp, [id]);
+      }),
+    ).toThrow(ConflictError);
+  });
+});
+
 describe('skip_approvals', () => {
   it('lists the approved rows for the follow-up only, and none once it is done', () => {
     const project = seedProject(store);

@@ -52,8 +52,9 @@ const dtoOf = (row: SkipRow): SkippedActionDto => ({
 });
 
 /**
- * Records a skip in the caller's write; a second one of the same call in the run writes nothing and
- * answers null (T4 call 9). A written skip changes its run's task, so the task's views follow.
+ * Records a skip in the caller's write; a second one of the same call in the run adds no row and
+ * answers null (T4 call 9), keeping the stricter of the two. A written skip changes its run's task,
+ * so the task's views follow.
  */
 export function recordSkip(ctx: WriteContext, input: SkipInput): SkippedActionId | null {
   const id = mintId('SkippedAction');
@@ -77,7 +78,10 @@ export function recordSkip(ctx: WriteContext, input: SkipInput): SkippedActionId
     .onConflictDoNothing()
     .returning({ id: schema.skippedActions.id })
     .all();
-  if (written.length === 0) return null;
+  if (written.length === 0) {
+    tighten(ctx, input);
+    return null;
+  }
   const run = ctx.tx
     .select({ taskId: schema.workstreams.taskId })
     .from(schema.workstreams)
@@ -91,6 +95,45 @@ export function recordSkip(ctx: WriteContext, input: SkipInput): SkippedActionId
       data: { skipped: id },
     });
   return id;
+}
+
+/**
+ * A second report of a call already recorded keeps the stricter of the two: a kind nothing approves
+ * replaces one that could be approved, and a summary cut in either report counts as cut, so a looser
+ * first report can't be what Run these now approves.
+ */
+function tighten(ctx: WriteContext, input: SkipInput): void {
+  if (input.toolUseId === null) return;
+  const kept = ctx.tx
+    .select()
+    .from(schema.skippedActions)
+    .where(
+      and(
+        eq(schema.skippedActions.workstreamId, input.workstreamId),
+        eq(schema.skippedActions.toolUseId, input.toolUseId),
+      ),
+    )
+    .get();
+  if (kept === undefined) return;
+  const summaryCut = kept.summaryCut || (input.summaryCut ?? false);
+  const stricter =
+    approvalOf(kept.kind, summaryCut) !== Approval.None &&
+    approvalOf(input.kind, summaryCut) === Approval.None;
+  ctx.tx
+    .update(schema.skippedActions)
+    .set({
+      summaryCut,
+      ...(stricter
+        ? {
+            kind: input.kind,
+            limitName: input.limit,
+            reason: input.reason,
+            source: input.source,
+          }
+        : {}),
+    })
+    .where(eq(schema.skippedActions.id, kept.id))
+    .run();
 }
 
 /** The run's skips in the order they were recorded; with `after`, only those recorded later. */
