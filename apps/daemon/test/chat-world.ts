@@ -1,8 +1,6 @@
 import {
   AccountKind,
   JudgeKind,
-  Provider,
-  providerOf,
   type AgentAccountKind,
   type ChatDto,
   type DaemonEvent,
@@ -13,7 +11,6 @@ import { ManualClock } from '../src/clock';
 import {
   chatHooks,
   createChatLiveSessions,
-  chatsUnavailable,
   createChatService,
   type ChatHooksDeps,
   type ChatService,
@@ -112,6 +109,7 @@ export function chatWorld(
       ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,
+      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
@@ -128,7 +126,7 @@ export function chatWorld(
         { model: 'claude-sonnet-5-5', tier: null },
       ],
     }),
-    unavailable: () => chatsUnavailable(providerOf(launched.kind) === Provider.Codex),
+    webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
   });
   return {
     store,

@@ -49,7 +49,7 @@ import {
 } from '../trust';
 import { judgeChatCall } from './confinement';
 import type { ChatLiveSessions } from './live-sessions';
-import { CHAT_SYSTEM_PROMPT } from './prompt';
+import { chatSystemPrompt } from './prompt';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
 // explore profile as the attended one: Plan's read-only sandbox and read tools, commands judged, the
@@ -106,6 +106,8 @@ export interface ChatHooksDeps {
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
+  /** Whether the agent on an account kind and model searches the web (`capabilities.webSearch`). */
+  readonly webSearchOf: (kind: AgentAccountKind, model: string) => boolean;
   /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
   readonly judge?: Judge;
   readonly clock: Clock;
@@ -259,7 +261,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           profile: {
             kind: 'explore',
             judge,
-            systemPrompt: CHAT_SYSTEM_PROMPT,
+            systemPrompt: chatSystemPrompt(deps.webSearchOf(launch.account.kind, launch.modelId)),
             ...chatProfile(ready?.commands !== undefined),
           },
           cwd: launch.cwd,
@@ -280,6 +282,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             token: start.mcpToken,
             toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000,
           },
+          hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           canUseTool: (req) =>

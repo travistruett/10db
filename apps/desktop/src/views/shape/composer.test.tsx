@@ -1,4 +1,3 @@
-import { BRAINSTORM_REFUSED_ON_CHATGPT } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
@@ -111,20 +110,16 @@ describe('the composer’s input and a late failed text', () => {
 });
 
 describe('the composer’s alert', () => {
-  it.each([
-    ['a failure to reach Claude', LATE_FAILURE, "Couldn't reach Claude"],
-    [
-      'a conversation refused on a ChatGPT account',
-      BRAINSTORM_REFUSED_ON_CHATGPT,
-      'Not available on this account',
-    ],
-  ])('titles %s', (_name, failure, title) => {
-    const { arrive } = mount(failure);
-    arrive('a message');
+  it.each([['a failure to reach Claude', LATE_FAILURE, "Couldn't reach Claude"]])(
+    'titles %s',
+    (_name, failure, title) => {
+      const { arrive } = mount(failure);
+      arrive('a message');
 
-    const alert = screen.getByRole('alert');
-    expect(alert.textContent).toContain(title);
-    expect(alert.textContent).toContain(failure);
-    expect(screen.queryAllByRole('alert')).toHaveLength(1);
-  });
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toContain(title);
+      expect(alert.textContent).toContain(failure);
+      expect(screen.queryAllByRole('alert')).toHaveLength(1);
+    },
+  );
 });

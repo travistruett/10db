@@ -2,8 +2,6 @@ import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import type { SeenAccount } from './account-check';
 import { codexCapabilities } from './capabilities';
-import { onProfile } from './agent-profile';
-import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
 import { codexHomes } from './codex-home';
@@ -21,11 +19,8 @@ import type { SignInCheck } from './sign-in-check';
 import {
   AccountProbeError,
   CompletionError,
-  SessionEndReason,
   type AccountProbeSpec,
   type AgentAdapter,
-  type SessionEvent,
-  type SessionHandle,
 } from './types';
 
 export interface CodexAdapterOptions {
@@ -43,22 +38,7 @@ export interface CodexAdapterOptions {
 /** How long a probe waits for the app-server to say who the account is. */
 const PROBE_MS = 30_000;
 
-const NO_BRAINSTORM = 'Brainstorm chat is not available on a ChatGPT account.';
 const NO_QUESTIONS = 'A ChatGPT account does not answer one-shot questions.';
-
-/** A handle that ends at once with `message`, as an adapter that cannot run the conversation does. */
-function endedAtOnce(message: string): SessionHandle {
-  const events = createChannel<SessionEvent>();
-  events.push({ type: 'ended', reason: SessionEndReason.Error, message });
-  events.end();
-  return {
-    events,
-    send: () => undefined,
-    interrupt: () => Promise.resolve(null),
-    stop: () => Promise.resolve(),
-    setModel: () => Promise.resolve(),
-  };
-}
 
 async function readAccount(rpc: CodexRpc): Promise<SeenAccount> {
   await rpc.call('initialize', { clientInfo: CODEX_CLIENT_INFO }, InitializeResponse);
@@ -112,11 +92,9 @@ export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
-    open: (spec) =>
-      onProfile(spec, {
-        lane: (lane) => startCodexSession(lane, { ...opts, homes }),
-        explore: () => endedAtOnce(NO_BRAINSTORM),
-      }),
+    // A lane and an explore conversation open the same session: the sandbox, the guard hook and the
+    // judge come with the spec (sessions spec §5.5, the attended profile).
+    open: (spec) => startCodexSession(spec, { ...opts, homes }),
     readClientUuids: (spec) => readThreadClientUuids(spec, { ...opts, homes }),
   };
 }

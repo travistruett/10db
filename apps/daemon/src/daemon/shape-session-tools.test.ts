@@ -10,6 +10,7 @@ import {
 import { join } from 'node:path';
 import {
   AccountKind,
+  Provider,
   mintId,
   ShapeOrigin,
   type ProjectId,
@@ -113,6 +114,9 @@ function conversation(
   return { projectId: project.id, shapeId: shape.id };
 }
 
+/** Where a ChatGPT session's temp dir is made, as the daemon names it. */
+const CODEX_LANES = '/Users/b/.10db/lanes';
+
 /** DNS as the tests see it: every name public, but those listed. */
 const lookupWith =
   (names: Readonly<Record<string, readonly string[]>> = {}) =>
@@ -141,6 +145,7 @@ function preparer(
     lookup,
     builderHome: join(root, 'home'),
     laneWritableRoots: [join(root, 't')],
+    codexLaneTempRoot: CODEX_LANES,
     exportAwsCredentials: (profile) => {
       profiles.push(profile);
       return Promise.resolve({
@@ -369,16 +374,27 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
 });
 
 describe('the config dir a Plan session’s sandbox is given', () => {
-  // Where the account keeps its login, by its kind, as a lane's session reads it (`sessionConfigDir`).
-  it.each<[string, AgentAccountKind, string]>([
-    ['a Claude kind', AccountKind.ClaudeSubscription, '/accounts/claude'],
-    ['a Codex kind', AccountKind.CodexSignin, '/accounts/codex'],
-  ])('follows the account of %s', async (_name, kind, expected) => {
+  // Where the account keeps its login, by its kind, as a lane's session reads it (`sessionConfigDir`), and
+  // the agent and temp root a lane of that kind gets: a Codex conversation is a Codex thread.
+  it.each<[string, AgentAccountKind, string, Provider, string | undefined]>([
+    [
+      'a Claude kind',
+      AccountKind.ClaudeSubscription,
+      '/accounts/claude',
+      Provider.Claude,
+      undefined,
+    ],
+    ['a Codex kind', AccountKind.CodexSignin, '/accounts/codex', Provider.Codex, CODEX_LANES],
+  ])('follows the account of %s', async (_name, kind, expected, provider, tempRoot) => {
     const owner = conversation({ mcpServers: {} });
-    const seen: string[] = [];
+    const seen: unknown[] = [];
     const { prepare } = preparer({
       forSession: (input) => {
-        seen.push(input.configDir);
+        seen.push({
+          configDir: input.configDir,
+          provider: input.provider,
+          tempRoot: input.tempRoot,
+        });
         return Promise.reject(new Error('recorded'));
       },
     });
@@ -390,6 +406,6 @@ describe('the config dir a Plan session’s sandbox is given', () => {
       }),
     );
     await prepared.release();
-    expect(seen).toEqual([expected]);
+    expect(seen).toEqual([{ configDir: expected, provider, tempRoot }]);
   });
 });

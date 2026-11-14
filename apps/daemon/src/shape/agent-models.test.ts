@@ -19,13 +19,13 @@ describe('the models a Plan session may launch an agent on', () => {
 
 describe('the Plan prompt’s model names', () => {
   it('lists the aliases the account’s agents take', () => {
-    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS)).toMatch(
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, true)).toMatch(
       /model "opus", "fable", "sonnet" or "haiku"/,
     );
   });
 
   it('says agents run on the session’s model when the account offers no alias', () => {
-    const prompt = shapeSystemPrompt([]);
+    const prompt = shapeSystemPrompt([], true);
     expect(prompt).toMatch(/runs? on yours|run on the session's model/);
     expect(prompt).not.toMatch(/"opus"|"fable"|"sonnet"|"haiku"/);
   });

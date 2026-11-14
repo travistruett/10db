@@ -91,6 +91,9 @@
         "subagents": {
           "type": "boolean"
         },
+        "webSearch": {
+          "type": "boolean"
+        },
         "modelSwitch": {
           "type": "string",
           "enum": [
@@ -124,6 +127,7 @@
         "plan",
         "reasoning",
         "subagents",
+        "webSearch",
         "modelSwitch",
         "takeover",
         "costUsd",

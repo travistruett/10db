@@ -1,7 +1,11 @@
-import type { ChatDto, ProjectId, ProjectViewDto } from '@10db/contracts';
+import {
+  CODEX_WEB_WAITS,
+  type ChatDto,
+  type ProjectId,
+  type ProjectViewDto,
+} from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconInfoCircle } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { composerPhase } from '../../conversation/composer-phase';
@@ -51,6 +55,10 @@ export function FreshTab({
   const narrow = useMediaQuery(NARROW_QUERY);
   const [draft, setDraft] = useSessionDraft(draftKey.fresh(tab.id));
   const models = useChatModels(tab.projectId);
+  // Codex's web search stays off until a live check (`capabilities.webSearch`): a chat there is never said to
+  // search the web, and says once why it searches nothing.
+  const web = models.data?.webSearch === true;
+  const noWeb = models.data?.webSearch === false;
   const starts = useSessionStarts(tab.projectId);
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
@@ -85,13 +93,12 @@ export function FreshTab({
   const changeDraft = (next: Draft): void => {
     setDraft(next);
     setCreateError(null);
-    if (!OPEN_MENTION.test(next.text) || (models.data?.unavailable ?? null) !== null) return;
+    if (!OPEN_MENTION.test(next.text)) return;
     ensureChat(false).catch((error: unknown) => {
       setCreateError(error instanceof Error ? error.message : String(error));
     });
   };
 
-  const unavailable = models.data?.unavailable ?? null;
   const phase = composerPhase({
     state: 'idle_cold',
     hasText: hasContent(draft),
@@ -106,7 +113,9 @@ export function FreshTab({
     <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <Box maw={720} mx="auto" px="md" pt="12vh" pb="xl">
         <Text size="sm" c="dimmed" mb="md">
-          A chat reads {name}, runs commands and searches the web.
+          {web
+            ? `A chat reads ${name}, runs commands and searches the web.`
+            : `A chat reads ${name} and runs commands.`}
         </Text>
         <Group gap="sm" mb={4} wrap="wrap">
           <Select
@@ -124,7 +133,7 @@ export function FreshTab({
               if (next !== undefined) onProject(next.id);
             }}
           />
-          {unavailable === null && models.data !== undefined ? (
+          {models.data !== undefined ? (
             <ModelPicker
               offered={models.data.offered}
               default={models.data.default}
@@ -136,30 +145,23 @@ export function FreshTab({
             />
           ) : null}
         </Group>
-        {unavailable === null ? (
+        <Text size="xs" c="dimmed" mb="sm">
+          {web
+            ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
+            : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
+        </Text>
+        {noWeb ? (
           <Text size="xs" c="dimmed" mb="sm">
-            Uses {name}&apos;s account. Reads the code, runs commands and searches the web. Asks
-            before anything that crosses a limit.
+            {CODEX_WEB_WAITS}
           </Text>
-        ) : (
-          <Text size="xs" c="dimmed" mb="sm">
-            <IconInfoCircle
-              size={14}
-              stroke={1.5}
-              aria-hidden="true"
-              style={{ verticalAlign: '-2px' }}
-            />{' '}
-            {unavailable}
-          </Text>
-        )}
+        ) : null}
         <Box mx="calc(var(--mantine-spacing-md) * -1)">
           <Composer
             draft={draft}
             onDraft={changeDraft}
             capabilities={{ images: [] }}
             phase={phase}
-            disabledReason={unavailable}
-            locked={unavailable !== null}
+            disabledReason={null}
             error={createError}
             inputRef={input}
             onSend={async () => {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CODEX_WEB_WAITS,
   TrustSurface,
   ClaimKind,
   JudgeDecision,
@@ -360,10 +361,6 @@ import { stepSkills } from './step-skills';
  * that resumes such a conversation keeps the same line.
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
-
-/** What a Codex session's thread says while the Web switch is on and its web search stays off. */
-const CODEX_WEB_WAITS =
-  'Web search on ChatGPT comes after a live check, so this session searches nothing.';
 
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());

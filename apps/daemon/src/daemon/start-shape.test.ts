@@ -1,7 +1,7 @@
 import type { ShapeMessageDto } from '@10db/contracts';
 import {
   AccountCreatedDto,
-  BRAINSTORM_REFUSED_ON_CHATGPT,
+  ConversationDto,
   GoalDto,
   ProjectDto,
   ShapeConvertResult,
@@ -66,7 +66,7 @@ async function startOnTheFake(): Promise<ReturnType<typeof apiClient>> {
 }
 
 describe('a Shape conversation on a ChatGPT account', () => {
-  it('is refused while the project is on one, and starts again once it is back on a Claude plan', async () => {
+  it('runs on Codex, offering its models, and says it has no research and review agents', async () => {
     const api = await startOnTheFake();
     const project = await api.post('/projects', ProjectDto, {
       name: 'demo',
@@ -74,34 +74,20 @@ describe('a Shape conversation on a ChatGPT account', () => {
       gateCommand: 'true',
       areas: [{ name: 'src', globs: ['src/**'] }],
     });
-    const claudePlan = project.accountId;
     const { account: chatgpt } = await api.post('/accounts', AccountCreatedDto, {
       kind: 'codex_signin',
       label: 'ChatGPT plan',
     });
-    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
     await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: chatgpt.id });
-
-    const words = new RegExp(`-> 400: .*${BRAINSTORM_REFUSED_ON_CHATGPT}`);
-    await expect(api.post(`/projects/${project.id}/shapes`, ShapeDto, {})).rejects.toThrow(words);
-    await expect(sayToPlan(api, shape.id, 'Make the cards denser.')).rejects.toThrow(words);
-    const refused = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-    expect(said(shape.id)).toEqual([]);
-    expect(refused.turn.running).toBe(false);
-    // No model is offered for a conversation that can't run, and none can be chosen.
-    expect(refused.models).toEqual({ default: null, offered: [] });
-    await expect(
-      api.put(`/shapes/${shape.id}/model`, ShapeDto, { model: 'sonnet' }),
-    ).rejects.toThrow(words);
-
-    await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: claudePlan });
+    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
     expect((await api.get(`/shapes/${shape.id}`, ShapeViewDto)).models.offered).not.toEqual([]);
     await sayToPlan(api, shape.id, 'Make the cards denser.');
-    await waitForAsync(async () => {
-      const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-      return !view.turn.running && said(shape.id).some((m) => m.author === 'claude') ? view : false;
+    const view = await waitForAsync(async () => {
+      const seen = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
+      return !seen.turn.running && said(shape.id).some((m) => m.author === 'claude') ? seen : false;
     });
-    expect(said(shape.id).some((m) => m.kind === 'notice')).toBe(false);
+    const conversation = await api.get(`/conversations/${view.conversationId}`, ConversationDto);
+    expect(conversation.capabilities).toMatchObject({ label: 'Codex', subagents: false });
   });
 });
 

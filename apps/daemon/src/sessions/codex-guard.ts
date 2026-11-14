@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { PatchHunk } from '../trust';
 import { judgedVerdict } from './session-judge';
-import type { LaneSessionSpec } from './types';
+import type { AgentSessionCore } from './types';
 
 /** What Codex's `PreToolUse` hook sends: the keys 10db reads, with the rest passed over. */
 export const HookInput = z.looseObject({
@@ -159,7 +159,7 @@ function unreadable(toolName: string): string {
   if (toolName === 'apply_patch') return '10db could not read this patch, so it was refused.';
   if (toolName === 'Bash' || toolName.startsWith('mcp__'))
     return '10db could not read this call, so it was refused.';
-  return `10db does not allow the tool "${toolName}" in a lane.`;
+  return `10db does not allow the tool "${toolName}" in this session.`;
 }
 
 /**
@@ -167,7 +167,7 @@ function unreadable(toolName: string): string {
  * 10db doesn't know, and a patch that names no path, are refused rather than read as nothing to judge.
  */
 export async function judgeHookCall(
-  spec: Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool' | 'judgeCall'>,
+  spec: Pick<AgentSessionCore, 'preToolUse' | 'canUseTool' | 'judgeCall'>,
   hook: HookInput,
   signal: AbortSignal,
 ): Promise<GuardAnswer> {

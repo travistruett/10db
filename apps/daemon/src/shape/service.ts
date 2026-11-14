@@ -118,11 +118,6 @@ export interface ShapeServiceDeps {
    * start a session.
    */
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
-  /**
-   * Why a project's account can't run a conversation, or null. Reads the project and its account row
-   * only, so asking costs no Keychain read.
-   */
-  brainstormRefusal(projectId: ProjectId): string | null;
   /** The models a conversation of the project may run on (§5.1); none offered without it. */
   readonly models?: (projectId: ProjectId) => ShapeModelsDto;
   /**
@@ -439,16 +434,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       return STRICTEST_LIMITS;
     }
   };
-  /**
-   * Refuses a request for a project whose account can't run a conversation, so the builder is told when
-   * they ask instead of by a notice in a transcript that never reached Claude. Any other reason a launch
-   * can't be resolved is left to the start that follows.
-   */
-  const refuseChatGptAccount = (projectId: ProjectId): void => {
-    const why = deps.brainstormRefusal(projectId);
-    if (why !== null) throw new InvalidError(why);
-  };
-
   const { screens } = deps;
   const toolsFor: ShapeToolsFor = ({ shapeId }) =>
     createShapeToolHandlers(
@@ -509,6 +494,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       ...(deps.prepare === undefined ? {} : { prepare: deps.prepare }),
       limitsFor,
       judgeOf: (kind, model) => deps.adapter.capabilities({ kind }, model).judge,
+      subagentsOf: (kind, model) => deps.adapter.capabilities({ kind }, model).subagents,
       ...(deps.judge === undefined ? {} : { judge: deps.judge }),
       clock: deps.clock,
       contextLimitPct: deps.contextLimitPct ?? CONTEXT_LIMIT_PCT,
@@ -519,12 +505,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   return {
     create(projectId, input) {
-      refuseChatGptAccount(projectId);
       return state.write((ctx) => insertShape(ctx, projectId, input));
     },
 
     startFromTerminal(input) {
-      refuseChatGptAccount(input.projectId);
       const made: { id: ShapeId | null } = { id: null };
       try {
         return state.write((ctx) => {
@@ -626,7 +610,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     send(shapeId, text) {
-      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const message = postMessage(shapeId, text);
       engine.queued(conversationOf(shapeId));
       heard(shapeId, message);
@@ -634,7 +617,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     redo(shapeId, text) {
-      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const posted: { message: ShapeMessageDto | null } = { message: null };
       return engine
         .redo(conversationOf(shapeId), () => {
@@ -649,12 +631,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     sendNow(shapeId) {
-      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       engine.sendNow(conversationOf(shapeId));
     },
 
     propose(shapeId) {
-      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       if (pressPending(shapeId, ShapeEventKind.Propose)) return { status: 'ignored' };
       const { note, instruction } = proposeNote(getShape(state.db, shapeId).round > 0);
       // The press unlocks propose_plan for good and is a row in the transcript, in one write; its
@@ -673,7 +653,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     rehearse(shapeId, proposalIds) {
-      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
       if (pressPending(shapeId, ShapeEventKind.Rehearse))
@@ -729,7 +708,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     chooseModel(shapeId, model, effort = null) {
       const { projectId } = getShape(state.db, shapeId);
-      refuseChatGptAccount(projectId);
       const offered = (deps.models?.(projectId).offered ?? []).map((o) => o.model);
       if (model !== null && !offered.includes(model))
         throw new InvalidError(

@@ -1,4 +1,3 @@
-import { BRAINSTORM_REFUSED_ON_CHATGPT } from '@10db/contracts';
 import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@mantine/core';
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
@@ -138,14 +137,7 @@ export function Composer(props: ComposerProps) {
       onDrop={onDrop}
     >
       {shown === null ? null : (
-        <Alert
-          color="red"
-          title={
-            shown === BRAINSTORM_REFUSED_ON_CHATGPT
-              ? 'Not available on this account'
-              : "Couldn't reach Claude"
-          }
-        >
+        <Alert color="red" title="Couldn't reach Claude">
           {shown}
         </Alert>
       )}

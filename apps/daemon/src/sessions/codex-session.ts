@@ -17,7 +17,7 @@ import {
   type HookInput,
 } from './codex-guard';
 import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
-import { codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
+import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import {
   createTurnState,
   hasKnownShape,
@@ -52,7 +52,7 @@ import {
   SessionEndReason,
   type SessionEvent,
   type SessionHandle,
-  type LaneSessionSpec,
+  type AgentSessionSpec,
   type ShapeImage,
 } from './types';
 
@@ -203,7 +203,7 @@ function versionOf(userAgent: string): string | null {
  * model, a failed resume or an account that can't be read `error`; no prompt is sent and the child is
  * closed on every path. Each call runs under a deadline on the injected clock.
  */
-export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps): SessionHandle {
+export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps): SessionHandle {
   const events = createChannel<SessionEvent>();
   const clock: Clock = deps.clock ?? systemClock;
   const log = deps.logger;
@@ -487,13 +487,13 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
   };
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
+    const developerInstructions = codexDeveloperInstructions(spec);
     const params = {
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
       config: codexThreadConfig(spec),
-      // Codex loads no AGENTS.md under `untrusted` (L4): the instructions travel with the thread.
-      ...(spec.instructions ? { developerInstructions: spec.instructions } : {}),
+      ...(developerInstructions === null ? {} : { developerInstructions }),
     };
     const resumeId = spec.resumeProviderSessionId;
     let thread;
@@ -916,7 +916,10 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
       HOME: home.emptyHome,
       TENDB_MCP_TOKEN: spec.mcp.token,
       TENDB_GUARD_SOCKET: socketPath,
-      TENDB_GUARD_MAX_SECONDS: String(Math.ceil(spec.mcp.toolTimeoutMs / 1_000)),
+      // A card the hook raises waits on the builder, so the hook's own wait bounds it, not a tool's.
+      TENDB_GUARD_MAX_SECONDS: String(
+        Math.ceil((spec.hookWaitMs ?? spec.mcp.toolTimeoutMs) / 1_000),
+      ),
     };
     const child = (deps.spawn ?? spawnAppServer)(deps.codexPath, childEnv());
     child.stderr.on('data', (chunk: Buffer | string) => {

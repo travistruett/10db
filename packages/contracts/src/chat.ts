@@ -24,10 +24,6 @@ export const CHAT_DEFAULT_TITLE = 'New session';
 /** Most characters of a builder's name for a chat. */
 export const CHAT_RENAME_MAX = 120;
 
-/** What a project whose account is a ChatGPT plan reads in Sessions until chats run on Codex. */
-export const CHATS_UNAVAILABLE_ON_CHATGPT =
-  'Chats on a ChatGPT account come with the next update. Plan, the Board and tasks work as before.';
-
 export const ChatDto = z.object({
   id: ChatId,
   projectId: ProjectId,
@@ -70,11 +66,19 @@ export const ChatPatchInput = z
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ChatPatchInput = z.infer<typeof ChatPatchInput>;
 
-/** What a chat may run on: the account's models, or why the project's account runs no chat yet. */
+/**
+ * What a Codex session says while its web search stays off: `cached` waits on a live check that it fetches no
+ * page the agent names. A lane's thread says it once; a chat's fresh tab says it in place of the web.
+ */
+export const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check, so this session searches nothing.';
+
+/** What a chat may run on: the account's models and its default. */
 export const ChatModelsDto = z.object({
   default: z.string().nullable(),
   offered: z.array(ShapeModelOption),
-  unavailable: z.string().nullable(),
+  /** Whether the project's agent searches the web (`capabilities.webSearch`), for the fresh tab's words. */
+  webSearch: z.boolean(),
 });
 export type ChatModelsDto = z.infer<typeof ChatModelsDto>;
 

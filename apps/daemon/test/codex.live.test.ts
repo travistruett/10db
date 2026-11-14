@@ -19,7 +19,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, type Readable } from 'node:stream';
-import { mintId, Provider, type AccountId, type SessionId } from '@10db/contracts';
+import { JudgeKind, mintId, Provider, type AccountId, type SessionId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { parse } from 'smol-toml';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -52,6 +52,7 @@ import {
   type CodexChild,
   type AgentAdapter,
   type SessionEvent,
+  type ExploreSessionSpec,
   type LaneSessionSpec,
   type ShapeImage,
 } from '../src/sessions';
@@ -437,7 +438,7 @@ interface SessionRun {
   readonly events: readonly SessionEvent[];
   readonly threadId: string | null;
   readonly request: FakeRequest | undefined;
-  readonly spec: LaneSessionSpec;
+  readonly spec: LaneSessionSpec | ExploreSessionSpec;
 }
 
 let codexPath: string;
@@ -709,6 +710,83 @@ async function runOnLane(
   };
 }
 
+/**
+ * Runs one explore session (a chat's or Plan's) of `steps` on Plan's read-only sandbox, to the end of its first
+ * turn: 10db's judge asks the builder about a call naming `DENIED`, and `goAhead` is the builder's answer.
+ */
+async function runExplore(
+  world: World,
+  steps: Parameters<FakeResponses['script']>[0],
+  goAhead: { asked: string[] },
+): Promise<SessionRun> {
+  const launch = launcher.session(world.account, MODEL, []);
+  const laneSession = await world.laneSandbox.forSession({
+    ...laneInput(world, launch.env),
+    readOnly: true,
+  });
+  try {
+    const prompt = world.model.script(steps);
+    const spec: ExploreSessionSpec = {
+      sessionId: mintId('Session'),
+      conversationId: null,
+      policy: testPolicy(),
+      profile: {
+        kind: 'explore',
+        judge: JudgeKind.Tendb,
+        systemPrompt: 'You are a chat.',
+        tools: [],
+        allowedTools: [],
+        disallowedTools: [],
+        agents: {},
+      },
+      cwd: world.checkout,
+      prompt,
+      model: launch.model,
+      effort: 'low',
+      resumeProviderSessionId: null,
+      env: launch.env,
+      account: launch.expect,
+      projectMcpServers: {},
+      sandbox: laneSession.spec,
+      setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
+      mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
+      preToolUse: (req) => {
+        world.calls.push({ toolName: req.toolName, input: JSON.stringify(req.input) });
+        return { decision: 'allow' };
+      },
+      judgeCall: (req) =>
+        Promise.resolve(
+          JSON.stringify(req.input).includes(DENIED)
+            ? { decision: 'ask', reason: "10db's judge asks the builder: a limit" }
+            : { decision: 'allow' },
+        ),
+      canUseTool: (req) => {
+        goAhead.asked.push(JSON.stringify(req.input));
+        return Promise.resolve({ behavior: 'allow' });
+      },
+    };
+    const handle = world.adapter.open(spec);
+    const events: SessionEvent[] = [];
+    try {
+      for await (const event of handle.events) {
+        events.push(event);
+        if (event.type === 'turn_complete') await handle.stop();
+      }
+    } finally {
+      await handle.stop();
+    }
+    const started = events.find((e) => e.type === 'started');
+    return {
+      events,
+      threadId: started?.type === 'started' ? started.providerSessionId : null,
+      request: world.model.lastRequest(prompt),
+      spec,
+    };
+  } finally {
+    laneSession.dispose();
+  }
+}
+
 /** The session started and its turn completed: every start check passed and the prompt ran. */
 function expectTurn(run: SessionRun): readonly string[] {
   // A refused start shows its message here.
@@ -847,6 +925,25 @@ describe.skipIf(!live)(
       expect(world.mcp.calls).toEqual([JSON.stringify({ message: 'allowed' })]);
       expect(readFileSync(join(world.checkout, 'bash-allowed.txt'), 'utf8')).toBe('allowed\n');
       expect(readFileSync(join(world.checkout, 'patch-allowed.txt'), 'utf8')).toBe('allowed\n');
+    });
+
+    // Sessions spec §5.5, §16 check 3, trust line L1: a chat's thread on Codex. The judge stops a call at a
+    // limit and the builder's go-ahead lets it run; the read-only sandbox refuses a write the judge let
+    // through, and the hook still ran for it.
+    it('runs an explore thread read-only, judged through the hook, with the go-ahead', async () => {
+      const goAhead = { asked: [] as string[] };
+      const outputs = expectTurn(
+        await runExplore(
+          world,
+          [run(`echo ${DENIED}`), run('echo written > explore-write.txt'), { say: 'done' }],
+          goAhead,
+        ),
+      );
+      expect(world.calls.map((c) => c.toolName)).toEqual(['Bash', 'Bash']);
+      expect(goAhead.asked).toHaveLength(1);
+      expect(goAhead.asked[0]).toContain(DENIED);
+      expect(outputs[0]).toContain(DENIED);
+      expect(existsSync(join(world.checkout, 'explore-write.txt'))).toBe(false);
     });
 
     it('refuses the call when the guard socket is gone', async () => {

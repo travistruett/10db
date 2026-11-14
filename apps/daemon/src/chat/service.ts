@@ -2,7 +2,6 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CHAT_DEFAULT_TITLE,
-  CHATS_UNAVAILABLE_ON_CHATGPT,
   ChatTitleSource,
   ConflictError,
   ConversationItemAuthor,
@@ -106,13 +105,8 @@ export interface ChatServiceDeps {
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
   modelsOf(projectId: ProjectId): { default: string | null; offered: readonly ShapeModelOption[] };
-  /** Why the project's account runs no chat yet, or null when it runs them. */
-  unavailable(projectId: ProjectId): string | null;
-}
-
-/** Why a project whose account is a ChatGPT plan runs no chat yet, from its provider. */
-export function chatsUnavailable(onCodex: boolean): string | null {
-  return onCodex ? CHATS_UNAVAILABLE_ON_CHATGPT : null;
+  /** Whether the agent of the project's account searches the web (`capabilities.webSearch`). */
+  webSearchOf(projectId: ProjectId): boolean;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -120,11 +114,6 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const dtoOf = (id: ChatId): ChatDto => {
     const view = chatView(state.db, id);
     return { ...view, conversation: engine.view(view.conversationId) };
-  };
-
-  const refuseUnavailable = (projectId: ProjectId): void => {
-    const why = deps.unavailable(projectId);
-    if (why !== null) throw new ConflictError(why);
   };
 
   const offered = (projectId: ProjectId, model: string): void => {
@@ -135,7 +124,6 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   return {
     create(input) {
       getProject(state.db, input.projectId);
-      refuseUnavailable(input.projectId);
       if (input.model !== null) offered(input.projectId, input.model);
       const id = state.write((ctx) => {
         const chatId = mintId('Chat');
@@ -181,10 +169,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     models(projectId) {
-      const why = deps.unavailable(projectId);
-      if (why !== null) return { default: null, offered: [], unavailable: why };
       const models = deps.modelsOf(projectId);
-      return { default: models.default, offered: [...models.offered], unavailable: null };
+      return {
+        default: models.default,
+        offered: [...models.offered],
+        webSearch: deps.webSearchOf(projectId),
+      };
     },
 
     async archive(id) {
@@ -218,11 +208,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   };
 
   function post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow {
-    const conv = getConversation(state.db, conversationId);
     const chat = chatOfConversation(state.db, conversationId);
     if (chat === null) throw new ConflictError('This conversation is no chat’s');
     if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
-    refuseUnavailable(conv.projectId);
     return keepBuilderMessage(input, {
       limits: {
         maxChars: TASK_MESSAGE_MAX_CHARS,

@@ -29,6 +29,7 @@ import {
   useUploadShapeFile,
 } from '../../daemon/shape-queries';
 import { formatTokens } from '../factory/format-tokens';
+import { AgentsLine } from './agents-line';
 import { Composer } from './composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
@@ -286,7 +287,12 @@ export function ConversationPane({
           </Group>
         )}
       </Group>
-      {conversation === undefined ? null : <JudgeLine judge={conversation.capabilities.judge} />}
+      {conversation === undefined ? null : (
+        <>
+          <JudgeLine judge={conversation.capabilities.judge} />
+          <AgentsLine subagents={conversation.capabilities.subagents} />
+        </>
+      )}
       <Transcript
         shapeId={shapeId}
         conversation={conversation}

@@ -5,6 +5,7 @@ import { request } from 'node:http';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SANDBOXED } from '../../test/fixtures';
+import { judgeShapeCall, type ShapeAccess } from '../shape';
 import { codexHomes } from './codex-home';
 import {
   guardCalls,
@@ -235,6 +236,35 @@ describe('judgeHookCall', () => {
   });
 
   const bash = (command: string): HookInput => ({ tool_name: 'Bash', tool_input: { command } });
+
+  // Sessions spec §5.5: Plan's thread on Codex is read-only. Its patch reaches Plan's own guard through the hook
+  // as one Edit per path, which Plan refuses, whatever the sandbox would have done with it.
+  it.each([
+    ['adds a file', '*** Add File: notes.md\n+x'],
+    ['updates one', '*** Update File: src/a.ts\n@@\n-x\n+y'],
+    ['deletes one', '*** Delete File: src/a.ts'],
+  ])('refuses a patch in Plan’s thread that %s', async (_name, change) => {
+    const access: ShapeAccess = {
+      checkout: '/w/repo',
+      home: '/Users/b',
+      protectedReads: [],
+      filesDir: '/d/shapes/s1',
+      sandboxRoots: [],
+    };
+    const plan: Spec = {
+      ...ALLOW_ALL,
+      preToolUse: (req) =>
+        judgeShapeCall({ toolName: req.toolName, toolInput: req.input, cwd: req.cwd }, access),
+    };
+    const hook: HookInput = {
+      tool_name: 'apply_patch',
+      tool_input: { command: `*** Begin Patch\n${change}\n*** End Patch` },
+      cwd: '/w/repo',
+    };
+    const answer = await judgeHookCall(plan, hook, NEVER);
+    expect(answer).toMatchObject({ allow: false });
+    expect(answer.allow ? '' : answer.reason).toContain('Plan writes no code');
+  });
 
   it('allows on allow', async () => {
     expect(await judgeHookCall(ALLOW_ALL, bash('ls'), NEVER)).toEqual({ allow: true });

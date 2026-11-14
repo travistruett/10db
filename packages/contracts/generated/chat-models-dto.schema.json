@@ -39,16 +39,13 @@
         ]
       }
     },
-    "unavailable": {
-      "type": [
-        "string",
-        "null"
-      ]
+    "webSearch": {
+      "type": "boolean"
     }
   },
   "required": [
     "default",
     "offered",
-    "unavailable"
+    "webSearch"
   ]
 }

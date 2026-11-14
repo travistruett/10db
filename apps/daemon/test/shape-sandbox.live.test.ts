@@ -39,7 +39,7 @@ import {
 import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true);
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the
@@ -141,6 +141,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       exportAwsCredentials: () => Promise.reject(new Error('no AWS in this test')),
       builderHome: homedir(),
       laneWritableRoots: [join(dataDir, 'worktrees'), roots.temp, roots.codexLanes, roots.files],
+      codexLaneTempRoot: roots.codexLanes,
     });
     const cards: { title: string; shapeId: unknown }[] = [];
     const prepared = await prepare({

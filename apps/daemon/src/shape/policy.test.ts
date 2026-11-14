@@ -14,7 +14,7 @@ import {
 } from './policy';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS, true);
 
 // Shape spec §5.2: the lists a session starts with, and the one prompt that explains them.
 
