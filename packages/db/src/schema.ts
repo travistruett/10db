@@ -1598,6 +1598,10 @@ export const conversations = sqliteTable(
     /** §6.7; null for a task, whose state is the runner's. */
     state: text('state').$type<ConversationState>(),
     contextPct: real('context_pct'),
+    /** The slash commands the agent last listed, so a cold conversation still offers them; null before any. */
+    commands: text('commands', { mode: 'json' }).$type<
+      { name: string; description: string; argumentHint: string | null }[]
+    >(),
     /** The `seq` the next item takes. */
     nextSeq: integer('next_seq').notNull().default(1),
     createdAt: createdAt(),
@@ -1702,10 +1706,31 @@ export const chats = sqliteTable(
     tabPosition: integer('tab_position'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    lastActivityAt: text('last_activity_at').notNull(),
+    /** When the builder last sent or the agent last ended a turn; null until the first message. */
+    lastActivityAt: text('last_activity_at'),
     archivedAt: text('archived_at'),
   },
-  (t) => [index('chats_project_idx').on(t.projectId)],
+  (t) => [
+    index('chats_project_idx').on(t.projectId),
+    uniqueIndex('chats_conversation_unique').on(t.conversationId),
+  ],
+);
+
+/** The tasks a chat filed: what `edit_task`'s scope, Recent's count and a row's Undo read. */
+export const chatTasks = sqliteTable(
+  'chat_tasks',
+  {
+    chatId: text('chat_id')
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.taskId] }), index('chat_tasks_task_idx').on(t.taskId)],
 );
 
 /**
