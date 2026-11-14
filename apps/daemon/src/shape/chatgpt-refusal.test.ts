@@ -32,6 +32,13 @@ const requests: [string, () => unknown][] = [
   ['propose', () => f.service.propose(f.c.shape.id)],
   ['rehearse', () => f.service.rehearse(f.c.shape.id)],
   ['a model choice', () => f.service.chooseModel(f.c.shape.id, 'claude-sonnet-5-5')],
+  ['a redo', () => f.service.redo(f.c.shape.id, 'Make the cards denser still.')],
+  [
+    'Send now',
+    () => {
+      f.service.sendNow(f.c.shape.id);
+    },
+  ],
   [
     'start_shape',
     () =>

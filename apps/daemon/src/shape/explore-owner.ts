@@ -54,6 +54,7 @@ import {
   type ExploreOwnerHooks,
   type PictureLimits,
 } from '../conversation';
+import { storedModelNames } from '../catalogue';
 import type { StateStore } from '../events';
 import { stringField } from '../guard';
 import { principlesBrief } from '../knowledge';
@@ -532,7 +533,6 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           policy,
           profile: {
             kind: 'explore',
-            shapeId,
             judge,
             systemPrompt: shapeSystemPrompt(launch.agentModels),
             tools: [...toolset.tools],
@@ -719,9 +719,11 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       // The conversation's own pick resolves as its next start would; another resolves as itself.
       const launch =
         model === shape.model ? launchOf(shapeId) : deps.launch(shape.projectId, model);
+      // The name the catalogue gives the model, else its ID.
+      const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
       return {
         model: launch.modelId,
-        label: launch.modelId,
+        label: name ?? launch.modelId,
         launchId: launch.model,
         effort: launch.effort,
       };

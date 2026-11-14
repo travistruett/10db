@@ -37,6 +37,7 @@ import {
   getProject,
   getShape,
   getShapeFinding,
+  getItem,
   getShapeProposal,
   insertShape,
   insertShapeFile,
@@ -50,6 +51,7 @@ import {
   settleOpenQuestionsOfTask,
   shapeConversation,
   updateItem,
+  type ConversationItemRow,
   type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -179,6 +181,10 @@ export interface ShapeService {
   dropProposal(shapeId: ShapeId, id: ShapeProposalId): void;
   /** Records a builder message and queues its turn. */
   send(shapeId: ShapeId, text: string): ShapeMessageDto;
+  /** Stop and Redo: the turn stops, and the edited message runs next in place of the one it redoes. */
+  redo(shapeId: ShapeId, text: string): Promise<ConversationItemRow>;
+  /** Sends what waits under the conversation's Send now line. */
+  sendNow(shapeId: ShapeId): void;
   /** Queues a Propose turn, or ignores the press while a Propose turn is queued or running. */
   propose(shapeId: ShapeId): { status: 'started' | 'ignored' };
   /**
@@ -344,6 +350,31 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   ): ShapeMessageDto =>
     state.write((ctx) => insertShapeMessage(ctx, shapeId, { author, kind, body }));
   /** Tells the screen the conversation changed, for what no row records (where its session is). */
+  /**
+   * The builder's message, stored queued before anything is sent (call 2): it waits for a turn to
+   * take it. The first one titles the conversation.
+   */
+  const postMessage = (shapeId: ShapeId, text: string): ShapeMessageDto => {
+    const message = state.write((ctx) =>
+      insertShapeMessage(ctx, shapeId, {
+        author: ShapeMessageAuthor.Builder,
+        kind: ShapeMessageKind.Text,
+        body: text,
+        queued: true,
+      }),
+    );
+    const title = titleFrom(text);
+    if (title !== '' && getShape(state.db, shapeId).title === DEFAULT_SHAPE_TITLE)
+      state.write((ctx) => {
+        patchShape(ctx, shapeId, { title });
+      });
+    return message;
+  };
+  /** Shadow only: nothing waits on it, and it never throws. */
+  const heard = (shapeId: ShapeId, message: ShapeMessageDto): void => {
+    void deps.jev?.heard(shapeId, message.id);
+  };
+
   const announce = (shapeId: ShapeId): void => {
     state.write((ctx) => {
       ctx.emit({
@@ -588,24 +619,30 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     send(shapeId, text) {
       refuseChatGptAccount(getShape(state.db, shapeId).projectId);
-      // Stored queued before anything is sent (call 2): it waits for a turn to take it.
-      const message = state.write((ctx) =>
-        insertShapeMessage(ctx, shapeId, {
-          author: ShapeMessageAuthor.Builder,
-          kind: ShapeMessageKind.Text,
-          body: text,
-          queued: true,
-        }),
-      );
-      const title = titleFrom(text);
-      if (title !== '' && getShape(state.db, shapeId).title === DEFAULT_SHAPE_TITLE)
-        state.write((ctx) => {
-          patchShape(ctx, shapeId, { title });
-        });
+      const message = postMessage(shapeId, text);
       engine.queued(conversationOf(shapeId));
-      // Shadow only: nothing waits on it, and it never throws.
-      void deps.jev?.heard(shapeId, message.id);
+      heard(shapeId, message);
       return message;
+    },
+
+    redo(shapeId, text) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
+      const posted: { message: ShapeMessageDto | null } = { message: null };
+      return engine
+        .redo(conversationOf(shapeId), () => {
+          const message = postMessage(shapeId, text);
+          posted.message = message;
+          return getItem(state.db, message.id);
+        })
+        .then((edit) => {
+          if (posted.message !== null) heard(shapeId, posted.message);
+          return edit;
+        });
+    },
+
+    sendNow(shapeId) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
+      engine.sendNow(conversationOf(shapeId));
     },
 
     propose(shapeId) {
@@ -703,6 +740,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         },
         (error: unknown) => {
           log.warn({ err: error, shapeId }, 'the conversation’s model could not be changed');
+          // The old pick is back: the screen shows it again.
+          announce(shapeId);
         },
       );
       return { ...shape, model };

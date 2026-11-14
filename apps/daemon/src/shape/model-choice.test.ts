@@ -1,6 +1,7 @@
 import { AccountKind, ConflictError, InvalidError } from '@10db/contracts';
-import { getShape } from '@10db/db';
+import { getShape, setAppSetting } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { waitFor } from '../../test/fixtures';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
@@ -28,6 +29,34 @@ describe('a conversation’s model', () => {
     const launched: (string | null)[] = [];
     f = createServiceFixture({ models: () => MODELS, onLaunch: (m) => launched.push(m) });
     const shapeId = f.c.shape.id;
+    // The catalogue names the model the notice says.
+    f.state.write((ctx) => {
+      setAppSetting(ctx, 'catalogue.document', {
+        fetchedAt: '2026-11-13T09:00:00.000Z',
+        catalogue: {
+          providers: {
+            anthropic: {
+              models: [
+                {
+                  provider: 'anthropic',
+                  id: 'claude-sonnet-5-5',
+                  name: 'Claude Sonnet 5.5',
+                  maker: 'anthropic',
+                  family: null,
+                  releaseDate: null,
+                  deprecated: false,
+                  inputPrice: null,
+                  outputPrice: null,
+                  efforts: [],
+                },
+              ],
+            },
+          },
+          hash: 'h',
+          skipped: 0,
+        },
+      });
+    });
     expect(f.service.view(shapeId).models).toEqual(MODELS);
     expect(f.service.view(shapeId).shape.model).toBeNull();
     f.service.send(shapeId, 'First');
@@ -49,7 +78,7 @@ describe('a conversation’s model', () => {
         .view(shapeId)
         .messages.filter((m) => m.kind === 'notice')
         .map((m) => m.body),
-    ).toEqual(['Now on claude-sonnet-5-5 · claude-sonnet-5-5']);
+    ).toEqual(['Now on Claude Sonnet 5.5 · claude-sonnet-5-5']);
   });
 
   it('goes back to the plan role’s when the pick is cleared', () => {
@@ -104,6 +133,21 @@ describe('a conversation’s model', () => {
       expect(spec.account.kind).toBe(AccountKind.Bedrock);
     },
   );
+
+  it('tells the screen when a warm session refuses the switch, so it shows the old pick again', async () => {
+    f = createServiceFixture({ models: () => MODELS });
+    const shapeId = f.c.shape.id;
+    f.service.send(shapeId, 'First');
+    await f.service.settled(shapeId);
+    f.adapter.shapeModelSwitch = () => Promise.reject(new Error('the model switch failed'));
+    const before = f.events.length;
+    f.service.chooseModel(shapeId, 'claude-sonnet-5-5');
+    const shapeOf = f.c.store.db;
+    await waitFor(() => getShape(shapeOf, shapeId).model === null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.events.slice(before).map((e) => e.type)).toContain('shape.changed');
+    expect(getShape(f.c.store.db, shapeId).model).toBeNull();
+  });
 
   it('refuses a model the project’s account does not offer', () => {
     f = createServiceFixture({

@@ -4,13 +4,11 @@ import {
   ConversationOwnerKind,
   NotFoundError,
   ShapeId,
-  ShapeMessageAuthor,
-  ShapeMessageKind,
   type ConversationId,
   type ConversationItemDto,
   type ConversationItemId,
 } from '@10db/contracts';
-import { getConversation, getItem, insertShapeMessage, listItems } from '@10db/db';
+import { getConversation, getItem, listItems } from '@10db/db';
 import { itemDtoOf, itemsWithFull, readFullOutput, type ExploreEngine } from '../conversation';
 import type { ApiServices } from '../api';
 import type { StateStore } from '../events';
@@ -39,7 +37,7 @@ const NO_CHATS = 'A chat takes messages once Sessions runs chats.';
 export function createConversationServices(deps: {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
-  readonly shape: Pick<ShapeService, 'send'>;
+  readonly shape: Pick<ShapeService, 'send' | 'redo' | 'sendNow'>;
   readonly dataDir: string;
 }): ConversationApiServices {
   const { state, engine } = deps;
@@ -88,8 +86,7 @@ export function createConversationServices(deps: {
       return dtoOf(id, message.id);
     },
     sendConversationNow(id) {
-      known(id);
-      engine.sendNow(id);
+      deps.shape.sendNow(shapeOf(id));
       return engine.view(id);
     },
     async stopConversation(id) {
@@ -98,20 +95,7 @@ export function createConversationServices(deps: {
       return engine.view(id);
     },
     async redoConversation(id, text) {
-      const shapeId = shapeOf(id);
-      const edit = await engine.redo(id, () =>
-        getItem(
-          state.db,
-          state.write((ctx) =>
-            insertShapeMessage(ctx, shapeId, {
-              author: ShapeMessageAuthor.Builder,
-              kind: ShapeMessageKind.Text,
-              body: text,
-              queued: true,
-            }),
-          ).id,
-        ),
-      );
+      const edit = await deps.shape.redo(shapeOf(id), text);
       return dtoOf(id, edit.id);
     },
     conversationFull(id, itemId) {
