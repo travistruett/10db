@@ -171,7 +171,7 @@ kind line never competes with the buttons for width. It shows:
 
 **The tabs live in the header, in the 48 px row the window already has (call, the one bold move).**
 
-- On Sessions the strip starts just after the traffic lights, at 84 px, not at the sidebar's edge, so five tabs
+- On Sessions the strip starts just after the traffic lights, at 88 px, not at the sidebar's edge, so five tabs
   keep readable titles at 1080 px. It runs to the status icons.
 - Its empty space keeps `data-tauri-drag-region`, so the window still drags, and a double-click there zooms the
   window, as a macOS title bar does. A double-click on a tab renames it instead (§5.4).
@@ -312,8 +312,8 @@ After a close, focus moves to the tab on the right, or to the left one when the 
   Inbox's pass row lists it with **Open Session**, not Open UI Workbench **(call)**.
 - **A Chat's reply is not a card.** While the window is unfocused, it raises one notification, "Compare ACP
   adapters replied", with the reply's first line **(call)**. With the window focused the bold title says it. A
-  notification never fires for the tab in view (design spec §8). Settings › General gets "Notify when a chat
-  replies", on by default.
+  notification never fires for the tab in view (design spec §8). Settings › Sessions, a global section, gets
+  "Notify when a chat replies", on by default.
 
 ### 5.8 Keyboard
 
@@ -643,7 +643,7 @@ the Workbench already does it, both native adapters carry receipts, and a double
   checks them. Pictures wait as 56 px thumbnails above the input, each with Remove. A type outside `images` is
   refused under the input, in words.
 - **`@` mentions** (Mantine `Mentions`, design spec S11). The list is the files of the session's checkout, from
-  `GET /projects/:id/files` (`git ls-files`), fuzzy, showing 8 of the daemon's 50, with an 80 ms debounce.
+  `GET /conversations/:id/files?q=` (`git ls-files` of the checkout the daemon resolves from the conversation), fuzzy, showing 8 of the daemon's 50, with an 80 ms debounce.
   - A suggestion shows the `file` icon, the name in `fg_1` with the match underlined, and the folder in dimmed mono.
   - Enter or Tab picks one. The send key never fires while the list is open.
   - A picked file becomes a mono chip and reaches the agent as a path. The session's judge decides each read
@@ -1334,7 +1334,7 @@ Each call was made overnight, and each takes one line to overturn. "Adopted" mea
 **DESIGN.md updates that M5a makes.** Not edited now.
 
 1. **Scope follows the question:** the sidebar's global group reads Inbox, Factory, Sessions.
-2. **Navigation:** on Sessions only, the header holds the tab strip from 84 px, keeps its empty space as a drag
+2. **Navigation:** on Sessions only, the header holds the tab strip from 88 px, keeps its empty space as a drag
    region, and zooms the window on a double-click there.
 3. **Status:** a status is never told by color alone. A bare dot means running; a dot with a ring means waiting on
    the builder, the ring yellow, or red for a failure; failed, paused and done are icons in their colors. This
