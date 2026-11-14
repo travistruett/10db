@@ -107,6 +107,7 @@ export function PlaybookRowDrawer({
     <Drawer
       opened={opened}
       onClose={onClose}
+      closeButtonProps={{ 'aria-label': 'Close' }}
       position="right"
       size="md"
       title={row === null ? '' : `${RIGOR_LABELS[row.rigor].label}: process`}
