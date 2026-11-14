@@ -99,4 +99,8 @@ only process that writes the database.
   partial unique index and `ON CONFLICT DO NOTHING`, so a second report of one call writes nothing inside the
   caller's write. `skip_approvals` joins a follow-up task to the skips Run these now approved; `approveSkips`
   refuses another project's or an unapprovable one (`approvalOf`), and the approvals are read only until the
-  follow-up is `done`.
+  follow-up is `done`. Migration 0076 (generated): `skip_listings` (append-only), one row each time an ended run is
+  checked for its Skipped while you were away item: the newest skip it covered and the item, null when there was
+  nothing new. `unlistedEndedRuns` answers the `DONE` or `FAILED` runs with no row, or with skips after their last
+  one, for the start-up sweep. Migration 0077 (`--custom`, authored once) backfills a row with no item for every run
+  that had ended, reusing the run's UUID as the listing's, so the first start after the upgrade lists no old run.

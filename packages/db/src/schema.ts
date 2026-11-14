@@ -71,6 +71,7 @@ import type {
   TakeOutStep,
   TaskPageReportId,
   SkippedActionId,
+  SkipListingId,
   SkipKind,
   SkipSource,
   LimitName,
@@ -2397,4 +2398,28 @@ export const skipApprovals = sqliteTable(
       .references(() => skippedActions.id),
   },
   (t) => [primaryKey({ columns: [t.taskId, t.skippedActionId] })],
+);
+
+/**
+ * Each check of an ended unattended run for its Skipped while you were away item: the newest skip it
+ * covered, and the item it raised (null when there was nothing new to say). A run is listed once per
+ * ending, and a crash between the end and the item leaves no row, so the start-up sweep raises it.
+ */
+export const skipListings = sqliteTable(
+  'skip_listings',
+  {
+    id: text('id').$type<SkipListingId>().primaryKey(),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    throughSkipId: text('through_skip_id')
+      .$type<SkippedActionId>()
+      .references(() => skippedActions.id),
+    inboxItemId: text('inbox_item_id')
+      .$type<InboxItemId>()
+      .references(() => inboxItems.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('skip_listings_workstream_idx').on(t.workstreamId)],
 );

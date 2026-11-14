@@ -9,3 +9,4 @@ export { callKey, callSummary } from './call-summary';
 export { AWAY_ANSWER, SKIP_RESUMES_MAX, skipMessage, stoppedBySkip } from './skip';
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
 export { answerAway, routedToPerson, type AwayLane } from './away-question';
+export { writtenConfig } from './written-config';

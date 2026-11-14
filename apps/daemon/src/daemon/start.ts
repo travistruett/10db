@@ -15,6 +15,8 @@ import {
   agentKind,
   providerOf,
   StepRole,
+  WorkstreamId,
+  WorkstreamState,
   type Effort,
   type InboxAnswer,
   type InboxItemDto,
@@ -23,7 +25,6 @@ import {
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
@@ -138,6 +139,8 @@ import {
   subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
+  raiseSkippedCard,
+  sweepUnlistedRuns,
   type DeliveryContext,
   type DeliveryLimits,
   type PassOpenDeps,
@@ -1609,6 +1612,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // An ended unattended run lists what it skipped while nobody watched, once; the sweep raises the
+  // item of a run that ended before a crash, or that recovery just failed.
+  const skippedDeps = { state, git, log: logger.child({ component: 'skipped' }) };
+  bus.subscribe((event) => {
+    if (event.type !== EventType.WorkstreamChanged) return;
+    const to = event.data['to'];
+    if (to !== WorkstreamState.Done && to !== WorkstreamState.Failed) return;
+    const id = WorkstreamId.safeParse(event.entityId);
+    if (!id.success) return;
+    raiseSkippedCard(skippedDeps, id.data).catch((error: unknown) => {
+      logger.warn(
+        { err: error, workstreamId: id.data },
+        'could not raise the skipped item of a run',
+      );
+    });
+  });
+  await sweepUnlistedRuns(skippedDeps);
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
