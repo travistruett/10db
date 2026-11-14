@@ -175,6 +175,8 @@ export function serveJudge(initial: {
             thread_answer: merged(JudgeDecision.ThreadAnswer),
             reply_match: merged(JudgeDecision.ReplyMatch),
             approval_read: merged(JudgeDecision.ApprovalRead),
+            task_rigor: merged(JudgeDecision.TaskRigor),
+            task_kinds: merged(JudgeDecision.TaskKinds),
           },
         },
       };

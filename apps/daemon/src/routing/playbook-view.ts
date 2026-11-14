@@ -48,6 +48,7 @@ export function playbookView(playbook: PlaybookScopes): PlaybookDto {
     const rounds = found.find((f) => f.row.reviewRounds !== null);
     const fix = found.find((f) => f.row.fixBy !== null);
     const approves = found.find((f) => f.row.approvesPlan !== null);
+    const ships = found.find((f) => f.row.ships !== null);
     return {
       rigor,
       steps: {
@@ -63,6 +64,7 @@ export function playbookView(playbook: PlaybookScopes): PlaybookDto {
         value: approves?.row.approvesPlan ?? fallback.approvesPlan,
         source: approves?.source ?? 'default',
       },
+      ships: { value: ships?.row.ships ?? fallback.ships, source: ships?.source ?? 'default' },
     };
   });
   const cells = RIGORS.flatMap((rigor) =>

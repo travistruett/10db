@@ -53,6 +53,7 @@ export * from './task-page-reports';
 export * from './task-context';
 export * from './task-thread';
 export * from './tasks';
+export * from './task-sizing';
 export * from './tool-ops';
 export * from './usage';
 export * from './workstreams';

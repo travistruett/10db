@@ -20,6 +20,7 @@ import {
   ProposalListQuery,
   SearchMatch,
   TaskInput,
+  RigorSource,
   TaskKindSource,
   TaskMove,
   TaskPatch,
@@ -161,7 +162,9 @@ export function createBuilderTools(
       };
       const refusal = newTaskRefusal(trimmed);
       if (refusal !== null) throw new DomainError('invalid', refusal);
-      return taskSummary(await services.createTask(projectId, TaskInput.parse(trimmed)));
+      return taskSummary(
+        await services.createTask(projectId, TaskInput.parse(trimmed), RigorSource.Agent),
+      );
     },
     [BuilderToolName.EditTask]: async (args) => {
       const { taskId, kinds: named, ...changes } = BuilderToolInputs.edit_task.parse(args);
@@ -183,7 +186,9 @@ export function createBuilderTools(
         if (criteria.length === 0) throw new DomainError('invalid', NEW_TASK_NO_CRITERIA);
         patch['acceptanceCriteria'] = criteria;
       }
-      return taskSummary(await services.patchTask(taskId, TaskPatch.parse(patch)));
+      return taskSummary(
+        await services.patchTask(taskId, TaskPatch.parse(patch), RigorSource.Agent),
+      );
     },
     [BuilderToolName.RemoveTask]: (args) =>
       taskSummary(services.removeTask(BuilderToolInputs.remove_task.parse(args).taskId)),

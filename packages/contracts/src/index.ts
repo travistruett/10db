@@ -47,6 +47,7 @@ export * from './plan-record';
 export * from './plan-record-view';
 export * from './review-rounds';
 export * from './sign-in-url';
+export * from './skills';
 export { PROTOCOL_VERSION } from './protocol';
 export * from './self-update';
 export * from './run-next';

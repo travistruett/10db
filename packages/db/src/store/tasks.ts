@@ -8,6 +8,7 @@ import {
   Delivery,
   effectiveRigor,
   EventType,
+  explainEffectiveRigor,
   InvalidError,
   isTerminal,
   mintId,
@@ -37,6 +38,7 @@ import {
   type ProjectId,
   type ProposalId,
   Rigor,
+  RigorSource,
   type TaskConfig,
   type TaskDto,
   type TaskId,
@@ -186,6 +188,8 @@ export function insertTask(
   projectId: ProjectId,
   input: TaskInput,
   placement?: Placement,
+  /** Who gave the task its rigor, when `input` has one; the builder's, which pins it, when left out. */
+  rigorSource?: RigorSource,
 ): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
@@ -213,6 +217,7 @@ export function insertTask(
     landing: config.landing ?? taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, config.workspaceMode), reason: null }),
     proposalId: null,
+    rigorSource: rigorSource ?? RigorSource.Builder,
   });
 }
 
@@ -511,6 +516,8 @@ function writeTask(
       readonly landing: TaskLanding;
       readonly proposalId: ProposalId | null;
       readonly goalId?: GoalId;
+      /** Who gave the task its `rigor`; ignored when it has none. */
+      readonly rigorSource?: RigorSource;
       /** The human column to park the task in; absent, it is planned. */
       readonly boardColumnId?: BoardColumnId | null;
     },
@@ -530,6 +537,7 @@ function writeTask(
     acceptanceCriteria: config.acceptanceCriteria,
     areas: config.areas,
     rigor: config.rigor ?? null,
+    rigorSource: config.rigor == null ? null : (config.rigorSource ?? RigorSource.Builder),
     kinds: config.kinds ?? [],
     effortPin: config.effortPin ?? null,
     proposalId: config.proposalId,
@@ -631,6 +639,17 @@ function toTaskDto(
   row: typeof schema.tasks.$inferSelect,
   inputs: RigorInputs = rigorInputs(db, row.projectId),
 ): TaskDto {
+  const rigorInput = {
+    rigor: row.rigor,
+    projectDefault: inputs.projectDefault,
+    taskKinds: row.kinds,
+    kinds: inputs.kinds,
+  };
+  const explained = explainEffectiveRigor({
+    ...rigorInput,
+    rigorSource: row.rigorSource,
+    rigorReason: row.rigorReason,
+  });
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
     .from(schema.taskDeps)
@@ -661,12 +680,13 @@ function toTaskDto(
     acceptanceCriteria: row.acceptanceCriteria,
     areas: row.areas,
     rigor: row.rigor,
-    effectiveRigor: effectiveRigor({
-      rigor: row.rigor,
-      projectDefault: inputs.projectDefault,
-      taskKinds: row.kinds,
-      kinds: inputs.kinds,
-    }),
+    effectiveRigor: effectiveRigor(rigorInput),
+    rigorSource: row.rigor === null ? null : (row.rigorSource ?? RigorSource.Builder),
+    rigorReason: row.rigor === null ? null : row.rigorReason,
+    effectiveRigorSource: explained.source,
+    effectiveRigorReason: explained.reason,
+    kindsOff: row.kindsOff,
+    sizedByRules: row.sizingCalls.rigor === null && Object.keys(row.sizingCalls.kinds).length === 0,
     kinds: row.kinds,
     effortPin: row.effortPin,
     landing: landingOf(row),
@@ -1046,6 +1066,8 @@ export function patchTask(
   id: TaskId,
   patch: TaskPatch,
   proposed?: Placement,
+  /** Who gave the rigor the patch sets, when it sets one; the builder's, which pins it, when left out. */
+  rigorSource?: RigorSource,
 ): TaskDto {
   const changes = TaskPatch.parse(patch);
   if (changes.kinds !== undefined)
@@ -1076,6 +1098,13 @@ export function patchTask(
     .update(schema.tasks)
     .set({
       ...fields,
+      // A rigor the patch sets is pinned by whoever set it, with no reason of its own; clearing it hands the task back to sizing.
+      ...(fields.rigor === undefined
+        ? {}
+        : {
+            rigorSource: fields.rigor === null ? null : (rigorSource ?? RigorSource.Builder),
+            rigorReason: null,
+          }),
       ...(landing === undefined ? {} : landingColumns(landing)),
       // The patch is the builder's placement control: the reason says so, replacing a proposed one.
       ...(fields.workspaceMode === undefined ? {} : { placementReason: BUILDER_CHOSE_PLACEMENT }),
@@ -1165,6 +1194,24 @@ function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictE
 }
 
 /**
+ * Whether the rule's proposal would move the task to the other placement: it is not the builder's own, it
+ * differs from where the task is, and a task with no reason takes it only when the rule matched. The store's
+ * own check of whether the task can still move comes after (`movedByProposal`); a caller that must not move
+ * a task whose join into a batch is pending asks this first.
+ */
+export function placementRuleMoves(
+  task: Pick<TaskDto, 'workspaceMode' | 'placementReason'>,
+  proposed: Placement | undefined,
+): boolean {
+  return (
+    proposed !== undefined &&
+    proposed.workspaceMode !== task.workspaceMode &&
+    task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
+    (task.placementReason !== null || proposed.reason !== null)
+  );
+}
+
+/**
  * The columns an edit sets when the placement rule gives the task a different placement (the task's
  * areas or risk tags changed after it was made). Null when the task stays as it is: the builder chose
  * its placement, or Start could no longer start it. Otherwise:
@@ -1177,7 +1224,7 @@ function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictE
  *   sent it to a copy. It is always the default, never what the creator asked for: the store keeps
  *   no record of the request (task placement spec, P2).
  */
-function movedByProposal(
+export function movedByProposal(
   db: DbReader,
   task: TaskDto,
   proposed: Placement,

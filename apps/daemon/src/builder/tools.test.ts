@@ -2,6 +2,7 @@ import {
   BoardStatus,
   BuilderToolName,
   mintId,
+  RigorSource,
   TaskStatus,
   WorkstreamState,
   type TaskDto,
@@ -129,5 +130,34 @@ describe('import_plan', () => {
       ),
     ).rejects.toThrow(/bundle/);
     expect(importPlan).not.toHaveBeenCalled();
+  });
+});
+
+describe('create_task and edit_task', () => {
+  const projectId = mintId('Project');
+  const created = { id: taskId, title: 'the task', status: TaskStatus.Open } as TaskDto;
+
+  it('give the task service the agent as the source of a rigor they set', async () => {
+    const createTask = vi.fn(() => created);
+    const patchTask = vi.fn(() => created);
+    const tools = createBuilderTools({
+      getTask: () => asTask({ kinds: [] }),
+      createTask,
+      patchTask,
+    } as unknown as BuilderServices);
+    await tools[BuilderToolName.CreateTask]({
+      projectId,
+      title: 'Add a thing',
+      acceptanceCriteria: ['It works'],
+      areas: ['api'],
+      rigor: 'careful',
+    });
+    await tools[BuilderToolName.EditTask]({ taskId, rigor: 'light' });
+    expect(createTask).toHaveBeenCalledWith(
+      projectId,
+      expect.objectContaining({ rigor: 'careful' }),
+      RigorSource.Agent,
+    );
+    expect(patchTask).toHaveBeenCalledWith(taskId, { rigor: 'light' }, RigorSource.Agent);
   });
 });

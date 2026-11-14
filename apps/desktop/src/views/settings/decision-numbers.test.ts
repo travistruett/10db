@@ -213,6 +213,7 @@ describe('outcomeText', () => {
       'The call failed; 10db asked which way',
     ],
     ['stopped', JudgeDecision.ReviewSize, JudgeOutcome.Stopped, null, 'Stopped before it answered'],
+    ['overridden', JudgeDecision.TaskRigor, JudgeOutcome.Overridden, 'light', 'Overridden by you'],
     [
       'shadow',
       JudgeDecision.ShapeReady,

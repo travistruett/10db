@@ -512,6 +512,20 @@
       "when": 1794629977158,
       "tag": "0072_tiny_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1794631713814,
+      "tag": "0073_fixed_dazzler",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1794631720971,
+      "tag": "0074_rigor_source_of_set_rigors",
+      "breakpoints": true
     }
   ]
 }

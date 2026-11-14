@@ -1,4 +1,12 @@
-import { FixBy, ModelTier, Rigor, StepRole, type CellSetting, type Effort } from '@10db/contracts';
+import {
+  FixBy,
+  ModelTier,
+  Rigor,
+  Ships,
+  StepRole,
+  type CellSetting,
+  type Effort,
+} from '@10db/contracts';
 import { effortAbove } from './pools';
 import { ROLE_DEFAULT } from './role-defaults';
 
@@ -21,14 +29,26 @@ export interface RowProcess {
   readonly reviewRounds: number;
   readonly fixBy: FixBy;
   readonly approvesPlan: boolean;
+  /** Whether tasks of one goal at this rigor ship as one pull request. */
+  readonly ships: Ships;
 }
 
 /** The process each rigor starts with. */
 export const DEFAULT_PROCESS: Readonly<Record<Rigor, RowProcess>> = {
-  [Rigor.Light]: { reviewRounds: 1, fixBy: FixBy.Resumed, approvesPlan: false },
-  [Rigor.Standard]: { reviewRounds: 1, fixBy: FixBy.Resumed, approvesPlan: false },
-  [Rigor.Careful]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: false },
-  [Rigor.Critical]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: true },
+  [Rigor.Light]: {
+    reviewRounds: 1,
+    fixBy: FixBy.Resumed,
+    approvesPlan: false,
+    ships: Ships.WithGoal,
+  },
+  [Rigor.Standard]: {
+    reviewRounds: 1,
+    fixBy: FixBy.Resumed,
+    approvesPlan: false,
+    ships: Ships.WithGoal,
+  },
+  [Rigor.Careful]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: false, ships: Ships.Alone },
+  [Rigor.Critical]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: true, ships: Ships.Alone },
 };
 
 /**

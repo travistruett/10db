@@ -37,6 +37,8 @@ const kind = (key: string, fields: Partial<KindDto> = {}): KindDto => ({
   toInbox: false,
   addsSteps: [],
   overrides: {},
+  impliedBy: [],
+  skills: [],
   position: 0,
   ...fields,
 });

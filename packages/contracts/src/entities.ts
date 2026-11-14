@@ -3,8 +3,9 @@ import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accoun
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
+import { HyphenatedKey } from './keys';
 import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
-import { Rigor, TaskKind } from './rigor';
+import { EffectiveRigorSource, Rigor, RigorSource, TaskKind } from './rigor';
 import { ScreensMatrix } from './task-screens';
 import {
   AccountId,
@@ -845,6 +846,24 @@ export const TaskDto = z.object({
   rigor: z.enum(Rigor).nullable(),
   /** The rigor the task runs at: its own or the project's, never below its kinds' minimum. */
   effectiveRigor: z.enum(Rigor),
+  /** Who set the task's own rigor; null while it has none. */
+  rigorSource: z.enum(RigorSource).nullable(),
+  /** The reason the one who set the rigor gave; null while the task has no rigor of its own. */
+  rigorReason: z.string().nullable(),
+  /**
+   * Where the rigor the task runs at comes from: the stored source when it has a rigor of its own, `rules`
+   * when its kinds raised it, else `default` (the project's).
+   */
+  effectiveRigorSource: z.enum(EffectiveRigorSource),
+  /** Why the effective rigor is what it is, as a sentence; the reason given, or what the rules or default did. */
+  effectiveRigorReason: z.string().nullable(),
+  /** Keys of kinds the builder took off the task, which no rule, judge or agent puts back. */
+  kindsOff: z.array(z.string()),
+  /**
+   * True while no judge answer has been applied to the task: sizing was by rules alone, because there is
+   * no Decisions account, the judge is off, or its answer has not come.
+   */
+  sizedByRules: z.boolean(),
   kinds: z.array(TaskKind),
   /** The builder's effort for every step of the task; null is no pin. */
   effortPin: z.enum(Effort).nullable(),
@@ -895,6 +914,8 @@ export const TaskPatchFields = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   rigor: z.enum(Rigor).nullable(),
   kinds: z.array(TaskKind),
+  /** Keys of kinds the builder took off the task. */
+  kindsOff: z.array(HyphenatedKey),
   effortPin: z.enum(Effort).nullable(),
   /** Replaces the task's areas; only while the task has never started, and only with the project's own. */
   areas: z.array(Name).min(1),

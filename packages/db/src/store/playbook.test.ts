@@ -34,6 +34,7 @@ const row = (
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  ships: null,
   ...process,
 });
 
@@ -86,11 +87,13 @@ describe('playbook overrides', () => {
     set(null, { rows: [{ rigor: 'standard', steps: ['implement', 'review', 'qa'] }] });
     set(null, { rows: [{ rigor: 'standard', reviewRounds: 2 }] });
     set(null, { rows: [{ rigor: 'standard', fixBy: 'fresh', approvesPlan: false }] });
+    set(null, { rows: [{ rigor: 'standard', ships: 'alone' }] });
     expect(getPlaybook(store.db, null).rows).toEqual([
       row('standard', ['implement', 'review', 'qa'], {
         reviewRounds: 2,
         fixBy: 'fresh',
         approvesPlan: false,
+        ships: 'alone',
       }),
     ]);
 

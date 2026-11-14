@@ -92,7 +92,7 @@ function rowSteps(rigor: Rigor, playbook: PlaybookScopes): readonly StepRole[] {
   return DEFAULT_ROWS[rigor];
 }
 
-/** A rigor's review rounds, send-back fix and plan approval, each from the project's row, else the global one, else the default. */
+/** A rigor's review rounds, send-back fix, plan approval and how it ships, each from the project's row, else the global one, else the default. */
 export function rowProcess(rigor: Rigor, playbook: PlaybookScopes): RowProcess {
   const rows = scopesOf(playbook).flatMap((scope) => scope.rows.filter((r) => r.rigor === rigor));
   const fallback = DEFAULT_PROCESS[rigor];
@@ -100,6 +100,7 @@ export function rowProcess(rigor: Rigor, playbook: PlaybookScopes): RowProcess {
     reviewRounds: rows.find((r) => r.reviewRounds !== null)?.reviewRounds ?? fallback.reviewRounds,
     fixBy: rows.find((r) => r.fixBy !== null)?.fixBy ?? fallback.fixBy,
     approvesPlan: rows.find((r) => r.approvesPlan !== null)?.approvesPlan ?? fallback.approvesPlan,
+    ships: rows.find((r) => r.ships !== null)?.ships ?? fallback.ships,
   };
 }
 

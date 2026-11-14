@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SKILL_NAMES } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   HARNESS_PLUGIN_DIR,
@@ -16,7 +17,6 @@ import {
   MAX_SKILL_BYTES,
   readPluginManifest,
   readSkillBody,
-  SKILL_NAMES,
   SkillManifestError,
 } from './index';
 

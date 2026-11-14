@@ -1,8 +1,17 @@
-import { createTestStore, deleteKind, listKinds, patchKind, insertKind } from '@10db/db';
+import {
+  createTestStore,
+  deleteKind,
+  getAppSetting,
+  insertKind,
+  listKinds,
+  patchKind,
+  setAppSetting,
+} from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { seedTeam } from './seed';
+import { KINDS_IMPLIED_SEEDED_KEY } from './seed-kinds';
 
 let state: StateStore;
 let close: () => void;
@@ -63,6 +72,37 @@ describe('seedTeam’s kinds', () => {
       plan_review: review,
     });
     expect(byKey.get('security')?.addsSteps).toEqual([]);
+    expect(kinds.map((k) => [k.key, k.impliedBy, k.skills])).toEqual([
+      ['security', [], []],
+      ['auth', [], []],
+      ['migration', ['migrations'], []],
+      ['dependency', ['deps'], []],
+      ['schema', [], []],
+      ['infra', [], []],
+      ['ui', [], []],
+      ['docs', [], []],
+    ]);
+    expect(getAppSetting(state.db, KINDS_IMPLIED_SEEDED_KEY)).toBe(true);
+  });
+
+  it('gives the kinds an install seeded before implied-by the hazards that imply them, once', () => {
+    seed();
+    const migration = () => listKinds(state.db).find((k) => k.key === 'migration');
+    const dependency = () => listKinds(state.db).find((k) => k.key === 'dependency');
+    // What an install from before the field holds: both kinds seeded, neither implied by anything, and the
+    // dependency kind already given an implied-by of the builder's own.
+    state.write((ctx) => {
+      patchKind(ctx, migration()?.id ?? never(), { impliedBy: [] });
+      patchKind(ctx, dependency()?.id ?? never(), { impliedBy: ['packages'] });
+      setAppSetting(ctx, KINDS_IMPLIED_SEEDED_KEY, false);
+    });
+    seed();
+    expect(migration()?.impliedBy).toEqual(['migrations']);
+    expect(dependency()?.impliedBy).toEqual(['packages']);
+
+    state.write((ctx) => patchKind(ctx, migration()?.id ?? never(), { impliedBy: [] }));
+    seed();
+    expect(migration()?.impliedBy).toEqual([]);
   });
 
   it('adds nothing the second time, and does not undo a kind the builder deleted or edited', () => {

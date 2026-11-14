@@ -37,13 +37,14 @@ const DEFAULT_PROCESS: Readonly<
       readonly reviewRounds: number;
       readonly fixBy: 'resumed' | 'fresh';
       readonly approvesPlan: boolean;
+      readonly ships: 'with_goal' | 'alone';
     }
   >
 > = {
-  light: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
-  standard: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
-  careful: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false },
-  critical: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true },
+  light: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
+  standard: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
+  careful: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false, ships: 'alone' },
+  critical: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true, ships: 'alone' },
 };
 
 const own = <T>(value: T, source: PlaybookSource = 'default') => ({ value, source });
@@ -64,6 +65,7 @@ export function playbookDto(
     reviewRounds: own(DEFAULT_PROCESS[rigor].reviewRounds),
     fixBy: own(DEFAULT_PROCESS[rigor].fixBy),
     approvesPlan: own(DEFAULT_PROCESS[rigor].approvesPlan),
+    ships: own(DEFAULT_PROCESS[rigor].ships),
     ...over.rows?.find((r) => r.rigor === rigor),
   }));
   const cells = RIGORS.flatMap((rigor) =>
@@ -98,6 +100,8 @@ export function kindDto(over: Partial<KindDto> & { key: string }): KindDto {
     toInbox: false,
     addsSteps: [],
     overrides: {},
+    impliedBy: [],
+    skills: [],
     position: 0,
     ...over,
   });

@@ -40,7 +40,6 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  BUILDER_CHOSE_PLACEMENT,
   cancelTask,
   closeTask,
   reopenTask,
@@ -95,6 +94,7 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  placementRuleMoves,
   renamePass,
   resumeTask,
   runNext,
@@ -111,7 +111,7 @@ import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
 import { buildModelRows, groupMeasuresByModel, type CatalogueSync } from '../catalogue';
-import { proposePlacement } from '../placement';
+import { placementAfterEdit, proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
@@ -357,7 +357,7 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    async createTask(projectId, input) {
+    async createTask(projectId, input, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
         const known = listKinds(ctx.tx);
@@ -372,6 +372,7 @@ export function createServices(deps: {
             kinds: kindsOfTask(kinds, known),
             workspaceMode: input.workspaceMode,
           }),
+          rigorSource,
         );
       });
       deps.scheduler.requestTick();
@@ -800,7 +801,7 @@ export function createServices(deps: {
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
-    async patchTask(id, patch) {
+    async patchTask(id, patch, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
@@ -822,25 +823,20 @@ export function createServices(deps: {
         const proposed =
           patch.areas === undefined && patch.kinds === undefined
             ? undefined
-            : proposePlacement(getProject(ctx.tx, task.projectId), {
+            : placementAfterEdit({
+                project: getProject(ctx.tx, task.projectId),
                 areas: patch.areas ?? task.areas,
-                kinds: kindsOfTask(kinds, known),
+                kinds,
+                known,
               });
-        // A join still pending has not written yet, so the move would collide with it.
-        // The same holds for any move the rule makes: a task the builder placed never moves, and one with
-        // no reason moves only when the rule matched.
-        if (
-          proposed !== undefined &&
-          proposed.workspaceMode !== task.workspaceMode &&
-          task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
-          (task.placementReason !== null || proposed.reason !== null)
-        )
-          deps.starter.refuseIfJoining(id);
+        // A join still pending has not written yet, so a move the rule makes would collide with it.
+        if (placementRuleMoves(task, proposed)) deps.starter.refuseIfJoining(id);
         return patchTask(
           ctx,
           id,
           patch.kinds === undefined ? patch : { ...patch, kinds },
           proposed,
+          rigorSource,
         );
       });
     },

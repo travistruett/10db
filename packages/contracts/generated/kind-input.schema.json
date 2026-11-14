@@ -200,6 +200,28 @@
           }
         }
       }
+    },
+    "impliedBy": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "skills": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "planning",
+          "test-first",
+          "review-checklist",
+          "brainstorming",
+          "handoff"
+        ]
+      }
     }
   },
   "required": [

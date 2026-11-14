@@ -1,9 +1,18 @@
 import { ModelTier, Rigor, StepRole, type CellSetting, type KindInput } from '@10db/contracts';
-import { getAppSetting, insertKind, listKinds, setAppSetting } from '@10db/db';
+import { getAppSetting, insertKind, listKinds, patchKind, setAppSetting } from '@10db/db';
 import type { WriteContext } from '@10db/db';
 
 /** The app setting that records the kinds were offered, so a kind the builder deletes or edits stays so. */
 export const KINDS_SEEDED_KEY = 'kinds.seeded';
+
+/** The app setting that records the seeded kinds were given what implies them, so the builder's change to it stays. */
+export const KINDS_IMPLIED_SEEDED_KEY = 'kinds.implied-seeded';
+
+/** The hazards whose presence on a task gives it a seeded kind, by the kind's key. */
+const SEEDED_IMPLIED_BY: Readonly<Record<string, readonly string[]>> = {
+  migration: ['migrations'],
+  dependency: ['deps'],
+};
 
 const tier = (name: ModelTier): CellSetting => ({
   personaId: null,
@@ -59,6 +68,7 @@ export const SEEDED_KINDS: readonly KindInput[] = [
     toInbox: true,
     addsSteps: [StepRole.PlanReview],
     overrides: { ...RISKY_OVERRIDES, [StepRole.PlanReview]: tier(ModelTier.Frontier) },
+    impliedBy: ['migrations'],
   },
   {
     key: 'dependency',
@@ -68,6 +78,7 @@ export const SEEDED_KINDS: readonly KindInput[] = [
     alwaysReviewed: true,
     ownCopy: true,
     toInbox: true,
+    impliedBy: ['deps'],
   },
   {
     key: 'schema',
@@ -90,8 +101,24 @@ export const SEEDED_KINDS: readonly KindInput[] = [
  * the builder later deletes or edits is not put back. A key the builder already made is left alone.
  */
 export function seedKinds(ctx: WriteContext): void {
-  if (getAppSetting(ctx.tx, KINDS_SEEDED_KEY) === true) return;
-  const have = new Set(listKinds(ctx.tx).map((k) => k.key));
-  for (const kind of SEEDED_KINDS) if (!have.has(kind.key)) insertKind(ctx, kind);
-  setAppSetting(ctx, KINDS_SEEDED_KEY, true);
+  if (getAppSetting(ctx.tx, KINDS_SEEDED_KEY) !== true) {
+    const have = new Set(listKinds(ctx.tx).map((k) => k.key));
+    for (const kind of SEEDED_KINDS) if (!have.has(kind.key)) insertKind(ctx, kind);
+    setAppSetting(ctx, KINDS_SEEDED_KEY, true);
+  }
+  seedImpliedBy(ctx);
+}
+
+/**
+ * Gives the migration and dependency kinds what implies them, once, for an install that seeded them before
+ * the field existed. A kind that already names something keeps it, and nothing is put back afterwards.
+ */
+function seedImpliedBy(ctx: WriteContext): void {
+  if (getAppSetting(ctx.tx, KINDS_IMPLIED_SEEDED_KEY) === true) return;
+  for (const kind of listKinds(ctx.tx)) {
+    const implied = SEEDED_IMPLIED_BY[kind.key];
+    if (implied !== undefined && kind.impliedBy.length === 0)
+      patchKind(ctx, kind.id, { impliedBy: [...implied] });
+  }
+  setAppSetting(ctx, KINDS_IMPLIED_SEEDED_KEY, true);
 }

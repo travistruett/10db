@@ -395,7 +395,7 @@ importers:
         version: link:../daemon
       '@axe-core/playwright':
         specifier: 4.14.0
-        version: 4.14.0(playwright-core@1.64.1)
+        version: 4.14.0(playwright-core@1.65.0)
       '@babel/core':
         specifier: 8.0.10
         version: 8.0.10
@@ -488,6 +488,9 @@ importers:
 
   packages/harness:
     dependencies:
+      '@10db/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -5447,10 +5450,10 @@ snapshots:
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
 
-  '@axe-core/playwright@4.14.0(playwright-core@1.64.1)':
+  '@axe-core/playwright@4.14.0(playwright-core@1.65.0)':
     dependencies:
       axe-core: 4.14.0
-      playwright-core: 1.64.1
+      playwright-core: 1.65.0
 
   '@babel/code-frame@7.29.7':
     dependencies:

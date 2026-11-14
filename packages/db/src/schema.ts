@@ -88,6 +88,9 @@ import type {
   Provider,
   QuestionCategory,
   FixBy,
+  RigorSource,
+  Ships,
+  SkillName,
   Rigor,
   RoutingRuleId,
   SessionId,
@@ -448,10 +451,26 @@ export const tasks = sqliteTable(
       .references(() => flows.id),
     /** The rigor set on the task; null follows the project's default and the task's kinds. */
     rigor: text('rigor').$type<Rigor>(),
+    /** Who set `rigor`; null while the task has none. */
+    rigorSource: text('rigor_source').$type<RigorSource>(),
+    /** The reason the one who set `rigor` gave. */
+    rigorReason: text('rigor_reason'),
     kinds: text('kinds', { mode: 'json' })
       .$type<TaskKind[]>()
       .notNull()
       .default(sql`'[]'`),
+    /** Keys of kinds the builder took off the task; sizing never puts one back. */
+    kindsOff: text('kinds_off', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The fingerprint of the text the task was last sized for; null before the first sizing. */
+    sizedFor: text('sized_for'),
+    /** The judge calls whose answers sizing applied: the rigor call and one call per kind key. */
+    sizingCalls: text('sizing_calls', { mode: 'json' })
+      .$type<{ rigor: JudgeCallId | null; kinds: Record<string, JudgeCallId> }>()
+      .notNull()
+      .default(sql`'{"rigor":null,"kinds":{}}'`),
     /** The builder's effort for every step of the task; null is no pin. */
     effortPin: text('effort_pin').$type<Effort>(),
     /** The accepted proposal this task was filed from; null for a task made by hand. */
@@ -1271,6 +1290,14 @@ export const kinds = sqliteTable('kinds', {
     .$type<Partial<Record<StepRole, CellSetting>>>()
     .notNull()
     .default(sql`'{}'`),
+  impliedBy: text('implied_by', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  skills: text('skills', { mode: 'json' })
+    .$type<SkillName[]>()
+    .notNull()
+    .default(sql`'[]'`),
   position: integer('position').notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1291,6 +1318,7 @@ export const playbookRows = sqliteTable(
     reviewRounds: integer('review_rounds'),
     fixBy: text('fix_by').$type<FixBy>(),
     approvesPlan: integer('approves_plan', { mode: 'boolean' }),
+    ships: text('ships').$type<Ships>(),
     updatedAt: updatedAt(),
   },
   (t) => [

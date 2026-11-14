@@ -76,6 +76,52 @@
                   "critical"
                 ]
               },
+              "rigorSource": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "judge",
+                      "agent",
+                      "builder"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rigorReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "effectiveRigorSource": {
+                "type": "string",
+                "enum": [
+                  "judge",
+                  "agent",
+                  "builder",
+                  "rules",
+                  "default"
+                ]
+              },
+              "effectiveRigorReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kindsOff": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sizedByRules": {
+                "type": "boolean"
+              },
               "kinds": {
                 "type": "array",
                 "items": {
@@ -89,7 +135,9 @@
                       "type": "string",
                       "enum": [
                         "builder",
-                        "agent"
+                        "agent",
+                        "rules",
+                        "judge"
                       ]
                     }
                   },
@@ -373,6 +421,12 @@
               "areas",
               "rigor",
               "effectiveRigor",
+              "rigorSource",
+              "rigorReason",
+              "effectiveRigorSource",
+              "effectiveRigorReason",
+              "kindsOff",
+              "sizedByRules",
               "kinds",
               "effortPin",
               "landing",

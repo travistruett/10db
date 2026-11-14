@@ -3,6 +3,7 @@ import { ModelSetting } from './catalogue';
 import { DomainError } from './errors';
 import { AccountId, KindId, PersonaId, ProjectId } from './ids';
 import { HyphenatedKey } from './keys';
+import { SkillName } from './skills';
 import { Effort, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
@@ -52,8 +53,52 @@ export function effectiveRigor(input: {
   return strongest !== undefined && !rigorAtLeast(own, strongest) ? strongest : own;
 }
 
-/** Who gave a task one of its kinds: the builder (which pins it) or an agent. */
-export const TaskKindSource = { Builder: 'builder', Agent: 'agent' } as const;
+/** Who set a task's own rigor: the judge, an agent or the builder (the last two pin it). */
+export const RigorSource = { Judge: 'judge', Agent: 'agent', Builder: 'builder' } as const;
+export type RigorSource = ValueOf<typeof RigorSource>;
+
+/** Where the rigor a task runs at comes from: who set its own, the rules its kinds raised it by, or the project's default. */
+export const EffectiveRigorSource = { ...RigorSource, Rules: 'rules', Default: 'default' } as const;
+export type EffectiveRigorSource = ValueOf<typeof EffectiveRigorSource>;
+
+/**
+ * Where the rigor a task runs at comes from, with a sentence for the card's hover. A rigor of its own says who
+ * set it and why; kinds that lifted the rigor above that (or above the project's default) say so by their
+ * minimum and the keys that hold it; otherwise it is the project's default.
+ */
+export function explainEffectiveRigor(input: {
+  readonly rigor: Rigor | null;
+  readonly rigorSource: RigorSource | null;
+  readonly rigorReason: string | null;
+  readonly projectDefault: Rigor;
+  readonly taskKinds: readonly { readonly key: string }[];
+  readonly kinds: readonly { readonly key: string; readonly minimumRigor: Rigor | null }[];
+}): { readonly source: EffectiveRigorSource; readonly reason: string | null } {
+  const own = input.rigor ?? input.projectDefault;
+  const effective = effectiveRigor(input);
+  if (effective !== own) {
+    const keys = new Set(input.taskKinds.map((k) => k.key));
+    const holders = input.kinds.filter((k) => keys.has(k.key) && k.minimumRigor === effective);
+    return {
+      source: EffectiveRigorSource.Rules,
+      reason: `at least ${rigorTitle(effective)}: ${holders.map((k) => k.key).join(', ')}`,
+    };
+  }
+  if (input.rigor !== null)
+    return {
+      source: input.rigorSource ?? EffectiveRigorSource.Builder,
+      reason: input.rigorReason,
+    };
+  return { source: EffectiveRigorSource.Default, reason: null };
+}
+
+/** Who gave a task one of its kinds: the builder (which pins it), an agent, the rules or the judge. */
+export const TaskKindSource = {
+  Builder: 'builder',
+  Agent: 'agent',
+  Rules: 'rules',
+  Judge: 'judge',
+} as const;
 export type TaskKindSource = ValueOf<typeof TaskKindSource>;
 
 /** A kind a task has, by the kind's key, and who gave it. */
@@ -74,6 +119,10 @@ export type CellSetting = z.infer<typeof CellSetting>;
 /** How a reviewer's send-back is fixed: by the build session that wrote the code, resumed, or by a fresh one. */
 export const FixBy = { Resumed: 'resumed', Fresh: 'fresh' } as const;
 export type FixBy = ValueOf<typeof FixBy>;
+
+/** Whether a rigor's tasks of one goal ship as one pull request or each alone. */
+export const Ships = { WithGoal: 'with_goal', Alone: 'alone' } as const;
+export type Ships = ValueOf<typeof Ships>;
 
 const ReviewRounds = z.int().min(0).max(3);
 
@@ -102,6 +151,7 @@ export const PlaybookInput = z.object({
         reviewRounds: ReviewRounds.nullable().optional(),
         fixBy: z.enum(FixBy).nullable().optional(),
         approvesPlan: z.boolean().nullable().optional(),
+        ships: z.enum(Ships).nullable().optional(),
       }),
     )
     .refine((rows) => noneTwice(rows.map((r) => r.rigor)), { message: 'A rigor is set twice' })
@@ -131,6 +181,8 @@ export const PlaybookRowDto = z.object({
   fixBy: sourced(z.enum(FixBy)),
   /** Whether the builder approves the plan before the build starts. */
   approvesPlan: sourced(z.boolean()),
+  /** Whether tasks of this rigor that belong to one goal ship as one pull request. */
+  ships: sourced(z.enum(Ships)),
 });
 export type PlaybookRowDto = z.infer<typeof PlaybookRowDto>;
 
@@ -169,6 +221,10 @@ const KindFields = {
   /** Steps the rigor's row does not run that a task of this kind runs anyway. */
   addsSteps: z.array(z.enum(StepRole)),
   overrides: KindOverrides,
+  /** Area and hazard names whose presence on a task gives it this kind. */
+  impliedBy: z.array(z.string().min(1)),
+  /** The craft skills every step of a task of this kind loads. */
+  skills: z.array(SkillName),
 };
 
 export const KindDto = z.object({
@@ -191,6 +247,8 @@ export const KindInput = z.object({
   toInbox: KindFields.toInbox.default(false),
   addsSteps: KindFields.addsSteps.default([]),
   overrides: KindFields.overrides.default({}),
+  impliedBy: KindFields.impliedBy.default([]),
+  skills: KindFields.skills.default([]),
 });
 export type KindInput = z.input<typeof KindInput>;
 

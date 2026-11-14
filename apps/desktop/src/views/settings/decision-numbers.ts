@@ -137,6 +137,8 @@ export function outcomeText(call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'a
       return 'Stopped before it answered';
     case JudgeOutcome.Shadow:
       return 'Logged in shadow; nothing shown';
+    case JudgeOutcome.Overridden:
+      return 'Overridden by you';
     case JudgeOutcome.BelowFloor:
     case JudgeOutcome.FallbackOff:
     case JudgeOutcome.FallbackNoKey:
