@@ -737,16 +737,22 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       const shape = state.write((ctx) => patchShape(ctx, shapeId, { effort }));
       // The engine switches a warm session for its next turn, and notes the change once it has.
-      void engine.modelChanged(conversation, model).then(
-        () => {
-          announce(shapeId);
-        },
-        (error: unknown) => {
-          log.warn({ err: error, shapeId }, 'the conversation’s model could not be changed');
-          // The old pick is back: the screen shows it again.
-          announce(shapeId);
-        },
-      );
+      void engine
+        .modelChanged(conversation, model)
+        .then(
+          () => {
+            announce(shapeId);
+          },
+          (error: unknown) => {
+            log.warn({ err: error, shapeId }, 'the conversation’s model could not be changed');
+            // The old pick is back: the screen shows it again.
+            announce(shapeId);
+          },
+        )
+        // A change that settles once the store has closed has no screen left to tell.
+        .catch((error: unknown) => {
+          log.warn({ err: error, shapeId }, 'the conversation’s model change could not be shown');
+        });
       return { ...shape, model };
     },
 
