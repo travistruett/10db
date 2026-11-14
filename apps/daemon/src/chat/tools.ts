@@ -102,6 +102,8 @@ function previousOf(before: TaskDto, edit: Record<string, unknown>): TaskEditPre
     const now = field === 'kinds' ? before.kinds.map((k) => ({ key: k.key })) : old;
     if (!same(now, edit[field])) previous[field] = old;
   }
+  // A builder's edit of the kinds also moves the kinds they took off, so Undo puts those back too.
+  if ('kinds' in previous) previous['kindsOff'] = before.kindsOff;
   return TaskEditPrevious.parse(previous);
 }
 

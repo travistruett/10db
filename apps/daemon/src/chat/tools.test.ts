@@ -198,6 +198,19 @@ describe("a chat's tools on /mcp", () => {
     expect(openCards()).toEqual([]);
   });
 
+  it('an edit of the kinds keeps the kinds the builder took off among the old values', async () => {
+    const chat = await newChat();
+    const task = await builderTask('Kinds');
+    let edited = '';
+    await agentTurn(chat, async (call) => {
+      edited = await call('edit_task', { taskId: task.id, kinds: [{ key: 'docs' }] });
+    });
+    const result = z
+      .object({ previous: z.record(z.string(), z.unknown()) })
+      .parse(JSON.parse(edited));
+    expect(result.previous).toEqual({ kinds: task.kinds, kindsOff: task.kindsOff });
+  });
+
   it("asks before removing the builder's task: Deny keeps it, Allow once removes it", async () => {
     const chat = await newChat();
     const task = await builderTask();
