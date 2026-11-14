@@ -171,7 +171,7 @@ describe('moveToPlaybook: flows become rigor', () => {
     });
     const task = newTask(p, { flow });
     run();
-    expect(getTask(state.db, task.id).rigor).toBe(rigor);
+    expect(getTask(state.db, task.id)).toMatchObject({ rigor, rigorSource: 'builder' });
     expect(getProject(state.db, p.id).defaultRigor).toBe(rigor);
   });
 
@@ -179,7 +179,7 @@ describe('moveToPlaybook: flows become rigor', () => {
     const p = project('demo');
     const task = newTask(p);
     run();
-    expect(getTask(state.db, task.id).rigor).toBeNull();
+    expect(getTask(state.db, task.id)).toMatchObject({ rigor: null, rigorSource: null });
     expect(getProject(state.db, p.id).defaultRigor).toBe('standard');
   });
 });

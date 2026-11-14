@@ -1,4 +1,4 @@
-import { RigorBelowKindError, Rigor, type TaskInput } from '@10db/contracts';
+import { RigorBelowKindError, Rigor, RigorSource, type TaskInput } from '@10db/contracts';
 import { getTask, listTasks } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -86,5 +86,30 @@ describe('a rigor below the kinds’ minimum, through the task service', () => {
     });
     const patched = await taskService().patchTask(task.id, { rigor: null });
     expect(patched).toMatchObject({ rigor: null, effectiveRigor: 'careful' });
+  });
+});
+
+describe('who set a task’s rigor, through the task service', () => {
+  const projectId = () => h.project.id;
+
+  it('pins a rigor from the API or the Board as the builder’s, and one given as an agent’s as the agent’s', async () => {
+    const service = taskService();
+    const byApi = await service.createTask(projectId(), { ...brief, rigor: Rigor.Careful });
+    expect(byApi).toMatchObject({ rigorSource: 'builder', effectiveRigorSource: 'builder' });
+    const byAgent = await service.createTask(
+      projectId(),
+      { ...brief, rigor: Rigor.Careful },
+      RigorSource.Agent,
+    );
+    expect(getTask(h.store.db, byAgent.id)).toMatchObject({
+      rigor: 'careful',
+      rigorSource: 'agent',
+    });
+
+    const unsized = await service.createTask(projectId(), brief);
+    const edited = await service.patchTask(unsized.id, { rigor: Rigor.Light }, RigorSource.Agent);
+    expect(edited).toMatchObject({ rigor: 'light', rigorSource: 'agent' });
+    const byBuilder = await service.patchTask(unsized.id, { rigor: Rigor.Standard });
+    expect(byBuilder).toMatchObject({ rigor: 'standard', rigorSource: 'builder' });
   });
 });

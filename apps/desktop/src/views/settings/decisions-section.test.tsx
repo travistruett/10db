@@ -52,13 +52,14 @@ describe('Settings › Decisions', () => {
       expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeTruthy();
     });
 
-    it('groups every decision, with no Sizing group until it has rows', async () => {
+    it('groups every decision, the sizing ones before plan', async () => {
       open();
       await screen.findByRole('table', { name: 'Decisions' });
       const groups = screen.getAllByRole('rowheader').map((h) => h.textContent);
       // The retired review-size decision is no longer configured, so it has no Delivery group.
-      expect(groups).toEqual(['Plan', 'Stakeholder questions']);
-      expect(screen.queryByText('Sizing', { selector: 'th' })).toBeNull();
+      expect(groups).toEqual(['Sizing', 'Plan', 'Stakeholder questions']);
+      await rowOf('How much process a task needs');
+      await rowOf('What a task touches');
     });
 
     it('each row shows its status, model, sure enough and last 30 days', async () => {

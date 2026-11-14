@@ -28,6 +28,8 @@ const toKindDto = (row: KindRow): KindDto => ({
   toInbox: row.toInbox,
   addsSteps: row.addsSteps,
   overrides: row.overrides,
+  impliedBy: row.impliedBy,
+  skills: row.skills,
   position: row.position,
 });
 

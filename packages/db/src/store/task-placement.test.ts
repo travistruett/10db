@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
+  BUILDER_CHOSE_PLACEMENT,
   createTestStore,
   currentBatch,
   getProject,
@@ -21,6 +22,7 @@ import {
   moveTask,
   patchProject,
   patchTask,
+  placementRuleMoves,
   seedProject,
   setTaskStatus,
   transitionBatch,
@@ -381,5 +383,40 @@ describe('currentBatch', () => {
     const p = project();
     newBatch(p.id, 'Copy', '/wt/copy');
     expect(currentBatch(store.db, p.id)).toBeNull();
+  });
+});
+
+describe('placementRuleMoves', () => {
+  const copy: Placement = { workspaceMode: 'worktree', reason: 'touches migrations' };
+  const plain: Placement = { workspaceMode: 'shared', reason: null };
+  it.each([
+    { name: 'no proposal', own: plain, proposed: undefined, moves: false },
+    { name: 'the same place', own: plain, proposed: plain, moves: false },
+    { name: 'a matching rule on a task with no reason', own: plain, proposed: copy, moves: true },
+    {
+      name: 'the rule no longer matching a task it sent to a copy',
+      own: copy,
+      proposed: plain,
+      moves: true,
+    },
+    {
+      name: 'a placement the builder chose, which no rule moves',
+      own: { workspaceMode: 'shared', reason: BUILDER_CHOSE_PLACEMENT },
+      proposed: copy,
+      moves: false,
+    },
+    {
+      name: 'a different mode from a reasonless default proposal, which says nothing about the task',
+      own: { workspaceMode: 'worktree', reason: null },
+      proposed: plain,
+      moves: false,
+    },
+  ] as const)('$name: $moves', ({ own, proposed, moves }) => {
+    expect(
+      placementRuleMoves(
+        { workspaceMode: own.workspaceMode, placementReason: own.reason },
+        proposed,
+      ),
+    ).toBe(moves);
   });
 });

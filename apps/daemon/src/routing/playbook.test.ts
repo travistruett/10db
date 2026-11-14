@@ -28,6 +28,7 @@ const row = (rigor: Rigor, ...steps: StepRole[]): PlaybookRowOverride => ({
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  ships: null,
 });
 const processRow = (
   rigor: Rigor,
@@ -38,6 +39,7 @@ const processRow = (
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  ships: null,
   ...process,
 });
 const cell = (
@@ -65,6 +67,8 @@ const kind = (key: string, fields: Partial<KindDto> = {}): KindDto => ({
   toInbox: false,
   addsSteps: [],
   overrides: {},
+  impliedBy: [],
+  skills: [],
   position: 0,
   ...fields,
 });
@@ -353,31 +357,31 @@ describe('rowProcess: project, then global, then default, field by field', () =>
       name: 'the default of Light',
       rigor: Rigor.Light,
       playbook: scopes(),
-      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
     },
     {
       name: 'the default of Standard',
       rigor: Rigor.Standard,
       playbook: scopes(),
-      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
     },
     {
       name: 'the default of Careful',
       rigor: Rigor.Careful,
       playbook: scopes(),
-      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false },
+      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false, ships: 'alone' },
     },
     {
       name: 'the default of Critical',
       rigor: Rigor.Critical,
       playbook: scopes(),
-      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true },
+      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: true, ships: 'alone' },
     },
     {
       name: 'a global row overriding one field',
       rigor: Rigor.Standard,
       playbook: scopes({ rows: [processRow(Rigor.Standard, { reviewRounds: 3 })] }),
-      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: false },
+      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
     },
     {
       name: 'a project row overriding another field over a global one',
@@ -386,7 +390,7 @@ describe('rowProcess: project, then global, then default, field by field', () =>
         { rows: [processRow(Rigor.Standard, { reviewRounds: 3, fixBy: 'fresh' })] },
         { rows: [processRow(Rigor.Standard, { fixBy: 'resumed', approvesPlan: true })] },
       ),
-      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: true },
+      want: { reviewRounds: 3, fixBy: 'resumed', approvesPlan: true, ships: 'with_goal' },
     },
     {
       name: 'zero rounds and false are values, not gaps',
@@ -394,13 +398,19 @@ describe('rowProcess: project, then global, then default, field by field', () =>
       playbook: scopes({
         rows: [processRow(Rigor.Critical, { reviewRounds: 0, approvesPlan: false })],
       }),
-      want: { reviewRounds: 0, fixBy: 'fresh', approvesPlan: false },
+      want: { reviewRounds: 0, fixBy: 'fresh', approvesPlan: false, ships: 'alone' },
+    },
+    {
+      name: 'a row setting how it ships, over the default',
+      rigor: Rigor.Careful,
+      playbook: scopes({ rows: [processRow(Rigor.Careful, { ships: 'with_goal' })] }),
+      want: { reviewRounds: 2, fixBy: 'fresh', approvesPlan: false, ships: 'with_goal' },
     },
     {
       name: 'a row of another rigor',
       rigor: Rigor.Light,
       playbook: scopes({ rows: [processRow(Rigor.Critical, { reviewRounds: 0 })] }),
-      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false },
+      want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
     },
   ])('$name', ({ rigor, playbook, want }) => {
     expect(rowProcess(rigor, playbook)).toEqual(want);

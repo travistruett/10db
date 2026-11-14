@@ -400,6 +400,40 @@ describe('the playbook table', () => {
       });
     });
 
+    it('saves how a rigor ships, from the row it has', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Light steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Light: process' }));
+      const ships = drawer.getByRole('combobox', { name: 'Ships', hidden: true });
+      expect(ships).toHaveProperty('value', 'With its goal');
+      await pickOption(ships, 'Alone');
+      await waitFor(() => {
+        expect(puts).toEqual([
+          { path: '/playbook', body: { rows: [{ rigor: 'light', ships: 'alone' }], cells: [] } },
+        ]);
+      });
+    });
+
+    it('hands Ships back to the scope above on its own, leaving the steps alone', async () => {
+      const puts = serve({
+        global: playbookDto({
+          rows: [{ rigor: 'light', ships: own('alone', 'global') }],
+        }),
+      });
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Light steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Light: process' }));
+      const reset = drawer.getByRole('button', { name: 'Reset: ships', hidden: true });
+      await waitFor(() => {
+        expect(reset).toHaveProperty('disabled', false);
+      });
+      fireEvent.click(reset);
+      await waitFor(() => {
+        expect(puts.at(-1)?.body.rows).toEqual([{ rigor: 'light', ships: null }]);
+      });
+    });
+
     it('takes the plan review with the plan, and Reset hands the row back', async () => {
       const puts = serve({
         global: playbookDto({

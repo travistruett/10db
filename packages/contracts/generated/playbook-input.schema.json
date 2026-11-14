@@ -68,6 +68,20 @@
               "boolean",
               "null"
             ]
+          },
+          "ships": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "with_goal",
+                  "alone"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

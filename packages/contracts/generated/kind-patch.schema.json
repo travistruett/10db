@@ -188,6 +188,26 @@
           }
         }
       }
+    },
+    "impliedBy": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "planning",
+          "test-first",
+          "review-checklist",
+          "brainstorming",
+          "handoff"
+        ]
+      }
     }
   },
   "additionalProperties": false

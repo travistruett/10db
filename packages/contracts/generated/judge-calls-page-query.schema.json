@@ -24,7 +24,9 @@
         "question_route",
         "thread_answer",
         "reply_match",
-        "approval_read"
+        "approval_read",
+        "task_rigor",
+        "task_kinds"
       ]
     },
     "outcome": {
@@ -37,7 +39,8 @@
         "fallback_timeout",
         "fallback_error",
         "stopped",
-        "shadow"
+        "shadow",
+        "overridden"
       ]
     }
   }

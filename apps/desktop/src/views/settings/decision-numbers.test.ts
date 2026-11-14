@@ -28,6 +28,7 @@ const stats = (over: Partial<DecisionStatsDto> = {}): DecisionStatsDto => ({
   acted: 0,
   belowFloor: 0,
   shadow: 0,
+  overridden: 0,
   stopped: 0,
   // A count of timed-out calls, not a wait: named so the load-tolerance check doesn't read it as one.
   fallbacks: { off: 0, no_key: 0, timeout: NO_CALLS, error: 0 },
@@ -213,6 +214,7 @@ describe('outcomeText', () => {
       'The call failed; 10db asked which way',
     ],
     ['stopped', JudgeDecision.ReviewSize, JudgeOutcome.Stopped, null, 'Stopped before it answered'],
+    ['overridden', JudgeDecision.TaskRigor, JudgeOutcome.Overridden, 'light', 'Overridden by you'],
     [
       'shadow',
       JudgeDecision.ShapeReady,

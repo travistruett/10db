@@ -82,6 +82,52 @@ describe('a task carries its rigor, kinds and effort pin', () => {
     ).toThrow(InvalidError);
   });
 
+  it('records who set a rigor, pins one given at creation, and drops the source when it is cleared', () => {
+    const project = seedProject(store);
+    const made = (rigorSource?: 'agent' | 'judge') =>
+      store.write((ctx) =>
+        insertTask(ctx, project.id, { ...brief, rigor: 'careful' }, undefined, rigorSource),
+      ).value;
+    expect(made()).toMatchObject({ rigorSource: 'builder', rigorReason: null });
+    expect(made('agent')).toMatchObject({ rigorSource: 'agent' });
+    const none = store.write((ctx) => insertTask(ctx, project.id, brief)).value;
+    expect(none).toMatchObject({ rigor: null, rigorSource: null, sizedByRules: true });
+
+    const set = store.write((ctx) =>
+      patchTask(ctx, none.id, { rigor: 'light' }, undefined, 'agent'),
+    ).value;
+    expect(set).toMatchObject({
+      rigor: 'light',
+      rigorSource: 'agent',
+      effectiveRigorSource: 'agent',
+    });
+    const bySetter = store.write((ctx) => patchTask(ctx, none.id, { rigor: 'light' })).value;
+    expect(bySetter.rigorSource).toBe('builder');
+    const cleared = store.write((ctx) => patchTask(ctx, none.id, { rigor: null })).value;
+    expect(cleared).toMatchObject({
+      rigor: null,
+      rigorSource: null,
+      rigorReason: null,
+      effectiveRigorSource: 'default',
+    });
+  });
+
+  it('hands a task back to sizing when its rigor is cleared, and not for any other change', () => {
+    const project = seedProject(store);
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, { ...brief, rigor: 'careful' }),
+    ).value;
+    const sizedFor = (): unknown =>
+      store.db.$client.prepare('SELECT sized_for FROM tasks WHERE id = ?').get(task.id);
+    const sized = () =>
+      store.db.$client.prepare("UPDATE tasks SET sized_for = 'fp' WHERE id = ?").run(task.id);
+    sized();
+    store.write((ctx) => patchTask(ctx, task.id, { rigor: 'light' }));
+    expect(sizedFor()).toEqual({ sized_for: 'fp' });
+    store.write((ctx) => patchTask(ctx, task.id, { rigor: null }));
+    expect(sizedFor()).toEqual({ sized_for: null });
+  });
+
   it('lets a task keep a kind the builder has deleted, and refuses it on any other task', () => {
     const project = seedProject(store);
     const kind = store.write((ctx) => insertKind(ctx, { key: 'ui', label: 'UI' })).value;

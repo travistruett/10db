@@ -137,6 +137,7 @@ const base = (decision: JudgeDecision) => ({
   belowFloor: NO_CALLS,
   shadow: NO_CALLS,
   stopped: NO_CALLS,
+  overridden: NO_CALLS,
   fallbacks: { off: NO_CALLS, no_key: NO_CALLS, timeout: NO_TIMEOUTS, error: NO_CALLS },
   costUsd: 0,
   medianLatencyMs: null,

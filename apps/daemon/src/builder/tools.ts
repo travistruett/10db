@@ -38,6 +38,7 @@ export type BuilderServices = Pick<
   | 'createTask'
   | 'patchTask'
   | 'startTask'
+  | 'settleSizing'
   | 'moveTask'
   | 'runNext'
   | 'listBoardColumns'
@@ -152,7 +153,7 @@ export function createBuilderTools(
       const trimmed = {
         ...loose,
         // The agent names kinds by key; who set them is 10db's to record. Keys no kind has are refused.
-        kinds: named.map(({ key }) => ({ key, source: TaskKindSource.Agent })),
+        kinds: named.map(({ key }) => ({ key, source: TaskKindSource.Builder })),
         title: loose.title.trim(),
         headline: loose.headline.trim(),
         why: loose.why.trim(),
@@ -171,7 +172,7 @@ export function createBuilderTools(
         const held = services.getTask(taskId).kinds;
         patch['kinds'] = named.map(
           ({ key }) =>
-            held.find((kind) => kind.key === key) ?? { key, source: TaskKindSource.Agent },
+            held.find((kind) => kind.key === key) ?? { key, source: TaskKindSource.Builder },
         );
       }
       if (changes.title !== undefined) patch['title'] = changes.title.trim();
@@ -187,8 +188,10 @@ export function createBuilderTools(
     },
     [BuilderToolName.RemoveTask]: (args) =>
       taskSummary(services.removeTask(BuilderToolInputs.remove_task.parse(args).taskId)),
-    [BuilderToolName.StartTask]: (args) => {
+    [BuilderToolName.StartTask]: async (args) => {
       const { taskId, fresh } = BuilderToolInputs.start_task.parse(args);
+      // Before any read, so two quick starts of one task run their checks one after the other.
+      await services.settleSizing([taskId]);
       // The API starts any open task; an agent filing tasks must not jump one past its dependencies.
       const task = services.getTask(taskId);
       // A held task already started once: the Board's Start queues its run again, so this does too.

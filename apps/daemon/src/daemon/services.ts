@@ -3,6 +3,12 @@ import { join } from 'node:path';
 import {
   ACTIVE_STATES,
   AreaRole,
+  JudgeOutcome,
+  RigorSource,
+  TaskKindSource,
+  type Rigor,
+  type TaskDto,
+  type TaskKind,
   CatalogueAttempt,
   type AccountDto,
   type AccountId,
@@ -40,7 +46,6 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  BUILDER_CHOSE_PLACEMENT,
   cancelTask,
   closeTask,
   reopenTask,
@@ -95,6 +100,11 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  placementRuleMoves,
+  judgeCallAnswer,
+  readTaskSizing,
+  recordJudgeOutcome,
+  type WriteContext,
   renamePass,
   resumeTask,
   runNext,
@@ -117,7 +127,8 @@ import {
   speedProviderFor,
   type CatalogueSync,
 } from '../catalogue';
-import { proposePlacement } from '../placement';
+import { placementAfterEdit, proposePlacement } from '../placement';
+import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
@@ -196,6 +207,56 @@ function liveAccount(db: DbReader, id: AccountId): AccountDto {
   return account;
 }
 
+/**
+ * The keys the builder has taken off the task once it has `kinds`: those it held and no longer does join
+ * `kindsOff`, and one it has put back leaves it.
+ */
+function kindsOffAfter(task: TaskDto, kinds: readonly TaskKind[]): string[] {
+  const now = new Set(kinds.map((k) => k.key));
+  const removed = task.kinds.map((k) => k.key).filter((key) => !now.has(key));
+  return [...new Set([...task.kindsOff.filter((key) => !now.has(key)), ...removed])];
+}
+
+/**
+ * Records, in the builder's write, that the builder changed what the judge set: the rigor it chose, a kind
+ * it added that the builder took off, or one it said no to that the builder added.
+ */
+function recordOverrides(
+  ctx: WriteContext,
+  task: TaskDto,
+  rigor: Rigor | null | undefined,
+  kinds: readonly TaskKind[] | undefined,
+): void {
+  const calls = readTaskSizing(ctx.tx, task.id)?.sizingCalls;
+  if (calls === undefined) return;
+  if (
+    rigor !== undefined &&
+    task.rigorSource === RigorSource.Judge &&
+    task.rigor !== rigor &&
+    calls.rigor !== null
+  )
+    recordJudgeOutcome(ctx, calls.rigor, JudgeOutcome.Overridden);
+  if (kinds === undefined) return;
+  const now = new Set(kinds.map((k) => k.key));
+  const held = new Set(task.kinds.map((k) => k.key));
+  for (const kind of task.kinds) {
+    const call = calls.kinds[kind.key];
+    if (kind.source === TaskKindSource.Judge && !now.has(kind.key) && call !== undefined)
+      recordJudgeOutcome(ctx, call, JudgeOutcome.Overridden);
+  }
+  for (const key of now) {
+    const call = calls.kinds[key];
+    // Only a kind the judge answered `no` to: one an agent took off was put back, not argued with.
+    if (
+      !held.has(key) &&
+      !task.kindsOff.includes(key) &&
+      call !== undefined &&
+      judgeCallAnswer(ctx.tx, call) === 'no'
+    )
+      recordJudgeOutcome(ctx, call, JudgeOutcome.Overridden);
+  }
+}
+
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
   readonly state: StateStore;
@@ -238,6 +299,10 @@ export function createServices(deps: {
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** The sizing in flight, which a start from the Board, the API or the builder's MCP waits for. */
+  readonly sizing: Pick<SizingService, 'settled'>;
+  /** How long that wait is at most. */
+  readonly sizingWaitMs: number;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
@@ -365,7 +430,7 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    async createTask(projectId, input) {
+    async createTask(projectId, input, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
         const known = listKinds(ctx.tx);
@@ -380,12 +445,14 @@ export function createServices(deps: {
             kinds: kindsOfTask(kinds, known),
             workspaceMode: input.workspaceMode,
           }),
+          rigorSource,
         );
       });
       deps.scheduler.requestTick();
       return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
+    settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
@@ -818,7 +885,7 @@ export function createServices(deps: {
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
-    async patchTask(id, patch) {
+    async patchTask(id, patch, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
@@ -828,7 +895,22 @@ export function createServices(deps: {
       return deps.state.write((ctx) => {
         const task = getTask(ctx.tx, id);
         const known = listKinds(ctx.tx);
-        const kinds = patch.kinds ?? task.kinds;
+        // A change from the Board or the API is the builder's; the builder's MCP says it is an agent's.
+        const byBuilder = rigorSource === undefined || rigorSource === RigorSource.Builder;
+        // A kind the builder adds is theirs, whatever source the form carried; one the task holds keeps its own.
+        const patched =
+          patch.kinds === undefined
+            ? undefined
+            : byBuilder
+              ? patch.kinds.map(
+                  (k) =>
+                    task.kinds.find((held) => held.key === k.key) ?? {
+                      key: k.key,
+                      source: TaskKindSource.Builder,
+                    },
+                )
+              : patch.kinds;
+        const kinds = patched ?? task.kinds;
         // A rigor or kinds the patch leaves out are the task's own, so the pair is checked as it will stand.
         if (patch.rigor !== undefined || patch.kinds !== undefined)
           refuseRigorBelowKinds({
@@ -840,25 +922,29 @@ export function createServices(deps: {
         const proposed =
           patch.areas === undefined && patch.kinds === undefined
             ? undefined
-            : proposePlacement(getProject(ctx.tx, task.projectId), {
+            : placementAfterEdit({
+                project: getProject(ctx.tx, task.projectId),
                 areas: patch.areas ?? task.areas,
-                kinds: kindsOfTask(kinds, known),
+                kinds,
+                known,
               });
-        // A join still pending has not written yet, so the move would collide with it.
-        // The same holds for any move the rule makes: a task the builder placed never moves, and one with
-        // no reason moves only when the rule matched.
-        if (
-          proposed !== undefined &&
-          proposed.workspaceMode !== task.workspaceMode &&
-          task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
-          (task.placementReason !== null || proposed.reason !== null)
-        )
-          deps.starter.refuseIfJoining(id);
+        // A join still pending has not written yet, so a move the rule would make would collide with it.
+        if (placementRuleMoves(task, proposed)) deps.starter.refuseIfJoining(id);
+        if (byBuilder) recordOverrides(ctx, task, patch.rigor, patched);
+        const kindsOff =
+          byBuilder && patched !== undefined && patch.kindsOff === undefined
+            ? kindsOffAfter(task, patched)
+            : patch.kindsOff;
         return patchTask(
           ctx,
           id,
-          patch.kinds === undefined ? patch : { ...patch, kinds },
+          {
+            ...patch,
+            ...(patched === undefined ? {} : { kinds: patched }),
+            ...(kindsOff === undefined ? {} : { kindsOff }),
+          },
           proposed,
+          rigorSource,
         );
       });
     },

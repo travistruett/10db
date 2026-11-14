@@ -211,6 +211,60 @@
                 "model",
                 "floor"
               ]
+            },
+            "task_rigor": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
+            "task_kinds": {
+              "default": {
+                "enabled": true,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
             }
           }
         }

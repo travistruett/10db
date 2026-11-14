@@ -42,6 +42,7 @@ export function statsFor(
       acted: 0,
       belowFloor: 0,
       shadow: 0,
+      overridden: 0,
       stopped: 0,
       fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
       costUsd: 0,
@@ -137,6 +138,8 @@ export function outcomeText(call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'a
       return 'Stopped before it answered';
     case JudgeOutcome.Shadow:
       return 'Logged in shadow; nothing shown';
+    case JudgeOutcome.Overridden:
+      return 'Overridden by you';
     case JudgeOutcome.BelowFloor:
     case JudgeOutcome.FallbackOff:
     case JudgeOutcome.FallbackNoKey:

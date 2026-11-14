@@ -1,6 +1,9 @@
 import {
+  DEFAULT_HAZARDS,
   KindInput,
   RIGORS,
+  SKILL_NAMES,
+  SkillName,
   StepRole,
   type CellSetting,
   type KindDto,
@@ -12,17 +15,20 @@ import {
   Checkbox,
   Drawer,
   Group,
+  MultiSelect,
   Select,
   Stack,
   Switch,
   Text,
   Textarea,
+  TagsInput,
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { useCreateKind, useDeleteKind, usePatchKind } from '../../daemon/kind-queries';
 import { usePersonas } from '../../daemon/persona-queries';
+import { useProjects } from '../../daemon/queries';
 import { settingSummary } from './model-setting-options';
 import { CellFields } from './playbook-cell-fields';
 import { isEmptyCell } from './playbook-edits';
@@ -50,6 +56,8 @@ interface Draft {
   readonly failsAtLimit: boolean;
   readonly ownCopy: boolean;
   readonly toInbox: boolean;
+  readonly impliedBy: readonly string[];
+  readonly skills: readonly SkillName[];
   readonly addsSteps: readonly StepRole[];
   readonly overrides: Overrides;
 }
@@ -63,11 +71,24 @@ const EMPTY_DRAFT: Draft = {
   failsAtLimit: false,
   ownCopy: false,
   toInbox: false,
+  impliedBy: [],
+  skills: [],
   addsSteps: [],
   overrides: {},
 };
 
 const draftOf = (kind: KindDto | null): Draft => (kind === null ? EMPTY_DRAFT : { ...kind });
+
+/** A craft skill as the list shows it: "test-first" reads "Test First". */
+const skillLabel = (name: SkillName): string =>
+  name
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+
+const SKILL_OPTIONS = SKILL_NAMES.map((name) => ({ value: name, label: skillLabel(name) }));
+
+const isSkill = (value: string): value is SkillName => SkillName.safeParse(value).success;
 
 const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === value);
 
@@ -121,6 +142,16 @@ export function KindDrawer({
   const [draft, setDraft] = useState<Draft>(() => draftOf(kind));
   const [confirming, setConfirming] = useState(false);
   const personas = usePersonas().data ?? [];
+  // What can imply a kind: the stock hazards, and every project's own areas and hazards.
+  const impliers = [
+    ...new Set([
+      ...DEFAULT_HAZARDS.map((h) => h.name),
+      ...(useProjects().data ?? []).flatMap((p) => [
+        ...p.areas.map((a) => a.name),
+        ...p.hazards.map((h) => h.name),
+      ]),
+    ]),
+  ];
   const create = useCreateKind();
   const patch = usePatchKind();
   const remove = useDeleteKind();
@@ -139,6 +170,8 @@ export function KindDrawer({
     failsAtLimit: draft.failsAtLimit,
     ownCopy: draft.ownCopy,
     toInbox: draft.toInbox,
+    impliedBy: [...draft.impliedBy],
+    skills: [...draft.skills],
     addsSteps: [...draft.addsSteps],
     overrides: storedOverrides(draft.overrides),
   });
@@ -218,6 +251,24 @@ export function KindDrawer({
             />
           ))}
         </Stack>
+        <TagsInput
+          label="Implied by"
+          description="A new task whose areas include one of these names gets this kind. Area and hazard names."
+          data={impliers}
+          value={[...draft.impliedBy]}
+          onChange={(values) => {
+            change({ impliedBy: values });
+          }}
+        />
+        <MultiSelect
+          label="Skills"
+          description="Craft skills every step of a task of this kind loads."
+          data={SKILL_OPTIONS}
+          value={[...draft.skills]}
+          onChange={(values) => {
+            change({ skills: values.filter(isSkill) });
+          }}
+        />
         <Checkbox.Group
           label="Adds steps"
           description="Steps this kind runs even when its rigor does not."

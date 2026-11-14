@@ -79,6 +79,10 @@ describe('RecentDecisions', () => {
         outcome: 'below_floor',
       });
     });
+    await pickFilter('What 10db did', 'What 10db did', 'Overridden');
+    await waitFor(() => {
+      expect(lastQuery(sent)?.['outcome']).toBe('overridden');
+    });
   });
 
   it('keeps its header when nothing matches', async () => {

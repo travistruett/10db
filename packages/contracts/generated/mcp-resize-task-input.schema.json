@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "opId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{8,100}$",
+      "description": "A unique ID for this call. Reuse it only when retrying the same call."
+    },
+    "rigor": {
+      "type": "string",
+      "enum": [
+        "light",
+        "standard",
+        "careful",
+        "critical"
+      ],
+      "description": "The rigor the task should run at from here on."
+    },
+    "why": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "One or two sentences on why, which the builder reads."
+    }
+  },
+  "required": [
+    "opId",
+    "rigor",
+    "why"
+  ]
+}

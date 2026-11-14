@@ -35,6 +35,7 @@ import {
   Urgency,
   Verdict,
 } from './states';
+import { Rigor } from './rigor';
 import { MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
@@ -72,6 +73,7 @@ export const McpToolName = {
   WriteHandoff: 'write_handoff',
   CompleteStep: 'complete_step',
   ReportPages: 'report_pages',
+  ResizeTask: 'resize_task',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
 
@@ -318,6 +320,15 @@ export const McpToolInputs = {
         'Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.',
       ),
   }),
+  resize_task: z.object({
+    opId: OpId,
+    rigor: z.enum(Rigor).describe('The rigor the task should run at from here on.'),
+    why: z
+      .string()
+      .min(1)
+      .max(300)
+      .describe('One or two sentences on why, which the builder reads.'),
+  }),
   report_pages: z.object({
     opId: OpId,
     routes: z
@@ -438,6 +449,11 @@ export const McpToolOutputs = {
     instruction: z.string(),
     /** The tasks filed from `followUps`; absent in a result recorded before there were any. */
     followUps: z.array(z.object({ taskId: TaskId, title: z.string() })).default([]),
+  }),
+  resize_task: z.object({
+    /** False when the call was refused; `message` says why, or what the task now runs at. */
+    resized: z.boolean(),
+    message: z.string(),
   }),
   report_pages: z.object({
     /** The routes kept for this turn's (or this run's) pictures. */

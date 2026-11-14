@@ -72,6 +72,7 @@ export function decisionStatsDto(
     acted: 0,
     belowFloor: 0,
     shadow: 0,
+    overridden: 0,
     stopped: 0,
     fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
     costUsd: 0,
@@ -175,6 +176,8 @@ export function serveJudge(initial: {
             thread_answer: merged(JudgeDecision.ThreadAnswer),
             reply_match: merged(JudgeDecision.ReplyMatch),
             approval_read: merged(JudgeDecision.ApprovalRead),
+            task_rigor: merged(JudgeDecision.TaskRigor),
+            task_kinds: merged(JudgeDecision.TaskKinds),
           },
         },
       };

@@ -32,6 +32,8 @@ describe('kinds', () => {
       toInbox: true,
       addsSteps: ['plan_review'],
       overrides: { review: { model: { kind: 'tier', tier: 'frontier' }, effort: 'high' } },
+      impliedBy: ['migrations'],
+      skills: ['planning', 'test-first'],
     });
     add('docs');
     const kinds = listKinds(store.db);
@@ -47,8 +49,16 @@ describe('kinds', () => {
       toInbox: true,
       addsSteps: ['plan_review'],
       overrides: { review: { model: { kind: 'tier', tier: 'frontier' }, effort: 'high' } },
+      impliedBy: ['migrations'],
+      skills: ['planning', 'test-first'],
     });
-    expect(kinds[1]).toMatchObject({ minimumRigor: null, addsSteps: [], overrides: {} });
+    expect(kinds[1]).toMatchObject({
+      minimumRigor: null,
+      addsSteps: [],
+      overrides: {},
+      impliedBy: [],
+      skills: [],
+    });
   });
 
   it('refuses a key another kind has', () => {

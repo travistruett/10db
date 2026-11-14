@@ -22,7 +22,9 @@
               "question_route",
               "thread_answer",
               "reply_match",
-              "approval_read"
+              "approval_read",
+              "task_rigor",
+              "task_kinds"
             ]
           },
           "calls": {
@@ -41,6 +43,11 @@
             "maximum": 9007199254740991
           },
           "shadow": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "overridden": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
@@ -116,6 +123,7 @@
           "acted",
           "belowFloor",
           "shadow",
+          "overridden",
           "stopped",
           "fallbacks",
           "costUsd",

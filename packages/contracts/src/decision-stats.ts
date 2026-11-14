@@ -8,6 +8,8 @@ export const DecisionStatsDto = z.object({
   acted: z.int().min(0),
   belowFloor: z.int().min(0),
   shadow: z.int().min(0),
+  /** Calls whose value the builder changed afterwards, counted apart from `acted`. */
+  overridden: z.int().min(0),
   stopped: z.int().min(0),
   /** Calls that fell back to today's rule, by why. */
   fallbacks: z.object({

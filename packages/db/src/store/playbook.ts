@@ -10,6 +10,7 @@ import {
   type ModelSetting,
   type PersonaId,
   type ProjectId,
+  type Ships,
   type Rigor,
 } from '@10db/contracts';
 import { and, asc, eq, isNull } from 'drizzle-orm';
@@ -25,6 +26,7 @@ export interface PlaybookRowOverride {
   readonly reviewRounds: number | null;
   readonly fixBy: FixBy | null;
   readonly approvesPlan: boolean | null;
+  readonly ships: Ships | null;
 }
 
 /** What one scope overrides of a cell; a null field is left to the scope above. */
@@ -53,6 +55,7 @@ export function getPlaybook(db: DbReader, projectId: ProjectId | null): Playbook
       reviewRounds: schema.playbookRows.reviewRounds,
       fixBy: schema.playbookRows.fixBy,
       approvesPlan: schema.playbookRows.approvesPlan,
+      ships: schema.playbookRows.ships,
     })
     .from(schema.playbookRows)
     .where(projectIs(schema.playbookRows.projectId, projectId))
@@ -104,6 +107,7 @@ export function setPlaybook(
       fixBy: row.fixBy === undefined ? (current?.fixBy ?? null) : row.fixBy,
       approvesPlan:
         row.approvesPlan === undefined ? (current?.approvesPlan ?? null) : row.approvesPlan,
+      ships: row.ships === undefined ? (current?.ships ?? null) : row.ships,
     };
     if (Object.values(merged).every((field) => field === null)) {
       ctx.tx.delete(schema.playbookRows).where(where).run();

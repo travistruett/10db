@@ -25,6 +25,10 @@ export const JudgeDecision = {
   ReplyMatch: 'reply_match',
   /** Stakeholder questions: whether a reply approves the open proposal. */
   ApprovalRead: 'approval_read',
+  /** Sizing: how much process a task needs, one of the four rigors. */
+  TaskRigor: 'task_rigor',
+  /** Sizing: whether a task touches one kind of work, asked once per kind. */
+  TaskKinds: 'task_kinds',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -40,6 +44,8 @@ export const JudgeOutcome = {
   Stopped: 'stopped',
   /** A Shape decision in shadow (spec §9): the answer was logged to be scored, and nothing was shown. */
   Shadow: 'shadow',
+  /** The builder changed the value the judge set, so the call is counted as wrong. */
+  Overridden: 'overridden',
 } as const;
 export type JudgeOutcome = (typeof JudgeOutcome)[keyof typeof JudgeOutcome];
 
@@ -74,6 +80,8 @@ export const JudgeConfig = z.object({
     [JudgeDecision.ThreadAnswer]: shapeDecision(),
     [JudgeDecision.ReplyMatch]: shapeDecision(),
     [JudgeDecision.ApprovalRead]: shapeDecision(),
+    [JudgeDecision.TaskRigor]: shapeDecision(),
+    [JudgeDecision.TaskKinds]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -92,6 +100,8 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ThreadAnswer]: { ...DEFAULT_DECISION },
     [JudgeDecision.ReplyMatch]: { ...DEFAULT_DECISION },
     [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
+    [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
+    [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -134,6 +144,8 @@ export const JudgeConfigPatch = z
         [JudgeDecision.ThreadAnswer]: JudgeDecisionConfigPatch,
         [JudgeDecision.ReplyMatch]: JudgeDecisionConfigPatch,
         [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
+        [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
+        [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

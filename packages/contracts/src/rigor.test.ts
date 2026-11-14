@@ -3,6 +3,7 @@ import { ModelSetting } from './catalogue';
 import { mintId } from './ids';
 import {
   effectiveRigor,
+  explainEffectiveRigor,
   KindInput,
   KindOrderInput,
   kindsOfTask,
@@ -360,4 +361,58 @@ describe('kindsOfTask and withKindsNamed', () => {
       expect(result.map((k) => `${k.key}:${k.source}`)).toEqual(want);
     },
   );
+});
+
+describe('explainEffectiveRigor', () => {
+  const kinds = [
+    { key: 'security', minimumRigor: Rigor.Careful },
+    { key: 'migration', minimumRigor: Rigor.Careful },
+    { key: 'dependency', minimumRigor: Rigor.Standard },
+    { key: 'docs', minimumRigor: null },
+  ];
+  const keys = (...names: string[]): TaskKind[] =>
+    names.map((key) => ({ key, source: 'rules' }) as const);
+
+  it.each([
+    {
+      name: 'a rigor of its own says who set it and why',
+      own: { rigor: Rigor.Light, rigorSource: 'judge', rigorReason: 'a typo fix' },
+      taskKinds: keys(),
+      want: { source: 'judge', reason: 'a typo fix' },
+    },
+    {
+      name: 'a builder pin has no reason of its own',
+      own: { rigor: Rigor.Careful, rigorSource: 'builder', rigorReason: null },
+      taskKinds: keys('docs'),
+      want: { source: 'builder', reason: null },
+    },
+    {
+      name: 'kinds that raise the default name the strongest minimum and every kind holding it',
+      own: { rigor: null, rigorSource: null, rigorReason: null },
+      taskKinds: keys('docs', 'migration', 'security', 'dependency'),
+      want: { source: 'rules', reason: 'at least Careful: security, migration' },
+    },
+    {
+      name: 'kinds that raise a judged rigor are the rules, not the judge',
+      own: { rigor: Rigor.Light, rigorSource: 'judge', rigorReason: 'a typo fix' },
+      taskKinds: keys('dependency'),
+      want: { source: 'rules', reason: 'at least Standard: dependency' },
+    },
+    {
+      name: 'kinds that do not raise it leave the project default',
+      own: { rigor: null, rigorSource: null, rigorReason: null },
+      taskKinds: keys('docs', 'dependency'),
+      want: { source: 'default', reason: null },
+    },
+    {
+      name: 'a key no kind has adds nothing',
+      own: { rigor: null, rigorSource: null, rigorReason: null },
+      taskKinds: keys('deleted'),
+      want: { source: 'default', reason: null },
+    },
+  ] as const)('$name', ({ own, taskKinds, want }) => {
+    expect(
+      explainEffectiveRigor({ ...own, projectDefault: Rigor.Standard, taskKinds, kinds }),
+    ).toEqual(want);
+  });
 });

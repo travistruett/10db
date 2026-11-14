@@ -30,6 +30,7 @@ import {
   MCP_APPROVAL_DETAIL,
   ReviewCardDetail,
   reviewRounds,
+  RigorSource,
   type AccountId,
   type Rigor,
   type WorkstreamId,
@@ -2963,6 +2964,50 @@ describe('moving accounts', () => {
     expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
   });
 
+  it("loads a task's kinds' skills in every step, named for Claude and inlined for Codex", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-kskill-0000', 'Write the second file'),
+          },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-kskill-0001', ['src/api/b.txt']), turn],
+      ],
+    });
+    engine.state.write((ctx) =>
+      insertKind(ctx, { key: 'craft', label: 'Craft', skills: ['brainstorming'] }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], {
+      flow: 'quick',
+      kinds: ['craft'],
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+
+    const chatgpt = seedAccount(engine.store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, chatgpt.id, { expectedIdentity: 'chatgpt@example.com' }),
+    );
+    moveTo(chatgpt.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+
+    const body = readSkillBody('brainstorming') ?? 'missing';
+    const [claude, codex] = engine.adapter.prompts.map((p) => p.prompt);
+    // The implementer's own skills stay, and the kind's come after them.
+    expect(claude).toContain('Skills to use: test-first, handoff, brainstorming.');
+    expect(claude).not.toContain(body);
+    expect(codex).toContain(body);
+    expect(codex).toContain(readSkillBody('test-first') ?? 'missing');
+  });
+
   it("brings the builder's answer to a fresh session after the project moved", async () => {
     engine = await createTestEngine({
       Alpha: [
@@ -4392,6 +4437,45 @@ describe('flows', () => {
       expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
       expect(step(workstream.id, 1)).toMatchObject({ reviewRounds: 1 });
       expect(ws(workstream.id).model).toBe(step(workstream.id, 1)?.model);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('gives a Light task its Build session resized to Standard a Review after the gate', async () => {
+      const resize = {
+        do: 'mcp' as const,
+        tool: 'resize_task',
+        args: { opId: 'op-resize-0041', rigor: 'standard', why: 'It touches three modules.' },
+      };
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            [
+              write('src/api/a.txt', 'op-resize-0042'),
+              commit('op-resize-0042', ['src/api/a.txt']),
+              resize,
+              turn,
+            ],
+            [approve('op-resize-0043'), turn],
+          ],
+        },
+        { gateCommand: 'true' },
+        { gate: { run: () => Promise.resolve(passing) } },
+      );
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+      // A rigor the builder gave is pinned; the agent resizes one the judge sized.
+      engine.state.write((ctx) =>
+        patchTask(ctx, task.id, { rigor: 'light' }, undefined, RigorSource.Judge),
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(getTask(engine.store.db, task.id)).toMatchObject({
+        rigor: 'standard',
+        rigorSource: 'agent',
+      });
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+      expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
       engine.launch(workstream.id);
       await engine.runner.idle();
       expect(ws(workstream.id).state).toBe('DONE');

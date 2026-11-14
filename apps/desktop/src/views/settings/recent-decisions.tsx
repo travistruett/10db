@@ -27,6 +27,7 @@ const OUTCOME_CHOICES = [
   { value: ANY_OUTCOME, label: 'Any outcome' },
   { value: JudgeOutcome.Acted, label: 'Acted' },
   { value: JudgeOutcome.BelowFloor, label: 'Not sure enough' },
+  { value: JudgeOutcome.Overridden, label: 'Overridden' },
   { value: JudgeOutcome.Shadow, label: 'Shadow' },
   { value: JudgeOutcome.FallbackOff, label: 'Fell back: off' },
   { value: JudgeOutcome.FallbackNoKey, label: 'Fell back: no key' },

@@ -111,6 +111,30 @@
               "value",
               "source"
             ]
+          },
+          "ships": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "enum": [
+                  "with_goal",
+                  "alone"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
           }
         },
         "required": [
@@ -118,7 +142,8 @@
           "steps",
           "reviewRounds",
           "fixBy",
-          "approvesPlan"
+          "approvesPlan",
+          "ships"
         ]
       }
     },

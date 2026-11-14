@@ -197,6 +197,7 @@ import type {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   ProvenanceDto,
+  RigorSource,
 } from '@10db/contracts';
 
 /** What starting a task made: its workstream in local delivery, the batch it runs in for pull requests. */
@@ -306,9 +307,20 @@ export interface ApiServices extends PlanRecordServices {
   listTasks(projectId: ProjectId): TaskDto[];
   /**
    * Throws InvalidError when the task's landing names a branch origin does not have, so the
-   * answer may come after asking origin.
+   * answer may come after asking origin. A rigor in `input` is pinned as `rigorSource` says: the builder's
+   * when left out, which is how the builder's own sessions (the Board, the API and the builder MCP) set it; a proposal's is the agent's.
    */
-  createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
+  createTask(
+    projectId: ProjectId,
+    input: TaskInput,
+    rigorSource?: RigorSource,
+  ): TaskDto | Promise<TaskDto>;
+  /**
+   * Resolves when the sizing in flight for these tasks has ended, or after a short wait, whichever is
+   * first; never rejects. A start from the Board, the API or the builder's MCP awaits it before it reads
+   * anything, so the rules and the judge have sized the task it starts.
+   */
+  settleSizing(taskIds: readonly TaskId[]): Promise<void>;
   /**
    * Starts a task; a held one is queued again as the run it was, in any delivery mode. A task whose
    * latest run failed in an open or failed batch runs again in that batch, keeping its commits; with
@@ -729,7 +741,8 @@ export interface ApiServices extends PlanRecordServices {
   patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
-  patchTask(id: TaskId, patch: TaskPatch): TaskDto | Promise<TaskDto>;
+  /** A rigor in `patch` is pinned as `rigorSource` says: the builder's when left out. */
+  patchTask(id: TaskId, patch: TaskPatch, rigorSource?: RigorSource): TaskDto | Promise<TaskDto>;
   /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
   moveTask(id: TaskId, move: TaskMove): TaskDto;
   listBoardColumns(projectId: ProjectId): BoardColumnDto[];

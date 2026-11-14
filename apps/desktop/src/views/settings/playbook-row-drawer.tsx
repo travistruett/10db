@@ -1,4 +1,10 @@
-import { FixBy, type PlaybookRowDto, type PlaybookSource, type ProjectId } from '@10db/contracts';
+import {
+  FixBy,
+  Ships,
+  type PlaybookRowDto,
+  type PlaybookSource,
+  type ProjectId,
+} from '@10db/contracts';
 import {
   Button,
   Checkbox,
@@ -28,6 +34,10 @@ const FIX_BY_OPTIONS = Object.values(FixBy).map((value) => ({
   label: FIX_BY_LABELS[value],
 }));
 const NO_REVIEW = 'Only for a review the change forces';
+const SHIPS_OPTIONS = [
+  { value: Ships.WithGoal, label: 'With its goal' },
+  { value: Ships.Alone, label: 'Alone' },
+];
 
 /** One field of a row's process: where its value comes from and the button that hands it back to the scope above. */
 function ProcessField({
@@ -84,7 +94,8 @@ function ProcessField({
 
 /**
  * A rigor's process: the steps it runs, how many rounds a reviewer may send work back, what fixes a send-back,
- * and whether the builder approves the plan. A change saves at once, and only the field changed is sent, in this
+ * whether the builder approves the plan, and how its tasks ship: with the rest of their goal in one pull request,
+ * or alone. A change saves at once, and only the field changed is sent, in this
  * scope; a field's Reset (Use global, in a project) hands only that field back to the scope above.
  */
 export function PlaybookRowDrawer({
@@ -211,6 +222,29 @@ export function PlaybookRowDrawer({
               disabled={!hasPlan || set.isPending}
               onChange={(e) => {
                 set.mutate({ rows: [{ rigor: row.rigor, approvesPlan: e.currentTarget.checked }] });
+              }}
+            />
+          </ProcessField>
+          <ProcessField
+            title="Ships"
+            name="ships"
+            source={row.ships.source}
+            scope={scope}
+            busy={set.isPending}
+            note="With its goal, tasks of one goal that start together share a pull request; kinds with their own copy always ship alone."
+            onReset={() => {
+              set.mutate({ rows: [{ rigor: row.rigor, ships: null }] });
+            }}
+          >
+            <Select
+              aria-label="Ships"
+              data={SHIPS_OPTIONS}
+              value={row.ships.value}
+              allowDeselect={false}
+              disabled={set.isPending}
+              onChange={(value) => {
+                const picked = SHIPS_OPTIONS.find((o) => o.value === value);
+                if (picked) set.mutate({ rows: [{ rigor: row.rigor, ships: picked.value }] });
               }}
             />
           </ProcessField>

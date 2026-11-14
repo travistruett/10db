@@ -2,6 +2,7 @@ import {
   QuestionCategory,
   Urgency,
   InboxKind,
+  RigorSource,
   type PlaybookMoveEntry,
   type ProjectId,
 } from '@10db/contracts';
@@ -85,10 +86,13 @@ export function moveToPlaybook(ctx: WriteContext): MoveReport {
   for (const { projectId, rigor: defaultRigor } of rigor.projects)
     patchProject(ctx, projectId, { defaultRigor });
   for (const task of rigor.tasks)
-    patchTask(ctx, task.taskId, {
-      ...(task.rigor === null ? {} : { rigor: task.rigor }),
-      kinds: [...task.kinds],
-    });
+    patchTask(
+      ctx,
+      task.taskId,
+      { ...(task.rigor === null ? {} : { rigor: task.rigor }), kinds: [...task.kinds] },
+      undefined,
+      RigorSource.Builder,
+    );
 
   const unreadable = legacy.unreadable.map((error): ScopedMoveEntry => ({
     projectId: null,

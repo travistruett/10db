@@ -18,6 +18,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     createProject: none,
     listTasks: () => [],
     createTask: track('createTask'),
+    settleSizing: () => Promise.resolve(),
     startTask: none,
     holdTask: none,
     runNext: none,

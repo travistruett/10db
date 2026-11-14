@@ -38,6 +38,8 @@ describe('judge config', () => {
         thread_answer: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         reply_match: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         approval_read: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        task_rigor: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        task_kinds: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
@@ -58,16 +60,20 @@ describe('judge config', () => {
     expect(config.decisions.shape_record).toEqual(DEFAULT_JUDGE_CONFIG.decisions.shape_record);
   });
 
-  it.each(['question_route', 'thread_answer', 'reply_match', 'approval_read'] as const)(
-    'reads a config stored before %s with its default',
-    (decision) => {
-      const config = JudgeConfig.parse({
-        enabled: true,
-        decisions: { shape_ready: { enabled: true, model: 'm', floor: 0.5 } },
-      });
-      expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
-    },
-  );
+  it.each([
+    'question_route',
+    'thread_answer',
+    'reply_match',
+    'approval_read',
+    'task_rigor',
+    'task_kinds',
+  ] as const)('reads a config stored before %s with its default', (decision) => {
+    const config = JudgeConfig.parse({
+      enabled: true,
+      decisions: { shape_ready: { enabled: true, model: 'm', floor: 0.5 } },
+    });
+    expect(config.decisions[decision]).toEqual(DEFAULT_JUDGE_CONFIG.decisions[decision]);
+  });
 
   it.each([
     ['above one', 1.01],

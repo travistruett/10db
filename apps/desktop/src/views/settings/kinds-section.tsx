@@ -77,6 +77,12 @@ export function KindsSection() {
       ),
     },
     {
+      accessor: 'impliedBy',
+      title: 'Implied by',
+      noWrap: true,
+      render: (kind) => kind.impliedBy.join(', '),
+    },
+    {
       accessor: 'addsSteps',
       title: 'Adds',
       noWrap: true,
