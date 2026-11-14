@@ -21,6 +21,10 @@ import { draftKey, sessionDrafts } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
 import { openCardsByConversation } from './needs-you';
 import { markSeen, readSeen } from './seen';
+import { nextNeeding, targetIndex } from './session-keys';
+import { tabInfo } from './tab-info';
+import { needsYou } from './tab-state';
+import { useSessionKeys } from './use-session-keys';
 import { panelId, TabStrip, type StripTab } from './tab-strip';
 
 export interface SessionsViewProps {
@@ -67,6 +71,12 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     writeFreshTabs(fresh);
   }, [fresh]);
 
+  // ⌘T on another view writes a fresh tab and lands here on it; a tab this screen does not know yet is read in.
+  if (search.fresh !== undefined && !fresh.some((t) => t.id === search.fresh)) {
+    const stored = readFreshTabs();
+    if (stored.some((t) => t.id === search.fresh)) setFresh(stored);
+  }
+
   const list = projects.data ?? [];
   const chats = open.data ?? [];
   const tabs = stripOf(chats, fresh);
@@ -100,6 +110,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       window.removeEventListener('focus', look);
     };
   }, [selectedChat, lastReplyAt]);
+
+  const cards = openCardsByConversation(inbox.data ?? []);
+  const infos = tabs.map((tab) => tabInfo(tab, cards, seen));
 
   const select_ = (tab: StripTab): void => {
     if (tab.kind === 'chat') {
@@ -151,6 +164,40 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     select(projectId);
   };
 
+  useSessionKeys((key) => {
+    const at = selected === null ? -1 : tabs.indexOf(selected);
+    switch (key.kind) {
+      case 'new':
+        newTab();
+        return true;
+      case 'close':
+        if (selected === null) return false;
+        closeTab(selected);
+        return true;
+      case 'next_needing': {
+        const next = nextNeeding(
+          infos.map((info) => needsYou(info.state)),
+          at,
+        );
+        const tab = next === null ? undefined : tabs[next];
+        if (tab !== undefined) select_(tab);
+        return true;
+      }
+      case 'go':
+      case 'last':
+      case 'prev':
+      case 'next': {
+        const index = targetIndex(key, at, tabs.length);
+        const tab = index === null ? undefined : tabs[index];
+        if (tab !== undefined) select_(tab);
+        return true;
+      }
+      case 'reopen':
+      case 'stop':
+        return false;
+    }
+  });
+
   return (
     <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Announcer message={announcement} label="Sessions announcements" />
@@ -159,7 +206,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           tabs={tabs}
           selectedKey={selected?.key ?? null}
           projects={list}
-          cards={openCardsByConversation(inbox.data ?? [])}
+          cards={cards}
           seen={seen}
           onSelect={select_}
           onClose={closeTab}

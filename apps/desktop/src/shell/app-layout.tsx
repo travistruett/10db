@@ -25,6 +25,7 @@ import {
 } from '@tabler/icons-react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useState } from 'react';
+import { useNewSessionKey } from './use-new-session-key';
 import { useDaemonStatus } from '../daemon/provider';
 import { useDesktopSync } from '../desktop/sync';
 import { useRenderMode } from '../screens/render-context';
@@ -125,6 +126,7 @@ export function AppLayout() {
 
 function FullLayout() {
   useDesktopSync();
+  useNewSessionKey();
   const status = useDaemonStatus();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
