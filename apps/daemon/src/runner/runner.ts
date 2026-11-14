@@ -71,7 +71,7 @@ import {
   approvedLines,
   buildTrustPolicy,
   CROSSES_LIMIT_QUESTION,
-  PRE_EXISTING_MAX,
+  PRE_EXISTING_READ_MAX,
   callKey,
   callSummary,
   createSkipRecorder,
@@ -2530,13 +2530,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     const preExisting =
       laneSession === null || !tendbReady
         ? []
-        : await opts.git.untrackedAndIgnored(checkout, PRE_EXISTING_MAX).catch((error: unknown) => {
-            opts.logger.warn(
-              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-              "the checkout's untracked files could not be read; 10db's judge reads none",
-            );
-            return [];
-          });
+        : await opts.git
+            .untrackedAndIgnored(checkout, PRE_EXISTING_READ_MAX)
+            .catch((error: unknown) => {
+              opts.logger.warn(
+                { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+                "the checkout's untracked files could not be read; 10db's judge reads none",
+              );
+              return [];
+            });
     const startFloor =
       laneSession === null
         ? null
@@ -2989,9 +2991,9 @@ export function createRunner(opts: RunnerOptions): Runner {
                 checkout,
                 tmpDir: laneSession.tmpDir,
                 secretFiles: laneSession.fileAccess.secretFiles ?? [],
+                preExisting,
               },
               policy,
-              preExisting,
               allowLines: () => [
                 ...new Set([
                   ...approvedLines(approved),

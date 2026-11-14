@@ -601,9 +601,9 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
                       checkout: launch.cwd,
                       tmpDir: launch.cwd,
                       secretFiles: access.secretFiles ?? [],
+                      preExisting: [],
                     },
                     policy,
-                    preExisting: [],
                     allowLines: () => projectGrantLines(state.db, project.id),
                     judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
                     // Plan's allow list holds none of the project's allowed commands, on native too.

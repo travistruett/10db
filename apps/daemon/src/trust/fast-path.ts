@@ -1,8 +1,9 @@
-import { statSync } from 'node:fs';
-import { basename, isAbsolute, resolve, sep } from 'node:path';
+import { lstatSync, statSync } from 'node:fs';
+import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   foldPathCase,
   isSecretFileName,
+  isWithin,
   isWithinOnEveryReading,
   plainCommandWords,
   readOnlyShellRefusal,
@@ -30,6 +31,11 @@ export interface FastPathContext {
   readonly tmpDir: string;
   /** The session's secret files: every `.env*` file and link, and each link's real path. */
   readonly secretFiles: readonly string[];
+  /**
+   * The untracked and ignored entries the checkout held when the session started, relative to it, as git lists
+   * them (an ignored folder once, ending in `/`).
+   */
+  readonly preExisting: readonly string[];
 }
 
 /** Key and credential files, by their last segment, case-folded, beside the sandbox's own `.env*`. */
@@ -198,7 +204,26 @@ function editStaysIn(call: LimitCall, path: string | null, ctx: FastPathContext)
   if (namesSecret(target, ctx.secretFiles)) return false;
   // `..` is kept as written: after a link it means something else, and both readings must be inside.
   const written = isAbsolute(path) ? path : `${call.cwd}${sep}${path}`;
+  if (overwritesPreExisting(written, ctx)) return false;
   return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
+}
+
+function exists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an edit changes a file that was there before the session and that git can't bring back: it exists,
+ * and on some reading it is a pre-existing entry or under one.
+ */
+function overwritesPreExisting(written: string, ctx: FastPathContext): boolean {
+  if (!exists(written)) return false;
+  return ctx.preExisting.some((entry) => isWithin(join(ctx.checkout, entry), written));
 }
 
 /**

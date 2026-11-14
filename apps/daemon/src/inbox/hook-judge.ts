@@ -69,7 +69,6 @@ export interface HookJudgeContext {
   readonly taskId: TaskId | null;
   readonly fastPath: FastPathContext;
   readonly policy: TrustPolicy;
-  readonly preExisting: readonly string[];
   /** The builder's approved calls and the project's grants as they are now, so a grant removed mid-session stops at once. */
   readonly allowLines: () => readonly string[];
   /** The judge of this call: only a `tendb` call is 10db's judge's. */
@@ -134,7 +133,6 @@ export function createHookJudge(
         fastPath: ctx.fastPath,
         policy: ctx.policy,
         allow: ctx.allowLines(),
-        preExisting: ctx.preExisting,
         ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
         ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),
         signal: req.signal,

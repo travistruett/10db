@@ -77,7 +77,12 @@ const call = (toolName: string, input: unknown, hunk: PatchHunk | null = null): 
 function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface = 'lane') {
   return {
     call: call('Bash', { command: 'vercel deploy --prod' }),
-    fastPath: { checkout, tmpDir: join(root, 'tmp'), secretFiles: [join(checkout, '.env')] },
+    fastPath: {
+      checkout,
+      tmpDir: join(root, 'tmp'),
+      secretFiles: [join(checkout, '.env')],
+      preExisting: [],
+    },
     policy: buildTrustPolicy({
       surface,
       projectName: 'demo',
@@ -88,7 +93,6 @@ function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface 
       grants: [],
     }),
     allow: [],
-    preExisting: [],
     signal: new AbortController().signal,
     ...over,
   } satisfies CrossesLimitRequest;
@@ -210,7 +214,12 @@ describe('crossesLimit', () => {
     const command = 'echo "```" && vercel deploy --prod';
     await ask({
       call: call('Bash', { command }),
-      preExisting: ['data/', 'notes "old".txt'],
+      fastPath: {
+        checkout,
+        tmpDir: join(root, 'tmp'),
+        secretFiles: [join(checkout, '.env')],
+        preExisting: ['data/', 'notes "old".txt'],
+      },
       allow: ['Allowed by the builder in this project: deploys to staging'],
     });
     const sent = sentState();

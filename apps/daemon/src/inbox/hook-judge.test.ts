@@ -134,7 +134,12 @@ function hookJudge(
       projectId: project.id,
       workstreamId: null,
       taskId: null,
-      fastPath: { checkout, tmpDir: join(root, 'tmp'), secretFiles: [join(checkout, '.env')] },
+      fastPath: {
+        checkout,
+        tmpDir: join(root, 'tmp'),
+        secretFiles: [join(checkout, '.env')],
+        preExisting: [],
+      },
       policy: buildTrustPolicy({
         surface,
         projectName: 'demo',
@@ -144,7 +149,6 @@ function hookJudge(
         switches: TRUST_DEFAULTS,
         grants: [],
       }),
-      preExisting: [],
       allowLines: () => grants,
       judgeNow: () => opts.now ?? JudgeKind.Tendb,
       coveredByBuilderRule: (req) =>

@@ -18,9 +18,17 @@ beforeAll(() => {
   writeFileSync(join(checkout, '.env'), 'KEY=1\n');
   writeFileSync(join(checkout, 'src', 'a.ts'), 'export const a = 1;\n');
   writeFileSync(join(checkout, 'src', 'a.json'), '{}\n');
+  writeFileSync(join(checkout, 'data', 'seed.db'), 'rows\n');
+  writeFileSync(join(checkout, 'notes.md'), 'kept\n');
   symlinkSync('.env', join(checkout, 'notes.txt'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
-  ctx = { checkout, tmpDir, secretFiles: [join(checkout, '.env')] };
+  // `data/` is ignored and `notes.md` untracked, and both were there before the session.
+  ctx = {
+    checkout,
+    tmpDir,
+    secretFiles: [join(checkout, '.env')],
+    preExisting: ['data/', 'notes.md'],
+  };
 });
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
@@ -56,6 +64,11 @@ describe('fastPathAllows', () => {
     ['a Codex delete', 'Edit', { file_path: 'src/a.ts' }, false, 'delete'],
     ['a Codex move', 'Edit', { file_path: 'src/a.ts' }, false, 'move'],
     ['a Codex update', 'Edit', { file_path: 'src/a.ts' }, true, 'update'],
+    ['a write over a pre-existing ignored file', 'Write', { file_path: 'data/seed.db' }, false],
+    ['an edit of a pre-existing ignored file', 'Edit', { file_path: 'data/seed.db' }, false],
+    ['a Codex add over a pre-existing file', 'Edit', { file_path: 'data/seed.db' }, false, 'add'],
+    ['an edit of a pre-existing untracked file', 'Edit', { file_path: 'notes.md' }, false],
+    ['a new file in a pre-existing ignored folder', 'Write', { file_path: 'data/new.db' }, true],
     ['ls', 'Bash', bash('ls -la src'), true],
     ['git log', 'Bash', bash('git log -5 --oneline'), true],
     ['cat .env', 'Bash', bash('cat .env'), false],

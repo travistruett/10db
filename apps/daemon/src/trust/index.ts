@@ -14,7 +14,7 @@ export { PatchHunk, type FastPathContext } from './fast-path';
 export {
   CROSSES_LIMIT_QUESTION,
   crossesLimit,
-  PRE_EXISTING_MAX,
+  PRE_EXISTING_READ_MAX,
   type LimitAt,
 } from './crosses-limit';
 export { grantLine, grantTargetOf, projectGrantLines } from './grants';

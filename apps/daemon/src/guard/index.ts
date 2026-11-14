@@ -7,6 +7,7 @@ export {
   foldPathCase,
   isOverLongPath,
   isSecretFileName,
+  isWithin,
   isWithinOnEveryReading,
   OVER_LONG_PATH_REFUSAL,
   PathResolutionError,

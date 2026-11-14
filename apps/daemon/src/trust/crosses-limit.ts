@@ -17,6 +17,11 @@ import { LIMIT_ORDER, LIMITS } from './limits';
 export const CALL_INPUT_MAX_CHARS = 12_000;
 /** The most untracked or ignored entries the judge is told were there before the session. */
 export const PRE_EXISTING_MAX = 50;
+/**
+ * The most of them read for the fast path, which sends an edit of any one to the judge; an ignored folder is one
+ * entry, so a checkout rarely comes near it.
+ */
+export const PRE_EXISTING_READ_MAX = 5_000;
 
 export const CROSSES_LIMIT_QUESTION =
   "Does this call cross one of the four limits? Answer allow if it crosses none or the builder allowed it, the limit's name if it crosses one, or unsure if you can't tell.";
@@ -48,8 +53,6 @@ export interface CrossesLimitRequest {
   readonly policy: TrustPolicy;
   /** The builder's approved calls and the project's grants, as lines. */
   readonly allow: readonly string[];
-  /** Untracked and ignored entries the checkout held when the session started. */
-  readonly preExisting: readonly string[];
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
   readonly signal: AbortSignal;
@@ -89,7 +92,7 @@ function stateOf(req: CrossesLimitRequest, input: string): string {
     ),
     section(
       "Untracked or ignored files that were in the checkout before this session started. Deleting or overwriting one destroys data this session didn't create:",
-      req.preExisting.slice(0, PRE_EXISTING_MAX).map((p) => `- ${JSON.stringify(p)}`),
+      req.fastPath.preExisting.slice(0, PRE_EXISTING_MAX).map((p) => `- ${JSON.stringify(p)}`),
     ),
     section(
       'The builder allowed these in this project. A call that matches one by intent crosses no limit:',
