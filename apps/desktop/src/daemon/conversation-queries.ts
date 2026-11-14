@@ -222,6 +222,23 @@ export function useStopConversation() {
   });
 }
 
+/** Stops the turn and sends `text` as the next one. */
+export function useRedoConversation() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly conversationId: ConversationId; readonly text: string }) =>
+      readJson(
+        await client.conversations[':conversationId'].redo.$post({
+          param: { conversationId: input.conversationId },
+          json: { text: input.text, mentions: [] },
+        }),
+        ConversationItemDto,
+      ),
+    onSuccess: (_item, input) => refreshAfter(queryClient, input.conversationId),
+  });
+}
+
 /** Sends what waits under the Send now line; refused with the daemon's words when nothing would run. */
 export function useSendNow() {
   const { client } = useDaemon();

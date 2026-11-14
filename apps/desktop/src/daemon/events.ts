@@ -12,6 +12,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { chatKeys } from './chat-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
@@ -68,7 +69,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
-  conversation: [conversationKeys.all],
+  conversation: [conversationKeys.all, chatKeys.all],
+  // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
+  chat: [chatKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
   pass: [passKeys.all],

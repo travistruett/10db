@@ -14,10 +14,13 @@ import { pickerAccept, withPictures } from './pictures';
 export interface ComposerProps {
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
-  readonly capabilities: AgentCapabilitiesDto;
+  /** What the agent takes: Attach shows only with a picture format. */
+  readonly capabilities: Pick<AgentCapabilitiesDto, 'images'>;
   readonly phase: ComposerPhase;
   /** Why Send is off (reconnecting, a removed project); the input still takes text. */
   readonly disabledReason: string | null;
+  /** Why the last send failed, from the screen that sent it: shown beside Send. */
+  readonly error?: string | null;
   /** Nothing can be typed either: the account has no chat to offer. */
   readonly locked?: boolean;
   /** Sends the draft; rejects with the daemon's words, and the draft stays. */
@@ -71,6 +74,7 @@ export function Composer({
   capabilities,
   phase,
   disabledReason,
+  error = null,
   locked = false,
   onSend,
   onStop,
@@ -253,9 +257,9 @@ export function Composer({
               <Text size="xs" c="dimmed" lineClamp={2}>
                 {disabledReason}
               </Text>
-            ) : failure === null ? null : (
+            ) : (failure ?? error) === null ? null : (
               <Text size="xs" c="red" lineClamp={2}>
-                {failure}
+                {failure ?? error}
               </Text>
             )}
             {phase.stop === null ? null : (

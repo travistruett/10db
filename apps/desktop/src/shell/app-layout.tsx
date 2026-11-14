@@ -18,6 +18,7 @@ import {
   IconBuildingFactory2,
   IconInbox,
   IconLayoutKanban,
+  IconMessages,
   IconRoute,
   IconSettings,
   IconTools,
@@ -32,9 +33,11 @@ import { ScreenRenderHost } from '../screens/screen-render-host';
 import { AgentDownloadStatus } from './agent-download-status';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
+import { HeaderSlotProvider, HeaderSlotTarget } from './header-slot';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
+import { useSessionsNeedingYouCount } from '../views/sessions/needing-you-count';
 import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
@@ -47,6 +50,7 @@ import { ShapeNav } from './shape-nav';
 const GLOBAL_NAV = [
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
+  { to: '/sessions', label: 'Sessions', icon: IconMessages },
 ] as const;
 
 /** How the selected project's work is shaped; Plan sits among them as `ShapeNav`. */
@@ -72,6 +76,9 @@ const SHELL_FOLD_QUERY = '(max-width: 767px)';
 /** Clears macOS's traffic lights, which sit over the header's left end. */
 const TRAFFIC_LIGHTS_WIDTH = 72;
 
+/** Sessions draws its tab strip from just after the traffic lights (a measure the header's slot keeps). */
+const SESSIONS_STRIP_START = 88;
+
 /** A count on a sidebar item, read by assistive tech as `phrase`. */
 function CountBadge({ count, phrase }: { readonly count: number; readonly phrase: string }) {
   return (
@@ -87,6 +94,18 @@ function CountBadge({ count, phrase }: { readonly count: number; readonly phrase
 function InboxBadge({ count }: { readonly count: number }) {
   return (
     <CountBadge count={count} phrase={`${String(count)} open card${count === 1 ? '' : 's'}`} />
+  );
+}
+
+/** The sessions waiting on the builder; nothing when none does. */
+function SessionsBadge() {
+  const count = useSessionsNeedingYouCount();
+  if (count === 0) return null;
+  return (
+    <CountBadge
+      count={count}
+      phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
+    />
   );
 }
 
@@ -130,90 +149,72 @@ function FullLayout() {
       />
     );
   }
+  const inSessions = pathname === '/sessions' || pathname.startsWith('/sessions/');
   return (
-    <AppShell
-      header={{ height: 48 }}
-      navbar={{
-        width: 200,
-        breakpoint: 'sm',
-        collapsed: { mobile: navHidden, desktop: navHidden },
-      }}
-      padding="md"
-    >
-      {/* The window has no title bar: macOS draws its traffic lights over the header's left end, and
-          the header's empty space drags the window. */}
-      <AppShell.Header data-tauri-drag-region>
-        <Group h="100%" px="md" gap="sm" justify="space-between" data-tauri-drag-region>
-          <Box pl={TRAFFIC_LIGHTS_WIDTH} data-tauri-drag-region>
-            {folded ? (
-              <Burger
-                size="sm"
-                opened={!navHidden}
-                aria-label={navHidden ? 'Show navigation' : 'Hide navigation'}
-                onClick={() => {
-                  setOpenedOn(navHidden ? pathname : null);
-                }}
-              />
-            ) : null}
-          </Box>
-          <Group gap="sm" data-tauri-drag-region>
-            <AgentDownloadStatus />
-            <DaemonStatus />
-            <KeepAwakeControl />
-            <ColorSchemeToggle />
-          </Group>
-        </Group>
-      </AppShell.Header>
-      {/* The sidebar sits a Selenized step above the content, so the fills that would match the body
-          (active and hover states, the dark/gray scale steps) move up one step inside it. */}
-      <AppShell.Navbar
-        // A folded sidebar is out of sight, so it is out of the tab order too.
-        inert={navHidden}
-        p="xs"
-        bg="var(--mantine-color-default)"
-        style={{
-          '--mantine-primary-color-light': 'var(--mantine-color-default-hover)',
-          '--mantine-primary-color-light-color': 'var(--mantine-color-bright)',
-          '--mantine-color-dark-6': 'var(--mantine-color-default-hover)',
-          '--mantine-color-gray-0': 'var(--mantine-color-default-hover)',
+    <HeaderSlotProvider>
+      <AppShell
+        header={{ height: 48 }}
+        navbar={{
+          width: 200,
+          breakpoint: 'sm',
+          collapsed: { mobile: navHidden, desktop: navHidden },
         }}
+        padding="md"
       >
-        {inSettings ? (
-          // Settings lists more sections than a short window holds, so its sidebar scrolls.
-          <AppShell.Section grow component={ScrollArea}>
-            <SettingsNav />
-          </AppShell.Section>
-        ) : (
-          <>
-            {/* Global first, then the selected project's views, then app-wide Settings at the foot:
+        {/* The window has no title bar: macOS draws its traffic lights over the header's left end, and
+          the header's empty space drags the window. */}
+        <AppShell.Header data-tauri-drag-region>
+          <Group h="100%" px="md" gap="sm" justify="space-between" data-tauri-drag-region>
+            <Box
+              pl={inSessions ? SESSIONS_STRIP_START : TRAFFIC_LIGHTS_WIDTH}
+              data-tauri-drag-region
+            >
+              {folded ? (
+                <Burger
+                  size="sm"
+                  opened={!navHidden}
+                  aria-label={navHidden ? 'Show navigation' : 'Hide navigation'}
+                  onClick={() => {
+                    setOpenedOn(navHidden ? pathname : null);
+                  }}
+                />
+              ) : null}
+            </Box>
+            <HeaderSlotTarget />
+            <Group gap="sm" data-tauri-drag-region>
+              <AgentDownloadStatus />
+              <DaemonStatus />
+              <KeepAwakeControl />
+              <ColorSchemeToggle />
+            </Group>
+          </Group>
+        </AppShell.Header>
+        {/* The sidebar sits a Selenized step above the content, so the fills that would match the body
+          (active and hover states, the dark/gray scale steps) move up one step inside it. */}
+        <AppShell.Navbar
+          // A folded sidebar is out of sight, so it is out of the tab order too.
+          inert={navHidden}
+          p="xs"
+          bg="var(--mantine-color-default)"
+          style={{
+            '--mantine-primary-color-light': 'var(--mantine-color-default-hover)',
+            '--mantine-primary-color-light-color': 'var(--mantine-color-bright)',
+            '--mantine-color-dark-6': 'var(--mantine-color-default-hover)',
+            '--mantine-color-gray-0': 'var(--mantine-color-default-hover)',
+          }}
+        >
+          {inSettings ? (
+            // Settings lists more sections than a short window holds, so its sidebar scrolls.
+            <AppShell.Section grow component={ScrollArea}>
+              <SettingsNav />
+            </AppShell.Section>
+          ) : (
+            <>
+              {/* Global first, then the selected project's views, then app-wide Settings at the foot:
                 the same order the Settings sidebar uses. */}
-            <AppShell.Section grow>
-              <Stack gap={2}>
-                {GLOBAL_NAV.map(({ to, label, icon: Icon }) => (
-                  <NavLink
-                    key={to}
-                    component={Link}
-                    to={to}
-                    active={pathname === to || pathname.startsWith(`${to}/`)}
-                    label={label}
-                    leftSection={<Icon size={16} stroke={1.5} />}
-                    rightSection={
-                      to === '/inbox' && openCards > 0 ? (
-                        <InboxBadge count={openCards} />
-                      ) : undefined
-                    }
-                  />
-                ))}
-              </Stack>
-              <Stack gap={2} mt="lg">
-                <Text size="xs" fw={600} c="dimmed" px="sm" pb={4}>
-                  Project
-                </Text>
-                <ProjectSwitcher compact />
-                {PROJECT_NAV.map(({ to, label, icon: Icon }) =>
-                  to === '/shape' ? (
-                    <ShapeNav key={to} pathname={pathname} />
-                  ) : (
+              <AppShell.Section grow>
+                <Stack gap={2}>
+                  {GLOBAL_NAV.map(({ to, label, icon: Icon }) => (
                     <NavLink
                       key={to}
                       component={Link}
@@ -222,49 +223,76 @@ function FullLayout() {
                       label={label}
                       leftSection={<Icon size={16} stroke={1.5} />}
                       rightSection={
-                        to === '/workbench' && project !== null ? (
-                          <WorkbenchBadge projectId={project.id} />
+                        to === '/inbox' && openCards > 0 ? (
+                          <InboxBadge count={openCards} />
+                        ) : to === '/sessions' ? (
+                          <SessionsBadge />
                         ) : undefined
                       }
                     />
-                  ),
-                )}
+                  ))}
+                </Stack>
+                <Stack gap={2} mt="lg">
+                  <Text size="xs" fw={600} c="dimmed" px="sm" pb={4}>
+                    Project
+                  </Text>
+                  <ProjectSwitcher compact />
+                  {PROJECT_NAV.map(({ to, label, icon: Icon }) =>
+                    to === '/shape' ? (
+                      <ShapeNav key={to} pathname={pathname} />
+                    ) : (
+                      <NavLink
+                        key={to}
+                        component={Link}
+                        to={to}
+                        active={pathname === to || pathname.startsWith(`${to}/`)}
+                        label={label}
+                        leftSection={<Icon size={16} stroke={1.5} />}
+                        rightSection={
+                          to === '/workbench' && project !== null ? (
+                            <WorkbenchBadge projectId={project.id} />
+                          ) : undefined
+                        }
+                      />
+                    ),
+                  )}
+                  <NavLink
+                    label="Project Settings"
+                    leftSection={<IconAdjustments size={16} stroke={1.5} />}
+                    renderRoot={(props) => (
+                      <Link
+                        {...props}
+                        to="/settings/$section"
+                        params={{ section: SettingsSectionKey.General }}
+                      />
+                    )}
+                  />
+                </Stack>
+              </AppShell.Section>
+              <AppShell.Section>
                 <NavLink
-                  label="Project Settings"
-                  leftSection={<IconAdjustments size={16} stroke={1.5} />}
+                  label="Settings"
+                  leftSection={<IconSettings size={16} stroke={1.5} />}
                   renderRoot={(props) => (
                     <Link
                       {...props}
                       to="/settings/$section"
-                      params={{ section: SettingsSectionKey.General }}
+                      params={{ section: firstAppSection() }}
                     />
                   )}
                 />
-              </Stack>
-            </AppShell.Section>
-            <AppShell.Section>
-              <NavLink
-                label="Settings"
-                leftSection={<IconSettings size={16} stroke={1.5} />}
-                renderRoot={(props) => (
-                  <Link
-                    {...props}
-                    to="/settings/$section"
-                    params={{ section: firstAppSection() }}
-                  />
-                )}
-              />
-            </AppShell.Section>
-          </>
-        )}
-      </AppShell.Navbar>
-      {/* A column, so a view can take the height the reconnecting banner leaves rather than assume it.
+              </AppShell.Section>
+            </>
+          )}
+        </AppShell.Navbar>
+        {/* A column, so a view can take the height the reconnecting banner leaves rather than assume it.
           Nothing else goes above a view: what needs the builder is a card in the Inbox. */}
-      <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
-        {status.kind === 'connected' && <ScreenRenderHost />}
-        {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
-        <Outlet />
-      </AppShell.Main>
-    </AppShell>
+        <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
+          {status.kind === 'connected' && <ScreenRenderHost />}
+          {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
+          <Outlet />
+        </AppShell.Main>
+      </AppShell>
+    </HeaderSlotProvider>
   );
 }
