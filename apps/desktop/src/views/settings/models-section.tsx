@@ -27,8 +27,8 @@ import { OpenRouterStatusLine } from './openrouter-status-line';
 import { SettingsSectionKey } from './sections';
 
 /** The two views of the page: the agents' models by account, and the models behind 10db's own decisions. */
-export const ModelsView = { Agents: 'agents', Decisions: 'decisions' } as const;
-export type ModelsView = (typeof ModelsView)[keyof typeof ModelsView];
+const ModelsView = { Agents: 'agents', Decisions: 'decisions' } as const;
+type ModelsView = (typeof ModelsView)[keyof typeof ModelsView];
 
 const VIEW_LABELS = [
   { value: ModelsView.Agents, label: 'Agents' },
