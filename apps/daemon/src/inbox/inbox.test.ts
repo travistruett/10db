@@ -2391,6 +2391,52 @@ describe('permission broker in a sandboxed lane', () => {
     expect(decision.behavior === 'deny' ? decision.message : '').toMatch(/equivalent/i);
   });
 
+  describe("a call 10db's judge noted at a limit", () => {
+    const WRITES_LIVE = {
+      limit: 'writes_live' as const,
+      reason: "10db's judge: Writing To Live Systems",
+    };
+    function noted(ws: ReturnType<typeof seedWorkstream>) {
+      const limits = createLimitNotes();
+      limits.note('t1', WRITES_LIVE);
+      return createPermissionBroker(
+        { state, inbox, git: NO_GIT, logger: silentLogger },
+        {
+          projectId: ws.project.id,
+          workstreamId: ws.workstream.id,
+          sessionId: mintId('Session'),
+          observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+          signal: controller.signal,
+          sandbox: { fileAccess, hazards: DEFAULT_HAZARDS },
+          limits,
+        },
+      );
+    }
+
+    it("is still refused with no card where 10db's gates refuse it", async () => {
+      const ws = seedWorkstream(base);
+      const decision = await noted(ws)(
+        request('Read', { file_path: join(fileAccess.home, '.claude.json') }),
+      );
+      expect(decision.behavior).toBe('deny');
+      expect(openCards()).toEqual([]);
+    });
+
+    it('raises its limit card where the gates would allow it', async () => {
+      const ws = seedWorkstream(base);
+      void noted(ws)(request('Bash', { command: 'ls' }));
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow this? It may write to a live system');
+    });
+
+    it('a once-only call never offers Always in this project', async () => {
+      const ws = seedWorkstream(base);
+      void noted(ws)(request('Bash', { command: 'while :; do :; done', run_in_background: true }));
+      await settle();
+      expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    });
+  });
+
   const BACKGROUND_FLAG: readonly {
     readonly name: string;
     readonly input: Record<string, unknown>;

@@ -567,11 +567,12 @@ export function createPermissionBroker(
         ? null
         : mcpToolGrant(req.toolName, req.listedTools, ctx.mcpApproved);
     // Always in this project keeps the call itself only when it is short enough to keep whole.
-    const noteNeeded = judged && grantTargetOf(null, summary) === null;
-    const options = judged
-      ? limitOptions(noteNeeded)
-      : onceOnly
-        ? ONCE_OPTIONS
+    const noteNeeded = judged && !onceOnly && grantTargetOf(null, summary) === null;
+    // A once-only call offers no rule to store, Always in this project included.
+    const options = onceOnly
+      ? ONCE_OPTIONS
+      : judged
+        ? limitOptions(noteNeeded)
         : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
@@ -898,9 +899,9 @@ export function createPermissionBroker(
 
   async function decide(req: ToolRequest): Promise<ToolDecision> {
     if (req.toolName === 'AskUserQuestion') return askQuestions(req);
-    // 10db's judge stopped this call at a limit: the builder answers it, whatever the lane's rules allow.
+    // 10db's judge stopped this call at a limit: 10db's own gates still refuse what they refuse, and the builder
+    // answers the rest, whatever the lane's rules allow.
     const noted = req.toolUseId === null ? undefined : ctx.limits?.take(req.toolUseId);
-    if (noted !== undefined) return askPermission(req, null, noted);
     if (req.toolName === 'Bash' && ctx.passGit !== undefined) {
       const command = stringField(req.input, 'command');
       const call = command === null ? null : passGitCall(command, ctx.passGit.baseBranch);
@@ -909,16 +910,19 @@ export function createPermissionBroker(
         return { behavior: 'deny', message: call.reason, by: DeniedBy.TenDb };
     }
     const { sandbox } = ctx;
-    if (sandbox === undefined) return askPermission(req);
+    if (sandbox === undefined) return askPermission(req, null, noted);
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);
     let verdict: ToolDecision | Ask | null = null;
     if (req.toolName === 'Bash') verdict = judgeBash(req, sandbox);
     else if (req.toolName === 'Monitor') verdict = judgeMonitor(req, sandbox);
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);
-    if (verdict === null) return askPermission(req);
-    if (isDecision(verdict)) return verdict;
-    const decision = await askPermission(req, verdict);
+    if (verdict === null) return askPermission(req, null, noted);
+    if (isDecision(verdict)) {
+      if (verdict.behavior === 'deny' || noted === undefined) return verdict;
+      return askPermission(req, null, noted);
+    }
+    const decision = await askPermission(req, verdict, noted);
     return req.toolName === 'Read' ? servedSecretRead(req, decision, verdict, sandbox) : decision;
   }
 
