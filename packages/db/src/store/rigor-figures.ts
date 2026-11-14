@@ -24,12 +24,15 @@ import { listTasks } from './tasks';
 
 const DAY_MS = 86_400_000;
 
+/** What `step.changed` records as `sentBackBy` when the builder, not a reviewer, sent the work back. */
+const BUILDER_SENT_BACK = 'builder';
+
 /** What one done task took. */
 interface TaskWork {
   readonly task: TaskDto;
   readonly steps: number;
   readonly sessions: number;
-  readonly sendBacks: number;
+  readonly sentBack: number;
   readonly shippedWithFindings: boolean;
   readonly pullRequests: ReadonlySet<string>;
 }
@@ -39,8 +42,8 @@ function average(values: readonly number[]): number | null {
 }
 
 /**
- * When each task became done: its first logged change to done, else its last update, for a task whose
- * change was never logged.
+ * When each task became done: its last logged change to done (a task reopened by a merge run and done
+ * again counts when it finished), else its last update, for a task whose change was never logged.
  */
 function doneTimes(db: DbReader, tasks: readonly TaskDto[]): Map<TaskId, number> {
   const out = new Map<TaskId, number>();
@@ -60,12 +63,11 @@ function doneTimes(db: DbReader, tasks: readonly TaskDto[]): Map<TaskId, number>
     )
     .orderBy(asc(schema.events.seq))
     .all();
-  const first = new Map<string, number>();
+  const last = new Map<string, number>();
   for (const event of events) {
-    if (event.data['status'] === TaskStatus.Done && !first.has(event.entityId))
-      first.set(event.entityId, Date.parse(event.at));
+    if (event.data['status'] === TaskStatus.Done) last.set(event.entityId, Date.parse(event.at));
   }
-  for (const task of tasks) out.set(task.id, first.get(task.id) ?? Date.parse(task.updatedAt));
+  for (const task of tasks) out.set(task.id, last.get(task.id) ?? Date.parse(task.updatedAt));
   return out;
 }
 
@@ -96,6 +98,31 @@ function workOf(db: DbReader, tasks: readonly TaskDto[]): TaskWork[] {
             ),
           )
           .all();
+  // A reviewer's send-back is logged with the role that sent it; a builder's own send-back and a gate
+  // failure are not the rigor's reviews. `sentBack` on the step is reset by a retry, so it is not read.
+  const stepEvents =
+    workstreams.length === 0
+      ? []
+      : db
+          .select({ entityId: schema.events.entityId, data: schema.events.data })
+          .from(schema.events)
+          .where(
+            and(
+              eq(schema.events.entityType, 'workstream'),
+              eq(schema.events.type, EventType.StepChanged),
+              inArray(
+                schema.events.entityId,
+                workstreams.map((w) => w.id),
+              ),
+            ),
+          )
+          .all();
+  const reviewerSendBacks = new Map<string, number>();
+  for (const event of stepEvents) {
+    const by = event.data['sentBackBy'];
+    if (typeof by === 'string' && by !== BUILDER_SENT_BACK)
+      reviewerSendBacks.set(event.entityId, (reviewerSendBacks.get(event.entityId) ?? 0) + 1);
+  }
   const batchIds = workstreams.flatMap((w) => (w.batchId === null ? [] : [w.batchId]));
   const prUrls = new Map(
     (batchIds.length === 0
@@ -119,42 +146,59 @@ function workOf(db: DbReader, tasks: readonly TaskDto[]): TaskWork[] {
       task,
       steps: steps.filter((s) => s.startedAt !== null).length,
       sessions: sessions.filter((s) => own.some((w) => w.id === s.workstreamId)).length,
-      sendBacks: steps.reduce((sum, s) => sum + s.sentBack, 0),
+      sentBack: own.reduce((sum, w) => sum + (reviewerSendBacks.get(w.id) ?? 0), 0),
       shippedWithFindings: steps.some((s) => s.shippedAtLimit !== undefined),
       pullRequests,
     };
   });
 }
 
-/** The distinct pull requests that carried each goal's tasks in `work`, averaged over the goals. */
-function pullRequestsPerGoal(work: readonly TaskWork[]): number | null {
-  const byGoal = new Map<GoalId, Set<string>>();
+/** The tasks' own average of `figure`; null with no task. */
+const perTask = (work: readonly TaskWork[], figure: (w: TaskWork) => number): number | null =>
+  average(work.map(figure));
+
+/**
+ * For each goal with a task in `work`, the goal's tasks in `work` summed by `total`, averaged over those
+ * goals; null when no task is in a goal.
+ */
+function perGoal(
+  work: readonly TaskWork[],
+  total: (tasks: readonly TaskWork[]) => number,
+): number | null {
+  const byGoal = new Map<GoalId, TaskWork[]>();
   for (const w of work) {
     const goalId = w.task.goalId;
     if (goalId === null || goalId === undefined) continue;
-    const urls = byGoal.get(goalId) ?? new Set<string>();
-    for (const url of w.pullRequests) urls.add(url);
-    byGoal.set(goalId, urls);
+    byGoal.set(goalId, [...(byGoal.get(goalId) ?? []), w]);
   }
-  return average([...byGoal.values()].map((urls) => urls.size));
+  return average([...byGoal.values()].map(total));
 }
+
+const sum = (tasks: readonly TaskWork[], figure: (w: TaskWork) => number): number =>
+  tasks.reduce((n, w) => n + figure(w), 0);
+
+const distinctPullRequests = (tasks: readonly TaskWork[]): number =>
+  new Set(tasks.flatMap((w) => [...w.pullRequests])).size;
 
 function row(rigor: RigorFiguresRowDto['rigor'], work: readonly TaskWork[]): RigorFiguresRowDto {
   return {
     rigor,
     tasksDone: work.length,
-    stepsPerTask: average(work.map((w) => w.steps)),
-    sessionsPerTask: average(work.map((w) => w.sessions)),
-    sendBacksPerTask: average(work.map((w) => w.sendBacks)),
-    pullRequestsPerGoal: pullRequestsPerGoal(work),
-    shippedWithFindings: average(work.map((w) => (w.shippedWithFindings ? 1 : 0))),
+    stepsPerTask: perTask(work, (w) => w.steps),
+    sessionsPerTask: perTask(work, (w) => w.sessions),
+    pullRequestsPerTask: perTask(work, (w) => w.pullRequests.size),
+    stepsPerGoal: perGoal(work, (t) => sum(t, (w) => w.steps)),
+    sessionsPerGoal: perGoal(work, (t) => sum(t, (w) => w.sessions)),
+    pullRequestsPerGoal: perGoal(work, distinctPullRequests),
+    sentBackPerTask: perTask(work, (w) => w.sentBack),
+    shippedWithFindings: perTask(work, (w) => (w.shippedWithFindings ? 1 : 0)),
   };
 }
 
 /**
  * What the project's tasks that became done in the last `days` days took, one row per rigor (by the
  * rigor each has now) and one for all of them, and how often the builder overrode the judge's sizing
- * in the same period, across every project.
+ * in the same period, over the project's own sizing calls.
  */
 export function rigorFigures(
   db: DbReader,
@@ -164,7 +208,20 @@ export function rigorFigures(
 ): RigorFiguresDto {
   const nowMs = now.getTime();
   const from = nowMs - days * DAY_MS;
-  const done = listTasks(db, projectId).filter((t) => t.status === TaskStatus.Done);
+  const tookOut = new Set(
+    db
+      .select({ taskId: schema.passTakeOuts.taskId })
+      .from(schema.passTakeOuts)
+      .all()
+      .map((r) => r.taskId),
+  );
+  // A task in a Workbench pass never ran a rigor's plan, so it measures nothing about the rigor.
+  const done = listTasks(db, projectId).filter(
+    (t) =>
+      t.status === TaskStatus.Done &&
+      (t.passId === null || t.passId === undefined) &&
+      !tookOut.has(t.id),
+  );
   const doneAt = doneTimes(db, done);
   const inWindow = done.filter((t) => {
     const at = doneAt.get(t.id) ?? 0;
@@ -175,9 +232,12 @@ export function rigorFigures(
   const calls = db
     .select({ outcome: schema.judgeCalls.outcome })
     .from(schema.judgeCalls)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.judgeCalls.taskId))
     .where(
       and(
+        eq(schema.tasks.projectId, projectId),
         eq(schema.judgeCalls.decision, JudgeDecision.TaskRigor),
+        inArray(schema.judgeCalls.outcome, [JudgeOutcome.Acted, JudgeOutcome.Overridden]),
         gte(schema.judgeCalls.createdAt, new Date(from).toISOString()),
         lte(schema.judgeCalls.createdAt, now.toISOString()),
       ),

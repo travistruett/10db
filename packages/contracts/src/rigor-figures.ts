@@ -26,16 +26,21 @@ export const ALL_RIGORS = 'all';
 export const RigorFiguresRowDto = z.object({
   rigor: z.union([z.enum(Rigor), z.literal(ALL_RIGORS)]),
   tasksDone: z.int().nonnegative(),
-  /** Steps that ran: a step sent back and run again counts once. */
+  /** Steps that ran: a step sent back and run again counts once per run. */
   stepsPerTask: z.number().nonnegative().nullable(),
   sessionsPerTask: z.number().nonnegative().nullable(),
-  /** Times a reviewer or a gate sent the work back. */
-  sendBacksPerTask: z.number().nonnegative().nullable(),
+  /** Distinct pull request URLs that carried a task; a CI-fix or re-cut batch reuses its pull request. */
+  pullRequestsPerTask: z.number().nonnegative().nullable(),
   /**
-   * The distinct pull requests that carried a goal's done tasks of this rigor, averaged over the goals with
-   * such a task. Null when no done task of the rigor is in a goal.
+   * The same three figures over goals: for each goal with a done task of this rigor, that rigor's tasks of
+   * the goal summed (steps, sessions, distinct pull request URLs), averaged over those goals. Null when no
+   * done task of the rigor is in a goal.
    */
+  stepsPerGoal: z.number().nonnegative().nullable(),
+  sessionsPerGoal: z.number().nonnegative().nullable(),
   pullRequestsPerGoal: z.number().nonnegative().nullable(),
+  /** Times a reviewer sent the work back (a builder's send-back and a gate failure are not counted). */
+  sentBackPerTask: z.number().nonnegative().nullable(),
   /** The share of done tasks, 0 to 1, that shipped with findings filed as a follow-up. */
   shippedWithFindings: z.number().min(0).max(1).nullable(),
 });
@@ -46,8 +51,8 @@ export const RigorFiguresDto = z.object({
   /** One row per rigor, Light to Critical, then the row for all of them. */
   rows: z.array(RigorFiguresRowDto),
   /**
-   * The judge's sizing calls in the period, across every project, and how many the builder overrode;
-   * null when the judge made none.
+   * The project's tasks' answered sizing calls in the period (acted or overridden), and how many the
+   * builder overrode; null when there were none.
    */
   judgeOverride: z
     .object({ calls: z.int().positive(), overridden: z.int().nonnegative() })

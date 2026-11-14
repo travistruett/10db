@@ -13,10 +13,13 @@ import { useRigorFigures } from '../../daemon/rigor-figures-queries';
 const COLUMNS = [
   'Rigor',
   'Tasks done',
-  'Steps',
-  'Sessions',
-  'Send-backs',
+  'Steps per task',
+  'Sessions per task',
+  'PRs per task',
+  'Steps per goal',
+  'Sessions per goal',
   'PRs per goal',
+  'Sent back per task',
   'Shipped with findings',
 ] as const;
 
@@ -48,8 +51,11 @@ function FigureRow({ row }: { readonly row: RigorFiguresRowDto }) {
       <Table.Td>{row.tasksDone}</Table.Td>
       <Table.Td>{figure(row.stepsPerTask)}</Table.Td>
       <Table.Td>{figure(row.sessionsPerTask)}</Table.Td>
-      <Table.Td>{figure(row.sendBacksPerTask)}</Table.Td>
+      <Table.Td>{figure(row.pullRequestsPerTask)}</Table.Td>
+      <Table.Td>{figure(row.stepsPerGoal)}</Table.Td>
+      <Table.Td>{figure(row.sessionsPerGoal)}</Table.Td>
       <Table.Td>{figure(row.pullRequestsPerGoal)}</Table.Td>
+      <Table.Td>{figure(row.sentBackPerTask)}</Table.Td>
       <Table.Td>{share(row.shippedWithFindings)}</Table.Td>
     </Table.Tr>
   );
@@ -58,7 +64,7 @@ function FigureRow({ row }: { readonly row: RigorFiguresRowDto }) {
 function overrideLine(judgeOverride: RigorFiguresDto['judgeOverride']): string | null {
   return judgeOverride === null
     ? null
-    : `You changed the judge's sizing ${String(judgeOverride.overridden)} of ${String(judgeOverride.calls)} times (all projects)`;
+    : `You changed the judge's sizing ${String(judgeOverride.overridden)} of ${String(judgeOverride.calls)} times`;
 }
 
 /**
@@ -95,7 +101,7 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
       {figures.isLoading ? <Loader size="sm" aria-label="Loading work per rigor" /> : null}
       {figures.isSuccess ? (
         <>
-          <Table.ScrollContainer minWidth={560}>
+          <Table.ScrollContainer minWidth={900}>
             <Table aria-label="Work per task by rigor" striped withTableBorder>
               <Table.Thead>
                 <Table.Tr>

@@ -1,5 +1,7 @@
 import {
   Effort,
+  EventType,
+  mintId,
   JudgeDecision,
   JudgeOutcome,
   StepRole,
@@ -12,6 +14,7 @@ import {
   type Rigor,
   type RigorFiguresRowDto,
   type TaskId,
+  type WorkstreamId,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
@@ -20,6 +23,7 @@ import * as schema from '../schema';
 import { insertBatch, patchBatch } from './batches';
 import { insertGoal } from './goals';
 import { insertJudgeCall } from './judge-calls';
+import { insertPass } from './passes';
 import { rigorFigures } from './rigor-figures';
 import { insertSession } from './sessions';
 import type { Store } from './store';
@@ -80,7 +84,7 @@ function run(
   steps: WorkstreamStep[],
   sessions: number,
   batchId: BatchId | null = null,
-): void {
+): WorkstreamId {
   const ws = store.write((ctx) =>
     insertWorkstream(ctx, taskId, {
       batchId,
@@ -105,6 +109,19 @@ function run(
         mcpTokenHash: `hash-${ws.id}-${String(i)}`,
       }),
     );
+  return ws.id;
+}
+
+/** What a send-back logs: the role that sent the work back, or `builder`. */
+function sentBackBy(workstreamId: WorkstreamId, by: string): void {
+  store.write((ctx) => {
+    ctx.emit({
+      type: EventType.StepChanged,
+      entityType: 'workstream',
+      entityId: workstreamId,
+      data: { stepIndex: 0, role: 'implement', sentBackBy: by },
+    });
+  });
 }
 
 function batch(projectId: ProjectId, name: string, prUrl: string | null): BatchId {
@@ -140,7 +157,12 @@ function finishAt(taskId: TaskId, iso: string): void {
   });
 }
 
-function call(decision: JudgeDecision, outcome: JudgeOutcome, iso: string): void {
+function call(
+  decision: JudgeDecision,
+  outcome: JudgeOutcome,
+  iso: string,
+  taskId: TaskId | null,
+): void {
   at(iso);
   store.write((ctx) =>
     insertJudgeCall(ctx, {
@@ -154,7 +176,7 @@ function call(decision: JudgeDecision, outcome: JudgeOutcome, iso: string): void
       latencyMs: 1,
       costUsd: null,
       workstreamId: null,
-      taskId: null,
+      taskId,
     }),
   );
 }
@@ -196,10 +218,17 @@ describe('rigorFigures', () => {
 
     const prA = batch(project.id, 'a', 'https://example.test/pr/1');
     const prB = batch(project.id, 'b', 'https://example.test/pr/2');
-    run(l1, [...ran(1), ...ran(1, { sentBack: 1 })], 2, prA);
+    const prBRecut = batch(project.id, 'b2', 'https://example.test/pr/2');
+    const l1Run = run(l1, [...ran(1), ...ran(1, { sentBack: 1 })], 2, prA);
+    sentBackBy(l1Run, 'review');
     run(l2, [...ran(1), step({ status: StepStatus.Pending, startedAt: null })], 1, prA);
-    // A retried task: the first run's two steps and one session, then a second run's three and two sessions.
-    run(c1, ran(2, { sentBack: 1 }), 1);
+    // A task reopened by a merge run: the first run's two steps and one session, then a second run's three
+    // and two sessions. A re-cut batch reuses its pull request.
+    // The retry reset the steps' own counts, so only the logged send-backs say what the reviewers did.
+    const c1First = run(c1, ran(2), 1, prBRecut);
+    sentBackBy(c1First, 'review');
+    sentBackBy(c1First, 'qa');
+    sentBackBy(c1First, 'builder');
     run(
       c1,
       [...ran(2), step({ shippedAtLimit: { followUpTaskId: l1, followUpTitle: 'Findings' } })],
@@ -208,6 +237,25 @@ describe('rigorFigures', () => {
     );
     const standard = task(project.id, 'Standard', 'standard');
     run(standard, ran(2), 1);
+    // A task in a Workbench pass never ran a rigor's plan: counted nowhere.
+    const page = task(project.id, 'Page', 'light');
+    run(page, ran(9), 9);
+    store.write((ctx) =>
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [page],
+        dirt: [],
+      }),
+    );
+    finishAt(page, '2026-11-10T00:00:00.000Z');
     // Never done, removed, finished before the window, and in another project: counted nowhere.
     const open = task(project.id, 'Open', 'standard');
     run(open, ran(4), 4);
@@ -223,12 +271,16 @@ describe('rigorFigures', () => {
     finishAt(c1, '2026-11-12T00:00:00.000Z');
     finishAt(standard, '2026-11-13T00:00:00.000Z');
 
-    call(JudgeDecision.TaskRigor, JudgeOutcome.Acted, '2026-11-01T00:00:00.000Z');
-    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-11-02T00:00:00.000Z');
-    call(JudgeDecision.TaskRigor, JudgeOutcome.FallbackTimeout, '2026-11-03T00:00:00.000Z');
-    // Another decision, and a sizing call before the window: not counted.
-    call(JudgeDecision.ReviewSize, JudgeOutcome.Overridden, '2026-11-04T00:00:00.000Z');
-    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-10-30T00:00:00.000Z');
+    // Answered sizing calls on this project's tasks: two acted, one overridden.
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Acted, '2026-11-01T00:00:00.000Z', l1);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Acted, '2026-11-02T00:00:00.000Z', l2);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-11-02T00:00:00.000Z', c1);
+    // Not counted: unanswered, another decision, before the window, another project's task.
+    call(JudgeDecision.TaskRigor, JudgeOutcome.FallbackTimeout, '2026-11-03T00:00:00.000Z', l1);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.BelowFloor, '2026-11-03T00:00:00.000Z', l1);
+    call(JudgeDecision.ReviewSize, JudgeOutcome.Overridden, '2026-11-04T00:00:00.000Z', l1);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-10-30T00:00:00.000Z', l1);
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-11-05T00:00:00.000Z', elsewhere);
 
     at(NOW);
     const figures = rigorFigures(store.db, project.id, new Date(nowMs), 14);
@@ -241,50 +293,72 @@ describe('rigorFigures', () => {
       'critical',
       'all',
     ]);
+    const nothing = {
+      stepsPerTask: null,
+      sessionsPerTask: null,
+      pullRequestsPerTask: null,
+      stepsPerGoal: null,
+      sessionsPerGoal: null,
+      pullRequestsPerGoal: null,
+      sentBackPerTask: null,
+      shippedWithFindings: null,
+    };
     expect(rowOf(figures.rows, 'light')).toEqual({
       rigor: 'light',
       tasksDone: 2,
       stepsPerTask: 1.5,
       sessionsPerTask: 1.5,
-      sendBacksPerTask: 0.5,
+      pullRequestsPerTask: 1,
+      // The goal's two light tasks together: 3 steps, 3 sessions, one pull request.
+      stepsPerGoal: 3,
+      sessionsPerGoal: 3,
       pullRequestsPerGoal: 1,
+      sentBackPerTask: 0.5,
       shippedWithFindings: 0,
     });
+    // In no goal, so only the per-task figures.
     expect(rowOf(figures.rows, 'standard')).toEqual({
       rigor: 'standard',
       tasksDone: 1,
       stepsPerTask: 2,
       sessionsPerTask: 1,
-      sendBacksPerTask: 0,
+      pullRequestsPerTask: 0,
+      stepsPerGoal: null,
+      sessionsPerGoal: null,
       pullRequestsPerGoal: null,
+      sentBackPerTask: 0,
       shippedWithFindings: 0,
     });
+    // The re-cut batch shares its pull request: one URL, two batches. Two reviewer send-backs; the
+    // builder's own is not one.
     expect(rowOf(figures.rows, 'careful')).toEqual({
       rigor: 'careful',
       tasksDone: 1,
       stepsPerTask: 5,
       sessionsPerTask: 3,
-      sendBacksPerTask: 2,
+      pullRequestsPerTask: 1,
+      stepsPerGoal: 5,
+      sessionsPerGoal: 3,
       pullRequestsPerGoal: 1,
+      sentBackPerTask: 2,
       shippedWithFindings: 1,
     });
     expect(rowOf(figures.rows, 'critical')).toEqual({
       rigor: 'critical',
       tasksDone: 0,
-      stepsPerTask: null,
-      sessionsPerTask: null,
-      sendBacksPerTask: null,
-      pullRequestsPerGoal: null,
-      shippedWithFindings: null,
+      ...nothing,
     });
-    // Light and Careful each reach one pull request in the goal; together the goal has two.
+    // The goal's three done tasks: 8 steps, 6 sessions and two pull request URLs.
     expect(rowOf(figures.rows, 'all')).toEqual({
       rigor: 'all',
       tasksDone: 4,
       stepsPerTask: 2.5,
       sessionsPerTask: 1.75,
-      sendBacksPerTask: 0.75,
+      pullRequestsPerTask: 0.75,
+      stepsPerGoal: 8,
+      sessionsPerGoal: 6,
       pullRequestsPerGoal: 2,
+      sentBackPerTask: 0.75,
       shippedWithFindings: 0.25,
     });
     expect(figures.judgeOverride).toEqual({ calls: 3, overridden: 1 });
@@ -292,7 +366,7 @@ describe('rigorFigures', () => {
 
   it('has no override figure when the judge sized nothing in the period', () => {
     const project = seedProject(store);
-    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-10-01T00:00:00.000Z');
+    call(JudgeDecision.TaskRigor, JudgeOutcome.Overridden, '2026-11-01T00:00:00.000Z', null);
     at(NOW);
 
     expect(rigorFigures(store.db, project.id, new Date(nowMs), 14).judgeOverride).toBeNull();
@@ -338,7 +412,7 @@ describe('rigorFigures', () => {
         counted: true,
       },
       {
-        name: 'done before the window, reopened and done again inside it (it became done once)',
+        name: 'done before the window, reopened and done again inside it (it counts when it finished)',
         days: 14,
         done: (id) => {
           finishAt(id, '2026-10-20T00:00:00.000Z');
@@ -348,7 +422,7 @@ describe('rigorFigures', () => {
           });
           finishAt(id, '2026-11-10T00:00:00.000Z');
         },
-        counted: false,
+        counted: true,
       },
       {
         name: 'done with no change logged, so its last update is when',

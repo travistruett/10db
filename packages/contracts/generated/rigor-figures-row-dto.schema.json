@@ -46,7 +46,29 @@
         }
       ]
     },
-    "sendBacksPerTask": {
+    "pullRequestsPerTask": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stepsPerGoal": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sessionsPerGoal": {
       "anyOf": [
         {
           "type": "number",
@@ -58,6 +80,17 @@
       ]
     },
     "pullRequestsPerGoal": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sentBackPerTask": {
       "anyOf": [
         {
           "type": "number",
@@ -86,8 +119,11 @@
     "tasksDone",
     "stepsPerTask",
     "sessionsPerTask",
-    "sendBacksPerTask",
+    "pullRequestsPerTask",
+    "stepsPerGoal",
+    "sessionsPerGoal",
     "pullRequestsPerGoal",
+    "sentBackPerTask",
     "shippedWithFindings"
   ]
 }
