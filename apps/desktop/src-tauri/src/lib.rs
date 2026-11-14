@@ -4,6 +4,7 @@ mod app_page;
 mod connection;
 mod supervisor;
 mod tray;
+mod web_link;
 
 use tauri::{Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
@@ -76,7 +77,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             daemon_connection,
             update_tray,
-            open_app_page
+            open_app_page,
+            web_link::open_web_link
         ])
         .setup(|app| {
             let items = tray::build(app.handle())?;

@@ -1,4 +1,4 @@
-import type { DaemonEvent } from '@10db/contracts';
+import type { ConversationDeltaFrame, DaemonEvent } from '@10db/contracts';
 import type { ApiServices } from './services';
 
 const PAGE = 500;
@@ -8,12 +8,15 @@ const PAGE = 500;
  * replay from the store, flush the buffer past the last replayed seq, then go live. A live event
  * that arrives ahead of an earlier one (a listener that writes while handling an event publishes
  * the later event first) is held back until the store has supplied the earlier ones.
+ * Live frames (sessions spec §6.5) go to `sendLive` only once the replay is live; they take no seq,
+ * so they never touch the replay cursor, and a reconnect replays none.
  * Returns an unsubscribe function.
  */
 export function streamEvents(
   after: number,
-  services: Pick<ApiServices, 'eventsAfter' | 'subscribe'>,
+  services: Pick<ApiServices, 'eventsAfter' | 'subscribe' | 'subscribeLive'>,
   send: (event: DaemonEvent) => void,
+  sendLive: (frame: ConversationDeltaFrame) => void,
 ): () => void {
   let lastSent = after;
   let live = false;
@@ -46,5 +49,9 @@ export function streamEvents(
   }
   for (const event of buffered.sort((a, b) => a.seq - b.seq)) deliver(event);
   live = true;
-  return unsubscribe;
+  const unsubscribeLive = services.subscribeLive(sendLive);
+  return () => {
+    unsubscribeLive();
+    unsubscribe();
+  };
 }

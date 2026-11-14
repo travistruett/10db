@@ -12,6 +12,7 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  type DbReader,
   getDecision,
   getDecisionDto,
   getInboxItem,
@@ -21,7 +22,7 @@ import {
   getShape,
   getSource,
   getWorkstream,
-  type DbReader,
+  sessionShapeId,
 } from '@10db/db';
 
 type Ref = Record<string, unknown>;
@@ -75,12 +76,12 @@ function describeSource(db: DbReader, a: Attribution): Common {
   // A builder source's sessionId is the tool's own, not one of 10db's; only other sources name 10db's.
   const sessionId = builder ? null : SessionId.safeParse(ref['sessionId']);
   const workstreamId = WorkstreamId.safeParse(ref['workstreamId']);
-  // A session runs a workstream or a Shape conversation, exactly one; the session row says which.
+  // A session runs a workstream or a Plan conversation; the session row says which.
   const session = sessionId?.success
     ? orNull(() => {
         const row = getSession(db, sessionId.data);
         const workstream = workstreamId.success ? workstreamId.data : row.workstreamId;
-        const shape = workstream === null ? row.shapeId : null;
+        const shape = workstream === null ? sessionShapeId(db, row) : null;
         return {
           id: sessionId.data,
           workstreamId: workstream,

@@ -6,10 +6,12 @@ import { isOwnFile } from './account-rules';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { JudgedRule, judgedRuleApplies } from './judged-rules';
-import { realPathOf } from './paths';
+import { foldPathCase, realPathOf, resolveInRepoReadings } from './paths';
 import { laneReadOnlyWords } from './read-only';
+import { splitCommand, stripCommandPrefixes } from './shell-words';
 import { CLAUDE_TOOLS_REVIEWED } from './reviewed-tools';
 import { firstUnread } from './unread-commands';
+import { AskKind } from './unattended';
 import { unreadableHazard } from './unread-hazards';
 
 /**
@@ -114,11 +116,57 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
   }
 }
 
+/** What an unattended lane is told of a docker call while the project has Docker off. */
+export const DOCKER_OFF =
+  'Docker is off for this project. Turning it on is Settings › Project › Docker.';
+
+const DOCKER_PROGRAMS: ReadonlySet<string> = new Set(['docker', 'docker-compose', 'podman']);
+
+/** A Bash or Monitor command with a segment whose program is docker, docker-compose or podman. */
+function callsDocker(input: GuardInput): boolean {
+  if (input.toolName !== 'Bash' && input.toolName !== 'Monitor') return false;
+  const command = stringField(input.toolInput, 'command');
+  if (command === null) return false;
+  try {
+    return splitCommand(command).some((segment) => {
+      const program = stripCommandPrefixes(segment.words, { lookThroughRunners: true })[0]
+        ?.split('/')
+        .at(-1);
+      return program !== undefined && DOCKER_PROGRAMS.has(program);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Why a call goes to the broker, and which kind of ask it is. */
+interface BrokerAsk {
+  readonly kind: AskKind;
+  readonly reason: string;
+}
+
+const EDITOR_CONFIG_DIRS: ReadonlySet<string> = new Set(['.vscode', '.idea']);
+const namesEditorConfig = (path: string): boolean =>
+  path.split('/').some((part) => EDITOR_CONFIG_DIRS.has(foldPathCase(part)));
+
+/**
+ * Which of Claude Code's protected paths a write asks about: editor config the builder's editor
+ * runs, a file outside the checkout (a home rc file), or the checkout's own agent config. Inside is
+ * where the path resolves on every reading, links and `..` followed, never how it is spelled; a path
+ * that can't be resolved is outside.
+ */
+function protectedWriteKind(path: string, repoPath: string): AskKind {
+  const where = resolveInRepoReadings(repoPath, path);
+  if (namesEditorConfig(path) || (where.inside && where.rels.some(namesEditorConfig)))
+    return AskKind.EditorConfigWrite;
+  return where.inside ? AskKind.ConfigWrite : AskKind.HomeRcWrite;
+}
+
 /**
  * Why a call the guard allows must still reach 10db's permission broker, or null when Claude Code's
  * permission mode may decide it.
  */
-function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
+function brokerAsk(input: GuardInput, onlyReads: boolean): BrokerAsk | null {
   // A rule the guard hands to a judge that runs. Only shell rules read the text, so none names git or sudo.
   const handedToJudge = (rule: JudgedRule): boolean =>
     !judgedRuleApplies(rule, {
@@ -136,27 +184,37 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   )
     return null;
   const judged = BROKER_JUDGES[input.toolName];
-  if (judged !== undefined) return judged;
+  if (judged !== undefined) return { kind: AskKind.WebOrMcp, reason: judged };
   if (actsOutsideSandboxProxy(input.toolName)) {
-    return `${input.toolName} acts outside the sandbox's network proxy; 10db judges every call.`;
+    return {
+      kind: AskKind.WebOrMcp,
+      reason: `${input.toolName} acts outside the sandbox's network proxy; 10db judges every call.`,
+    };
   }
   if (
     !CLASSIFIER_TOOLS.has(input.toolName) &&
     !input.toolName.startsWith('mcp__10db__') &&
     !(CLAUDE_TOOLS_REVIEWED.tools.has(input.toolName) && handedToJudge(JudgedRule.ReviewedTool))
   ) {
-    return `${input.toolName} is not a tool the classifier may decide for a lane; 10db judges it.`;
+    return {
+      kind: AskKind.UnknownTool,
+      reason: `${input.toolName} is not a tool the classifier may decide for a lane; 10db judges it.`,
+    };
   }
   if (input.fileAccess !== undefined) {
     if (READ_FAMILY.has(input.toolName)) {
-      return input.fileAccess.readAsk(input.toolName, input.toolInput, input.cwd);
+      const asked = input.fileAccess.readAsk(input.toolName, input.toolInput, input.cwd);
+      return asked === null ? null : { kind: AskKind.ReadOutside, reason: asked };
     }
     if (EDIT_FAMILY.has(input.toolName)) {
       const path =
         stringField(input.toolInput, 'file_path') ?? stringField(input.toolInput, 'notebook_path');
-      return path === null
-        ? 'The path of this edit could not be read.'
-        : input.fileAccess.writeAsk(path);
+      if (path === null)
+        return { kind: AskKind.UnreadEditPath, reason: 'The path of this edit could not be read.' };
+      const asked = input.fileAccess.writeAsk(path);
+      return asked === null
+        ? null
+        : { kind: protectedWriteKind(path, input.repoPath), reason: asked };
     }
   }
   let socketJudged = false;
@@ -166,7 +224,11 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
       // A socket reaches its host from Claude Code's own process, as WebFetch does, so it goes to a
       // judge only while the Web switch is on.
       if (input.webOn !== true || !handedToJudge(JudgedRule.MonitorSocket)) {
-        return 'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.';
+        return {
+          kind: AskKind.MonitorSocket,
+          reason:
+            'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.',
+        };
       }
       socketJudged = true;
     }
@@ -175,7 +237,7 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   if (command === null) {
     // A Monitor that only opens a socket has no command to read; the judge that took the socket sees it.
     return input.toolName === 'Monitor' && !socketJudged
-      ? 'Monitor carried no command to read.'
+      ? { kind: AskKind.MonitorNoCommand, reason: 'Monitor carried no command to read.' }
       : null;
   }
   // A background call never blocks the lane, so a loop with no end holds a core while it goes on.
@@ -184,7 +246,10 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
     input.toolName === 'Monitor' ||
     runsInBackground(ToolInputRecord.safeParse(input.toolInput).data ?? {});
   if (startsEndlessBackgroundLoop(command, { background })) {
-    return `"${command}" starts something that never ends in the background, so the builder is asked.`;
+    return {
+      kind: AskKind.EndlessLoop,
+      reason: `"${command}" starts something that never ends in the background, so the builder is asked.`,
+    };
   }
   const unclaimed = input.hazards.filter(
     (hazard) =>
@@ -197,7 +262,10 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   const part = mayRunHazard(command, unclaimed);
   if (part === null) return null;
   const names = unclaimed.map((hazard) => `"${hazard.name}"`).join(', ');
-  return `10db can't read whether "${part}" runs a hazard this task hasn't claimed (${names}), so the builder is asked. Spell the command out in plain words, or claim the hazard first.`;
+  return {
+    kind: AskKind.UnreadHazard,
+    reason: `10db can't read whether "${part}" runs a hazard this task hasn't claimed (${names}), so the builder is asked. Spell the command out in plain words, or claim the hazard first.`,
+  };
 }
 
 const READS_ONLY =
@@ -318,6 +386,14 @@ function onlyReads(input: GuardInput): boolean {
 export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const verdict = judgeToolUse(input);
   if (verdict.decision !== 'allow') return verdict;
+  // Unattended, a docker call while the project has Docker off is a skip the item lists;
+  // attended, the kernel refuses it as before.
+  if (input.attended === false && input.dockerOn !== true && callsDocker(input))
+    return {
+      decision: 'deny',
+      reason: DOCKER_OFF,
+      rule: 'docker_off',
+    };
   if (HOST_LIST_TOOLS.has(input.toolName) && HostList.safeParse(input.toolInput).success) {
     return {
       decision: 'deny',
@@ -326,8 +402,8 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
     };
   }
   const reads = onlyReads(input);
-  const reason = brokerAsk(input, reads);
-  if (reason !== null) return { decision: 'ask', reason };
+  const asked = brokerAsk(input, reads);
+  if (asked !== null) return { decision: 'ask', reason: asked.reason, kind: asked.kind };
   // The judge opened it, and the data directory holds it: no allow rule or classifier reaches it.
   if (readsOwnPicture(input)) return { decision: 'allow', settled: OWN_PICTURE };
   return reads ? { decision: 'allow', settled: READS_ONLY } : verdict;

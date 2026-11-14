@@ -1,3 +1,4 @@
+import type { ShapeMessageDto } from '@10db/contracts';
 import {
   AccountCreatedDto,
   BRAINSTORM_REFUSED_ON_CHATGPT,
@@ -5,15 +6,20 @@ import {
   ProjectDto,
   ShapeConvertResult,
   ShapeDto,
-  ShapeMessageDto,
+  type ShapeId,
   ShapeViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { applyAaMeasurement, listModelProfiles, replaceAccountModels } from '@10db/db';
-import { apiClient } from '../../test/api-client';
+import {
+  applyAaMeasurement,
+  listModelProfiles,
+  listShapeMessages,
+  replaceAccountModels,
+} from '@10db/db';
+import { apiClient, sayToPlan } from '../../test/api-client';
 import { seedProfiles } from '../../test/seed-profiles';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
 import { FakeAdapter, scriptedShapeBehaviour } from '../sessions';
@@ -35,6 +41,12 @@ afterEach(async () => {
   repo.cleanup();
   dir.cleanup();
 });
+
+/** The conversation's transcript rows, read from the running daemon's store. */
+function said(shapeId: ShapeId): ShapeMessageDto[] {
+  if (daemon === null) throw new Error('no daemon is running');
+  return listShapeMessages(daemon.state.db, shapeId);
+}
 
 async function startOnTheFake(): Promise<ReturnType<typeof apiClient>> {
   const adapter = new FakeAdapter({});
@@ -72,11 +84,9 @@ describe('a Shape conversation on a ChatGPT account', () => {
 
     const words = new RegExp(`-> 400: .*${BRAINSTORM_REFUSED_ON_CHATGPT}`);
     await expect(api.post(`/projects/${project.id}/shapes`, ShapeDto, {})).rejects.toThrow(words);
-    await expect(
-      api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Make the cards denser.' }),
-    ).rejects.toThrow(words);
+    await expect(sayToPlan(api, shape.id, 'Make the cards denser.')).rejects.toThrow(words);
     const refused = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-    expect(refused.messages).toEqual([]);
+    expect(said(shape.id)).toEqual([]);
     expect(refused.turn.running).toBe(false);
     // No model is offered for a conversation that can't run, and none can be chosen.
     expect(refused.models).toEqual({ default: null, offered: [] });
@@ -86,14 +96,12 @@ describe('a Shape conversation on a ChatGPT account', () => {
 
     await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: claudePlan });
     expect((await api.get(`/shapes/${shape.id}`, ShapeViewDto)).models.offered).not.toEqual([]);
-    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
-      text: 'Make the cards denser.',
-    });
-    const talked = await waitForAsync(async () => {
+    await sayToPlan(api, shape.id, 'Make the cards denser.');
+    await waitForAsync(async () => {
       const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-      return !view.turn.running && view.messages.some((m) => m.author === 'claude') ? view : false;
+      return !view.turn.running && said(shape.id).some((m) => m.author === 'claude') ? view : false;
     });
-    expect(talked.messages.some((m) => m.kind === 'notice')).toBe(false);
+    expect(said(shape.id).some((m) => m.kind === 'notice')).toBe(false);
   });
 });
 
@@ -111,15 +119,13 @@ describe('a Shape conversation on a started daemon', () => {
     expect(shape.title).toBe('New conversation');
     expect(await api.get(`/projects/${project.id}/shapes`, z.array(ShapeDto))).toHaveLength(1);
 
-    const sent = await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
-      text: 'Make the cards denser.\nAnd thin the scrollbars.',
-    });
+    const sent = await sayToPlan(api, shape.id, 'Make the cards denser.\nAnd thin the scrollbars.');
     expect(sent.author).toBe('builder');
 
     const talked = await waitForAsync(async () => {
       const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
       return !view.turn.running &&
-        view.messages.some((m) => m.author === 'claude' && m.kind === 'text')
+        said(shape.id).some((m) => m.author === 'claude' && m.kind === 'text')
         ? view
         : false;
     });

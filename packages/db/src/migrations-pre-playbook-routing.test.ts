@@ -13,7 +13,7 @@ import {
 import { migrationsBefore } from './migrations-test-support';
 
 const AT = '2026-11-14T12:00:00.000Z';
-const DROP = '0076_drop_old_routing';
+const DROP = '0087_drop_old_routing';
 
 let dir: string;
 let db: TendbDatabase;

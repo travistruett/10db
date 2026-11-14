@@ -1,8 +1,10 @@
+import { z } from 'zod';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   TrustSurface,
   ClaimKind,
+  Approval,
   ConflictError,
   currentStep,
   EventType,
@@ -20,6 +22,8 @@ import {
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
+  SkipKind,
+  SkipSource,
   REVIEW_ROLES,
   StepRole,
   StepStatus,
@@ -63,6 +67,9 @@ import {
 } from '@10db/contracts';
 import {
   buildTrustPolicy,
+  callKey,
+  callSummary,
+  createSkipRecorder,
   deniedNoticeText,
   FloorReason,
   floorNoticeText,
@@ -71,7 +78,10 @@ import {
   judgeForCall,
   offersAllowThis,
   projectLiveSystems,
+  SKIP_RESUMES_MAX,
+  skipMessage,
   startingJudge,
+  stoppedBySkip,
 } from '../trust';
 import {
   activeClaims,
@@ -137,6 +147,9 @@ import {
   type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
+  approvedCallKeys,
+  approvedSkipsForTask,
+  listSkipsForWorkstream,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -196,7 +209,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
-import { judgePreToolUse, type ProtectedPath } from '../guard';
+import { answerUnattended, judgePreToolUse, stringField, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -279,7 +292,6 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
-import { pictureLimitsFor } from '../screens';
 import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
@@ -313,7 +325,7 @@ import {
 import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
-import { threadInlineBytes } from './thread-pictures';
+import { heldInlineBytes, pictureLimitsFor } from '../conversation';
 import { stepSkills } from './step-skills';
 
 /**
@@ -323,7 +335,11 @@ import { stepSkills } from './step-skills';
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
+/** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
+const ToolInputRecord = z.record(z.string(), z.unknown());
+
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
+
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
@@ -764,6 +780,10 @@ interface Control {
   builderStop: boolean;
   /** Closes a pass task's session once it has been idle since its last turn ended. */
   idleTimer: Timer | null;
+  /** How often each step's turn a skip stopped was resumed, by step index, across the run's sessions. */
+  readonly skipResumes: Map<number, number>;
+  /** Set when the step said it can't do its job without a skipped call: it fails when the turn ends. */
+  blockedReason: string | null;
   done: Promise<void>;
 }
 
@@ -2374,6 +2394,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
     // Read before the start slot is taken, so nothing it throws can hold the slot.
     const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
+    // The calls the builder approved by Run these now: a lane nobody watches runs them.
+    const approvedKeys = pass === null ? approvedCallKeys(db, task.id) : [];
+    const approved = (pass === null ? approvedSkipsForTask(db, task.id) : []).map((skip) => ({
+      summary: skip.summary,
+      // The store answers an approval of none for a summary the builder never saw whole.
+      cut: skip.approval === Approval.None,
+      reason: skip.reason,
+      limit: skip.limit,
+      kind: skip.kind,
+    }));
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
@@ -2454,6 +2484,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
       }),
       switches,
+      approved,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -2543,7 +2574,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             )
           : outgoingMessage(
               feedback,
-              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              heldInlineBytes(listTaskFileRows(db, task.id), limits),
               limits,
               readsPictureFiles,
             );
@@ -2560,6 +2591,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const prompt = buildSessionPrompt({
       provider,
       inPass: pass !== null,
+      attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
@@ -2795,17 +2827,35 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
     };
 
+    // A lane nobody watches never waits on a card (trust line §5): what would raise one is skipped,
+    // recorded here, and listed for the builder; the calls they approved by Run these now go on.
+    const unattended = policy.attended
+      ? null
+      : {
+          skips: createSkipRecorder(
+            { state: opts.state, log: opts.logger },
+            { workstreamId: id, sessionId: session.id },
+          ),
+          approvedKeys,
+          taskId: task.id,
+          projectId: project.id,
+          block: (reason: string) => {
+            ctl.blockedReason = reason;
+          },
+        };
     opts.live.register(session.id, {
       signal: abort.signal,
       observer,
       askedToHandOff: () => {
         st.handoffAskedByTool = true;
       },
+      ...(unattended === null ? {} : { away: unattended }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
       handle = opts.adapter.open({
         sessionId: session.id,
+        conversationId: session.conversationId,
         policy,
         cwd: checkout,
         prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
@@ -2842,7 +2892,14 @@ export function createRunner(opts: RunnerOptions): Runner {
               sayFloor(ctx, FloorReason.LeftAutoMode);
             });
           }
-          return judgePreToolUse({
+          // The hook's input is the model's own JSON: read as a record here, where it is keyed.
+          const input = ToolInputRecord.safeParse(req.input).data ?? {};
+          const key = callKey(req.toolName, input, checkout);
+          unattended?.skips.seen(req.toolUseId ?? null);
+          const verdict = judgePreToolUse({
+            attended: unattended === null,
+            dockerOn: project.sandboxDocker,
+            deployApproved: unattended?.approvedKeys.includes(key) === true,
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -2867,6 +2924,27 @@ export function createRunner(opts: RunnerOptions): Runner {
             coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
             webOn: switches.web,
           });
+          if (unattended === null) return verdict;
+          const answer = answerUnattended({
+            verdict,
+            judge,
+            callKey: key,
+            approvedKeys: unattended.approvedKeys,
+            path: stringField(input, 'file_path') ?? stringField(input, 'notebook_path'),
+            toolName: req.toolName,
+          });
+          if (answer.skip !== null)
+            unattended.skips.record({
+              toolName: req.toolName,
+              toolUseId: req.toolUseId ?? null,
+              callKey: key,
+              summary: callSummary(req.toolName, input).text,
+              kind: answer.skip.kind,
+              limit: answer.skip.limit,
+              reason: answer.skip.reason,
+              source: SkipSource.Guard,
+            });
+          return answer.verdict;
         },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
@@ -2878,6 +2956,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             signal: abort.signal,
             allowOnce: permission?.allowOnce ?? null,
             mcpApproved: projectMcp.configHashes,
+            ...(unattended === null
+              ? {}
+              : { unattended: { judge: sessionJudge, checkout, ...unattended } }),
             ...(laneSession
               ? {
                   sandbox: {
@@ -3136,12 +3217,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
-            // A lane has no thread to show it on; the lane's recorded skips are where it will show.
+            // A lane has no thread to show it on: the denial is a skip, listed for the builder.
             if (!pass) {
-              log.info(
-                { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },
-                'auto mode denied a call',
-              );
+              const classifier = denied.by === 'classifier';
+              unattended?.skips.record({
+                toolName: denied.toolName,
+                toolUseId: denied.toolUseId,
+                callKey: null,
+                summary: denied.summary,
+                kind: classifier ? SkipKind.Classifier : SkipKind.SafetyCheck,
+                limit: denied.limit,
+                reason: denied.reason,
+                source: classifier ? SkipSource.AutoMode : SkipSource.SafetyCheck,
+              });
               break;
             }
             // The notice and its offer are one write, so a notice never shows a button with no offer.
@@ -3300,6 +3388,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            // What this turn skipped; the next turn's calls count afresh.
+            const turnSkips = unattended?.skips.inTurn() ?? null;
+            unattended?.skips.nextTurn();
             // The model ran a turn: a mark from an error's wording alone on it was wrong.
             if (st.lastTurn === 'success' && !st.modelProven) {
               st.modelProven = true;
@@ -3361,6 +3452,38 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : null;
             // Set at each turn end, so a later turn that reaches no limit clears it.
             st.unaskedRunEnded = unasked?.atLimit ? unasked.run.count : null;
+            // A lane nobody watches whose turn ended on a skip, often because the judge said to stop, is
+            // told to carry on, a bounded number of times per step. A handoff, a background
+            // hold, a builder message or a stop has the turn end as it would.
+            if (ctl.blockedReason !== null) {
+              const skipped = listSkipsForWorkstream(db, id)
+                .filter((skip) => skip.kind !== SkipKind.Question)
+                .map((skip) => skip.summary);
+              st.outcome = {
+                kind: 'refused',
+                message: `The ${step.role} step couldn't do its job without a call 10db skipped: ${ctl.blockedReason}. Skipped: ${skipped.join('; ')}`,
+                providerSessionId: st.providerSessionId,
+              };
+              await handle.stop();
+              break;
+            }
+            const resumed = ctl.skipResumes.get(row.stepIndex) ?? 0;
+            if (
+              turnSkips !== null &&
+              turnSkips.last !== null &&
+              stoppedBySkip(turnSkips) &&
+              st.lastTurn === 'success' &&
+              resumed < SKIP_RESUMES_MAX &&
+              !(recorded && stands) &&
+              !st.handoffRequested &&
+              !st.heldForBackground &&
+              stopRequested(ctl) === null &&
+              untakenMessages(db, task.id).length === 0
+            ) {
+              ctl.skipResumes.set(row.stepIndex, resumed + 1);
+              handle.send(skipMessage(turnSkips.last.limit, turnSkips.last.reason));
+              break;
+            }
             if (recorded && stands && !unasked?.atLimit) {
               ctl.unaskedHandoffs = unasked?.run ?? null;
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
@@ -4354,6 +4477,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         messages: null,
         builderStop: false,
         idleTimer: null,
+        skipResumes: new Map(),
+        blockedReason: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   AppUrl,
+  ChatId,
+  ConversationFileId,
+  ConversationId,
+  ConversationItemId,
   isDaemonAddress,
   DEFAULT_HAZARDS,
   EvidenceDto,
@@ -8,6 +12,8 @@ import {
   HandoffInput,
   hazardScope,
   HazardScope,
+  idOfUuid,
+  idUuid,
   McpToolInputs,
   mintId,
   NextAction,
@@ -51,6 +57,35 @@ describe('ids', () => {
 
   it('rejects an ID minted for another kind', () => {
     expect(WorkstreamId.safeParse(mintId('Task')).success).toBe(false);
+  });
+
+  const SCHEMAS = { ChatId, ConversationFileId, ConversationId, ConversationItemId } as const;
+
+  it.each([
+    ['ConversationItemId', 'cvi', true],
+    ['ConversationItemId', 'shm', true],
+    ['ConversationItemId', 'tmg', true],
+    ['ConversationItemId', 'sfl', false],
+    ['ConversationFileId', 'cvf', true],
+    ['ConversationFileId', 'sfl', true],
+    ['ConversationFileId', 'tfl', true],
+    ['ConversationFileId', 'shm', false],
+    ['ConversationId', 'cnv', true],
+    ['ChatId', 'cht', true],
+  ] as const)('%s reads the prefix %s: %s', (schema, prefix, accepted) => {
+    expect(
+      SCHEMAS[schema].safeParse(`${prefix}_0199f1c2-7a3b-7c4d-8e5f-0123456789ab`).success,
+    ).toBe(accepted);
+  });
+
+  it.each([
+    ['ConversationItem', 'cvi'],
+    ['ConversationFile', 'cvf'],
+    ['Conversation', 'cnv'],
+    ['Chat', 'cht'],
+  ] as const)('mints %s under %s only', (kind, prefix) => {
+    expect(mintId(kind).startsWith(`${prefix}_`)).toBe(true);
+    expect(idOfUuid(kind, idUuid(mintId(kind)))?.startsWith(`${prefix}_`)).toBe(true);
   });
 });
 

@@ -66,7 +66,7 @@ const AT_LATER = '2026-11-13T08:00:00.000Z';
 const fresh = () => bundleJson(project.id);
 const TABLES = [
   'shapes',
-  'shape_messages',
+  'conversation_items',
   'shape_attachments',
   'shape_attachment_revisions',
   'shape_entries',

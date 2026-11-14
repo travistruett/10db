@@ -203,6 +203,8 @@ describe('the migration that renames stored model aliases', () => {
       { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
       { model_pin: null },
     ]);
+    // The test stops at the next migration, where a shape's model is still on its row; 0076 later moves it to
+    // the shape's conversation.
     expect(rows(z.object({ model: z.string() }), 'SELECT model FROM shapes')).toEqual([
       { model: 'claude-opus-5-5' },
     ]);

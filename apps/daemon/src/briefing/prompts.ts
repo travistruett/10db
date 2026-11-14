@@ -18,6 +18,7 @@ import { quotedWords, renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 import { renderPlanContext } from './plan-context-text';
+import { AWAY_ANSWER } from '../trust';
 
 interface StepBrief {
   readonly index: number;
@@ -115,6 +116,8 @@ export interface PromptInput {
   readonly judged?: boolean;
   /** The judge also settles the lane's WebSearch and WebFetch (the Web switch is on), so they wait on no card. */
   readonly webJudged?: boolean;
+  /** A person is in the session (the trust policy's `attended`); absent counts as attended. */
+  readonly attended?: boolean;
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -287,13 +290,21 @@ const AUTO_MODE_REFUSES =
 
 const AUTO_MODE_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.`;
 
-/** Where a judge settles the lane's calls: the limits it holds and what to do at one. */
-const judgedAutoModeRule = (refusedCall: string): string =>
-  `Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. ${refusedCall} A dependency change and a loop with no end in the background wait on a card from the builder.`;
+const WAITS_ON_A_CARD =
+  'A dependency change and a loop with no end in the background wait on a card from the builder.';
 
-const JUDGED_LANE_RULE = judgedAutoModeRule(
-  "Don't retry a refused call another way; carry on without it and say in your handoff what it was.",
-);
+/** Where a judge settles the lane's calls: the limits it holds and what to do at one. */
+const judgedAutoModeRule = (refusedCall: string, tail: string = WAITS_ON_A_CARD): string =>
+  `Claude Code's auto mode judges each call against four limits: destroying data this session didn't create, sending code, files, keys or the conversation anywhere the builder didn't, reading secrets, and writing to anything live (a deploy, a migration against a non-local database, a cloud CLI's write, publishing a package, merging a pull request). It refuses those, running the full gate (10db runs it after your turn), committing, pushing or merging with git or gh (use the 10db commit tool), and generating CPU load. ${refusedCall} ${tail}`;
+
+const LANE_REFUSED_CALL =
+  "Don't retry a refused call another way; carry on without it and say in your handoff what it was.";
+
+const JUDGED_LANE_RULE = judgedAutoModeRule(LANE_REFUSED_CALL);
+
+/** A lane nobody watches waits on no card: what would raise one is skipped (trust line §5). */
+const SKIPPED_RULE =
+  'Nobody is watching this task. A call 10db or auto mode refuses with "Skipped:" is left out on purpose: carry on without it, and list each skipped call in your handoff. If the step\'s job can\'t be done without it, call report_blocked with the reason.';
 
 /** A pass has the builder in it, who can allow a refused call. */
 const JUDGED_PASS_RULE = judgedAutoModeRule(
@@ -431,12 +442,18 @@ interface SetupLines {
   readonly judged: boolean;
   readonly inPass: boolean;
   readonly webJudged: boolean;
+  readonly attended: boolean;
 }
 
 /** The auto-mode line: the limits a judge holds, or what the rules floor refuses and cards. */
 function autoModeLine(setup: SetupLines): string {
-  if (!setup.judged) return AUTO_MODE_RULE;
-  const limits = setup.inPass ? JUDGED_PASS_RULE : JUDGED_LANE_RULE;
+  if (!setup.judged)
+    return setup.attended ? AUTO_MODE_RULE : `${AUTO_MODE_REFUSES} ${SKIPPED_RULE}`;
+  const limits = setup.inPass
+    ? JUDGED_PASS_RULE
+    : setup.attended
+      ? JUDGED_LANE_RULE
+      : judgedAutoModeRule(LANE_REFUSED_CALL, SKIPPED_RULE);
   return setup.webJudged ? `${limits} ${WEB_JUDGED_SENTENCE}` : limits;
 }
 
@@ -493,6 +510,20 @@ function withSandboxRules(
     }
     return [own];
   });
+}
+
+/** The line that tells a session to ask the builder when a decision isn't its own. */
+const ASKS_THE_BUILDER = 'When a decision is not yours to make, ask with ';
+
+/**
+ * A lane nobody watches is told its questions are answered at once, and decides itself.
+ * Where the task routes questions to people, those still go to them.
+ */
+function awayRules(rules: readonly string[], routed: boolean): string[] {
+  const away = routed
+    ? `Nobody is watching this task: a question the routes below don't send to someone gets "${AWAY_ANSWER}" at once. Decide yourself, and say in your handoff what you decided and why.`
+    : `Nobody is watching this task: a question gets "${AWAY_ANSWER}" at once. Decide yourself, and say in your handoff what you decided and why.`;
+  return rules.map((rule) => (rule.startsWith(ASKS_THE_BUILDER) ? away : rule));
 }
 
 const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
@@ -848,6 +879,31 @@ function stepSection(input: PromptInput): string[] {
 
 export function buildSessionPrompt(input: PromptInput): string {
   const claims = input.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
+  const lines = withSandboxRules(
+    input.step.tools === ToolAccess.ReadOnly
+      ? readOnlyRules(input.step.role)
+      : [
+          ...(input.inPass === true ? PASS_RULES : RULES),
+          ...(input.pictures === true ? [PICTURES_RULE] : []),
+        ],
+    input.sandboxed === true,
+    input.provider,
+    {
+      instructionsLoaded: input.instructionsLoaded === true,
+      setupLine: input.setupLine ?? null,
+      judged: input.judged === true,
+      inPass: input.inPass === true,
+      webJudged: input.webJudged === true,
+      attended: input.attended !== false,
+    },
+  );
+  const rules =
+    input.attended === false
+      ? awayRules(
+          lines,
+          (input.questionRoutes ?? []).some((r) => r.people.length > 0),
+        )
+      : lines;
   return [
     'You are working on one task in a shared repository, managed by 10db.',
     '',
@@ -863,25 +919,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     `Your claims: ${claims}.`,
     '',
     'Rules:',
-    bullets(
-      withSandboxRules(
-        input.step.tools === ToolAccess.ReadOnly
-          ? readOnlyRules(input.step.role)
-          : [
-              ...(input.inPass === true ? PASS_RULES : RULES),
-              ...(input.pictures === true ? [PICTURES_RULE] : []),
-            ],
-        input.sandboxed === true,
-        input.provider,
-        {
-          instructionsLoaded: input.instructionsLoaded === true,
-          setupLine: input.setupLine ?? null,
-          judged: input.judged === true,
-          inPass: input.inPass === true,
-          webJudged: input.webJudged === true,
-        },
-      ),
-    ),
+    bullets(rules),
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),

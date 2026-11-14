@@ -210,7 +210,7 @@ describe("a pass task's turns", () => {
     expect(turn).toMatchObject({ seq: 1, endedAt: null, ending: null, settledAt: null });
     expect(started.map((e) => e.type)).toContain(EventType.PassTurnStarted);
     // The message that started the turn names it.
-    expect(getTaskMessageRow(store.db, turn.messageId ?? mintId('TaskMessage')).turnId).toBe(
+    expect(getTaskMessageRow(store.db, turn.messageId ?? mintId('ConversationItem')).turnId).toBe(
       turn.id,
     );
     expect(openPassTurn(store.db, taskId)?.id).toBe(turn.id);

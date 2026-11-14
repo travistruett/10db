@@ -1,6 +1,7 @@
 import { AccountKind, ConflictError, InvalidError, type Effort } from '@10db/contracts';
-import { getShape, schema } from '@10db/db';
+import { getShape, listShapeMessages, schema, setAppSetting } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { waitFor } from '../../test/fixtures';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
@@ -28,21 +29,55 @@ describe('a conversation’s model', () => {
     const launched: (string | null)[] = [];
     f = createServiceFixture({ models: () => MODELS, onLaunch: (m) => launched.push(m) });
     const shapeId = f.c.shape.id;
+    // The catalogue names the model the notice says.
+    f.state.write((ctx) => {
+      setAppSetting(ctx, 'catalogue.document', {
+        fetchedAt: '2026-11-13T09:00:00.000Z',
+        catalogue: {
+          providers: {
+            anthropic: {
+              models: [
+                {
+                  provider: 'anthropic',
+                  id: 'claude-sonnet-5-5',
+                  name: 'Claude Sonnet 5.5',
+                  maker: 'anthropic',
+                  family: null,
+                  releaseDate: null,
+                  deprecated: false,
+                  inputPrice: null,
+                  outputPrice: null,
+                  efforts: [],
+                },
+              ],
+            },
+          },
+          hash: 'h',
+          skipped: 0,
+        },
+      });
+    });
     expect(f.service.view(shapeId).models).toEqual(MODELS);
     expect(f.service.view(shapeId).shape.model).toBeNull();
     f.service.send(shapeId, 'First');
     await f.service.settled(shapeId);
+    expect(launched).toEqual([null]);
     expect(f.service.chooseModel(shapeId, 'claude-sonnet-5-5').model).toBe('claude-sonnet-5-5');
     expect(getShape(f.c.store.db, shapeId).model).toBe('claude-sonnet-5-5');
     expect(f.service.view(shapeId).shape.model).toBe('claude-sonnet-5-5');
     f.service.send(shapeId, 'Second');
     await f.service.settled(shapeId);
-    expect(launched).toEqual([null, 'claude-sonnet-5-5']);
-    const [first, second] = f.adapter.shapeSessions;
+    // The warm session takes the pick for its next turn (sessions call 13): no second session.
+    const [first, ...rest] = f.adapter.shapeSessions;
     expect(must(first, 'first').spec.model).toBe('claude-opus-5-5');
-    // The new session resumes the conversation, on the model picked.
-    expect(must(second, 'second').spec.model).toBe('claude-sonnet-5-5');
-    expect(must(second, 'second').spec.resumeProviderSessionId).toBe('fake-shape-1');
+    expect(must(first, 'first').models).toEqual(['claude-sonnet-5-5']);
+    expect(must(first, 'first').sent).toHaveLength(1);
+    expect(rest).toEqual([]);
+    expect(
+      listShapeMessages(f.c.store.db, shapeId)
+        .filter((m) => m.kind === 'notice')
+        .map((m) => m.body),
+    ).toEqual(['Now on Claude Sonnet 5.5 · claude-sonnet-5-5']);
   });
 
   it.each([null, 'low'] as const)(
@@ -60,6 +95,27 @@ describe('a conversation’s model', () => {
       expect(launched).toEqual([effort]);
     },
   );
+
+  // No agent changes a live session's effort, so the warm one closes and the next turn starts on it.
+  it('runs the next turn on an effort chosen alone, in a fresh session', async () => {
+    f = createServiceFixture({ models: () => MODELS });
+    const shapeId = f.c.shape.id;
+    f.service.send(shapeId, 'First');
+    await f.service.settled(shapeId);
+    f.service.chooseModel(shapeId, null, 'low');
+    f.service.send(shapeId, 'Second');
+    await f.service.settled(shapeId);
+    expect(f.adapter.shapeSessions.map((s) => s.spec.prompt)).toEqual([
+      expect.stringContaining('First') as string,
+      expect.stringContaining('Second') as string,
+    ]);
+    const efforts = f.c.store.db
+      .select({ effort: schema.sessions.effort })
+      .from(schema.sessions)
+      .all()
+      .map((r) => r.effort);
+    expect(efforts).toEqual(['high', 'low']);
+  });
 
   it('keeps the effort chosen with the model, and a choice without one clears it', () => {
     f = createServiceFixture({ models: () => MODELS });
@@ -107,6 +163,39 @@ describe('a conversation’s model', () => {
       );
     },
   );
+
+  it.each([
+    { name: 'the same model again', pick: 'claude-opus-5-5', again: 'claude-opus-5-5' },
+    { name: 'the plan role’s again', pick: null, again: null },
+  ])(
+    'starts on the project’s account as it is at the start after $name, never the one a pick saw',
+    async ({ pick, again }) => {
+      f = createServiceFixture({ models: () => MODELS });
+      const shapeId = f.c.shape.id;
+      f.service.chooseModel(shapeId, pick);
+      f.service.chooseModel(shapeId, again);
+      f.launchOn(AccountKind.Bedrock);
+      f.service.send(shapeId, 'First');
+      await f.service.settled(shapeId);
+      const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+      expect(spec.account.kind).toBe(AccountKind.Bedrock);
+    },
+  );
+
+  it('tells the screen when a warm session refuses the switch, so it shows the old pick again', async () => {
+    f = createServiceFixture({ models: () => MODELS });
+    const shapeId = f.c.shape.id;
+    f.service.send(shapeId, 'First');
+    await f.service.settled(shapeId);
+    f.adapter.shapeModelSwitch = () => Promise.reject(new Error('the model switch failed'));
+    const before = f.events.length;
+    f.service.chooseModel(shapeId, 'claude-sonnet-5-5');
+    const shapeOf = f.c.store.db;
+    await waitFor(() => getShape(shapeOf, shapeId).model === null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.events.slice(before).map((e) => e.type)).toContain('shape.changed');
+    expect(getShape(f.c.store.db, shapeId).model).toBeNull();
+  });
 
   it('refuses a model the project’s account does not offer', () => {
     f = createServiceFixture({

@@ -1,5 +1,6 @@
 import {
   AccountLoginEndedData,
+  ConversationDeltaFrame,
   DaemonEvent,
   EventsHead,
   EventType,
@@ -11,6 +12,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
@@ -32,6 +34,7 @@ import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
+import { skipKeys } from './skip-queries';
 import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -51,8 +54,9 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY],
-  // A task becoming done, or changing rigor, moves the rigor figures.
-  task: [['tasks'], goalKeys.all, CANDIDATES, rigorFiguresKeys.all],
+  // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
+  // figures.
+  task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   // The digest's Decisions and Deviations rows.
@@ -67,6 +71,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   proposal: KNOWLEDGE,
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
+  // An explore conversation stored or changed an item, or moved state: its items and its state.
+  conversation: [conversationKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
   pass: [passKeys.all],
@@ -116,6 +122,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
+  // A turn began or ended: what streams is read again, so an item that finished leaves it.
+  'conversation.state': [liveKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -154,6 +162,12 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       try {
         json = JSON.parse(raw);
       } catch {
+        return;
+      }
+      // A live frame is never stored and takes no seq (sessions spec §6.5): the cursor stays.
+      const frame = ConversationDeltaFrame.safeParse(json);
+      if (frame.success) {
+        writeLiveFrame(queryClient, frame.data);
         return;
       }
       const parsed = DaemonEvent.safeParse(json);

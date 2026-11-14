@@ -1,7 +1,8 @@
-import { TrustPolicy, TrustSurface, type TrustSwitches } from '@10db/contracts';
+import { SkipKind, TrustPolicy, TrustSurface, type TrustSwitches } from '@10db/contracts';
 import { coordinationLines } from './coordination';
 import { LIMIT_ORDER, LIMITS } from './limits';
 import { quotedValue } from './quoted-value';
+import { approvedLine, type ApprovedAction } from './skip';
 
 export interface TrustPolicyInput {
   readonly surface: TrustSurface;
@@ -10,6 +11,8 @@ export interface TrustPolicyInput {
   readonly gateCommand: string | null;
   readonly liveSystems: readonly string[];
   readonly switches: TrustSwitches;
+  /** The calls the builder approved by Run these now for this session's task; none when absent. */
+  readonly approved?: readonly ApprovedAction[];
 }
 
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
@@ -61,7 +64,12 @@ export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
     limits: LIMIT_ORDER.map((name) => ({ name, ...LIMITS[name] })),
     environment: environmentLines(input),
     coordination: coordinationLines(input.surface, input.gateCommand),
-    allow: [],
+    // Only the classifier reads by intent; the guard and the broker match the other approvals' keys.
+    allow: (input.approved ?? []).flatMap((a) => {
+      if (a.kind !== SkipKind.Classifier) return [];
+      const line = approvedLine(a);
+      return line === null ? [] : [line];
+    }),
     switches: input.switches,
   });
 }

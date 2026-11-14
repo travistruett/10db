@@ -1,6 +1,6 @@
 import { LimitName, OUTPUT_TAIL_CHARS, type ToolCallView } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import type { BeforeText } from './before-text';
+import { BEFORE_TEXT_MAX_BYTES, type BeforeText } from './before-text';
 import {
   claudePlanSteps,
   claudeToolCall,
@@ -392,6 +392,51 @@ describe('claudeToolCall, Edit with replace_all', () => {
     const view = claudeToolCall(use('Edit', input), { startedAt, before: () => before });
     expect(view).toMatchObject({ kind: 'edit', ...shown });
   });
+
+  it('builds a replacement that would outgrow the before-text limit only up to it, and says it is cut', () => {
+    // 2,000 one-character matches each grown to 1,000 characters would build 2,000,000.
+    const growing = { ...input, new_string: 'X'.repeat(1_000) };
+    const view = claudeToolCall(use('Edit', growing), {
+      startedAt,
+      before: () => text('a'.repeat(2_000)),
+    });
+    if (view.kind !== 'edit') throw new Error(`expected an edit, got ${view.kind}`);
+    const shown = view.hunks.reduce((sum, hunk) => sum + hunk.after.length, 0);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThanOrEqual(BEFORE_TEXT_MAX_BYTES);
+    expect(view.truncated).toBe(true);
+  });
+});
+
+describe('claudeToolCall, MultiEdit with an edit that replaces all', () => {
+  it.each<{ name: string; before: string; next: string; shown: object; capped?: true }>([
+    {
+      name: 'shows every replacement of that edit',
+      before: 'a\nb\na\nc\n',
+      next: 'X',
+      shown: { addedLines: 2, removedLines: 2, truncated: false },
+    },
+    {
+      name: 'builds a growing replacement only up to the before-text limit, and says it is cut',
+      before: 'a'.repeat(2_000),
+      next: 'X'.repeat(1_000),
+      shown: { truncated: true },
+      capped: true,
+    },
+  ])('$name', ({ before, next, shown, capped }) => {
+    const view = claudeToolCall(
+      use('MultiEdit', {
+        file_path: 'a.ts',
+        edits: [{ old_string: 'a', new_string: next, replace_all: true }],
+      }),
+      { startedAt, before: () => text(before) },
+    );
+    expect(view).toMatchObject({ kind: 'edit', ...shown });
+    if (capped && view.kind === 'edit')
+      expect(view.hunks.reduce((sum, h) => sum + h.after.length, 0)).toBeLessThanOrEqual(
+        BEFORE_TEXT_MAX_BYTES,
+      );
+  });
 });
 
 describe('claudeToolResult', () => {
@@ -539,6 +584,31 @@ describe('createClaudeToolCalls', () => {
     ]);
     // Once final, the call is forgotten.
     expect(calls.result('toolu_1', { isError: false, content: 'a' })).toEqual([]);
+  });
+
+  it('keeps a result longer than the tail whole, beside the tail, and a short one only in the view', () => {
+    const { calls } = tracker();
+    calls.use(use('Bash', { command: 'cat big' }));
+    const long = 'x'.repeat(5_904) + 'y'.repeat(OUTPUT_TAIL_CHARS);
+    const [done] = calls.result('toolu_1', { isError: false, content: long });
+    expect(done).toMatchObject({
+      full: { output: long },
+      call: { outputTail: 'y'.repeat(OUTPUT_TAIL_CHARS) },
+    });
+    calls.use(use('Bash', { command: 'ls' }, 'toolu_2'));
+    const [short] = calls.result('toolu_2', { isError: false, content: 'a.ts' });
+    expect(short).not.toHaveProperty('full');
+  });
+
+  it('keeps an edit past the line cap whole as its patch', () => {
+    const calls = createClaudeToolCalls({ now: () => startedAt, read: () => ABSENT });
+    const content = Array.from({ length: 1_600 }, (_, i) => `line ${String(i)}`).join('\n') + '\n';
+    calls.capture('toolu_1', 'Write', { file_path: 'big.ts', content }, '/repo');
+    calls.use(use('Write', { file_path: 'big.ts', content }));
+    const [done] = calls.result('toolu_1', { isError: false, content: 'written' });
+    expect(done).toMatchObject({ call: { truncated: true } });
+    const patch = done?.type === 'tool_call' ? (done.full?.patch ?? '') : '';
+    expect(patch.split('\n').filter((l) => l.startsWith('+'))).toHaveLength(1_600);
   });
 
   it('a result for an id never seen gives nothing', () => {

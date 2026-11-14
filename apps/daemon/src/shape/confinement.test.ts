@@ -715,3 +715,123 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     expect('reason' in verdict && verdict.reason).toMatch(/foreground/i);
   });
 });
+
+// Trust line §8: where Plan's judge is native, its own session searches and fetches the web and its
+// commands go to auto mode's classifier, not a card. Plan still writes no code, and its reads keep their
+// rules. On a rules or 10db judge every answer is today's.
+describe('judgeShapeCall by the session’s judge', () => {
+  let sandboxed: ShapeAccess;
+  beforeEach(() => {
+    sandboxed = {
+      ...access,
+      secretFiles: [join(access.checkout, '.env')],
+      commands: {
+        protectedPaths: [{ path: dataDir, refusal: `${dataDir} is 10db's data.` }],
+        fileAccess: fileAccessJudge({
+          checkout: access.checkout,
+          home: access.home,
+          protectedReads: access.protectedReads,
+          readList: [],
+          systemDocRoots: [],
+          configDir: join(root, 'tmp', 'no-claude-config'),
+          providerSessionId: null,
+          sandboxTemp: { roots: access.sandboxRoots, own: join(root, 'tmp', '10db-ownabc') },
+        }),
+      },
+    };
+  });
+
+  const RESEARCHER = { agentId: 'r1', agentType: 'researcher' } as const;
+  const ROWS: readonly (readonly [string, () => ShapeCall, string, string])[] = [
+    ['a search from the session', () => call('WebSearch', { query: 'x' }), 'allow', 'deny'],
+    [
+      'a fetch from the session',
+      () => call('WebFetch', { url: 'https://example.com/' }),
+      'allow',
+      'deny',
+    ],
+    [
+      'a command that is not read-only',
+      () => call('Bash', { command: 'pnpm test' }),
+      'allow',
+      'ask',
+    ],
+    [
+      'a command run in the background',
+      () => call('Bash', { command: 'pnpm dev', run_in_background: true }),
+      'allow',
+      'deny',
+    ],
+    [
+      'a command sent to the background with &',
+      () => call('Bash', { command: 'pnpm dev &' }),
+      'allow',
+      'deny',
+    ],
+    ['a command under nohup', () => call('Bash', { command: 'nohup pnpm dev' }), 'allow', 'deny'],
+    // What the classifier would not judge for 10db stays 10db's: the caps, and the page rules.
+    [
+      'a search query past the length cap',
+      () => call('WebSearch', { query: 'q'.repeat(RESEARCH_QUERY_LIMIT + 1) }),
+      'deny',
+      'deny',
+    ],
+    [
+      'a fetch of an http page',
+      () => call('WebFetch', { url: 'http://example.com/' }),
+      'deny',
+      'deny',
+    ],
+    [
+      'a fetch of the loopback host',
+      () => call('WebFetch', { url: 'https://127.0.0.1:4317/mcp' }),
+      'deny',
+      'deny',
+    ],
+    [
+      'a fetch of a public page by the researcher',
+      () => call('WebFetch', { url: 'https://example.com/' }, RESEARCHER),
+      'allow',
+      'allow',
+    ],
+    ['an Edit', () => call('Edit', { file_path: path('checkout/src/a.ts') }), 'deny', 'deny'],
+    [
+      'a Write',
+      () => call('Write', { file_path: path('checkout/src/b.ts'), content: 'b' }),
+      'deny',
+      'deny',
+    ],
+    [
+      'a Read of the checkout’s .env',
+      () => call('Read', { file_path: path('checkout/.env') }),
+      'deny',
+      'deny',
+    ],
+  ];
+
+  it.each(ROWS)('on a native judge, answers %s', (_name, make, native) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge: 'native' }).decision).toBe(native);
+  });
+
+  it.each(
+    ROWS.flatMap(
+      ([name, make, , today]) =>
+        [
+          [name, 'rules', make, today],
+          [name, 'tendb', make, today],
+        ] as const,
+    ),
+  )('on a %s judge… answers %s as today', (_name, judge, make, today) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge }).decision).toBe(today);
+  });
+
+  it('says Plan writes no code when it refuses an edit, on every judge', () => {
+    for (const judge of ['native', 'rules', 'tendb'] as const) {
+      const verdict = judgeShapeCall(call('Edit', { file_path: path('checkout/src/a.ts') }), {
+        ...sandboxed,
+        judge,
+      });
+      expect('reason' in verdict && verdict.reason).toMatch(/Plan writes no code/);
+    }
+  });
+});

@@ -9,10 +9,13 @@ import {
   goalProposal,
   looseTaskProposal,
   questionProposal,
+  sentItemDto,
   shapeDto,
   shapeMessageDto,
+  shapeOfConversation,
   shapeViewDto,
 } from '../../test/shape-fixtures';
+import { conversationDto } from '../../test/conversation-fixtures';
 
 // Shape spec §4 D1: under 1100 px the Proposed sidebar is a drawer, and each count in the bar's
 // summary line opens it at that count's section.
@@ -235,9 +238,9 @@ describe('Shape: the drawer layout', () => {
   it('stops a running turn only on the Esc after the editor and the drawer have closed', async () => {
     const stops: string[] = [];
     server.use(
-      http.post(daemonUrl('/shapes/:shapeId/stop'), ({ params }) => {
-        stops.push(String(params['shapeId']));
-        return new HttpResponse(null, { status: 204 });
+      http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+        stops.push(String(shapeOfConversation(params['conversationId'])));
+        return HttpResponse.json(conversationDto());
       }),
     );
     openNarrow({
@@ -338,7 +341,7 @@ describe('Shape: the conversation across a layout change', () => {
   const uploaded = () =>
     HttpResponse.json(
       {
-        id: mintId('ShapeFile'),
+        id: mintId('ConversationFile'),
         shapeId: shape.id,
         name: 'brief.md',
         mediaType: 'text/markdown',
@@ -383,7 +386,7 @@ describe('Shape: the conversation across a layout change', () => {
   it('keeps the reason and the text of a send that failed before the upload opened it', async () => {
     const upload = waiting();
     serve(
-      http.post(daemonUrl('/shapes/:shapeId/messages'), restarting),
+      http.post(daemonUrl('/conversations/:conversationId/messages'), restarting),
       http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
         await upload.held;
         return uploaded();
@@ -404,7 +407,7 @@ describe('Shape: the conversation across a layout change', () => {
   it('keeps the reason and the text of a send that failed after the builder left /shape', async () => {
     const message = waiting();
     serve(
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
         await message.held;
         return restarting();
       }),
@@ -448,9 +451,9 @@ describe('Shape: the conversation across a layout change', () => {
       http.post(daemonUrl('/shapes/:shapeId/files'), () =>
         refused('brief.md isn’t really Markdown'),
       ),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
         await message.held;
-        return HttpResponse.json(shapeMessageDto(shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     renderApp('/shape');
@@ -466,9 +469,9 @@ describe('Shape: the conversation across a layout change', () => {
     contentWidth = 1200;
     const message = waiting();
     serve(
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
         await message.held;
-        return HttpResponse.json(shapeMessageDto(shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     const { router } = renderApp('/shape');

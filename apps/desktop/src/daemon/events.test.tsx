@@ -2,6 +2,7 @@ import {
   EventsHead,
   mintId,
   type AccountId,
+  type ConversationId,
   type DaemonEvent,
   type ProjectId,
 } from '@10db/contracts';
@@ -13,6 +14,7 @@ import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
+import { useConversationLive } from './conversation-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
 import { screenKeys } from './screen-queries';
 import { passKeys, useTurnActivity } from './pass-queries';
@@ -76,6 +78,16 @@ function AccountList() {
 function UsageOf({ accountId }: { readonly accountId: AccountId }) {
   useAccountUsage(accountId);
   return null;
+}
+
+/** What the conversation streams now, as its text items' text. */
+function LiveText({ conversationId }: { readonly conversationId: ConversationId }) {
+  const live = useConversationLive(conversationId);
+  return (
+    <p data-testid="live">
+      {[...live.values()].map((item) => (item.kind === 'tool_call' ? '' : item.text)).join('')}
+    </p>
+  );
 }
 
 describe('useEventStream', () => {
@@ -306,6 +318,49 @@ describe('useEventStream', () => {
     await waitFor(
       () => {
         expect(seen).toEqual([42, 43]);
+      },
+      { timeout: 15_000 },
+    );
+    expect(new URL(urls[1] ?? 'ws://missing').searchParams.get('after')).toBe('42');
+  });
+
+  it('applies a live frame to the conversation it streams, never moving the cursor past it', async () => {
+    const conversationId = mintId('Conversation');
+    const itemId = mintId('ConversationItem');
+    const urls: string[] = [];
+    const frame = (offset: number, text: string) =>
+      JSON.stringify({
+        live: true,
+        type: 'conversation.delta',
+        conversationId,
+        itemId,
+        kind: 'agent_message',
+        offset,
+        text,
+      });
+    server.use(
+      ...baseHandlers({ headSeq: 41 }),
+      eventStream.addEventListener('connection', ({ client }) => {
+        urls.push(client.url.toString());
+        if (urls.length > 1) return;
+        client.send(JSON.stringify(daemonEvent({ seq: 42 })));
+        client.send(frame(0, 'Half '));
+        client.send(frame(5, 'a sentence.'));
+      }),
+    );
+    renderWithDaemon(
+      <>
+        <Stream />
+        <LiveText conversationId={conversationId} />
+      </>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('live').textContent).toBe('Half a sentence.');
+    });
+    for (const client of eventStream.clients) client.close();
+    await waitFor(
+      () => {
+        expect(urls).toHaveLength(2);
       },
       { timeout: 15_000 },
     );

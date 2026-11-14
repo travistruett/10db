@@ -62,6 +62,7 @@ function recording(name: string): AgentAdapter & { readonly calls: string[] } {
         send: () => undefined,
         interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
+        setModel: () => Promise.resolve(),
       } satisfies SessionHandle;
     },
     readClientUuids: () => {

@@ -4,62 +4,71 @@ import { z } from 'zod';
 /** A lower-case RFC 9562 UUIDv7, which sorts by creation time as text. */
 const UUID_V7 = '[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 
-function idSchema<const B extends string>(prefix: string, brand: B) {
+/**
+ * An ID's schema. The first prefix is the one minted; the others are prefixes the kind still reads, for
+ * rows that kept the id they had under an older kind.
+ */
+function idSchema<const B extends string>(prefixes: readonly [string, ...string[]], brand: B) {
+  const [minted] = prefixes;
+  const prefix = prefixes.length === 1 ? minted : `(?:${prefixes.join('|')})`;
   return z
     .string()
-    .regex(new RegExp(`^${prefix}_${UUID_V7}$`), `expected a ${brand} (${prefix}_…)`)
+    .regex(new RegExp(`^${prefix}_${UUID_V7}$`), `expected a ${brand} (${minted}_…)`)
     .brand<B>();
 }
 
 const ID_SCHEMAS = {
-  Account: idSchema('acc', 'AccountId'),
-  Project: idSchema('prj', 'ProjectId'),
-  Task: idSchema('tsk', 'TaskId'),
-  Workstream: idSchema('ws', 'WorkstreamId'),
-  Session: idSchema('ses', 'SessionId'),
-  Handoff: idSchema('hof', 'HandoffId'),
-  Claim: idSchema('clm', 'ClaimId'),
-  InboxItem: idSchema('inb', 'InboxItemId'),
-  ToolOp: idSchema('top', 'ToolOpId'),
-  Evidence: idSchema('evd', 'EvidenceId'),
-  Decision: idSchema('dec', 'DecisionId'),
-  Deviation: idSchema('dvn', 'DeviationId'),
-  Source: idSchema('src', 'SourceId'),
-  Proposal: idSchema('prp', 'ProposalId'),
-  PermissionRule: idSchema('prm', 'PermissionRuleId'),
-  Persona: idSchema('per', 'PersonaId'),
-  Person: idSchema('psn', 'PersonId'),
-  RoutingRule: idSchema('rtr', 'RoutingRuleId'),
-  PersonContact: idSchema('pcn', 'PersonContactId'),
-  StakeholderSend: idSchema('snd', 'StakeholderSendId'),
-  ModelProfile: idSchema('mpf', 'ModelProfileId'),
-  Principle: idSchema('pri', 'PrincipleId'),
-  Batch: idSchema('bat', 'BatchId'),
-  BoardColumn: idSchema('bcl', 'BoardColumnId'),
-  Goal: idSchema('gol', 'GoalId'),
-  GoalCriterion: idSchema('gcr', 'GoalCriterionId'),
-  JudgeCall: idSchema('jdg', 'JudgeCallId'),
-  Shape: idSchema('shp', 'ShapeId'),
-  ShapeMessage: idSchema('shm', 'ShapeMessageId'),
-  ShapeProposal: idSchema('spp', 'ShapeProposalId'),
-  ShapeLink: idSchema('slk', 'ShapeLinkId'),
-  ShapeFinding: idSchema('shf', 'ShapeFindingId'),
-  ShapeQuestion: idSchema('sqn', 'ShapeQuestionId'),
-  ShapeFile: idSchema('sfl', 'ShapeFileId'),
-  ShapeAttachment: idSchema('sat', 'ShapeAttachmentId'),
-  ShapeAttachmentRevision: idSchema('sar', 'ShapeAttachmentRevisionId'),
-  ShapeEntry: idSchema('sen', 'ShapeEntryId'),
-  ShapeEntryVersion: idSchema('sev', 'ShapeEntryVersionId'),
-  TaskContextCheck: idSchema('tcx', 'TaskContextCheckId'),
-  LandingGroup: idSchema('lgp', 'LandingGroupId'),
-  Kind: idSchema('knd', 'KindId'),
-  TaskMessage: idSchema('tmg', 'TaskMessageId'),
-  TaskFile: idSchema('tfl', 'TaskFileId'),
-  Pass: idSchema('pas', 'PassId'),
-  PassTurn: idSchema('ptn', 'PassTurnId'),
-  TaskScreen: idSchema('tsc', 'TaskScreenId'),
-  PassPreviewMark: idSchema('ppm', 'PassPreviewMarkId'),
-  TaskPageReport: idSchema('tpr', 'TaskPageReportId'),
+  Account: idSchema(['acc'], 'AccountId'),
+  Project: idSchema(['prj'], 'ProjectId'),
+  Task: idSchema(['tsk'], 'TaskId'),
+  Workstream: idSchema(['ws'], 'WorkstreamId'),
+  Session: idSchema(['ses'], 'SessionId'),
+  Handoff: idSchema(['hof'], 'HandoffId'),
+  Claim: idSchema(['clm'], 'ClaimId'),
+  InboxItem: idSchema(['inb'], 'InboxItemId'),
+  ToolOp: idSchema(['top'], 'ToolOpId'),
+  Evidence: idSchema(['evd'], 'EvidenceId'),
+  Decision: idSchema(['dec'], 'DecisionId'),
+  Deviation: idSchema(['dvn'], 'DeviationId'),
+  Source: idSchema(['src'], 'SourceId'),
+  Proposal: idSchema(['prp'], 'ProposalId'),
+  PermissionRule: idSchema(['prm'], 'PermissionRuleId'),
+  Persona: idSchema(['per'], 'PersonaId'),
+  Person: idSchema(['psn'], 'PersonId'),
+  RoutingRule: idSchema(['rtr'], 'RoutingRuleId'),
+  PersonContact: idSchema(['pcn'], 'PersonContactId'),
+  StakeholderSend: idSchema(['snd'], 'StakeholderSendId'),
+  ModelProfile: idSchema(['mpf'], 'ModelProfileId'),
+  Principle: idSchema(['pri'], 'PrincipleId'),
+  Batch: idSchema(['bat'], 'BatchId'),
+  BoardColumn: idSchema(['bcl'], 'BoardColumnId'),
+  Goal: idSchema(['gol'], 'GoalId'),
+  GoalCriterion: idSchema(['gcr'], 'GoalCriterionId'),
+  JudgeCall: idSchema(['jdg'], 'JudgeCallId'),
+  Shape: idSchema(['shp'], 'ShapeId'),
+  ShapeProposal: idSchema(['spp'], 'ShapeProposalId'),
+  ShapeLink: idSchema(['slk'], 'ShapeLinkId'),
+  ShapeFinding: idSchema(['shf'], 'ShapeFindingId'),
+  ShapeQuestion: idSchema(['sqn'], 'ShapeQuestionId'),
+  ShapeAttachment: idSchema(['sat'], 'ShapeAttachmentId'),
+  ShapeAttachmentRevision: idSchema(['sar'], 'ShapeAttachmentRevisionId'),
+  ShapeEntry: idSchema(['sen'], 'ShapeEntryId'),
+  ShapeEntryVersion: idSchema(['sev'], 'ShapeEntryVersionId'),
+  TaskContextCheck: idSchema(['tcx'], 'TaskContextCheckId'),
+  LandingGroup: idSchema(['lgp'], 'LandingGroupId'),
+  Kind: idSchema(['knd'], 'KindId'),
+  Pass: idSchema(['pas'], 'PassId'),
+  PassTurn: idSchema(['ptn'], 'PassTurnId'),
+  TaskScreen: idSchema(['tsc'], 'TaskScreenId'),
+  PassPreviewMark: idSchema(['ppm'], 'PassPreviewMarkId'),
+  TaskPageReport: idSchema(['tpr'], 'TaskPageReportId'),
+  Conversation: idSchema(['cnv'], 'ConversationId'),
+  ConversationItem: idSchema(['cvi', 'shm', 'tmg'], 'ConversationItemId'),
+  ConversationFile: idSchema(['cvf', 'sfl', 'tfl'], 'ConversationFileId'),
+  Chat: idSchema(['cht'], 'ChatId'),
+  SkippedAction: idSchema(['skp'], 'SkippedActionId'),
+  SkipListing: idSchema(['skl'], 'SkipListingId'),
+  RunHost: idSchema(['rhs'], 'RunHostId'),
 } as const;
 
 const ID_PREFIX = {
@@ -91,12 +100,10 @@ const ID_PREFIX = {
   GoalCriterion: 'gcr',
   JudgeCall: 'jdg',
   Shape: 'shp',
-  ShapeMessage: 'shm',
   ShapeProposal: 'spp',
   ShapeLink: 'slk',
   ShapeFinding: 'shf',
   ShapeQuestion: 'sqn',
-  ShapeFile: 'sfl',
   ShapeAttachment: 'sat',
   ShapeAttachmentRevision: 'sar',
   ShapeEntry: 'sen',
@@ -104,13 +111,18 @@ const ID_PREFIX = {
   TaskContextCheck: 'tcx',
   LandingGroup: 'lgp',
   Kind: 'knd',
-  TaskMessage: 'tmg',
-  TaskFile: 'tfl',
   Pass: 'pas',
   PassTurn: 'ptn',
   TaskScreen: 'tsc',
   PassPreviewMark: 'ppm',
   TaskPageReport: 'tpr',
+  Conversation: 'cnv',
+  ConversationItem: 'cvi',
+  ConversationFile: 'cvf',
+  Chat: 'cht',
+  SkippedAction: 'skp',
+  SkipListing: 'skl',
+  RunHost: 'rhs',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -191,8 +203,6 @@ export const JudgeCallId = ID_SCHEMAS.JudgeCall;
 export type JudgeCallId = IdOf<'JudgeCall'>;
 export const ShapeId = ID_SCHEMAS.Shape;
 export type ShapeId = IdOf<'Shape'>;
-export const ShapeMessageId = ID_SCHEMAS.ShapeMessage;
-export type ShapeMessageId = IdOf<'ShapeMessage'>;
 export const ShapeProposalId = ID_SCHEMAS.ShapeProposal;
 export type ShapeProposalId = IdOf<'ShapeProposal'>;
 export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
@@ -201,8 +211,6 @@ export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;
 export type ShapeFindingId = IdOf<'ShapeFinding'>;
 export const ShapeQuestionId = ID_SCHEMAS.ShapeQuestion;
 export type ShapeQuestionId = IdOf<'ShapeQuestion'>;
-export const ShapeFileId = ID_SCHEMAS.ShapeFile;
-export type ShapeFileId = IdOf<'ShapeFile'>;
 export const ShapeAttachmentId = ID_SCHEMAS.ShapeAttachment;
 export type ShapeAttachmentId = IdOf<'ShapeAttachment'>;
 export const ShapeAttachmentRevisionId = ID_SCHEMAS.ShapeAttachmentRevision;
@@ -217,10 +225,6 @@ export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const KindId = ID_SCHEMAS.Kind;
 export type KindId = IdOf<'Kind'>;
-export const TaskMessageId = ID_SCHEMAS.TaskMessage;
-export type TaskMessageId = IdOf<'TaskMessage'>;
-export const TaskFileId = ID_SCHEMAS.TaskFile;
-export type TaskFileId = IdOf<'TaskFile'>;
 export const PassId = ID_SCHEMAS.Pass;
 export type PassId = IdOf<'Pass'>;
 export const PassTurnId = ID_SCHEMAS.PassTurn;
@@ -231,5 +235,25 @@ export const PassPreviewMarkId = ID_SCHEMAS.PassPreviewMark;
 export type PassPreviewMarkId = IdOf<'PassPreviewMark'>;
 export const TaskPageReportId = ID_SCHEMAS.TaskPageReport;
 export type TaskPageReportId = IdOf<'TaskPageReport'>;
+export const ConversationId = ID_SCHEMAS.Conversation;
+export type ConversationId = IdOf<'Conversation'>;
+export const ConversationItemId = ID_SCHEMAS.ConversationItem;
+export type ConversationItemId = IdOf<'ConversationItem'>;
+export const ConversationFileId = ID_SCHEMAS.ConversationFile;
+export type ConversationFileId = IdOf<'ConversationFile'>;
+export const ChatId = ID_SCHEMAS.Chat;
+export type ChatId = IdOf<'Chat'>;
+export const SkippedActionId = ID_SCHEMAS.SkippedAction;
+export type SkippedActionId = IdOf<'SkippedAction'>;
+export const SkipListingId = ID_SCHEMAS.SkipListing;
+export type SkipListingId = IdOf<'SkipListing'>;
+export const RunHostId = ID_SCHEMAS.RunHost;
+export type RunHostId = IdOf<'RunHost'>;
+/** A task's thread message is a conversation item. @alias */
+export const TaskMessageId = ConversationItemId;
+export type TaskMessageId = ConversationItemId;
+/** A picture pasted into a task's thread is a conversation file. @alias */
+export const TaskFileId = ConversationFileId;
+export type TaskFileId = ConversationFileId;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

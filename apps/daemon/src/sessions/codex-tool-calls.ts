@@ -8,7 +8,7 @@ import {
 import { z } from 'zod';
 import { hunksOfPatch, hunksOfTexts, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
-import { PlanStepStatus, type PlanStep } from './types';
+import { PlanStepStatus, type PlanStep, type ToolCallFull } from './types';
 
 // Sessions spec §5.2 and §5.5: a Codex thread item as the typed calls every card reads. Each item is
 // read loosely, so a field Codex adds still passes; an item that isn't a tool call gives none.
@@ -362,6 +362,25 @@ function untitled(item: unknown, times: ItemTimes): UntitledToolCall[] {
 /** The calls a thread item holds: none for an item that isn't a tool call, one per file for a patch. */
 export function codexToolCalls(item: unknown, times: ItemTimes): readonly ToolCallView[] {
   return untitled(item, times).map(titled);
+}
+
+/**
+ * What a finished call's view left out of its item: a command's aggregated output longer than the
+ * tail, or a cut change's diff. Null when the view holds it all.
+ */
+export function codexFullOf(item: unknown, call: ToolCallView): ToolCallFull | null {
+  const cmd = CommandItem.safeParse(item);
+  if (cmd.success && call.kind === 'command') {
+    const output = cmd.data.aggregatedOutput ?? '';
+    return output.length > OUTPUT_TAIL_CHARS ? { output } : null;
+  }
+  const patch = FileChangeItem.safeParse(item);
+  if (patch.success && call.kind === 'edit' && call.truncated) {
+    const index = Number(call.id.slice(patch.data.id.length + 1));
+    const diff = patch.data.changes[index]?.diff;
+    return diff === undefined || diff === '' ? null : { patch: diff };
+  }
+  return null;
 }
 
 /** A running command with more output: its tail kept to the cap, every byte counted. Any other call is as it was. */

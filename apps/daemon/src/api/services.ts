@@ -1,4 +1,13 @@
 import type {
+  ConversationDeltaFrame,
+  ConversationDto,
+  ConversationFullDto,
+  ConversationId,
+  ConversationItemDto,
+  ConversationItemId,
+  ConversationItemsPage,
+  ConversationLiveDto,
+  ConversationOwnerKind,
   Effort,
   KindDto,
   KindId,
@@ -180,6 +189,7 @@ import type {
   TaskMove,
   TaskPatch,
   WorkstreamChangesDto,
+  SkippedActionDto,
   WorkstreamDto,
   WorkstreamId,
   DecisionEdit,
@@ -468,12 +478,8 @@ export interface ApiServices extends PlanRecordServices {
   createShape(projectId: ProjectId, input: ShapeInput): ShapeDto;
   /** Everything the Shape screen renders for the conversation. Throws NotFoundError for an unknown one. */
   getShapeView(id: ShapeId): ShapeViewDto;
-  /** Records a builder message and queues Claude's turn on it. */
-  sendShapeMessage(id: ShapeId, text: string): ShapeMessageDto;
   /** Queues a Propose turn, or ignores the press while one is queued or running. */
   proposeShape(id: ShapeId): ShapeProposeResult;
-  /** Interrupts the turn that is running; answering when nothing runs is a no-op. */
-  stopShape(id: ShapeId): Promise<void>;
   /**
    * Runs the conversation on `model` from its next turn, or on the `plan` role's with null, at `effort`
    * or, with null, the model's own default. Throws
@@ -592,6 +598,8 @@ export interface ApiServices extends PlanRecordServices {
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
   workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
+  /** What the run skipped and the questions it was answered at once, oldest first. */
+  listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
   /** With `recent`, only that many, the most recently updated first. */
   listInbox(filter: {
     readonly states: readonly InboxState[] | null;
@@ -600,6 +608,26 @@ export interface ApiServices extends PlanRecordServices {
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
+  /** The live frames of what conversations are streaming; never stored, never in the replay. */
+  subscribeLive(listener: (frame: ConversationDeltaFrame) => void): () => void;
+  /** Who owns a conversation, read from its row alone; NotFoundError for one 10db lacks. */
+  conversationOwnerKind(id: ConversationId): ConversationOwnerKind;
+  /** An explore conversation as the UI reads it (sessions spec §10); NotFoundError for one 10db lacks. */
+  getConversation(id: ConversationId): ConversationDto;
+  /** A page of its items in `seq` order, after `afterSeq` when given. */
+  conversationItems(id: ConversationId, afterSeq: number | null): ConversationItemsPage;
+  /** What it streams now, for a client that joins or reconnects. */
+  conversationLive(id: ConversationId): ConversationLiveDto;
+  /** A builder message, stored queued and taken by the conversation's owner; ConflictError for a task's. */
+  postConversationMessage(id: ConversationId, text: string): ConversationItemDto;
+  /** Sends what waits under "Send now"; ConflictError, with the state's words, when nothing would run. */
+  sendConversationNow(id: ConversationId): ConversationDto;
+  /** Stops the turn; answers once it is stopping or settled. */
+  stopConversation(id: ConversationId): Promise<ConversationDto>;
+  /** Stops the turn and sends the edited message as the next. */
+  redoConversation(id: ConversationId, text: string): Promise<ConversationItemDto>;
+  /** What an item keeps on disk past what it holds; NotFoundError when it keeps nothing. */
+  conversationFull(id: ConversationId, itemId: ConversationItemId): ConversationFullDto;
   /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;

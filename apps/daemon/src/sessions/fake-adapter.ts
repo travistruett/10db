@@ -180,8 +180,11 @@ export class FakeAdapter implements AgentAdapter {
     for (const wake of waiters) wake();
   }
 
+  /** What the fake says it can do, over the agent's own: a test stages another agent's row. */
+  capabilityOverrides: Partial<AgentCapabilities> = {};
+
   capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities {
-    return capabilitiesOf(account.kind, model);
+    return { ...capabilitiesOf(account.kind, model), ...this.capabilityOverrides };
   }
 
   /**
@@ -244,6 +247,10 @@ export class FakeAdapter implements AgentAdapter {
   readonly shapeSessions: {
     readonly spec: ExploreSessionSpec;
     readonly sent: string[];
+    /** The client uuid each message after the first went under, null for none. */
+    readonly uuids: (string | null)[];
+    /** Every model the session was switched to, in order. */
+    readonly models: string[];
     readonly handle: SessionHandle;
   }[] = [];
   /** How a Shape session answers a message; the default writes a short reply. */
@@ -253,37 +260,69 @@ export class FakeAdapter implements AgentAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /** When set, a Shape session reports `started` only once it resolves. */
+  shapeStartGate: Promise<void> | null = null;
+  /** What switching a Shape session's model answers; it switches by default. */
+  shapeModelSwitch: (model: string) => Promise<void> = () => Promise.resolve();
+  /**
+   * What a Shape session's interrupt answers, from the uuids of the messages it holds that no turn has
+   * begun: by default none, as a Claude Code without `interrupt_receipt_v1`.
+   */
+  shapeInterruptReceipt: (
+    queued: readonly string[],
+  ) => InterruptReceipt | Promise<InterruptReceipt> = () => null;
   /** The same for a lane session: its stop waits for it before the session ends. */
   laneStopGate: Promise<void> | null = null;
 
+  /**
+   * Why a Shape session ends before it starts, or null when it starts: a test stands for an agent
+   * session that can no longer be resumed.
+   */
+  shapeStartFailure: (
+    spec: ExploreSessionSpec,
+  ) => { readonly reason: SessionEndReason; readonly message: string } | null = () => null;
+
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
+    const failure = refusal === null ? this.shapeStartFailure(spec) : null;
     const sent: string[] = [];
+    const uuids: (string | null)[] = [];
+    const models: string[] = [];
     const inner = refusal
       ? fakeEndedSession({
           type: 'ended',
           reason: SessionEndReason.AccountRefused,
           message: `${refusal.message}. No message was sent.`,
         })
-      : runFakeExploreSession(
-          spec,
-          (turn) => this.shapeBehaviour(turn),
-          providerSessionId,
-          this.claim(providerSessionId),
-        );
+      : failure !== null
+        ? fakeEndedSession({ type: 'ended', reason: failure.reason, message: failure.message })
+        : runFakeExploreSession(
+            spec,
+            (turn) => this.shapeBehaviour(turn),
+            providerSessionId,
+            this.claim(providerSessionId),
+            (queued) => this.shapeInterruptReceipt(queued),
+            () => this.shapeStartGate,
+          );
     const handle: SessionHandle = {
       events: inner.events,
-      send: (text, images) => {
+      send: (text, images, uuid) => {
         sent.push(text);
-        inner.send(text, images);
+        uuids.push(uuid ?? null);
+        inner.send(text, images, uuid);
       },
       interrupt: () => inner.interrupt(),
       stop: async () => {
         if (this.shapeStopGate !== null) await this.shapeStopGate;
         await inner.stop();
       },
+      setModel: async (model) => {
+        await this.shapeModelSwitch(model);
+        models.push(model);
+        await inner.setModel(model);
+      },
     };
-    this.shapeSessions.push({ spec, sent, handle });
+    this.shapeSessions.push({ spec, sent, uuids, models, handle });
     return handle;
   }
 

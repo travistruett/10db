@@ -24,6 +24,10 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/tasks/:taskId/shape' },
   { route: '/tasks/:taskId/step-plan' },
   { route: '/shapes/:shapeId' },
+  // Plan's transcript and what it streams: database and memory reads.
+  { route: '/conversations/:conversationId' },
+  { route: '/conversations/:conversationId/items' },
+  { route: '/conversations/:conversationId/live' },
   { route: '/workstreams' },
   { route: '/inbox' },
   { route: '/projects/:projectId/proposals' },
@@ -45,6 +49,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     'A system check probes the machine and runs commands; ?recheck=1 runs them again on every read.',
   '/workstreams/:id/changes':
     "A lane's changes are read by running git in its copy, and a screen draws without them.",
+  '/workstreams/:id/skips':
+    'What a lane skipped holds the commands it tried, which only the builder reads; no screen draws them.',
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
@@ -59,6 +65,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/tasks/:taskId/thread/pictures/:fileId':
     "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
+  '/conversations/:conversationId/items/:itemId/full':
+    "A call's whole output is for the card that expands it, not for a screen.",
   '/shapes/:shapeId/record':
     "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
   '/shapes/:shapeId/record/:list':

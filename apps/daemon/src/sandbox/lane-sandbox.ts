@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { foldPathCase } from '../guard';
@@ -69,7 +69,14 @@ const LANE_DISALLOWED_TOOLS: readonly string[] = [
   'PushNotification',
 ];
 
+/** A folder the builder's editor reads its config from, which runs outside the sandbox. */
+const isEditorConfig = (path: string): boolean => {
+  const name = basename(path);
+  return name === '.vscode' || name === '.idea';
+};
+
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
+
 export interface LaneSandboxSpec {
   readonly settings: LaneSandboxSettings;
   /** The checkout's real path, which the profile builds on and does not list as writable. */
@@ -494,15 +501,17 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             // person may allow a Read: that Read is served from a copy (`secretReadsDir`).
             ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
           ],
+          // A lane nobody watches writes the checkout's agent config without a card:
+          // none of it runs before the builder approves it. Editor config runs when the builder
+          // opens the folder, so it still asks.
           askRules: [
-            ...claudeProtected.files.flatMap((path) => [
+            ...(input.attended === true ? claudeProtected.files : []).flatMap((path) => [
               `Edit(${ruleScope(path)})`,
               `Write(${ruleScope(path)})`,
             ]),
-            ...claudeProtected.directories.flatMap((path) => [
-              `Edit(${ruleScope(path)}/**)`,
-              `Write(${ruleScope(path)}/**)`,
-            ]),
+            ...claudeProtected.directories
+              .filter((path) => input.attended === true || isEditorConfig(path))
+              .flatMap((path) => [`Edit(${ruleScope(path)}/**)`, `Write(${ruleScope(path)}/**)`]),
           ],
         };
         let providerSessionId = input.resumeProviderSessionId;

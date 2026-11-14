@@ -1,4 +1,4 @@
-import { ShapeToolName, type ShapeReviewer } from '@10db/contracts';
+import { JudgeKind, ShapeToolName, type ShapeReviewer } from '@10db/contracts';
 import type { ShapeAgentDefinition } from '../sessions';
 import { SHAPE_CODE_RESEARCHER, SHAPE_RESEARCHER } from './confinement';
 
@@ -71,6 +71,16 @@ export const SHAPE_ALLOWED_TOOLS: readonly string[] = [
   ...SHAPE_OFFERED_TOOLS.map((name) => `mcp__10db__${name}`),
   `mcp__10db__${ShapeToolName.ReportFinding}`,
 ];
+
+/**
+ * What a Plan session approves without a prompt, by its judge. On a native judge the web tools are left
+ * out: an allow rule would approve a call before auto mode's classifier sees it.
+ */
+export function shapeAllowedTools(judge: JudgeKind | undefined): readonly string[] {
+  return judge === JudgeKind.Native
+    ? SHAPE_ALLOWED_TOOLS.filter((name) => name !== 'WebSearch' && name !== 'WebFetch')
+    : SHAPE_ALLOWED_TOOLS;
+}
 
 const REPORTING = `Report with report_finding, once per finding, passing the effortKey you were given. Each call answers with a findingId. Do not change anything and do not call any other 10db tool. Your last message lists every finding you reported, each with its findingId and one line, so the session can resolve it; say "nothing to report" if there were none.`;
 

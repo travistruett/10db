@@ -19,6 +19,7 @@ import {
   insertShape,
   seedProject,
   type AccountRow,
+  shapeConversation,
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { serve } from '@hono/node-server';
@@ -38,7 +39,6 @@ import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
 import {
-  READ_CHARGE_MAX_BYTES,
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
@@ -51,6 +51,7 @@ import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '.
 import { createTempRepo, testPolicy } from './fixtures';
 import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
+import { READ_CHARGE_MAX_BYTES } from '../src/conversation';
 
 /** The prompt for a subscription, whose agents take every alias. */
 const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
@@ -120,10 +121,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: mintId('Shape'),
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -207,7 +208,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const { token, hash } = mintSessionToken();
     state.write((ctx) =>
       insertSession(ctx, {
-        shapeId: shape.id,
+        conversationId: shapeConversation(ctx.tx, shape.id).id,
         provider: 'claude',
         model: 'haiku',
         effort: 'low',
@@ -291,10 +292,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: shape.id,
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -413,10 +414,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const judged: Judged[] = [];
     const handle = adapter.open({
       sessionId: mintId('Session'),
+      conversationId: null,
       policy: testPolicy('plan'),
       profile: {
         kind: 'explore',
-        shapeId: mintId('Shape'),
         systemPrompt: SHAPE_SYSTEM_PROMPT,
         tools: [...SHAPE_BUILT_IN_TOOLS],
         allowedTools: SHAPE_ALLOWED_TOOLS,
@@ -633,10 +634,10 @@ async function readInSession(
   const reads: ShapeToolRequest[] = [];
   const handle = adapter.open({
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: SHAPE_SYSTEM_PROMPT,
       tools: [...SHAPE_BUILT_IN_TOOLS],
       allowedTools: SHAPE_ALLOWED_TOOLS,

@@ -398,7 +398,7 @@ export function taskMessageDto(
   overrides: Partial<TaskMessageDto> = {},
 ): TaskMessageDto {
   return TaskMessageDto.parse({
-    id: mintId('TaskMessage'),
+    id: mintId('ConversationItem'),
     taskId,
     author: 'builder',
     kind: 'message',
@@ -419,7 +419,7 @@ export function taskFileDto(
   overrides: Partial<TaskFileDto> = {},
 ): TaskFileDto {
   return TaskFileDto.parse({
-    id: mintId('TaskFile'),
+    id: mintId('ConversationFile'),
     taskId: message.taskId,
     messageId: message.id,
     name: 'Screenshot 2026-11-09 at 12.17.03.png',

@@ -41,13 +41,23 @@ const MARKDOWN_REHYPE_PLUGINS: NonNullable<StreamdownProps['rehypePlugins']> = [
   ],
 ];
 
-/** Draws `text` as markdown, or shows it whole as plain text when it is too long or drawing it throws. */
-export function Markdown({ text }: { readonly text: string }) {
+/**
+ * Draws `text` as markdown, or shows it whole as plain text when it is too long or drawing it throws.
+ * A text still `streaming` is drawn in streamdown's streaming mode, which parses only its last block
+ * again as text arrives.
+ */
+export function Markdown({
+  text,
+  streaming = false,
+}: {
+  readonly text: string;
+  readonly streaming?: boolean;
+}) {
   if (text.length > MARKDOWN_MAX_LENGTH) return <PlainMarkdown text={text} />;
   return (
     <MarkdownBoundary text={text}>
       <Streamdown
-        mode="static"
+        mode={streaming ? 'streaming' : 'static'}
         parseIncompleteMarkdown
         skipHtml
         controls={false}

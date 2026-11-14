@@ -6,9 +6,9 @@ import {
   type DbReader,
   type ShapeProposalRow,
 } from '@10db/db';
-import { parseScreenBody } from '../screens';
 import { convertedStateLines } from './converted-state';
 import { missizedLines } from './sizing';
+import { parseScreenBody } from '../conversation';
 
 /** How many of the latest transcript rows the digest repeats verbatim (Shape spec §5.3). */
 export const DIGEST_MESSAGES = 40;

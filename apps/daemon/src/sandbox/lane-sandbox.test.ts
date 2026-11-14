@@ -641,7 +641,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
       expect(session.spec.checkout).toBe(checkout);
       expect(session.spec.settings.filesystem.denyRead).toContain(env);
-      expect(session.spec.askRules).toContain(`Edit(/${join(checkout, '.mcp.json')})`);
+      expect(session.spec.askRules).toContain(`Edit(/${join(checkout, '.vscode')}/**)`);
     } finally {
       session.dispose();
     }
@@ -859,8 +859,26 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
-  it("asks before an edit or write of the checkout's Claude-protected files and directories", async () => {
+  // T4 call 6: a lane nobody watches writes the checkout's agent config without a card; none of it
+  // runs before the builder approves it. Editor config still asks.
+  it('an unattended session has no ask rule on .mcp.json or .claude/hooks, and keeps the one on .vscode', async () => {
     const session = await sandbox().forSession(input());
+    try {
+      const rules = session.spec.askRules;
+      expect(rules.filter((r) => r.includes('.mcp.json') || r.includes('/.claude/'))).toEqual([]);
+      expect(rules).toEqual(
+        expect.arrayContaining([
+          `Edit(/${join(checkout, '.vscode')}/**)`,
+          `Write(/${join(checkout, '.idea')}/**)`,
+        ]),
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("an attended session asks before an edit or write of the checkout's Claude-protected files and directories", async () => {
+    const session = await sandbox().forSession(input({ attended: true }));
     try {
       const settings = join(checkout, '.claude', 'settings.json');
       const hooks = join(checkout, '.claude', 'hooks');

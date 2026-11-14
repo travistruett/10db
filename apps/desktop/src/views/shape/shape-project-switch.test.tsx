@@ -3,7 +3,13 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
-import { shapeDto, shapeMessageDto, shapeViewDto } from '../../test/shape-fixtures';
+import {
+  sentItemDto,
+  shapeDto,
+  shapeMessageDto,
+  shapeOfConversation,
+  shapeViewDto,
+} from '../../test/shape-fixtures';
 
 // Shape is per project: switching project must not leave the old project's conversation on screen.
 
@@ -178,8 +184,8 @@ describe('Shape: switching project', () => {
           status: 201,
         });
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), ({ params }) => {
-        const shapeId = String(params['shapeId']);
+      http.post(daemonUrl('/conversations/:conversationId/messages'), ({ params }) => {
+        const shapeId = String(shapeOfConversation(params['conversationId']));
         posted.push(shapeId);
         if (posted.length === 1) {
           return HttpResponse.json(
@@ -187,7 +193,7 @@ describe('Shape: switching project', () => {
             { status: 503 },
           );
         }
-        return HttpResponse.json(shapeMessageDto(betaShape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
       http.get(daemonUrl('/shapes/:shapeId'), ({ params }) =>
         HttpResponse.json(

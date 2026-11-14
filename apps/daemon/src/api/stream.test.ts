@@ -14,6 +14,10 @@ const ev = (seq: number): DaemonEvent => ({
 
 type Services = Pick<ApiServices, 'eventsAfter' | 'subscribe'>;
 
+/** The stored replay, with no live frames: the frames' own test is `daemon/live-frames.test.ts`. */
+const stream = (after: number, services: Services, send: (event: DaemonEvent) => void) =>
+  streamEvents(after, { ...services, subscribeLive: () => () => undefined }, send, () => undefined);
+
 describe('streamEvents', () => {
   it('replays after the cursor, then streams live, with no gap or duplicate at the seam', () => {
     const history = [ev(1), ev(2), ev(3)];
@@ -37,7 +41,7 @@ describe('streamEvents', () => {
       },
     };
     const sent: number[] = [];
-    const stop = streamEvents(1, services, (e) => sent.push(e.seq));
+    const stop = stream(1, services, (e) => sent.push(e.seq));
     listener?.(ev(4));
     listener?.(ev(5));
     stop();
@@ -58,7 +62,7 @@ describe('streamEvents', () => {
       eventsAfter: (after) => history.filter((e) => e.seq > after),
     };
     const sent: number[] = [];
-    streamEvents(0, services, (e) => sent.push(e.seq));
+    stream(0, services, (e) => sent.push(e.seq));
     // Events 2 and 3 are committed, but a re-entrant write makes 3 reach this listener first.
     history.push(ev(2), ev(3));
     listener?.(ev(3));
@@ -84,7 +88,7 @@ describe('streamEvents', () => {
       },
     };
     const sent: number[] = [];
-    streamEvents(0, services, (e) => sent.push(e.seq));
+    stream(0, services, (e) => sent.push(e.seq));
     expect(sent).toEqual([1, 2, 3]);
   });
 
@@ -95,7 +99,7 @@ describe('streamEvents', () => {
       eventsAfter: (after, limit) => history.filter((e) => e.seq > after).slice(0, limit),
     };
     const sent: number[] = [];
-    streamEvents(0, services, (e) => sent.push(e.seq));
+    stream(0, services, (e) => sent.push(e.seq));
     expect(sent).toHaveLength(1200);
   });
 });

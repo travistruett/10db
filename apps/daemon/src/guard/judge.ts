@@ -32,6 +32,7 @@ import {
   resolveInRepoReadings,
 } from './paths';
 import { readOnlyShellRefusal } from './read-only';
+import type { AskKind } from './unattended';
 import {
   commandName,
   findExecCommands,
@@ -96,6 +97,18 @@ export interface GuardInput {
   readonly coveredByAllowRule: boolean;
   /** The project's Web switch is on, so WebSearch and WebFetch go to a judge that runs, not a card. */
   readonly webOn?: boolean;
+  /**
+   * A person is in the session (the trust policy's `attended`); absent counts as attended. Only an
+   * unattended lane's verdicts become skips.
+   */
+  readonly attended?: boolean;
+  /** The project's Docker switch is on: an unattended lane's docker call is not refused here. */
+  readonly dockerOn?: boolean;
+  /**
+   * The builder approved this exact call, skipped as a deploy in an earlier run (Run these now): the
+   * floor's deploy refusal is lifted, and nothing else is.
+   */
+  readonly deployApproved?: boolean;
 }
 
 /**
@@ -119,7 +132,13 @@ export interface FileAccessJudge {
  */
 export type GuardVerdict =
   | { readonly decision: 'allow'; readonly settled?: string }
-  | { readonly decision: 'deny' | 'ask'; readonly reason: string };
+  /** `rule` names a refusal an unattended lane lists as a skip (`answerUnattended`). */
+  | { readonly decision: 'deny'; readonly reason: string; readonly rule?: DenyRule }
+  /** `kind` says why, for an unattended lane's answer (`answerUnattended`); absent, it is skipped. */
+  | { readonly decision: 'ask'; readonly reason: string; readonly kind?: AskKind };
+
+/** A refusal an unattended lane lists: the floor's deploy, Docker while it is off, a closed secret. */
+export type DenyRule = typeof JudgedRule.Deploy | 'docker_off' | 'secret_read';
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
 /**
@@ -720,8 +739,14 @@ function judgeShell(
     if (DIRECTORY_CHANGES.has(head)) afterCd = true;
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l))))) {
-      if (applies(JudgedRule.Deploy))
-        return deny('Deploy and publish commands are never run by agents.');
+      // A deploy the builder approved by its exact call lifts this refusal alone: every other
+      // check of this segment, the rest of the line and the hook's own still run.
+      if (applies(JudgedRule.Deploy) && input.deployApproved !== true)
+        return {
+          decision: 'deny',
+          reason: 'Deploy and publish commands are never run by agents.',
+          rule: JudgedRule.Deploy,
+        };
       if (ctx.coveredByAllowRule) coveredDeploy = true;
     }
     const line = words.join(' ');
@@ -814,7 +839,7 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     // In a pass the builder may let a plain commit, push or merge run, on a card, as in Claude Code.
     if (input.toolName === 'Bash' && input.inPass !== undefined) {
       const call = passGitCall(command, input.inPass.baseBranch);
-      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK };
+      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK, kind: 'pass_git' };
       if (call?.kind === 'refuse') return deny(call.reason);
     }
     const ctx = {

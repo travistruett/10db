@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir, testPolicy } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { pictureLimitsFor } from '../screens';
 import {
   FakeAdapter,
   type FakeScriptBook,
@@ -25,7 +24,7 @@ import {
   type LaneSessionSpec,
 } from '../sessions';
 import { createLaneMessages, outgoingMessage } from './lane-messages';
-import { threadInlineBytes } from './thread-pictures';
+import { heldInlineBytes, pictureLimitsFor } from '../conversation';
 
 // Workbench spec §6.3: a builder message reaches a lane session under its row's uuid, and is marked
 // delivered only when a turn is seen to take it (`user_message_uuids`, which the fake stamps as the SDK
@@ -71,6 +70,7 @@ const say = (body: string, pictures = 0): TaskMessageRow => {
 function startSession(adapter: FakeAdapter): SessionHandle {
   const spec: LaneSessionSpec = {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     profile: { kind: 'lane', workstreamId: mintId('Workstream'), sequence: 1, allowedTools: [] },
     cwd: dir.path,
@@ -139,7 +139,7 @@ describe('lane messages', () => {
     expect(undelivered()).toEqual([]);
     expect(getTaskMessageRow(state.db, second.id).deliveredAt).not.toBeNull();
     // A uuid that is no message of this task is not evidence for any.
-    expect(messages.consumed([idUuid(mintId('TaskMessage')), 'not-a-uuid'])).toEqual([]);
+    expect(messages.consumed([idUuid(mintId('ConversationItem')), 'not-a-uuid'])).toEqual([]);
     await handle.stop();
   });
 
@@ -230,7 +230,7 @@ describe('lane messages', () => {
   it('sends Codex every picture as its file on every push, held already or over the budget: a Codex lane cannot open one by its path', () => {
     const shot = say('Make it blue', 2);
     state.write((ctx) => {
-      markTaskFilesInline(ctx, taskId, [shot.files[0]?.id ?? mintId('TaskFile')], false);
+      markTaskFilesInline(ctx, taskId, [shot.files[0]?.id ?? mintId('ConversationFile')], false);
     });
     const limits = pictureLimitsFor(AccountKind.CodexSignin);
     const spentAll = limits.inlineMaxBytes;
@@ -253,7 +253,7 @@ describe('lane messages', () => {
     const messages = createLaneMessages({ state, taskId, handle, limits });
     const shot = say('Make it blue', 1);
     messages.push(shot);
-    const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
+    const spent = heldInlineBytes(listTaskFileRows(state.db, taskId), limits);
     expect(spent).toBeGreaterThan(0);
 
     await messages.interrupt();
@@ -262,7 +262,7 @@ describe('lane messages', () => {
     expect(messages.consumed([again?.uuid ?? ''])).toEqual([shot.id]);
     expect(again?.images).toBe(0);
     expect(again?.text).toContain(`kept at ${shot.files[0]?.storedPath ?? ''}`);
-    expect(threadInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
+    expect(heldInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
     await handle.stop();
   });
 });

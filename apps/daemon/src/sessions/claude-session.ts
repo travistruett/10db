@@ -12,7 +12,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
+import { AccountKind, JudgeKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
 import { AUTOUPDATE_OFF } from '../environment';
 import type { Logger } from '../log';
@@ -118,6 +118,7 @@ export function refusedSession(message: string): SessionHandle {
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -258,6 +259,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
               toolName: hookInput.tool_name,
               input: hookInput.tool_input,
               cwd: hookInput.cwd,
+              toolUseId: hookInput.tool_use_id,
               // Each call carries the mode Claude Code reports with it; none is not auto mode.
               reportedMode:
                 hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
@@ -309,6 +311,7 @@ function exploreQueryOptions(
       disallowedTools: spec.profile.disallowedTools,
       agents: spec.profile.agents,
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+      autoMode: spec.profile.judge === JudgeKind.Native ? renderClaudeAutoMode(spec.policy) : null,
     },
     spec.sandbox,
   );
@@ -483,7 +486,12 @@ function logFields(session: ClaudeSession): Record<string, string> {
     case 'lane':
       return { sessionId: session.spec.sessionId, workstreamId: session.spec.profile.workstreamId };
     case 'explore':
-      return { sessionId: session.spec.sessionId, shapeId: session.spec.profile.shapeId };
+      return {
+        sessionId: session.spec.sessionId,
+        ...(session.spec.conversationId === null
+          ? {}
+          : { conversationId: session.spec.conversationId }),
+      };
   }
 }
 
@@ -521,6 +529,7 @@ function endedSession(ended: Extract<SessionEvent, { type: 'ended' }>): SessionH
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 
@@ -1106,6 +1115,10 @@ function startSession(
       abortTimer.cancel();
       forceTimer.cancel();
     },
+    async setModel(model) {
+      if (halted()) return;
+      await q.setModel(model);
+    },
   };
 }
 
@@ -1214,6 +1227,8 @@ export function startClaudeSession(
       await current?.stop();
       await settled;
     },
+    // Between two starts the next start is made from the session, so the pick waits for it.
+    setModel: (model) => (closedStart() || !current ? Promise.resolve() : current.setModel(model)),
   };
 }
 

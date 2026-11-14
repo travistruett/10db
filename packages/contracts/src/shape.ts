@@ -7,7 +7,7 @@ import {
   ProjectId,
   ShapeFindingId,
   ShapeId,
-  ShapeMessageId,
+  ConversationItemId,
   TaskId,
 } from './ids';
 import { TopicKey } from './knowledge';
@@ -96,7 +96,7 @@ export type RecordScope = KnowledgeScope;
  * The builder's messages (or an engine-event note) a proposal came from. Absent keeps the row's
  * stored ids, so a resumed session never restates ids it can no longer see.
  */
-const SourceMessageIds = z.array(ShapeMessageId).min(1).optional();
+const SourceMessageIds = z.array(ConversationItemId).min(1).optional();
 
 /** Reserved for later annotation kinds; empty until one exists. */
 const Annotations = z.array(z.json()).max(0).default([]);
@@ -340,7 +340,7 @@ export const ShapeModelInput = z.strictObject({
 export type ShapeModelInput = z.infer<typeof ShapeModelInput>;
 
 export const ShapeMessageDto = z.object({
-  id: ShapeMessageId,
+  id: ConversationItemId,
   shapeId: ShapeId,
   author: z.enum(ShapeMessageAuthor),
   kind: z.enum(ShapeMessageKind),

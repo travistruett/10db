@@ -56,6 +56,7 @@ function endedAtOnce(message: string): SessionHandle {
     send: () => undefined,
     interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
+    setModel: () => Promise.resolve(),
   };
 }
 

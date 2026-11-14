@@ -1,10 +1,11 @@
+import type { JudgeKind } from '@10db/contracts';
 import type {
+  ConversationId,
   AccountRefusal,
   DeniedBy,
   Effort,
   ModelMarkBasis,
   SessionId,
-  ShapeId,
   AgentAccountKind,
   ToolCallView,
   TrustPolicy,
@@ -86,6 +87,8 @@ export type AgentProfileKind = (typeof AgentProfileKind)[keyof typeof AgentProfi
 /** What every session carries, whatever it is for. */
 export interface AgentSessionCore {
   readonly sessionId: SessionId;
+  /** The conversation the session runs: Plan's, a task's thread, or null for a lane whose task has none. */
+  readonly conversationId: ConversationId | null;
   readonly cwd: string;
   /** The first message; later ones come from `send`. */
   readonly prompt: string;
@@ -164,7 +167,8 @@ export interface LaneProfile {
  */
 export interface ExploreProfile {
   readonly kind: typeof AgentProfileKind.Explore;
-  readonly shapeId: ShapeId;
+  /** Who judges the session's calls (`capabilities.judge`): native runs it in auto mode; rules where absent. */
+  readonly judge?: JudgeKind;
   /** Appended to Claude Code's own system prompt. */
   readonly systemPrompt: string;
   /** The built-in tools the session has; every other built-in is left out. */
@@ -188,6 +192,8 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
   /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
   readonly cwd?: string | undefined;
+  /** The call's id, as the agent's hook names it; what a skip of it is recorded by. */
+  readonly toolUseId?: string | undefined;
   /**
    * The permission mode the agent reported with this call: Claude Code's `auto`, or anything else.
    * Absent where the agent reports none (Codex, the fake, a Plan session until it runs in auto mode).
@@ -282,7 +288,13 @@ export type SessionEvent =
    * A tool call as it starts, changes and finishes, each time whole. `appended` is the output this
    * update added, when it came from a stream of output.
    */
-  | { readonly type: 'tool_call'; readonly call: ToolCallView; readonly appended?: string }
+  | {
+      readonly type: 'tool_call';
+      readonly call: ToolCallView;
+      readonly appended?: string;
+      /** On a finished call, what its view cut off: the whole output, or the edit's whole patch. */
+      readonly full?: ToolCallFull;
+    }
   /** The slash commands the session offers, replacing the last list. */
   | { readonly type: 'commands'; readonly commands: readonly AgentCommand[] }
   /** The agent's plan for its turn, replacing the last one. */
@@ -364,6 +376,14 @@ export type SessionEvent =
  */
 export type InterruptReceipt = { readonly stillQueued: readonly string[] } | null;
 
+/** What a finished call's view left out, kept on disk for the card to expand. */
+export interface ToolCallFull {
+  /** A command's whole output, or an MCP call's whole result, when it is longer than the tail. */
+  readonly output?: string;
+  /** An edit's whole unified patch, when its hunks were cut. */
+  readonly patch?: string;
+}
+
 export interface SessionHandle {
   /** Ends with exactly one `ended` event. */
   readonly events: AsyncIterable<SessionEvent>;
@@ -376,6 +396,11 @@ export interface SessionHandle {
   interrupt(): Promise<InterruptReceipt>;
   /** Ends the session cleanly; resolves once `ended` has been emitted. */
   stop(): Promise<void>;
+  /**
+   * Runs the session's next turn on `model`, the account's launch id for it. Between turns only: a
+   * caller never sends it while a turn runs.
+   */
+  setModel(model: string): Promise<void>;
 }
 
 /** A picture as Claude sees it: an image content block, base64 (Shape spec §5.4). */

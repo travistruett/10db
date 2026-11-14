@@ -1,5 +1,6 @@
 import {
   AccountId,
+  ConversationId,
   EventsHead,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -11,6 +12,7 @@ import {
   SystemCheckDto,
   TaskScreensDto,
 } from '@10db/contracts';
+import { CodeHighlightAdapterProvider } from '@mantine/code-highlight';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -24,6 +26,7 @@ import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler 
 import { setupServer } from 'msw/node';
 import type { ReactElement, ReactNode } from 'react';
 import { App } from '../app';
+import { shikiAdapter } from '../conversation/shiki';
 import type { ConnectionResolver, DaemonConnection } from '../daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
@@ -33,7 +36,9 @@ import { githubStatusDto } from './github-fixtures';
 import { modelMeasuresDto, rolePickDto, rolePicksDto } from './model-fixtures';
 import { playbookDto } from './playbook-fixtures';
 import { projectViewDto } from './fixtures';
+import { conversationDto } from './conversation-fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
+import { itemsOfConversation } from './shape-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -157,6 +162,19 @@ export function baseHandlers(
     // A task's drawer asks what its lane got of a Plan; a task filed by hand has none.
     http.get(daemonUrl('/tasks/:taskId/plan-context', base), () =>
       HttpResponse.json({ context: null, packed: null, checks: [] }),
+    ),
+    // A Plan conversation reads its conversation: idle, holding the items its fixture gave, streaming nothing.
+    http.get(daemonUrl('/conversations/:conversationId', base), ({ params }) =>
+      HttpResponse.json(conversationDto({ id: ConversationId.parse(params['conversationId']) })),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/items', base), ({ params }) =>
+      HttpResponse.json({
+        items: itemsOfConversation(ConversationId.parse(params['conversationId'])),
+        nextAfterSeq: null,
+      }),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/live', base), ({ params }) =>
+      HttpResponse.json({ conversationId: params['conversationId'], items: [] }),
     ),
     // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
     http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>
@@ -286,14 +304,16 @@ export function renderWithDaemon(
       cssVariablesResolver={cssVariablesResolver}
       defaultColorScheme="dark"
     >
-      <QueryClientProvider client={queryClient}>
-        <DaemonProvider
-          resolve={opts.resolve ?? resolveTest}
-          {...(opts.intervals ? { intervals: opts.intervals } : {})}
-        >
-          {children}
-        </DaemonProvider>
-      </QueryClientProvider>
+      <CodeHighlightAdapterProvider adapter={shikiAdapter}>
+        <QueryClientProvider client={queryClient}>
+          <DaemonProvider
+            resolve={opts.resolve ?? resolveTest}
+            {...(opts.intervals ? { intervals: opts.intervals } : {})}
+          >
+            {children}
+          </DaemonProvider>
+        </QueryClientProvider>
+      </CodeHighlightAdapterProvider>
     </MantineProvider>
   );
   const { rerender } = render(ui, { wrapper });

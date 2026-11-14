@@ -1,5 +1,7 @@
 import {
+  ConversationItemId,
   EventType,
+  idUuid,
   mintId,
   ProposalKind,
   ShapeOrigin,
@@ -13,23 +15,33 @@ import * as schema from '../schema';
 import {
   accountUsage,
   createTestStore,
+  getConversation,
   getShape,
+  getShapeSdkSessionId,
   getSession,
+  insertConversation,
+  insertItem,
   insertPrinciple,
   insertSession,
   insertShape,
+  insertShadowAnswer,
   insertShapeLink,
+  insertShapeMessage,
   insertShapeProposal,
   insertShapeQuestion,
   insertSource,
   insertTask,
   insertWorkstream,
   listShapeLinks,
+  listShapeMessages,
   listShapeQuestions,
   listShapes,
   markShapeLinksSizeTold,
+  patchProject,
   patchShape,
+  seedAccount,
   seedProject,
+  shapeConversation,
   shapeTokens,
   updateSessionUsage,
   type Store,
@@ -70,39 +82,27 @@ function newShape(title = 'Density') {
   return store.write((ctx) => insertShape(ctx, project.id, { title, origin: ShapeOrigin.App }));
 }
 
-function laneSession() {
+function laneSession(hash = 'hash-lane') {
   return store.write((ctx) => {
     const task = insertTask(ctx, project.id, {
       title: 'Lane work',
       acceptanceCriteria: ['x'],
       areas: ['api'],
     });
-    return insertSession(ctx, {
+    const session = insertSession(ctx, {
       ...sessionInput,
       workstreamId: insertWorkstream(ctx, task.id, {
         first: { model: 'claude-sonnet-5-5', effort: 'medium' },
       }).id,
-      mcpTokenHash: 'hash-lane',
+      mcpTokenHash: hash,
     });
+    return { session, taskId: task.id };
   }).value;
 }
 
 describe('the Shape tables', () => {
   it.each([
-    [
-      'shapes',
-      [
-        'id',
-        'project_id',
-        'title',
-        'state',
-        'origin',
-        'sdk_session_id',
-        'propose_unlocked',
-        'round',
-      ],
-    ],
-    ['shape_messages', ['id', 'shape_id', 'author', 'kind', 'body', 'created_at']],
+    ['shapes', ['id', 'project_id', 'title', 'state', 'origin', 'propose_unlocked', 'round']],
     [
       'shape_proposals',
       [
@@ -119,8 +119,28 @@ describe('the Shape tables', () => {
       ],
     ],
     ['shape_links', ['id', 'shape_id', 'proposal_id', 'key', 'goal_id', 'task_id', 'decision_id']],
+    [
+      'conversations',
+      [
+        'id',
+        'project_id',
+        'owner_kind',
+        'owner_id',
+        'profile',
+        'account_id',
+        'model',
+        'provider_session_id',
+        'state',
+        'next_seq',
+      ],
+    ],
   ])('%s exists with its columns', (table, expected) => {
     expect(columns(table)).toEqual(expect.arrayContaining(expected));
+  });
+
+  it('keeps a conversation’s session and model on its conversation, not on the shape', () => {
+    expect(columns('shapes')).not.toContain('sdk_session_id');
+    expect(columns('shapes')).not.toContain('model');
   });
 
   it('adds no Shape column to proposals and no Shape value to ProposalKind', () => {
@@ -157,12 +177,133 @@ describe('the Shape tables', () => {
     expect(listShapes(store.db, project.id)).toEqual([shape]);
   });
 
+  it('gives a new shape its conversation, which holds the model and the session it resumes', () => {
+    const { value: shape } = newShape();
+    const conversation = shapeConversation(store.db, shape.id);
+    expect(conversation).toMatchObject({
+      projectId: project.id,
+      ownerKind: 'shape',
+      ownerId: shape.id,
+      profile: 'explore',
+      state: 'idle_cold',
+      accountId: project.accountId,
+      model: null,
+      providerSessionId: null,
+    });
+    store.write((ctx) =>
+      patchShape(ctx, shape.id, { model: 'claude-opus-5-5', sdkSessionId: 'sdk-9' }),
+    );
+    expect(getShape(store.db, shape.id).model).toBe('claude-opus-5-5');
+    expect(getShapeSdkSessionId(store.db, shape.id)).toBe('sdk-9');
+    expect(getConversation(store.db, conversation.id)).toMatchObject({
+      model: 'claude-opus-5-5',
+      providerSessionId: 'sdk-9',
+    });
+  });
+
+  it('moves a conversation to the account its project moves to', () => {
+    const { value: shape } = newShape();
+    const other = seedAccount(store, { kind: 'claude_subscription', label: 'Company B' });
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: other.id }));
+    expect(shapeConversation(store.db, shape.id).accountId).toBe(other.id);
+  });
+
   it('keeps the model the builder chose for a conversation, and forgets it for the default', () => {
     const { value: shape } = newShape();
     store.write((ctx) => patchShape(ctx, shape.id, { model: 'fable' }));
     expect(getShape(store.db, shape.id).model).toBe('fable');
     store.write((ctx) => patchShape(ctx, shape.id, { model: null }));
     expect(getShape(store.db, shape.id).model).toBeNull();
+  });
+
+  it('lists a migrated row first and new ones after it, by seq, though new ids sort first', () => {
+    const shape = newShape().value;
+    const conversation = shapeConversation(store.db, shape.id).id;
+    const migrated = ConversationItemId.parse(`shm_${idUuid(mintId('ConversationItem'))}`);
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, delivered_at, created_at,
+           updated_at)
+         VALUES (?, ?, 1, 'builder', 'message', '{"text":"old"}', ?, ?, ?)`,
+      )
+      .run(migrated, conversation, ...Array<string>(3).fill('2026-11-01T00:00:00.000Z'));
+    store.db.$client
+      .prepare('UPDATE conversations SET next_seq = 2 WHERE id = ?')
+      .run(conversation);
+    const say = (body: string) =>
+      store.write((ctx) =>
+        insertShapeMessage(ctx, shape.id, { author: 'builder', kind: 'text', body }),
+      ).value;
+    const first = say('one');
+    const second = say('two');
+    expect(listShapeMessages(store.db, shape.id).map((m) => [m.id, m.body])).toEqual([
+      [migrated, 'old'],
+      [first.id, 'one'],
+      [second.id, 'two'],
+    ]);
+    expect(
+      store.db.$client
+        .prepare('SELECT seq FROM conversation_items WHERE id = ?')
+        .pluck()
+        .get(first.id),
+    ).toBe(2);
+    expect(listShapeMessages(store.db, shape.id, migrated).map((m) => m.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
+  });
+
+  it('opens a transcript holding a row it cannot read, leaving that row out', () => {
+    const shape = newShape().value;
+    const said = store.write((ctx) =>
+      insertShapeMessage(ctx, shape.id, { author: 'builder', kind: 'text', body: 'kept' }),
+    ).value;
+    store.db.$client
+      .prepare(
+        `INSERT INTO conversation_items (id, conversation_id, seq, author, kind, body, created_at, updated_at)
+         VALUES (?, ?, 2, 'agent', 'tool_call', '{}', ?, ?)`,
+      )
+      .run(
+        mintId('ConversationItem'),
+        shapeConversation(store.db, shape.id).id,
+        ...Array<string>(2).fill(now.toISOString()),
+      );
+    expect(listShapeMessages(store.db, shape.id).map((m) => m.id)).toEqual([said.id]);
+  });
+
+  it('keeps a tool line of 150 emoji whole', () => {
+    const shape = newShape().value;
+    const line = '🙂'.repeat(150);
+    store.write((ctx) =>
+      insertShapeMessage(ctx, shape.id, { author: 'claude', kind: 'tool', body: line }),
+    );
+    expect(listShapeMessages(store.db, shape.id).map((m) => [m.kind, m.body])).toEqual([
+      ['tool', line],
+    ]);
+  });
+
+  it('logs a shadow answer on a message of the conversation', () => {
+    const shape = newShape().value;
+    const message = store.write((ctx) =>
+      insertItem(ctx, shapeConversation(ctx.tx, shape.id).id, {
+        author: 'builder',
+        kind: 'message',
+        body: { text: 'hi' },
+      }),
+    ).value;
+    store.db.$client.pragma('foreign_keys = ON');
+    expect(() =>
+      store.write((ctx) => {
+        insertShadowAnswer(ctx, {
+          shapeId: shape.id,
+          messageId: message.id,
+          decision: 'shape_ready',
+          answer: 'yes',
+          confidence: 0.9,
+          judgeCallId: mintId('JudgeCall'),
+        });
+      }),
+    ).not.toThrow();
   });
 
   it('keeps one proposal per key in a conversation', () => {
@@ -339,43 +480,69 @@ describe('the Shape tables', () => {
 });
 
 describe('a Shape session', () => {
+  const plan = (shapeId: ReturnType<typeof newShape>['value']['id']) =>
+    shapeConversation(store.db, shapeId).id;
+
   it('belongs to its conversation, on the project account, with no workstream', () => {
     const shape = newShape().value;
+    const conversationId = plan(shape.id);
     const session = store.write((ctx) =>
-      insertSession(ctx, { ...sessionInput, shapeId: shape.id, mcpTokenHash: 'hash-shape' }),
+      insertSession(ctx, { ...sessionInput, conversationId, mcpTokenHash: 'hash-shape' }),
     ).value;
     expect(getSession(store.db, session.id)).toMatchObject({
-      shapeId: shape.id,
+      conversationId,
       workstreamId: null,
       accountId: project.accountId,
       sequence: 1,
     });
     const next = store.write((ctx) =>
-      insertSession(ctx, { ...sessionInput, shapeId: shape.id, mcpTokenHash: 'hash-shape-2' }),
+      insertSession(ctx, { ...sessionInput, conversationId, mcpTokenHash: 'hash-shape-2' }),
     ).value;
     expect(next.sequence).toBe(2);
   });
 
-  it('is counted in per-project usage beside the lanes', () => {
+  it('is counted in per-project usage once, whichever owners its row names', () => {
     const lane = laneSession();
     const shape = newShape().value;
     const talk = store.write((ctx) =>
-      insertSession(ctx, { ...sessionInput, shapeId: shape.id, mcpTokenHash: 'hash-shape' }),
+      insertSession(ctx, {
+        ...sessionInput,
+        conversationId: plan(shape.id),
+        mcpTokenHash: 'hash-shape',
+      }),
     ).value;
+    // A lane of a task with a thread names its workstream and its task's conversation.
+    const both = laneSession('hash-both');
+    const thread = store.write((ctx) =>
+      insertConversation(ctx, {
+        projectId: project.id,
+        owner: { kind: 'task', id: both.taskId },
+        profile: 'lane',
+        state: null,
+      }),
+    ).value;
+    store.db.$client
+      .prepare('UPDATE sessions SET conversation_id = ? WHERE id = ?')
+      .run(thread.id, both.session.id);
     store.write((ctx) => {
-      updateSessionUsage(ctx, lane.id, { inputTokens: 100, outputTokens: 10, cachedTokens: 1 });
+      updateSessionUsage(ctx, lane.session.id, {
+        inputTokens: 100,
+        outputTokens: 10,
+        cachedTokens: 1,
+      });
       updateSessionUsage(ctx, talk.id, { inputTokens: 40, outputTokens: 4, cachedTokens: 2 });
+      updateSessionUsage(ctx, both.session.id, { inputTokens: 7, outputTokens: 1 });
     });
     const usage = accountUsage(store.db, project.accountId, NOVEMBER);
     expect(usage.byProject).toEqual([
       expect.objectContaining({
         projectId: project.id,
-        tokensIn: 140,
-        tokensOut: 14,
+        tokensIn: 147,
+        tokensOut: 15,
         tokensCached: 3,
       }),
     ]);
-    expect(usage.total.tokensIn).toBe(140);
+    expect(usage.total.tokensIn).toBe(147);
   });
 
   it('adds up the input and output tokens of every session of its conversation, and no other', () => {
@@ -385,11 +552,11 @@ describe('a Shape session', () => {
     expect(shapeTokens(store.db, shape.id)).toBe(0);
     store.write((ctx) => {
       const session = (shapeId: typeof shape.id, hash: string) =>
-        insertSession(ctx, { ...sessionInput, shapeId, mcpTokenHash: hash });
+        insertSession(ctx, { ...sessionInput, conversationId: plan(shapeId), mcpTokenHash: hash });
       const first = session(shape.id, 'hash-tokens-1');
       const second = session(shape.id, 'hash-tokens-2');
       const elsewhere = session(other.id, 'hash-tokens-3');
-      updateSessionUsage(ctx, lane.id, { inputTokens: 1000, outputTokens: 100 });
+      updateSessionUsage(ctx, lane.session.id, { inputTokens: 1000, outputTokens: 100 });
       updateSessionUsage(ctx, first.id, { inputTokens: 40, outputTokens: 4, cachedTokens: 9 });
       updateSessionUsage(ctx, second.id, { inputTokens: 60, outputTokens: 6 });
       updateSessionUsage(ctx, elsewhere.id, { inputTokens: 7, outputTokens: 7 });
@@ -399,28 +566,31 @@ describe('a Shape session', () => {
   });
 
   it.each([
-    ['neither a workstream nor a shape', false],
-    ['both a workstream and a shape', true],
-  ])('is refused by the database with %s', (_, both) => {
+    ['neither a workstream nor a conversation', false, true],
+    ['both a workstream and a conversation', true, false],
+  ])('a session with %s: refused %s', (_, both, refused) => {
     const lane = laneSession();
     const shape = newShape().value;
-    const [workstreamId, shapeId] = both ? [lane.workstreamId, shape.id] : [null, null];
-    expect(() =>
+    const [workstreamId, conversationId] = both
+      ? [lane.session.workstreamId, plan(shape.id)]
+      : [null, null];
+    const insert = () =>
       store.db.$client
         .prepare(
-          `INSERT INTO sessions (id, workstream_id, shape_id, account_id, sequence, provider, model, effort,
-             mode, mcp_token_hash, started_at, input_tokens, output_tokens, created_at, updated_at)
+          `INSERT INTO sessions (id, workstream_id, conversation_id, account_id, sequence, provider, model,
+             effort, mode, mcp_token_hash, started_at, input_tokens, output_tokens, created_at, updated_at)
            VALUES (?, ?, ?, ?, 1, 'claude', 'opus', 'high', 'managed', 'hash-x', ?, 0, 0, ?, ?)`,
         )
         .run(
           mintId('Session'),
           workstreamId,
-          shapeId,
+          conversationId,
           project.accountId,
           now.toISOString(),
           now.toISOString(),
           now.toISOString(),
-        ),
-    ).toThrow(/CHECK constraint failed/);
+        );
+    if (refused) expect(insert).toThrow(/CHECK constraint failed: sessions_has_owner/);
+    else expect(insert).not.toThrow();
   });
 });

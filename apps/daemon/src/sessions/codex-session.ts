@@ -217,6 +217,8 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
   /** The session is ending (a stop, or a failed turn that ends it), so notifications are no longer read. */
   let closing = false;
   let threadId: string | null = null;
+  /** The model the next `turn/start` names: the spec's, until `setModel` picks another. */
+  let model = spec.model;
   /** Turns that have completed, so a `turn/start` reply is not taken for a turn that already ended. */
   let turnsCompleted = 0;
   const state = createTurnState();
@@ -460,7 +462,7 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
    * run it. An error that merely names it (at capacity, a context window exceeded) is not a refusal.
    */
   const refusesModel = (message: string): boolean =>
-    message.includes(spec.model) && /does not exist|unknown model/i.test(message);
+    message.includes(model) && /does not exist|unknown model/i.test(message);
 
   /** A server error that refuses the requested model. */
   const isModelRefusal = (error: unknown): boolean =>
@@ -549,7 +551,7 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
           ...pictureInputs(message.images),
         ],
         approvalPolicy: 'never',
-        model: spec.model,
+        model,
         effort: spec.effort,
       },
       TurnStartResponse,
@@ -588,7 +590,7 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
     closing = true;
     switch (end) {
       case TurnEnd.ModelRefused:
-        finish(SessionEndReason.ModelRefused, modelRefusal(spec.model));
+        finish(SessionEndReason.ModelRefused, modelRefusal(model));
         return;
       case TurnEnd.SignedOut: {
         const message = `Codex says account "${spec.account.label}" is signed out.`;
@@ -1025,6 +1027,10 @@ export function startCodexSession(spec: LaneSessionSpec, deps: CodexSessionDeps)
       const turnId = state.turnId;
       if (started && threadId !== null && turnId !== null) await interruptTurn(threadId, turnId);
       finish(SessionEndReason.Stopped, null);
+    },
+    setModel: (next) => {
+      model = next;
+      return Promise.resolve();
     },
   };
 }

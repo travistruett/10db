@@ -8,12 +8,15 @@ import {
   type Provider,
   type SessionId,
   type SessionMode,
-  type ShapeId,
+  ConversationOwnerKind,
+  ShapeId,
+  type ConversationId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
+import { getConversation } from './conversations';
 import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
@@ -21,15 +24,18 @@ export type SessionRow = typeof schema.sessions.$inferSelect;
 /** A lane's session: the session runs its workstream. */
 export type LaneSessionRow = SessionRow & { readonly workstreamId: WorkstreamId };
 
-/** Whether the session runs a lane's workstream, rather than a Shape conversation. */
+/** Whether the session runs a lane's workstream, rather than only a conversation. */
 export function isLaneSession(row: SessionRow): row is LaneSessionRow {
   return row.workstreamId !== null;
 }
 
-/** A session runs a workstream or a Shape conversation, exactly one (Shape spec §5.1). */
+/**
+ * A session is inserted for a workstream (a lane) or for a conversation (Plan's). A lane of a task
+ * with a thread also names its task's conversation, which the insert finds.
+ */
 type SessionOwner =
-  | { readonly workstreamId: WorkstreamId; readonly shapeId?: undefined }
-  | { readonly shapeId: ShapeId; readonly workstreamId?: undefined };
+  | { readonly workstreamId: WorkstreamId; readonly conversationId?: undefined }
+  | { readonly conversationId: ConversationId; readonly workstreamId?: undefined };
 
 export type NewSession = SessionOwner & NewSessionFields;
 
@@ -45,6 +51,8 @@ interface NewSessionFields {
   readonly briefingBaselinePct?: number | null;
   /** The account the session launches on; absent, the project's current account. */
   readonly accountId?: AccountId;
+  /** The row's id, when the caller minted it to prepare the session before the row is written. */
+  readonly id?: SessionId;
 }
 
 /** The account of the project the session works for: through its workstream, or its conversation. */
@@ -63,24 +71,51 @@ function projectOwner(ctx: WriteContext, input: SessionOwner) {
   }
   const owner = ctx.tx
     .select(columns)
-    .from(schema.shapes)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.shapes.projectId))
+    .from(schema.conversations)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.conversations.projectId))
     .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
-    .where(eq(schema.shapes.id, input.shapeId))
+    .where(eq(schema.conversations.id, input.conversationId))
     .get();
-  if (!owner) throw new NotFoundError('shape', input.shapeId);
+  if (!owner) throw new NotFoundError('conversation', input.conversationId);
   return owner;
 }
 
+/** The shape whose conversation the session runs; null for a session of no Plan conversation. */
+export function sessionShapeId(db: DbReader, row: SessionRow): ShapeId | null {
+  if (row.conversationId === null) return null;
+  const conversation = getConversation(db, row.conversationId);
+  // The owner id of a shape's conversation is a ShapeId; parsed, as text read from the database.
+  return conversation.ownerKind === ConversationOwnerKind.Shape
+    ? ShapeId.parse(conversation.ownerId)
+    : null;
+}
+
+/** The conversation of the workstream's task's thread, which its lane session runs; null for none. */
+function laneConversation(ctx: WriteContext, workstreamId: WorkstreamId): ConversationId | null {
+  const row = ctx.tx
+    .select({ id: schema.conversations.id })
+    .from(schema.workstreams)
+    .innerJoin(
+      schema.conversations,
+      and(
+        eq(schema.conversations.ownerKind, ConversationOwnerKind.Task),
+        eq(schema.conversations.ownerId, schema.workstreams.taskId),
+      ),
+    )
+    .where(eq(schema.workstreams.id, workstreamId))
+    .get();
+  return row?.id ?? null;
+}
+
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
-  const { workstreamId, shapeId, ...fields } = input;
+  const { workstreamId, conversationId, id, ...fields } = input;
   const prior = ctx.tx
     .select({ n: count() })
     .from(schema.sessions)
     .where(
       workstreamId !== undefined
         ? eq(schema.sessions.workstreamId, workstreamId)
-        : eq(schema.sessions.shapeId, shapeId),
+        : eq(schema.sessions.conversationId, conversationId),
     )
     .get();
   // A project can move while a session waits for its start, so the runner names the account it launched on.
@@ -89,10 +124,10 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
       ? projectOwner(ctx, input)
       : { accountId: input.accountId, kind: getAccountRow(ctx.tx, input.accountId).kind };
   const row: SessionRow = {
-    id: mintId('Session'),
+    id: id ?? mintId('Session'),
     ...fields,
     workstreamId: workstreamId ?? null,
-    shapeId: shapeId ?? null,
+    conversationId: conversationId ?? laneConversation(ctx, workstreamId),
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,
@@ -177,6 +212,34 @@ export function endSession(ctx: WriteContext, id: SessionId, exitReason: string)
       entityId: id,
       data: { exitReason },
     });
+}
+
+/**
+ * The dollars a conversation's sessions cost together; null when none has a cost (a subscription's,
+ * whose dollars are not real money).
+ */
+export function conversationCostUsd(db: DbReader, conversationId: ConversationId): number | null {
+  const row = db
+    .select({ total: sql<number | null>`sum(${schema.sessions.costUsd})` })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.conversationId, conversationId))
+    .get();
+  return row?.total ?? null;
+}
+
+/** Ends every session of the conversation that has not ended, as a restart finds them; answers how many. */
+export function endConversationSessions(
+  ctx: WriteContext,
+  conversationId: ConversationId,
+  exitReason: string,
+): number {
+  const live = ctx.tx
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.conversationId, conversationId), isNull(schema.sessions.endedAt)))
+    .all();
+  for (const row of live) endSession(ctx, row.id, exitReason);
+  return live.length;
 }
 
 export function getSession(db: DbReader, id: SessionId): SessionRow {

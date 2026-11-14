@@ -31,6 +31,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy(),
     cwd: dir.path,
     prompt: 'Task: Alpha\nDo it.',
@@ -351,7 +352,6 @@ describe('one open handle per agent session', () => {
     ...spec({ resumeProviderSessionId: resume }),
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are Shape.',
       tools: [],
       allowedTools: [],
@@ -393,6 +393,14 @@ describe('one open handle per agent session', () => {
         .map((e) => e.type),
     ).toEqual(['text_delta', 'text_delta', 'message', 'turn_complete']);
     expect(events).toContainEqual({ type: 'message', itemId: 'fake-msg-1', text: 'Understood.' });
+  });
+
+  it('records the model an explore session is switched to', async () => {
+    const adapter = new FakeAdapter({});
+    const handle = adapter.open(exploreSpec(null));
+    await handle.setModel('claude-opus-5-5');
+    expect(adapter.shapeSessions[0]?.models).toEqual(['claude-opus-5-5']);
+    await handle.stop();
   });
 
   it('refuses an explore session on the agent session a lane holds: the key is the agent session', () => {

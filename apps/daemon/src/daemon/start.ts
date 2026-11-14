@@ -17,6 +17,8 @@ import {
   RoutedBy,
   agentKind,
   providerOf,
+  WorkstreamId,
+  WorkstreamState,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -24,13 +26,13 @@ import {
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
+  getBatch,
   getInboxItem,
   createStore,
   DB_MIGRATIONS_DIR,
@@ -153,6 +155,10 @@ import {
   subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
+  applySkippedChoice,
+  raiseSkippedCard,
+  skipFollowUpStarter,
+  sweepUnlistedRuns,
   type DeliveryContext,
   type DeliveryLimits,
   type PassOpenDeps,
@@ -171,7 +177,13 @@ import {
   type GhLoginProbe,
   type ResolvedTools,
 } from '../environment';
-import { createEventBus, createStateStore, type StateStore } from '../events';
+import {
+  createEventBus,
+  createLiveFrames,
+  createStateStore,
+  type LiveFrames,
+  type StateStore,
+} from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
@@ -184,7 +196,7 @@ import {
   type GhTools,
 } from '../github';
 import { createGithubServices } from './github-services';
-import { createInboxService, createParkAnswers } from '../inbox';
+import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
@@ -192,11 +204,13 @@ import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
+import { createExploreEngine } from '../conversation';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
   forgetEndedYields,
+  mintSessionToken,
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
@@ -238,6 +252,7 @@ import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
+import { createConversationServices } from './conversation-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -435,6 +450,8 @@ export interface DaemonOptions {
   readonly devUiOrigin?: string;
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
+  /** The live channel conversations stream on; one is made when none is given. */
+  readonly liveFrames?: LiveFrames;
   readonly caffeinate?: CaffeinateSpawner;
   /** The system check, given the git and gh the daemon resolved so it reports the ones it runs. */
   readonly systemCheck?: (
@@ -616,6 +633,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  const liveFrames =
+    opts.liveFrames ??
+    createLiveFrames((error) => {
+      logger.error({ err: error }, 'live frame listener failed');
+    });
   // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
   backfillAttachmentRevisions(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
@@ -780,6 +802,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let startPageSignOff: StartSignOff | null = null;
+  // Starts the follow-ups Run these now made, once the services that start tasks exist.
+  let startFollowUps = (): void => undefined;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -837,8 +861,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // stakeholder's words are answered through the card and never reach a live ask_human call.
     afterRouted: (id) => {
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
-      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
+      // Read after the draft, which hands a person's card back to the builder for want of Slack. A
+      // card that now goes to someone else parks its sessions; one left with the builder waits live,
+      // except in a lane nobody watches, which answers at once.
+      const routed = getInboxItem(state.db, id);
+      if (routedAway(routed)) runner?.parkFor(id);
+      else if (leftWithBuilder(routed))
+        inbox.answerAwayWaits(id, (sessionId) => live.get(sessionId)?.away !== undefined);
       after?.();
     },
   });
@@ -859,6 +888,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onParkAnswer: parkAnswers,
     log: logger,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      applySkippedChoice(ctx, item, answer)
+        ? () => {
+            startFollowUps();
+          }
+        : undefined,
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
@@ -1424,17 +1459,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
   const laneSandbox = sandboxes?.lane ?? null;
+  // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
+  const exploreEngine = createExploreEngine({
+    state,
+    adapter,
+    clock,
+    log: logger.child({ component: 'explore' }),
+    dataDir: opts.dataDir,
+    frames: liveFrames,
+    // A waiting update starts no new turn: a conversation's session is no lane, and the install
+    // would cut off one that began during the drain, or while the install starts.
+    hold: holdBoth([updateDrain, installHold]),
+    bus,
+    mintToken: mintSessionToken,
+    // A start the account runtime holds (a pause, a monthly cap) waits it out, as a lane's does.
+    accountBlocked: (accountId, projectId) =>
+      accounts.blocked(getAccountRow(db, accountId), projectId),
+    defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+    withdrawCard: (id) => {
+      inbox.withdraw(id);
+    },
+  });
   const shape = createShapeService({
     state,
     adapter,
+    engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
-    // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
-    // install would cut off one that began during the drain, or while the install starts.
-    hold: holdBoth([updateDrain, installHold]),
     jev: createShapeJev({
       state,
       judge,
@@ -1632,6 +1686,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // An ended unattended run lists what it skipped while nobody watched, once; the sweep raises the
+  // item of a run that ended before a crash, or that recovery just failed.
+  const skippedDeps = { state, git, log: logger.child({ component: 'skipped' }) };
+  // The raises still reading a run's changed paths, which stop() waits for before the store closes.
+  const skippedRaises = new Set<Promise<void>>();
+  const unsubscribeSkipped = bus.subscribe((event) => {
+    if (event.type !== EventType.WorkstreamChanged) return;
+    const to = event.data['to'];
+    if (to !== WorkstreamState.Done && to !== WorkstreamState.Failed) return;
+    const id = WorkstreamId.safeParse(event.entityId);
+    if (!id.success) return;
+    const raised = raiseSkippedCard(skippedDeps, id.data)
+      .catch((error: unknown) => {
+        logger.warn(
+          { err: error, workstreamId: id.data },
+          'could not raise the skipped item of a run',
+        );
+      })
+      .finally(() => {
+        skippedRaises.delete(raised);
+      });
+    skippedRaises.add(raised);
+  });
+  await sweepUnlistedRuns(skippedDeps);
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
@@ -1910,6 +1988,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     clock,
     bus,
+    liveFrames,
     runner: createdRunner,
     scheduler: createdScheduler,
     moves,
@@ -1977,6 +2056,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
+    conversation: createConversationServices({
+      state,
+      engine: exploreEngine,
+      shape,
+      dataDir: opts.dataDir,
+    }),
     planRecord: createPlanRecordServices({
       state,
       dataDir: opts.dataDir,
@@ -2030,6 +2115,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       git.gitDirs(repoPath).catch(() => undefined);
     },
   });
+  // A follow-up starts once its source lets it: looked at on every batch and run change, and now.
+  startFollowUps = skipFollowUpStarter({
+    state,
+    log: logger.child({ component: 'skip-follow-ups' }),
+    starts: {
+      join: (projectId, taskId, batchId) => {
+        services.startBatch(projectId, {
+          title: getBatch(db, batchId).title,
+          taskIds: [taskId],
+          batchId,
+        });
+      },
+      base: (taskId) => {
+        services.startTask(taskId);
+      },
+    },
+  });
+  bus.subscribe((event) => {
+    if (event.type === EventType.BatchUpdated || event.type === EventType.WorkstreamChanged)
+      startFollowUps();
+  });
+  startFollowUps();
   const build = opts.build ?? null;
   let selfUpdate: SelfUpdate | null = null;
   // What an update waits for, as counts. A queued ship, checkout return or cleanup is a delivery job
@@ -2222,6 +2329,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      awayFor: (id) => live.get(id)?.away,
       claimWaits,
       deliverMessage: (taskId, messageId) =>
         createdRunner.deliverMessage(taskId, messageId, { redo: false }),
@@ -2230,6 +2338,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       shapeTools: shape.toolsFor,
     }),
   });
+  // What a restart found of each explore conversation is settled before the API serves it.
+  await exploreEngine.recover();
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
     fetch: app.fetch,
@@ -2364,6 +2474,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
       await shape.close();
+      await exploreEngine.close();
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
@@ -2376,6 +2487,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A tick asked for before the stop may still be reading the branches; it launches nothing now,
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
+      unsubscribeSkipped();
+      await Promise.all(skippedRaises);
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });

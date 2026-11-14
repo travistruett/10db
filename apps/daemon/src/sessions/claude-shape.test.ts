@@ -34,6 +34,7 @@ import type {
   ToolRequest,
 } from './types';
 import { testPolicy } from '../../test/fixtures';
+import { judgeShapeCall } from '../shape';
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
@@ -45,6 +46,7 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
   const { profile, ...core } = overrides;
   return {
     sessionId: mintId('Session'),
+    conversationId: null,
     policy: testPolicy('plan'),
     cwd: '/repo',
     prompt: 'First message',
@@ -67,7 +69,6 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     ...core,
     profile: {
       kind: 'explore',
-      shapeId: mintId('Shape'),
       systemPrompt: 'You are Shape.',
       tools: ['Read', 'Grep', 'Glob', 'Agent'],
       allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
@@ -175,6 +176,10 @@ function fakeQuery(
         return Promise.resolve({ added: [], removed: [], errors: opts.mcpErrors ?? {} });
       },
       mcpServerStatus: () => Promise.resolve([]),
+      setModel: (model?: string) => {
+        run.order.push(`setModel ${model ?? ''}`);
+        return Promise.resolve();
+      },
       getContextUsage: () =>
         Promise.resolve({ totalTokens: 90_000, maxTokens: 200_000, percentage: 45 }),
     }) as unknown as ReturnType<QueryFn>;
@@ -485,6 +490,65 @@ describe('the PreToolUse hook', () => {
     });
   });
 
+  describe('with Plan’s own judge of a web call', () => {
+    const access = (judge: 'native' | 'rules') => ({
+      checkout: '/repo',
+      home: '/home',
+      protectedReads: [],
+      filesDir: '/files',
+      sandboxRoots: ['/tmp/10db'],
+      judge,
+    });
+    const judged = (judge: 'native' | 'rules') =>
+      hookFor((req) =>
+        judgeShapeCall(
+          {
+            toolName: req.toolName,
+            toolInput: req.input,
+            agentId: req.agentId,
+            agentType: req.agentType,
+          },
+          access(judge),
+        ),
+      );
+
+    it.each([
+      [
+        'a fetch of the loopback MCP host, on a native judge',
+        'native',
+        'http://127.0.0.1:4317/mcp',
+        'deny',
+      ],
+      [
+        'a fetch of a private address, on a native judge',
+        'native',
+        'https://10.0.0.5/admin',
+        'deny',
+      ],
+      ['a fetch from the session, on a rules judge', 'rules', 'https://example.com/', 'deny'],
+    ] as const)('refuses %s', async (_name, judge, url, decision) => {
+      const call = await judged(judge);
+      expect(await call({ tool_name: 'WebFetch', tool_input: { url, prompt: 'x' } })).toMatchObject(
+        {
+          hookSpecificOutput: { permissionDecision: decision },
+        },
+      );
+    });
+
+    it('leaves a fetch of a public page to Claude Code’s own judge, on a native judge: no decision', async () => {
+      const call = await judged('native');
+      expect(
+        await call({
+          tool_name: 'WebFetch',
+          tool_input: { url: 'https://example.com/', prompt: 'x' },
+        }),
+      ).toEqual({});
+      expect(
+        await call({ tool_name: 'WebSearch', tool_input: { query: 'vega-lite ties' } }),
+      ).toEqual({});
+    });
+  });
+
   it('denies when the guard throws', async () => {
     const call = await hookFor(() => {
       throw new Error('boom');
@@ -659,6 +723,24 @@ describe('the session’s run', () => {
     }
     expect(interruptsBeforeStop).toBe(1);
     expect(run.inputs.map((m) => m.message.content)).toEqual(['First message', 'and another']);
+  });
+
+  it('runs the next turn on the model it is given between turns', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(spec(), deps(query));
+    let switched = false;
+    for await (const event of handle.events) {
+      if (event.type === 'turn_complete' && !switched) {
+        switched = true;
+        await handle.setModel('claude-opus-5-5');
+        handle.send('on the new model');
+      } else if (event.type === 'turn_complete') await handle.stop();
+    }
+    expect(run.order.filter((o) => o !== 'accountInfo' && o !== 'setMcpServers')).toEqual([
+      'input',
+      'setModel claude-opus-5-5',
+      'input',
+    ]);
   });
 
   it('refuses a session that is not the expected account, before any prompt', async () => {

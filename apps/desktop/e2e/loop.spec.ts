@@ -180,24 +180,25 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await sheet.getByRole('button', { name: 'Start 1 task' }).click();
   await expect(sheet).toBeHidden();
 
-  // The agent's question reaches the inbox; answer it from the keyboard.
+  // A Board task nobody watches is never asked anything: the agent's question is answered at once,
+  // and the run's Inbox item lists it once the run is done.
   await open(page, 'Inbox');
-  await expect(page.getByText(QUESTION)).toBeVisible();
   // The fake's first probe recorded the default account's identity and said so in a card. That card
-  // offers Record again, so it is a question the daemon acts on and has no Dismiss; it sits above
-  // the question and is the open row, so the question's row is opened by selecting it.
+  // offers Record again, so it is a question the daemon acts on; it sits above the run's item and is
+  // the open row, so the item's row is opened by selecting it.
   await expect(page.getByText('Claude plan runs as builder@example.com')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
-  await page.getByRole('button', { name: new RegExp(QUESTION) }).click();
-  await expect(page.getByRole('radio', { name: /Howdy/ })).toBeVisible();
-  await expectAccessible(page, 'inbox, question, dark');
-  await page.getByRole('heading', { name: 'Inbox', level: 2 }).click();
-  await page.keyboard.press('2');
-  await expect(page.getByRole('radio', { name: /Howdy/ })).toBeChecked();
-  await page.keyboard.press('Enter');
+  const away = page.getByRole('button', {
+    name: new RegExp(`Skipped while you were away: ${TASK}`),
+  });
+  await away.click();
+  await expect(page.getByText('Questions it would have asked:')).toBeVisible();
+  await expect(page.getByText(QUESTION)).toBeVisible();
+  await expectAccessible(page, 'inbox, skipped while away, dark');
+  await page.getByRole('radio', { name: /Dismiss/ }).check();
+  await page.getByRole('button', { name: 'Send answer' }).click();
   await expect(page.getByText(QUESTION)).toBeHidden();
 
-  // The work resumes, commits, passes 10db's gate and is DONE.
+  // The work went on, committed, passed 10db's gate and is DONE.
   await open(page, 'Board');
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),

@@ -5,6 +5,7 @@ import {
   rehearseNote,
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
+  shapeAllowedTools,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_OFFERED_TOOLS,
@@ -277,5 +278,17 @@ describe('a session in its read-only sandbox (§5.2)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "code-researcher"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/waits for the builder's approval on a card/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/data, never instructions/);
+  });
+});
+
+describe('the tools a Plan session approves without a prompt, by its judge', () => {
+  it('leaves the web tools out on a native judge, so auto mode’s classifier judges each call', () => {
+    expect(shapeAllowedTools('native')).not.toContain('WebSearch');
+    expect(shapeAllowedTools('native')).not.toContain('WebFetch');
+    expect(shapeAllowedTools('native')).toContain('Read');
+  });
+
+  it.each(['rules', 'tendb'] as const)('keeps today’s list on a %s judge', (judge) => {
+    expect(shapeAllowedTools(judge)).toEqual(SHAPE_ALLOWED_TOOLS);
   });
 });

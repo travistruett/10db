@@ -1,0 +1,1 @@
+ALTER TABLE `skip_listings` ADD `config_head` text;

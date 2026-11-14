@@ -12,7 +12,7 @@ import {
   type ShadowAgreementDto,
   type ShapeId,
   type ShapeJudgeDecision,
-  type ShapeMessageId,
+  type ConversationItemId,
 } from '@10db/contracts';
 import {
   getJudgeConfig,
@@ -57,11 +57,11 @@ export interface ShapeJevDeps {
 
 export interface ShapeJev {
   /** Asks the decisions about one builder message; resolves once every answer is logged. Never throws. */
-  heard(shapeId: ShapeId, messageId: ShapeMessageId): Promise<void>;
+  heard(shapeId: ShapeId, messageId: ConversationItemId): Promise<void>;
 }
 
 /** The conversation up to the message, fenced as data so nothing in it reads as an instruction. */
-function stateOf(db: DbReader, shapeId: ShapeId, messageId: ShapeMessageId): string {
+function stateOf(db: DbReader, shapeId: ShapeId, messageId: ConversationItemId): string {
   const messages = listShapeMessages(db, shapeId).filter(
     (m) =>
       m.kind === ShapeMessageKind.Text &&
@@ -76,7 +76,7 @@ function stateOf(db: DbReader, shapeId: ShapeId, messageId: ShapeMessageId): str
 export function createShapeJev(deps: ShapeJevDeps): ShapeJev {
   async function ask(
     shapeId: ShapeId,
-    messageId: ShapeMessageId,
+    messageId: ConversationItemId,
     decision: ShapeJudgeDecision,
     state: string,
     judge: Judge,
@@ -134,7 +134,7 @@ interface Conversation {
 }
 
 /** Propose pressed within the builder's next two messages. */
-function readyTruth(conv: Conversation, messageId: ShapeMessageId): Truth {
+function readyTruth(conv: Conversation, messageId: ConversationItemId): Truth {
   const at = conv.messages.findIndex((m) => m.id === messageId);
   let builderMessages = 0;
   for (const m of conv.messages.slice(at + 1)) {
@@ -154,7 +154,7 @@ function readyTruth(conv: Conversation, messageId: ShapeMessageId): Truth {
  */
 function citedTruth(
   conv: Conversation,
-  messageId: ShapeMessageId,
+  messageId: ConversationItemId,
   kinds: ReadonlySet<string>,
 ): Truth {
   const citing = conv.proposals.filter(

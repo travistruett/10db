@@ -29,6 +29,7 @@ import {
   listShapeLinks,
   listShapeMessages,
   listShapeProposals,
+  shapeConversation,
   shapeTokens,
   type DbReader,
   type ShapeFileRow,
@@ -246,7 +247,7 @@ export function buildShapeView(
   return {
     shape,
     models: world.models ?? NO_MODELS,
-    messages,
+    conversationId: shapeConversation(db, shapeId).id,
     proposals: listShapeProposals(db, shapeId).map((row) =>
       proposalOf(db, row, links, shape.round),
     ),
