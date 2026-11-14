@@ -1,14 +1,23 @@
 import {
   Approval,
+  ConflictError,
+  InboxKind,
   SkipKind,
+  SkippedActionId,
+  WorkstreamId,
   WorkstreamState,
+  type InboxAnswer,
+  type InboxItemDto,
   type InboxOption,
   type SkippedActionDto,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
+  approveSkips,
   getTask,
   getWorkstreamRow,
+  insertSkipFollowUp,
+  insertTask,
+  skipFollowUpOf,
   lastListed,
   passHoldingTask,
   listSkipsForWorkstream,
@@ -16,12 +25,15 @@ import {
   unlistedEndedRuns,
   type WriteContext,
 } from '@10db/db';
+import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { flagCard } from '../inbox';
 import type { Logger } from '../log';
 import { LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
+import { followUpStart } from './follow-up-start';
+import { sourceStateOf } from './skip-follow-up';
 
 // Trust line §5 and T4 call 12: when an unattended run ends, one Inbox item lists what it skipped,
 // the questions it was answered at once and the config it wrote, each once. It is marked in
@@ -125,6 +137,16 @@ const DISMISS: InboxOption = {
   description: 'Leave the work as it is',
 };
 
+/** Run these now, worded by whether the follow-up would start now or wait for the source to ship. */
+function runOption(waits: boolean): InboxOption {
+  return {
+    label: SkippedChoice.RunTheseNow,
+    description: waits
+      ? 'Waits for the task to finish shipping, then starts a follow-up that runs the calls above, approved'
+      : 'Start a follow-up task that runs the calls above, approved',
+  };
+}
+
 /** The run's changed paths, as the review step reads them; null when they can't be read. */
 async function changedPaths(
   deps: SkippedCardDeps,
@@ -178,7 +200,13 @@ export async function raiseSkippedCard(
       workstreamId: null,
       title: `Skipped while you were away: ${task.title}`,
       body: bodyOf(skips, written),
-      options: [DISMISS],
+      options:
+        skipIds.length === 0
+          ? [DISMISS]
+          : [
+              runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait'),
+              DISMISS,
+            ],
       recommendation: null,
       detail: { [SKIPPED_DETAIL]: workstreamId, skipIds },
       foldKey: `skipped:${workstreamId}:${through ?? 'none'}`,
@@ -199,4 +227,64 @@ export async function sweepUnlistedRuns(deps: SkippedCardDeps): Promise<void> {
       );
     }
   }
+}
+
+const SkippedDetail = z.object({
+  [SKIPPED_DETAIL]: WorkstreamId,
+  skipIds: z.array(SkippedActionId),
+});
+
+/** The longest source title the follow-up's own title quotes whole. */
+const SOURCE_TITLE_MAX = 160;
+
+/**
+ * Run these now, in the answer's own write: the follow-up task, its approvals (exactly the skips the
+ * item listed) and its follow-up row. Answers whether it made one, so the caller starts it once the
+ * write commits. A source whose run is being retried, or that already has a follow-up, is refused.
+ */
+export function applySkippedChoice(
+  ctx: WriteContext,
+  item: InboxItemDto,
+  answer: InboxAnswer,
+): boolean {
+  if (item.kind !== InboxKind.Flag || answer.choice !== SkippedChoice.RunTheseNow) return false;
+  // The detail is the item's own JSON, written when it was raised.
+  const detail = SkippedDetail.safeParse(item.detail);
+  if (!detail.success) return false;
+  const source = detail.data[SKIPPED_DETAIL];
+  const ids = detail.data.skipIds;
+  if (ids.length === 0) throw new ConflictError('Nothing this item lists can be run approved');
+  const row = getWorkstreamRow(ctx.tx, source);
+  const sourceTask = getTask(ctx.tx, row.taskId);
+  if (row.state !== WorkstreamState.Done && row.state !== WorkstreamState.Failed)
+    throw new ConflictError(
+      `"${sourceTask.title}" is being retried; Run these now waits until its run ends.`,
+    );
+  const existing = skipFollowUpOf(ctx.tx, source);
+  if (existing !== null)
+    throw new ConflictError(`"${sourceTask.title}" already has the follow-up "${existing.title}".`);
+  const listed = new Set<string>(ids);
+  const approved = listSkipsForWorkstream(ctx.tx, source).filter((s) => listed.has(s.id));
+  const quoted =
+    sourceTask.title.length > SOURCE_TITLE_MAX
+      ? `${sourceTask.title.slice(0, SOURCE_TITLE_MAX)}…`
+      : sourceTask.title;
+  const task = insertTask(ctx, row.projectId, {
+    title: `Run what "${quoted}" skipped`,
+    description: [
+      `The builder approved these calls, which an earlier run of "${sourceTask.title}" skipped. Run them, then finish what that run left undone because of them.`,
+      ...approved.map((s) => `- \`${oneLine(s.summary)}\`: skipped because ${oneLine(s.reason)}`),
+    ].join('\n'),
+    acceptanceCriteria: [
+      'Each approved call has run, and what it held up in the earlier run is done.',
+    ],
+    areas: sourceTask.areas,
+  });
+  approveSkips(ctx, task.id, ids);
+  insertSkipFollowUp(ctx, {
+    taskId: task.id,
+    sourceWorkstreamId: source,
+    sourceBatchId: row.batchId,
+  });
+  return true;
 }

@@ -66,7 +66,7 @@ import {
   type Keychain,
 } from '../src/environment';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
-import { createDeliveryJobs } from '../src/delivery';
+import { applySkippedChoice, createDeliveryJobs, skipFollowUpStarter } from '../src/delivery';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
@@ -295,9 +295,24 @@ export async function createTestEngine(
     const id = InboxItemId.safeParse(event.entityId);
     if (id.success) sends.onCardChanged(getInboxItem(state.db, id.data)).catch(() => undefined);
   });
+  // Run these now's follow-up starts as the Board's Start does; the engine has no batch starter.
+  const startFollowUps = skipFollowUpStarter({
+    state,
+    log: silentLogger,
+    starts: {
+      join: () => {
+        throw new Error('the test engine starts no batch');
+      },
+      base: (taskId) => {
+        startTaskWithPlan(state, taskId);
+      },
+    },
+  });
   const inbox = createInboxService({
     state,
     judgeOff: triageJudge.off,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      applySkippedChoice(ctx, item, answer) ? startFollowUps : undefined,
     parkWaiting: (id) => {
       runner?.parkFor(id);
     },

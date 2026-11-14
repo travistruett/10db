@@ -493,6 +493,15 @@ export function createInboxService(deps: {
    */
   onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
   /**
+   * Runs inside the answer's write for a flag whose choice writes rows of its own (Run these now): a
+   * throw refuses the answer and keeps the flag open. What it answers runs once the write committed.
+   */
+  onFlagAnswerInWrite?(
+    ctx: WriteContext,
+    item: InboxItemDto,
+    answer: InboxAnswer,
+  ): (() => void) | undefined;
+  /**
    * Runs once the builder answered a lane's question with "Park the task" and the card closed with the
    * answer: the run stops and the task is parked. The asking session is not handed the answer, since
    * it is stopped, not told. It must not throw; it logs what it could not do.
@@ -805,6 +814,7 @@ export function createInboxService(deps: {
           applyGateHostChoice(ctx, updated, answer);
           applyDockerChoice(ctx, updated, answer);
           applyHazardChoice(ctx, updated, answer);
+          afterCommit = deps.onFlagAnswerInWrite?.(ctx, updated, answer);
         }
         return updated;
       });

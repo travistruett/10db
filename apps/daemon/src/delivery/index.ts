@@ -80,3 +80,6 @@ export { createWorktreeDependencies } from './worktree-dependencies';
 export { createWorktreeGenerators } from './worktree-generated';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export { raiseSkippedCard, SKIPPED_DETAIL, SkippedChoice, sweepUnlistedRuns } from './skipped-card';
+export { applySkippedChoice } from './skipped-card';
+export { skipFollowUpStarter, sourceStateOf } from './skip-follow-up';
+export { followUpStart } from './follow-up-start';

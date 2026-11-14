@@ -31,6 +31,7 @@ import {
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
+  getBatch,
   getInboxItem,
   createStore,
   DB_MIGRATIONS_DIR,
@@ -139,7 +140,9 @@ import {
   subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
+  applySkippedChoice,
   raiseSkippedCard,
+  skipFollowUpStarter,
   sweepUnlistedRuns,
   type DeliveryContext,
   type DeliveryLimits,
@@ -733,6 +736,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let startPageSignOff: StartSignOff | null = null;
+  // Starts the follow-ups Run these now made, once the services that start tasks exist.
+  let startFollowUps = (): void => undefined;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -814,6 +819,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onParkAnswer: parkAnswers,
     log: logger,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      applySkippedChoice(ctx, item, answer)
+        ? () => {
+            startFollowUps();
+          }
+        : undefined,
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
@@ -2014,6 +2025,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       git.gitDirs(repoPath).catch(() => undefined);
     },
   });
+  // A follow-up starts once its source lets it: looked at on every batch and run change, and now.
+  startFollowUps = skipFollowUpStarter({
+    state,
+    log: logger.child({ component: 'skip-follow-ups' }),
+    starts: {
+      join: (projectId, taskId, batchId) => {
+        services.startBatch(projectId, {
+          title: getBatch(db, batchId).title,
+          taskIds: [taskId],
+          batchId,
+        });
+      },
+      base: (taskId) => {
+        services.startTask(taskId);
+      },
+    },
+  });
+  bus.subscribe((event) => {
+    if (event.type === EventType.BatchUpdated || event.type === EventType.WorkstreamChanged)
+      startFollowUps();
+  });
+  startFollowUps();
   const build = opts.build ?? null;
   let selfUpdate: SelfUpdate | null = null;
   // What an update waits for, as counts. A queued ship, checkout return or cleanup is a delivery job

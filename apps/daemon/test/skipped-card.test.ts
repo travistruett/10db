@@ -96,7 +96,7 @@ describe('Skipped while you were away', () => {
         "- curl -s https://b.example (This call needs a person's approval on this account, and nobody is watching this task.)",
       ].join('\n'),
     );
-    expect(item?.options.map((o) => o.label)).toEqual(['Dismiss']);
+    expect(item?.options.map((o) => o.label)).toEqual(['Run these now', 'Dismiss']);
   });
 
   it('a run with none, no questions and no config raises none', async () => {

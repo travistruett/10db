@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   TrustSurface,
   ClaimKind,
+  Approval,
   ConflictError,
   currentStep,
   EventType,
@@ -145,6 +146,7 @@ import {
   type WorkstreamRow,
   type WriteContext,
   approvedCallKeys,
+  approvedSkipsForTask,
   listSkipsForWorkstream,
 } from '@10db/db';
 import {
@@ -2130,6 +2132,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
     // The calls the builder approved by Run these now: a lane nobody watches runs them.
     const approvedKeys = pass === null ? approvedCallKeys(db, task.id) : [];
+    const approved = (pass === null ? approvedSkipsForTask(db, task.id) : []).map((skip) => ({
+      summary: skip.summary,
+      // The store answers an approval of none for a summary the builder never saw whole.
+      cut: skip.approval === Approval.None,
+      reason: skip.reason,
+      limit: skip.limit,
+      kind: skip.kind,
+    }));
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
@@ -2210,6 +2220,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
       }),
       switches,
+      approved,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.

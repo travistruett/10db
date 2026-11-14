@@ -2423,3 +2423,23 @@ export const skipListings = sqliteTable(
   },
   (t) => [index('skip_listings_workstream_idx').on(t.workstreamId)],
 );
+
+/**
+ * A follow-up Run these now made: the run whose skips it runs, approved, and that run's batch,
+ * stamped once when it starts. Pending while unstarted and its task neither done nor removed.
+ */
+export const skipFollowUps = sqliteTable('skip_follow_ups', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  sourceWorkstreamId: text('source_workstream_id')
+    .$type<WorkstreamId>()
+    .notNull()
+    .references(() => workstreams.id),
+  sourceBatchId: text('source_batch_id')
+    .$type<BatchId>()
+    .references(() => batches.id),
+  startedAt: text('started_at'),
+  createdAt: createdAt(),
+});

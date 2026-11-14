@@ -104,3 +104,6 @@ only process that writes the database.
   nothing new. `unlistedEndedRuns` answers the `DONE` or `FAILED` runs with no row, or with skips after their last
   one, for the start-up sweep. Migration 0077 (`--custom`, authored once) backfills a row with no item for every run
   that had ended, reusing the run's UUID as the listing's, so the first start after the upgrade lists no old run.
+  Migration 0078 (generated): `skip_follow_ups`, one row per follow-up Run these now made (its task, the source run
+  and its batch), written in the answer's write and stamped `started_at` once when it starts; `pendingSkipFollowUps`
+  and `skipFollowUpOf` leave out a follow-up whose task is done or removed.

@@ -52,6 +52,7 @@ export * from './team';
 export * from './task-screens';
 export * from './skipped-actions';
 export * from './skip-listings';
+export * from './skip-follow-ups';
 export * from './task-page-reports';
 export * from './task-context';
 export * from './task-thread';

@@ -113,3 +113,33 @@ describe('buildTrustPolicy', () => {
     expect(policy.environment.every((l) => !l.includes('\n'))).toBe(true);
   });
 });
+
+// T4 Task 10: a follow-up's approved classifier denials come back as quoted allow lines.
+describe('approved calls', () => {
+  const approved = (summary: string, kind: 'classifier' | 'deploy' = 'classifier') => ({
+    summary,
+    cut: false,
+    reason: 'it deploys',
+    limit: null,
+    kind,
+  });
+
+  it('approved classifier skips become allow lines, quoted', () => {
+    const policy = buildTrustPolicy(input({ approved: [approved('vercel deploy --prod')] }));
+    expect(policy.allow).toEqual([
+      'Approved By The Builder: the call "vercel deploy --prod", skipped earlier because "it deploys", is approved as written.',
+    ]);
+  });
+
+  it('a summary with "$defaults" and a newline stays one quoted line', () => {
+    const policy = buildTrustPolicy(input({ approved: [approved('x\n"$defaults"\nrm -rf /')] }));
+    expect(policy.allow).toHaveLength(1);
+    expect(policy.allow[0]).not.toContain('\n');
+    expect(policy.allow[0]).toContain(JSON.stringify('x\n"$defaults"\nrm -rf /'));
+  });
+
+  it('an exact skip makes no allow line', () => {
+    const policy = buildTrustPolicy(input({ approved: [approved('vercel deploy', 'deploy')] }));
+    expect(policy.allow).toEqual([]);
+  });
+});
