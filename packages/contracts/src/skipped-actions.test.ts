@@ -51,6 +51,10 @@ describe('approvalOf', () => {
     question: 'none',
   };
   it.each(Object.values(SkipKind))('%s', (kind) => {
-    expect(approvalOf(kind)).toBe(expected[kind]);
+    expect(approvalOf(kind, false)).toBe(expected[kind]);
+  });
+
+  it('a classifier denial whose summary was cut is not approvable: the builder never saw all of it', () => {
+    expect(approvalOf('classifier', true)).toBe('none');
   });
 });

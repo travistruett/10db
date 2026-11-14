@@ -69,6 +69,46 @@ describe('callKey', () => {
     expect(key('Bash', { command: 'ls' })).not.toBe(key('Monitor', { command: 'ls' }));
   });
 
+  it('the same command run outside the sandbox has another key', () => {
+    expect(key('Bash', { command: 'ls' })).not.toBe(
+      key('Bash', { command: 'ls', dangerouslyDisableSandbox: true }),
+    );
+  });
+
+  it.each([
+    [
+      'Write',
+      { file_path: '/wt/a/x.ts', content: 'one' },
+      { file_path: '/wt/a/x.ts', content: 'two' },
+    ],
+    [
+      'Edit',
+      { file_path: '/wt/a/x.ts', old_string: 'a', new_string: 'b' },
+      { file_path: '/wt/a/x.ts', old_string: 'a', new_string: 'c' },
+    ],
+    ['MultiEdit', { file_path: '/wt/a/x.ts', edits: [1] }, { file_path: '/wt/a/x.ts', edits: [2] }],
+  ])('the same %s path with other content has another key', (tool, one, two) => {
+    expect(key(tool, one)).not.toBe(key(tool, two));
+  });
+
+  it('a path that only begins with the checkout keeps its own name', () => {
+    expect(key('Bash', { command: 'cat /wt/a-other/x' }, '/wt/a')).not.toBe(
+      key('Bash', { command: 'cat /wt/b-other/x' }, '/wt/b'),
+    );
+  });
+
+  it('the checkout before a space or a shell operator is still the checkout', () => {
+    expect(key('Bash', { command: 'cd /wt/a && ls' }, '/wt/a')).toBe(
+      key('Bash', { command: 'cd /wt/b && ls' }, '/wt/b'),
+    );
+  });
+
+  it('a literal <checkout> in the input is not the checkout', () => {
+    expect(key('Bash', { command: 'cat <checkout>/x' }, '/wt/a')).not.toBe(
+      key('Bash', { command: 'cat /wt/a/x' }, '/wt/a'),
+    );
+  });
+
   it('an unknown tool keys its whole input, whatever its key order', () => {
     expect(key('mcp__x__y', { a: 1, b: 2 })).toBe(key('mcp__x__y', { b: 2, a: 1 }));
     expect(key('mcp__x__y', { a: 1 })).not.toBe(key('mcp__x__y', { a: 2 }));

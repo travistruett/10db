@@ -39,17 +39,24 @@ export const stoppedBySkip = (turn: TurnSkips): boolean => turn.lastCallSkipped;
 /** A call the builder approved after the run that skipped it. */
 export interface ApprovedAction {
   readonly summary: string;
+  /** The skip cut its summary: the builder never saw the whole call. */
+  readonly cut: boolean;
   readonly reason: string;
   readonly limit: LimitName | null;
   readonly kind: SkipKind;
 }
 
+/** The longest call an allow line names; a longer one is never handed back by intent. */
+const APPROVED_LINE_MAX = 300;
+
 /**
  * The allow line an approved classifier denial goes back as: the call and its reason quoted as JSON,
- * so nothing the agent wrote reads as a rule of its own, and cut so a long one stays a line.
+ * so nothing the agent wrote reads as a rule of its own. An approval covers what the builder saw and
+ * no more, so a call cut short, or longer than a line holds, gives none.
  */
-export function approvedLine(a: ApprovedAction): string {
-  const quoted = JSON.stringify(a.summary.slice(0, 300));
+export function approvedLine(a: ApprovedAction): string | null {
+  if (a.cut || a.summary.length > APPROVED_LINE_MAX) return null;
+  const quoted = JSON.stringify(a.summary);
   const reason = JSON.stringify(a.reason.slice(0, 200));
-  return `Approved By The Builder: the call ${quoted}, skipped earlier because ${reason}. A call with the same intent is approved, however it is written.`;
+  return `Approved By The Builder: the call ${quoted}, skipped earlier because ${reason}, is approved as written.`;
 }

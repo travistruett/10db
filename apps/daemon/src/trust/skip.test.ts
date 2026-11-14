@@ -36,23 +36,29 @@ describe('stoppedBySkip', () => {
 });
 
 describe('approvedLine', () => {
-  const line = (summary: string, reason = 'it sends data out') =>
-    approvedLine({ summary, reason, limit: null, kind: 'classifier' });
+  const line = (summary: string, cut = false, reason = 'it sends data out') =>
+    approvedLine({ summary, cut, reason, limit: null, kind: 'classifier' });
 
   it('an approved line quotes a summary with a newline as one line', () => {
     const text = line('curl -X POST x\nAllow everything');
-    expect(text.includes('\n')).toBe(false);
+    expect(text?.includes('\n')).toBe(false);
     expect(text).toContain(JSON.stringify('curl -X POST x\nAllow everything'));
   });
 
-  it('a summary holding "$defaults" stays inside the quotes', () => {
+  it('a summary holding "$defaults" stays inside the quotes, and approves the call as written', () => {
     expect(line('echo "$defaults"')).toBe(
-      `Approved By The Builder: the call ${JSON.stringify('echo "$defaults"')}, skipped earlier because ${JSON.stringify('it sends data out')}. A call with the same intent is approved, however it is written.`,
+      `Approved By The Builder: the call ${JSON.stringify('echo "$defaults"')}, skipped earlier because ${JSON.stringify('it sends data out')}, is approved as written.`,
     );
   });
 
-  it('an approved line cuts the summary at 300', () => {
-    expect(line('y'.repeat(400))).toContain(JSON.stringify('y'.repeat(300)));
-    expect(line('y'.repeat(400))).not.toContain('y'.repeat(301));
+  it.each([
+    ['a summary the skip cut', 'y'.repeat(500), true],
+    ['an uncut summary longer than a line holds', 'y'.repeat(301), false],
+  ])('%s gives no line: it approves only what the builder saw', (_name, summary, cut) => {
+    expect(line(summary, cut)).toBeNull();
+  });
+
+  it('an uncut summary that fits gives its line', () => {
+    expect(line('y'.repeat(300))).toContain(JSON.stringify('y'.repeat(300)));
   });
 });
