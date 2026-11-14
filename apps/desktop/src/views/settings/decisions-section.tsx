@@ -1,4 +1,4 @@
-import type { JudgeDecision, QuestionMeasureDto, SizingMeasureDto } from '@10db/contracts';
+import type { JudgeDecision } from '@10db/contracts';
 import { Alert, Anchor, Group, Stack, Switch, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -15,94 +15,11 @@ import { statsFor } from './decision-numbers';
 import { DecisionsTable } from './decisions-table';
 import { PaidBy } from './paid-by';
 import { RecentDecisions } from './recent-decisions';
-import { SettingRow, SettingsCard } from './setting-row';
-
-const percent = (part: number, whole: number): string =>
-  `${String(Math.round((part / whole) * 100))}%`;
-
-/** Settings › Decisions › Sizing (spec §8 Calibration). */
-function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
-  const buckets = (['S', 'M', 'L', 'XL'] as const)
-    .filter((b) => sizing.buckets[b].n > 0)
-    .map((b) => `${b} ${String(sizing.buckets[b].within)} of ${String(sizing.buckets[b].n)}`);
-  return (
-    <SettingRow
-      label="Sizing"
-      description="Finished tasks Plan converted, whose size was within one bucket of the lane time they took."
-    >
-      <Stack gap={2} role="group" aria-label="Sizing">
-        {sizing.n === 0 ? (
-          <Text size="sm" c="dimmed">
-            No converted task has finished yet
-          </Text>
-        ) : (
-          <>
-            <Text size="sm">
-              {percent(sizing.within, sizing.n)} within one bucket ({String(sizing.within)} of{' '}
-              {String(sizing.n)})
-            </Text>
-            <Text size="xs" c="dimmed">
-              {buckets.join(' · ')}
-            </Text>
-          </>
-        )}
-        {sizing.overrides > 0 ? (
-          <Text size="xs" c="dimmed">
-            {String(sizing.overrides)} set by you, not counted
-          </Text>
-        ) : null}
-      </Stack>
-    </SettingRow>
-  );
-}
-
-const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
-
-const perTask = (rate: QuestionMeasureDto['converted']): string =>
-  `${String(Math.round((rate.cards / rate.tasks) * 100) / 100)} question cards per task (${taskCount(rate.tasks)})`;
-
-/** Settings › Decisions › Questions (spec §7 Measure): Inbox question cards, converted against other tasks. */
-function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto }) {
-  const { converted, other } = questions;
-  return (
-    <SettingRow
-      label="Questions"
-      description="Inbox question cards on tasks Plan converted, against the project's other tasks. Only tasks that started count."
-    >
-      <Stack gap={2} role="group" aria-label="Questions">
-        {converted.tasks === 0 ? (
-          <Text size="sm" c="dimmed">
-            No converted task has started yet
-          </Text>
-        ) : (
-          <Text size="sm">{perTask(converted)} converted</Text>
-        )}
-        {other.tasks === 0 ? null : (
-          <Text size="xs" c="dimmed">
-            {perTask(other)} for the project&apos;s other tasks
-          </Text>
-        )}
-      </Stack>
-    </SettingRow>
-  );
-}
 
 const UNREACHABLE = "Couldn't reach the daemon.";
 
 function failureText(error: unknown): string {
   return error instanceof DaemonRequestError ? error.message : UNREACHABLE;
-}
-
-/** Sizing and Questions: what Plan's converted tasks came to. */
-function PlanMeasuresCard() {
-  const measures = useShapeMeasures();
-  if (measures.data === undefined) return null;
-  return (
-    <SettingsCard>
-      <SizingRow sizing={measures.data.sizing} />
-      <QuestionsRow questions={measures.data.questions} />
-    </SettingsCard>
-  );
 }
 
 /** Settings › Decisions: the master switch, who pays, every routine decision a fast model makes and its recent calls. */
@@ -163,7 +80,6 @@ export function DecisionsSection() {
         models={modelList}
         onOpen={setOpen}
       />
-      <PlanMeasuresCard />
       <RecentDecisions {...(modelList === undefined ? {} : { models: modelList })} />
       <DecisionDrawer
         decision={open}
