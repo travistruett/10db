@@ -2824,13 +2824,17 @@ export function createRunner(opts: RunnerOptions): Runner {
      * not over: the agent is about to see it, and the next completion decides. Otherwise the turn
      * ends Ready, and the session stays open for the builder's next message.
      */
-    const passTurnComplete = async (text: string | null): Promise<void> => {
+    const passTurnComplete = async (
+      text: string | null,
+      replyItemId: TaskMessageId | null,
+    ): Promise<void> => {
       armIdleClose(id, ctl);
       try {
         const ended = await endTurnSteps(passWork, {
           workstreamId: id,
           ending: PassTurnEnding.Ready,
           reply: text,
+          replyItemId,
           fence: ctl.fence,
           providerSessionId: st.providerSessionId,
           reason: '',
@@ -3136,7 +3140,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             // Before the turn's end is written, so a reply that streamed is the turn's reply.
-            items?.recorder.turnEnded();
+            const replyItemId =
+              items?.recorder.turnEnded({ cut: (event.result ?? 'success') !== 'success' }) ?? null;
             items?.recorder.newTurn();
             st.lastTurn = event.result ?? 'success';
             // The model ran a turn: a mark from an error's wording alone on it was wrong.
@@ -3170,7 +3175,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 break;
               }
               if (await passHandoff()) break;
-              await passTurnComplete(event.text ?? null);
+              await passTurnComplete(event.text ?? null, replyItemId);
               break;
             }
             const recorded = handoffForSession(db, session.id);

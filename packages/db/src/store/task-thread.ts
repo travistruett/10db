@@ -31,7 +31,6 @@ import {
   findItemByPushUuid,
   getItem,
   insertItem,
-  lastItems,
   listItems,
   listUndeliveredMessages,
   markItemPushedUnder,
@@ -547,33 +546,31 @@ export function insertSystemNotice(
 }
 
 /**
- * The agent's reply at the end of a pass turn, naming the turn, in the caller's write. A reply the
- * session already streamed into the thread, as its latest item, is that item, marked as the turn's.
+ * The agent's reply at the end of a pass turn, naming the turn, in the caller's write. `itemId` is the
+ * reply the session already streamed into the thread, which the turn's text only abbreviates (trimmed,
+ * capped): that item is marked as the turn's and nothing is stored. With none, `body` is stored.
  */
 export function insertAgentReply(
   ctx: WriteContext,
   taskId: TaskId,
-  input: { readonly body: string; readonly turnId: PassTurnId },
+  input: {
+    readonly body: string;
+    readonly turnId: PassTurnId;
+    readonly itemId?: TaskMessageId;
+  },
 ): TaskMessageDto {
-  const conversation = taskConversationOf(ctx.tx, taskId);
-  const [latest] = conversation === null ? [] : lastItems(ctx.tx, conversation.id, 1);
-  if (
-    latest?.author === ConversationItemAuthor.Agent &&
-    latest.kind === ConversationItemKind.AgentMessage &&
-    !latest.partial &&
-    (latest.turnId === null || latest.turnId === input.turnId) &&
-    taskMessageOf(latest)?.body === input.body
-  ) {
-    markTaskMessageTurn(ctx, taskId, latest.id, input.turnId);
+  if (input.itemId !== undefined) {
+    const item = threadItem(ctx.tx, taskId, input.itemId);
+    markTaskMessageTurn(ctx, taskId, item.id, input.turnId);
     const task = getTask(ctx.tx, taskId);
     ctx.emit({
       type: EventType.TaskMessageAdded,
       entityType: 'task',
       entityId: taskId,
-      data: { projectId: task.projectId, messageId: latest.id },
+      data: { projectId: task.projectId, messageId: item.id },
     });
-    const row = toTaskMessage(taskId, getItem(ctx.tx, latest.id), []);
-    if (row === null) throw new NotFoundError('task message', latest.id);
+    const row = toTaskMessage(taskId, getItem(ctx.tx, item.id), []);
+    if (row === null) throw new NotFoundError('task message', item.id);
     return toMessageDto(row);
   }
   return toMessageDto(

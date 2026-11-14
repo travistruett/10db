@@ -134,13 +134,16 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         return;
       case 'turn_complete':
         // What streamed with no `message` to finish it is kept, so no turn end loses text.
-        items.turnEnded((ctx) => {
-          updateSessionUsage(ctx, sessionId, {
-            inputTokens: event.inputTokens,
-            outputTokens: event.outputTokens,
-            cachedTokens: event.cachedTokens,
-            costUsd: event.costUsd,
-          });
+        items.turnEnded({
+          cut: (event.result ?? 'success') !== 'success',
+          then: (ctx) => {
+            updateSessionUsage(ctx, sessionId, {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              cachedTokens: event.cachedTokens,
+              costUsd: event.costUsd,
+            });
+          },
         });
         sink.turnComplete(event);
         return;

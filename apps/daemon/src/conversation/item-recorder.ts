@@ -20,7 +20,9 @@ import { storePartial } from './partial';
 // Sessions spec §6.3, §6.5: what one open session says, as a conversation's items, for every owner (the
 // explore engine's sessions and a lane's). Its text and calls stream into live buffers, sent as live
 // frames, and each finished item is stored under the id its buffer minted, capped, with what the cap or
-// the view cut off on disk. A turn that ends early stores what streamed, marked partial.
+// the view cut off on disk. A turn's end finishes what streamed and names its reply, so the turn's end
+// attaches to that item rather than storing the reply again; a turn that ends early stores what
+// streamed, marked partial, under the turn.
 
 /** The session events that are a conversation's items. */
 export type ItemEvent = Extract<
@@ -33,10 +35,14 @@ export interface ItemRecorder {
   /** Streams or stores one item event. */
   record(event: ItemEvent): void;
   /**
-   * The turn ended: its reasoning is complete and a reply with no `message` to finish it is kept,
-   * marked partial, in the caller's write; `then` joins that write.
+   * The turn ended: what it streamed is finished, in the caller's write, a reply with no `message` to
+   * finish it included, which is kept partial when the turn was `cut` short (failed, stopped, out of
+   * turns); `then` joins that write. Answers the turn's last finished reply, null when it had none.
    */
-  turnEnded(then?: (ctx: WriteContext) => void): void;
+  turnEnded(opts?: {
+    readonly cut?: boolean;
+    readonly then?: (ctx: WriteContext) => void;
+  }): ConversationItemId | null;
   /** Stores what streamed, marked partial, and empties the buffers. */
   storePartial(): ConversationItemId[];
   /** A turn begins: its plan is a new item. */
@@ -67,6 +73,10 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
   });
   /** The adapter ids of reasoning items in flight, stored when the next item begins. */
   const reasoning = new Set<string>();
+  /** The adapter ids of replies streaming with no `message` yet, finished at the turn's end. */
+  const replies = new Set<string>();
+  /** The turn's last finished reply. */
+  let lastReply: ConversationItemId | null = null;
   let planItem: ConversationItemId | null = null;
 
   /** What a write left for the disk, put there once the write has committed. */
@@ -113,8 +123,8 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
     if (Object.keys(onDisk).length > 0) disk.push([id, onDisk]);
   };
 
-  /** Stores each text in flight: reasoning complete, a reply with no `message` partial. */
-  const storeTexts = (ctx: WriteContext, except?: string, replies = false): void => {
+  /** Stores the reasoning in flight, but `except`'s, as complete. */
+  const storeReasoning = (ctx: WriteContext, except?: string): void => {
     for (const adapterId of [...reasoning]) {
       if (adapterId === except) continue;
       reasoning.delete(adapterId);
@@ -122,17 +132,19 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
       if (held?.kind !== 'reasoning' || held.text === '') continue;
       store(ctx, held.itemId, ConversationItemKind.Reasoning, { text: held.text }, null);
     }
-    if (!replies) return;
-    for (const held of buffers.inFlight())
-      if (held.kind === 'agent_message' && held.text !== '')
-        store(ctx, held.itemId, ConversationItemKind.AgentMessage, { text: held.text }, null, true);
+  };
+
+  /** Stores a reply; a finished one with text is the turn's last reply so far. */
+  const storeReply = (ctx: WriteContext, id: ConversationItemId, text: string, partial = false) => {
+    store(ctx, id, ConversationItemKind.AgentMessage, { text }, null, partial);
+    if (!partial && text.trim() !== '') lastReply = id;
   };
 
   /** A new item begins: the reasoning before it is complete. */
   const nextItem = (adapterId: string): void => {
     if ([...reasoning].some((id) => id !== adapterId))
       write((ctx) => {
-        storeTexts(ctx, adapterId);
+        storeReasoning(ctx, adapterId);
       });
   };
 
@@ -150,6 +162,7 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
       switch (event.type) {
         case 'text_delta':
           nextItem(event.itemId);
+          replies.add(event.itemId);
           buffers.text(event.itemId, 'agent_message', event.offset, event.text);
           return;
         case 'reasoning_delta':
@@ -160,9 +173,10 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
         case 'message': {
           nextItem(event.itemId);
           const id = buffers.itemIdOf(event.itemId);
+          replies.delete(event.itemId);
           buffers.finish(event.itemId);
           write((ctx) => {
-            store(ctx, id, ConversationItemKind.AgentMessage, { text: event.text }, null);
+            storeReply(ctx, id, event.text);
           });
           return;
         }
@@ -186,17 +200,31 @@ export function createItemRecorder(deps: ItemRecorderDeps): ItemRecorder {
         }
       }
     },
-    turnEnded(then) {
+    turnEnded({ cut = false, then } = {}) {
       write((ctx) => {
-        storeTexts(ctx, undefined, true);
+        storeReasoning(ctx);
+        for (const adapterId of [...replies]) {
+          replies.delete(adapterId);
+          const held = buffers.finish(adapterId);
+          if (held?.kind === 'agent_message' && held.text !== '')
+            storeReply(ctx, held.itemId, held.text, cut);
+        }
         then?.(ctx);
       });
+      const reply = lastReply;
+      lastReply = null;
+      return reply;
     },
     storePartial() {
       reasoning.clear();
+      replies.clear();
+      lastReply = null;
       const ids = write((ctx) =>
-        storePartial(ctx, conversationId, buffers.inFlight(), (id, full) => {
-          disk.push([id, full]);
+        storePartial(ctx, conversationId, buffers.inFlight(), {
+          turnId: deps.turnId?.() ?? null,
+          keep: (id, full) => {
+            disk.push([id, full]);
+          },
         }),
       );
       buffers.dispose();

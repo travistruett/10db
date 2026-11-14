@@ -769,6 +769,8 @@ export function runFakeExploreSession(
           emit({ type: 'activity', kind: 'text', summary: String(error) });
         }
       }
+      // A stopped turn ends in error, as Claude Code's and Codex's interrupted turns do.
+      const stopped = current.signal.aborted;
       current = null;
       if (core.ended()) break;
       if (result.end !== undefined) {
@@ -798,7 +800,7 @@ export function runFakeExploreSession(
       emit({
         type: 'turn_complete',
         ...(dropped.length === 0 ? {} : { dropped }),
-        ...(failed ? { result: 'error' as const } : {}),
+        ...(failed || stopped ? { result: 'error' as const } : {}),
         ...(result.text === undefined ? {} : { text: result.text }),
         inputTokens: 100 * number,
         outputTokens: 10 * number,

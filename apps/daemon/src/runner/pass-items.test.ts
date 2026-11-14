@@ -112,7 +112,7 @@ const itemsOf = (task: TaskDto) => {
 describe("a page's turn through the conversation library", () => {
   it.each([
     {
-      name: 'a reply that differs from what it said is its own item',
+      name: 'a reply after what it said earlier is its own item',
       reply: 'Tidied the form.',
       kinds: ['message', 'agent_message', 'tool_call', 'agent_message'],
     },
@@ -128,7 +128,8 @@ describe("a page's turn through the conversation library", () => {
       ...(reply === 'Tidied the form.' ? [{ do: 'say' as const, text: 'Ran the tests.' }] : []),
       { do: 'tool_call', call: command(ToolCallStatus.Running) },
       { do: 'tool_call', call: command(ToolCallStatus.Done), full: { output: OUTPUT } },
-      ...(reply === 'Ran the tests.' ? [{ do: 'say' as const, text: 'Ran the tests.' }] : []),
+      // As both providers make it, the turn's text is its last reply's.
+      { do: 'say', text: reply },
       { do: 'turn_complete', text: reply },
       { do: 'await_message', contains: 'never sent' },
     ];
@@ -162,7 +163,7 @@ describe("a page's turn through the conversation library", () => {
   });
 
   it('keeps what a stopped turn streamed, marked partial, and serves it live until then', async () => {
-    const { task, id } = await openPage([
+    const { task, id, passId } = await openPage([
       { do: 'consume' },
       { do: 'think', text: 'The padding is uneven.' },
       { do: 'tool_call', call: command(ToolCallStatus.Running) },
@@ -179,9 +180,10 @@ describe("a page's turn through the conversation library", () => {
     await engine.runner.stopPassLane(id);
 
     const kept = listItems(engine.store.db, conversationId).filter((i) => i.author === 'agent');
-    expect(kept.map((i) => [i.kind, i.partial])).toEqual([
-      ['reasoning', false],
-      ['tool_call', true],
+    const [turn] = listPassTurns(engine.store.db, passId);
+    expect(kept.map((i) => [i.kind, i.partial, i.turnId])).toEqual([
+      ['reasoning', false, turn?.id],
+      ['tool_call', true, turn?.id],
     ]);
     expect(kept[1]?.body).toMatchObject({ status: ToolCallStatus.Failed });
     expect(engine.laneLive.live(conversationId).items).toEqual([]);

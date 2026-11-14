@@ -10,7 +10,8 @@
   (`intake.ts`: limits, pictures on disk first, the rows in one write). Rule 5's ask after a restart is
   `readBackAsk` (`delivery-rules.ts`), which the engine's restart and the runner's read-back
   (`runner/read-back.ts`) both use. `item-recorder.ts` turns one session's item events into live
-  frames and stored items, capped by `full-output.ts`, with what an early end streamed stored partial,
+  frames and stored items, capped by `full-output.ts`; a turn's end finishes what streamed and answers the
+  turn's last reply, and what an early end streamed is stored partial under the turn (`partial.ts`),
   for the engine's sessions and a page's alike; `live-registry.ts` serves what a task conversation's
   runner-owned session streams now. A task's side (sessions spec §6.1): `task-thread.ts` takes the
   builder's message (`POST /tasks/:taskId/thread` and `POST /conversations/:id/messages` or `/redo` for
