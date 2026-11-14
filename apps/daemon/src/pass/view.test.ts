@@ -31,6 +31,7 @@ import {
   patchWorkstream,
   seedProject,
   settlePassTurn,
+  taskConversationOf,
   transitionWorkstream,
   type Store,
 } from '@10db/db';
@@ -172,6 +173,8 @@ describe('the view of a pass', () => {
       state: S.Queued,
       nextActionKind: 'start',
       spokenTo: false,
+      // A page has its task's conversation from when it joins the pass.
+      conversationId: taskConversationOf(store.db, settings)?.id,
       turn: null,
       pausedUntil: null,
       failure: null,
@@ -179,6 +182,7 @@ describe('the view of a pass', () => {
       waitsFor: null,
       preview: null,
     });
+    expect(open?.conversationId).toEqual(expect.any(String));
     expect(readyPage).toMatchObject({
       area: 'people',
       route: '/people',
