@@ -152,10 +152,11 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
       `${call.toolName} is not available to the ${call.agentType ?? 'this'} agent: only the session and its code researchers run commands.`,
     );
   if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
-  // A native judge's session may run a command in the background, under the lanes' process tracking:
-  // it stops with the session.
+  // Only a native judge's session runs a command in the background, under the lanes' process tracking: it
+  // stops with the session. On 10db's judge, as on the rules, every command runs in the foreground.
+  const native = access.judge === JudgeKind.Native;
   // A judge that runs (auto mode or 10db's) takes the calls the rules would card.
-  const native = access.judge !== undefined && access.judge !== JudgeKind.Rules;
+  const judged = native || access.judge === JudgeKind.Tendb;
   if (!native && flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
   const command = stringField(call.toolInput, 'command');
   if (!native && command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
@@ -175,7 +176,7 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     fileAccess: commands.fileAccess,
   });
   // A command that is not read-only is the judge's call: auto mode's classifier where it runs, else a card.
-  if (verdict.decision === 'allow' && verdict.settled === undefined && !native)
+  if (verdict.decision === 'allow' && verdict.settled === undefined && !judged)
     return ask(NOT_READ_ONLY);
   return verdict;
 }
@@ -350,13 +351,13 @@ const isProjectTool = (toolName: string): boolean =>
   toolName.split('__').length >= 3;
 
 /**
- * A web call. On a rules judge only the researcher touches the web. On a native judge the session may
- * too, and what passes the checks below goes on to Claude Code's own flow, auto mode's classifier
+ * A web call. On a rules judge and on 10db's judge only the researcher touches the web. On a native judge the
+ * session may too, and what passes the checks below goes on to Claude Code's own flow, auto mode's classifier
  * included: a bare allow is no decision (trust line §8). The checks stay 10db's either way, for the
  * classifier makes none of them: a query's length, a page that is https, public and named.
  */
 function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
-  if ((judge === undefined || judge === JudgeKind.Rules) && !isResearcher(call))
+  if (judge !== JudgeKind.Native && !isResearcher(call))
     return deny(
       `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${SHAPE_RESEARCHER}", and ask it in words.`,
     );
