@@ -16,7 +16,6 @@ import {
   PassTurnWithFilesDto,
   TaskScreenDto,
   PassViewDto,
-  TaskFileDto,
   TaskMessageDto,
   WorkbenchSetupDto,
   type InboxItemDto,
@@ -433,25 +432,6 @@ export function pageItemDto(
     createdAt: minutesBeforeNow(12),
     text: 'The padding is too tight',
     ...item,
-  });
-}
-
-/** A picture pasted with `message`. */
-export function taskFileDto(
-  message: Pick<TaskMessageDto, 'id' | 'taskId'>,
-  overrides: Partial<TaskFileDto> = {},
-): TaskFileDto {
-  return TaskFileDto.parse({
-    id: mintId('ConversationFile'),
-    taskId: message.taskId,
-    messageId: message.id,
-    name: 'Screenshot 2026-11-09 at 12.17.03.png',
-    mediaType: 'image/png',
-    size: 4,
-    sha256: 'c'.repeat(64),
-    inlineSent: true,
-    createdAt: minutesBeforeNow(12),
-    ...overrides,
   });
 }
 

@@ -17,11 +17,11 @@ export { createItemRecorder, type ItemRecorder } from './item-recorder';
 export { createLiveRegistry, type LiveRegistry } from './live-registry';
 export type { ExploreOwnerHooks, ExploreStart, TurnEnd } from './explore-hooks';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
-export { keepBuilderMessage, removeKeptFiles, type PastedFile } from './intake';
+export { keepBuilderMessage, type PastedFile } from './intake';
 export { buildThreadDigest, builderMessageText, FRESH_SESSION_NOTICE } from './lane-text';
 export { readConversationPicture } from './pictures';
 export { taskFilesDir } from './task-files';
-export { createTaskThread, type PageMessages, type TaskThread } from './task-thread';
+export { createTaskThread, type TaskThread } from './task-thread';
 export { readImageHeader, readImageSize } from './image-check';
 export {
   FRESH_START_LINE,
