@@ -477,3 +477,34 @@ describe('the tools a judge takes over', () => {
     expect(judgeAs(judge, row)).toBe(expected);
   });
 });
+
+describe('a read-only line under each judge', () => {
+  it.each(
+    ['ls src', 'grep -rn KEY .'].flatMap((command) =>
+      Object.values(JudgeKind).map((judge) => ({
+        judge,
+        command,
+        settled: judge !== JudgeKind.Tendb,
+      })),
+    ),
+  )(
+    'is settled on native and rules, and a bare allow on tendb: $command ($judge)',
+    ({ judge, command, settled }) => {
+      const verdict = judgePreToolUse({
+        judge,
+        coveredByAllowRule: false,
+        toolName: 'Bash',
+        toolInput: { command },
+        repoPath: repo.path,
+        areas: AREAS,
+        hazards: DEFAULT_HAZARDS,
+        claims: EVERY_HAZARD,
+        readOnly: false,
+        protectedPaths: [],
+        fileAccess: access,
+      });
+      expect(verdict.decision).toBe('allow');
+      expect(verdict.decision === 'allow' && verdict.settled !== undefined).toBe(settled);
+    },
+  );
+});

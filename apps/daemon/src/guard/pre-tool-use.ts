@@ -1,5 +1,5 @@
 import { isAbsolute, posix, resolve, sep } from 'node:path';
-import { ClaimKind, type HazardDef } from '@10db/contracts';
+import { ClaimKind, JudgeKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { ENDLESS_FILES, runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 import { isOwnFile } from './account-rules';
@@ -400,5 +400,9 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
   if (asked !== null) return { decision: 'ask', reason: asked.reason, kind: asked.kind };
   // The judge opened it, and the data directory holds it: no allow rule or classifier reaches it.
   if (readsOwnPicture(input)) return { decision: 'allow', settled: OWN_PICTURE };
-  return reads ? { decision: 'allow', settled: READS_ONLY } : verdict;
+  // On 10db's judge a read-only line is a bare allow: the fast path, which knows the secret names and
+  // a recursive search, decides it, and the model after it.
+  return reads && input.judge !== JudgeKind.Tendb
+    ? { decision: 'allow', settled: READS_ONLY }
+    : verdict;
 }
