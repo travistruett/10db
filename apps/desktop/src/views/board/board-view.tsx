@@ -20,6 +20,7 @@ import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
+import { useKinds } from '../../daemon/kind-queries';
 import {
   useAbandonBatch,
   useBatches,
@@ -173,6 +174,7 @@ function BoardColumns({
   goalTitles,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
+  const kinds = useKinds().data ?? [];
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
@@ -332,6 +334,8 @@ function BoardColumns({
                 place={ws ? places.get(ws.id) : undefined}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
+                kinds={kinds}
+                defaultRigor={project.defaultRigor}
               />
             );
           }}

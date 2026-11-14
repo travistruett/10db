@@ -1,5 +1,5 @@
 import { effectiveRigor, RIGORS, rigorAtLeast, type KindDto, type Rigor } from '@10db/contracts';
-import { RIGOR_LABEL } from './rigor-labels';
+import { rigorLabel } from '../settings/rigor-labels';
 
 export interface RigorOption {
   readonly value: Rigor;
@@ -31,8 +31,8 @@ export function rigorOptions(
       value,
       disabled: below,
       label: below
-        ? `${RIGOR_LABEL[value]} (${strongest.label} needs ${RIGOR_LABEL[floor]} or more)`
-        : RIGOR_LABEL[value],
+        ? `${rigorLabel(value)} (${strongest.label} needs ${rigorLabel(floor)} or more)`
+        : rigorLabel(value),
     };
   });
 }
@@ -52,7 +52,7 @@ export function projectDefaultLabel(
     taskKinds: taskKeys.map((key) => ({ key })),
     kinds,
   });
-  if (effective === projectDefault) return `Project default (${RIGOR_LABEL[effective]})`;
+  if (effective === projectDefault) return `Project default (${rigorLabel(effective)})`;
   const raiser = kinds.find((k) => taskKeys.includes(k.key) && k.minimumRigor === effective);
-  return `Project default (${RIGOR_LABEL[effective]}${raiser === undefined ? '' : `, raised by ${raiser.label}`})`;
+  return `Project default (${rigorLabel(effective)}${raiser === undefined ? '' : `, raised by ${raiser.label}`})`;
 }
