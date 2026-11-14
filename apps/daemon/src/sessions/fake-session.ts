@@ -20,6 +20,7 @@ import {
   type FakeSent,
   type FakeStep,
 } from './fake-script';
+import { FakeTaskRefs } from './fake-task-refs';
 import { readCheckoutText } from './before-text';
 import { claudeToolCall, claudeToolResult, createClaudeToolCalls } from './claude-tool-calls';
 import {
@@ -289,6 +290,8 @@ export function runFakeLaneSession(
     }
   };
 
+  const taskRefs = new FakeTaskRefs();
+
   const callMcp = async (
     tool: string,
     args: Record<string, unknown>,
@@ -416,8 +419,12 @@ export function runFakeLaneSession(
         emit({ type: 'tool_call', call: step.call });
         return 'continue';
       case 'mcp': {
-        const result = await Promise.race([callMcp(step.tool, step.args), untilStopped]);
+        const result = await Promise.race([
+          callMcp(step.tool, taskRefs.resolve(step.args)),
+          untilStopped,
+        ]);
         if (result === 'stopped') return 'halt';
+        taskRefs.learn(result.text);
         observe(index, 'mcp_result', {
           tool: step.tool,
           isError: result.isError,
