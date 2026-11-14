@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^skp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "workstreamId": {
+      "type": "string",
+      "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "toolName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 501
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "web_or_mcp",
+        "unknown_tool",
+        "monitor_socket",
+        "monitor_no_command",
+        "read_outside",
+        "secret_read",
+        "config_write",
+        "editor_config_write",
+        "home_rc_write",
+        "unread_edit_path",
+        "endless_loop",
+        "unread_hazard",
+        "deploy",
+        "docker_off",
+        "escalation",
+        "default_mode_card",
+        "hazard_card",
+        "classifier",
+        "safety_check",
+        "host",
+        "question"
+      ]
+    },
+    "limit": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "destroys_data",
+            "sends_data_out",
+            "reads_secrets",
+            "writes_live"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "auto_mode",
+        "safety_check",
+        "guard",
+        "broker",
+        "host_judge",
+        "question",
+        "tendb_judge"
+      ]
+    },
+    "approval": {
+      "type": "string",
+      "enum": [
+        "intent",
+        "exact",
+        "seed_host",
+        "none"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    }
+  },
+  "required": [
+    "id",
+    "workstreamId",
+    "toolName",
+    "summary",
+    "kind",
+    "limit",
+    "reason",
+    "source",
+    "approval",
+    "createdAt"
+  ]
+}

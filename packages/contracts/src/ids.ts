@@ -67,6 +67,7 @@ const ID_SCHEMAS = {
   ConversationItem: idSchema(['cvi', 'shm', 'tmg'], 'ConversationItemId'),
   ConversationFile: idSchema(['cvf', 'sfl', 'tfl'], 'ConversationFileId'),
   Chat: idSchema(['cht'], 'ChatId'),
+  SkippedAction: idSchema(['skp'], 'SkippedActionId'),
 } as const;
 
 const ID_PREFIX = {
@@ -119,6 +120,7 @@ const ID_PREFIX = {
   ConversationItem: 'cvi',
   ConversationFile: 'cvf',
   Chat: 'cht',
+  SkippedAction: 'skp',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -241,6 +243,8 @@ export const ConversationFileId = ID_SCHEMAS.ConversationFile;
 export type ConversationFileId = IdOf<'ConversationFile'>;
 export const ChatId = ID_SCHEMAS.Chat;
 export type ChatId = IdOf<'Chat'>;
+export const SkippedActionId = ID_SCHEMAS.SkippedAction;
+export type SkippedActionId = IdOf<'SkippedAction'>;
 /** A task's thread message is a conversation item. @alias */
 export const TaskMessageId = ConversationItemId;
 export type TaskMessageId = ConversationItemId;

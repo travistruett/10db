@@ -253,6 +253,7 @@ import {
   TrustSwitches,
 } from './trust';
 import { LiveSystemsDto } from './trust-policy';
+import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
@@ -424,6 +425,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-dto': ShapeDto,
   'shape-message-dto': ShapeMessageDto,
   'shape-view-dto': ShapeViewDto,
+  'skipped-action-dto': SkippedActionDto,
   'shape-input': ShapeInput,
   'shape-message-input': ShapeMessageInput,
   'shape-propose-result': ShapeProposeResult,
