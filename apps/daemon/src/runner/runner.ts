@@ -1818,6 +1818,25 @@ export function createRunner(opts: RunnerOptions): Runner {
     return resolved;
   }
 
+  /**
+   * Records the provider session that ran step `stepIndex`, so a send-back can resume it. It re-reads the
+   * workstream's steps inside the write and changes only that field: the steps the launch read earlier
+   * may since have been saved with another model.
+   */
+  function rememberStepSession(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    stepIndex: number,
+    providerSessionId: string,
+    fence: number | null,
+  ): void {
+    const current = getWorkstreamRow(ctx.tx, id);
+    if (current.stepIndex !== stepIndex || current.steps[stepIndex] === undefined) return;
+    patchWorkstream(ctx, id, fence, {
+      steps: current.steps.map((s, i) => (i === stepIndex ? { ...s, providerSessionId } : s)),
+    });
+  }
+
   /** The step as it would launch on `account` with the models it lists now, saving nothing. */
   function resolveOn(
     row: WorkstreamRow,
@@ -2851,6 +2870,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             if (laneSession !== null) watchLaneProcesses(laneSession, event.pid, pidStart, log);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
+              rememberStepSession(ctx, id, row.stepIndex, event.providerSessionId, ctl.fence);
               // The thread says a fresh session began for the builder's message, once it has.
               if (feedback !== null && resumeId === null && !noticed) {
                 noticed = true;

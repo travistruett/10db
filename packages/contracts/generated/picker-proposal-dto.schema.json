@@ -749,6 +749,10 @@
                           "minimum": 0,
                           "maximum": 3
                         },
+                        "providerSessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "shippedAtLimit": {
                           "type": "object",
                           "properties": {

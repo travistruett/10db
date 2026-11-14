@@ -68,6 +68,11 @@ export const WorkstreamStep = z.object({
    */
   reviewRounds: z.int().min(0).max(3).optional(),
   /**
+   * The provider session that last ran this step, so a send-back can resume it. Absent until a session of
+   * the step has started.
+   */
+  providerSessionId: z.string().min(1).optional(),
+  /**
    * Set on a review or QA step whose rejection used up the retry limit and shipped the work anyway:
    * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.
    */

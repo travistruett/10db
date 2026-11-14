@@ -173,6 +173,10 @@ describe('the model a planned step starts on', () => {
         new RegExp(`${planned} is not offered by Second plan`),
       );
       expect(saved.model).toBe(ran);
+      // The write that records the step's session keeps the model the launch just saved.
+      expect(saved.steps[0]?.providerSessionId).toBe(
+        listSessions(engine.store.db, workstream.id).at(-1)?.providerSessionId,
+      );
     });
   });
 });
