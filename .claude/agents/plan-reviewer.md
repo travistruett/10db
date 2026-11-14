@@ -16,8 +16,8 @@ use in later tasks; each task's tests can fail and would catch the defect they t
 a placeholder; the order of tasks builds working software at each step; risks the spec names have
 an owner; each feature says how it behaves on every account kind 10db supports (Claude plan, Claude
 through Bedrock or an API key, ChatGPT/Codex plan), and none refuses a provider outright (`AGENTS.md`,
-Provider parity); each milestone ends in something the builder can run and a pull request of its own, not
-one pull request at the end; a change that spans the daemon and the desktop is built as one
+Provider parity); each milestone ends in something the builder can run (how many pull requests the
+milestones land in is the builder's call); a change that spans the daemon and the desktop is built as one
 vertical slice, or the plan says where the two first run together against the real daemon, before
 any review of either; and every flow with asynchronous steps that other events can interrupt (a
 message, a stop, a restart, another flow taking over) has a table of its states against those
