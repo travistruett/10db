@@ -85,7 +85,6 @@ export function AllTabsMenu({
           </UnstyledButton>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Label>All Tabs</Menu.Label>
           {tabs.map((tab) => {
             const info = infos.get(tab.key);
             return (
@@ -113,8 +112,9 @@ export function AllTabsMenu({
           })}
           {closed.length === 0 ? null : (
             <>
-              <Menu.Divider />
-              <Menu.Label>Recently Closed</Menu.Label>
+              <Text size="xs" c="dimmed" fw={600} px="sm" pt="xs" aria-hidden="true">
+                Recently Closed
+              </Text>
               {closed.map((entry) => (
                 <Menu.Item
                   key={entry.chatId}

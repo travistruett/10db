@@ -44,6 +44,21 @@ describe('Sessions: the keyboard', () => {
     expect(await screen.findByRole('textbox', { name: 'Message' })).toBeTruthy();
   });
 
+  it('a first send in the tab ⌘T opened leaves that one tab, now a chat, and no second fresh tab', async () => {
+    const { chat } = open('/inbox', { chats: [] });
+    await screen.findByRole('button', { name: 'Project: ampsio. Switch project' });
+    press('t', { metaKey: true });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(box, { target: { value: 'First thought' } });
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(chat.created).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(1);
+    });
+  });
+
   it('leaves ⌘W, ⌘J and the digits to the page off Sessions', async () => {
     const { router } = open('/inbox', { chats: three() });
     await screen.findByRole('link', { name: 'Inbox' });

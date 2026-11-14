@@ -127,8 +127,12 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   };
 
   // The composer takes the cursor when the tab is shown (a chat made from a fresh tab keeps typing).
+  // The caret goes to the end of what was typed before the tab was a chat, which WebKit leaves at the start.
   useEffect(() => {
-    input.current?.focus();
+    const field = input.current;
+    if (field === null) return;
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
   }, [chat.id]);
 
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the

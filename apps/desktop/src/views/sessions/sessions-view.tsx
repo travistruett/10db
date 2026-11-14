@@ -67,6 +67,12 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const patch = usePatchChat();
   const unarchive = useUnarchiveChat();
   const [fresh, setFresh] = useState<readonly FreshTabState[]>(readFreshTabs);
+  // The fresh tabs this screen has let go, which the storage still holds until its next write.
+  const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+  const dropFresh = (id: string): void => {
+    setDropped((held) => new Set(held).add(id));
+    setFresh((tabsNow) => removeFreshTab(tabsNow, id));
+  };
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const [seen, setSeen] = useState(readSeen);
   const inbox = useInbox();
@@ -75,7 +81,11 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   }, [fresh]);
 
   // ⌘T on another view writes a fresh tab and lands here on it; a tab this screen does not know yet is read in.
-  if (search.fresh !== undefined && !fresh.some((t) => t.id === search.fresh)) {
+  if (
+    search.fresh !== undefined &&
+    !dropped.has(search.fresh) &&
+    !fresh.some((t) => t.id === search.fresh)
+  ) {
     const stored = readFreshTabs();
     if (stored.some((t) => t.id === search.fresh)) setFresh(stored);
   }
@@ -137,7 +147,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       select(projectId);
     },
     removeFresh: (id) => {
-      setFresh((tabsNow) => removeFreshTab(tabsNow, id));
+      dropFresh(id);
     },
   });
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -155,7 +165,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const chatMade = (tab: FreshTabState, chat: ChatDto, send: boolean): void => {
     sessionDrafts.move(draftKey.fresh(tab.id), draftKey.chat(chat.id));
     if (send) sessionDrafts.requestSend(draftKey.chat(chat.id));
-    setFresh((tabsNow) => removeFreshTab(tabsNow, tab.id));
+    dropFresh(tab.id);
     onSearch({ chat: chat.id }, true);
   };
 
@@ -164,7 +174,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     if (chat.archivedAt !== null) await unarchive.mutateAsync(chat.id);
     if (chat.tabPosition === null || chat.archivedAt !== null)
       await patch.mutateAsync({ chatId: chat.id, tabPosition: tab.position });
-    setFresh((tabsNow) => removeFreshTab(tabsNow, tab.id));
+    dropFresh(tab.id);
     onSearch({ chat: chat.id }, true);
     select(chat.projectId);
   };
