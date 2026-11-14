@@ -144,6 +144,13 @@ describe('the builder changing the kinds of a task', () => {
     expect(edited.kinds).toEqual([docs, { key: 'ui', source: 'builder' }]);
   });
 
+  it('does not count a kind an agent took off and the builder put back against the judge', async () => {
+    const id = await judgedTask();
+    await taskService().patchTask(id, { kinds: [] }, RigorSource.Agent);
+    await taskService().patchTask(id, { kinds: [docs] });
+    expect(outcomes(JudgeDecision.TaskKinds, '(docs)')).toEqual(['acted']);
+  });
+
   it('records nothing for kinds an agent sets, and puts none in kindsOff', async () => {
     const id = await judgedTask();
     const edited = await taskService().patchTask(id, { kinds: [] }, RigorSource.Agent);

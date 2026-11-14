@@ -101,6 +101,7 @@ import {
   patchProject,
   patchTask,
   placementRuleMoves,
+  judgeCallAnswer,
   readTaskSizing,
   recordJudgeOutcome,
   type WriteContext,
@@ -200,7 +201,6 @@ function liveAccount(db: DbReader, id: AccountId): AccountDto {
   return account;
 }
 
-/** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 /**
  * The keys the builder has taken off the task once it has `kinds`: those it held and no longer does join
  * `kindsOff`, and one it has put back leaves it.
@@ -240,11 +240,18 @@ function recordOverrides(
   }
   for (const key of now) {
     const call = calls.kinds[key];
-    if (!held.has(key) && !task.kindsOff.includes(key) && call !== undefined)
+    // Only a kind the judge answered `no` to: one an agent took off was put back, not argued with.
+    if (
+      !held.has(key) &&
+      !task.kindsOff.includes(key) &&
+      call !== undefined &&
+      judgeCallAnswer(ctx.tx, call) === 'no'
+    )
       recordJudgeOutcome(ctx, call, JudgeOutcome.Overridden);
   }
 }
 
+/** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
   readonly state: StateStore;
   readonly clock: Clock;

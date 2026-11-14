@@ -1,6 +1,7 @@
 import {
   AccountCreatedDto,
   AccountDto,
+  BatchDto,
   JudgeCallsPageDto,
   JudgeStatusDto,
   KindDto,
@@ -43,7 +44,7 @@ afterEach(async () => {
 });
 
 /** A daemon whose judge is a fake OpenRouter that holds every question; a start waits `sizingWaitMs`. */
-async function start(sizingWaitMs: number) {
+async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) {
   daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
@@ -92,12 +93,14 @@ async function start(sizingWaitMs: number) {
     secret: 'a-fake-key-for-the-test',
   });
   await api.patch('/judge', JudgeStatusDto, { accountId: account.id });
-  const project = await api.post('/projects', ProjectDto, {
+  const created = await api.post('/projects', ProjectDto, {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
     areas: [{ name: 'src', globs: ['src/**'] }],
+    ...extra,
   });
+  const project = created;
   const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
     title: 'Sized',
     acceptanceCriteria: ['x'],
@@ -128,6 +131,25 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
       rigor: 'critical',
       rigorSource: 'judge',
     });
+  });
+
+  it('a batch start waits for the sizing too, then starts the sized tasks', async () => {
+    const { api, project, task } = await start(30_000, {
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    const starting = api.post(`/projects/${project.id}/batches`, z.array(BatchDto), {
+      title: 'Sized',
+      taskIds: [task.id],
+    });
+    expect(await taskOf(api, project.id, task.id)).toMatchObject({ workstreamId: null });
+    answerAll();
+    expect(await starting).toHaveLength(1);
+    expect(await taskOf(api, project.id, task.id)).toMatchObject({
+      rigor: 'critical',
+      rigorSource: 'judge',
+    });
+    expect((await taskOf(api, project.id, task.id))?.workstreamId).not.toBeNull();
   });
 
   it('goes on with the rules’ answer after the wait, and the late answer is stopped', async () => {

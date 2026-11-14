@@ -30,16 +30,12 @@ const RIGOR_FALLBACK: Readonly<Record<EffectiveRigorSource, string>> = {
 };
 
 /**
- * What explains the rigor: the reason the one who set it gave, else a line for who it was. A rigor no
- * answer has set reads "Sized by rules" while nothing but the rules sized the task.
+ * What explains the rigor: the reason the one who set it gave, else a line for who it was, and "Sized by
+ * rules" appended while no judge answer has been applied.
  */
 function rigorExplanation(task: SizedRigor): string {
-  if (task.effectiveRigorReason !== null) return task.effectiveRigorReason;
-  const own =
-    task.effectiveRigorSource === EffectiveRigorSource.Builder ||
-    task.effectiveRigorSource === EffectiveRigorSource.Agent;
-  if (task.sizedByRules && !own) return 'Sized by rules';
-  return RIGOR_FALLBACK[task.effectiveRigorSource];
+  const why = task.effectiveRigorReason ?? RIGOR_FALLBACK[task.effectiveRigorSource];
+  return task.sizedByRules ? `${why} · Sized by rules` : why;
 }
 
 /**

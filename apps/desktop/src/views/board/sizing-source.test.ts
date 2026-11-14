@@ -37,14 +37,21 @@ describe('rigorBadge', () => {
       want: { label: 'Careful · agent', tooltip: 'Rigor an agent set' },
     },
     {
-      name: 'the builder’s, even while no judge answer has landed',
+      name: 'the builder’s, while no judge answer has landed',
       over: { effectiveRigorSource: 'builder', sizedByRules: true },
-      want: { label: 'Careful · you', tooltip: 'Rigor you set' },
+      want: { label: 'Careful · you', tooltip: 'Rigor you set · Sized by rules' },
     },
     {
-      name: 'the judge’s with no reason, sized by rules',
-      over: { effectiveRigorSource: 'judge', sizedByRules: true },
-      want: { label: 'Careful · judged', tooltip: 'Sized by rules' },
+      name: 'raised by rules while only rules sized the task',
+      over: {
+        effectiveRigorSource: 'rules',
+        effectiveRigorReason: 'at least Careful: migration',
+        sizedByRules: true,
+      },
+      want: {
+        label: 'Careful · rules',
+        tooltip: 'at least Careful: migration · Sized by rules',
+      },
     },
   ] as const)('$name', ({ over, want }) => {
     expect(rigorBadge(task(over), Rigor.Standard)).toEqual(want);
@@ -57,15 +64,6 @@ describe('rigorBadge', () => {
         Rigor.Standard,
       ),
     ).toBeNull();
-  });
-
-  it('shows a default-sourced rigor that differs from the project’s, with no source word', () => {
-    expect(
-      rigorBadge(
-        task({ effectiveRigorSource: 'default', effectiveRigor: Rigor.Light, sizedByRules: true }),
-        Rigor.Standard,
-      ),
-    ).toEqual({ label: 'Light', tooltip: 'Sized by rules' });
   });
 });
 
@@ -90,7 +88,7 @@ describe('rigorSourceLine', () => {
     {
       name: 'the default while only rules sized the task',
       over: { effectiveRigorSource: 'default', sizedByRules: true },
-      want: 'Sized by rules',
+      want: 'The project’s default · Sized by rules',
     },
     {
       name: 'the default once a judge answer landed',
