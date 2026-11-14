@@ -2,9 +2,7 @@ import {
   AccountId,
   AccountKind,
   JudgeDecision,
-  JudgeOutcome,
   SHAPE_JUDGE_DECISIONS,
-  type JudgeCallDto,
   type JudgeConfig,
   type JudgeDecisionConfig,
   type JudgeStatusDto,
@@ -29,13 +27,14 @@ import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { DaemonRequestError } from '../../daemon/client';
-import { useJudgeCalls, useJudgeStatus, usePatchJudge } from '../../daemon/judge-queries';
+import { useJudgeStatus, usePatchJudge } from '../../daemon/judge-queries';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { AccountSelect } from './account-select';
 import { AddAccountModal } from './accounts/add-account-modal';
 import { cantRunDecisions } from './accounts/used-by';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
 import { DecisionModelPicker } from './decision-model-picker';
+import { RecentDecisions } from './recent-decisions';
 import { useFocusTarget } from './focus-target';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
@@ -54,26 +53,6 @@ const SHAPE_QUESTION: Readonly<Record<ShapeJudgeDecision, string>> = {
   [JudgeDecision.ShapeReady]: 'After each message, until the first Propose: have you said enough?',
   [JudgeDecision.ShapeRecord]: 'Does this message state a decision or principle worth recording?',
   [JudgeDecision.ShapeElsewhere]: 'Is this a question only someone else can answer?',
-};
-
-const DECISION_LABEL: Readonly<Record<JudgeDecision, string>> = {
-  [JudgeDecision.ReviewSize]: REVIEW_LABEL,
-  ...SHAPE_LABEL,
-  [JudgeDecision.QuestionRoute]: 'Who a question goes to',
-  [JudgeDecision.ThreadAnswer]: 'Which option a conversation chose',
-  [JudgeDecision.ReplyMatch]: 'Which question a reply answers',
-  [JudgeDecision.ApprovalRead]: 'Whether a reply approves',
-};
-
-/** What 10db did, in the builder's words, for the outcomes that do not depend on the answer. */
-const OUTCOME_TEXT: Readonly<Record<Exclude<JudgeOutcome, 'acted'>, string>> = {
-  [JudgeOutcome.BelowFloor]: 'Not sure enough; the review ran',
-  [JudgeOutcome.FallbackOff]: 'Decisions were off; the review ran',
-  [JudgeOutcome.FallbackNoKey]: 'No key; the review ran',
-  [JudgeOutcome.FallbackTimeout]: 'Timed out; the review ran',
-  [JudgeOutcome.FallbackError]: 'The call failed; the review ran',
-  [JudgeOutcome.Stopped]: 'Stopped before it answered',
-  [JudgeOutcome.Shadow]: 'Logged in shadow; nothing shown',
 };
 
 const percent = (part: number, whole: number): string =>
@@ -228,17 +207,6 @@ function ShapeMeasures({
   );
 }
 
-/**
- * `acted` means 10db followed the model's answer, which is a skip or a review: what it did depends on
- * which, so the text follows the answer and the outcome together.
- */
-function outcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer'>): string {
-  if (call.outcome !== JudgeOutcome.Acted) return OUTCOME_TEXT[call.outcome];
-  if (call.answer === 'skip') return 'Skipped the review';
-  if (call.answer === 'review') return 'Ran the review (model said review)';
-  return 'Followed the answer';
-}
-
 const UNREACHABLE = "Couldn't reach the daemon.";
 
 function failureText(error: unknown): string {
@@ -362,63 +330,6 @@ function RunsOn({
         }}
       />
     </div>
-  );
-}
-
-function RecentCall({ call }: { readonly call: JudgeCallDto }) {
-  const answer =
-    call.answer === null
-      ? 'no answer'
-      : `${call.answer}${call.confidence === null ? '' : ` (${call.confidence.toFixed(2)})`}`;
-  return (
-    <li>
-      <Stack gap={0} py="xs" px="md">
-        <Group justify="space-between" wrap="nowrap" gap="md">
-          <Text size="sm" fw={500}>
-            {DECISION_LABEL[call.decision]}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {new Date(call.createdAt).toLocaleString()}
-          </Text>
-        </Group>
-        <Text size="xs" c="dimmed">
-          {call.model} · {answer}
-        </Text>
-        <Group gap="xs">
-          <Text size="xs">{outcomeText(call)}</Text>
-          {call.taskId ? (
-            <Text size="xs" component="span">
-              <Link to="/board" search={{ task: call.taskId }}>
-                Open on the board
-              </Link>
-            </Text>
-          ) : null}
-        </Group>
-      </Stack>
-    </li>
-  );
-}
-
-function RecentDecisions() {
-  const calls = useJudgeCalls();
-  const rows = calls.data ?? [];
-  return (
-    <Stack gap="xs">
-      <Text component="h5" fw={600} size="sm" m={0}>
-        Recent decisions
-      </Text>
-      {rows.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          No decisions yet.
-        </Text>
-      ) : (
-        <ul aria-label="Recent decisions" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {rows.map((call) => (
-            <RecentCall key={call.id} call={call} />
-          ))}
-        </ul>
-      )}
-    </Stack>
   );
 }
 

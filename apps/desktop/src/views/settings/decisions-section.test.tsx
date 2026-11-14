@@ -1,4 +1,4 @@
-import { mintId, type AccountDto } from '@10db/contracts';
+import type { AccountDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -6,7 +6,6 @@ import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { daemonUrl, renderApp, server } from '../../test/daemon';
 import {
   decisionModelDto,
-  judgeCallDto,
   judgeStatusDto,
   serveJudge,
   shapeMeasuresDto,
@@ -298,46 +297,6 @@ describe('Settings › Decisions', () => {
       screen.getByRole('switch', { name: 'Use fast models for routine decisions' }),
     ).toHaveProperty('disabled', true);
   });
-
-  it('lists recent calls with their outcome and a link to the task', async () => {
-    const taskId = mintId('Task');
-    open({
-      calls: [
-        judgeCallDto({ taskId, outcome: 'acted', answer: 'skip', confidence: 0.93 }),
-        judgeCallDto({ outcome: 'fallback_timeout', answer: null, confidence: null }),
-      ],
-    });
-    const list = await screen.findByRole('list', { name: 'Recent decisions' });
-    const [first, second, ...rest] = within(list).getAllByRole('listitem');
-    if (!first || !second) throw new Error('expected two rows');
-    expect(rest).toHaveLength(0);
-    expect(within(first).getByText(/skip.*0\.93/)).toBeTruthy();
-    expect(within(first).getByText('Skipped the review')).toBeTruthy();
-    expect(
-      within(first).getByRole('link', { name: 'Open on the board' }).getAttribute('href'),
-    ).toBe(`/board?task=${taskId}`);
-    expect(within(second).getByText('Timed out; the review ran')).toBeTruthy();
-    expect(within(second).queryByRole('link')).toBeNull();
-  });
-
-  it.each([
-    ['skip acted on', 'acted', 'skip', 'Skipped the review'],
-    ['review acted on', 'acted', 'review', 'Ran the review (model said review)'],
-    ['skip below the floor', 'below_floor', 'skip', 'Not sure enough; the review ran'],
-    ['no answer, decisions off', 'fallback_off', null, 'Decisions were off; the review ran'],
-    ['no answer, no key', 'fallback_no_key', null, 'No key; the review ran'],
-    ['no answer, error', 'fallback_error', null, 'The call failed; the review ran'],
-    ['cut short by a cancel or a shutdown', 'stopped', null, 'Stopped before it answered'],
-  ] as const)(
-    'says what 10db did from the answer and the outcome together: %s',
-    async (_name, outcome, answer, text) => {
-      open({
-        calls: [judgeCallDto({ outcome, answer, confidence: answer === null ? null : 0.9 })],
-      });
-      const list = await screen.findByRole('list', { name: 'Recent decisions' });
-      expect(within(list).getByText(text)).toBeTruthy();
-    },
-  );
 
   it('says when there are no decisions yet', async () => {
     open();

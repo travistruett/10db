@@ -3,6 +3,7 @@ import {
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
   JudgeCallDto,
+  JudgeCallsPageQuery,
   JudgeConfigPatch,
   JudgeDecision,
   JudgeStatusDto,
@@ -74,6 +75,8 @@ export interface JudgeRequest {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
+  /** The request's search params, when it has any. */
+  readonly query?: Readonly<Record<string, string>>;
 }
 
 /** A judge that remembers what it was sent, serving status and calls from mutable state. */
@@ -93,10 +96,12 @@ export function serveJudge(initial: {
   const sent: JudgeRequest[] = [];
   const note = async (request: Request) => {
     const text = await request.text();
+    const params = new URL(request.url).searchParams;
     sent.push({
       method: request.method,
       path: new URL(request.url).pathname,
       body: text === '' ? null : JSON.parse(text),
+      ...(params.size > 0 ? { query: Object.fromEntries(params) } : {}),
     });
   };
   server.use(
@@ -156,6 +161,23 @@ export function serveJudge(initial: {
       return HttpResponse.json(initial.test);
     }),
     http.get(daemonUrl('/judge/calls'), () => HttpResponse.json(initial.calls ?? [])),
+    http.get(daemonUrl('/judge/calls/page'), async ({ request }) => {
+      await note(request);
+      const query = JudgeCallsPageQuery.parse(
+        Object.fromEntries(new URL(request.url).searchParams),
+      );
+      const matching = [...(initial.calls ?? [])]
+        .filter((c) => query.decision === undefined || c.decision === query.decision)
+        .filter((c) => query.outcome === undefined || c.outcome === query.outcome)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return HttpResponse.json({
+        calls: matching.slice(query.offset, query.offset + query.limit),
+        total: matching.length,
+      });
+    }),
+    http.get(daemonUrl('/judge/decisions'), () =>
+      HttpResponse.json({ since: '2026-10-14T12:00:00.000Z', decisions: [] }),
+    ),
     http.get(daemonUrl('/judge/models'), () =>
       HttpResponse.json({
         models: initial.models ?? [decisionModelDto()],
