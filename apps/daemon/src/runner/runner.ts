@@ -311,6 +311,7 @@ import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
 import { threadInlineBytes } from './thread-pictures';
+import { stepSkills } from './step-skills';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -2042,7 +2043,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     // differ from the last session's when the project moved. Reading has no side effects.
     const account = getAccountRow(db, ctl.accountId);
     const provider = providerOf(agentKind(account.kind));
-    const skills = persona?.skills ?? [];
+    // The persona's craft skills, then those of the task's kinds, so every step of such a task loads them.
+    const skills = stepSkills(persona, kindsOfTask(task.kinds, listKinds(db)));
     // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
     // blocks while they fit the account's limits and what the thread's budget has left.

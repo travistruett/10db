@@ -2964,6 +2964,50 @@ describe('moving accounts', () => {
     expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
   });
 
+  it("loads a task's kinds' skills in every step, named for Claude and inlined for Codex", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-kskill-0000', 'Write the second file'),
+          },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-kskill-0001', ['src/api/b.txt']), turn],
+      ],
+    });
+    engine.state.write((ctx) =>
+      insertKind(ctx, { key: 'craft', label: 'Craft', skills: ['brainstorming'] }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], {
+      flow: 'quick',
+      kinds: ['craft'],
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+
+    const chatgpt = seedAccount(engine.store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, chatgpt.id, { expectedIdentity: 'chatgpt@example.com' }),
+    );
+    moveTo(chatgpt.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+
+    const body = readSkillBody('brainstorming') ?? 'missing';
+    const [claude, codex] = engine.adapter.prompts.map((p) => p.prompt);
+    // The implementer's own skills stay, and the kind's come after them.
+    expect(claude).toContain('Skills to use: test-first, handoff, brainstorming.');
+    expect(claude).not.toContain(body);
+    expect(codex).toContain(body);
+    expect(codex).toContain(readSkillBody('test-first') ?? 'missing');
+  });
+
   it("brings the builder's answer to a fresh session after the project moved", async () => {
     engine = await createTestEngine({
       Alpha: [
