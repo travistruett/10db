@@ -11,8 +11,8 @@ import * as schema from '../schema';
 import type { WriteContext } from './store';
 
 /*
- * Writers for the routing tables the playbook replaced. Nothing in 10db writes those tables any more,
- * so a test of the move to the playbook (or of what reads the old rows) puts its rows here.
+ * Writers for the routing tables the playbook replaced, for the test of what reads the old rows. Nothing in
+ * 10db writes those tables any more; the daemon's tests have their own (`apps/daemon/test/legacy-rows.ts`).
  */
 
 type FlowStepFields = Partial<LegacyFlow['steps'][number]> &
@@ -32,36 +32,6 @@ export function seedLegacyFlow(
   };
   ctx.tx.insert(schema.flows).values(row).run();
   return { id: row.id, name: row.name, steps: row.steps };
-}
-
-/** The three flows 10db used to seed: quick (implement), standard (and review) and full (every step). */
-export function seedLegacyDefaultFlows(
-  ctx: WriteContext,
-): Record<'quick' | 'standard' | 'full', LegacyFlow> {
-  return {
-    quick: seedLegacyFlow(ctx, { name: 'quick', steps: [{ role: 'implement', need: 40 }] }),
-    standard: seedLegacyFlow(ctx, {
-      name: 'standard',
-      steps: [
-        { role: 'implement', need: 40 },
-        { role: 'review', need: 48 },
-      ],
-    }),
-    full: seedLegacyFlow(ctx, {
-      name: 'full',
-      steps: [
-        { role: 'plan', need: 45, skip: [{ kind: 'unless_criteria_over', count: 3 }] },
-        {
-          role: 'plan_review',
-          need: 48,
-          skip: [{ kind: 'unless_risk', tags: ['security', 'auth', 'migration'] }],
-        },
-        { role: 'implement', need: 40 },
-        { role: 'review', need: 48 },
-        { role: 'qa', need: 35, skip: [{ kind: 'unless_criteria_over', count: 3 }] },
-      ],
-    }),
-  };
 }
 
 export function seedLegacyRoleSetting(ctx: WriteContext, setting: LegacyRoleSetting): void {
