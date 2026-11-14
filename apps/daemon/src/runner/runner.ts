@@ -277,7 +277,7 @@ import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
-import { raisePlanApproval, waitsForPlanApproval } from './plan-approval';
+import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {
@@ -1262,16 +1262,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     step: WorkstreamStep,
   ): 'stop' {
-    const plan = [...row.steps.slice(0, row.stepIndex + 1)]
-      .reverse()
-      .find((s) => s.role === StepRole.Plan)?.result?.summary;
     opts.state.write((ctx) => {
       countFinished(ctx, step);
       const card = raisePlanApproval(ctx, {
         workstreamId: id,
         projectId: row.projectId,
         taskTitle: getTask(ctx.tx, row.taskId).title,
-        plan: plan ?? 'The plan step recorded no plan.',
+        plan: planOf(row),
       });
       transitionWorkstream(ctx, id, {
         to: S.WaitingHuman,

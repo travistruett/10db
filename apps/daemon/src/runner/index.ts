@@ -12,6 +12,7 @@ export {
   type StopPassLane,
 } from './runner';
 export { liveCheckCard, raiseBuilderCheck } from './builder-check';
+export { livePlanCard, planOf, raisePlanApproval } from './plan-approval';
 export { untakenMessages } from './lane-messages';
 export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from './pass-turn';
 export { raisePassCheck, raiseTurnFailed } from './pass-check';

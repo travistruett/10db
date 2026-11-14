@@ -1,5 +1,6 @@
 import {
   PlanChoice,
+  StepRole,
   WorkstreamState,
   type InboxItemDto,
   type ProjectId,
@@ -20,6 +21,13 @@ export interface PlanApproval {
   readonly projectId: ProjectId;
   readonly taskTitle: string;
   readonly plan: string;
+}
+
+/** The plan the workstream's Plan step recorded, as the builder is shown it. */
+export function planOf(row: WorkstreamRow): string {
+  const upTo = row.steps.slice(0, row.stepIndex + 1);
+  const planStep = upTo.findLast((s) => s.role === StepRole.Plan);
+  return planStep?.result?.summary ?? 'The plan step recorded no plan.';
 }
 
 /** The live `plan` card of a workstream, if the builder has not finished with it. */
