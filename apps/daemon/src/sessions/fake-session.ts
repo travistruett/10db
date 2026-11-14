@@ -419,12 +419,25 @@ export function runFakeLaneSession(
         emit({ type: 'tool_call', call: step.call });
         return 'continue';
       case 'mcp': {
-        const result = await Promise.race([
-          callMcp(step.tool, taskRefs.resolve(step.args)),
-          untilStopped,
-        ]);
+        const args = taskRefs.resolve(step.args);
+        // A Claude session reports the use and the result of each tool call on 10db's server, which a
+        // chat draws as its builder-tool rows.
+        const useId = `fake-mcp-${String(index)}`;
+        for (const event of toolCalls.use({
+          id: useId,
+          name: `mcp__10db__${step.tool}`,
+          input: args,
+          parentId: null,
+        }))
+          emit(event);
+        const result = await Promise.race([callMcp(step.tool, args), untilStopped]);
         if (result === 'stopped') return 'halt';
         taskRefs.learn(result.text);
+        for (const event of toolCalls.result(useId, {
+          isError: result.isError,
+          content: result.text,
+        }))
+          emit(event);
         observe(index, 'mcp_result', {
           tool: step.tool,
           isError: result.isError,
