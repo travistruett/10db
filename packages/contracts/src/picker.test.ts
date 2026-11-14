@@ -12,8 +12,6 @@ const task = {
   description: '',
   acceptanceCriteria: ['x'],
   areas: ['api'],
-  riskTags: [],
-  flowId: null,
   rigor: null,
   effectiveRigor: 'standard',
   kinds: [],

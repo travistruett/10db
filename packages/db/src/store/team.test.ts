@@ -1,12 +1,4 @@
-import {
-  ConflictError,
-  EventType,
-  InvalidError,
-  mintId,
-  NotFoundError,
-  CriterionCheck,
-  type PersonaId,
-} from '@10db/contracts';
+import { ConflictError, EventType, InvalidError, mintId, CriterionCheck } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { listEventsAfter } from './events';
@@ -25,12 +17,10 @@ import {
   setDmCursor,
   updatePerson,
   findPersonaByKey,
-  getTeam,
   insertPerson,
   insertPersona,
   listPersonas,
   patchPersona,
-  setTeam,
 } from './team';
 import { createTestStore, seedProject } from './test-support';
 
@@ -57,8 +47,6 @@ describe('personas', () => {
     expect(events.map((e) => e.type)).toEqual([EventType.PersonaSaved]);
     expect(persona).toMatchObject({
       skills: [],
-      minimumScore: null,
-      modelPin: null,
       archived: false,
     });
     expect(findPersonaByKey(store.db, 'reviewer')).toEqual(persona);
@@ -91,85 +79,6 @@ describe('personas', () => {
     expect(listPersonas(store.db, { includeArchived: true }).map((p) => p.key)).toEqual([
       'reviewer',
     ]);
-  });
-});
-
-describe('team', () => {
-  it('starts empty, then replaces bindings and members as a whole', () => {
-    const project = seedProject(store);
-    expect(getTeam(store.db, project.id)).toEqual({
-      projectId: project.id,
-      bindings: [],
-      members: [],
-    });
-    const persona = store.write((ctx) => insertPersona(ctx, reviewer)).value;
-    const sam = store.write((ctx) => insertPerson(ctx, { handle: 'sam', name: 'Sam' })).value;
-    const { events } = store.write((ctx) =>
-      setTeam(ctx, project.id, {
-        bindings: [{ role: 'review', personaId: persona.id }],
-        members: [sam.id],
-      }),
-    );
-    expect(events.map((e) => e.type)).toEqual([EventType.TeamSaved]);
-    expect(getTeam(store.db, project.id)).toEqual({
-      projectId: project.id,
-      bindings: [{ role: 'review', personaId: persona.id }],
-      members: [sam.id],
-    });
-    store.write((ctx) => setTeam(ctx, project.id, { bindings: [], members: [] }));
-    expect(getTeam(store.db, project.id).bindings).toEqual([]);
-  });
-
-  it.each([
-    {
-      name: 'a persona bound to a role it does not have',
-      bind: (id: PersonaId) => ({ role: 'implement' as const, personaId: id }),
-      archive: false,
-    },
-    {
-      name: 'an archived persona',
-      bind: (id: PersonaId) => ({ role: 'review' as const, personaId: id }),
-      archive: true,
-    },
-  ])('refuses $name', ({ bind, archive }) => {
-    const project = seedProject(store);
-    const persona = store.write((ctx) => insertPersona(ctx, reviewer)).value;
-    if (archive) store.write((ctx) => patchPersona(ctx, persona.id, { archived: true }));
-    expect(() =>
-      store.write((ctx) => setTeam(ctx, project.id, { bindings: [bind(persona.id)], members: [] })),
-    ).toThrow(InvalidError);
-  });
-});
-
-describe('setTeam on a missing target', () => {
-  it.each([
-    { name: 'an empty team', body: () => ({ bindings: [], members: [] }) },
-    {
-      name: 'a bound team',
-      body: (id: PersonaId) => ({
-        bindings: [{ role: 'review' as const, personaId: id }],
-        members: [],
-      }),
-    },
-  ])('answers not-found for an unknown project with $name and emits nothing', ({ body }) => {
-    const persona = store.write((ctx) => insertPersona(ctx, reviewer)).value;
-    const before = listEventsAfter(store.db, 0, 100).length;
-    expect(() => store.write((ctx) => setTeam(ctx, mintId('Project'), body(persona.id)))).toThrow(
-      NotFoundError,
-    );
-    expect(listEventsAfter(store.db, 0, 100)).toHaveLength(before);
-  });
-
-  it('refuses an unknown binding persona as invalid, not missing', () => {
-    const project = seedProject(store);
-    expect(() =>
-      store.write((ctx) =>
-        setTeam(ctx, project.id, {
-          bindings: [{ role: 'review', personaId: mintId('Persona') }],
-          members: [],
-        }),
-      ),
-    ).toThrow(InvalidError);
   });
 });
 
@@ -294,12 +203,14 @@ describe('removePerson', () => {
     const sam = store.write((ctx) =>
       insertPerson(ctx, { handle: 'sam', name: 'Sam', slack: contact }),
     ).value;
-    store.write((ctx) => setTeam(ctx, project.id, { bindings: [], members: [sam.id] }));
+    store.write((ctx) => {
+      ctx.tx.insert(schema.teamMembers).values({ projectId: project.id, personId: sam.id }).run();
+    });
     const { events } = store.write((ctx) => {
       removePerson(ctx, sam.id);
     });
     expect(events.map((e) => e.type)).toContain(EventType.PersonRemoved);
-    expect(getTeam(store.db, project.id).members).toEqual([]);
+    expect(store.db.select().from(schema.teamMembers).all()).toEqual([]);
     expect(findPersonByHandle(store.db, 'sam')).toBeUndefined();
     expect(store.db.select().from(schema.personContacts).all()).toEqual([]);
   });

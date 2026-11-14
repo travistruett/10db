@@ -24,7 +24,6 @@ import type {
   StoredRequiredChecks,
   FailingCheckDto,
   FlowId,
-  FlowStepDef,
   GoalBudget,
   GoalCriterionId,
   GoalId,
@@ -47,7 +46,6 @@ import type {
   JudgeDecision,
   JudgeOutcome,
   McpVerdict,
-  ModelPin,
   ModelSetting,
   ModelStatus,
   ModelTier,
@@ -64,7 +62,6 @@ import type {
   TakeOutStep,
   TaskPageReportId,
   PatternId,
-  PatternMatch,
   ModelProfileId,
   NextAction,
   Notice,
@@ -91,7 +88,6 @@ import type {
   Provider,
   QuestionCategory,
   Rigor,
-  RiskTag,
   RoutingRuleId,
   SessionId,
   SessionMode,
@@ -151,6 +147,12 @@ import type {
   ShapeState,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
+import type {
+  LegacyFlowStep,
+  LegacyModelPin,
+  LegacyPatternMatch,
+  LegacyRiskTag,
+} from './legacy-types';
 import { sql } from 'drizzle-orm';
 import {
   type AnySQLiteColumn,
@@ -193,7 +195,7 @@ export const appSettings = sqliteTable('app_settings', {
 export const flows = sqliteTable('flows', {
   id: text('id').$type<FlowId>().primaryKey(),
   name: text('name').notNull().unique(),
-  steps: text('steps', { mode: 'json' }).$type<FlowStepDef[]>().notNull(),
+  steps: text('steps', { mode: 'json' }).$type<LegacyFlowStep[]>().notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -436,7 +438,7 @@ export const tasks = sqliteTable(
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),
     riskTags: text('risk_tags', { mode: 'json' })
-      .$type<RiskTag[]>()
+      .$type<LegacyRiskTag[]>()
       .notNull()
       .default(sql`'[]'`),
     flowId: text('flow_id')
@@ -983,7 +985,7 @@ export const personas = sqliteTable('personas', {
     .notNull()
     .default(sql`'[]'`),
   minimumScore: real('minimum_score'),
-  modelPin: text('model_pin', { mode: 'json' }).$type<ModelPin>(),
+  modelPin: text('model_pin', { mode: 'json' }).$type<LegacyModelPin>(),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1328,7 +1330,7 @@ export const patterns = sqliteTable(
       .$type<ProjectId>()
       .references(() => projects.id),
     name: text('name').notNull(),
-    match: text('match', { mode: 'json' }).$type<PatternMatch>().notNull(),
+    match: text('match', { mode: 'json' }).$type<LegacyPatternMatch>().notNull(),
     setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
     position: integer('position').notNull(),
     createdAt: createdAt(),

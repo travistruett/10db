@@ -180,7 +180,7 @@ describe('the builder MCP endpoint', () => {
         { name: 'src', globs: ['src/**'] },
         { name: 'docs', globs: ['docs/**'] },
       ],
-      flowId: project.flowId,
+      defaultRigor: project.defaultRigor,
       delivery: project.delivery,
     });
     expect(projects[0]?.['hazards']).toContainEqual(
@@ -260,8 +260,6 @@ describe('the builder MCP endpoint', () => {
             acceptanceCriteria: ['  one ', '', 'two'],
             areas: ['src'],
             dependsOn: [first.id],
-            riskTags: ['security'],
-            flowId: project.flowId,
           }),
         );
       expect(created.title).toBe('Search is fast');
@@ -272,8 +270,6 @@ describe('the builder MCP endpoint', () => {
         acceptanceCriteria: ['one', 'two'],
         areas: ['src'],
         dependsOn: [first.id],
-        riskTags: ['security'],
-        flowId: project.flowId,
         boardStatus: created.boardStatus,
       });
     });
@@ -412,7 +408,6 @@ describe('the builder MCP endpoint', () => {
       { name: 'an unknown dependency', body: { dependsOn: [mintId('Task')] } },
       { name: 'a title with a newline', body: { title: 'one\ntwo' } },
       { name: 'an empty title', body: { title: '' } },
-      { name: 'an unknown flow', body: { flowId: mintId('Flow') } },
     ])('refuses $name as the REST API does', async ({ body }) => {
       const project = await seedProject();
       const input = { title: 't', acceptanceCriteria: ['a'], areas: ['src'], ...body };
@@ -444,12 +439,12 @@ describe('the builder MCP endpoint', () => {
         taskId: task.id,
         title: ' after ',
         acceptanceCriteria: [' new '],
-        riskTags: ['auth'],
+        why: ' because ',
       });
       expect((await tasksOf(project.id))[0]).toMatchObject({
         title: 'after',
         acceptanceCriteria: ['new'],
-        riskTags: ['auth'],
+        why: 'because',
         areas: ['src'],
       });
     });

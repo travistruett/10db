@@ -154,7 +154,6 @@ describe('reviewSizeState', () => {
     title: 'Add a route',
     description: 'It lists things.',
     acceptanceCriteria: ['Lists things', 'Has a test'],
-    riskTags: [],
   };
   const changes = (diff: string, truncated = false, list = [file('a.ts', 2, 1)]) => ({
     files: list,

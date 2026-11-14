@@ -365,7 +365,7 @@ describe('the drafting guidance', () => {
     expect(BUILDER_INSTRUCTIONS).toContain(phrase);
   });
 
-  it.each(['outcome', 'seen or measured', 'dependsOn', 'list_kinds', 'omit flowId'])(
+  it.each(['outcome', 'seen or measured', 'dependsOn', 'list_kinds', 'omit landing'])(
     'create_task says %j',
     (phrase) => {
       expect(create()).toContain(phrase);

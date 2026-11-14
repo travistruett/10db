@@ -472,8 +472,7 @@ export function createToolHandlers(
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
-          // `riskTags` is the older name for the risky kinds: its words are their keys.
-          const declared = [...new Set([...(input.kinds ?? []), ...(input.riskTags ?? [])])];
+          const declared = [...new Set(input.kinds ?? [])];
           const known = listKinds(ctx.tx);
           const taskKinds = withKindsNamed([], declared, known, 'agent');
           if (draft) {

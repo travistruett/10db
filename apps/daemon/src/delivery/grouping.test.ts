@@ -39,8 +39,6 @@ function tasksNamed(
         description: '',
         acceptanceCriteria: ['it works'],
         areas: ['api'],
-        riskTags: [],
-        flowId: null,
         landing: { kind: 'base' },
         workspaceMode: 'worktree',
         placementReason: null,

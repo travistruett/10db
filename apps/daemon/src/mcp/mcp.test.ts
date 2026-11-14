@@ -561,7 +561,6 @@ describe('MCP tools', () => {
 
     it.each([
       ['a kind that asks for a card', { kinds: ['dependency'] }],
-      ['an older risk tag', { riskTags: ['dependency'] }],
       ['a risk named in its text', { title: 'Bump the zod dependency' }],
       ['joining a running batch', { joinsRunningBatch: true }],
       ['a size over the limit', { body: 'x'.repeat(1300) }],
@@ -580,7 +579,6 @@ describe('MCP tools', () => {
 
     it.each([
       ['a kind', { kinds: ['dependency'] }, 'it carries the dependency kind'],
-      ['an older risk tag', { riskTags: ['dependency'] }, 'it carries the dependency kind'],
       [
         'a risk named in its text',
         { title: 'Bump the zod dependency' },
@@ -597,8 +595,7 @@ describe('MCP tools', () => {
 
     it.each([
       ['kinds', { kinds: ['security', 'auth'] }],
-      ['older risk tags', { riskTags: ['security', 'auth'] }],
-      ['both, once each', { kinds: ['security'], riskTags: ['security', 'auth'] }],
+      ['kinds named twice, once each', { kinds: ['security', 'auth', 'security'] }],
     ])(
       'keeps the declared %s on the card, and the task filed from it has them',
       async (_n, over) => {
@@ -641,7 +638,7 @@ describe('MCP tools', () => {
         opId: 'op-prop-0007',
         ...small,
         title: 'Tighten the security and auth checks',
-        riskTags: ['security'],
+        kinds: ['security'],
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
@@ -656,7 +653,7 @@ describe('MCP tools', () => {
         ...small,
         kind: 'change_task',
         title: 'Tighten the security and auth checks',
-        riskTags: ['security'],
+        kinds: ['security'],
       });
       expect(openCards()).toHaveLength(1);
       expect(openCards()[0]?.body).toMatch(
@@ -2468,7 +2465,7 @@ describe('MCP idempotence by opId', () => {
         kind: 'new_task',
         title: 'Add x',
         body: 'because',
-        riskTags: ['security'],
+        kinds: ['security'],
       },
       created: { proposals: 1, inbox: 1 },
     },
@@ -3213,7 +3210,7 @@ describe('principle proposals', () => {
       title: 'Never log tokens',
       body: 'One reached the logs last week.',
       principle: { statement: 'Never write a token to a log' },
-      riskTags: ['security', 'auth', 'security'],
+      kinds: ['security', 'auth', 'security'],
     });
     const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
     expect(card?.body).toContain('Never write a token to a log');
@@ -3229,7 +3226,7 @@ describe('principle proposals', () => {
       kind: 'principle',
       title: 'Small PRs',
       body: 'Prefer small pull requests',
-      riskTags: [],
+      kinds: [],
     });
     const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
     expect(card?.body).not.toContain('Raised as a card');

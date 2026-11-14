@@ -1,14 +1,18 @@
-import type { ModelSetting, RiskTag, StepRole, TaskId } from '@10db/contracts';
+import type { ModelSetting, StepRole, TaskId } from '@10db/contracts';
 import {
-  findFlowByName,
   findPersonaByKey,
   insertPersona,
   insertTask,
-  patchPersona,
+  patchTask,
+  readLegacyRouting,
+  seedLegacyBinding,
+  seedLegacyDefaultFlows,
+  seedLegacyPatterns,
+  seedLegacyPersonaPin,
+  seedLegacyRoleSetting,
+  seedLegacyTaskRouting,
   seedProject,
-  setPatterns,
-  setRoleSetting,
-  setTeam,
+  type LegacyRiskTag,
   type Store,
 } from '@10db/db';
 import type { StateStore } from '../src/events';
@@ -17,7 +21,7 @@ export interface MovedTask {
   readonly name: string;
   readonly flow: 'quick' | 'standard' | 'full';
   readonly criteria: number;
-  readonly tag: RiskTag | null;
+  readonly tag: LegacyRiskTag | null;
 }
 
 export const MOVED_TASKS: readonly MovedTask[] = [
@@ -45,7 +49,9 @@ interface Helpers {
     role: StepRole,
     pin?: { model: string; effort: 'low' | 'medium' | 'high' },
   ): void;
-  pattern(roles: StepRole[], tags: RiskTag[], value: ModelSetting): void;
+  pattern(roles: StepRole[], tags: LegacyRiskTag[], value: ModelSetting): void;
+  /** Gives every task of the world a model setting of its own. */
+  taskModel(value: ModelSetting): void;
 }
 
 export const MOVED_SCENARIOS: Readonly<Record<string, Setup>> = {
@@ -77,6 +83,13 @@ export const MOVED_SCENARIOS: Readonly<Record<string, Setup>> = {
   'implementer minimum 60': (h) => {
     h.minimum('implementer', 60);
   },
+  'implementer minimum 100': (h) => {
+    h.minimum('implementer', 100);
+  },
+  'a task’s own model and a persona pin': (h) => {
+    h.pin('implementer', { model: OPUS, effort: 'low' });
+    h.taskModel(tier('frontier'));
+  },
 };
 
 export function buildMovedWorld(
@@ -91,52 +104,60 @@ export function buildMovedWorld(
     return persona;
   };
   const pinOf = (pin: { model: string; effort: 'low' | 'medium' | 'high' }) => pin;
+  let taskModel: ModelSetting | null = null;
   state.write((ctx) => {
     setup({
       setting: (role, inProject, value) => {
-        setRoleSetting(ctx, { role, projectId: inProject ? project.id : null, setting: value });
+        seedLegacyRoleSetting(ctx, {
+          role,
+          projectId: inProject ? project.id : null,
+          setting: value,
+        });
       },
       pin: (key, pin) => {
-        patchPersona(ctx, find(key).id, { modelPin: pinOf(pin) });
+        seedLegacyPersonaPin(ctx, find(key).id, { modelPin: pinOf(pin) });
       },
       minimum: (key, score) => {
-        patchPersona(ctx, find(key).id, { minimumScore: score });
+        seedLegacyPersonaPin(ctx, find(key).id, { minimumScore: score });
       },
       bind: (role, key) => {
-        setTeam(ctx, project.id, { bindings: [{ role, personaId: find(key).id }], members: [] });
+        seedLegacyBinding(ctx, { projectId: project.id, role, personaId: find(key).id });
       },
       persona: (key, role, pin) => {
-        insertPersona(ctx, {
+        const made = insertPersona(ctx, {
           key,
           name: key,
           role,
           tools: role === 'implement' ? 'edit' : 'read_only',
           instructions: 'Do it.',
-          ...(pin ? { modelPin: pin } : {}),
         });
+        if (pin) seedLegacyPersonaPin(ctx, made.id, { modelPin: pin });
+      },
+      taskModel: (value) => {
+        taskModel = value;
       },
       pattern: (roles, tags, value) => {
-        setPatterns(ctx, null, [
-          {
-            name: 'Mine',
-            match: { roles, riskTags: tags, areas: [], retryOnly: false },
-            setting: value,
-          },
+        seedLegacyPatterns(ctx, null, [
+          { name: 'Mine', match: { roles, riskTags: tags }, setting: value },
         ]);
       },
     });
   });
   const taskIds = new Map<string, TaskId>();
   state.write((ctx) => {
+    seedLegacyDefaultFlows(ctx);
+    const flows = readLegacyRouting(ctx.tx).flows;
     for (const t of MOVED_TASKS) {
-      const flow = findFlowByName(ctx.tx, t.flow);
       const made = insertTask(ctx, project.id, {
         title: t.name,
         acceptanceCriteria: Array.from({ length: t.criteria }, (_, i) => `c${String(i)}`),
         areas: ['api'],
-        riskTags: t.tag === null ? [] : [t.tag],
-        flowId: flow?.id ?? null,
       });
+      seedLegacyTaskRouting(ctx, made.id, {
+        riskTags: t.tag === null ? [] : [t.tag],
+        flowId: flows.find((f) => f.name === t.flow)?.id ?? null,
+      });
+      if (taskModel !== null) patchTask(ctx, made.id, { modelSetting: taskModel });
       taskIds.set(t.name, made.id);
     }
   });

@@ -127,8 +127,6 @@ export const BuilderToolInputs = {
     acceptanceCriteria: z.array(z.string()).default([]),
     areas: z.array(z.string()).default([]),
     dependsOn: z.array(z.string()).default([]),
-    riskTags: z.array(z.string()).default([]),
-    flowId: z.string().nullable().default(null),
     /** Null or left out follows the project's default and the task's kinds. */
     rigor: z.enum(Rigor).nullable().default(null),
     /** The kinds the task has, by key: 10db records them as set by an agent. */
@@ -145,8 +143,6 @@ export const BuilderToolInputs = {
       why: z.string().optional(),
       description: z.string().optional(),
       acceptanceCriteria: z.array(z.string()).optional(),
-      riskTags: z.array(z.string()).optional(),
-      flowId: z.string().nullable().optional(),
       /** Null hands the rigor back to the project's default and the task's kinds. */
       rigor: z.enum(Rigor).nullable().optional(),
       /** Replaces the task's kinds, by key; a kind it already had keeps who set it. */
@@ -248,7 +244,7 @@ export const BUILDER_INSTRUCTIONS = [
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
   "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the kind migration or dependency; a task that touches neither names no hazard.",
   '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
-  "- Add dependsOn (ids of open tasks from list_tasks) only when needed. Name the kinds the work touches (keys from list_kinds, such as security or migration): a kind can raise the task's rigor, add a review and send it to a separate copy. Omit rigor to let the project's default and the kinds decide; a rigor below a kind's minimum is refused. Omit flowId and landing: a new task uses the project default flow and lands where the project says.",
+  "- Add dependsOn (ids of open tasks from list_tasks) only when needed. Name the kinds the work touches (keys from list_kinds, such as security or migration): a kind can raise the task's rigor, add a review and send it to a separate copy. Omit rigor to let the project's default and the kinds decide; a rigor below a kind's minimum is refused. Omit landing: a new task lands where the project says.",
   '- Create the task without asking for confirmation, then report its title and id. The builder reads the board, and can edit or remove it.',
   '',
   'Decisions and principles (search_knowledge, save_decision, save_principle, supersede_knowledge, retire_knowledge, withdraw_knowledge, list_proposals):',
@@ -275,13 +271,13 @@ const DRAFTING =
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
-    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder; role page is a screen of the app, with the route that shows it when one path does, and role shared is code pages share), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
+    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder; role page is a screen of the app, with the route that shows it when one path does, and role shared is code pages share), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default rigor and delivery mode.',
   [BuilderToolName.ListKinds]:
     "Lists the kinds a task can have (security, auth, migration, ui and others the builder made), each with its key, what it means, the lowest rigor it allows and what it changes: always reviewed, fails at the retry limit, its own copy, and whether a proposal of it goes to the Inbox. Name a task's kinds by key in create_task and edit_task.",
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
-  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the migration and dependency kinds do. Add dependsOn only when needed, name the kinds the work touches (keys from list_kinds) and leave rigor out unless the work needs more than the kinds and the project's default give; a rigor below a kind's minimum is refused, and omit flowId for the project default; omit landing too, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words.`,
-  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, headline, why, description, acceptanceCriteria (replaces the list), rigor (null hands it back to the default), kinds (replaces the list, keys from list_kinds), flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
+  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the migration and dependency kinds do. Add dependsOn only when needed, name the kinds the work touches (keys from list_kinds) and leave rigor out unless the work needs more than the kinds and the project's default give; a rigor below a kind's minimum is refused; omit landing, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words.`,
+  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, headline, why, description, acceptanceCriteria (replaces the list), rigor (null hands it back to the default), kinds (replaces the list, keys from list_kinds), areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:

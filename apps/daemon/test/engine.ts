@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { InboxItemId, mintId, Rigor, RoutedBy, StepRole } from '@10db/contracts';
+import { InboxItemId, mintId, Rigor, RoutedBy, StepRole, TaskKindSource } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -12,7 +12,6 @@ import type {
   ProjectDto,
   ProjectId,
   ProjectInput,
-  RiskTag,
   TaskDto,
   WorkstreamDto,
   WorkstreamId,
@@ -137,7 +136,8 @@ export interface TestEngine {
     title: string,
     areas?: string[],
     dependsOn?: TaskDto['id'][],
-    plan?: { flow: string; riskTags?: RiskTag[]; criteria?: number },
+    /** `riskTags` shape the steps a scripted `full` flow runs; `kinds` are the keys the task is filed with. */
+    plan?: { flow: string; riskTags?: string[]; kinds?: string[]; criteria?: number },
     batchId?: BatchId,
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
@@ -557,8 +557,8 @@ export async function createTestEngine(
           acceptanceCriteria: criteria,
           areas,
           dependsOn,
-          riskTags: plan?.riskTags ?? [],
           rigor,
+          kinds: (plan?.kinds ?? []).map((key) => ({ key, source: TaskKindSource.Builder })),
         }),
       );
       const workstream = plan

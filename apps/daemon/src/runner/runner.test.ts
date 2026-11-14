@@ -49,6 +49,7 @@ import {
   insertBatch,
   insertInboxItem,
   insertJudgeCall,
+  insertKind,
   insertPrinciple,
   insertSource,
   listJudgeCalls,
@@ -4070,9 +4071,13 @@ describe('flows', () => {
           [approve('op-flow-0499'), turn],
         ],
       });
+      // A kind of its own that fails at the limit, so the task stays on the Standard steps the script runs.
+      engine.state.write((ctx) => {
+        insertKind(ctx, { key: 'no-open-findings', label: 'No open findings', failsAtLimit: true });
+      });
       const { workstream } = engine.addTask('Alpha', ['api'], [], {
         flow: 'standard',
-        riskTags: ['security'],
+        kinds: ['no-open-findings'],
       });
       await until(workstream.id, (s) => s === 'FAILED');
       return workstream;
@@ -7831,14 +7836,11 @@ describe('the review size decision', () => {
 
   const forcing: {
     name: string;
-    riskTags?: ('security' | 'auth' | 'migration' | 'dependency')[];
+    kinds?: string[];
     config?: Parameters<typeof patchJudgeConfig>[1];
     content?: string;
   }[] = [
-    { name: 'a security risk tag', riskTags: ['security'] },
-    { name: 'an auth risk tag', riskTags: ['auth'] },
-    { name: 'a migration risk tag', riskTags: ['migration'] },
-    { name: 'a dependency risk tag', riskTags: ['dependency'] },
+    { name: 'a dependency kind', kinds: ['dependency'] },
     { name: 'the judge switched off', config: { enabled: false } },
     {
       name: 'the decision switched off',
@@ -7861,7 +7863,7 @@ describe('the review size decision', () => {
     }
     const { workstream } = engine.addTask('Alpha', ['api'], [], {
       flow: 'standard',
-      ...(row.riskTags ? { riskTags: row.riskTags } : {}),
+      ...(row.kinds ? { kinds: row.kinds } : {}),
     });
     await until(workstream.id, (s) => s === 'DONE');
     expect(asked).toHaveLength(0);

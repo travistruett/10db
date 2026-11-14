@@ -468,8 +468,9 @@ and Workbench pickers, and §10.3. One vertical slice, tested through the real b
 | A persona's minimum score | the "at least N" of every cell that persona fills, when higher than the cell's |
 | A task's model setting | the task's model pin |
 
-What has no home is not dropped silently: one Inbox card lists every pattern and persona pin that was not carried
-over, with its content, and links to the playbook **(call)**.
+What has no home is not dropped silently: each affected project gets one Inbox card listing every pattern and
+persona pin that was not carried over for it, with its content; the entries that apply everywhere are kept as a note
+at the top of Settings › Models until the builder dismisses it.
 
 Removed with it: the `flows` table and API, `FlowStepDef.need`, skip rules, `routing/floors.ts`, patterns and
 their Settings section, `ROLE_NEED`, risk tags, persona `modelPin` and `minimumScore`, and `review_size`.

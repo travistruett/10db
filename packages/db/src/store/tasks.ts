@@ -46,7 +46,6 @@ import {
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
-import { getFlow } from './flows';
 import { checkTaskKinds, listKinds } from './kinds';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
@@ -190,7 +189,6 @@ export function insertTask(
 ): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
-  if (config.flowId) getFlow(ctx.tx, config.flowId);
   const kinds = checkTaskKinds(ctx.tx, config.kinds);
   refuseUnknownAreas(project, config.areas);
   if (config.dependsOn.length > 0) {
@@ -258,8 +256,6 @@ export function insertGoalTask(
     acceptanceCriteria: [...input.acceptanceCriteria],
     areas: [...input.areas],
     dependsOn: [...input.dependsOn],
-    riskTags: [],
-    flowId: null,
     landing: taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     proposalId: null,
@@ -285,8 +281,6 @@ export function insertPassPageTask(
     acceptanceCriteria: [],
     areas: [input.area],
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     landing: taskLandingFor(project),
     workspaceMode: WorkspaceMode.Shared,
     reason: null,
@@ -395,9 +389,7 @@ export function insertTaskFromProposal(
     acceptanceCriteria: [],
     areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
-    riskTags: [],
     kinds: checkTaskKinds(ctx.tx, input.kinds ?? []),
-    flowId: null,
     proposalId: input.proposalId,
   });
 }
@@ -453,8 +445,6 @@ export function insertFollowUpTask(
     acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
     areas: source.areas,
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     proposalId: null,
     boardColumnId: iceboxColumnId(ctx.tx, source.projectId),
   });
@@ -503,8 +493,6 @@ export function insertRetryLimitFollowUp(
         : ['The findings in the description are fixed'],
     areas: source.areas,
     dependsOn: [],
-    riskTags: [],
-    flowId: null,
     proposalId: null,
     boardColumnId: null,
   });
@@ -541,8 +529,6 @@ function writeTask(
     description: config.description,
     acceptanceCriteria: config.acceptanceCriteria,
     areas: config.areas,
-    riskTags: config.riskTags,
-    flowId: config.flowId,
     rigor: config.rigor ?? null,
     kinds: config.kinds ?? [],
     effortPin: config.effortPin ?? null,
@@ -674,8 +660,6 @@ function toTaskDto(
     description: row.description,
     acceptanceCriteria: row.acceptanceCriteria,
     areas: row.areas,
-    riskTags: row.riskTags,
-    flowId: row.flowId,
     rigor: row.rigor,
     effectiveRigor: effectiveRigor({
       rigor: row.rigor,
@@ -717,6 +701,21 @@ export function getTask(db: DbReader, id: TaskId): TaskDto {
   const row = db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
   if (!row) throw new NotFoundError('task', id);
   return toTaskDto(db, row);
+}
+
+/**
+ * The tasks with these ids, in that order, reading the kinds and each project's default once for the whole
+ * list rather than once per task.
+ */
+export function getTasks(db: DbReader, ids: readonly TaskId[]): TaskDto[] {
+  const inputs = new Map<ProjectId, RigorInputs>();
+  return ids.map((id) => {
+    const row = db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
+    if (!row) throw new NotFoundError('task', id);
+    const known = inputs.get(row.projectId) ?? rigorInputs(db, row.projectId);
+    inputs.set(row.projectId, known);
+    return toTaskDto(db, row, known);
+  });
 }
 
 /** The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed. */
@@ -1053,7 +1052,6 @@ export function patchTask(
     changes.kinds = checkTaskKinds(ctx.tx, changes.kinds, getTask(ctx.tx, id).kinds);
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
-  if (changes.flowId) getFlow(ctx.tx, changes.flowId);
   const { landing, ...fields } = changes;
   if (landing !== undefined) {
     // The branch is cut and the pull request opened for the task's batch, so once the task has run

@@ -3,7 +3,7 @@ import { ModelSetting } from './catalogue';
 import { DomainError } from './errors';
 import { AccountId, KindId, PersonaId, ProjectId } from './ids';
 import { HyphenatedKey } from './keys';
-import { Effort, RiskTag, StepRole } from './states';
+import { Effort, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
 
@@ -281,20 +281,4 @@ export function withKindsNamed(
     added.push({ key, source });
   }
   return [...taskKinds, ...added];
-}
-
-/**
- * The task's kinds after an edit that still names risk tags, the older name of the security, auth,
- * migration and dependency kinds: those four kinds are set to match `riskTags`, every other kind stays as it
- * is. A tag whose kind does not exist adds nothing.
- */
-export function kindsMatchingRiskTags(
-  taskKinds: readonly TaskKind[],
-  riskTags: readonly RiskTag[],
-  known: readonly { readonly key: string }[],
-  source: TaskKindSource,
-): TaskKind[] {
-  const risky = new Set<string>(Object.values(RiskTag));
-  const kept = taskKinds.filter((k) => !risky.has(k.key) || riskTags.some((tag) => tag === k.key));
-  return withKindsNamed(kept, riskTags, known, source);
 }

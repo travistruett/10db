@@ -824,7 +824,7 @@ describe('team, routing and benchmark routes', () => {
       name: 'PATCH /tasks/:id',
       method: 'PATCH',
       path: `/tasks/${taskId}`,
-      body: { riskTags: ['auth'] },
+      body: { headline: 'Edited' },
       service: 'patchTask',
     },
     {

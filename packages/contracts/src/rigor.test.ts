@@ -5,7 +5,6 @@ import {
   effectiveRigor,
   KindInput,
   KindOrderInput,
-  kindsMatchingRiskTags,
   kindsOfTask,
   KindPatch,
   ModelPicksQuery,
@@ -18,7 +17,6 @@ import {
   rigorAtLeast,
   type TaskKind,
 } from './rigor';
-import type { RiskTag } from './states';
 
 describe('rigorAtLeast', () => {
   it.each(
@@ -331,45 +329,4 @@ describe('kindsOfTask and withKindsNamed', () => {
       expect(result.map((k) => `${k.key}:${k.source}`)).toEqual(want);
     },
   );
-});
-
-describe('kindsMatchingRiskTags', () => {
-  const known = ['security', 'auth', 'migration', 'dependency', 'ui'].map((key) => ({ key }));
-  const own = (...pairs: [string, TaskKind['source']][]): TaskKind[] =>
-    pairs.map(([key, source]) => ({ key, source }));
-  const names = (kinds: readonly TaskKind[]) => kinds.map((k) => `${k.key}:${k.source}`);
-
-  it.each([
-    {
-      name: 'sets the risky kinds to the tags',
-      have: [],
-      tags: ['migration'],
-      want: ['migration:builder'],
-    },
-    {
-      name: 'swaps a risky kind for another tag',
-      have: [['migration', 'agent']],
-      tags: ['dependency'],
-      want: ['dependency:builder'],
-    },
-    { name: 'clears the risky kinds with no tags', have: [['auth', 'agent']], tags: [], want: [] },
-    {
-      name: 'keeps a kind that is not risky and one a tag keeps',
-      have: [
-        ['ui', 'agent'],
-        ['auth', 'agent'],
-      ],
-      tags: ['auth'],
-      want: ['ui:agent', 'auth:agent'],
-    },
-  ] as { name: string; have: [string, TaskKind['source']][]; tags: RiskTag[]; want: string[] }[])(
-    '$name',
-    ({ have, tags, want }) => {
-      expect(names(kindsMatchingRiskTags(own(...have), tags, known, 'builder'))).toEqual(want);
-    },
-  );
-
-  it('adds nothing for a tag whose kind the builder deleted', () => {
-    expect(kindsMatchingRiskTags([], ['migration'], [{ key: 'ui' }], 'builder')).toEqual([]);
-  });
 });

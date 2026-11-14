@@ -13,8 +13,6 @@ const persona = (key: string, role: PersonaDto['role']): PersonaDto => ({
   tools: role === 'implement' ? 'edit' : 'read_only',
   instructions: `${key} instructions`,
   skills: [],
-  minimumScore: null,
-  modelPin: null,
   archived: false,
   createdAt: NOW,
   updatedAt: NOW,

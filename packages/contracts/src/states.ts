@@ -282,15 +282,6 @@ export const REVIEW_ROLES: readonly StepRole[] = [
 export const ToolAccess = { ReadOnly: 'read_only', Edit: 'edit' } as const;
 export type ToolAccess = ValueOf<typeof ToolAccess>;
 
-/** Risks that raise a step's floor (spec §5.2: trust boundaries, migrations, auth). */
-export const RiskTag = {
-  Security: 'security',
-  Auth: 'auth',
-  Migration: 'migration',
-  Dependency: 'dependency',
-} as const;
-export type RiskTag = ValueOf<typeof RiskTag>;
-
 export const Verdict = { Approve: 'approve', Reject: 'reject' } as const;
 export type Verdict = ValueOf<typeof Verdict>;
 

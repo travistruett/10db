@@ -1,10 +1,5 @@
-import {
-  ModelTier,
-  StepRole,
-  type KindDto,
-  type ModelSetting,
-  type PatternDto,
-} from '@10db/contracts';
+import { ModelTier, StepRole, type KindDto, type ModelSetting } from '@10db/contracts';
+import type { LegacyPattern } from '@10db/db';
 import { describeSetting, type ScopedMoveEntry } from './move-entries';
 
 type Overrides = KindDto['overrides'];
@@ -35,7 +30,7 @@ export function strength(setting: ModelSetting): number | null {
 }
 
 /** The pattern 10db seeded: the best model for work tagged security, auth and migration, on every role. */
-function isSeededHighRisk(pattern: PatternDto): boolean {
+function isSeededHighRisk(pattern: LegacyPattern): boolean {
   const { match, setting } = pattern;
   const tags = new Set<string>(match.riskTags);
   return (
@@ -65,14 +60,14 @@ export interface PatternMoves {
  * a project's pattern, an area or retry pattern, one on no risk tag, one that would not raise.
  */
 export function movePatterns(
-  patterns: readonly PatternDto[],
+  patterns: readonly LegacyPattern[],
   kinds: readonly KindDto[],
 ): PatternMoves {
   const current = new Map<string, Overrides>(kinds.map((k) => [k.key, { ...k.overrides }]));
   const changed = new Set<string>();
   const claimed = new Set<string>();
   const entries: ScopedMoveEntry[] = [];
-  const report = (pattern: PatternDto, what: string, why: string): void => {
+  const report = (pattern: LegacyPattern, what: string, why: string): void => {
     entries.push({
       projectId: pattern.projectId,
       setting: `Pattern "${pattern.name}"`,

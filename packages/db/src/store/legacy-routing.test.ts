@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { insertFlow } from './flows';
 import { readLegacyRouting } from './legacy-routing';
-import { setPatterns, setRoleSetting } from './model-settings';
-import { patchProject } from './projects';
+import {
+  seedLegacyBinding,
+  seedLegacyFlow,
+  seedLegacyPatterns,
+  seedLegacyPersonaPin,
+  seedLegacyProjectFlow,
+  seedLegacyRoleSetting,
+  seedLegacyTaskRouting,
+} from './legacy-routing-fixtures';
 import type { Store } from './store';
-import { insertPersona, setTeam } from './team';
+import { insertPersona } from './team';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
@@ -20,53 +26,53 @@ afterEach(() => {
 describe('readLegacyRouting', () => {
   it('reads every table the playbook replaces, and nothing is written by reading', () => {
     const project = seedProject(store);
-    const persona = store.write((ctx) =>
-      insertPersona(ctx, {
+    const persona = store.write((ctx) => {
+      const made = insertPersona(ctx, {
         key: 'deep-reviewer',
         name: 'Deep reviewer',
         role: 'review',
         tools: 'read_only',
         instructions: 'Review.',
+      });
+      seedLegacyPersonaPin(ctx, made.id, {
         minimumScore: 50,
         modelPin: { model: 'test-model', effort: 'high' },
-      }),
-    ).value;
-    store.write((ctx) => {
-      setTeam(ctx, project.id, {
-        bindings: [{ role: 'review', personaId: persona.id }],
-        members: [],
       });
-    });
+      seedLegacyBinding(ctx, { projectId: project.id, role: 'review', personaId: made.id });
+      return made;
+    }).value;
     const flow = store.write((ctx) =>
-      insertFlow(ctx, { name: 'quick', steps: [{ role: 'implement', need: 40 }] }),
+      seedLegacyFlow(ctx, { name: 'quick', steps: [{ role: 'implement', need: 40 }] }),
     ).value;
     store.write((ctx) => {
-      patchProject(ctx, project.id, { flowId: flow.id });
-    });
-    store.write((ctx) => {
-      setRoleSetting(ctx, { role: 'review', projectId: null, setting: { kind: 'automatic' } });
-    });
-    store.write((ctx) => {
-      setPatterns(ctx, project.id, [
-        {
-          name: 'Risky',
-          match: { roles: [], riskTags: ['auth'], areas: [], retryOnly: false },
-          setting: { kind: 'top_of_tier' },
-        },
+      seedLegacyProjectFlow(ctx, project.id, flow.id);
+      seedLegacyRoleSetting(ctx, {
+        role: 'review',
+        projectId: null,
+        setting: { kind: 'automatic' },
+      });
+      seedLegacyPatterns(ctx, project.id, [
+        { name: 'Risky', match: { riskTags: ['auth'] }, setting: { kind: 'top_of_tier' } },
       ]);
     });
-    const task = store.write((ctx) =>
-      insertTask(ctx, project.id, {
+    const task = store.write((ctx) => {
+      const made = insertTask(ctx, project.id, {
         title: 'Fix login',
         acceptanceCriteria: ['Works'],
         areas: ['api'],
-        riskTags: ['auth'],
-        flowId: flow.id,
-      }),
-    ).value;
+      });
+      seedLegacyTaskRouting(ctx, made.id, { riskTags: ['auth'], flowId: flow.id });
+      return made;
+    }).value;
 
     const legacy = readLegacyRouting(store.db);
-    expect(legacy.flows.map((f) => f.name)).toEqual(['quick']);
+    expect(legacy.flows).toEqual([
+      {
+        id: flow.id,
+        name: 'quick',
+        steps: [{ role: 'implement', need: 40, skip: [], persona: null }],
+      },
+    ]);
     expect(legacy.roleSettings).toEqual([
       { role: 'review', projectId: null, setting: { kind: 'automatic' } },
     ]);

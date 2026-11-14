@@ -26,29 +26,6 @@
         "minLength": 1
       }
     },
-    "riskTags": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "security",
-          "auth",
-          "migration",
-          "dependency"
-        ]
-      }
-    },
-    "flowId": {
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^flw_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "rigor": {
       "anyOf": [
         {

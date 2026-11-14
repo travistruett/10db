@@ -110,7 +110,7 @@ export function createBuilderTools(
         columns: services
           .listBoardColumns(project.id)
           .map((column) => ({ id: column.id, name: column.name })),
-        flowId: project.flowId,
+        defaultRigor: project.defaultRigor,
         delivery: project.delivery,
       }));
     },
@@ -143,8 +143,6 @@ export function createBuilderTools(
           rigor: task.rigor,
           effectiveRigor: task.effectiveRigor,
           kinds: task.kinds.map((kind) => kind.key),
-          riskTags: task.riskTags,
-          flowId: task.flowId,
           dependsOn: task.dependsOn,
           boardStatus: task.boardStatus,
           boardColumnId: task.boardColumnId,

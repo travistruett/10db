@@ -31,7 +31,6 @@ import {
   ProposalKind,
   QUESTION_CATEGORY_HINTS,
   QuestionCategory,
-  RiskTag,
   Severity,
   Urgency,
   Verdict,
@@ -261,8 +260,6 @@ export const McpToolInputs = {
      * one; a kind that asks for a card always raises it. A key no kind has is ignored.
      */
     kinds: z.array(HyphenatedKey).optional(),
-    /** The older name for the risky kinds: security, auth, migration or dependency. Read as `kinds`. */
-    riskTags: z.array(z.enum(RiskTag)).optional(),
     /** Set when the work must join a batch that is already running; a person decides that. */
     joinsRunningBatch: z.boolean().optional(),
     principle: PrincipleDraft.optional().describe(

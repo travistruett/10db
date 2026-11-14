@@ -1,11 +1,9 @@
 import {
   PlaybookMoveEntry,
-  type FlowInput,
   type ModelSetting,
   type PersonaId,
   type ProjectDto,
   type Rigor,
-  type RiskTag,
   type StepRole,
   type TaskDto,
 } from '@10db/contracts';
@@ -16,19 +14,22 @@ import {
   getPlaybook,
   getTask,
   getProject,
-  insertFlow,
   insertPersona,
   insertTask,
-  listFlows,
   listInbox,
   listKinds,
-  patchPersona,
-  patchProject,
+  readLegacyRouting,
+  seedLegacyBinding,
+  seedLegacyDefaultFlows,
+  seedLegacyFlow,
+  seedLegacyPatterns,
+  seedLegacyPersonaPin,
+  seedLegacyProjectFlow,
+  seedLegacyRoleSetting,
+  seedLegacyTaskRouting,
   seedProject,
-  setPatterns,
-  setRoleSetting,
-  setTeam,
-  type NewPattern,
+  type LegacyPatternSeed,
+  type LegacyRiskTag,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -44,6 +45,10 @@ beforeEach(() => {
   close = test.close;
   state = createStateStore(test.store, createEventBus());
   seedTeam(state, readDefaultPersonas());
+  // An install that has run before holds the three flows 10db used to seed.
+  state.write((ctx) => {
+    seedLegacyDefaultFlows(ctx);
+  });
   project = (name) => seedProject(test.store, { name });
 });
 afterEach(() => {
@@ -57,7 +62,7 @@ const personaId = (key: string): PersonaId => {
   return found.id;
 };
 const flowId = (name: string) => {
-  const found = listFlows(state.db).find((f) => f.name === name);
+  const found = readLegacyRouting(state.db).flows.find((f) => f.name === name);
   if (!found) throw new Error(`no flow ${name}`);
   return found.id;
 };
@@ -79,50 +84,50 @@ const all = (setting: ModelSetting | null) => RIGORS.map(() => setting);
 
 const newTask = (
   p: ProjectDto,
-  extra: { flow?: string; riskTags?: RiskTag[]; title?: string } = {},
+  extra: { flow?: string; riskTags?: LegacyRiskTag[]; title?: string } = {},
 ): TaskDto =>
-  state.write((ctx) =>
-    insertTask(ctx, p.id, {
+  state.write((ctx) => {
+    const task = insertTask(ctx, p.id, {
       title: extra.title ?? 'A task',
       acceptanceCriteria: ['Works'],
       areas: ['api'],
+    });
+    seedLegacyTaskRouting(ctx, task.id, {
       riskTags: extra.riskTags ?? [],
       flowId: extra.flow === undefined ? null : flowId(extra.flow),
-    }),
-  );
+    });
+    return task;
+  });
 
-const addFlow = (name: string, steps: FlowInput['steps']) =>
-  state.write((ctx) => insertFlow(ctx, { name, steps }));
+const addFlow = (name: string, steps: Parameters<typeof seedLegacyFlow>[1]['steps']) =>
+  state.write((ctx) => seedLegacyFlow(ctx, { name, steps }));
 const addPersona = (key: string, role: StepRole, pin?: { model: string; effort: 'low' | 'high' }) =>
-  state.write((ctx) =>
-    insertPersona(ctx, {
+  state.write((ctx) => {
+    const persona = insertPersona(ctx, {
       key,
       name: key,
       role,
       tools: role === 'implement' ? 'edit' : 'read_only',
       instructions: 'Do it.',
-      ...(pin ? { modelPin: pin } : {}),
-    }),
-  );
+    });
+    if (pin) seedLegacyPersonaPin(ctx, persona.id, { modelPin: pin });
+    return persona;
+  });
 const setting = (role: StepRole, projectId: ProjectDto | null, value: ModelSetting) => {
   state.write((ctx) => {
-    setRoleSetting(ctx, { role, projectId: projectId?.id ?? null, setting: value });
+    seedLegacyRoleSetting(ctx, { role, projectId: projectId?.id ?? null, setting: value });
   });
 };
-const patterns = (scope: ProjectDto | null, list: NewPattern[]) => {
+const patterns = (scope: ProjectDto | null, list: LegacyPatternSeed[]) => {
   state.write((ctx) => {
-    setPatterns(ctx, scope?.id ?? null, list);
+    seedLegacyPatterns(ctx, scope?.id ?? null, list);
   });
 };
 const pattern = (
   name: string,
-  match: Partial<NewPattern['match']>,
+  match: LegacyPatternSeed['match'],
   value: ModelSetting,
-): NewPattern => ({
-  name,
-  match: { roles: [], riskTags: [], areas: [], retryOnly: false, ...match },
-  setting: value,
-});
+): LegacyPatternSeed => ({ name, match, setting: value });
 const capable: ModelSetting = { kind: 'tier', tier: 'capable' };
 const frontier: ModelSetting = { kind: 'tier', tier: 'frontier' };
 const balanced: ModelSetting = { kind: 'tier', tier: 'balanced' };
@@ -159,7 +164,7 @@ describe('moveToPlaybook: flows become rigor', () => {
     if (steps) addFlow(flow, [...steps]);
     const p = project('demo');
     state.write((ctx) => {
-      patchProject(ctx, p.id, { flowId: flowId(flow) });
+      seedLegacyProjectFlow(ctx, p.id, flowId(flow));
     });
     const task = newTask(p, { flow });
     run();
@@ -257,7 +262,7 @@ describe('moveToPlaybook: team bindings', () => {
     const other = project('other');
     const deep = addPersona('deep-reviewer', 'review');
     state.write((ctx) => {
-      setTeam(ctx, p.id, { bindings: [{ role: 'review', personaId: deep.id }], members: [] });
+      seedLegacyBinding(ctx, { projectId: p.id, role: 'review', personaId: deep.id });
     });
     run();
     expect(RIGORS.map((r) => cell(p, r, 'review').personaId)).toEqual(RIGORS.map(() => deep.id));
@@ -273,7 +278,7 @@ describe('moveToPlaybook: a persona’s pin and minimum', () => {
   it('lets the default persona’s pin beat the global role setting, model and effort', () => {
     setting('implement', null, capable);
     state.write((ctx) => {
-      patchPersona(ctx, personaId('implementer'), { modelPin: pin });
+      seedLegacyPersonaPin(ctx, personaId('implementer'), { modelPin: pin });
     });
     run();
     expect(modelsOf(null, 'implement')).toEqual(all(pinned));
@@ -288,10 +293,11 @@ describe('moveToPlaybook: a persona’s pin and minimum', () => {
       effort: 'high',
     });
     state.write((ctx) => {
-      patchPersona(ctx, personaId('implementer'), { modelPin: pin });
-      setTeam(ctx, bound.id, {
-        bindings: [{ role: 'implement', personaId: pinnedPersona.id }],
-        members: [],
+      seedLegacyPersonaPin(ctx, personaId('implementer'), { modelPin: pin });
+      seedLegacyBinding(ctx, {
+        projectId: bound.id,
+        role: 'implement',
+        personaId: pinnedPersona.id,
       });
     });
     setting('implement', bound, capable);
@@ -308,12 +314,9 @@ describe('moveToPlaybook: a persona’s pin and minimum', () => {
     const inherits = project('inherits');
     const unpinned = addPersona('plain-implementer', 'implement');
     state.write((ctx) => {
-      patchPersona(ctx, personaId('implementer'), { modelPin: pin });
+      seedLegacyPersonaPin(ctx, personaId('implementer'), { modelPin: pin });
       for (const p of [own, inherits])
-        setTeam(ctx, p.id, {
-          bindings: [{ role: 'implement', personaId: unpinned.id }],
-          members: [],
-        });
+        seedLegacyBinding(ctx, { projectId: p.id, role: 'implement', personaId: unpinned.id });
     });
     setting('implement', null, capable);
     setting('implement', own, balanced);
@@ -329,7 +332,7 @@ describe('moveToPlaybook: a persona’s pin and minimum', () => {
 
   it('raises an automatic cell to the persona’s minimum when that is higher than the cell’s', () => {
     state.write((ctx) => {
-      patchPersona(ctx, personaId('implementer'), { minimumScore: 50 });
+      seedLegacyPersonaPin(ctx, personaId('implementer'), { minimumScore: 50 });
     });
     run();
     // Light 35, Standard 40 and Careful 45 rise to 50; Critical already asks 50.
@@ -343,8 +346,8 @@ describe('moveToPlaybook: a persona’s pin and minimum', () => {
 
   it('keeps a higher minimum of the role setting and reports a minimum a tier cannot carry', () => {
     state.write((ctx) => {
-      patchPersona(ctx, personaId('implementer'), { minimumScore: 50 });
-      patchPersona(ctx, personaId('reviewer'), { minimumScore: 50 });
+      seedLegacyPersonaPin(ctx, personaId('implementer'), { minimumScore: 50 });
+      seedLegacyPersonaPin(ctx, personaId('reviewer'), { minimumScore: 50 });
     });
     setting('implement', null, { kind: 'automatic', minimum: 60 });
     setting('review', null, capable);
@@ -420,13 +423,20 @@ describe('moveToPlaybook: patterns', () => {
   });
 
   it('drops the seeded high-risk pattern, found by its content, and nothing else with it', () => {
+    patterns(null, [
+      pattern(
+        'High-risk work',
+        { riskTags: ['security', 'auth', 'migration'] },
+        { kind: 'top_of_tier' },
+      ),
+    ]);
     const before = listKinds(state.db);
     const report = run();
     expect(listKinds(state.db)).toEqual(before);
     expect(report.global).toEqual([]);
   });
 
-  const unplaceable: { name: string; match: Partial<NewPattern['match']> }[] = [
+  const unplaceable: { name: string; match: LegacyPatternSeed['match'] }[] = [
     { name: 'an area pattern', match: { riskTags: ['auth'], areas: ['api'] } },
     { name: 'a retry pattern', match: { riskTags: ['auth'], retryOnly: true } },
     { name: 'a pattern on no risk tag', match: { roles: ['review'] } },

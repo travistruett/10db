@@ -94,8 +94,6 @@ export function personaDto(
     tools: 'read_only',
     instructions: '',
     skills: [],
-    minimumScore: null,
-    modelPin: null,
     archived: false,
     createdAt: AT,
     updatedAt: AT,

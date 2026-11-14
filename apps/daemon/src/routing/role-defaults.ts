@@ -47,10 +47,6 @@ export function pickByDefault(
   };
 }
 
-/** The tier a role runs on, which a floor moves to the top one. */
-export const defaultTier = (role: StepRole, floored: boolean): ModelTier =>
-  floored ? ModelTier.Frontier : ROLE_DEFAULT[role].tier;
-
 /**
  * One rung up from a profile: the top model of its tier when it is not already there, then the cheapest model of
  * the next tier up, then, on the top of the highest, the next effort. The top of Capable is the dearest model of

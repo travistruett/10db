@@ -3,14 +3,18 @@ import {
   StepRole,
   type CellSetting,
   type Effort,
-  type FlowDto,
   type ModelSetting,
   type PlaybookInput,
   type ProjectId,
   type Rigor,
-  type RoleSettingDto,
 } from '@10db/contracts';
-import type { LegacyBinding, LegacyPersona, LegacyRouting } from '@10db/db';
+import type {
+  LegacyBinding,
+  LegacyFlow,
+  LegacyPersona,
+  LegacyRoleSetting,
+  LegacyRouting,
+} from '@10db/db';
 import { DEFAULT_CELLS, DEFAULT_PERSONA_FOR, ROLE_DEFAULT } from '../routing';
 import { describeSetting, type ScopedMoveEntry } from './move-entries';
 import { rigorOfFlow } from './move-rigor';
@@ -73,7 +77,7 @@ export function moveCells(legacy: LegacyRouting): MovedCells {
   const defaultPersona = (role: StepRole): LegacyPersona | undefined =>
     live.find((p) => p.key === DEFAULT_PERSONA_FOR[role]) ?? live.find((p) => p.role === role);
   const roleSetting = (role: StepRole, projectId: ProjectId | null): ModelSetting | null =>
-    legacy.roleSettings.find((r: RoleSettingDto) => r.role === role && r.projectId === projectId)
+    legacy.roleSettings.find((r: LegacyRoleSetting) => r.role === role && r.projectId === projectId)
       ?.setting ?? null;
   const entries: ScopedMoveEntry[] = [];
   const global: Draft = new Map();
@@ -169,7 +173,7 @@ function minimumEntry(
   };
 }
 
-function collision(flow: FlowDto, role: StepRole, personaKey: string): ScopedMoveEntry {
+function collision(flow: LegacyFlow, role: StepRole, personaKey: string): ScopedMoveEntry {
   return {
     projectId: null,
     setting: `Persona of the ${role} step in the flow ${flow.name}`,
