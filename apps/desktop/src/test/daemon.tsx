@@ -1,4 +1,5 @@
 import {
+  ConversationId,
   EventsHead,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -31,7 +32,9 @@ import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
 import { githubStatusDto } from './github-fixtures';
 import { projectViewDto } from './fixtures';
+import { conversationDto } from './conversation-fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
+import { itemsOfConversation } from './shape-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -121,6 +124,19 @@ export function baseHandlers(
     // A task's drawer asks what its lane got of a Plan; a task filed by hand has none.
     http.get(daemonUrl('/tasks/:taskId/plan-context', base), () =>
       HttpResponse.json({ context: null, packed: null, checks: [] }),
+    ),
+    // A Plan conversation reads its conversation: idle, holding the items its fixture gave, streaming nothing.
+    http.get(daemonUrl('/conversations/:conversationId', base), ({ params }) =>
+      HttpResponse.json(conversationDto({ id: ConversationId.parse(params['conversationId']) })),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/items', base), ({ params }) =>
+      HttpResponse.json({
+        items: itemsOfConversation(ConversationId.parse(params['conversationId'])),
+        nextAfterSeq: null,
+      }),
+    ),
+    http.get(daemonUrl('/conversations/:conversationId/live', base), ({ params }) =>
+      HttpResponse.json({ conversationId: params['conversationId'], items: [] }),
     ),
     // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
     http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>

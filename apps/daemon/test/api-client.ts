@@ -1,4 +1,4 @@
-import { FlowDto, type FlowId } from '@10db/contracts';
+import { ConversationItemDto, FlowDto, ShapeViewDto, type FlowId } from '@10db/contracts';
 import { z } from 'zod';
 
 /** A typed fetch wrapper for tests: parses every response with the schema given and throws on a status of 400 or more. */
@@ -37,4 +37,14 @@ export async function quickFlowId(api: ReturnType<typeof apiClient>): Promise<Fl
   const quick = (await api.get('/flows', z.array(FlowDto))).find((f) => f.name === 'quick');
   if (!quick) throw new Error('the quick flow was not seeded');
   return quick.id;
+}
+
+/** Sends the builder's message to a Plan conversation through the conversation routes, as the app does. */
+export async function sayToPlan(
+  api: ReturnType<typeof apiClient>,
+  shapeId: string,
+  text: string,
+): Promise<ConversationItemDto> {
+  const { conversationId } = await api.get(`/shapes/${shapeId}`, ShapeViewDto);
+  return api.post(`/conversations/${conversationId}/messages`, ConversationItemDto, { text });
 }

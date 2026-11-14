@@ -96,3 +96,26 @@ export function applyFrame(
   next.set(frame.itemId, { kind: frame.kind, text });
   return { items: next, gap: false };
 }
+
+/** What streams last, of the items not stored yet: the reply's text, the agent's thinking, or a call. */
+export function streamingOf(
+  live: LiveItems,
+  stored: ReadonlySet<ConversationItemId>,
+): {
+  readonly streaming: 'text' | 'reasoning' | 'tool' | null;
+  readonly call: ToolCallView | null;
+} {
+  const last = [...live].filter(([id]) => !stored.has(id)).at(-1)?.[1];
+  switch (last?.kind) {
+    case undefined:
+      return { streaming: null, call: null };
+    case 'agent_message':
+      return { streaming: 'text', call: null };
+    case 'reasoning':
+      return { streaming: 'reasoning', call: null };
+    case 'tool_call':
+      return last.call?.status === 'running'
+        ? { streaming: 'tool', call: last.call }
+        : { streaming: null, call: null };
+  }
+}

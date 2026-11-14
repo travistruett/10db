@@ -1,5 +1,5 @@
 import { AccountKind, ConflictError, InvalidError } from '@10db/contracts';
-import { getShape, setAppSetting } from '@10db/db';
+import { getShape, setAppSetting, listShapeMessages } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { must } from './conversation-fixture';
@@ -74,9 +74,8 @@ describe('a conversation’s model', () => {
     expect(must(first, 'first').sent).toHaveLength(1);
     expect(rest).toEqual([]);
     expect(
-      f.service
-        .view(shapeId)
-        .messages.filter((m) => m.kind === 'notice')
+      listShapeMessages(f.c.store.db, shapeId)
+        .filter((m) => m.kind === 'notice')
         .map((m) => m.body),
     ).toEqual(['Now on Claude Sonnet 5.5 · claude-sonnet-5-5']);
   });

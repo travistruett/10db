@@ -1,20 +1,31 @@
 import {
-  ShapeMessageAuthor,
+  ConversationState,
+  type ConversationDto,
   type ProjectId,
   type ShapeId,
   type ShapeViewDto,
+  type ToolCallView,
 } from '@10db/contracts';
 import { ActionIcon, Box, Button, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
 import { IconBooks, IconPlus } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
 import { useEffect, useRef } from 'react';
+import { JudgeLine, toolDoing, WorkingLine } from '../../conversation';
+import { streamingOf } from '../../conversation/live-items';
+import {
+  useConversation,
+  useConversationItems,
+  useConversationLive,
+  useSendConversationMessage,
+  useSendNow,
+  useStopConversation,
+} from '../../daemon/conversation-queries';
 import { usePlanRecord } from '../../daemon/plan-record-queries';
 import {
   useCreateShape,
   useProposeShape,
-  useSendShapeMessage,
-  useStopShape,
+  useShapeConversation,
   useUploadShapeFile,
 } from '../../daemon/shape-queries';
 import { formatTokens } from '../factory/format-tokens';
@@ -26,8 +37,7 @@ import { leaveLate, takeLate, useLate } from './late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
-import { useWaitingPermissions, WaitingPermissions } from './waiting-permissions';
-import { WorkingLine } from './working-line';
+import { WaitingPermissions } from './waiting-permissions';
 
 export interface ConversationPaneProps {
   readonly projectId: ProjectId | null;
@@ -40,6 +50,27 @@ export interface ConversationPaneProps {
   readonly onOpened: (shapeId: ShapeId) => void;
   /** The messages a row's Why? points at. */
   readonly why: TranscriptProps['why'];
+}
+
+/**
+ * The conversation as the working line shows it: a send on its way wakes an idle session, and a Stop
+ * on its way is stopping, before the daemon reports either.
+ */
+function shownState(
+  conversation: ConversationDto,
+  pending: { readonly sending: boolean; readonly stopping: boolean },
+): ConversationDto {
+  const { state } = conversation;
+  if (
+    pending.stopping &&
+    (state === ConversationState.Running || state === ConversationState.WaitingCard)
+  )
+    return { ...conversation, state: ConversationState.Stopping };
+  if (pending.sending && state === ConversationState.IdleCold)
+    return { ...conversation, state: ConversationState.Starting };
+  if (pending.sending && state === ConversationState.IdleWarm)
+    return { ...conversation, state: ConversationState.Running };
+  return conversation;
 }
 
 /** Left: the conversation's title, its transcript and the input. */
@@ -59,10 +90,18 @@ export function ConversationPane({
   const hasRecord =
     record !== undefined && (record.documents.length > 0 || record.counts.evidence > 0);
   const create = useCreateShape(projectId);
-  const send = useSendShapeMessage();
+  const conversationOf = useShapeConversation();
+  const send = useSendConversationMessage();
   const propose = useProposeShape();
-  const stop = useStopShape();
+  const stop = useStopConversation();
+  const sendNow = useSendNow();
   const upload = useUploadShapeFile();
+  // The transcript is the conversation's items, then what streams now (sessions spec §10).
+  const conversationId = shapeId === null ? null : (view?.conversationId ?? null);
+  const conversation = useConversation(conversationId).data;
+  const items = useConversationItems(conversationId);
+  const live = useConversationLive(conversationId);
+  const now = streamingOf(live, new Set(items.map((item) => item.id)));
 
   // The conversation a first send or drop made, held as the promise of its create so a send and a
   // drop that overlap share one create instead of leaving an empty conversation behind. The screen
@@ -128,14 +167,11 @@ export function ConversationPane({
   };
 
   const answering = view?.turn.running ?? false;
-  // A turn waiting on an Inbox card is waiting on the builder, not Claude. A send or Propose still on
-  // its way counts as working, since the view only reports the turn once the daemon has taken it; a
-  // Stop on its way does not, since the turn is ending.
-  const hasCards = useWaitingPermissions(shapeId).length > 0;
-  const waitingForAnswer = hasCards && answering && !stop.isPending;
-  const working =
-    (answering || send.isPending || propose.isPending) && !hasCards && !stop.isPending;
-  const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
+  // A round, or a proposal, means the builder has been heard, before the items have loaded.
+  const heardBuilder =
+    items.some((item) => item.kind === 'message') ||
+    (view?.shape.round ?? 0) > 0 ||
+    (view?.proposals.length ?? 0) > 0;
   // An imported Plan changes only by a re-import: a proposal round would replace what was imported, and
   // the daemon refuses one, so Propose is neither shown nor reached by ⌘⇧↩.
   const importedAt = view?.shape.importedAt ?? null;
@@ -160,7 +196,7 @@ export function ConversationPane({
     if (shapeId !== null) {
       if (propose.isError) propose.reset();
       queuedSinceStop.current = queued;
-      stop.mutate(shapeId);
+      if (conversationId !== null) stop.mutate(conversationId);
     }
   };
   // A refused Stop was about the turn that was running. Once that turn has ended the refusal is out
@@ -180,7 +216,8 @@ export function ConversationPane({
 
   // A load failure is what the screen is in now, so it comes first; a refused Propose or Stop is the
   // daemon's words in the same alert.
-  const shownError = error ?? propose.error?.message ?? stop.error?.message ?? null;
+  const shownError =
+    error ?? propose.error?.message ?? stop.error?.message ?? sendNow.error?.message ?? null;
   useShapeKeys({ onPropose: doPropose, onStop: doStop, answering });
 
   return (
@@ -248,8 +285,32 @@ export function ConversationPane({
           </Group>
         )}
       </Group>
-      <Transcript messages={view?.messages ?? []} why={why} />
-      <WorkingLine working={working} waitingForAnswer={waitingForAnswer} />
+      {conversation === undefined ? null : <JudgeLine judge={conversation.capabilities.judge} />}
+      <Transcript
+        shapeId={shapeId}
+        conversation={conversation}
+        items={items}
+        live={live}
+        why={why}
+        busy={now.streaming === 'text'}
+        onSendNow={() => {
+          if (conversationId !== null) sendNow.mutate(conversationId);
+        }}
+        onAllow={(call: ToolCallView) => {
+          if (conversationId !== null)
+            send.mutate({ conversationId, text: `Go ahead: ${call.title}` });
+        }}
+      />
+      {conversation === undefined ? null : (
+        <WorkingLine
+          conversation={shownState(conversation, {
+            sending: send.isPending || propose.isPending,
+            stopping: stop.isPending,
+          })}
+          streaming={now.streaming}
+          {...(now.call === null ? {} : { tool: toolDoing(now.call) })}
+        />
+      )}
       <WaitingPermissions shapeId={shapeId} />
       {view?.turn.waitingForUpdate === true ? (
         <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
@@ -303,7 +364,7 @@ export function ConversationPane({
           try {
             id = await ensureId();
             made = id;
-            await send.mutateAsync({ shapeId: id, text });
+            await send.mutateAsync({ conversationId: await conversationOf(id), text });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sent.current = null;

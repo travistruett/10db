@@ -1460,7 +1460,7 @@ describe('shape routes', () => {
         default: 'claude-opus-5-5',
         offered: [{ model: 'claude-opus-5-5', tier: 'capable' as const }],
       },
-      messages: [],
+      conversationId: mintId('Conversation'),
       proposals: [],
       heard: [],
       files: [],
@@ -1502,46 +1502,11 @@ describe('shape routes', () => {
     expect((await app(services).request('/shapes/not-a-shape', auth)).status).toBe(400);
   });
 
-  it('takes a message (202), refuses an empty one, and Propose answers started or ignored', async () => {
-    const sent: string[] = [];
-    const message = {
-      id: mintId('ConversationItem'),
-      shapeId,
-      author: 'builder',
-      kind: 'text',
-      body: 'Hi',
-      createdAt: AT,
-    };
-    const services = stubServices({
-      sendShapeMessage: (_id, text) => {
-        sent.push(text);
-        return message as never;
-      },
-      proposeShape: () => ({ status: 'ignored' }),
-    });
-    const ok = await app(services).request(`/shapes/${shapeId}/messages`, post({ text: 'Hi' }));
-    expect(ok.status).toBe(202);
-    expect(await ok.json()).toEqual(message);
-    expect(sent).toEqual(['Hi']);
-    expect(
-      (await app(services).request(`/shapes/${shapeId}/messages`, post({ text: '' }))).status,
-    ).toBe(400);
+  it('Propose answers started or ignored', async () => {
+    const services = stubServices({ proposeShape: () => ({ status: 'ignored' }) });
     const propose = await app(services).request(`/shapes/${shapeId}/propose`, post({}));
     expect(propose.status).toBe(202);
     expect(await propose.json()).toEqual({ status: 'ignored' });
-  });
-
-  it('Stop answers 204', async () => {
-    const stopped: string[] = [];
-    const services = stubServices({
-      stopShape: (id) => {
-        stopped.push(id);
-        return Promise.resolve();
-      },
-    });
-    const res = await app(services).request(`/shapes/${shapeId}/stop`, post({}));
-    expect(res.status).toBe(204);
-    expect(stopped).toEqual([shapeId]);
   });
 
   it('runs the conversation on the model chosen, whatever its ID, refuses a blank one (400), and a change mid-turn (409)', async () => {
@@ -1809,7 +1774,6 @@ describe('shape routes', () => {
     for (const [method, path] of [
       ['GET', `/projects/${projectId}/shapes`],
       ['GET', `/shapes/${shapeId}`],
-      ['POST', `/shapes/${shapeId}/messages`],
       ['POST', `/shapes/${shapeId}/convert`],
       ['POST', `/shapes/${shapeId}/files`],
       ['PATCH', `/shapes/${shapeId}/proposals/${mintId('ShapeProposal')}`],

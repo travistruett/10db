@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelTier } from './catalogue';
 import {
+  ConversationId,
   DecisionId,
   GoalId,
   PrincipleId,
@@ -14,7 +15,6 @@ import {
 import {
   ShapeAttachment,
   ShapeDto,
-  ShapeMessageDto,
   ShapeProposalBody,
   ShapeProposalKind,
   ShapeProposalState,
@@ -172,8 +172,8 @@ export const ShapeViewDto = z.object({
   shape: ShapeDto,
   /** What the conversation's model picker offers; `shape.model` is the builder's pick. */
   models: ShapeModelsDto.default({ default: null, offered: [] }),
-  /** The transcript, oldest first. */
-  messages: z.array(ShapeMessageDto),
+  /** The conversation the transcript is read from: `/conversations/:id/items`. */
+  conversationId: ConversationId,
   /** Every proposal row, tombstones and superseded ones included, in the order they were made. */
   proposals: z.array(ShapeProposalDto),
   /** The latest `note_heard` echo, shown before the first Propose. */

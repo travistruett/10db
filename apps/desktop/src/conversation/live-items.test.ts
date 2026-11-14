@@ -1,6 +1,6 @@
 import { mintId, type ConversationDeltaFrame, type ToolCallView } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { applyFrame, liveItemsOf, type LiveItems } from './live-items';
+import { applyFrame, liveItemsOf, streamingOf, type LiveItems } from './live-items';
 
 // Sessions spec §6.5: a live item is rebuilt from frames by absolute offset, whatever order, repeat or
 // gap they arrive in; a gap asks for /live again.
@@ -134,5 +134,54 @@ describe('applyFrame, a call', () => {
     expect(call?.kind === 'tool_call' && call.outputOffset).toBe(10_001);
     expect(applyFrame(start, out(9_000, 'old'), none)).toEqual({ items: start, gap: false });
     expect(applyFrame(start, out(15_000, 'far'), none).gap).toBe(true);
+  });
+});
+
+describe('streamingOf', () => {
+  const call = (status: 'running' | 'done') =>
+    ({ kind: 'tool_call', call: commandView(status), output: '', outputOffset: 0 }) as const;
+  function commandView(status: 'running' | 'done'): ToolCallView {
+    return {
+      id: 'c',
+      kind: 'command',
+      harnessTool: 'Bash',
+      title: 'ls',
+      startedAt: '2026-11-13T10:00:00.000Z',
+      durationMs: null,
+      parentId: null,
+      refusal: null,
+      deniedBy: null,
+      limit: null,
+      soft: null,
+      command: 'ls',
+      cwd: null,
+      outputTail: '',
+      outputBytes: 0,
+      exitCode: null,
+      status,
+    };
+  }
+  it.each<[string, LiveItems, ReadonlySet<typeof a>, string | null]>([
+    ['nothing streams', new Map(), none, null],
+    ['a reply streams', new Map([[a, { kind: 'agent_message', text: 'Hi' }]]), none, 'text'],
+    [
+      'thinking streams last',
+      new Map([
+        [a, { kind: 'agent_message', text: 'Hi' }],
+        [b, { kind: 'reasoning', text: 'Hm' }],
+      ]),
+      none,
+      'reasoning',
+    ],
+    ['a call runs', new Map([[a, call('running')]]), none, 'tool'],
+    ['a call finished, not yet stored', new Map([[a, call('done')]]), none, null],
+    [
+      'the reply is stored',
+      new Map([[a, { kind: 'agent_message', text: 'Hi' }]]),
+      new Set([a]),
+      null,
+    ],
+  ])('%s', (_name, live, stored, streaming) => {
+    expect(streamingOf(live, stored).streaming).toBe(streaming);
   });
 });

@@ -1,19 +1,21 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import type { ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
   HealthResponse,
   ProjectDto,
   SelfUpdateStatusDto,
   ShapeDto,
-  ShapeMessageDto,
+  ShapeId,
   ShapeViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { apiClient, quickFlowId } from '../../test/api-client';
+import { listShapeMessages } from '@10db/db';
+import { apiClient, quickFlowId, sayToPlan } from '../../test/api-client';
 import { FakeGh } from '../../test/fake-gh';
 import { seedProfiles } from '../../test/seed-profiles';
 import {
@@ -41,6 +43,12 @@ const inboxCard = z.object({ title: z.string(), body: z.string(), projectId: z.s
 
 let dir: { path: string; cleanup(): void };
 let daemon: RunningDaemon | null;
+
+/** The conversation's transcript rows, read from the running daemon's store. */
+function said(shapeId: ShapeId): ShapeMessageDto[] {
+  if (daemon === null) throw new Error('no daemon is running');
+  return listShapeMessages(daemon.state.db, shapeId);
+}
 let repo: { path: string; cleanup(): void };
 let staged: string[];
 let applied: string[];
@@ -802,7 +810,7 @@ describe('self-update in the daemon', () => {
       const project = await addProject(api);
       await waitFor(() => applied.length > 0 && applied);
       const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
-      await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'One more thing.' });
+      await sayToPlan(api, shape.id, 'One more thing.');
       const view = () => api.get(`/shapes/${shape.id}`, ShapeViewDto);
       await waitForAsync(async () => (await view()).turn.queued === 1);
       return { adapter, api, view };
@@ -830,7 +838,7 @@ describe('self-update in the daemon', () => {
       const [shape] = await next.get(`/projects/${project?.id ?? ''}/shapes`, z.array(ShapeDto));
       const after = await next.get(`/shapes/${shape?.id ?? ''}`, ShapeViewDto);
       // The queue is durable: the message waits under Send now, and nothing runs unattended.
-      expect(after.messages.at(-1)?.body).toBe('One more thing.');
+      expect(said(ShapeId.parse(shape?.id)).at(-1)?.body).toBe('One more thing.');
       expect(after.turn.queued).toBe(1);
       expect(adapter.shapeSessions).toHaveLength(0);
     });
@@ -850,7 +858,7 @@ describe('self-update in the daemon', () => {
     await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
     const project = await addProject(api);
     const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
-    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Denser board.' });
+    await sayToPlan(api, shape.id, 'Denser board.');
     await waitFor(() => adapter.shapeSessions.length === 1);
     head = NEW;
     await waitForAsync(async () => (await selfUpdate(api)).draining);

@@ -9,6 +9,7 @@ import {
   ShapeProposalState,
   type ShapeProposalDto,
 } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { must } from './conversation-fixture';
 import { reconcileDraft } from './rounds';
@@ -114,7 +115,9 @@ describe('editing a row', () => {
     round({ looseTasks: [task(m, 'a', { size: 'L' })] });
     expect(row('a').body).toMatchObject({ size: 'M' });
 
-    const note = f.service.view(shapeId()).messages.find((x) => x.kind === ShapeMessageKind.Edit);
+    const note = listShapeMessages(f.c.store.db, shapeId()).find(
+      (x) => x.kind === ShapeMessageKind.Edit,
+    );
     expect(note).toMatchObject({ author: ShapeMessageAuthor.Note });
     expect(note?.body).toBe('The builder set Task a’s size to M');
   });
@@ -136,9 +139,9 @@ describe('editing a row', () => {
       f.service.editProposal(shapeId(), row('a').id, { size: 'huge' });
     }).toThrow(/does not fit/);
     expect(row('a').pinned).toEqual([]);
-    expect(f.service.view(shapeId()).messages.some((x) => x.kind === ShapeMessageKind.Edit)).toBe(
-      false,
-    );
+    expect(
+      listShapeMessages(f.c.store.db, shapeId()).some((x) => x.kind === ShapeMessageKind.Edit),
+    ).toBe(false);
   });
 
   it('refuses a converted row', async () => {

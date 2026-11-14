@@ -9,6 +9,7 @@ import {
   type SeeScreenInput,
   type ShapeId,
 } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage, pngOfSize } from '../../test/png';
 import { createScreens, type ScreenOutcome, type ScreenService } from '../screens';
@@ -59,9 +60,8 @@ async function nextTurn(text = 'Here you go'): Promise<FakeShapeTurn> {
 }
 
 const notices = (): string[] =>
-  f.service
-    .view(shapeId())
-    .messages.filter((m) => m.kind === ShapeMessageKind.Notice)
+  listShapeMessages(f.c.store.db, shapeId())
+    .filter((m) => m.kind === ShapeMessageKind.Notice)
     .map((m) => m.body);
 
 const read = (path: string, pages?: string) =>

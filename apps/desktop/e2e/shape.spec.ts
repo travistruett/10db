@@ -11,8 +11,11 @@ import { auth, createProject } from './shape-project';
 
 const Tasks = z.array(z.looseObject({ id: z.string(), title: z.string() }));
 const LongView = z.looseObject({
-  messages: z.array(z.looseObject({ id: z.string() })),
+  conversationId: z.string(),
   proposals: z.array(z.looseObject({})),
+});
+const LongItems = z.looseObject({
+  items: z.array(z.looseObject({ id: z.string(), kind: z.string() })),
 });
 
 const MESSAGE = 'Make the cards denser. Thin out the scrollbars';
@@ -197,27 +200,37 @@ test('a 2,000-message conversation mounts only the blocks near the viewport as W
     '1 goal · 2 loose · 1 to record',
   );
 
-  // The daemon's real view, with 2,000 messages in it and a row that came from one far down.
+  // The daemon's real conversation, with 2,000 messages in it and a row that came from one far down.
   const shapeId = new URL(page.url()).pathname.split('/').pop() ?? '';
   const WHY_TARGET = 1500;
+  const viewed = await page.request.get(`${daemonUrl}/shapes/${shapeId}`, { headers: auth });
+  const { conversationId } = LongView.parse(await viewed.json());
+  const real = await page.request.get(`${daemonUrl}/conversations/${conversationId}/items`, {
+    headers: auth,
+  });
+  const template = LongItems.parse(await real.json()).items.find((i) => i.kind === 'message');
+  if (template === undefined) throw new Error('The conversation has its first message');
+  const items = Array.from({ length: 2000 }, (_, i) => ({
+    ...template,
+    // Still a UUID v7, which the schema asks for: only its last digits differ.
+    id: `${template.id.slice(0, -4)}${i.toString(16).padStart(4, '0')}`,
+    seq: i + 1,
+    author: i % 2 === 0 ? 'builder' : 'agent',
+    kind: i % 2 === 0 ? 'message' : 'agent_message',
+    text: longBody(i),
+  }));
+  await page.route(`${daemonUrl}/conversations/${conversationId}/items*`, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { items, nextAfterSeq: null } });
+  });
   await page.route(`${daemonUrl}/shapes/${shapeId}`, async (route) => {
     const response = await route.fetch();
     const view = LongView.parse(await response.json());
-    const template = view.messages[0];
-    if (template === undefined) throw new Error('The conversation has its first message');
-    const messages = Array.from({ length: 2000 }, (_, i) => ({
-      ...template,
-      // Still a UUID v7, which the schema asks for: only its last digits differ.
-      id: `${template.id.slice(0, -4)}${i.toString(16).padStart(4, '0')}`,
-      author: i % 2 === 0 ? 'builder' : 'claude',
-      kind: 'text',
-      body: longBody(i),
-    }));
     const proposals = view.proposals.map((p) => ({
       ...p,
-      sourceMessageIds: [messages[WHY_TARGET]?.id],
+      sourceMessageIds: [items[WHY_TARGET]?.id],
     }));
-    await route.fulfill({ response, json: { ...view, messages, proposals } });
+    await route.fulfill({ response, json: { ...view, proposals } });
   });
   await page.reload();
 

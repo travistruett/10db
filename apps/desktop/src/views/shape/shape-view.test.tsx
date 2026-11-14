@@ -10,10 +10,13 @@ import {
   looseTaskProposal,
   principleProposal,
   questionProposal,
+  sentItemDto,
   shapeDto,
   shapeMessageDto,
+  shapeOfConversation,
   shapeViewDto,
 } from '../../test/shape-fixtures';
+import { conversationDto } from '../../test/conversation-fixtures';
 import { planRecordDto, planRecordHandlers } from '../../test/plan-record-fixtures';
 
 const NO_COUNTS = { decisions: 0, evidence: 0, reviews: 0, questions: 0, tasks: 0 };
@@ -177,9 +180,9 @@ describe('Shape: the first run', () => {
       http.post(daemonUrl('/projects/:projectId/shapes'), () =>
         HttpResponse.json(view.shape, { status: 201 }),
       ),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async ({ request }) => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async ({ request }) => {
         posted.push(await request.json());
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     const { router } = renderApp('/shape');
@@ -206,16 +209,22 @@ describe('Shape: the first run', () => {
         created += 1;
         return HttpResponse.json(view.shape, { status: 201 });
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async ({ params, request }) => {
-        posted.push({ shapeId: String(params['shapeId']), body: await request.json() });
-        if (posted.length === 1) {
-          return HttpResponse.json(
-            { error: 'unavailable', message: 'Claude is away' },
-            { status: 503 },
-          );
-        }
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
-      }),
+      http.post(
+        daemonUrl('/conversations/:conversationId/messages'),
+        async ({ params, request }) => {
+          posted.push({
+            shapeId: String(shapeOfConversation(params['conversationId'])),
+            body: await request.json(),
+          });
+          if (posted.length === 1) {
+            return HttpResponse.json(
+              { error: 'unavailable', message: 'Claude is away' },
+              { status: 503 },
+            );
+          }
+          return HttpResponse.json(sentItemDto(), { status: 202 });
+        },
+      ),
     );
     const { router } = renderApp('/shape');
     const input = await screen.findByRole('textbox', { name: 'Message' });
@@ -251,10 +260,16 @@ describe('Shape: the first run', () => {
         }
         return HttpResponse.json(view.shape, { status: 201 });
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async ({ params, request }) => {
-        posted.push({ shapeId: String(params['shapeId']), body: await request.json() });
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
-      }),
+      http.post(
+        daemonUrl('/conversations/:conversationId/messages'),
+        async ({ params, request }) => {
+          posted.push({
+            shapeId: String(shapeOfConversation(params['conversationId'])),
+            body: await request.json(),
+          });
+          return HttpResponse.json(sentItemDto(), { status: 202 });
+        },
+      ),
     );
     const { router } = renderApp('/shape');
     const input = await screen.findByRole('textbox', { name: 'Message' });
@@ -449,9 +464,9 @@ describe('Shape: the conversation', () => {
     const stops: string[] = [];
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), ({ params }) => {
-        stops.push(String(params['shapeId']));
-        return new HttpResponse(null, { status: 204 });
+      http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+        stops.push(String(shapeOfConversation(params['conversationId'])));
+        return HttpResponse.json(conversationDto());
       }),
     );
     open(view);
@@ -494,8 +509,8 @@ describe('Shape: the conversation', () => {
           { status: 503 },
         ),
       ),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
-        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
+        HttpResponse.json(sentItemDto(), { status: 202 }),
       ),
     );
     open(view);
@@ -531,7 +546,7 @@ describe('Shape: the conversation', () => {
     });
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+      http.post(daemonUrl('/conversations/:conversationId/stop'), () =>
         HttpResponse.json({ error: 'not_found', message: 'No such conversation' }, { status: 404 }),
       ),
     );
@@ -557,7 +572,7 @@ describe('Shape: the conversation', () => {
     serve(
       http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([running.shape])),
       http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(current)),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+      http.post(daemonUrl('/conversations/:conversationId/stop'), () =>
         HttpResponse.json(
           { error: 'unavailable', message: 'The daemon is restarting' },
           { status: 503 },
@@ -590,7 +605,7 @@ describe('Shape: the conversation', () => {
     });
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+      http.post(daemonUrl('/conversations/:conversationId/stop'), () =>
         HttpResponse.json(
           { error: 'unavailable', message: 'The daemon is restarting' },
           { status: 503 },
@@ -651,8 +666,8 @@ describe('Shape: the conversation', () => {
           { status: 503 },
         );
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
-        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
+        HttpResponse.json(sentItemDto(), { status: 202 }),
       ),
     );
     open(view);
@@ -694,15 +709,15 @@ describe('Shape: the conversation', () => {
     });
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/stop'), async () => {
         await held;
         return HttpResponse.json(
           { error: 'unavailable', message: 'The daemon is restarting' },
           { status: 503 },
         );
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
-        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
+        HttpResponse.json(sentItemDto(), { status: 202 }),
       ),
     );
     open(view);
@@ -731,14 +746,14 @@ describe('Shape: the conversation', () => {
     });
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+      http.post(daemonUrl('/conversations/:conversationId/stop'), () =>
         HttpResponse.json(
           { error: 'unavailable', message: 'The daemon is restarting' },
           { status: 503 },
         ),
       ),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
-        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () =>
+        HttpResponse.json(sentItemDto(), { status: 202 }),
       ),
     );
     open(view);
@@ -759,7 +774,7 @@ describe('Shape: the conversation', () => {
     serve(
       http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([first.shape])),
       http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(current)),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), refusal),
+      http.post(daemonUrl('/conversations/:conversationId/stop'), refusal),
     );
     const { queryClient } = open(first);
     fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
@@ -779,7 +794,7 @@ describe('Shape: the conversation', () => {
     serve(
       http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([first.shape])),
       http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(current)),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), refusal),
+      http.post(daemonUrl('/conversations/:conversationId/stop'), refusal),
     );
     const { queryClient } = open(first);
     fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
@@ -847,7 +862,7 @@ describe('Shape: the conversation', () => {
           ? HttpResponse.json({ error: 'boom', message: 'The database is locked' }, { status: 500 })
           : HttpResponse.json(view),
       ),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), refusal),
+      http.post(daemonUrl('/conversations/:conversationId/stop'), refusal),
     );
     const { queryClient } = open(view);
     fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
@@ -875,9 +890,9 @@ describe('Shape: the conversation', () => {
         await refused.held;
         return refusal();
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () => {
         taken = true;
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     open(view);
@@ -914,13 +929,13 @@ describe('Shape: the conversation', () => {
         if (taken) await refreshed.held;
         return HttpResponse.json(view);
       }),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/stop'), async () => {
         await refused.held;
         return refusal();
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), () => {
         taken = true;
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     open(view);
@@ -946,14 +961,14 @@ describe('Shape: the conversation', () => {
     let sent = false;
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/stop'), async () => {
         await refused.held;
         return refusal();
       }),
-      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
         sent = true;
         await delivered.held;
-        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+        return HttpResponse.json(sentItemDto(), { status: 202 });
       }),
     );
     open(view);
@@ -978,7 +993,7 @@ describe('Shape: the conversation', () => {
     const proposeHeld = gate();
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), async () => {
+      http.post(daemonUrl('/conversations/:conversationId/stop'), async () => {
         await refused.held;
         return refusal();
       }),
@@ -1010,9 +1025,9 @@ describe('Shape: the conversation', () => {
     let stopped = false;
     serve(
       ...conversations(view),
-      http.post(daemonUrl('/shapes/:shapeId/stop'), () => {
+      http.post(daemonUrl('/conversations/:conversationId/stop'), () => {
         stopped = true;
-        return new HttpResponse(null, { status: 204 });
+        return HttpResponse.json(conversationDto());
       }),
       http.post(daemonUrl('/shapes/:shapeId/propose'), async () => {
         await refused.held;

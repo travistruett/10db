@@ -1,4 +1,4 @@
-import { listAccountModels, replaceAccountModels } from '@10db/db';
+import { listAccountModels, replaceAccountModels, listShapeMessages } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
@@ -36,9 +36,8 @@ describe('a conversation whose model the account refuses', () => {
       { model: 'claude-opus-5-5', unusable: true },
     ]);
     expect(
-      f.service
-        .view(shapeId)
-        .messages.map((m) => m.body)
+      listShapeMessages(f.c.store.db, shapeId)
+        .map((m) => m.body)
         .join('\n'),
     ).toMatch(/cannot run the model us\.anthropic\.claude-opus-5-5/);
   });

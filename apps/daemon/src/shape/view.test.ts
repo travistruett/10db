@@ -12,9 +12,11 @@ import {
   getShape,
   insertShape,
   insertSource,
+  listShapeMessages,
   listShapeProposals,
   patchShape,
   retirePrinciple,
+  shapeConversation,
   supersedeDecision,
   withdrawDecision,
 } from '@10db/db';
@@ -138,7 +140,7 @@ describe('the view', () => {
     const view = service.view(shapeId);
     expect(view).toMatchObject({
       shape: { id: shapeId, round: 0, proposeUnlocked: false },
-      messages: [],
+      conversationId: shapeConversation(c.store.db, shapeId).id,
       proposals: [],
       heard: [],
       turn: { running: false, queued: 0, proposing: false },
@@ -177,7 +179,9 @@ describe('the view', () => {
     await service.settled(shapeId);
     const view = service.view(shapeId);
     expect(view.heard).toEqual(['Thinner scrollbars', 'Denser cards']);
-    expect(view.messages.map((m) => m.author)).toContain(ShapeMessageAuthor.Builder);
+    expect(listShapeMessages(c.store.db, shapeId).map((m) => m.author)).toContain(
+      ShapeMessageAuthor.Builder,
+    );
   });
 
   it('says a turn is running with the next one queued, and a Propose pending', async () => {

@@ -90,7 +90,6 @@ import {
   ShapeFindingId,
   ShapeId,
   ShapeInput,
-  ShapeMessageInput,
   ShapeProposalId,
   ShapeModelInput,
   ShapeRehearseInput,
@@ -651,18 +650,6 @@ export function createApp(deps: ApiDeps) {
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
     )
-    .post(
-      '/shapes/:shapeId/messages',
-      validator('json', (value): ShapeMessageInput => ShapeMessageInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.sendShapeMessage(
-            ShapeId.parse(c.req.param('shapeId')),
-            c.req.valid('json').text,
-          ),
-          202,
-        ),
-    )
     .post('/shapes/:shapeId/propose', (c) =>
       c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
     )
@@ -698,10 +685,6 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
-    .post('/shapes/:shapeId/stop', async (c) => {
-      await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));
-      return c.body(null, 204);
-    })
     .post(
       '/shapes/:shapeId/convert',
       validator('json', (value): ShapeConvertInput => ShapeConvertInput.parse(value)),

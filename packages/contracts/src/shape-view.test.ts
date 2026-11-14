@@ -120,7 +120,8 @@ describe('ShapeProposalDto', () => {
 });
 
 describe('ShapeViewDto', () => {
-  it('parses a conversation with its transcript, proposals and turn', () => {
+  it('parses a conversation with where its transcript is, its proposals and turn', () => {
+    const conversationId = mintId('Conversation');
     const view = ShapeViewDto.parse({
       shape: {
         id: shapeId,
@@ -133,9 +134,7 @@ describe('ShapeViewDto', () => {
         createdAt: AT,
         updatedAt: AT,
       },
-      messages: [
-        { id: source, shapeId, author: 'builder', kind: 'text', body: 'Hi', createdAt: AT },
-      ],
+      conversationId,
       proposals: [{ ...base, key: 'thin-scrollbars', kind: 'task', body: looseBody }],
       heard: ['Thinner scrollbars'],
       files: [
@@ -233,6 +232,7 @@ describe('ShapeViewDto', () => {
       ],
       tokens: 88_000,
     });
+    expect(view.conversationId).toBe(conversationId);
     expect(view.tokens).toBe(88_000);
     expect(view.attachments[0]?.attachment.kind).toBe('mermaid');
     expect(view.preview.criticalPath).toEqual(['thin-scrollbars']);

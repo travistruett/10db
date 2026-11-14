@@ -6,6 +6,7 @@ import {
   StartShapeInput,
   type AgentAccountKind,
 } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
@@ -52,6 +53,7 @@ describe('a conversation on a ChatGPT account', () => {
   it.each(requests)('refuses %s and writes nothing', (_name, request) => {
     f = createServiceFixture({ accountKind: AccountKind.CodexSignin, models: () => MODELS });
     const before = f.service.view(f.c.shape.id);
+    const said = listShapeMessages(f.c.store.db, f.c.shape.id);
     const listed = f.service.list(f.c.project.id).length;
     let thrown: unknown;
     try {
@@ -62,7 +64,7 @@ describe('a conversation on a ChatGPT account', () => {
     expect(thrown).toBeInstanceOf(InvalidError);
     expect(thrown).toMatchObject({ message: BRAINSTORM_REFUSED_ON_CHATGPT });
     const after = f.service.view(f.c.shape.id);
-    expect(after.messages).toEqual(before.messages);
+    expect(listShapeMessages(f.c.store.db, f.c.shape.id)).toEqual(said);
     expect(after.shape.proposeUnlocked).toBe(before.shape.proposeUnlocked);
     expect(after.shape.model).toBe(before.shape.model);
     expect(f.service.list(f.c.project.id)).toHaveLength(listed);

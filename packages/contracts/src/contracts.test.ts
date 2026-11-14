@@ -72,7 +72,7 @@ describe('HealthResponse', () => {
 
 describe('PROTOCOL_VERSION', () => {
   it('is 9: the model tiers became four rungs', () => {
-    expect(PROTOCOL_VERSION).toBe(9);
+    expect(PROTOCOL_VERSION).toBe(10);
   });
 });
 

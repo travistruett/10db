@@ -3,11 +3,11 @@ import {
   ShapeConvertResult,
   ShapeDto,
   ShapeFileDto,
-  ShapeMessageDto,
   ShapeOfDto,
   ShapeProposeResult,
   ShapeRehearseResult,
   ShapeViewDto,
+  type ConversationId,
   type DecisionId,
   type PrincipleId,
   type GoalId,
@@ -120,21 +120,21 @@ export function useCreateShape(projectId: ProjectId | null) {
   });
 }
 
-/** Sends the builder's message; the daemon queues Claude's turn behind any turn that is running. */
-export function useSendShapeMessage() {
+/**
+ * The conversation a Plan's transcript is read from and messages go to, from its view: the cached
+ * one, else read now, as for a conversation the first send just made.
+ */
+export function useShapeConversation(): (shapeId: ShapeId) => Promise<ConversationId> {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { readonly shapeId: ShapeId; readonly text: string }) =>
-      readJson(
-        await client.shapes[':shapeId'].messages.$post({
-          param: { shapeId: input.shapeId },
-          json: { text: input.text },
-        }),
-        ShapeMessageDto,
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
-  });
+  return async (shapeId) => {
+    const view = await queryClient.query({
+      queryKey: shapeKeys.view(shapeId),
+      queryFn: async () =>
+        readJson(await client.shapes[':shapeId'].$get({ param: { shapeId } }), ShapeViewDto),
+    });
+    return view.conversationId;
+  };
 }
 
 /** Propose, or Propose Again: a press while a Propose turn is queued or running is ignored. */
@@ -147,18 +147,6 @@ export function useProposeShape() {
         await client.shapes[':shapeId'].propose.$post({ param: { shapeId } }),
         ShapeProposeResult,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
-  });
-}
-
-/** Interrupts the turn that is running; the queue runs next. */
-export function useStopShape() {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (shapeId: ShapeId) => {
-      await readJson(await client.shapes[':shapeId'].stop.$post({ param: { shapeId } }), z.null());
-    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
   });
 }

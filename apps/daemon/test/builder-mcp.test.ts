@@ -22,6 +22,7 @@ import {
   insertBatch,
   insertInboxItem,
   insertWorkstream,
+  listShapeMessages,
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
@@ -947,7 +948,9 @@ describe('the builder MCP endpoint', () => {
       expect(made.title).toBe('Board polish');
       const shown = await view(made.id);
       expect(shown.shape).toMatchObject({ origin: 'claude_code', round: 0 });
-      expect(shown.messages.map((m) => [m.author, m.body])).toEqual([
+      expect(
+        listShapeMessages(daemon.state.db, shown.shape.id).map((m) => [m.author, m.body]),
+      ).toEqual([
         ['note', 'From a Claude Code session'],
         ['builder', 'We settled on denser cards.'],
       ]);

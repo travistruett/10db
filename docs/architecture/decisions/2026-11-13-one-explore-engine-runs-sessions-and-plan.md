@@ -43,8 +43,9 @@
   sandbox. No hook command runs, and the project's stdio servers start under srt with no session env. What
   keeps the credential is Claude Code itself and the git it runs, which need it to call the model.
 - Plan writes no code. That is its role, and its sandbox stays read-only; its `.env` rule is unchanged.
-- Plan's transcript is read through `/conversations/:id/items`; `ShapeViewDto.messages` is removed and
-  `PROTOCOL_VERSION` is 9.
+- Plan's transcript is read through `/conversations/:id/items`, and its messages, Stop and Send Now go through
+  the conversation routes; `ShapeViewDto.messages` is removed for `conversationId`, `POST /shapes/:id/messages`
+  and `/stop` are gone, and `PROTOCOL_VERSION` is 10.
 
 ## Why
 

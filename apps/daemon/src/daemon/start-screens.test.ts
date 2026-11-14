@@ -1,15 +1,16 @@
+import type { ShapeMessageDto } from '@10db/contracts';
 import {
   ProjectDto,
   ShapeDto,
-  ShapeMessageDto,
-  ShapeViewDto,
+  type ShapeId,
   TaskDto,
   ScreenRenderRequest,
   mintId,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { apiClient } from '../../test/api-client';
+import { listShapeMessages } from '@10db/db';
+import { apiClient, sayToPlan } from '../../test/api-client';
 import { seedProfiles } from '../../test/seed-profiles';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
 import { pngImage } from '../../test/png';
@@ -40,6 +41,12 @@ interface Sqlite {
 }
 
 /** Every row of every table, as text, by table: any change to any of them shows. */
+/** The conversation's transcript rows, read from the running daemon's store. */
+function said(shapeId: ShapeId): ShapeMessageDto[] {
+  if (daemon === null) throw new Error('no daemon is running');
+  return listShapeMessages(daemon.state.db, shapeId);
+}
+
 function dump(running: RunningDaemon): Record<string, string> {
   const raw = (running.state.db as unknown as { $client: Sqlite }).$client;
   const tables = raw
@@ -103,9 +110,7 @@ describe('see_screen on a started daemon', () => {
     // The window waits for work, as the app's does, before the session asks.
     const claim = fetch(`${running.url}/screens/claim`, ui(running, { method: 'POST' }));
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
-      text: 'Please see the board at 900',
-    });
+    await sayToPlan(api, shape.id, 'Please see the board at 900');
     const request = ScreenRenderRequest.parse(await (await claim).json());
     expect(request).toMatchObject({
       screen: 'board',
@@ -171,15 +176,13 @@ describe('see_screen on a started daemon', () => {
       }),
     );
     expect(delivered.status).toBe(204);
-    await waitForAsync(async () => {
-      const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-      return view.messages.some((m) => m.body.startsWith('I saw the board'));
-    });
-    const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-    const bodies = view.messages.map((m) => [m.kind, m.body]);
+    await waitForAsync(() =>
+      Promise.resolve(said(shape.id).some((m) => m.body.startsWith('I saw the board'))),
+    );
+    const bodies = said(shape.id).map((m) => [m.kind, m.body]);
     expect(bodies).toContainEqual(['tool', 'see_screen · board · 900×900']);
     expect(bodies).toContainEqual(['text', 'I saw the board: 1 picture.']);
-    const row = view.messages.find((m) => m.kind === 'screen');
+    const row = said(shape.id).find((m) => m.kind === 'screen');
     expect(JSON.parse(row?.body ?? '{}')).toMatchObject({ screen: 'board', name: '0001.png' });
 
     // The builder sees the same image the session was given.
@@ -215,19 +218,15 @@ describe('see_screen on a started daemon', () => {
       areas: [{ name: 'src', globs: ['src/**'] }],
     });
     const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
-    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
-      text: 'Please see the factory',
-    });
-    await waitForAsync(async () => {
-      const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-      return view.messages.some((m) => m.body.startsWith('I could not see it'));
-    });
-    const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
-    expect(view.messages.find((m) => m.body.startsWith('I could not see it'))?.body).toMatch(
+    await sayToPlan(api, shape.id, 'Please see the factory');
+    await waitForAsync(() =>
+      Promise.resolve(said(shape.id).some((m) => m.body.startsWith('I could not see it'))),
+    );
+    expect(said(shape.id).find((m) => m.body.startsWith('I could not see it'))?.body).toMatch(
       /window isn't open/,
     );
-    expect(view.messages.filter((m) => m.kind === 'screen')).toEqual([]);
-    expect(view.messages.map((m) => m.body)).toContainEqual(
+    expect(said(shape.id).filter((m) => m.kind === 'screen')).toEqual([]);
+    expect(said(shape.id).map((m) => m.body)).toContainEqual(
       expect.stringMatching(/^see_screen · refused · .*window isn't open/),
     );
   });
