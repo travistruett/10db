@@ -118,6 +118,7 @@ import {
   type PlanImportError,
   type ScreenRenderRequest,
   type ShapeConvertError,
+  type ConversationDeltaFrame,
   ConversationId,
   ConversationOwnerKind,
   NotFoundError,
@@ -332,6 +333,14 @@ export function createApp(deps: ApiDeps) {
     } catch (error) {
       // Only a conversation 10db lacks passes, so its route answers 404; any other error refuses.
       return error instanceof NotFoundError;
+    }
+  };
+  /** Whether a conversation is a Plan's; one that can't be read is not. */
+  const planConversation = (id: ConversationId): boolean => {
+    try {
+      return deps.services.conversationOwnerKind(id) === ConversationOwnerKind.Shape;
+    } catch {
+      return false;
     }
   };
   const app = new Hono()
@@ -1781,6 +1790,19 @@ export function createApp(deps: ApiDeps) {
       STREAM_PATH,
       deps.upgradeWebSocket((c) => {
         const after = Cursor.parse(c.req.query('after'));
+        // A token held by code an agent may edit gets a conversation's live words only where it is a
+        // Plan's, as for its reads. A conversation's owner never changes, so each is looked up once.
+        const full = sameToken(c.req.query('token') ?? '', deps.token);
+        const planOwned = new Map<ConversationId, boolean>();
+        const mayHear = (frame: ConversationDeltaFrame): boolean => {
+          if (full) return true;
+          let owned = planOwned.get(frame.conversationId);
+          if (owned === undefined) {
+            owned = planConversation(frame.conversationId);
+            planOwned.set(frame.conversationId, owned);
+          }
+          return owned;
+        };
         let stop: (() => void) | null = null;
         return {
           onOpen(_event, ws) {
@@ -1791,7 +1813,7 @@ export function createApp(deps: ApiDeps) {
                 ws.send(JSON.stringify(event));
               },
               (frame) => {
-                ws.send(JSON.stringify(frame));
+                if (mayHear(frame)) ws.send(JSON.stringify(frame));
               },
             );
           },

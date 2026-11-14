@@ -16,7 +16,10 @@
 - `tools.ts` holds the chat's tools on `/mcp` (`mcp/chat-tools.ts` is the server's side): each is the builder's
   tool (`builder/tools.ts`) held to the chat's project. `tool-policy.ts` is the table of what asks:
   `remove_task` on a task the chat did not file, and retire, withdraw and supersede every time, raise a
-  permission card owned by the conversation; a Stop or archive withdraws it. `create_task` records the task in
+  permission card owned by the conversation; a Stop or archive withdraws it, and so does the project's human
+  wait passing, inside the call's own timeout of that wait plus 5 minutes, so a late Allow finds it closed. A
+  conversation's card never folds with another. A knowledge card quotes the record and its id, and a record
+  of another project is refused before any card. `create_task` records the task in
   `chat_tasks`; `edit_task` answers the old values for Undo; `set_title` is cut at a word to 28 characters and
   never replaces the builder's name.
 - `conversation-files.ts` serves `GET /conversations/:id/files?q=` from `git ls-files` of the checkout the daemon
