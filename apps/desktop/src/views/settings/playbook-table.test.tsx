@@ -365,6 +365,25 @@ describe('the playbook table', () => {
       });
     });
 
+    it('hands Ships back to the scope above on its own, leaving the steps alone', async () => {
+      const puts = serve({
+        global: playbookDto({
+          rows: [{ rigor: 'light', ships: own('alone', 'global') }],
+        }),
+      });
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Light steps' }));
+      const drawer = within(await screen.findByRole('dialog', { name: 'Light: steps' }));
+      const reset = drawer.getByRole('button', { name: 'Reset Ships', hidden: true });
+      await waitFor(() => {
+        expect(reset).toHaveProperty('disabled', false);
+      });
+      fireEvent.click(reset);
+      await waitFor(() => {
+        expect(puts.at(-1)?.body.rows).toEqual([{ rigor: 'light', ships: null }]);
+      });
+    });
+
     it('takes the plan review with the plan, and Reset hands the row back', async () => {
       const puts = serve({
         global: playbookDto({

@@ -95,6 +95,22 @@ describe('the kinds list', () => {
     );
   });
 
+  it('shows what implies each kind in its own column', async () => {
+    serve([
+      kindDto({
+        key: 'migration',
+        label: 'Migration',
+        impliedBy: ['migrations', 'schema'],
+        position: 0,
+      }),
+      DOCS,
+    ]);
+    renderWithDaemon(<KindsSection />);
+    expect(await screen.findByRole('columnheader', { name: 'Implied by' })).toBeTruthy();
+    const migration = within(await screen.findByRole('row', { name: /Migration/ }));
+    expect(migration.getByText('migrations, schema')).toBeTruthy();
+  });
+
   it('moves a kind down one place, and the first and last have nowhere to go on their own side', async () => {
     const calls = serve();
     renderWithDaemon(<KindsSection />);

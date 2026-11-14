@@ -75,6 +75,18 @@ export function PlaybookRowDrawer({
                 set.mutate({ rows: [{ rigor: row.rigor, ships: value }] });
             }}
           />
+          <Group justify="flex-end">
+            <Button
+              size="xs"
+              variant="default"
+              disabled={row.ships.source !== scopeSource(projectId) || set.isPending}
+              onClick={() => {
+                set.mutate({ rows: [{ rigor: row.rigor, ships: null }] });
+              }}
+            >
+              {projectId === null ? 'Reset Ships' : 'Use Global Ships'}
+            </Button>
+          </Group>
           {set.isError ? (
             <Text size="xs" c="red" role="alert">
               {`Couldn't save: ${set.error.message}`}
