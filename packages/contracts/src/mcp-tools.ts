@@ -260,6 +260,12 @@ export const McpToolInputs = {
      * one; a kind that asks for a card always raises it. A key no kind has is ignored.
      */
     kinds: z.array(HyphenatedKey).optional(),
+    /**
+     * The name `kinds` had when a risk tag was a fixed list. Lanes still holding the older tool text send
+     * it; each tag is the key of the kind seeded in its place, so it is read as `kinds`. Removed once a
+     * release has gone out with the tool text that says `kinds`.
+     */
+    riskTags: z.array(z.enum(['security', 'auth', 'migration', 'dependency'])).optional(),
     /** Set when the work must join a batch that is already running; a person decides that. */
     joinsRunningBatch: z.boolean().optional(),
     principle: PrincipleDraft.optional().describe(

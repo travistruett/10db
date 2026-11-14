@@ -472,7 +472,7 @@ export function createToolHandlers(
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
-          const declared = [...new Set(input.kinds ?? [])];
+          const declared = [...new Set([...(input.kinds ?? []), ...(input.riskTags ?? [])])];
           const known = listKinds(ctx.tx);
           const taskKinds = withKindsNamed([], declared, known, 'agent');
           if (draft) {

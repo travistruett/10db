@@ -31,6 +31,18 @@
         "pattern": "^[a-z][a-z0-9-]{0,39}$"
       }
     },
+    "riskTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "auth",
+          "migration",
+          "dependency"
+        ]
+      }
+    },
     "joinsRunningBatch": {
       "type": "boolean"
     },

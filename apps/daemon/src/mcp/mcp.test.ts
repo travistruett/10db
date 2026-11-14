@@ -596,6 +596,7 @@ describe('MCP tools', () => {
     it.each([
       ['kinds', { kinds: ['security', 'auth'] }],
       ['kinds named twice, once each', { kinds: ['security', 'auth', 'security'] }],
+      ['risk tags, the name an older lane still calls them', { riskTags: ['security', 'auth'] }],
     ])(
       'keeps the declared %s on the card, and the task filed from it has them',
       async (_n, over) => {
