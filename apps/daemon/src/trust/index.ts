@@ -17,3 +17,13 @@ export {
   type FastPathContext,
   type LimitCall,
 } from './fast-path';
+export {
+  CALL_INPUT_MAX_CHARS,
+  CROSSES_LIMIT_OPTIONS,
+  CROSSES_LIMIT_QUESTION,
+  crossesLimit,
+  PRE_EXISTING_MAX,
+  type CrossesLimitRequest,
+  type LimitAt,
+  type LimitVerdict,
+} from './crosses-limit';
