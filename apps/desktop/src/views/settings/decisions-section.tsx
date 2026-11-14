@@ -59,6 +59,9 @@ export function DecisionsSection() {
               patch.mutate({ enabled: event.currentTarget.checked });
             }}
           />
+          <Text size="xs" c="dimmed" ta="right" maw={360}>
+            When off, 10db makes every decision the way it did before and never calls OpenRouter.
+          </Text>
           <PaidBy status={status.data} disabled={disabled} />
         </Stack>
       </Group>
@@ -84,6 +87,7 @@ export function DecisionsSection() {
       <DecisionDrawer
         decision={open}
         status={status.data}
+        statsFailed={stats.isError}
         stats={open === null ? undefined : statsFor(stats.data, open)}
         shadow={shadow.data?.shadow.find((a) => a.decision === open)}
         models={modelList}

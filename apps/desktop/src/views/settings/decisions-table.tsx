@@ -27,6 +27,27 @@ const STATUS_BADGE = {
   [DecisionStatus.AllOff]: { color: 'gray', variant: 'outline' },
 } as const;
 
+/** A decision's status as a badge, followed by a dimmed "· no key" while decisions are on and no key is usable. */
+export function StatusMark({
+  text,
+  keyed,
+}: {
+  readonly text: DecisionStatus;
+  readonly keyed: boolean;
+}) {
+  const allOff = text === DecisionStatus.AllOff;
+  return (
+    <Group gap={6} wrap="nowrap">
+      <Badge {...STATUS_BADGE[text]}>{text}</Badge>
+      {keyed || allOff ? null : (
+        <Text size="xs" c="dimmed">
+          · no key
+        </Text>
+      )}
+    </Group>
+  );
+}
+
 /**
  * Every decision under its group, with its status, model, Sure enough and last 30 days. A row, or Enter on
  * its name, opens the decision. The master switch and the daemon's kill switch both read as all off.
@@ -81,21 +102,13 @@ export function DecisionsTable({
       render: (row) =>
         ofDecision(row, (d) => {
           const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
-          return (
-            <Group gap={6} wrap="nowrap">
-              <Badge {...STATUS_BADGE[text]}>{text}</Badge>
-              {keyed ? null : (
-                <Text size="xs" c="dimmed">
-                  · no key
-                </Text>
-              )}
-            </Group>
-          );
+          return <StatusMark text={text} keyed={keyed} />;
         }),
     },
     {
       accessor: 'model',
       title: 'Model',
+      noWrap: true,
       render: (row) => ofDecision(row, (d) => modelName(config.decisions[d].model, models)),
     },
     {

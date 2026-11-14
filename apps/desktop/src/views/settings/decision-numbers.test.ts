@@ -72,12 +72,13 @@ describe('lastThirtyDays', () => {
   it.each([
     ['unread', undefined, DecisionMode.Acting, undefined, '—'],
     ['no calls', stats(), DecisionMode.Acting, undefined, 'No calls'],
+    ['shadow, no calls, no agreement', stats(), DecisionMode.Shadow, undefined, 'No calls · —'],
     [
-      'shadow, no calls, no agreement',
-      stats(),
+      'shadow, calls, agreement unread',
+      stats({ calls: 14 }),
       DecisionMode.Shadow,
       undefined,
-      'No calls · 0 of 20 scored',
+      '14 calls · —',
     ],
     [
       'acting',
@@ -153,6 +154,12 @@ describe('previewText', () => {
     ],
   ])('%s', (_name, percent, preview, expected) => {
     expect(previewText(percent, preview)).toBe(expected);
+  });
+
+  it('says would have counted as sure for a shadow decision, which acts on nothing', () => {
+    expect(previewText(80, { acted: 62, total: 120, otherModels: [] }, DecisionMode.Shadow)).toBe(
+      'At 80%, 10db would have counted as sure 62 of your last 120 answers.',
+    );
   });
 });
 
@@ -230,6 +237,8 @@ describe('formatDecisionUsd', () => {
     [0.0123, '$0.0123'],
     [0, '$0'],
     [1.23456, '$1.23'],
+    [9e-7, '$0.0000009'],
+    [4.2e-8, '$0.000000042'],
   ])('%s', (usd, expected) => {
     expect(formatDecisionUsd(usd)).toBe(expected);
   });

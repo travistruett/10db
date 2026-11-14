@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
+import { judgeKeys } from '../../daemon/judge-queries';
 import { daemonUrl, renderApp, server } from '../../test/daemon';
 import { decisionStatsDto, judgeStatusDto, serveJudge } from '../../test/judge-fixtures';
 
@@ -117,7 +118,7 @@ describe('Settings › Decisions', () => {
     });
 
     it('a stats failure still lists every decision, with a dash', async () => {
-      open();
+      const { queryClient } = open();
       server.use(
         http.get(daemonUrl('/judge/decisions'), () =>
           HttpResponse.json({ message: 'down' }, { status: 500 }),
@@ -125,9 +126,27 @@ describe('Settings › Decisions', () => {
       );
       const row = await rowOf('Which question a reply answers');
       await waitFor(() => {
-        expect(row.textContent).toContain('—');
+        expect(queryClient.getQueryState(judgeKeys.decisions)?.status).toBe('error');
       });
+      expect(row.textContent).toContain('—');
+      expect(row.textContent).not.toContain('No calls');
       expect(screen.getAllByRole('row').length).toBeGreaterThan(8);
+    });
+
+    it('says no key only while decisions are on', async () => {
+      open({ status: judgeStatusDto({ config: { ...judgeStatusDto().config, enabled: false } }) });
+      const row = await rowOf('Who a question goes to');
+      expect(row.textContent).toContain('Off (all decisions)');
+      expect(row.textContent).not.toContain('no key');
+    });
+
+    it('puts the master switch’s line under it', async () => {
+      open();
+      expect(
+        await screen.findByText(
+          'When off, 10db makes every decision the way it did before and never calls OpenRouter.',
+        ),
+      ).toBeTruthy();
     });
 
     it('Paid by sits beside the master switch', async () => {
@@ -138,7 +157,7 @@ describe('Settings › Decisions', () => {
       expect(screen.queryByText('Runs on')).toBeNull();
     });
 
-    it('a row, or Enter on its name, opens that decision', async () => {
+    it('a row, or its name button, opens that decision', async () => {
       open();
       const row = await rowOf('Who a question goes to');
       fireEvent.click(within(row).getByText('jev-1.13'));

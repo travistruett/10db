@@ -3,6 +3,8 @@ import { Slider, Stack, Text } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import { useRef, useState } from 'react';
 import { usePatchJudge } from '../../daemon/judge-queries';
+import { DECISIONS } from './decision-catalogue';
+import { DaemonRequestError } from '../../daemon/client';
 import { previewText, thresholdPreview } from './decision-numbers';
 
 const MIN_PERCENT = 50;
@@ -22,12 +24,16 @@ export function SureEnough({
   decision,
   floor,
   answers,
+  loading = false,
   model,
   disabled,
 }: {
   readonly decision: JudgeDecision;
   readonly floor: number;
-  readonly answers: DecisionStatsDto['answers'];
+  /** The last 30 days' answers; undefined when they could not be read. */
+  readonly answers: DecisionStatsDto['answers'] | undefined;
+  /** The answers are still being read: the preview says nothing yet. */
+  readonly loading?: boolean;
   readonly model: string;
   readonly disabled: boolean;
 }) {
@@ -59,6 +65,7 @@ export function SureEnough({
     },
     { delay: SAVE_DELAY_MS, flushOnUnmount: true },
   );
+  const previewPercent = edit ?? Math.round(floor * 100);
   const outside = floor < MIN_PERCENT / 100 || floor > MAX_PERCENT / 100;
   return (
     <Stack gap={4}>
@@ -80,9 +87,25 @@ export function SureEnough({
           save.flush();
         }}
       />
-      <Text size="xs" c="dimmed">
-        {previewText(shown, thresholdPreview(answers, shown / 100, model))}
-      </Text>
+      {loading ? null : (
+        <Text size="xs" c="dimmed">
+          {answers === undefined
+            ? 'Your recent answers could not be read.'
+            : previewText(
+                // A floor saved outside the range is previewed as saved until it is moved.
+                previewPercent,
+                thresholdPreview(answers, previewPercent / 100, model),
+                DECISIONS[decision].mode,
+              )}
+        </Text>
+      )}
+      {patch.isError ? (
+        <Text size="xs" c="red" role="alert">
+          {patch.error instanceof DaemonRequestError
+            ? patch.error.message
+            : "Couldn't reach the daemon."}
+        </Text>
+      ) : null}
       {outside && edit === null ? (
         <Text size="xs" c="dimmed">
           Saved at {String(Math.round(floor * 100))}%.

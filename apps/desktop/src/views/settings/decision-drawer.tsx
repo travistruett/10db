@@ -7,10 +7,12 @@ import type {
 } from '@10db/contracts';
 import { Badge, Drawer, Stack, Switch, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { DaemonRequestError } from '../../daemon/client';
 import { usePatchJudge } from '../../daemon/judge-queries';
 import { DECISIONS, DecisionMode } from './decision-catalogue';
 import { DecisionModelPicker } from './decision-model-picker';
-import { formatDecisionUsd } from './decision-numbers';
+import { decisionStatus, formatDecisionUsd } from './decision-numbers';
+import { StatusMark } from './decisions-table';
 import { RecentDecisions } from './recent-decisions';
 import { SureEnough } from './sure-enough';
 
@@ -48,7 +50,7 @@ function lastThirtyDaysParts(stats: DecisionStatsDto): string[] {
   ];
   return [
     ...counted.filter(([, n]) => n > 0).map(([name, n]) => `${String(n)} ${name}`),
-    ...fellBack.filter(([, n]) => n > 0).map(([name, n]) => `fell back, ${name} ${String(n)}`),
+    ...fellBack.filter(([, n]) => n > 0).map(([name, n]) => `${String(n)} ${name}`),
     formatDecisionUsd(stats.costUsd),
     stats.medianLatencyMs === null
       ? 'median time —'
@@ -60,12 +62,14 @@ function DrawerBody({
   decision,
   status,
   stats,
+  statsFailed,
   shadow,
   models,
 }: {
   readonly decision: JudgeDecision;
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsDto | undefined;
+  readonly statsFailed: boolean;
   readonly shadow: ShadowAgreementDto | undefined;
   readonly models: readonly DecisionModelDto[] | undefined;
 }) {
@@ -76,6 +80,10 @@ function DrawerBody({
   const disabled = status.off;
   return (
     <Stack gap="md">
+      <StatusMark
+        text={decisionStatus(entry.mode, config.enabled, status.config.enabled && !status.off)}
+        keyed={status.account !== null && status.account.secretState === 'set'}
+      />
       <Text size="sm">{entry.asks}</Text>
       <Section title="On each answer">
         <Text size="sm">{entry.onAnswer}</Text>
@@ -109,6 +117,13 @@ function DrawerBody({
           patch.mutate({ decisions: { [decision]: { enabled: event.currentTarget.checked } } });
         }}
       />
+      {patch.isError ? (
+        <Text size="xs" c="red" role="alert">
+          {patch.error instanceof DaemonRequestError
+            ? patch.error.message
+            : "Couldn't reach the daemon."}
+        </Text>
+      ) : null}
       <Section title="Model">
         <DecisionModelPicker decision={decision} status={status} disabled={disabled} />
       </Section>
@@ -116,7 +131,8 @@ function DrawerBody({
         <SureEnough
           decision={decision}
           floor={config.floor}
-          answers={stats?.answers ?? []}
+          answers={stats?.answers}
+          loading={stats === undefined && !statsFailed}
           model={config.model}
           disabled={disabled}
         />
@@ -140,6 +156,7 @@ export function DecisionDrawer({
   decision,
   status,
   stats,
+  statsFailed,
   shadow,
   models,
   onClose,
@@ -148,6 +165,8 @@ export function DecisionDrawer({
   readonly decision: JudgeDecision | null;
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsDto | undefined;
+  /** The stats could not be read, as against not read yet. */
+  readonly statsFailed: boolean;
   readonly shadow: ShadowAgreementDto | undefined;
   readonly models: readonly DecisionModelDto[] | undefined;
   readonly onClose: () => void;
@@ -167,6 +186,7 @@ export function DecisionDrawer({
           decision={decision}
           status={status}
           stats={stats}
+          statsFailed={statsFailed}
           shadow={shadow}
           models={models}
         />

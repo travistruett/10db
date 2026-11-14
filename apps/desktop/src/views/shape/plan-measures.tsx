@@ -84,7 +84,14 @@ export function PlanMeasures() {
   const measures = useShapeMeasures();
   if (measures.data === undefined) return null;
   return (
-    <Stack component="section" aria-label="How Plan is doing" gap="sm">
+    <Stack
+      component="section"
+      aria-label="How Plan is doing"
+      gap="sm"
+      px="md"
+      pb="md"
+      style={{ flex: '0 1 280px' }}
+    >
       <Group gap="xs" align="baseline">
         <Text component="h3" fw={600} size="sm" m={0}>
           How Plan is doing

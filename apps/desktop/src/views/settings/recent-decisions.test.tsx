@@ -1,7 +1,8 @@
 import { JudgeDecision, JudgeOutcome, mintId } from '@10db/contracts';
+import { http, HttpResponse } from 'msw';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderWithDaemonAndRouter } from '../../test/daemon';
+import { daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import { judgeCallDto, serveJudge } from '../../test/judge-fixtures';
 import { RecentDecisions } from './recent-decisions';
 
@@ -113,5 +114,26 @@ describe('RecentDecisions', () => {
     const link = await screen.findByRole('link', { name: 'Open on the board' });
     expect(link.getAttribute('href')).toBe(`/board?task=${taskId}`);
     expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('says so when the calls cannot be read, and keeps its header', async () => {
+    serveJudge({});
+    server.use(
+      http.get(daemonUrl('/judge/calls/page'), () =>
+        HttpResponse.json({ message: 'down' }, { status: 500 }),
+      ),
+    );
+    await renderWithDaemonAndRouter(<RecentDecisions />);
+    expect(await screen.findByText('Recent decisions could not be read.')).toBeTruthy();
+    expect(screen.queryByText('No decisions yet.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Filter Decision' })).toBeTruthy();
+  });
+
+  it('does not say there are no decisions while the first page loads', async () => {
+    serveJudge({});
+    server.use(http.get(daemonUrl('/judge/calls/page'), () => new Promise(() => undefined)));
+    await renderWithDaemonAndRouter(<RecentDecisions />);
+    await screen.findByRole('table', { name: 'Recent decisions' });
+    expect(screen.queryByText('No decisions yet.')).toBeNull();
   });
 });

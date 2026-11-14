@@ -157,6 +157,7 @@ export function RecentDecisions({
             : `Recent decisions: ${DECISIONS[decision].label}`
         }
         records={calls}
+        fetching={page.isPending}
         columns={columns}
         idAccessor="id"
         maxHeight={420}
@@ -168,7 +169,13 @@ export function RecentDecisions({
         {...(calls.length === 0 ? { minHeight: 160 } : {})}
         emptyState={
           <Text c="dimmed" size="sm" ta="center">
-            {filtered ? 'No decision matches these filters.' : 'No decisions yet.'}
+            {page.isPending
+              ? ''
+              : page.isError
+                ? 'Recent decisions could not be read.'
+                : filtered
+                  ? 'No decision matches these filters.'
+                  : 'No decisions yet.'}
           </Text>
         }
         {...pagerProps(

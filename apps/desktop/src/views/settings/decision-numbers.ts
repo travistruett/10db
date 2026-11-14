@@ -51,9 +51,15 @@ export function statsFor(
   );
 }
 
-/** Three significant figures: $0.042, $0.02, $0.192. */
+const USD = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumSignificantDigits: 3,
+});
+
+/** Three significant figures, never in exponent form: $0.042, $0.02, $0.192, $0.0000009. */
 export function formatDecisionUsd(usd: number): string {
-  return `$${String(Number(usd.toPrecision(3)))}`;
+  return USD.format(usd);
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
@@ -66,11 +72,12 @@ export function lastThirtyDays(
   if (stats === undefined) return '—';
   const calls = stats.calls === 0 ? 'No calls' : plural(stats.calls, 'call');
   if (mode === DecisionMode.Shadow) {
-    const scored = agreement?.scored ?? 0;
+    // Without the agreement read, nothing is known about how many are scored.
+    if (agreement === undefined) return `${calls} · —`;
     const progress =
-      scored >= SHADOW_MIN_SCORED
-        ? `${String(agreement?.agreed ?? 0)} of ${String(scored)} agreed`
-        : `${String(scored)} of ${String(SHADOW_MIN_SCORED)} scored`;
+      agreement.scored >= SHADOW_MIN_SCORED
+        ? `${String(agreement.agreed)} of ${String(agreement.scored)} agreed`
+        : `${String(agreement.scored)} of ${String(SHADOW_MIN_SCORED)} scored`;
     return `${calls} · ${progress}`;
   }
   if (stats.calls === 0) return calls;
@@ -97,9 +104,15 @@ export function thresholdPreview(
   };
 }
 
-export function previewText(percent: number, preview: ThresholdPreview): string {
+export function previewText(
+  percent: number,
+  preview: ThresholdPreview,
+  mode: DecisionMode = DecisionMode.Acting,
+): string {
   if (preview.total === 0) return 'No answers in the last 30 days to try it against.';
-  const base = `At ${String(percent)}%, 10db would have acted on ${String(preview.acted)} of your last ${String(preview.total)} answers.`;
+  // A shadow decision acts on nothing: its answers only count as sure.
+  const did = mode === DecisionMode.Shadow ? 'counted as sure' : 'acted on';
+  const base = `At ${String(percent)}%, 10db would have ${did} ${String(preview.acted)} of your last ${String(preview.total)} answers.`;
   if (preview.otherModels.length === 0) return base;
   return `${base} Some were answered by ${preview.otherModels.join(', ')}, not the model picked now.`;
 }

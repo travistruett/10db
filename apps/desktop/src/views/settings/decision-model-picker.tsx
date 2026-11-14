@@ -76,7 +76,7 @@ export function DecisionModelPicker({
   );
   if (!keyed)
     return (
-      <Stack gap={2} align="flex-end">
+      <Stack gap={2} align="flex-start">
         {savedText}
         {status.off ? null : (
           <Text size="xs" c="dimmed">
@@ -90,7 +90,7 @@ export function DecisionModelPicker({
   if (models.isPending) return <Loader size="sm" aria-label="Loading models" />;
   if (models.isError)
     return (
-      <Stack gap={2} align="flex-end">
+      <Stack gap={2} align="flex-start">
         {savedText}
         <Text size="xs" c="red" role="alert">
           OpenRouter&apos;s decision models could not be read.{' '}

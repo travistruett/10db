@@ -47,10 +47,13 @@ function Harness({
   decision = DECISION,
   stats,
   shadow,
+  statsFailed = false,
 }: {
   readonly decision?: JudgeDecision;
   readonly stats?: DecisionStatsDto;
   readonly shadow?: ShadowAgreementDto;
+  /** The stats could not be read: the page passes no entry and says so. */
+  readonly statsFailed?: boolean;
 }) {
   const status = useJudgeStatus();
   const [open, setOpen] = useState<JudgeDecision | null>(decision);
@@ -60,6 +63,7 @@ function Harness({
       decision={open}
       status={status.data}
       stats={stats}
+      statsFailed={statsFailed}
       shadow={shadow}
       models={[decisionModelDto()]}
       onClose={() => {
@@ -125,18 +129,21 @@ describe('DecisionDrawer', () => {
     });
   });
 
-  it('a click on the thumb that doesn’t move it saves nothing', async () => {
+  it('moving away and back saves nothing', async () => {
     const sent = serveJudge({ status: keyedStatus(), accounts: [work] });
     await renderWithDaemonAndRouter(<Harness />);
     const thumb = await slider();
-    fireEvent.mouseDown(thumb);
-    fireEvent.mouseUp(thumb);
     // Moved away and back: the value is the one drawn before the edit began.
     fireEvent.keyDown(thumb, { key: 'ArrowRight' });
     fireEvent.keyDown(thumb, { key: 'ArrowLeft' });
     fireEvent.blur(thumb);
-    await screen.findByText('Last 30 days');
-    expect(saves(sent)).toHaveLength(0);
+    // A later move is saved alone, so the earlier edit sent nothing.
+    fireEvent.keyDown(thumb, { key: 'ArrowRight' });
+    fireEvent.blur(thumb);
+    await waitFor(() => {
+      expect(saves(sent)).toHaveLength(1);
+    });
+    expect(saves(sent)[0]?.body).toEqual({ decisions: { question_route: { floor: 0.81 } } });
   });
 
   it('closing the drawer right after a move still saves it', async () => {
@@ -194,7 +201,7 @@ describe('DecisionDrawer', () => {
       'disabled',
       true,
     );
-    expect(thumb.getAttribute('data-disabled') ?? thumb.getAttribute('aria-disabled')).toBeTruthy();
+    expect(thumb.getAttribute('aria-disabled')).toBe('true');
     expect(
       screen.getByText(/At 80%, 10db would have acted on 1 of your last 1 answers\./),
     ).toBeTruthy();
@@ -219,8 +226,8 @@ describe('DecisionDrawer', () => {
     for (const part of [
       '6 acted',
       '2 not sure enough',
-      'timed out 1',
-      'failed 1',
+      '1 timed out',
+      '1 failed',
       '$0.0123',
       '0.4 s',
     ]) {
@@ -246,6 +253,74 @@ describe('DecisionDrawer', () => {
         decision: 'question_route',
       });
     });
+  });
+
+  it('shows the decision’s status under the title, with no key when there is none', async () => {
+    serveJudge({ status: judgeStatusDto() });
+    await renderWithDaemonAndRouter(<Harness />);
+    const dialog = await screen.findByRole('dialog', { name: 'Who a question goes to' });
+    expect(within(dialog).getByText('Acting')).toBeTruthy();
+    expect(within(dialog).getByText('· no key')).toBeTruthy();
+  });
+
+  it('shows the daemon’s refusal under the switch when its save fails', async () => {
+    serveJudge({ status: keyedStatus(), accounts: [work] });
+    server.use(
+      http.patch(daemonUrl('/judge'), () =>
+        HttpResponse.json({ error: 'invalid', message: 'Saving is refused.' }, { status: 400 }),
+      ),
+    );
+    await renderWithDaemonAndRouter(<Harness />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Who a question goes to' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Saving is refused.');
+    expect(alert.closest('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('shows the refusal under the slider when its save fails', async () => {
+    serveJudge({ status: keyedStatus(), accounts: [work] });
+    server.use(
+      http.patch(daemonUrl('/judge'), () =>
+        HttpResponse.json({ error: 'invalid', message: 'Floor refused.' }, { status: 400 }),
+      ),
+    );
+    await renderWithDaemonAndRouter(<Harness />);
+    const thumb = await slider();
+    fireEvent.keyDown(thumb, { key: 'ArrowRight' });
+    fireEvent.blur(thumb);
+    expect((await screen.findByRole('alert')).textContent).toContain('Floor refused.');
+  });
+
+  it('says the recent answers could not be read when the stats are unavailable', async () => {
+    serveJudge({ status: keyedStatus(), accounts: [work] });
+    await renderWithDaemonAndRouter(<Harness statsFailed />);
+    expect(await screen.findByText('Your recent answers could not be read.')).toBeTruthy();
+    expect(screen.queryByText(/No answers in the last 30 days/)).toBeNull();
+  });
+
+  it('previews a floor saved outside 50 to 99 at its own percent', async () => {
+    serveJudge({ status: keyedStatus(0.3), accounts: [work] });
+    await renderWithDaemonAndRouter(
+      <Harness
+        stats={decisionStatsDto(DECISION, { calls: 3, answers: answers(0.35, 0.4, 0.9) })}
+      />,
+    );
+    expect(
+      await screen.findByText('At 30%, 10db would have acted on 3 of your last 3 answers.'),
+    ).toBeTruthy();
+  });
+
+  it('says would have counted as sure for a shadow decision', async () => {
+    serveJudge({ status: keyedStatus(0.8, {}, JudgeDecision.ShapeReady), accounts: [work] });
+    await renderWithDaemonAndRouter(
+      <Harness
+        decision={JudgeDecision.ShapeReady}
+        stats={decisionStatsDto(JudgeDecision.ShapeReady, { calls: 2, answers: answers(0.9, 0.5) })}
+      />,
+    );
+    expect(
+      await screen.findByText('At 80%, 10db would have counted as sure 1 of your last 2 answers.'),
+    ).toBeTruthy();
   });
 
   describe('Plan decisions', () => {

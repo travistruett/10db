@@ -342,9 +342,7 @@ export function ConversationPane({
           style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}
         >
           <RecentConversations projectId={projectId} />
-          <Box px="md" pb="md" style={{ flex: '0 1 280px' }}>
-            <PlanMeasures />
-          </Box>
+          <PlanMeasures />
         </Flex>
       ) : null}
     </Box>
