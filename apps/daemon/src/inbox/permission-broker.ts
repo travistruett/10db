@@ -789,7 +789,7 @@ export function createPermissionBroker(
       const { realPath, access } = writeAccess(path, sandbox.fileAccess);
       const parts = realPath.split('/');
       const editor = parts.includes('.vscode') || parts.includes('.idea');
-      // Unattended, the checkout's own agent config is written without a card (T4 call 6): none of
+      // Unattended, the checkout's own agent config is written without a card: none of
       // it runs before the builder approves it.
       if (
         ctx.unattended !== undefined &&

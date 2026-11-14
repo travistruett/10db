@@ -20,7 +20,7 @@ import type { Outgoing } from './explore-hooks';
 import type { EngineCore, Runtime, Session } from './explore-runtime';
 
 // Sessions spec §6.3: how a turn takes its starters. What waits is handed to the live session as
-// one message under one uuid (rule 1), a turn begins with what it was handed, and what a session
+// one message under one uuid, a turn begins with what it was handed, and what a session
 // leaves untaken goes back to 10db's queue.
 
 const S = ConversationState;
@@ -30,13 +30,13 @@ export interface ExploreTurns {
   handTo(rt: Runtime, session: Session, items: readonly ConversationItemRow[]): boolean;
   /** A turn begins with what waits: pushed now, or handed earlier and not taken. */
   beginTurn(rt: Runtime): void;
-  /** Every starter the session holds goes back to 10db's queue (call 22). */
+  /** Every starter the session holds goes back to 10db's queue. */
   handBack(rt: Runtime): void;
   /** The running turn is over: it took what it began with, but for what a receipt says is still queued. */
   settleTurn(rt: Runtime, stillQueued?: ReadonlySet<ConversationItemId>): void;
   /** The starters a session holds that went under one of `uuids`: every one a combined push carried. */
   itemsOf(rt: Runtime, uuids: readonly string[]): Set<ConversationItemId>;
-  /** The open "Send now" line is resolved: what waited under it is on its way (calls 12, 29). */
+  /** The open "Send now" line is resolved: what waited under it is on its way. */
   resolveSendNow(rt: Runtime): void;
   /** What streamed is kept as it stands now. */
   storePartialNow(rt: Runtime): void;
@@ -62,7 +62,7 @@ export function createTurns(core: EngineCore): ExploreTurns {
   const { state } = core.deps;
 
   /**
-   * Pushed under the one uuid before the session is handed them (rule 1), then what the owner marks
+   * Pushed under the one uuid before the session is handed them, then what the owner marks
    * once they are sent. A send that throws hands them back, tells nothing, says why, and answers false.
    */
   const handTo = (

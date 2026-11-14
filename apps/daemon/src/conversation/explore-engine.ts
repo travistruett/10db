@@ -57,7 +57,7 @@ export type { ExploreEngineDeps } from './explore-runtime';
 
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
 // conversation's state moves only through the reducer, is written with the conversation, and its
-// effects run one at a time on the conversation's chain (call 24). Its parts: how a session starts
+// effects run one at a time on the conversation's chain. Its parts: how a session starts
 // (explore-starts), how a turn takes its starters (explore-turns), how a turn stops and is redone
 // (explore-stops), and how a paused account is checked again (explore-pauses).
 
@@ -90,19 +90,19 @@ export interface ExploreEngine {
     kind: typeof ConversationOwnerKind.Shape | typeof ConversationOwnerKind.Chat,
     hooks: ExploreOwnerHooks,
   ): void;
-  /** A turn starter was stored (rule 1); reduces `builder_message`, or parks it behind a hold (call 23). */
+  /** A turn starter was stored; reduces `builder_message`, or parks it behind a hold. */
   queued(id: ConversationId): void;
   stop(id: ConversationId): Promise<void>;
-  /** Stop, then the edited message as the next turn (call 30). */
+  /** Stop, then the edited message as the next turn. */
   redo(id: ConversationId, post: () => ConversationItemRow): Promise<ConversationItemRow>;
-  /** Refused with the state's words when nothing would run (call 29). */
+  /** Refused with the state's words when nothing would run. */
   sendNow(id: ConversationId): void;
   modelChanged(id: ConversationId, model: string | null): Promise<void>;
   holdStarts(id: ConversationId): void;
   releaseStarts(id: ConversationId): void;
   view(id: ConversationId): ConversationDto;
   live(id: ConversationId): ConversationLiveDto;
-  /** Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for (call 28). */
+  /** Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. */
   busy(): readonly ConversationId[];
   /** A queue waits on a hold; Plan's view reads it for `waitingForUpdate`. */
   parked(id: ConversationId): boolean;
@@ -168,7 +168,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   const queuedNow = (rt: Runtime): number => unpushed(rt).length + handed(rt).length;
 
   /**
-   * The reducer's facts. A hold counts nothing queued (call 23), except to the events whose outcome
+   * The reducer's facts. A hold counts nothing queued, except to the events whose outcome
    * never starts a turn: a Stop, which clears a parked start, an end and a restart, which put what
    * waits under Send now.
    */
@@ -430,7 +430,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         });
         return;
       case E.StartFreshFromDigest:
-        // The resume failed before it started: once, a fresh session from the digest (call 8).
+        // The resume failed before it started: once, a fresh session from the digest.
         rt.resuming = false;
         state.write((ctx) => {
           patchConversation(ctx, rt.id, { providerSessionId: null });
@@ -453,7 +453,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
             });
           });
         return;
-      // Stored or cleared when reduced; takeover and archive are Sessions' (M5a, M6).
+      // Stored or cleared when reduced; this engine stores no takeover or archive.
       case E.StorePartial:
       case E.DropPendingStart:
       case E.WithdrawCard:
@@ -553,7 +553,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       rt.pauseTimer = null;
       const session = rt.session;
       if (session === null) continue;
-      // Its events stop first (call 25); what it held goes back and what streamed is kept (call 22).
+      // Its events stop first; what it held goes back and what streamed is kept.
       session.open.detach();
       turns.handBack(rt);
       turns.storePartialNow(rt);

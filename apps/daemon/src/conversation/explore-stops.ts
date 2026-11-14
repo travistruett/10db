@@ -9,7 +9,7 @@ import type { InterruptReceipt } from '../sessions';
 import type { EngineCore, Runtime, Session } from './explore-runtime';
 import type { ExploreTurns } from './explore-turns';
 
-// Sessions spec §6.3 and calls 22, 25 and 30: how a turn stops. Stop interrupts; a receipt or the
+// Sessions spec §6.3: how a turn stops. Stop interrupts; a receipt or the
 // turn's own end settles the stop, and past the grace the session is stopped. Stop and Redo replaces
 // the message it redoes when the agent never took it.
 
@@ -27,7 +27,7 @@ export interface ExploreStops {
   receiptCame(rt: Runtime, session: Session, receipt: InterruptReceipt | null): void;
   /** Neither a receipt nor the turn's end came within the grace: the session is stopped. */
   graceOver(rt: Runtime, session: Session): void;
-  /** Stop, then the edited message as the next turn (call 30). */
+  /** Stop, then the edited message as the next turn. */
   redo(
     id: ConversationId,
     post: () => ConversationItemRow,

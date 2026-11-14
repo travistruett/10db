@@ -15,7 +15,7 @@ export const SkipSource = {
   Broker: 'broker',
   HostJudge: 'host_judge',
   Question: 'question',
-  /** 10db's own judge; reserved for T5. */
+  /** 10db's own judge; reserved, and judged as `rules` until it has values. */
   TendbJudge: 'tendb_judge',
 } as const;
 export type SkipSource = ValueOf<typeof SkipSource>;

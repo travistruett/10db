@@ -18,7 +18,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
-// Trust line §5 and T4 Task 2: what an unattended lane skipped, one row per call in a run, and the
+// Trust line §5: what an unattended lane skipped, one row per call in a run, and the
 // skips the builder approved for a follow-up, read only until that follow-up is done.
 
 export interface SkipInput {
@@ -53,7 +53,7 @@ const dtoOf = (row: SkipRow): SkippedActionDto => ({
 
 /**
  * Records a skip in the caller's write; a second one of the same call in the run adds no row and
- * answers null (T4 call 9), keeping the stricter of the two. A written skip changes its run's task,
+ * answers null, keeping the stricter of the two. A written skip changes its run's task,
  * so the task's views follow.
  */
 export function recordSkip(ctx: WriteContext, input: SkipInput): SkippedActionId | null {

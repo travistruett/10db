@@ -2,7 +2,7 @@ import { ConversationState } from '@10db/contracts';
 import { timerAt } from '../clock';
 import type { EngineCore, Runtime } from './explore-runtime';
 
-// Sessions spec §6.4 and call 6: a conversation paused for its account's limit checks again at the
+// Sessions spec §6.4: a conversation paused for its account's limit checks again at the
 // pause's end, or at the next month's first instant for a cap, and on any change to the account.
 
 export interface ExplorePauses {
@@ -25,7 +25,7 @@ export function createPauses(core: EngineCore): ExplorePauses {
     });
   };
 
-  /** A check that finds the account still blocked waits silently for the next (call 6). */
+  /** A check that finds the account still blocked waits silently for the next. */
   const recheckPause = (rt: Runtime): void => {
     if (rt.state !== ConversationState.PausedAccount) return;
     const conv = core.conversation(rt.id);

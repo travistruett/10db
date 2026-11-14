@@ -23,7 +23,7 @@ import type { ExploreOwnerHooks } from './explore-hooks';
 
 // Sessions spec §6.3, §6.4: what a start does for an explore conversation before its state is reduced
 // by the restart row. Its sessions ended with the daemon; what they were handed and never seen taken
-// is taken when the agent's conversation shows it (rule 5), else handed back to wait; a turn cut off
+// is taken when the agent's conversation shows it, else handed back to wait; a turn cut off
 // with nothing stored says so; a card it waited on goes.
 
 /** What a conversation reads when a turn was running as 10db stopped and nothing of it was kept. */
@@ -81,7 +81,7 @@ export async function settleRestart(
   state.write((ctx) => {
     endConversationSessions(ctx, conv.id, 'daemon_restart');
   });
-  // Rule 5: what the agent's own conversation shows taken is delivered; the rest waits again.
+  // What the agent's own conversation shows taken is delivered; the rest waits again.
   const pushed = listPushedTurnStarters(state.db, conv.id);
   const oldest = pushed[0];
   if (

@@ -386,7 +386,7 @@ function onlyReads(input: GuardInput): boolean {
 export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const verdict = judgeToolUse(input);
   if (verdict.decision !== 'allow') return verdict;
-  // Unattended, a docker call while the project has Docker off is a skip the item lists (call 7);
+  // Unattended, a docker call while the project has Docker off is a skip the item lists;
   // attended, the kernel refuses it as before.
   if (input.attended === false && input.dockerOn !== true && callsDocker(input))
     return {

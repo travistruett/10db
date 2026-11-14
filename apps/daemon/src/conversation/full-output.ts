@@ -13,7 +13,7 @@ import type { Json } from '@10db/db';
 // Sessions spec §5.2, §6.2: what an item cannot hold is kept beside it on disk: a call's whole output,
 // an edit's whole patch, and the rest of a text past the body cap. The path is made of ids only.
 
-/** The most UTF-16 units a new item's JSON body holds (call 31). */
+/** The most UTF-16 units a new item's JSON body holds. */
 export const BODY_CAP_CHARS = 32_768;
 /** How much of a text over the cap the item keeps. */
 export const CAPPED_TEXT_CHARS = 30_000;
@@ -121,7 +121,7 @@ function shortened(value: Json): Json {
 }
 
 /**
- * An item body under the cap, and what it left out (call 31). A body whose JSON fits is kept as it
+ * An item body under the cap, and what it left out. A body whose JSON fits is kept as it
  * is; a longer text keeps its first 30,000 characters; a longer edit keeps the hunks that fit, marked
  * truncated, with its whole patch; a longer command keeps the start of its command. Pure.
  */

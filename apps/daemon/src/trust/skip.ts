@@ -19,7 +19,7 @@ export function skipMessage(limit: LimitName | null, reason: string): string {
     : `Skipped: this would ${LIMIT_VERBS[limit]}. ${CARRY_ON}`;
 }
 
-/** What an unattended lane's question is answered with (T4 call 21). */
+/** What an unattended lane's question is answered with. */
 export const AWAY_ANSWER =
   'The builder is away. Make the call yourself and say in your handoff what you decided and why.';
 
@@ -33,7 +33,7 @@ export interface TurnSkips {
 /** How many times a step's turn a skip stopped is resumed, per start of the run. */
 export const SKIP_RESUMES_MAX = 2;
 
-/** A turn whose last call was skipped stopped because of it (T4 call 10). */
+/** A turn whose last call was skipped stopped because of it. */
 export const stoppedBySkip = (turn: TurnSkips): boolean => turn.lastCallSkipped;
 
 /** A call the builder approved after the run that skipped it. */

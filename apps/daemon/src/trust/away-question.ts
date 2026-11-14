@@ -10,7 +10,7 @@ import { assigneesFor, BUILDER_HANDLE, type DbReader } from '@10db/db';
 import { AWAY_ANSWER } from './skip';
 import type { SkipRecorder } from './skip-recorder';
 
-// T4 call 21: a lane nobody watches asks no question of the builder. It is answered at once with
+// A lane nobody watches asks no question of the builder. It is answered at once with
 // AWAY_ANSWER, and kept for the builder's list. A question the project routes to a named person
 // still goes to them: the builder chose who answers it.
 

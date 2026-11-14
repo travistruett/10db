@@ -106,7 +106,7 @@ export async function runAcceptanceChecks(input: {
       "SELECT count(*) AS n FROM workstreams w WHERE w.state = 'DONE' AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.workstream_id = w.id AND e.kind = 'gate' AND e.exit_code = 0)",
     );
     const handoffs = count('SELECT count(*) AS n FROM handoffs');
-    // A Board task nobody watches is answered at once and its question kept (T4 call 21).
+    // A Board task nobody watches is answered at once and its question kept.
     const answered =
       count(
         "SELECT count(*) AS n FROM inbox_items WHERE kind = 'question' AND state = 'RESOLVED'",
@@ -116,7 +116,7 @@ export async function runAcceptanceChecks(input: {
       'SELECT count(*) AS n FROM (SELECT workstream_id, op_id FROM tool_ops GROUP BY workstream_id, op_id HAVING count(*) > 1)',
     );
     // A permission card stores the tool it asks about, and a task nobody watches skips the call
-    // instead (T4); "_" is escaped so a name cannot widen the match.
+    // instead; "_" is escaped so a name cannot widen the match.
     const toolPattern = `mcp\\_\\_${input.mcpServer.replace(/[\\%_]/g, '\\$&')}\\_\\_%`;
     const gatedCards =
       count(

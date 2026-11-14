@@ -501,7 +501,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             // person may allow a Read: that Read is served from a copy (`secretReadsDir`).
             ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
           ],
-          // A lane nobody watches writes the checkout's agent config without a card (T4 call 6):
+          // A lane nobody watches writes the checkout's agent config without a card:
           // none of it runs before the builder approves it. Editor config runs when the builder
           // opens the folder, so it still asks.
           askRules: [

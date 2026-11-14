@@ -49,7 +49,7 @@ export interface ExploreEngineDeps {
 
 const S = ConversationState;
 
-/** The states a turn is under way in: what an update drain waits for (call 28). */
+/** The states a turn is under way in: what an update drain waits for. */
 export const BUSY: ReadonlySet<ConversationState> = new Set([
   S.Starting,
   S.Running,
@@ -57,7 +57,7 @@ export const BUSY: ReadonlySet<ConversationState> = new Set([
   S.Stopping,
 ]);
 
-/** What a state is, in the words a refused Send Now gives (call 17). */
+/** What a state is, in the words a refused Send Now gives. */
 export function stateWords(state: ConversationState): string {
   switch (state) {
     case S.Starting:
@@ -81,7 +81,7 @@ export function stateWords(state: ConversationState): string {
   }
 }
 
-/** How a session's own end reads to the reducer (call 7). */
+/** How a session's own end reads to the reducer. */
 export function endedHow(reason: SessionEndReason): 'error' | 'paused' | 'unasked' {
   switch (reason) {
     case SessionEndReason.RateLimited:
@@ -140,7 +140,7 @@ export interface Runtime {
   ended: TurnEnd['how'];
   idle: Timer | null;
   idleSince: number | null;
-  /** A starter waits on a hold (call 23). */
+  /** A starter waits on a hold. */
   parked: boolean;
   /** Convert's hold on this conversation. */
   held: boolean;
@@ -150,7 +150,7 @@ export interface Runtime {
   grace: Timer | null;
   /** What the last interrupt answers. */
   receipt: Promise<InterruptReceipt> | null;
-  /** The message a Redo replaces, while its stop settles (call 30). */
+  /** The message a Redo replaces, while its stop settles. */
   redo: ConversationItemId | null;
   /** The session the engine last stopped or saw end, whose stream a partial is stored from. */
   lastSession: Session | null;

@@ -354,7 +354,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     state.write((ctx) => insertShapeMessage(ctx, shapeId, { author, kind, body }));
   /** Tells the screen the conversation changed, for what no row records (where its session is). */
   /**
-   * The builder's message, stored queued before anything is sent (call 2): it waits for a turn to
+   * The builder's message, stored queued before anything is sent: it waits for a turn to
    * take it. The first one titles the conversation.
    */
   const postMessage = (shapeId: ShapeId, text: string): ShapeMessageDto => {
@@ -653,7 +653,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       if (pressPending(shapeId, ShapeEventKind.Propose)) return { status: 'ignored' };
       const { note, instruction } = proposeNote(getShape(state.db, shapeId).round > 0);
       // The press unlocks propose_plan for good and is a row in the transcript, in one write; its
-      // instruction makes it a turn starter, queued (call 1).
+      // instruction makes it a turn starter, queued.
       state.write((ctx) => {
         patchShape(ctx, shapeId, { proposeUnlocked: true });
         insertShapeMessage(ctx, shapeId, {

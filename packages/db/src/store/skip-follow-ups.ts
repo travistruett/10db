@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
-// Trust line §5, T4 Task 10: a follow-up Run these now made, written once in the answer's own write
+// Trust line §5: a follow-up Run these now made, written once in the answer's own write
 // and stamped once when it starts, so a crash between the press and the start loses neither.
 
 export interface SkipFollowUp {

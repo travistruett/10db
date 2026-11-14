@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { SKIP_SUMMARY_MAX } from '@10db/contracts';
 
-// T4: how a skip names a call, and the key a follow-up matches an approved call by. The summary is
+// How a skip names a call, and the key a follow-up matches an approved call by. The summary is
 // for a person and may be cut; the key is over the whole call but its labels, uncut, so two calls
 // that share a prefix never match, and the same call in another worktree does.
 

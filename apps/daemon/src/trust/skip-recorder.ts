@@ -11,7 +11,7 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import type { TurnSkips } from './skip';
 
-// T4 Task 4: one recorder per run. Every channel that skips a call (the guard, the broker, auto
+// One recorder per run. Every channel that skips a call (the guard, the broker, auto
 // mode's denials, the host judge) or answers a question records it here once, and the turn's last
 // call is read by the order the calls were made in, not the order their reports arrive.
 

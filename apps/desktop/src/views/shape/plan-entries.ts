@@ -11,7 +11,7 @@ import type { ConversationEntry } from '../../conversation';
 import type { LiveCall, LiveItems } from '../../conversation/live-items';
 import { Screenshot } from './screenshot';
 
-// Plan's conversation items, then what streams now, as the conversation kit's entries (M4b call 15).
+// Plan's conversation items, then what streams now, as the conversation kit's entries.
 // A Plan tool line (`10db.plan`) is one `other` call: the kit's row reads its title, the tool's name
 // before the first ` · ` and its target after. A line whose second part is `refused` is a call 10db
 // stopped, with its third part, when there is one, as the reason. The digest and edit notes are for

@@ -516,7 +516,7 @@ function withSandboxRules(
 const ASKS_THE_BUILDER = 'When a decision is not yours to make, ask with ';
 
 /**
- * T4 call 21: a lane nobody watches is told its questions are answered at once, and decides itself.
+ * A lane nobody watches is told its questions are answered at once, and decides itself.
  * Where the task routes questions to people, those still go to them.
  */
 function awayRules(rules: readonly string[], routed: boolean): string[] {

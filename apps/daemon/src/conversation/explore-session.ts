@@ -26,7 +26,7 @@ import { createLiveBuffers, type LiveBuffers } from './live-buffers';
 import { storePartial } from './partial';
 
 // Sessions spec §6.5, §6.6: one open explore session. Its events stream into live buffers, and each
-// finished item is stored under the id its buffer minted (call 3), capped (call 31), with what the cap
+// finished item is stored under the id its buffer minted, capped, with what the cap
 // or the view cut off on disk. What the reducer needs (started, a turn's end, the session's end) goes
 // to the engine.
 
@@ -49,18 +49,18 @@ export interface OpenSession {
   readonly buffers: LiveBuffers;
   /** The session started with nothing to resume. */
   readonly fresh: boolean;
-  /** The slash commands the session offers, for the composer (M5a). */
+  /** The slash commands the session offers, for the composer. */
   readonly commands: () => readonly AgentCommand[];
-  /** Reads no more events but `ended` (call 25). */
+  /** Reads no more events but `ended`. */
   detach(): void;
   /**
    * The running turn is over for the engine though its own events are still to come (a receipt settled
-   * its stop): they are dropped, up to and including its `turn_complete` (call 25).
+   * its stop): they are dropped, up to and including its `turn_complete`.
    */
   skipTurn(): void;
   /** Stores what streamed, marked partial, and empties the buffers. */
   storePartial(): ConversationItemId[];
-  /** A turn begins: its plan is a new item (call 11). */
+  /** A turn begins: its plan is a new item. */
   newTurn(): void;
   /** Resolves when the session's events have ended. */
   readonly done: Promise<void>;
@@ -139,7 +139,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     if (Object.keys(onDisk).length > 0) disk.push([id, onDisk]);
   };
 
-  /** Stores each text in flight: reasoning complete (call 10), a reply with no `message` partial. */
+  /** Stores each text in flight: reasoning complete, a reply with no `message` partial. */
   const storeTexts = (ctx: WriteContext, except?: string, replies = false): void => {
     for (const adapterId of [...reasoning]) {
       if (adapterId === except) continue;

@@ -3442,7 +3442,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             // Set at each turn end, so a later turn that reaches no limit clears it.
             st.unaskedRunEnded = unasked?.atLimit ? unasked.run.count : null;
             // A lane nobody watches whose turn ended on a skip, often because the judge said to stop, is
-            // told to carry on, a bounded number of times per step (T4 call 10). A handoff, a background
+            // told to carry on, a bounded number of times per step. A handoff, a background
             // hold, a builder message or a stop has the turn end as it would.
             if (ctl.blockedReason !== null) {
               const skipped = listSkipsForWorkstream(db, id)

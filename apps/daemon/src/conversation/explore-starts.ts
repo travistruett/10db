@@ -75,7 +75,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
   };
 
   const start = async (rt: Runtime, waiting: ReadonlySet<ConversationItemId>): Promise<void> => {
-    // A new handle never opens on an agent session the last one still holds (call 24).
+    // A new handle never opens on an agent session the last one still holds.
     await rt.closing;
     const made: Made = { launch: null, sessionId: null, pushed: [] };
     try {
@@ -106,7 +106,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
     const conv = core.conversation(rt.id);
     const hooks = core.hooksOf(conv);
     const account = core.accountOf(conv);
-    // A start the account runtime holds reads as an end for the limit (call 6): nothing is sent.
+    // A start the account runtime holds reads as an end for the limit: nothing is sent.
     const blocked = core.deps.accountBlocked(account.id, conv.projectId);
     if (blocked !== null) {
       rt.pausedUntil = blocked.until;
@@ -192,7 +192,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
               kind: ConversationItemKind.Digest,
               body: kept.body,
             });
-      // Pushed under its uuid before the session is handed it (rule 1); what the owner marks told
+      // Pushed under its uuid before the session is handed it; what the owner marks told
       // waits for the handle, so a start that fails tells nothing.
       for (const item of items) markItemPushedUnder(ctx, item.id, uuid);
       return stored;
@@ -266,7 +266,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
           rt.grace = null;
           rt.lastSession = self;
           // A turn that ran took what it began with; the rest of what the session held goes back to
-          // the queue before it stops counting as live (call 22).
+          // the queue before it stops counting as live.
           if (self.started && rt.inTurn) turns.settleTurn(rt);
           turns.handBack(rt);
           rt.session = null;

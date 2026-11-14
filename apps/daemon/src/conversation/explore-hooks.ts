@@ -10,11 +10,11 @@ import type { WaitObserver } from '../inbox';
 import type { ConversationReadSpec, ExploreSessionSpec, ShapeImage } from '../sessions';
 import type { PictureLimits } from './picture-limits';
 
-// Sessions spec §6.1: what an explore conversation's owner (Plan, and from M5a a chat) gives the
+// Sessions spec §6.1: what an explore conversation's owner (Plan, and a chat once chats run) gives the
 // engine. The engine owns the session's lifecycle; the owner says what a session is and what a turn
 // starter reads as.
 
-/** What one queued turn starter sends (call 5). `sent` runs in the write that marks it pushed. */
+/** What one queued turn starter sends. `sent` runs in the write that marks it pushed. */
 export interface Outgoing {
   readonly text: string;
   readonly images: readonly ShapeImage[];
@@ -90,7 +90,7 @@ export interface ExploreOwnerHooks {
   ): Outgoing;
   onTurnEnded(conv: ConversationRow, end: TurnEnd): Promise<void>;
   /**
-   * What reading the agent's own conversation back needs after a restart (rule 5); absent for an owner
+   * What reading the agent's own conversation back needs after a restart; absent for an owner
    * whose agent keeps no conversation to read (Claude Code's).
    */
   readBackSpec?(

@@ -11,8 +11,8 @@ import type { PictureLimits } from './picture-limits';
 
 // Sessions spec §6.2, Workbench spec §6.3. The pure delivery rules every conversation's builder
 // messages follow, whoever owns the conversation. A message is pushed under a client uuid kept before
-// the session is handed it (rule 1), the first time under its own id's (rule 2), delivered only when a
-// turn lists that uuid (rule 3), and pushed again after an interrupt that may have lost it (rule 4).
+// the session is handed it, the first time under its own id's, delivered only when a
+// turn lists that uuid, and pushed again after an interrupt that may have lost it.
 
 export interface DeliverableFile {
   readonly id: ConversationFileId;
@@ -48,7 +48,7 @@ export interface OutgoingMessage {
 }
 
 /**
- * The client uuid a push of the message goes under (rule 2): its own id's, the first time it is
+ * The client uuid a push of the message goes under: its own id's, the first time it is
  * pushed anywhere, else a fresh one, since the conversation may already hold its own (a message handed
  * back is no longer pushed, but went under it).
  */
@@ -60,7 +60,7 @@ export function clientUuid(
 }
 
 /**
- * The messages to push again after an interrupt (rule 4), among those pushed and not delivered: one
+ * The messages to push again after an interrupt, among those pushed and not delivered: one
  * the receipt names as still queued runs as the next turn's start; one it does not name may have been
  * lost with the interrupted turn. With no receipt (null), every one is pushed again, which
  * at-least-once delivery allows: the message's id travels in its text.

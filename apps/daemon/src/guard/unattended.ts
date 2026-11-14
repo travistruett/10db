@@ -9,7 +9,7 @@ import {
 import { skipMessage } from '../trust';
 import type { GuardVerdict } from './judge';
 
-// Trust line §5 (T4 calls 2–6, 23): in a lane nobody watches, every guard ask is answered at once by
+// Trust line §5: in a lane nobody watches, every guard ask is answered at once by
 // a table over its kind and the session's judge: handed to the judge that runs (a bare allow, so the
 // permission mode decides), allowed, or skipped with a message the agent carries on from.
 
@@ -38,7 +38,7 @@ export type UnattendedOutcome = ValueOf<typeof UnattendedOutcome>;
 
 const O = UnattendedOutcome;
 
-/** A judge that runs and reads the session's policy; `tendb` has no values until T5 (call 23). */
+/** A judge that runs and reads the session's policy; `tendb` has no values yet and takes the rules' path. */
 const judgeRuns = (judge: JudgeKind): boolean => {
   switch (judge) {
     case JudgeKind.Native:
@@ -52,15 +52,15 @@ const judgeRuns = (judge: JudgeKind): boolean => {
 /** What an ask of this kind becomes in an unattended lane on this judge. */
 export function unattendedOutcome(kind: AskKind, judge: JudgeKind): UnattendedOutcome {
   switch (kind) {
-    // Call 4: a loop with no end goes to the classifier, which T3's Shared Mac line covers.
+    // A loop with no end goes to the classifier, which the Shared Mac line covers.
     case AskKind.EndlessLoop:
       return judgeRuns(judge) ? O.ToJudge : O.Skip;
-    // Agent-written config runs before no approval (call 6): project hooks load in no sandboxed
+    // Agent-written config runs before no approval: project hooks load in no sandboxed
     // session, `.mcp.json` by an approved hash, and definitions are copied cleaned.
     case AskKind.ConfigWrite:
       return O.Allow;
-    // A Read runs in Claude Code's own process, where the kernel doesn't reach (call 5); the
-    // classifier knows nothing of claims (call 3).
+    // A Read runs in Claude Code's own process, where the kernel doesn't reach; the
+    // classifier knows nothing of claims.
     // The guard asks about the web, a socket, an MCP or unreviewed tool only where no judge would
     // see the call: the Web switch is off, nothing shows the classifier judging it, or an allow rule
     // would settle it unjudged. A bare allow would hand it to the permission mode unjudged.
@@ -192,8 +192,8 @@ const skipped = (skip: UnattendedSkip): UnattendedAnswer => ({
 });
 
 /**
- * A refusal an unattended lane lists: the floor's deploy (call 8),
- * Docker while it is off (call 7) and a closed secret. Every other refusal stands as it is.
+ * A refusal an unattended lane lists: the floor's deploy,
+ * Docker while it is off and a closed secret. Every other refusal stands as it is.
  */
 function refusalAnswer(
   input: UnattendedInput,
