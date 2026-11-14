@@ -798,6 +798,14 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         },
         turnComplete: (event) => {
           if (rt.session !== self) return;
+          // What the turn dropped untaken goes back to the queue, to be pushed again under a new uuid.
+          const dropped = itemsOf(rt, event.dropped ?? []);
+          if (dropped.size > 0) {
+            state.write((ctx) => {
+              markItemsHandedBack(ctx, rt.id, [...dropped]);
+            });
+            rt.starters = rt.starters.filter((id) => !dropped.has(id));
+          }
           settleTurn(rt);
           // A Redo settles its stop once it has read the receipt.
           if (rt.state === S.Stopping && rt.redo !== null) return;

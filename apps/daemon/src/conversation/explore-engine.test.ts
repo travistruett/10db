@@ -909,4 +909,23 @@ describe('review round 1', () => {
       expect(w.stateOf()).not.toBe('stopping');
     },
   );
+
+  it('hands back what a turn dropped, and pushes it again as the next turn', async () => {
+    w = exploreWorld();
+    const first = gate();
+    w.adapter.shapeBehaviour = async (turn) => {
+      if (turn.number > 1) return { text: 'Again.' };
+      await first.promise;
+      return { text: 'Understood.', dropQueued: true };
+    };
+    w.send('one');
+    await waitFor(() => w.stateOf() === 'running');
+    const dropped = w.send('two');
+    await waitFor(() => w.adapter.shapeSessions[0]?.sent.length === 1);
+    first.release();
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two', 'two']);
+    expect(w.items().find((i) => i.id === dropped.id)?.deliveredAt).not.toBeNull();
+  });
 });

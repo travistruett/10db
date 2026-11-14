@@ -583,6 +583,11 @@ export interface FakeShapeTurnResult {
   readonly contextPercent?: number;
   /** The account could not run the session's model: the session ends as refused, after no turn. */
   readonly refusedModel?: boolean;
+  /**
+   * The turn ends dropping what it was handed and had not begun, as a Codex turn that fails does: the
+   * messages leave the queue and `turn_complete` names them `dropped`.
+   */
+  readonly dropQueued?: boolean;
   /** The session ends after the turn's events, with no `turn_complete`: a limit, an error, an exit. */
   readonly end?: { readonly reason: SessionEndReason; readonly message: string | null };
 }
@@ -698,8 +703,13 @@ export function runFakeExploreSession(
         totalTokens: percent * 2_000,
         maxTokens: 200_000,
       });
+      const dropped =
+        result.dropQueued === true
+          ? queue.splice(0).flatMap((m) => (m.uuid === null ? [] : [m.uuid]))
+          : [];
       emit({
         type: 'turn_complete',
+        ...(dropped.length === 0 ? {} : { dropped }),
         ...(failed ? { result: 'error' as const } : {}),
         ...(result.text === undefined ? {} : { text: result.text }),
         inputTokens: 100 * number,
