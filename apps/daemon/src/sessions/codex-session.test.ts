@@ -3,7 +3,7 @@ import { request } from 'node:http';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AccountKind, AccountProblem, mintId } from '@10db/contracts';
+import { AccountKind, AccountProblem, JudgeKind, mintId } from '@10db/contracts';
 import { parse } from 'smol-toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FAKE_SRT, SANDBOXED, testPolicy } from '../../test/fixtures';
@@ -11,6 +11,7 @@ import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock } from '../clock';
 import { silentLogger, type Logger } from '../log';
 import type { LaneSandboxSpec } from '../sandbox';
+import { createCodexAdapter } from './codex-adapter';
 import { codexThreadConfig } from './codex-lane-config';
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
@@ -28,7 +29,14 @@ import {
 import { CODEX_COMMANDS } from './codex-commands';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
-import type { LaneSessionSpec, SessionEvent, SessionHandle, ShapeImage } from './types';
+import type {
+  AgentSessionSpec,
+  ExploreSessionSpec,
+  LaneSessionSpec,
+  SessionEvent,
+  SessionHandle,
+  ShapeImage,
+} from './types';
 import { CODEX_VERIFIED_ON } from '../environment';
 
 const FINE = {
@@ -2118,7 +2126,7 @@ describe('codexThreadConfig', () => {
 describe('the guard socket', () => {
   /** Posts a Bash call to the session's socket; the status and body come back. */
   function post(
-    spec: LaneSessionSpec,
+    spec: Pick<AgentSessionSpec, 'sessionId'>,
     command: string,
   ): Promise<{ status: number | undefined; body: string }> {
     return new Promise((done, fail) => {
@@ -2187,6 +2195,94 @@ describe('the guard socket', () => {
     });
     await handle.stop();
   });
+
+  // Sessions spec §5.5, trust line §5: a chat's or Plan's thread is the attended profile. Its thread
+  // starts as a lane's does, on Plan's read-only sandbox, and the guard socket answers each call with
+  // the session's own judge: 10db's judge through the hook, or the rules floor where it has none.
+  const readOnly: LaneSandboxSpec = {
+    ...sandbox,
+    settings: {
+      ...sandbox.settings,
+      filesystem: {
+        ...sandbox.settings.filesystem,
+        allowWrite: ['/tmp/lane-1'],
+        denyWrite: ['/w/lane'],
+      },
+    },
+  };
+  const explore = (over: Partial<LaneSessionSpec>): ExploreSessionSpec => ({
+    ...specOf({
+      sandbox: readOnly,
+      instructions: 'Use pnpm.',
+      setup: { plugins: [], skillRoots: ['/s/yours/skills'] },
+      ...over,
+    }),
+    profile: {
+      kind: 'explore',
+      judge: JudgeKind.Tendb,
+      systemPrompt: 'You are a chat.',
+      tools: [],
+      allowedTools: [],
+      disallowedTools: [],
+      agents: {},
+    },
+  });
+  it.skipIf(SANDBOXED).each([
+    [
+      'the hook judge',
+      {
+        judgeCall: ({ input }: { input: unknown }) =>
+          Promise.resolve(
+            JSON.stringify(input).includes('push')
+              ? { decision: 'deny' as const, reason: "10db's judge: a push" }
+              : { decision: 'allow' as const },
+          ),
+      },
+      "10db's judge: a push",
+    ],
+    [
+      'the rules floor',
+      {
+        preToolUse: ({ input }: { input: unknown }) =>
+          JSON.stringify(input).includes('push')
+            ? { decision: 'deny' as const, reason: 'the rules: a push' }
+            : { decision: 'allow' as const },
+      },
+      'the rules: a push',
+    ],
+  ])(
+    'an explore thread on %s starts read-only, judged through the hook, with the setup and the tool wait',
+    async (_name, over, refusal) => {
+      const server = fakeAppServer({ ...FINE, 'skills/extraRoots/set': {}, 'turn/interrupt': {} });
+      const spec = explore(over);
+      // Through the adapter, which opens the explore profile on the same session as a lane's.
+      const handle = createCodexAdapter(depsOf(server)).open(spec);
+      await vi.waitFor(() => {
+        expect(methods(server)).toContain('turn/start');
+      });
+      expect(sentParams(server, 'skills/extraRoots/set')).toEqual({
+        extraRoots: ['/s/yours/skills'],
+      });
+      expect(sentParams(server, 'thread/start')).toEqual({
+        cwd: spec.cwd,
+        model: 'gpt-5.6-sol',
+        approvalPolicy: 'never',
+        config: codexThreadConfig(spec),
+        developerInstructions: 'Use pnpm.',
+      });
+      const config = codexThreadConfig(spec);
+      expect(config).toMatchObject({
+        web_search: 'disabled',
+        permissions: { lane: { filesystem: { '/w/lane': 'read' } } },
+        mcp_servers: { '10db': { tool_timeout_sec: 905 } },
+      });
+      expect(await post(spec, 'ls')).toEqual({ status: 200, body: '' });
+      const refused = await post(spec, 'git push');
+      expect(refused.body).toContain('"permissionDecision":"deny"');
+      expect(refused.body).toContain(refusal);
+      await handle.stop();
+    },
+  );
 
   it('refuses the session, sending no prompt, when the socket cannot be opened', async () => {
     await writeFile(join(root, 'run'), 'a file where the socket directory should be');

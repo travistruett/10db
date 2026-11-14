@@ -5,13 +5,7 @@ import { silentLogger } from '../log';
 import { checkAccount } from './account-check';
 import { createCodexAdapter } from './codex-adapter';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
-import {
-  AccountProbeError,
-  CompletionError,
-  type AgentAdapter,
-  type SessionEvent,
-  type SessionHandle,
-} from './types';
+import { AccountProbeError, CompletionError, type AgentAdapter } from './types';
 import { CODEX_VERIFIED_ON } from '../environment';
 
 const SIGNED_IN = {
@@ -58,12 +52,6 @@ const expectation = (identity: string | null) => ({
   kind: AccountKind.CodexSignin,
   identity,
 });
-
-async function events(handle: SessionHandle): Promise<SessionEvent[]> {
-  const seen: SessionEvent[] = [];
-  for await (const event of handle.events) seen.push(event);
-  return seen;
-}
 
 describe('startLogin', () => {
   it('starts the browser sign-in on the app-server it is given and keeps it for the caller to end', async () => {
@@ -219,13 +207,5 @@ describe('the rest of the adapter', () => {
       })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CompletionError);
-  });
-
-  it('ends a Shape conversation at once, saying brainstorm chat is not available on a ChatGPT account', async () => {
-    // Only the profile is read: the conversation ends before it starts.
-    const handle = adapterOn(fakeAppServer({})).open({ profile: { kind: 'explore' } } as never);
-    const [ended] = await events(handle);
-    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
-    expect(JSON.stringify(ended)).toContain('ChatGPT');
   });
 });

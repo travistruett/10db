@@ -1,6 +1,6 @@
 import { SandboxedMcpServer } from '../sandbox';
 import { lanePermissions } from './codex-lane-permissions';
-import type { LaneSessionSpec, SessionMcpServer } from './types';
+import type { AgentSessionCore, SessionMcpServer } from './types';
 
 /** The name of the permission profile 10db's template defines and every lane thread must run under. */
 export const LANE_PROFILE = 'lane';
@@ -33,10 +33,11 @@ function projectServer(server: SessionMcpServer): Record<string, unknown> {
 }
 
 /**
- * The per-lane `config` for `thread/start` and `thread/resume`. It travels over stdin, never on a
+ * The per-session `config` for `thread/start` and `thread/resume`: a lane's, or an explore
+ * conversation's on its read-only sandbox, whose checkout the profile makes `read`. It travels over stdin, never on a
  * command line, and holds the name of the token variable, never the token.
  */
-export function codexThreadConfig(spec: LaneSessionSpec): Record<string, unknown> {
+export function codexThreadConfig(spec: AgentSessionCore): Record<string, unknown> {
   const projects = Object.fromEntries(
     Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
   );
