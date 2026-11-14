@@ -5032,7 +5032,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       engine.launch(workstream.id);
       const spec = await waitFor(() => specs[0]);
       expect(spec.profile.lanePermissionMode).toBe('auto');
-      expect(spec.prompt).toContain('WebFetch, WebSearch and repo MCP tools wait on a card');
+      // A lane nobody watches waits on no card: the floor's line says a refused call is skipped.
+      expect(spec.prompt).toContain('A call 10db or auto mode refuses with "Skipped:" is left out');
       await engine.runner.idle();
 
       expect(ws(workstream.id).state).toBe('DONE');

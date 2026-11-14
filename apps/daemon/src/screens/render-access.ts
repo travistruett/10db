@@ -48,6 +48,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     'A system check probes the machine and runs commands; ?recheck=1 runs them again on every read.',
   '/workstreams/:id/changes':
     "A lane's changes are read by running git in its copy, and a screen draws without them.",
+  '/workstreams/:id/skips':
+    'What a lane skipped holds the commands it tried, which only the builder reads; no screen draws them.',
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
