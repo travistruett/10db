@@ -32,6 +32,7 @@ import {
   resolveInRepoReadings,
 } from './paths';
 import { readOnlyShellRefusal } from './read-only';
+import type { AskKind } from './unattended';
 import {
   commandName,
   findExecCommands,
@@ -119,7 +120,9 @@ export interface FileAccessJudge {
  */
 export type GuardVerdict =
   | { readonly decision: 'allow'; readonly settled?: string }
-  | { readonly decision: 'deny' | 'ask'; readonly reason: string };
+  | { readonly decision: 'deny'; readonly reason: string }
+  /** `kind` says why, for an unattended lane's answer (`answerUnattended`); absent, it is skipped. */
+  | { readonly decision: 'ask'; readonly reason: string; readonly kind?: AskKind };
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
 /**
@@ -814,7 +817,7 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     // In a pass the builder may let a plain commit, push or merge run, on a card, as in Claude Code.
     if (input.toolName === 'Bash' && input.inPass !== undefined) {
       const call = passGitCall(command, input.inPass.baseBranch);
-      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK };
+      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK, kind: 'pass_git' };
       if (call?.kind === 'refuse') return deny(call.reason);
     }
     const ctx = {

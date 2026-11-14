@@ -34,6 +34,8 @@ export const SkipKind = {
   UnreadEditPath: 'unread_edit_path',
   EndlessLoop: 'endless_loop',
   UnreadHazard: 'unread_hazard',
+  /** A pass's commit, push or merge, which the builder allows on a card when there. */
+  PassGit: 'pass_git',
   Deploy: 'deploy',
   DockerOff: 'docker_off',
   Escalation: 'escalation',
@@ -103,6 +105,7 @@ export function approvalOf(kind: SkipKind, summaryCut: boolean): Approval {
     case SkipKind.EditorConfigWrite:
     case SkipKind.HomeRcWrite:
     case SkipKind.UnreadHazard:
+    case SkipKind.PassGit:
     case SkipKind.HazardCard:
     case SkipKind.MonitorNoCommand:
     case SkipKind.UnreadEditPath:

@@ -1,0 +1,282 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { ClaimKind, DEFAULT_HAZARDS, JudgeKind, type LimitName } from '@10db/contracts';
+import { afterAll, describe, expect, it } from 'vitest';
+import { tempDir } from '../../test/fixtures';
+import { judgePreToolUse, protectedPaths, stringField, type FileAccessJudge } from './index';
+import {
+  AskKind,
+  answerUnattended,
+  limitOfAsk,
+  UnattendedOutcome,
+  unattendedOutcome,
+} from './unattended';
+
+// T4 Task 3 (trust line §5, calls 2–6, 23): every guard ask in a lane nobody watches is answered at
+// once, by its kind and the session's judge; `tendb` takes the rules' path until T5.
+
+type Row = readonly [
+  AskKind,
+  UnattendedOutcome,
+  UnattendedOutcome,
+  LimitName | null,
+  string | null,
+];
+
+const O = UnattendedOutcome;
+const TABLE: readonly Row[] = [
+  [AskKind.WebOrMcp, O.ToJudge, O.Skip, 'sends_data_out', null],
+  [
+    AskKind.UnknownTool,
+    O.ToJudge,
+    O.Skip,
+    null,
+    "mcp__x__y isn't a tool 10db can judge for a task nobody is watching.",
+  ],
+  [AskKind.MonitorSocket, O.ToJudge, O.Skip, 'sends_data_out', null],
+  [AskKind.MonitorNoCommand, O.Skip, O.Skip, null, 'Monitor needs a command to run.'],
+  [
+    AskKind.ReadOutside,
+    O.Skip,
+    O.Skip,
+    null,
+    '/home/x is outside what a task reads without asking. Read it with a Bash command, which the sandbox bounds.',
+  ],
+  [AskKind.SecretRead, O.Skip, O.Skip, 'reads_secrets', null],
+  [AskKind.ConfigWrite, O.Allow, O.Allow, null, null],
+  [
+    AskKind.EditorConfigWrite,
+    O.Skip,
+    O.Skip,
+    null,
+    '/home/x is editor config, which runs outside the sandbox when the builder opens the folder.',
+  ],
+  [AskKind.HomeRcWrite, O.Skip, O.Skip, null, '/home/x is outside the checkout.'],
+  [
+    AskKind.UnreadEditPath,
+    O.Skip,
+    O.Skip,
+    null,
+    'The path of this edit could not be read; name it plainly.',
+  ],
+  [
+    AskKind.EndlessLoop,
+    O.ToJudge,
+    O.Skip,
+    null,
+    'This starts something in the background that never ends.',
+  ],
+  [
+    AskKind.UnreadHazard,
+    O.Skip,
+    O.Skip,
+    null,
+    "10db can't read whether this changes a dependency or a migration this task hasn't claimed. Write the command out plainly, or claim the hazard first.",
+  ],
+  [
+    AskKind.PassGit,
+    O.Skip,
+    O.Skip,
+    null,
+    'A commit, push or merge waits for the builder in a pass; nobody is here to allow it.',
+  ],
+];
+
+const judges = [
+  [JudgeKind.Native, 1],
+  [JudgeKind.Rules, 2],
+  [JudgeKind.Tendb, 2],
+] as const;
+
+describe('unattendedOutcome', () => {
+  const rows = TABLE.flatMap((row) =>
+    judges.map(([judge, column]) => ({ kind: row[0], judge, outcome: row[column], row })),
+  );
+
+  it('has a row for every ask kind', () => {
+    expect(new Set(TABLE.map((r) => r[0]))).toEqual(new Set(Object.values(AskKind)));
+  });
+
+  it.each(rows)('$kind on $judge is $outcome', ({ kind, judge, outcome, row }) => {
+    expect(unattendedOutcome(kind, judge)).toBe(outcome);
+    expect(limitOfAsk(kind)).toBe(row[3]);
+    const answer = answerUnattended({
+      verdict: { decision: 'ask', reason: 'asked', kind },
+      judge,
+      callKey: 'k',
+      approvedKeys: [],
+      path: '/home/x',
+      toolName: 'mcp__x__y',
+    });
+    if (outcome === O.Skip) {
+      expect(answer.verdict.decision).toBe('deny');
+      expect(answer.skip).toMatchObject({ kind, limit: row[3] });
+      if (row[4] !== null) expect(answer.skip?.reason).toBe(row[4]);
+    } else {
+      expect(answer).toEqual({ verdict: { decision: 'allow' }, skip: null });
+    }
+  });
+});
+
+describe('answerUnattended', () => {
+  const ask = (kind: AskKind | undefined, judge: JudgeKind, approvedKeys: readonly string[] = []) =>
+    answerUnattended({
+      verdict:
+        kind === undefined
+          ? { decision: 'ask', reason: 'asked' }
+          : { decision: 'ask', reason: 'asked', kind },
+      judge,
+      callKey: 'k',
+      approvedKeys,
+      path: null,
+      toolName: 'mcp__x__y',
+    });
+
+  it('an approved key for an unknown tool on rules is allowed', () => {
+    expect(ask(AskKind.UnknownTool, JudgeKind.Rules, ['k'])).toEqual({
+      verdict: { decision: 'allow' },
+      skip: null,
+    });
+  });
+
+  it('an approved key for an unread hazard is still a skip', () => {
+    expect(ask(AskKind.UnreadHazard, JudgeKind.Rules, ['k']).skip?.kind).toBe('unread_hazard');
+  });
+
+  it('an ask with no kind is skipped, not waited on', () => {
+    expect(ask(undefined, JudgeKind.Native).verdict.decision).toBe('deny');
+  });
+
+  it('a skip tells the agent to carry on', () => {
+    expect(ask(AskKind.WebOrMcp, JudgeKind.Rules).verdict).toEqual({
+      decision: 'deny',
+      reason:
+        'Skipped: this would send data out. Carry on without it and say in your handoff what you skipped.',
+    });
+  });
+
+  it('passes an allow and a deny unchanged', () => {
+    for (const verdict of [{ decision: 'allow' }, { decision: 'deny', reason: 'no' }] as const)
+      expect(
+        answerUnattended({
+          verdict,
+          judge: JudgeKind.Rules,
+          callKey: 'k',
+          approvedKeys: [],
+          path: null,
+          toolName: 'Bash',
+        }),
+      ).toEqual({ verdict, skip: null });
+  });
+});
+
+describe('the guard’s asks, answered for a lane nobody watches', () => {
+  const repo = tempDir('unattended-repo');
+  afterAll(() => {
+    repo.cleanup();
+  });
+  const access: FileAccessJudge = {
+    read: () => 'ok',
+    write: () => 'ok',
+    readAsk: (_tool, input) => (JSON.stringify(input).includes(homedir()) ? 'outside' : null),
+    writeAsk: (path) =>
+      /\.claude\/|\.vscode\/|\.zshrc$/.test(path) ? 'a Claude Code config path' : null,
+  };
+  const CLAIMS = [
+    { kind: ClaimKind.Area, name: 'all' },
+    { kind: ClaimKind.Hazard, name: 'harness' },
+  ] as const;
+
+  function unattended(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    judge: JudgeKind = JudgeKind.Rules,
+    approvedKeys: readonly string[] = [],
+  ) {
+    const verdict = judgePreToolUse({
+      judge,
+      coveredByAllowRule: false,
+      toolName,
+      toolInput,
+      repoPath: repo.path,
+      areas: [{ name: 'all', globs: ['**'] }],
+      hazards: DEFAULT_HAZARDS,
+      claims: CLAIMS,
+      readOnly: false,
+      delivery: 'pull_request',
+      protectedPaths: protectedPaths({
+        dataDir: '/tmp/10db-data',
+        home: homedir(),
+        loginConfigDir: '/tmp/login',
+      }),
+      fileAccess: access,
+    });
+    return answerUnattended({
+      verdict,
+      judge,
+      callKey: 'k',
+      approvedKeys,
+      path: stringField(toolInput, 'file_path'),
+      toolName,
+    });
+  }
+  const skipOf = (a: ReturnType<typeof unattended>) => a.skip?.kind ?? null;
+
+  it('a write to .claude/settings.json is config_write and allowed', () => {
+    expect(
+      unattended('Write', { file_path: `${repo.path}/.claude/settings.json`, content: '{}' }),
+    ).toEqual({
+      verdict: { decision: 'allow' },
+      skip: null,
+    });
+  });
+
+  it('a write to .vscode/tasks.json is a skip', () => {
+    expect(
+      skipOf(unattended('Write', { file_path: `${repo.path}/.vscode/tasks.json`, content: '{}' })),
+    ).toBe('editor_config_write');
+  });
+
+  it('a write to ~/.zshrc never waits: the guard refuses a write outside the checkout first', () => {
+    const answer = unattended('Write', { file_path: join(homedir(), '.zshrc'), content: 'x' });
+    expect(answer.verdict.decision).toBe('deny');
+  });
+
+  it('WebFetch on rules is a skip', () => {
+    expect(skipOf(unattended('WebFetch', { url: 'https://example.com', prompt: 'x' }))).toBe(
+      'web_or_mcp',
+    );
+  });
+
+  it('a Read of a home path on native is a skip, not the classifier’s', () => {
+    expect(
+      skipOf(unattended('Read', { file_path: join(homedir(), 'notes.txt') }, JudgeKind.Native)),
+    ).toBe('read_outside');
+  });
+
+  it.each([JudgeKind.Native, JudgeKind.Rules, JudgeKind.Tendb])(
+    '"SUB=add; pnpm $SUB x" is a skip on %s',
+    (judge) => {
+      expect(skipOf(unattended('Bash', { command: 'SUB=add; pnpm $SUB x' }, judge))).toBe(
+        'unread_hazard',
+      );
+    },
+  );
+
+  it('"while :; do :; done &" goes to the classifier on native and is a skip on rules', () => {
+    expect(
+      unattended('Bash', { command: 'while :; do :; done &' }, JudgeKind.Native).verdict,
+    ).toEqual({
+      decision: 'allow',
+    });
+    expect(skipOf(unattended('Bash', { command: 'while :; do :; done &' }, JudgeKind.Rules))).toBe(
+      'endless_loop',
+    );
+  });
+
+  it('an approved key for an unknown tool on rules is allowed', () => {
+    expect(unattended('mcp__docs__search', {}, JudgeKind.Rules, ['k']).verdict).toEqual({
+      decision: 'allow',
+    });
+  });
+});

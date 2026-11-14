@@ -44,6 +44,7 @@ describe('approvalOf', () => {
     editor_config_write: 'none',
     home_rc_write: 'none',
     unread_hazard: 'none',
+    pass_git: 'none',
     hazard_card: 'none',
     monitor_no_command: 'none',
     unread_edit_path: 'none',

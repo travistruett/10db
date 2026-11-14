@@ -192,6 +192,7 @@ describe('judgePreToolUse', () => {
     expect(judge('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toEqual({
       decision: 'ask',
       reason: expect.stringContaining('pnpm $SUB left-pad@1.3.0') as string,
+      kind: 'unread_hazard',
     });
   });
 
