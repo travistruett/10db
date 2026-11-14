@@ -49,6 +49,7 @@ import {
   insertBatch,
   insertInboxItem,
   insertKind,
+  insertTask,
   insertPrinciple,
   insertSource,
   laneTimesOf,
@@ -138,6 +139,7 @@ import {
   waitFor,
 } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fixture';
 import { importBundle, planImportChanges } from '../plan-record';
 import { failedRepoCheck } from '../../test/fixtures';
@@ -7945,6 +7947,51 @@ describe("a Light task's review safety net", () => {
     await engine.runner.idle();
     expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
     expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
+  });
+
+  it('re-plans nothing and adds no review to a run no rigor planned, such as a merge resolution', async () => {
+    engine = await createTestEngine({ Alpha: [implement('op-net-0051')] });
+    const task = engine.state.write((ctx) =>
+      insertTask(ctx, engine.project.id, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['api'],
+        rigor: 'standard',
+      }),
+    );
+    const [implementStep] = resolveStepPlan(engine.store.db, task.id).steps;
+    if (!implementStep) throw new Error('no implement step');
+    const run = engine.state.write((ctx) =>
+      insertPlannedWorkstream(
+        ctx,
+        task.id,
+        { rigor: null, overBudget: [], steps: [implementStep] },
+        null,
+      ),
+    );
+    await until(run.id, (s) => s === 'DONE' || s === 'FAILED');
+    expect(ws(run.id).state).toBe('DONE');
+    expect(ws(run.id).steps.map((s) => s.role)).toEqual(['implement']);
+  });
+
+  it('adds the review when the changes cannot be read', async () => {
+    const git: Git = {
+      ...createGit(),
+      diffSince: () => Promise.reject(new Error('index.lock exists')),
+    };
+    engine = await createTestEngine(
+      { Alpha: [implement('op-net-0061'), [approve('op-net-0062'), turn]] },
+      {},
+      { git },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
+    expect(
+      reasons(workstream.id).some(
+        (r) => typeof r === 'string' && r.includes('review added: the changes could not be read'),
+      ),
+    ).toBe(true);
   });
 
   it('adds nothing to a Standard task, which has its review planned', async () => {
