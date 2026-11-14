@@ -80,7 +80,7 @@ export interface HookJudgeContext {
    * settled before any judge reads it, as Claude Code's allow rule settles it on native.
    */
   readonly coveredByBuilderRule: (req: JudgedCallRequest) => boolean;
-  /** The session's own answer on the `rules` floor, T4's unattended answer and skip included in a lane. */
+  /** The session's own answer on the `rules` floor, a lane's unattended answer and skip included. */
   readonly floorVerdict: (req: JudgedCallRequest) => GuardVerdict;
   /** A lane's skip recorder; null where the builder is in the session. */
   readonly skips: SkipRecorder | null;

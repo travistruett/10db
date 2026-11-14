@@ -18,7 +18,7 @@ import { RecentSessions } from './recent-sessions';
 import { draftKey, useSessionDraft } from './session-drafts';
 import { StartFrom } from './start-from';
 
-// Sessions UI spec §6.2, plan call 4: a tab that is not yet a chat. The chat is made at the first `@` or
+// Sessions UI spec §6.2: a tab that is not yet a chat. The chat is made at the first `@` or
 // the first send, whichever comes first, and the tab is then replaced by it. A send that fails after the
 // chat exists goes again from the chat's tab, so it never makes a second one.
 

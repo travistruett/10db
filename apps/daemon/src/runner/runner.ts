@@ -2525,7 +2525,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const sessionJudge = startingJudge(capability.judge, lanePermissionMode === 'auto', tendbReady);
     const judged = sessionJudge !== JudgeKind.Rules;
     // On 10db's judge Claude Code runs in default mode: the hook settles every call it allows, so auto
-    // mode's classifier would only add its cost (call 4).
+    // mode's classifier would only add its cost.
     const sessionPermissionMode: LanePermissionMode | null =
       lanePermissionMode !== null && sessionJudge === JudgeKind.Tendb
         ? 'default'
@@ -2915,7 +2915,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(unattended === null ? {} : { away: unattended }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
-    /** The guard's answer for a lane's call under `judge`, with T4's unattended answer and skip in a lane. */
+    /** The guard's answer for a lane's call under `judge`, with the unattended answer and skip in a lane. */
     const laneVerdict = (
       req: {
         readonly toolName: string;
@@ -2986,7 +2986,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     );
     let saidUnavailable = false;
     // 10db's judge, for the calls the guard leaves open: on a tendb session, and on a native one for a call
-    // outside auto mode (call 6). A session on the rules has none.
+    // outside auto mode. A session on the rules has none.
     const judgeCall =
       laneSession === null || sessionJudge === JudgeKind.Rules
         ? null
@@ -3364,7 +3364,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
-            // Auto mode's denials join 10db's judge's in the judge log (call 13).
+            // Auto mode's denials join 10db's judge's in the judge log.
             opts.state.write((ctx) =>
               insertJudgeCall(ctx, {
                 decision: JudgeDecision.CrossesLimit,

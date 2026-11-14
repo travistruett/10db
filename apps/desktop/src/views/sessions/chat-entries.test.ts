@@ -4,7 +4,7 @@ import type { ConversationEntry } from '../../conversation';
 import { commandCall, mcpCall, toolEntry } from '../../test/tool-call-fixtures';
 import { chatEntries, chatToolResult } from './chat-entries';
 
-// Plan call 2: a chat's builder tools become rows with Undo, and nothing else changes.
+// A chat's builder tools become rows with Undo, and nothing else changes.
 
 const taskId = mintId('Task');
 const context = { chatId: mintId('Chat'), projectId: mintId('Project') };
