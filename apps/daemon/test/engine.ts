@@ -87,6 +87,7 @@ import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
 import {
   applyCheckAnswer,
+  applyPlanAnswer,
   RunnerNotStartedError,
   createLiveSessions,
   type LiveSessions,
@@ -345,6 +346,11 @@ export async function createTestEngine(
           taskId,
         );
       });
+    },
+    onPlanAnswer: (ctx, item, answer) => {
+      const ready = runner;
+      if (!ready) throw new RunnerNotStartedError();
+      return applyPlanAnswer(ready, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);

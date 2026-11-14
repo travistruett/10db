@@ -239,6 +239,7 @@ import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
+  applyPlanAnswer,
   RunnerNotStartedError,
   type StartSignOff,
   createLiveSessions,
@@ -868,6 +869,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
+    },
+    onPlanAnswer: (ctx, item, answer) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return applyPlanAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);

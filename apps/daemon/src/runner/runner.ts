@@ -277,7 +277,7 @@ import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
-import { raisePlanApproval } from './plan-approval';
+import { raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {
@@ -478,6 +478,12 @@ export interface Runner {
    * check. The result runs once that write has committed.
    */
   sendBack(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
+  /**
+   * The builder approved the plan: Build starts, as it does after a plan the builder is not asked
+   * about. Runs inside the write that closes the card, and throws `ConflictError` for a workstream that
+   * is not waiting for its plan's approval. The result runs once that write has committed.
+   */
+  approvePlan(ctx: WriteContext, id: WorkstreamId): AfterCommit;
   /**
    * Hands the builder's message to a page of a pass (Workbench spec §6.3). A live session gets it at
    * once, after the builder's hand edits are kept and named ahead of it, starting a turn unless one
@@ -1270,6 +1276,32 @@ export function createRunner(opts: RunnerOptions): Runner {
       clearLease(ctx, id);
     });
     return 'stop';
+  }
+
+  /** The approval of a parked plan: the step after it starts, as `advanceTo` would start it. */
+  function approvePlanAdvance(ctx: WriteContext, row: WorkstreamRow): void {
+    const to = row.stepIndex + 1;
+    const next = row.steps[to];
+    if (!next) throw new ConflictError(`Workstream ${row.id} has no step to start after its plan`);
+    transitionWorkstream(ctx, row.id, {
+      to: S.Queued,
+      fence: null,
+      patch: {
+        steps: advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id)),
+        stepIndex: to,
+        nextAction: actionEntering(ctx, row, to),
+        model: next.model,
+        effort: next.effort,
+      },
+      reason: 'the builder approved the plan',
+    });
+    clearLease(ctx, row.id);
+    ctx.emit({
+      type: EventType.StepChanged,
+      entityType: 'workstream',
+      entityId: row.id,
+      data: { stepIndex: to, role: next.role },
+    });
   }
 
   /**
@@ -4211,9 +4243,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;
-      // The workstream waits for the builder's check, not for this card; only the check card's own
-      // answer moves it. A Ready pass page waits for the builder's next message.
-      if (row.nextAction.kind === 'builder_review' || row.nextAction.kind === 'pass_review') return;
+      // The workstream waits for the builder's check or plan approval, not for this card; only that
+      // card's own answer moves it. A Ready pass page waits for the builder's next message.
+      if (
+        row.nextAction.kind === 'builder_review' ||
+        row.nextAction.kind === 'plan_approval' ||
+        row.nextAction.kind === 'pass_review'
+      )
+        return;
       const providerSessionId =
         row.nextAction.kind === 'answer' ? row.nextAction.providerSessionId : null;
       opts.state.write((ctx) =>
@@ -4415,6 +4452,17 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       });
       opts.onLaneFreed();
+    },
+    approvePlan(ctx, id) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForPlanApproval(row))
+        throw new ConflictError(
+          `Workstream ${id} is not waiting for the builder to approve the plan`,
+        );
+      approvePlanAdvance(ctx, row);
+      return () => {
+        opts.onLaneFreed();
+      };
     },
     approveCheck(ctx, id) {
       const row = getWorkstreamRow(ctx.tx, id);

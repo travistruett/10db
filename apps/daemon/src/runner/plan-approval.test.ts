@@ -21,6 +21,11 @@ const approve = (opId: string) => ({
   args: { opId, summary: 'Looks right.', verdict: 'approve' },
 });
 const turn = { do: 'turn_complete' as const };
+const implement = (opId: string) => [
+  { do: 'tool' as const, toolName: 'Write', input: { file_path: 'src/api/a.txt', content: opId } },
+  { do: 'mcp' as const, tool: 'commit', args: { opId, paths: ['src/api/a.txt'], message: opId } },
+  turn,
+];
 
 const ws = (id: Parameters<typeof getWorkstreamRow>[1]) => getWorkstreamRow(engine.store.db, id);
 const planCards = () => listInbox(engine.store.db, {}).filter((i) => i.kind === 'plan');
@@ -101,5 +106,58 @@ describe('parking a task for the builder to approve its plan', () => {
     expect(ws(workstream.id).stepIndex).toBeGreaterThanOrEqual(
       ws(workstream.id).steps.findIndex((s) => s.role === 'implement'),
     );
+  });
+});
+
+describe('answering the plan card', () => {
+  const openPlanCard = () => {
+    const [card] = openPlanCards();
+    if (!card) throw new Error('no open plan card');
+    return card;
+  };
+
+  it('Approve runs Build, then the rest, and closes the card', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [planResult('op-plan-0021', 'PLAN'), turn],
+        [approve('op-plan-0022'), turn],
+        implement('op-plan-0023'),
+        [approve('op-plan-0024'), turn],
+        [approve('op-plan-0025'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    const card = openPlanCard();
+    engine.inbox.answer(card.id, { choice: 'approve' });
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 2,
+      nextAction: { kind: 'start' },
+      model: ws(workstream.id).steps[2]?.model,
+    });
+    expect(ws(workstream.id).steps[2]?.status).toBe('running');
+    expect(planCards().map((c) => c.state)).toEqual(['RESOLVED']);
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    // Plan, Plan Review, Build, Review and QA each ran once; the answer started nothing itself.
+    expect(engine.adapter.prompts).toHaveLength(5);
+    expect(planCards()).toHaveLength(1);
+  });
+
+  it('refuses an answer once the task was cancelled, and starts nothing', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [planResult('op-plan-0031', 'PLAN'), turn],
+        [approve('op-plan-0032'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    const card = openPlanCard();
+    await engine.runner.cancel(workstream.id);
+    expect(() => engine.inbox.answer(card.id, { choice: 'approve' })).toThrow();
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    expect(engine.adapter.prompts).toHaveLength(2);
   });
 });

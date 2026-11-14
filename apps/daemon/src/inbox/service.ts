@@ -466,6 +466,8 @@ export function createInboxService(deps: {
    * that write has committed. A check card closes with its answer and never reaches `onParkedAnswer`.
    */
   onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
+  /** Acts on an open plan card's answer as `onCheckAnswer` does a check card's, and closes the card the same way. */
+  onPlanAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
   /**
    * Runs once the builder answered a lane's question with "Park the task" and the card closed with the
    * answer: the run stops and the task is parked. The asking session is not handed the answer, since
@@ -512,7 +514,7 @@ export function createInboxService(deps: {
       transition(item.id, [InboxState.Answered], InboxState.Delivering);
     }
     // The workstream it concerns acted on the answer when it was given; there is nothing to hand on.
-    if (item.kind === InboxKind.Check) {
+    if (item.kind === InboxKind.Check || item.kind === InboxKind.Plan) {
       return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
     const live = resolveWaiters ? waiters.get(item.id) : undefined;
@@ -741,6 +743,7 @@ export function createInboxService(deps: {
         }
         assertKnownChoice(item, answer);
         if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
+        if (item.kind === InboxKind.Plan) afterCommit = deps.onPlanAnswer?.(ctx, item, answer);
         // Parking ends the run, so no session is handed the answer: the card closes with it. It is
         // 10db's control over the run, not the builder's answer to the question, so it is no decision
         // either: the question and answer live only on the parked run's notice.
