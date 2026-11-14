@@ -1,7 +1,9 @@
 import {
+  JUDGE_TIMEOUT_MS,
   mintId,
   type AccountId,
-  type JudgeDecision,
+  type AskedDecision,
+  JudgeDecision,
   type JudgeCallId,
   type JudgeOutcome,
   type JudgeTestResultDto,
@@ -15,15 +17,13 @@ import type { Logger } from '../log';
 import { askModel, modelApi, optionsText, type ModelAnswer } from './openrouter';
 import { untilAborted } from './until-aborted';
 
-/** How long a decision waits for a model before today's rule applies. */
-export const JUDGE_TIMEOUT_MS = 4_000;
 /** Logged calls are kept this long; older rows are deleted when the daemon starts. */
 export const JUDGE_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** The connection test waits longer: it may be the first call to a cold model. */
 const TEST_TIMEOUT_MS = 15_000;
 
 export interface JudgeRequest {
-  readonly decision: JudgeDecision;
+  readonly decision: AskedDecision;
   /** The content the question is about: task text and a capped diff. */
   readonly state: string;
   readonly question: string;
@@ -292,7 +292,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
   async function test(account: AccountId, model?: string): Promise<JudgeTestResultDto> {
     if (deps.off) return { ok: false, error: 'This daemon was started with TENDB_JUDGE=off' };
     const result = await attempt(
-      model ?? getJudgeConfig(deps.state.db).decisions.review_size.model,
+      model ?? getJudgeConfig(deps.state.db).decisions[JudgeDecision.ShapeReady].model,
       account,
       { state: TEST_STATE, question: TEST_QUESTION, options: TEST_OPTIONS },
       TEST_TIMEOUT_MS,

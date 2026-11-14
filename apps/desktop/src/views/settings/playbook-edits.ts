@@ -1,8 +1,11 @@
 import {
+  FixBy,
+  REVIEW_ROLES,
   StepRole,
   type CellSetting,
   type PersonaDto,
   type PlaybookCellDto,
+  type PlaybookRowDto,
   type PlaybookSource,
 } from '@10db/contracts';
 import { EFFORT_LABELS } from './rigor-labels';
@@ -109,3 +112,29 @@ function inheritedModel(
     ? `Automatic${model.minimum === undefined ? '' : `, at least ${String(model.minimum)}`}`
     : settingSummary(model, names);
 }
+
+/** Whether a row's steps include one that judges work: a plan review, a review or QA. */
+export const hasReviewingStep = (steps: readonly StepRole[]): boolean =>
+  steps.some((s) => REVIEW_ROLES.includes(s));
+
+/**
+ * A row's process in a line: its review rounds and how a send-back is fixed, or "no review" when no step
+ * reviews, and "you approve the plan" when the row asks for it and has a plan to approve.
+ */
+export function processLine(row: PlaybookRowDto): string {
+  const rounds = row.reviewRounds.value;
+  const review = hasReviewingStep(row.steps.value)
+    ? [`${String(rounds)} ${rounds === 1 ? 'round' : 'rounds'}`, `${row.fixBy.value} fix`]
+    : ['no review'];
+  const approval =
+    row.approvesPlan.value && row.steps.value.includes(StepRole.Plan)
+      ? ['you approve the plan']
+      : [];
+  return [...review, ...approval].join(' · ');
+}
+
+/** What each way of fixing a send-back is called. */
+export const FIX_BY_LABELS: Readonly<Record<FixBy, string>> = {
+  [FixBy.Resumed]: 'The build session, resumed',
+  [FixBy.Fresh]: 'A fresh build session',
+};

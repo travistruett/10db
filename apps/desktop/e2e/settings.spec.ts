@@ -95,6 +95,45 @@ test.describe('Settings', () => {
   });
 });
 
+async function openModels(page: Page, scheme: 'dark' | 'light'): Promise<void> {
+  await page.addInitScript((value: string) => {
+    window.localStorage.setItem('mantine-color-scheme-value', value);
+  }, scheme);
+  await page.goto('/settings/models');
+  await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
+}
+
+test.describe('Settings › Models', () => {
+  for (const scheme of ['dark', 'light'] as const) {
+    test(`Models switches between agents and decisions (${scheme})`, async ({ page }) => {
+      await openModels(page, scheme);
+      const main = page.getByRole('main');
+      const view = main.getByRole('radiogroup', { name: 'Models view' });
+      await expect(view.getByRole('radio', { name: 'Agents' })).toBeChecked();
+      await expect(main.getByRole('region', { name: 'Playbook section' })).toBeVisible();
+      await expectAccessible(page, `settings models agents ${scheme}`);
+
+      await view.getByText('Decisions').click();
+      await expect(view.getByRole('radio', { name: 'Decisions' })).toBeChecked();
+      await expect(main.getByRole('region', { name: 'Playbook section' })).toHaveCount(0);
+      const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
+      for (const group of ['Plan', 'Stakeholder questions']) {
+        await expect(decisions.getByText(group, { exact: true })).toBeVisible();
+      }
+      // The Status column belongs to Settings › Decisions, where decisions are switched on.
+      await expect(decisions.getByRole('columnheader', { name: 'Status' })).toHaveCount(0);
+      // The e2e daemon runs with TENDB_JUDGE=off.
+      await expect(
+        main.getByText(/Decisions are off: 10db was started with TENDB_JUDGE=off/),
+      ).toBeVisible();
+      await expectAccessible(page, `settings models decisions ${scheme}`);
+
+      await view.getByText('Agents').click();
+      await expect(main.getByRole('region', { name: 'Playbook section' })).toBeVisible();
+    });
+  }
+});
+
 /** Invented numbers: 26 calls on who a question goes to and 4 on skipping review. */
 function seededCalls(): readonly Record<string, unknown>[] {
   const route = Array.from({ length: 26 }, (_, i) => ({
@@ -152,7 +191,7 @@ test.describe('Settings › Decisions with logged calls', () => {
     await openDecisions(page, 'dark');
     const main = page.getByRole('main');
     const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
-    for (const group of ['Delivery', 'Plan', 'Stakeholder questions']) {
+    for (const group of ['Plan', 'Stakeholder questions']) {
       await expect(decisions.getByText(group, { exact: true })).toBeVisible();
     }
     // The e2e daemon runs with TENDB_JUDGE=off.
@@ -184,8 +223,8 @@ test.describe('Settings › Decisions with logged calls', () => {
     const main = page.getByRole('main');
     await expect(main.getByRole('table', { name: 'Decisions', exact: true })).toBeVisible();
     await expectAccessible(page, 'settings decisions light');
-    await main.getByRole('button', { name: 'Skip review for small changes' }).first().click();
-    await expect(page.getByRole('dialog', { name: 'Skip review for small changes' })).toBeVisible();
+    await main.getByRole('button', { name: 'Who a question goes to' }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Who a question goes to' })).toBeVisible();
     await expectAccessible(page, 'settings decisions drawer light');
   });
 });

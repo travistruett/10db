@@ -2,6 +2,7 @@ import { ScatterChart } from '@mantine/charts';
 import { Paper, Text } from '@mantine/core';
 import { z } from 'zod';
 import { formatCost, formatScore } from './model-format';
+import { modelSourceText } from './number-source';
 import { PICK_COLOR } from './pick-color';
 import { costTickLabel, type RightsizingSeries } from './rightsizing-series';
 
@@ -108,7 +109,17 @@ export function RightsizingChart({
                 {point.name} · {point.effort}
               </Text>
               <Text size="xs">Intelligence {formatScore(point.intelligence)}</Text>
+              {point.intelligenceSource === null ? null : (
+                <Text size="xs" c="dimmed">
+                  {modelSourceText(point.intelligenceSource, 'intelligence', null)}
+                </Text>
+              )}
               <Text size="xs">{formatCost(point.cost)} a task</Text>
+              {point.costSource === null ? null : (
+                <Text size="xs" c="dimmed">
+                  {modelSourceText(point.costSource, 'costPerTask', null)}
+                </Text>
+              )}
             </Paper>
           );
         },

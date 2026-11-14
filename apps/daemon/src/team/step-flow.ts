@@ -115,9 +115,16 @@ export function restartStep(
   );
 }
 
-/** One more send-back on the step whose rejection sent the work back, for the board's count. */
-export function countSendBack(steps: readonly WorkstreamStep[], from: number): WorkstreamStep[] {
-  return steps.map((s, i) => (i === from ? { ...s, sentBack: s.sentBack + 1 } : s));
+/**
+ * One more send-back on the step whose rejection sent the work back, for the board's count, with the
+ * review rounds the rigor allows now.
+ */
+export function countSendBack(
+  steps: readonly WorkstreamStep[],
+  from: number,
+  reviewRounds: number,
+): WorkstreamStep[] {
+  return steps.map((s, i) => (i === from ? { ...s, sentBack: s.sentBack + 1, reviewRounds } : s));
 }
 
 /** A retry starts the attempts over, so no earlier send-back counts any more; the rounds stay. */
@@ -128,4 +135,13 @@ export function clearSendBacks(steps: readonly WorkstreamStep[]): WorkstreamStep
 /** Marks the current step failed when its workstream fails. */
 export function failStep(steps: readonly WorkstreamStep[], index: number): WorkstreamStep[] {
   return steps.map((s, i) => (i === index ? { ...s, status: StepStatus.Failed } : s));
+}
+
+/**
+ * A step the builder's retry restarts: its fix is a fresh session that owes no step up for a send-back
+ * that meant to resume the step's own session.
+ */
+export function withoutFixFresh(step: WorkstreamStep): WorkstreamStep {
+  const { fixFresh, ...rest } = step;
+  return fixFresh === undefined ? step : rest;
 }

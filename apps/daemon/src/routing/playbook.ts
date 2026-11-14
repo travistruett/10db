@@ -139,6 +139,8 @@ export function resolveSteps(input: {
   readonly taskKinds: readonly TaskKind[];
   readonly kinds: readonly KindDto[];
   readonly playbook: PlaybookScopes;
+  /** Roles to run beyond the row's and the kinds': a step the runner adds once the work shows it needs one. */
+  readonly addedRoles?: readonly StepRole[];
 }): ResolvedStep[] {
   const { rigor, playbook } = input;
   // Where kinds disagree, the builder's order of kinds decides, not the order the task names them in.
@@ -148,6 +150,7 @@ export function resolveSteps(input: {
   const wanted = new Set<StepRole>([
     ...rowSteps(rigor, playbook),
     ...own.flatMap((k) => k.addsSteps),
+    ...(input.addedRoles ?? []),
   ]);
   // A plan review judges a plan, so a row that gains one gains the plan too.
   if (wanted.has(StepRole.PlanReview)) wanted.add(StepRole.Plan);

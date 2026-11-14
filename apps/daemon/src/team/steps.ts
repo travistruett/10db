@@ -58,7 +58,13 @@ import {
   revertedWorkNote,
   revertedWorkNotice,
 } from './reverted-work';
-import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
+import {
+  clearSendBacks,
+  restartStep,
+  retryTargetAfterRejection,
+  sendBackSteps,
+  withoutFixFresh,
+} from './step-flow';
 
 /** What starting this task would run: its rigor and kinds resolved against the playbook and the catalogue. */
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
@@ -116,9 +122,10 @@ export function insertPlannedWorkstream(
     first: { model: first.model, effort: first.effort },
   });
   patchWorkstream(ctx, ws.id, null, {
-    steps: plan.steps.map((s, i) =>
-      i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
-    ),
+    steps: plan.steps.map((s, i) => {
+      const planned = plan.rigor === null ? { ...s, fixedPlan: true as const } : s;
+      return i === 0 ? { ...planned, status: 'running', startedAt: ctx.now } : planned;
+    }),
     stepIndex: 0,
   });
   return getWorkstream(ctx.tx, ws.id);
@@ -343,7 +350,7 @@ export function retryWorkstream(
           failureReason: null,
           failureKind: null,
           steps: clearSendBacks(
-            sendBackSteps(row.steps, row.stepIndex, reworkAt, reworked, {
+            sendBackSteps(row.steps, row.stepIndex, reworkAt, withoutFixFresh(reworked), {
               now: ctx.now,
               sessions: getWorkstream(ctx.tx, id).sessionCount,
             }),
@@ -353,7 +360,7 @@ export function retryWorkstream(
           effort: reworked.effort,
           nextAction: evidence
             ? { kind: 'fix', evidenceId: evidence.id }
-            : { kind: 'revise', reviewStep: row.stepIndex },
+            : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
       });

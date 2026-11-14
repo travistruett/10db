@@ -1548,7 +1548,7 @@ describe('TaskDrawer', () => {
       expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
     });
 
-    it('says a task shipped at the retry limit with open findings, and names the follow-up task', async () => {
+    it('says a task shipped when its review rounds ran out with open findings, and names the follow-up task', async () => {
       serve();
       const rejected = result(
         'reject',
@@ -1575,7 +1575,9 @@ describe('TaskDrawer', () => {
       });
       const d = await dialog();
       const notice = within(d).getByTestId('shipped-at-limit');
-      expect(notice.textContent).toContain('Shipped at the retry limit with open findings');
+      expect(notice.textContent).toContain(
+        'Shipped when its review rounds ran out with open findings',
+      );
       expect(notice.textContent).toContain('Resolve the open findings of "Add the badge"');
       expect(
         within(within(d).getByTestId('latest-review')).getByText(/^Open at the limit/),

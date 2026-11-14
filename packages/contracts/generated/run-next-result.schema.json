@@ -250,6 +250,18 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "providerSessionId": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -263,6 +275,23 @@
                 "kind": {
                   "type": "string",
                   "const": "builder_review"
+                },
+                "inboxId": {
+                  "type": "string",
+                  "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "kind",
+                "inboxId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "plan_approval"
                 },
                 "inboxId": {
                   "type": "string",
@@ -610,6 +639,26 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "reviewRounds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "fixedPlan": {
+                "type": "boolean",
+                "const": true
+              },
+              "providerSessionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fixFresh": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "done"
+                ]
               },
               "shippedAtLimit": {
                 "type": "object",

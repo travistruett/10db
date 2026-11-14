@@ -19,6 +19,7 @@
         "review",
         "flag",
         "check",
+        "plan",
         "playbook_move_report"
       ]
     },

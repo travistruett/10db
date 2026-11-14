@@ -120,7 +120,13 @@ import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
-import { buildModelRows, groupMeasuresByModel, type CatalogueSync } from '../catalogue';
+import {
+  buildModelRows,
+  groupMeasuresByModel,
+  modelMeasures,
+  speedProviderFor,
+  type CatalogueSync,
+} from '../catalogue';
 import { placementAfterEdit, proposePlacement } from '../placement';
 import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -275,6 +281,8 @@ export function createServices(deps: {
   readonly catalogueOn: boolean;
   /** Whether OpenRouter's measures may show: an OpenRouter account is picked for decisions and no kill switch is on. */
   readonly openRouterOn: () => boolean;
+  /** `TENDB_JUDGE=off` or `TENDB_BENCHMARKS=off`: OpenRouter is never read. */
+  readonly openRouterOff: boolean;
   readonly judge: JudgeApiServices;
   /** gh's login and the Sign In that changes it. */
   readonly github: GithubApiServices;
@@ -798,6 +806,16 @@ export function createServices(deps: {
         ),
         now: deps.clock.now(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
+      }),
+    modelMeasures: (model, accountId) =>
+      modelMeasures({
+        model,
+        rows: listOpenRouterMeasures(db),
+        catalogue: deps.catalogue.catalogue(),
+        keyed: deps.openRouterOn(),
+        off: deps.openRouterOff,
+        accountProvider:
+          accountId === undefined ? null : speedProviderFor(liveAccount(db, accountId).kind),
       }),
     modelPicks: (accountId, rigor, projectId) => {
       const account = liveAccount(db, accountId);

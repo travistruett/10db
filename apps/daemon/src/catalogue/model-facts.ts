@@ -44,6 +44,7 @@ export function openRouterLatencyMs(rows: readonly OpenRouterMeasure[], now: Dat
     rows.flatMap((m) =>
       m.kind === OpenRouterMeasureKind.Speed &&
       m.latencyMs !== null &&
+      m.latencyMs > 0 &&
       now.getTime() - Date.parse(m.measuredAt) <= SPEED_STALE_MS
         ? [m.latencyMs]
         : [],
@@ -72,6 +73,7 @@ export function modelSpeed(input: {
     (m) =>
       m.kind === OpenRouterMeasureKind.Speed &&
       m.tokensPerSecond !== null &&
+      m.tokensPerSecond > 0 &&
       input.now.getTime() - Date.parse(m.measuredAt) <= SPEED_STALE_MS,
   );
   const own = input.provider === null ? undefined : fresh.find((m) => m.key === input.provider);

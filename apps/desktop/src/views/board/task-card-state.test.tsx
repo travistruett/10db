@@ -162,6 +162,20 @@ describe('TaskCard state', () => {
       expect(cardSummary(taskDto(), reviewed(2), new Map())).toContain('Review sent back 2 of 3.');
     });
 
+    it('names the rounds the step was stamped with, and each reviewing step apart', () => {
+      const withRounds = workstreamDto({
+        state: 'RUNNING',
+        steps: [
+          stepDto(),
+          stepDto({ role: 'review', tools: 'read_only', sentBack: 1, reviewRounds: 1 }),
+          stepDto({ role: 'qa', tools: 'read_only', sentBack: 2, reviewRounds: 2 }),
+        ],
+      });
+      expect(cardSummary(taskDto(), withRounds, new Map())).toContain(
+        'Review sent back 1 of 1; QA sent back 2 of 2.',
+      );
+    });
+
     it('says nothing for a task no review sent back', () => {
       card({ workstream: workstreamDto({ state: 'RUNNING', steps: [stepDto(), stepDto()] }) });
       expect(screen.queryByText(/Review sent back/)).toBeNull();
@@ -179,7 +193,7 @@ describe('TaskCard state', () => {
     });
   });
 
-  describe('shipped at the retry limit', () => {
+  describe('shipped when its review rounds ran out', () => {
     const rejection = {
       summary: '1. BLOCKING src/a.ts:1 no test.',
       verdict: 'reject' as const,
@@ -205,11 +219,11 @@ describe('TaskCard state', () => {
         ],
       });
     const LINE =
-      'Shipped at the retry limit with open findings. Follow-up task: Resolve the open findings of "Add the badge"';
+      'Shipped when its review rounds ran out with open findings. Follow-up task: Resolve the open findings of "Add the badge"';
 
     it('leaves the card face for the drawer', () => {
       card({ workstream: shipped() });
-      expect(screen.queryByText(/retry limit/)).toBeNull();
+      expect(screen.queryByText(/review rounds ran out/)).toBeNull();
     });
 
     it('says it to a screen reader too', () => {
@@ -231,13 +245,13 @@ describe('TaskCard state', () => {
       expect(
         cardSummary(taskDto(), { ...workstream, steps: [...workstream.steps, qa] }, new Map()),
       ).toContain(
-        'Shipped at the retry limit with open findings. Follow-up tasks: Resolve the open findings of "Add the badge"; Resolve the open QA findings of "Add the badge".',
+        'Shipped when its review rounds ran out with open findings. Follow-up tasks: Resolve the open findings of "Add the badge"; Resolve the open QA findings of "Add the badge".',
       );
     });
 
     it('says nothing for a task that did not ship at the limit', () => {
       card({ workstream: workstreamDto({ state: 'DONE', steps: [stepDto(), stepDto()] }) });
-      expect(screen.queryByText(/retry limit/)).toBeNull();
+      expect(screen.queryByText(/review rounds ran out/)).toBeNull();
     });
   });
 

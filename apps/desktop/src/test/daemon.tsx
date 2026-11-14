@@ -30,7 +30,7 @@ import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
 import { githubStatusDto } from './github-fixtures';
-import { rolePickDto, rolePicksDto } from './model-fixtures';
+import { modelMeasuresDto, rolePickDto, rolePicksDto } from './model-fixtures';
 import { playbookDto } from './playbook-fixtures';
 import { projectViewDto } from './fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
@@ -146,6 +146,8 @@ export function baseHandlers(
         ),
       ),
     ),
+    // A model's drawer asks for its stored OpenRouter rows; none yet.
+    http.get(daemonUrl('/models/measures', base), () => HttpResponse.json(modelMeasuresDto())),
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),

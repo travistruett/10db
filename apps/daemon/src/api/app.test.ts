@@ -748,6 +748,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'modelPicks',
     },
     {
+      name: 'GET /models/measures',
+      method: 'GET',
+      path: '/models/measures?model=claude-opus-5-5',
+      body: undefined,
+      service: 'modelMeasures',
+    },
+    {
       name: 'GET /models/offers',
       method: 'GET',
       path: '/models/offers',
@@ -1064,6 +1071,12 @@ describe('team, routing and benchmark routes', () => {
       name: 'picks at a rigor that does not exist',
       method: 'GET',
       path: `/models/picks?account=${mintId('Account')}&rigor=extreme`,
+      body: undefined,
+    },
+    {
+      name: 'model measures with no model',
+      method: 'GET',
+      path: '/models/measures',
       body: undefined,
     },
     {
@@ -2332,7 +2345,7 @@ describe('judge routes', () => {
       'PATCH /judge with a floor above one',
       'PATCH',
       '/judge',
-      { decisions: { review_size: { floor: 2 } } },
+      { decisions: { shape_ready: { floor: 2 } } },
     ],
     ['PATCH /judge with an account that is no id', 'PATCH', '/judge', { accountId: 'nope' }],
   ])('answers 400 for %s without reaching a service', async (_name, method, path, body) => {

@@ -46,11 +46,18 @@ describe('Settings › Decisions', () => {
       };
     };
 
-    it('groups every decision, the sizing ones between delivery and plan', async () => {
+    it('still shows the Status column in Settings › Decisions', async () => {
+      open();
+      const table = await screen.findByRole('table', { name: 'Decisions' });
+      expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeTruthy();
+    });
+
+    it('groups every decision, the sizing ones before plan', async () => {
       open();
       await screen.findByRole('table', { name: 'Decisions' });
       const groups = screen.getAllByRole('rowheader').map((h) => h.textContent);
-      expect(groups).toEqual(['Delivery', 'Sizing', 'Plan', 'Stakeholder questions']);
+      // The retired review-size decision is no longer configured, so it has no Delivery group.
+      expect(groups).toEqual(['Sizing', 'Plan', 'Stakeholder questions']);
       await rowOf('How much process a task needs');
       await rowOf('What a task touches');
     });
@@ -63,11 +70,15 @@ describe('Settings › Decisions', () => {
         stats: {
           since: '2026-10-14T12:00:00.000Z',
           decisions: [
-            decisionStatsDto(JudgeDecision.ReviewSize, { calls: 120, acted: 62, costUsd: 0.0123 }),
+            decisionStatsDto(JudgeDecision.QuestionRoute, {
+              calls: 120,
+              acted: 62,
+              costUsd: 0.0123,
+            }),
           ],
         },
       });
-      const row = await rowOf('Skip review for small changes');
+      const row = await rowOf('Who a question goes to');
       await waitFor(() => {
         expect(row.textContent).toContain('120 calls · 62 acted · $0.0123');
       });
@@ -110,7 +121,7 @@ describe('Settings › Decisions', () => {
       });
       await screen.findByRole('table', { name: 'Decisions' });
       for (const label of [
-        'Skip review for small changes',
+        'Who a question goes to',
         'Enough to propose',
         'Whether a reply approves',
       ]) {

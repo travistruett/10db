@@ -142,7 +142,8 @@ export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
     throw new InvalidError(
       `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling or lower the need in Settings › Models.`,
     );
-  return { rigor: plan.rigor, steps: [step], overBudget: [] };
+  // One page's implement step, whatever the task's rigor: no rigor plans this run.
+  return { rigor: null, steps: [step], overBudget: [] };
 }
 
 /** Throws what refuses these tasks a pass in the project, read from the database; writes nothing. */
