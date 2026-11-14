@@ -86,9 +86,6 @@ const EDITED_FIELDS = [
 /** What the builder's `create_task` answers: the filed task's summary. */
 const FiledTask = z.object({ id: TaskId });
 
-const decisionText = (d: { question: string; choice: string }): string =>
-  `${d.question} ${d.choice}`;
-
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /** The old value of each field an edit names and changes, for its Undo. */
@@ -122,12 +119,18 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
         throw new ConflictError('That task is in another project; this chat works in its own.');
       return task;
     };
-    /** The record a knowledge tool names, as its card quotes it: its words and its id. */
+    /**
+     * The record a knowledge tool names, as its card quotes it: its words and its id. A record of
+     * another project is refused; one that holds everywhere (scope you) has no project and is the chat's too.
+     */
     const named = (id: string): string => {
       const decision = DecisionId.safeParse(id);
-      const text = decision.success
-        ? decisionText(getDecision(state.db, decision.data))
-        : getPrinciple(state.db, PrincipleId.parse(id)).statement;
+      const record = decision.success
+        ? getDecision(state.db, decision.data)
+        : getPrinciple(state.db, PrincipleId.parse(id));
+      if (record.projectId !== null && record.projectId !== projectId)
+        throw new ConflictError('That record is in another project; this chat works in its own.');
+      const text = 'statement' in record ? record.statement : `${record.question} ${record.choice}`;
       return `“${text}” (${id}).`;
     };
     const run = (name: BuilderToolName, args: unknown): Promise<unknown> =>

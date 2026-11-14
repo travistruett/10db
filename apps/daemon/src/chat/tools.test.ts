@@ -5,12 +5,13 @@ import {
   ChatDto,
   ChatToolName,
   ConversationDto,
+  DecisionItem,
   PrincipleItem,
   ProjectDto,
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { chatMadeTask, listInbox } from '@10db/db';
+import { chatMadeTask, getDecisionDto, getPrinciple, listInbox } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
@@ -232,6 +233,38 @@ describe("a chat's tools on /mcp", () => {
     expect(await tasksOf()).toEqual([]);
     await answer(card, 'deny');
     await turn;
+  });
+
+  it('refuses a record of another project, with no card, and leaves it as it was', async () => {
+    const chat = await newChat();
+    const other = await api.post('/projects', ProjectDto, {
+      name: 'other',
+      repoPath: createTempRepo().path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    });
+    const rule = await principle(other);
+    const decision = await api.post(`/projects/${other.id}/decisions`, DecisionItem, {
+      question: 'Which queue?',
+      choice: 'BullMQ',
+      rationale: 'It retries',
+    });
+    const rows = [
+      { tool: 'retire_knowledge', args: { id: rule.id, reason: 'Ended' } },
+      { tool: 'withdraw_knowledge', args: { id: rule.id, reason: 'Misheard' } },
+      { tool: 'withdraw_knowledge', args: { id: decision.id, reason: 'Misheard' } },
+      { tool: 'supersede_knowledge', args: { id: decision.id, choice: 'SQS' } },
+      { tool: 'supersede_knowledge', args: { id: rule.id, statement: 'Retry twice' } },
+    ];
+    const said: string[] = [];
+    await agentTurn(chat, async (call) => {
+      for (const row of rows) said.push(await call(row.tool, row.args));
+    });
+    for (const text of said)
+      expect(text).toContain('That record is in another project; this chat works in its own.');
+    expect(openCards()).toEqual([]);
+    expect(getPrinciple(running().state.db, rule.id).state).toBe('current');
+    expect(getDecisionDto(running().state.db, decision.id).state).toBe('current');
   });
 
   it("renames an agent-titled chat cut at a word, and leaves the builder's name", async () => {
