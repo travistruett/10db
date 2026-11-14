@@ -16,6 +16,10 @@ import {
   QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   REVIEW_ROLES,
+  refuseRigorBelowKinds,
+  RigorBelowKindError,
+  RigorSource,
+  rigorTitle,
   StepRole,
   ToolAccess,
   JudgeKind,
@@ -60,6 +64,7 @@ import {
   replaceToolOp,
   patchWorkstream,
   releaseClaim,
+  setAgentRigor,
   searchDecisions,
   searchPrinciples,
   type ClaimRow,
@@ -193,6 +198,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     "Name the app's routes this turn's pictures should load, beyond the page areas your task names: a page area's route with its parameter filled in (/people/42 for /people/[id]), or the pages a change only in shared code shows. Only a page area's route is loaded: each parameter one plain value of letters, digits, _ or -, and your query dropped (the area route's own query is kept); any other path is refused. At most four a turn (a task outside a Workbench pass: a run); a read-only step can't call it. 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
+  resize_task:
+    "Change the rigor your own task runs at, when its size is not what it was filed as: a plan or build session only. The steps still to come follow the new rigor, and the builder is told why. You can't go below what the task's kinds ask for, can't change a rigor the builder set, and a Workbench page has none to change. A refusal comes back as the result, with what to do.",
   complete_step:
     'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
@@ -939,6 +946,50 @@ export function createToolHandlers(
           return record('report_pages', input.opId, judged, ctx);
         }),
       );
+    },
+
+    resize_task: (input) => {
+      const done = prior(input.opId, McpToolName.ResizeTask);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.resize_task.parse(done));
+      const refused = (message: string) => Promise.resolve({ resized: false, message });
+      const { task } = context();
+      const role = currentStep(getWorkstreamRow(db, workstreamId)).role;
+      if (role !== StepRole.Plan && role !== StepRole.Implement)
+        return refused('Only a plan or build session can resize its task');
+      if (task.passId !== null && task.passId !== undefined)
+        return refused("A Workbench page runs no rigor's steps");
+      if (task.rigorSource === RigorSource.Builder)
+        return refused(
+          `The builder set this task's rigor; carry on at ${rigorTitle(task.effectiveRigor)}`,
+        );
+      const kinds = listKinds(db);
+      try {
+        refuseRigorBelowKinds({ rigor: input.rigor, taskKinds: task.kinds, kinds });
+      } catch (error) {
+        if (!(error instanceof RigorBelowKindError)) throw error;
+        const label = kinds.find((k) => k.key === error.kindKey)?.label ?? error.kindKey;
+        return refused(`${label} work is at least ${rigorTitle(error.minimum)}`);
+      }
+      const reply = {
+        resized: true,
+        message: `This task now runs at ${rigorTitle(input.rigor)}; the steps still to come follow it.`,
+      };
+      deps.state.write((ctx) => {
+        setAgentRigor(ctx, task.id, input.rigor, input.why);
+        record('resize_task', input.opId, reply, ctx);
+      });
+      // A second write, so a crash between the two loses the notice; the card still shows the reason.
+      deps.inbox.flag({
+        projectId: task.projectId,
+        workstreamId,
+        title: `${task.title} was resized`,
+        body: `${role === StepRole.Plan ? 'The planner' : 'The builder agent'} resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
+        options: [{ label: 'Got it', description: '' }],
+        recommendation: null,
+        foldKey: `resize:${task.id}`,
+        refresh: true,
+      });
+      return Promise.resolve(reply);
     },
 
     complete_step: (input) => {

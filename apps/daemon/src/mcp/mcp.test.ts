@@ -13,6 +13,7 @@ import {
   createTestStore,
   endSession,
   getInboxItem,
+  getTask,
   getPrinciple,
   getWorkstream,
   insertBatch,
@@ -29,6 +30,7 @@ import {
   listInbox,
   listTasks,
   listToolOpResults,
+  patchTask,
   patchWorkstream,
   releaseClaims,
   schema,
@@ -51,6 +53,7 @@ import {
   type BatchId,
   type NextAction,
   type ProjectDto,
+  type TaskId,
   type WorkstreamId,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -514,7 +517,7 @@ describe('MCP tools in a worktree batch', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the seventeen tools', async () => {
+  it('lists exactly the eighteen tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -534,6 +537,7 @@ describe('MCP tools', () => {
       'report_deviation',
       'report_pages',
       'request_claim',
+      'resize_task',
       'write_handoff',
     ]);
   });
@@ -2566,6 +2570,116 @@ async function onStep(role: 'implement' | 'review' | 'plan') {
   });
   return s;
 }
+
+describe('resize_task', () => {
+  const why = 'It touches two areas and a migration';
+  const cards = () =>
+    listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.title.includes('resized'));
+  const taskOf = (s: { task: { id: TaskId } }) => getTask(state.db, s.task.id);
+
+  it.each(['implement', 'plan'] as const)(
+    'resizes the task from a %s step, pinning it as the agent’s with the reason, and tells the builder once',
+    async (role) => {
+      const s = await onStep(role);
+      const result = await s.call('resize_task', { opId: 'op-resize-01', rigor: 'careful', why });
+      expect(result.json).toMatchObject({ resized: true });
+      expect(taskOf(s)).toMatchObject({
+        rigor: 'careful',
+        rigorSource: 'agent',
+        rigorReason: why,
+        effectiveRigor: 'careful',
+        effectiveRigorSource: 'agent',
+      });
+      expect(cards()).toHaveLength(1);
+      expect(cards()[0]).toMatchObject({
+        title: expect.stringContaining('Alpha') as string,
+        body: expect.stringContaining(`Alpha to Careful: ${why}`) as string,
+        options: [{ label: 'Got it', description: '' }],
+      });
+    },
+  );
+
+  it('answers a replayed opId with the first result and raises no second notice', async () => {
+    const s = await onStep('implement');
+    const first = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
+    const replay = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
+    expect(replay.json).toEqual(first.json);
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('folds a later resize of the task into the one open notice', async () => {
+    const s = await onStep('implement');
+    await s.call('resize_task', {
+      opId: 'op-resize-03',
+      rigor: 'light',
+      why: 'Smaller than it read',
+    });
+    await s.call('resize_task', {
+      opId: 'op-resize-04',
+      rigor: 'critical',
+      why: 'Bigger after all',
+    });
+    expect(taskOf(s).rigor).toBe('critical');
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0]?.body).toContain('Critical: Bigger after all');
+  });
+
+  it.each([
+    {
+      name: 'a review step',
+      step: 'review' as const,
+      setup: () => undefined,
+      says: 'Only a plan or build session can resize its task',
+    },
+    {
+      name: 'a rigor the builder set',
+      step: 'implement' as const,
+      setup: (id: TaskId) => state.write((ctx) => patchTask(ctx, id, { rigor: 'light' })),
+      says: "The builder set this task's rigor; carry on at Light",
+    },
+    {
+      name: 'a rigor below the kinds’ minimum',
+      step: 'implement' as const,
+      setup: (id: TaskId) => {
+        state.write((ctx) => {
+          insertKind(ctx, { key: 'floor', label: 'Floor', minimumRigor: 'careful' });
+          patchTask(ctx, id, { kinds: [{ key: 'floor', source: 'builder' }] });
+        });
+      },
+      says: 'Floor work is at least Careful',
+    },
+  ])(
+    'refuses $name as a result the agent reads, changing nothing',
+    async ({ step, setup, says }) => {
+      const s = await onStep(step);
+      setup(s.task.id);
+      const before = taskOf(s);
+      const result = await s.call('resize_task', { opId: 'op-resize-05', rigor: 'standard', why });
+      expect(result.isError).toBe(false);
+      expect(result.json).toMatchObject({
+        resized: false,
+        message: expect.stringContaining(says) as string,
+      });
+      expect(taskOf(s)).toEqual(before);
+      expect(cards()).toEqual([]);
+    },
+  );
+
+  it('may go up from the kinds’ minimum, and not below', async () => {
+    const s = await onStep('implement');
+    state.write((ctx) => {
+      insertKind(ctx, { key: 'floor', label: 'Floor', minimumRigor: 'careful' });
+      patchTask(ctx, s.task.id, { kinds: [{ key: 'floor', source: 'builder' }] });
+    });
+    expect(
+      (await s.call('resize_task', { opId: 'op-resize-06', rigor: 'light', why })).json,
+    ).toMatchObject({ resized: false });
+    expect(
+      (await s.call('resize_task', { opId: 'op-resize-07', rigor: 'critical', why })).json,
+    ).toMatchObject({ resized: true });
+    expect(taskOf(s).rigor).toBe('critical');
+  });
+});
 
 describe('file_follow_up', () => {
   const args = {

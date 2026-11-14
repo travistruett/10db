@@ -18,7 +18,8 @@ export const Rigor = {
 export type Rigor = ValueOf<typeof Rigor>;
 
 /** A rigor as the builder reads it. */
-const rigorTitle = (rigor: Rigor): string => rigor.charAt(0).toUpperCase() + rigor.slice(1);
+/** A rigor as a name in a sentence: "careful" reads "Careful". */
+export const rigorTitle = (rigor: Rigor): string => rigor.charAt(0).toUpperCase() + rigor.slice(1);
 
 /** Every rigor, weakest first. */
 export const RIGORS: readonly Rigor[] = [
