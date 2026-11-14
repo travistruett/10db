@@ -27,6 +27,7 @@ import {
   type InterruptReceipt,
   type SessionEvent,
   type SessionHandle,
+  type AgentSessionCore,
   type LaneSessionSpec,
   type ShapeImage,
   type AgentSessionSpec,
@@ -150,8 +151,19 @@ export interface FakeLaneContext {
   stopGate(): Promise<void> | null;
 }
 
+/**
+ * What a scripted session reads of its spec: a lane's, or a chat's that the book scripts too, given
+ * the sequence of its sessions.
+ */
+export type ScriptedSessionSpec = AgentSessionCore & {
+  readonly profile: Pick<LaneSessionSpec['profile'], 'sequence' | 'allowedTools'>;
+};
+
 /** Stands in for a lane's Claude Code session: the scripted steps drive every event. */
-export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneContext): SessionHandle {
+export function runFakeLaneSession(
+  spec: ScriptedSessionSpec,
+  context: FakeLaneContext,
+): SessionHandle {
   const { title, steps, reportedModel } = context;
   const core = createFakeSessionCore();
   const emit = (event: SessionEvent): void => {
