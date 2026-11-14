@@ -140,13 +140,14 @@ export function putItem(
 export function listItems(
   db: DbReader,
   conversationId: ConversationId,
-  opts: { readonly afterSeq?: number } = {},
+  opts: { readonly afterSeq?: number; readonly limit?: number } = {},
 ): ConversationItemRow[] {
   const where =
     opts.afterSeq === undefined
       ? ofConversation(conversationId)
       : and(ofConversation(conversationId), gt(schema.conversationItems.seq, opts.afterSeq));
-  return db.select().from(schema.conversationItems).where(where).orderBy(bySeq).all();
+  const query = db.select().from(schema.conversationItems).where(where).orderBy(bySeq);
+  return (opts.limit === undefined ? query : query.limit(opts.limit)).all();
 }
 
 /** The newest `count` items, oldest first. */

@@ -1,5 +1,12 @@
 import type {
   ConversationDeltaFrame,
+  ConversationDto,
+  ConversationFullDto,
+  ConversationId,
+  ConversationItemDto,
+  ConversationItemId,
+  ConversationItemsPage,
+  ConversationLiveDto,
   PlanDocumentRevisionDto,
   PlanRecordDto,
   PlanRecordList,
@@ -571,6 +578,22 @@ export interface ApiServices extends PlanRecordServices {
   subscribe(listener: (event: DaemonEvent) => void): () => void;
   /** The live frames of what conversations are streaming; never stored, never in the replay. */
   subscribeLive(listener: (frame: ConversationDeltaFrame) => void): () => void;
+  /** An explore conversation as the UI reads it (sessions spec §10); NotFoundError for one 10db lacks. */
+  getConversation(id: ConversationId): ConversationDto;
+  /** A page of its items in `seq` order, after `afterSeq` when given. */
+  conversationItems(id: ConversationId, afterSeq: number | null): ConversationItemsPage;
+  /** What it streams now, for a client that joins or reconnects. */
+  conversationLive(id: ConversationId): ConversationLiveDto;
+  /** A builder message, stored queued and taken by the conversation's owner; ConflictError for a task's. */
+  postConversationMessage(id: ConversationId, text: string): ConversationItemDto;
+  /** Sends what waits under "Send now"; ConflictError, with the state's words, when nothing would run. */
+  sendConversationNow(id: ConversationId): ConversationDto;
+  /** Stops the turn; answers once it is stopping or settled. */
+  stopConversation(id: ConversationId): Promise<ConversationDto>;
+  /** Stops the turn and sends the edited message as the next. */
+  redoConversation(id: ConversationId, text: string): Promise<ConversationItemDto>;
+  /** What an item keeps on disk past what it holds; NotFoundError when it keeps nothing. */
+  conversationFull(id: ConversationId, itemId: ConversationItemId): ConversationFullDto;
   /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;

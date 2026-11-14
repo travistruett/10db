@@ -20,6 +20,8 @@ export {
   type ExploreEngine,
   type ExploreEngineDeps,
 } from './explore-engine';
+export { itemsWithFull, readFullOutput, writeFullOutput } from './full-output';
+export { itemDtoOf } from './item-dto';
 export type {
   ExploreLaunch,
   ExploreModel,

@@ -24,6 +24,10 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/tasks/:taskId/shape' },
   { route: '/tasks/:taskId/step-plan' },
   { route: '/shapes/:shapeId' },
+  // Plan's transcript and what it streams: database and memory reads.
+  { route: '/conversations/:conversationId' },
+  { route: '/conversations/:conversationId/items' },
+  { route: '/conversations/:conversationId/live' },
   { route: '/flows' },
   { route: '/workstreams' },
   { route: '/inbox' },
@@ -58,6 +62,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/tasks/:taskId/thread/pictures/:fileId':
     "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
+  '/conversations/:conversationId/items/:itemId/full':
+    "A call's whole output is for the card that expands it, not for a screen.",
   '/shapes/:shapeId/record':
     "A Plan's record is read in the Record view, and no screen Plan draws shows it.",
   '/shapes/:shapeId/record/:list':

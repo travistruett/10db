@@ -231,6 +231,7 @@ import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
+import { createConversationServices } from './conversation-services';
 import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -1934,6 +1935,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
+    conversation: createConversationServices({
+      state,
+      engine: exploreEngine,
+      shape,
+      dataDir: opts.dataDir,
+    }),
     planRecord: createPlanRecordServices({
       state,
       dataDir: opts.dataDir,

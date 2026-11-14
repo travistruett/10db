@@ -14,6 +14,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/screens/:screenId',
   '/tasks/:taskId/thread/pictures/:fileId',
   '/shapes/:shapeId/screens/:name',
+  // A call's whole output, read from its file: the dev UI's transcript expands it as the app's does.
+  '/conversations/:conversationId/items/:itemId/full',
   '/projects/:projectId/pictures',
   '/events',
   '/events/head',

@@ -117,6 +117,9 @@ import {
   type PlanImportError,
   type ScreenRenderRequest,
   type ShapeConvertError,
+  ConversationId,
+  ConversationItemId,
+  PostConversationMessage,
 } from '@10db/contracts';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -179,6 +182,11 @@ export interface ApiDeps {
 
 const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
+/** A page of a conversation's items starts after this `seq`. */
+const ConversationItemsQuery = z.object({
+  afterSeq: z.coerce.number().int().nonnegative().optional(),
+});
+
 const STREAM_PATH = '/events/stream';
 
 function sameToken(a: string, b: string): boolean {
@@ -557,6 +565,66 @@ export function createApp(deps: ApiDeps) {
         ),
     )
     .get('/shape-measures', (c) => c.json(deps.services.shapeMeasures()))
+    // Sessions spec §10: one set of routes for every explore conversation, whoever owns it.
+    .get('/conversations/:conversationId', (c) =>
+      c.json(deps.services.getConversation(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .get(
+      '/conversations/:conversationId/items',
+      validator('query', (value) => ConversationItemsQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.conversationItems(
+            ConversationId.parse(c.req.param('conversationId')),
+            c.req.valid('query').afterSeq ?? null,
+          ),
+        ),
+    )
+    .get('/conversations/:conversationId/live', (c) =>
+      c.json(deps.services.conversationLive(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .post(
+      '/conversations/:conversationId/messages',
+      validator('json', (value): PostConversationMessage => PostConversationMessage.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.postConversationMessage(
+            ConversationId.parse(c.req.param('conversationId')),
+            c.req.valid('json').text,
+          ),
+          202,
+        ),
+    )
+    .post('/conversations/:conversationId/send-now', (c) =>
+      c.json(
+        deps.services.sendConversationNow(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .post('/conversations/:conversationId/stop', async (c) =>
+      c.json(
+        await deps.services.stopConversation(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .post(
+      '/conversations/:conversationId/redo',
+      validator('json', (value): PostConversationMessage => PostConversationMessage.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.redoConversation(
+            ConversationId.parse(c.req.param('conversationId')),
+            c.req.valid('json').text,
+          ),
+          202,
+        ),
+    )
+    .get('/conversations/:conversationId/items/:itemId/full', (c) =>
+      c.json(
+        deps.services.conversationFull(
+          ConversationId.parse(c.req.param('conversationId')),
+          ConversationItemId.parse(c.req.param('itemId')),
+        ),
+      ),
+    )
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
     )

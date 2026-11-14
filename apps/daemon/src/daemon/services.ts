@@ -171,6 +171,7 @@ import type { KnowledgeApiServices } from './knowledge-services';
 import type { TrustServices } from './trust-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import type { ConversationApiServices } from './conversation-services';
 import type { PlanRecordServices } from '../api';
 import { gateCallsDocker } from './docker-need';
 import type { ListenerReader } from './listening-ports';
@@ -214,6 +215,8 @@ export function createServices(deps: {
   /** People, the Slack connection, timers, routes and sends. */
   readonly stakeholders: StakeholderApiServices;
   readonly shape: ShapeApiServices;
+  /** The conversation routes (sessions spec §10), over the explore engine. */
+  readonly conversation: ConversationApiServices;
   /** Importing a planning effort into a Plan. */
   readonly planRecord: PlanRecordServices;
   readonly knowledge: KnowledgeApiServices;
@@ -702,6 +705,7 @@ export function createServices(deps: {
     ...deps.trust,
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
+    ...deps.conversation,
     ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,

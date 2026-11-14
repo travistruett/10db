@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ConversationId,
@@ -52,6 +52,12 @@ export function boundedOutput(output: string): string {
   if (output.length <= FULL_OUTPUT_MAX_CHARS) return output;
   const cut = output.length - FULL_OUTPUT_MAX_CHARS;
   return `[${String(cut)} characters cut from the start]\n${output.slice(cut)}`;
+}
+
+/** The items of a conversation that keep anything on disk. */
+export function itemsWithFull(dataDir: string, conversationId: ConversationId): Set<string> {
+  const dir = join(dataDir, 'conversations', ConversationId.parse(conversationId), 'items');
+  return new Set(existsSync(dir) ? readdirSync(dir) : []);
 }
 
 /** Writes each part given, mode 600; answers whether it wrote any. */
