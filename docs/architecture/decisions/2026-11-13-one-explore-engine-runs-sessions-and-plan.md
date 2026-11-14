@@ -30,6 +30,11 @@
 - A session row is written before the owner prepares the session, with its token's hash, and bills the project's
   account as it is at the start, never the conversation's stored one; a start that goes no further ends it
   `start_failed`.
+- Plan's session runs in auto mode under the trust line's attended policy where its judge is `native`, and keeps
+  today's rules where it is `rules` (and `tendb`, until 10db's judge exists).
+- Plan's own session searches and fetches the web there; its researcher is an option. Commands are judged, not
+  carded, and may run in the background under the lanes' process tracking.
+- Plan writes no code. That is its role, and its sandbox stays read-only; its `.env` rule is unchanged.
 - Plan's transcript is read through `/conversations/:id/items`; `ShapeViewDto.messages` is removed and
   `PROTOCOL_VERSION` is 9.
 

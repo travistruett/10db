@@ -30,6 +30,11 @@ export type ClaudeProfile =
       readonly disallowedTools: readonly string[];
       readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
       readonly setup: ClaudeProfileSetup;
+      /**
+       * The attended policy as auto mode's rules where the session's judge is native (trust line §8):
+       * it then runs in auto mode. Null keeps default mode, in which a call no rule covers is carded.
+       */
+      readonly autoMode: ClaudeAutoModeSettings | null;
     };
 
 export type ClaudeProfileOptions = Pick<
@@ -108,20 +113,24 @@ function laneOptions(
 
 /**
  * Plan's options (Shape spec §5.2): no settings file and never the harness (its skills and personas are
- * for lanes), only the setup's plugin dirs; commands in a read-only lane sandbox; `default` permission
- * mode, in which a call no allow rule covers reaches the permission broker.
+ * for lanes), only the setup's plugin dirs; commands in a read-only lane sandbox. On a native judge it
+ * runs in auto mode under the attended policy; otherwise in `default` mode, in which a call no allow
+ * rule covers reaches the permission broker.
  */
 function exploreOptions(
   profile: Extract<ClaudeProfile, { kind: 'explore' }>,
   sandbox: LaneSandboxSpec | null,
 ): ClaudeProfileOptions {
   const setupAppend = setupPromptText(profile.setup.instructions, profile.setup.plugins);
+  const mode: LanePermissionMode = profile.autoMode === null ? 'default' : 'auto';
+  // Claude Code reads `autoMode` only from inline settings here, never the repository's.
+  const autoMode = profile.autoMode === null ? {} : { autoMode: profile.autoMode };
   return {
     settingSources: [],
     strictMcpConfig: true,
     settings: sandbox
-      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
-      : { autoCompactEnabled: true },
+      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] }, ...autoMode }
+      : { autoCompactEnabled: true, ...autoMode },
     ...(sandbox ? { sandbox: sandbox.settings } : {}),
     systemPrompt: {
       type: 'preset',
@@ -145,11 +154,11 @@ function exploreOptions(
         },
       ]),
     ),
-    permissionMode: 'default',
+    permissionMode: mode,
     includePartialMessages: true,
-    // Default mode: Claude Code forces it while the scrub is on, and it keeps the processes outside the
-    // sandbox free of the session's variables.
-    sandboxEnv: sandbox ? sandboxEnv(sandbox, 'default') : {},
+    // Claude Code forces default mode while the scrub is on, so auto mode turns it off; in default mode
+    // it keeps the processes outside the sandbox free of the session's variables.
+    sandboxEnv: sandbox ? sandboxEnv(sandbox, mode) : {},
   };
 }
 

@@ -12,7 +12,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
+import { AccountKind, JudgeKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
 import { AUTOUPDATE_OFF } from '../environment';
 import type { Logger } from '../log';
@@ -310,6 +310,7 @@ function exploreQueryOptions(
       disallowedTools: spec.profile.disallowedTools,
       agents: spec.profile.agents,
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+      autoMode: spec.profile.judge === JudgeKind.Native ? renderClaudeAutoMode(spec.policy) : null,
     },
     spec.sandbox,
   );

@@ -1,3 +1,4 @@
+import type { JudgeKind } from '@10db/contracts';
 import type {
   ConversationId,
   AccountRefusal,
@@ -168,6 +169,8 @@ export interface LaneProfile {
 export interface ExploreProfile {
   readonly kind: typeof AgentProfileKind.Explore;
   readonly shapeId: ShapeId;
+  /** Who judges the session's calls (`capabilities.judge`): native runs it in auto mode; rules where absent. */
+  readonly judge?: JudgeKind;
   /** Appended to Claude Code's own system prompt. */
   readonly systemPrompt: string;
   /** The built-in tools the session has; every other built-in is left out. */

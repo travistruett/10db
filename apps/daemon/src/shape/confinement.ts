@@ -73,6 +73,8 @@ export interface ShapeAccess {
   readonly setupReads?: readonly string[];
   /** The Agent tool aliases the project's account takes, which an agent may be launched on; empty when it takes none; every alias when absent. */
   readonly agentModels?: readonly string[];
+  /** Who judges the session's calls (`capabilities.judge`); today's rules where absent. */
+  readonly judge?: JudgeKind;
 }
 
 /** One tool call as the PreToolUse hook sees it; the SDK sets `agentId` only inside a subagent. */
@@ -150,9 +152,12 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
       `${call.toolName} is not available to the ${call.agentType ?? 'this'} agent: only the session and its code researchers run commands.`,
     );
   if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
-  if (flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
+  // A native judge's session may run a command in the background, under the lanes' process tracking:
+  // it stops with the session.
+  const native = access.judge === JudgeKind.Native;
+  if (!native && flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
   const command = stringField(call.toolInput, 'command');
-  if (command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
+  if (!native && command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
   const verdict = judgePreToolUse({
     judge: JudgeKind.Rules,
     coveredByAllowRule: false,
@@ -168,7 +173,9 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     protectedPaths: commands.protectedPaths,
     fileAccess: commands.fileAccess,
   });
-  if (verdict.decision === 'allow' && verdict.settled === undefined) return ask(NOT_READ_ONLY);
+  // A command that is not read-only is the judge's call: auto mode's classifier where it runs, else a card.
+  if (verdict.decision === 'allow' && verdict.settled === undefined && !native)
+    return ask(NOT_READ_ONLY);
   return verdict;
 }
 
@@ -390,7 +397,9 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
           'The researcher reads no files: it holds neither the project nor the conversation’s files, and answers from the web.',
         )
       : judgeRead(call, access);
-  if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call);
+  // Where the session's judge is native, its web calls go to auto mode's classifier (trust line §8).
+  if (WEB_TOOLS.has(call.toolName))
+    return access.judge === JudgeKind.Native ? ALLOW : judgeWeb(call);
   if (call.toolName === 'Skill') return judgeSkill(call);
   if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
@@ -398,6 +407,6 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
   // A server 10db registered, so one the builder approved for the project.
   if (isProjectTool(call.toolName)) return judgeProjectTool(call, access);
   return deny(
-    `${call.toolName} is not available: a Shape session is read-only. It reads the project and talks; it changes nothing.`,
+    `${call.toolName} is not available: Plan writes no code, so a Shape session is read-only. It reads the project and talks; it changes nothing.`,
   );
 }

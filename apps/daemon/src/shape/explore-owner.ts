@@ -12,6 +12,8 @@ import {
   ShapeEventKind,
   TrustSurface,
   type AccountKind,
+  type AgentAccountKind,
+  type JudgeKind,
   type ProjectId,
   type ConversationFileId,
 } from '@10db/contracts';
@@ -117,6 +119,8 @@ export interface ShapeOwnerDeps {
   launch(projectId: ProjectId, model: string | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
+  /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
+  readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
   readonly contextLimitPct: number;
   readonly turnOf: (shapeId: ShapeId) => ShapeTurnState;
   /** Tells the screen the conversation changed, for what no row records. */
@@ -412,10 +416,13 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       launches.delete(shapeId);
       const limits = deps.limitsFor(launch.account.kind);
       // Only this conversation's files: another conversation's, in the same project or not, stay unread.
+      // Where the judge is native the session runs in auto mode, with the web (trust line §8, §12).
+      const judge = deps.judgeOf(launch.account.kind, launch.modelId);
       const fileAccess: ShapeAccess = {
         ...launch.access,
         filesDir: shapeFilesDir(deps.filesDir, shapeId),
         agentModels: launch.agentModels,
+        judge,
       };
       const resumeId = start.resume;
       const { digest } = start;
@@ -521,6 +528,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           profile: {
             kind: 'explore',
             shapeId,
+            judge,
             systemPrompt: shapeSystemPrompt(launch.agentModels),
             tools: [...toolset.tools],
             allowedTools: SHAPE_ALLOWED_TOOLS,

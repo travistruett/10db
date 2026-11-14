@@ -471,6 +471,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       launch: (projectId, model) => deps.launch(projectId, model),
       ...(deps.prepare === undefined ? {} : { prepare: deps.prepare }),
       limitsFor,
+      judgeOf: (kind, model) => deps.adapter.capabilities({ kind }, model).judge,
       contextLimitPct: deps.contextLimitPct ?? CONTEXT_LIMIT_PCT,
       turnOf,
       announce,

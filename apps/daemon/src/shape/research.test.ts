@@ -5,7 +5,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { silentLogger } from '../log';
 import { FakeAdapter, type FakeShapeTurn } from '../sessions';
-import { seedConversation, type ConversationFixture } from './conversation-fixture';
+import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { createShapeService, type ShapeService } from './service';
 import { SHAPE_AGENT_MODELS } from './confinement';
 
@@ -83,7 +83,12 @@ async function turnWith(
 
 const RESEARCHER = { agentId: 'agent-1', agentType: 'researcher' } as const;
 
-describe('a research turn', () => {
+describe('a research turn on a rules judge', () => {
+  // Where auto mode can't run (a gateway, an older model), the guard's rules judge Plan's calls.
+  beforeEach(() => {
+    adapter.capabilityOverrides = { judge: 'rules' };
+  });
+
   it('stores the call that handed the researcher its question, then each search and fetch under it', async () => {
     await turnWith([
       {
@@ -164,5 +169,17 @@ describe('a research turn', () => {
     expect(calls().map((call) => [call.kind, call.status, call.deniedBy])).toEqual([
       ['subagent', 'denied', '10db'],
     ]);
+  });
+});
+
+describe('a research turn on a native judge', () => {
+  it('fetches from the session itself, stored as a web call it made, not denied', async () => {
+    await turnWith([
+      { toolName: 'WebFetch', input: { url: 'https://vega.github.io/vega-lite/docs/stack.html' } },
+    ]);
+    expect(calls().map((call) => [call.kind, call.status, call.parentId])).toEqual([
+      ['web', 'done', null],
+    ]);
+    expect(must(adapter.shapeSessions[0], 'a session').spec.profile.judge).toBe('native');
   });
 });

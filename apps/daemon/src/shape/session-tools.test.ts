@@ -169,6 +169,8 @@ describe('a conversation’s prepared session', () => {
   it('writes no line for a command or project tool call, and stores a card it waits on as an item', async () => {
     const p = preparing();
     f = createServiceFixture({ prepare: p.prepare });
+    // On a rules judge a command that is not read-only is carded; a native one hands it to auto mode.
+    f.adapter.capabilityOverrides = { judge: 'rules' };
     f.service.send(f.c.shape.id, 'Look at the git history.');
     await tick();
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
