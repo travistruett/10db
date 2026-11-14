@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
   AccountKind,
-  BRAINSTORM_REFUSED_ON_CHATGPT,
   ConversationOwnerKind,
   EventType,
   InvalidError,
@@ -14,7 +13,6 @@ import {
   JUDGE_TIMEOUT_MS,
   noOpenRouterSync,
   PROTOCOL_VERSION,
-  Provider,
   RoutedBy,
   agentKind,
   providerOf,
@@ -214,7 +212,6 @@ import {
 } from '../conversation';
 import {
   chatHooks,
-  chatsUnavailable,
   createChatLiveSessions,
   createChatService,
   createChatTools,
@@ -1483,12 +1480,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     broker: screenBroker,
     filesDir: join(opts.dataDir, 'shapes'),
   });
-  // Judged on the account the conversation runs on, which can differ from the project's provider.
-  const brainstormRefusal = (projectId: ProjectId): string | null =>
-    providerOf(agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind)) ===
-    Provider.Codex
-      ? BRAINSTORM_REFUSED_ON_CHATGPT
-      : null;
   const laneSandbox = sandboxes?.lane ?? null;
   // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
   const exploreEngine = createExploreEngine({
@@ -1512,8 +1503,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   });
   const conversationModels = (projectId: ProjectId) => {
-    // A conversation that can't run on the project's account has no model to choose.
-    if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
     const project = getProject(db, projectId);
     const inputs = routingInputs(db, project);
     return {
@@ -1528,8 +1517,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   ): ShapeLaunch => {
     const project = getProject(db, projectId);
     const row = getAccountRow(db, project.accountId);
-    const refusal = brainstormRefusal(projectId);
-    if (refusal !== null) throw new InvalidError(refusal);
     const run = conversationRun(db, project, chosen, effort);
     if (run === undefined) throw new InvalidError(`${row.label} offers no model for planning`);
     // The builder's pick runs at the conversation's effort snapped to that model's own efforts; one the
@@ -1590,7 +1577,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
       toolTimeoutMs: SHAPE_TOOL_TIMEOUT_MS,
     },
-    brainstormRefusal,
     // A Plan conversation runs commands only in a read-only lane sandbox; with none it runs none.
     ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
     models: conversationModels,
@@ -1602,8 +1588,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     dataDir: opts.dataDir,
     now: () => clock.now(),
     modelsOf: conversationModels,
-    // Until chats run on Codex (M5b), a project on a ChatGPT plan says when they come.
-    unavailable: (projectId) => chatsUnavailable(brainstormRefusal(projectId) !== null),
   });
   const chatLive = createChatLiveSessions();
   exploreEngine.register(

@@ -1,10 +1,4 @@
-import {
-  AccountKind,
-  CHATS_UNAVAILABLE_ON_CHATGPT,
-  ConflictError,
-  ConversationState,
-  InvalidError,
-} from '@10db/contracts';
+import { AccountKind, ConflictError, ConversationState, InvalidError } from '@10db/contracts';
 import { getConversation, listItems, patchConversation } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
@@ -49,15 +43,18 @@ describe('the chat service', () => {
     );
   });
 
-  it('says a ChatGPT-plan project runs no chat yet, and creates none there', () => {
+  it('makes and runs a chat on a ChatGPT-plan project, as on a Claude one', async () => {
     w = chatWorld();
     w.launchOn(AccountKind.CodexSignin);
-    expect(w.chat.models(w.project.id)).toEqual({
-      default: null,
-      offered: [],
-      unavailable: CHATS_UNAVAILABLE_ON_CHATGPT,
+    expect(w.chat.models(w.project.id).offered).not.toEqual([]);
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    const [session] = w.adapter.shapeSessions;
+    expect(session?.spec).toMatchObject({
+      profile: { kind: 'explore' },
+      account: { kind: AccountKind.CodexSignin },
     });
-    expect(() => w.open()).toThrow(new ConflictError(CHATS_UNAVAILABLE_ON_CHATGPT));
   });
 
   it('stores a message queued with its mentions, titles the chat from it, and starts a turn', async () => {

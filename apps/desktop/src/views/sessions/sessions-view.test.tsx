@@ -1,14 +1,9 @@
-import { CHATS_UNAVAILABLE_ON_CHATGPT, mintId } from '@10db/contracts';
+import { mintId } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pickOption } from '../../test/combobox';
-import {
-  chatDto,
-  chatModelsDto,
-  chatServer,
-  type ChatServerOptions,
-} from '../../test/chat-fixtures';
+import { chatDto, chatServer, type ChatServerOptions } from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 
@@ -183,36 +178,14 @@ describe('Sessions: a fresh tab', () => {
     expect(screen.queryByRole('combobox', { name: 'Project' })).toBeNull();
   });
 
-  it('on a ChatGPT-plan project says the chats wait, keeps Recent, and posts nothing', async () => {
-    const earlier = chatDto({ projectId: ampsio.id, title: 'Invoice export', tabPosition: null });
-    const { chat } = open('/sessions', {
-      models: chatModelsDto({
-        default: null,
-        offered: [],
-        unavailable: CHATS_UNAVAILABLE_ON_CHATGPT,
-      }),
-      recent: [earlier],
-      chats: [earlier],
-      starts: [{ kind: 'recent_area', text: 'How does billing/export work?' }],
-    });
-    expect((await screen.findAllByText(CHATS_UNAVAILABLE_ON_CHATGPT)).length).toBeGreaterThan(0);
-    expect(screen.getByRole('region', { name: 'Recent' })).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Start from' })).toBeTruthy();
-    expect(composer().hasAttribute('disabled')).toBe(true);
-    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
-    expect(chat.created).toHaveLength(0);
-  });
-
   it('shows a refused create beside Send and makes nothing', async () => {
     const { chat } = open('/sessions', {
-      createRefusal: 'Chats on a ChatGPT account come with the next update.',
+      createRefusal: 'The project is gone.',
     });
     await screen.findByRole('textbox', { name: 'Message' });
     type('hello');
     send();
-    expect(
-      await screen.findByText('Chats on a ChatGPT account come with the next update.'),
-    ).toBeTruthy();
+    expect(await screen.findByText('The project is gone.')).toBeTruthy();
     expect(chat.chats).toHaveLength(0);
   });
 

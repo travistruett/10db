@@ -69,7 +69,6 @@ beforeEach(() => {
     log: silentLogger,
     hold: drain,
     mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
-    brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
       model: 'claude-opus-5-5',

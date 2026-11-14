@@ -38,17 +38,10 @@
           "tier"
         ]
       }
-    },
-    "unavailable": {
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [
     "default",
-    "offered",
-    "unavailable"
+    "offered"
   ]
 }

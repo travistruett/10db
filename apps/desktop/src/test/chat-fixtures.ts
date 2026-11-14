@@ -59,7 +59,6 @@ export function chatModelsDto(overrides: Partial<ChatModelsDto> = {}): ChatModel
       { model: 'claude-opus-5', tier: 'frontier' },
       { model: 'claude-sonnet-5-5', tier: 'balanced' },
     ],
-    unavailable: null,
     ...overrides,
   });
 }

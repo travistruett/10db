@@ -5,7 +5,7 @@
 export { createConversationFiles } from './conversation-files';
 export { chatHooks, type ChatHooksDeps } from './hooks';
 export { createChatLiveSessions } from './live-sessions';
-export { chatsUnavailable, createChatService, type ChatService } from './service';
+export { createChatService, type ChatService } from './service';
 export { sessionStarts } from './session-starts';
 export { sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';

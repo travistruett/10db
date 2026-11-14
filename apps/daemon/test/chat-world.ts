@@ -1,8 +1,6 @@
 import {
   AccountKind,
   JudgeKind,
-  Provider,
-  providerOf,
   type AgentAccountKind,
   type ChatDto,
   type DaemonEvent,
@@ -13,7 +11,6 @@ import { ManualClock } from '../src/clock';
 import {
   chatHooks,
   createChatLiveSessions,
-  chatsUnavailable,
   createChatService,
   type ChatHooksDeps,
   type ChatService,
@@ -120,7 +117,6 @@ export function chatWorld(
         { model: 'claude-sonnet-5-5', tier: null },
       ],
     }),
-    unavailable: () => chatsUnavailable(providerOf(launched.kind) === Provider.Codex),
   });
   return {
     store,

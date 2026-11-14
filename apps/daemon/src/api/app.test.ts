@@ -1,6 +1,5 @@
 import {
   BatchStartResult,
-  CHATS_UNAVAILABLE_ON_CHATGPT,
   ConflictError,
   GoalDigestDto,
   GoalListDto,
@@ -2510,21 +2509,6 @@ describe('the chat routes', () => {
     });
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
-  });
-
-  it("POST /chats on a ChatGPT-plan project answers 409 with the service's words", async () => {
-    const services = stubServices({
-      createChat: () => {
-        throw new ConflictError(CHATS_UNAVAILABLE_ON_CHATGPT);
-      },
-    });
-    const res = await app(services).request('/chats', {
-      method: 'POST',
-      ...json,
-      body: JSON.stringify({ projectId, model: null, tabPosition: 0 }),
-    });
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain(CHATS_UNAVAILABLE_ON_CHATGPT);
   });
 
   it('PATCH /chats/:id with {} is a 400, and its 409 reaches the client in words', async () => {

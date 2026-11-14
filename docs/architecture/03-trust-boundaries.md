@@ -921,8 +921,10 @@ front of it.
 **Built** (`decisions/2026-11-05-plan-runs-commands-and-project-tools-through-the-lane-broker.md`, Shape spec
 §5.2). A Plan (Shape) session is a Claude Code session in `default` mode with no lane, claim or area. It holds the
 project's code and talks with the builder; the builder accepts its plan before any lane runs a task from it.
-It runs only on a Claude account: while the project is on a ChatGPT account, every request that would start or
-advance a conversation, or choose its model, is refused before it writes anything (`BRAINSTORM_REFUSED_ON_CHATGPT`).
+On a ChatGPT account it is a Codex thread on the same read-only lane sandbox, with approvals closed and every call
+sent through the guard hook to the conversation's judge (10db's judge, or the rules floor), as a Codex lane's is
+(§4.13), and without the research and review agents, which need Claude Code
+(`decisions/2026-11-14-plan-and-sessions-run-on-codex-without-claude-only-subagents.md`).
 
 - **Files.** Its file tools read only the checkout and the conversation's files directory; the hook refuses the
   rest with no card. Protected paths are refused to the file tools by the hook and to commands by the kernel.
