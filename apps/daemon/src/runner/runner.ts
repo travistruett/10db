@@ -8,6 +8,7 @@ import {
   EventType,
   type SessionActivityData,
   findingNotes,
+  atRoundLimit,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
   RoutedBy,
@@ -231,7 +232,7 @@ import {
   projectInstructionsLoaded,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
-import { escalateStep, resolveSteps } from '../routing';
+import { escalateStep, resolveSteps, rowProcess } from '../routing';
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
@@ -1398,14 +1399,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'advance':
         return advanceTo(id, ctl, row, step, move.to, null);
       case 'send_back': {
-        const attempt = row.attempt + 1;
-        if (attempt > opts.limits.maxFixAttempts) {
+        // A reviewer's rejections count against the rigor's rounds, read live; the gate's and the
+        // builder's send-backs use `attempt`, which this never touches.
+        const task = getTask(db, row.taskId);
+        const rounds = rowProcess(
+          task.effectiveRigor,
+          playbookInputs(db, row.projectId).playbook,
+        ).reviewRounds;
+        if (atRoundLimit(step.sentBack, rounds)) {
           const result = step.result;
           if (
             result &&
             shipsAtRetryLimit({
               role: step.role,
-              kinds: kindsOfTask(getTask(db, row.taskId).kinds, listKinds(db)),
+              kinds: kindsOfTask(task.kinds, listKinds(db)),
               evidence: listEvidence(db, id),
             })
           ) {
@@ -1421,7 +1428,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             const to = shipped.stepIndex + 1;
             if (to < shipped.steps.length) return advanceTo(id, ctl, shipped, step, to, atLimit);
             return completeReadOnlySteps(id, ctl, shipped, step, {
-              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task${skippedQa ? '; QA skipped: only docs changed' : ''}`,
+              reason: `${step.role} rejected the work and the review rounds (${String(rounds)}) are used up; shipped with its findings filed as a follow-up task${skippedQa ? '; QA skipped: only docs changed' : ''}`,
               atLimit,
             });
           }
@@ -1430,7 +1437,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             ctl.fence,
             {
               kind: WorkstreamFailure.RejectedAtLimit,
-              reason: `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+              reason: `The ${step.role} step rejected the work and the review rounds (${String(rounds)}) are used up`,
             },
             result
               ? {
@@ -1451,10 +1458,10 @@ export function createRunner(opts: RunnerOptions): Runner {
           if (up.moved && target.profileId)
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
           patchWorkstream(ctx, id, ctl.fence, {
-            attempt,
             steps: countSendBack(
               sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
               row.stepIndex,
+              rounds,
             ),
             stepIndex: move.to,
             nextAction: { kind: 'revise', reviewStep: row.stepIndex },

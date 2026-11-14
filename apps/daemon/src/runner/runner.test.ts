@@ -28,7 +28,6 @@ import {
   TRUST_DEFAULTS,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
-  rejectionsSentBack,
   ReviewCardDetail,
   reviewRounds,
   type AccountId,
@@ -3549,7 +3548,8 @@ describe('flows', () => {
       attempts: 1,
       reason: 'escalated from claude-sonnet-5-5@high after the review step rejected it',
     });
-    expect(ws(workstream.id).attempt).toBe(1);
+    // A reviewer's send-back counts against the review rounds, not the attempts.
+    expect(ws(workstream.id).attempt).toBe(0);
     engine.launch(workstream.id); // the second gate passed; review again
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
@@ -3897,6 +3897,10 @@ describe('flows', () => {
     ];
     const shipped = async () => {
       engine = await createTestEngine({ Alpha: [...[1, 2, 3, 4].flatMap(round)] });
+      // Three rounds, so the fourth rejection is the one at the limit.
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'standard', reviewRounds: 3 }] }),
+      );
       const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
       await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
       return { task, workstream };
@@ -3940,7 +3944,7 @@ describe('flows', () => {
 
     it('counts only the send-backs before the limit', async () => {
       const { workstream } = await shipped();
-      expect(rejectionsSentBack(ws(workstream.id))).toBe(3);
+      expect(step(workstream.id, 1)?.sentBack).toBe(3);
       expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
     });
 
@@ -3965,10 +3969,17 @@ describe('flows', () => {
         tool: 'complete_step',
         args: { opId: 'op-flow-0570', summary: '1. Put it in src/api/a.txt.', verdict: null },
       };
+      // Critical's QA has rounds of its own, so no rounds at all lets the review and then QA rejections each
+      // be the one at the limit.
+      const noRounds = () =>
+        engine.state.write((ctx) =>
+          setPlaybook(ctx, null, { rows: [{ rigor: 'critical', reviewRounds: 0 }] }),
+        );
       const thenQa = async (qa: FakeScriptBook[string][number]) => {
         engine = await createTestEngine({
-          Alpha: [[plan, turn], ...[1, 2, 3, 4].flatMap(round), qa],
+          Alpha: [[plan, turn], ...[4].flatMap(round), qa],
         });
+        noRounds();
         // Four criteria run the full flow's plan and QA steps.
         const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
           flow: 'full',
@@ -4025,19 +4036,19 @@ describe('flows', () => {
           Alpha: [
             [docsPlan, turn],
             [write('src/api/a.md', '# A design'), commit('op-docs-0581', ['src/api/a.md']), turn],
-            [reject('op-docs-0582', '1. NOTE round 1'), turn],
-            ...[2, 3, 4].flatMap(round),
+            [reject('op-docs-0582', FINAL), turn],
           ],
         });
+        noRounds();
         const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
           flow: 'full',
           criteria: 4,
         });
         await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
         expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
-        // The QA step leaves the plan and no QA session runs: plan, implement, and four reviews.
+        // The QA step leaves the plan and no QA session runs: plan, implement and the review.
         expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'review']);
-        expect(engine.adapter.prompts).toHaveLength(2 + 3 * 2 + 1);
+        expect(engine.adapter.prompts).toHaveLength(3);
         const [filed, ...rest] = filedFor(task.id);
         expect(rest).toEqual([]);
         expect(filed?.description).toContain(FINAL);
@@ -4049,7 +4060,7 @@ describe('flows', () => {
           .filter((e) => e.type === 'workstream.changed' && e.entityId === workstream.id)
           .map((e) => e.data['reason']);
         expect(reasons).toContain(
-          'review rejected the work at the retry limit; shipped with its findings filed as a follow-up task; QA skipped: only docs changed',
+          'review rejected the work and the review rounds (0) are used up; shipped with its findings filed as a follow-up task; QA skipped: only docs changed',
         );
       });
     });
@@ -4071,6 +4082,9 @@ describe('flows', () => {
           [approve('op-flow-0499'), turn],
         ],
       });
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'standard', reviewRounds: 3 }] }),
+      );
       // A kind of its own that fails at the limit, so the task stays on the Standard steps the script runs.
       engine.state.write((ctx) => {
         insertKind(ctx, { key: 'no-open-findings', label: 'No open findings', failsAtLimit: true });
@@ -4087,7 +4101,7 @@ describe('flows', () => {
       const workstream = await failed();
       expect(ws(workstream.id)).toMatchObject({
         state: 'FAILED',
-        failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+        failureReason: 'The review step rejected the work and the review rounds (3) are used up',
         failureKind: 'rejected_at_limit',
       });
       const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
@@ -4116,7 +4130,7 @@ describe('flows', () => {
         '1. NOTE round 2',
         '1. NOTE round 1',
       ]);
-      expect(rejectionsSentBack(ws(workstream.id))).toBe(3);
+      expect(step(workstream.id, 1)?.sentBack).toBe(3);
     });
 
     it('sends a retry to the implement step with the findings, and the review runs after it', async () => {
@@ -4129,7 +4143,7 @@ describe('flows', () => {
         nextAction: { kind: 'revise', reviewStep: 1 },
       });
       // The review has not run since the retry, so nothing it said before counts.
-      expect(rejectionsSentBack(ws(workstream.id))).toBe(0);
+      expect(step(workstream.id, 1)?.sentBack).toBe(0);
       expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
       expect(step(workstream.id, 0)).toMatchObject({ status: 'running', result: null });
       await until(workstream.id, (s) => s === 'DONE');
@@ -4151,6 +4165,101 @@ describe('flows', () => {
       expect(
         listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'builder'),
       ).toMatchObject([{ summary: 'Use the existing card component.' }]);
+    });
+  });
+
+  describe('a reviewer’s send-backs count against the rigor’s review rounds', () => {
+    const planStep = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-rounds-plan', summary: '1. Put it in src/api/a.txt.', verdict: null },
+    };
+    const rejection = (n: number) => [
+      [turn],
+      [reject(`op-rounds-${String(n)}`, `1. NOTE ${String(n)}`), turn],
+    ];
+    const filedFor = (taskId: string) =>
+      listTasks(engine.store.db, engine.project.id).filter((t) => t.id !== taskId);
+    const setRounds = (rigor: 'light' | 'standard' | 'careful' | 'critical', n: number) =>
+      engine.state.write((ctx) => setPlaybook(ctx, null, { rows: [{ rigor, reviewRounds: n }] }));
+
+    it('sends a Standard task back once, and ships it with a follow-up at the second rejection', async () => {
+      engine = await createTestEngine({ Alpha: [...rejection(1), ...rejection(2)] });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null, attempt: 0 });
+      expect(step(workstream.id, 1)).toMatchObject({ sentBack: 1, reviewRounds: 1 });
+      expect(step(workstream.id, 0)?.reviewRounds).toBeUndefined();
+      expect(filedFor(task.id)).toHaveLength(1);
+      expect(step(workstream.id, 1)?.shippedAtLimit).toBeDefined();
+    });
+
+    it('sends a Careful task back twice, and ships it at the third rejection', async () => {
+      engine = await createTestEngine({
+        Alpha: [[planStep, turn], ...[1, 2, 3].flatMap(rejection)],
+      });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'careful' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', attempt: 0 });
+      expect(step(workstream.id, 2)).toMatchObject({ sentBack: 2, reviewRounds: 2 });
+      expect(filedFor(task.id)).toHaveLength(1);
+    });
+
+    it('fails a task whose kind must not ship with open findings at the limit', async () => {
+      engine = await createTestEngine({ Alpha: [...rejection(1), ...rejection(2)] });
+      engine.state.write((ctx) => {
+        insertKind(ctx, { key: 'no-open-findings', label: 'No open findings', failsAtLimit: true });
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], {
+        flow: 'standard',
+        kinds: ['no-open-findings'],
+      });
+      await until(workstream.id, (s) => s === 'FAILED');
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'FAILED',
+        failureKind: 'rejected_at_limit',
+        failureReason: 'The review step rejected the work and the review rounds (1) are used up',
+      });
+    });
+
+    it('sends a review rejection back to Build after the gate used every attempt, as the counters are apart', async () => {
+      engine = await createTestEngine({ Alpha: [[turn], [reject('op-rounds-apart'), turn]] });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      engine.state.write((ctx) => {
+        patchWorkstream(ctx, workstream.id, null, {
+          attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
+        });
+      });
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
+        nextAction: { kind: 'revise', reviewStep: 1 },
+      });
+      expect(step(workstream.id, 1)?.sentBack).toBe(1);
+    });
+
+    it('ships on the first rejection when the row says 0 rounds', async () => {
+      engine = await createTestEngine({ Alpha: [...rejection(1)] });
+      setRounds('standard', 0);
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(step(workstream.id, 1)).toMatchObject({ sentBack: 0, reviewRounds: 0 });
+      expect(filedFor(task.id)).toHaveLength(1);
+    });
+
+    it('reads the rounds live: a row changed after the task started sets the limit', async () => {
+      engine = await createTestEngine({ Alpha: [...rejection(1), ...rejection(2)] });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      setRounds('standard', 0);
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(step(workstream.id, 1)?.sentBack).toBe(0);
     });
   });
 
@@ -4397,11 +4506,10 @@ describe('flows', () => {
         criteria: 4,
         riskTags: ['security'],
       });
-      engine.state.write((ctx) => {
-        patchWorkstream(ctx, workstream.id, null, {
-          attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
-        });
-      });
+      // No rounds: the plan review's first rejection is already at the limit.
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'critical', reviewRounds: 0 }] }),
+      );
       await until(workstream.id, (s) => s === 'FAILED');
       expect(ws(workstream.id).stepIndex).toBe(1);
       leaveOut(workstream.id);

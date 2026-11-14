@@ -63,6 +63,11 @@ export const WorkstreamStep = z.object({
   /** Times this step's rejection sent the work back since the attempts last started over; a retry sets it to 0. */
   sentBack: z.int().min(0).default(0),
   /**
+   * The review rounds the task's rigor allowed when this reviewing step was last written, for the card's
+   * "sent back N of R". The limit itself is read live at each rejection. Absent on a step stored without it.
+   */
+  reviewRounds: z.int().min(0).max(3).optional(),
+  /**
    * Set on a review or QA step whose rejection used up the retry limit and shipped the work anyway:
    * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.
    */

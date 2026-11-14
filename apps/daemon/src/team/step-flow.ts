@@ -115,9 +115,16 @@ export function restartStep(
   );
 }
 
-/** One more send-back on the step whose rejection sent the work back, for the board's count. */
-export function countSendBack(steps: readonly WorkstreamStep[], from: number): WorkstreamStep[] {
-  return steps.map((s, i) => (i === from ? { ...s, sentBack: s.sentBack + 1 } : s));
+/**
+ * One more send-back on the step whose rejection sent the work back, for the board's count, with the
+ * review rounds the rigor allows now.
+ */
+export function countSendBack(
+  steps: readonly WorkstreamStep[],
+  from: number,
+  reviewRounds: number,
+): WorkstreamStep[] {
+  return steps.map((s, i) => (i === from ? { ...s, sentBack: s.sentBack + 1, reviewRounds } : s));
 }
 
 /** A retry starts the attempts over, so no earlier send-back counts any more; the rounds stay. */

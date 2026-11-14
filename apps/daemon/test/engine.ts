@@ -154,6 +154,8 @@ function rigorOfFlow(flow: string): Rigor {
       return Rigor.Light;
     case 'standard':
       return Rigor.Standard;
+    case 'careful':
+      return Rigor.Careful;
     case 'full':
       return Rigor.Critical;
     default:
