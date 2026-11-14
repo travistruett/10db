@@ -53,6 +53,11 @@ export interface OpenSession {
   readonly commands: () => readonly AgentCommand[];
   /** Reads no more events but `ended` (call 25). */
   detach(): void;
+  /**
+   * The running turn is over for the engine though its own events are still to come (a receipt settled
+   * its stop): they are dropped, up to and including its `turn_complete` (call 25).
+   */
+  skipTurn(): void;
   /** Stores each reasoning item in flight, complete (call 10). */
   storeReasoning(write: WriteContext): void;
   /** Stores what streamed, marked partial, and empties the buffers. */
@@ -87,6 +92,8 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     },
   });
   let detached = false;
+  /** Turns whose remaining events are dropped, oldest first: each ends with its `turn_complete`. */
+  let skipping = 0;
   let commands: readonly AgentCommand[] = [];
   /** The adapter ids of reasoning items in flight, stored when the next item begins. */
   const reasoning = new Set<string>();
@@ -140,6 +147,10 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
 
   const onEvent = (event: SessionEvent): void => {
     if (detached && event.type !== 'ended') return;
+    if (skipping > 0 && event.type !== 'ended') {
+      if (event.type === 'turn_complete') skipping -= 1;
+      return;
+    }
     switch (event.type) {
       case 'started':
         state.write((ctx) => {
@@ -248,6 +259,9 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     commands: () => commands,
     detach() {
       detached = true;
+    },
+    skipTurn() {
+      skipping += 1;
     },
     storeReasoning: (ctx) => {
       storeReasoning(ctx);

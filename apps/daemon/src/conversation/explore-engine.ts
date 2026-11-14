@@ -233,8 +233,6 @@ interface Runtime {
   grace: Timer | null;
   /** What the last interrupt answers. */
   receipt: Promise<InterruptReceipt> | null;
-  /** A receipt settled the stop: the interrupted turn's own end is still to come, and is dropped (call 25). */
-  lateComplete: boolean;
   /** The message a Redo replaces, while its stop settles (call 30). */
   redo: ConversationItemId | null;
   /** The session the engine last stopped or saw end, whose stream a partial is stored from. */
@@ -305,7 +303,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         cancelled: false,
         grace: null,
         receipt: null,
-        lateComplete: false,
         redo: null,
         lastSession: null,
         resuming: false,
@@ -611,7 +608,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   /** A receipt that came while the stop waits: it settles the stop, unless a Redo decides first. */
   const receiptCame = (rt: Runtime, session: Session): void => {
     if (rt.session !== session || rt.state !== S.Stopping || !rt.inTurn || rt.redo !== null) return;
-    rt.lateComplete = true;
+    session.open.skipTurn();
     settleTurn(rt);
     rt.ended = 'stopped';
     reduce(rt, { type: 'stop_settled' });
@@ -801,10 +798,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         },
         turnComplete: (event) => {
           if (rt.session !== self) return;
-          if (rt.lateComplete) {
-            rt.lateComplete = false;
-            return;
-          }
           settleTurn(rt);
           // A Redo settles its stop once it has read the receipt.
           if (rt.state === S.Stopping && rt.redo !== null) return;
@@ -1083,19 +1076,16 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         queued(id);
         return edit;
       }
+      const untaken =
+        original !== null && receipt !== null && itemsOf(rt, receipt.stillQueued).has(original.id);
       if (rt.inTurn) {
-        // The turn's own end is still to come: it is dropped when it does.
-        rt.lateComplete = true;
+        // The turn's own end is still to come: it is dropped when it does, unless its session goes.
+        if (!untaken) session.open.skipTurn();
         settleTurn(rt);
       }
       rt.ended = 'stopped';
-      if (
-        original !== null &&
-        receipt !== null &&
-        itemsOf(rt, receipt.stillQueued).has(original.id)
-      ) {
+      if (untaken) {
         // The agent would run the original by itself: its session goes, and the edit alone is sent.
-        rt.lateComplete = false;
         state.write((ctx) => {
           deleteItem(ctx, original.id);
         });

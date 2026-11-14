@@ -863,3 +863,25 @@ describe('the warm cap', () => {
     });
   });
 });
+
+describe('review round 1', () => {
+  it('drops a stopped turn’s late events in its own session only, so the next session’s turn ends', async () => {
+    w = exploreWorld();
+    const never = new Promise<void>(() => undefined);
+    const gates = stoppableTurns(w, { lateEnd: never });
+    w.adapter.shapeInterruptReceipt = () => ({ stillQueued: [] });
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    await w.engine.stop(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    // The session dies before the stopped turn's own end arrives.
+    await w.adapter.shapeSessions[0]?.handle.stop();
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Again.' });
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    expect(w.ends.map((e) => e.how)).toEqual(['stopped', 'complete']);
+  });
+});
