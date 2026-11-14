@@ -3,7 +3,7 @@ import { ScatterChart } from '@mantine/charts';
 import { Paper, Text } from '@mantine/core';
 import { z } from 'zod';
 import { DECISIONS } from './decision-catalogue';
-import type { DecisionModelPoint } from './decision-model-series';
+import { costAxis, ringLabel, type DecisionModelPoint } from './decision-model-series';
 import { formatDecisionUsd } from './decision-numbers';
 import { decisionSourceText } from './number-source';
 import { PICK_COLOR } from './pick-color';
@@ -33,24 +33,16 @@ export function DecisionModelsChart({
   readonly models: readonly DecisionModelDto[];
   readonly height: number;
 }) {
-  const costs = points.map((p) => p.x);
+  const xAxis = costAxis(
+    points.map((p) => p.x),
+    freeX,
+  );
   const seconds = points.map((p) => p.secondsPerDecision);
-  const xTicks =
-    costs.length === 0
-      ? []
-      : [
-          ...new Set([
-            ...costTicks(Math.min(...costs), Math.max(...costs)).filter((t) => t !== freeX),
-            ...(freeX === null ? [] : [freeX]),
-          ]),
-        ].sort((a, b) => a - b);
   // The cutoff line is always inside the axis, so a model past it reads as past it.
   const yTicks = costTicks(
     Math.min(...seconds, FALLBACK_SECONDS),
     Math.max(...seconds, FALLBACK_SECONDS),
   );
-  const xFirst = xTicks[0];
-  const xLast = xTicks.at(-1);
   const yFirst = yTicks[0];
   const yLast = yTicks.at(-1);
   return (
@@ -70,9 +62,9 @@ export function DecisionModelsChart({
       xAxisProps={{
         scale: 'log',
         type: 'number',
-        ...(xFirst === undefined || xLast === undefined || xFirst === xLast
+        ...(xAxis === null
           ? { domain: ['auto', 'auto'] }
-          : { domain: [xFirst, xLast], ticks: xTicks, interval: 0 }),
+          : { domain: [...xAxis.domain], ticks: [...xAxis.ticks], interval: 0 }),
         tickFormatter: (value: number) => (value === freeX ? 'Free' : costTickLabel(value)),
       }}
       yAxisProps={{
@@ -102,7 +94,7 @@ export function DecisionModelsChart({
           fill: 'none',
           stroke: `var(--mantine-color-${PICK_COLOR}-6)`,
           strokeWidth: 2.5,
-          label: p.usedBy.map((d) => DECISIONS[d].label).join(', '),
+          label: ringLabel(p.usedBy),
         }))}
       tooltipProps={{
         wrapperStyle: { zIndex: 10 },
@@ -138,6 +130,11 @@ export function DecisionModelsChart({
               {model?.timeSource == null ? null : (
                 <Text size="xs" c="dimmed">
                   {decisionSourceText(model.timeSource)}
+                </Text>
+              )}
+              {point.usedBy.length === 0 ? null : (
+                <Text size="xs">
+                  Used by {point.usedBy.map((d) => DECISIONS[d].label).join(', ')}
                 </Text>
               )}
             </Paper>

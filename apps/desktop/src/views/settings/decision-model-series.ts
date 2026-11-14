@@ -4,6 +4,8 @@ import {
   type DecisionStatsListDto,
   type JudgeConfig,
 } from '@10db/contracts';
+import { DECISIONS } from './decision-catalogue';
+import { costTicks } from './rightsizing-series';
 
 /** One decision model placed by what a million of its decisions cost and how long one takes. */
 export interface DecisionModelPoint {
@@ -65,4 +67,34 @@ export function answersByModel(stats: DecisionStatsListDto): ReadonlyMap<string,
     for (const answer of decision.answers)
       counts.set(answer.model, (counts.get(answer.model) ?? 0) + 1);
   return counts;
+}
+
+/** A ring's label: the decision's name when one uses the model, else how many do, so it fits inside the plot. */
+export function ringLabel(usedBy: readonly JudgeDecision[]): string {
+  const [only] = usedBy;
+  return only !== undefined && usedBy.length === 1
+    ? DECISIONS[only].label
+    : `${String(usedBy.length)} decisions`;
+}
+
+/**
+ * The cost axis: the 1-2-5 ladder around the paid costs, and with a free model "Free" (at `freeX`) as the left
+ * edge, with no priced tick at or left of it. Null with nothing drawn.
+ */
+export function costAxis(
+  xs: readonly number[],
+  freeX: number | null,
+): { readonly domain: readonly [number, number]; readonly ticks: readonly number[] } | null {
+  if (xs.length === 0) return null;
+  const paid = xs.filter((x) => x !== freeX);
+  const ladder = paid.length === 0 ? [] : costTicks(Math.min(...paid), Math.max(...paid));
+  if (freeX === null) {
+    const first = ladder[0];
+    const last = ladder.at(-1);
+    return first === undefined || last === undefined
+      ? null
+      : { domain: [first, last], ticks: ladder };
+  }
+  const ticks = [freeX, ...ladder.filter((t) => t > freeX)];
+  return { domain: [freeX, ticks.at(-1) ?? freeX * 10], ticks };
 }

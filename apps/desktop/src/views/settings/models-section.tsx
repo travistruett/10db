@@ -46,25 +46,34 @@ const ACCOUNT_LABEL = (
 
 /** The account decisions are paid by, shown where the Agents view has its account; it is changed in Settings › Decisions. */
 function PaidByAccount() {
-  const paidBy = useJudgeStatus().data?.account ?? null;
+  const judge = useJudgeStatus();
+  const paidBy = judge.data?.account ?? null;
+  const placeholder = judge.isPending
+    ? 'Reading…'
+    : judge.isError
+      ? judge.error.message
+      : 'No OpenRouter account';
   return (
+    // WebKit shows no tooltip on a disabled control, so the hint sits on a wrapper around it.
     <Tooltip label="Change it under Settings › Decisions" position="bottom">
-      <Select
-        aria-label="Account"
-        size="xs"
-        w={240}
-        leftSection={
-          <Text size="xs" c="dimmed">
-            Paid by
-          </Text>
-        }
-        leftSectionWidth={72}
-        leftSectionPointerEvents="none"
-        data={paidBy === null ? [] : [{ value: paidBy.id, label: paidBy.label }]}
-        value={paidBy?.id ?? null}
-        placeholder="No OpenRouter account"
-        disabled
-      />
+      <span>
+        <Select
+          aria-label="Account"
+          size="xs"
+          w={240}
+          leftSection={
+            <Text size="xs" c="dimmed">
+              Paid by
+            </Text>
+          }
+          leftSectionWidth={72}
+          leftSectionPointerEvents="none"
+          data={paidBy === null ? [] : [{ value: paidBy.id, label: paidBy.label }]}
+          value={paidBy?.id ?? null}
+          placeholder={placeholder}
+          disabled
+        />
+      </span>
     </Tooltip>
   );
 }

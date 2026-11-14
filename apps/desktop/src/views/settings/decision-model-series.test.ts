@@ -1,7 +1,7 @@
 import { DEFAULT_JUDGE_CONFIG, JudgeDecision, type JudgeConfig } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { decisionModelDto } from '../../test/judge-fixtures';
-import { answersByModel, decisionModelSeries } from './decision-model-series';
+import { answersByModel, costAxis, decisionModelSeries, ringLabel } from './decision-model-series';
 
 const model = (id: string, over: Parameters<typeof decisionModelDto>[0] = {}) =>
   decisionModelDto({ id, name: id, costPerMillionUsd: 2, secondsPerDecision: 1.5, ...over });
@@ -72,6 +72,42 @@ describe('decisionModelSeries', () => {
       config({}),
     );
     expect(points.map((p) => p.id)).toEqual(['~a/one-latest', 'a/one-2']);
+  });
+});
+
+describe('ringLabel', () => {
+  it.each([
+    {
+      name: 'one decision names it',
+      used: [JudgeDecision.ReviewSize],
+      expected: 'Skip review for small changes',
+    },
+    {
+      name: 'several decisions count',
+      used: [JudgeDecision.ReviewSize, JudgeDecision.ShapeReady, JudgeDecision.ShapeRecord],
+      expected: '3 decisions',
+    },
+  ])('$name', ({ used, expected }) => {
+    expect(ringLabel(used)).toBe(expected);
+  });
+});
+
+describe('costAxis', () => {
+  it('has no tick at or left of Free, and starts at it', () => {
+    const axis = costAxis([0.25, 2, 40], 0.25);
+    expect(axis?.domain[0]).toBe(0.25);
+    expect(axis?.ticks[0]).toBe(0.25);
+    expect(axis?.ticks.filter((t) => t <= 0.25)).toEqual([0.25]);
+  });
+
+  it('is the 1-2-5 ladder around the costs when nothing is free', () => {
+    const axis = costAxis([2, 40], null);
+    expect(axis?.ticks).toEqual([2, 5, 10, 20, 50]);
+    expect(axis?.domain).toEqual([2, 50]);
+  });
+
+  it('is null with nothing drawn', () => {
+    expect(costAxis([], null)).toBeNull();
   });
 });
 

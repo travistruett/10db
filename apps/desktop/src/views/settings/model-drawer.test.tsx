@@ -108,7 +108,7 @@ describe('the model drawer’s OpenRouter additions', () => {
           {
             provider: 'Anthropic',
             tokensPerSecond: 44,
-            latencyMs: 100,
+            latencyMs: 1200,
             measuredAt: ago(72 * HOUR),
           },
         ],
@@ -127,9 +127,13 @@ describe('the model drawer’s OpenRouter additions', () => {
     const bedrock = within(speeds).getByRole('row', { name: /Amazon Bedrock/ });
     expect(within(bedrock).getByText("This account's")).toBeTruthy();
     expect(within(bedrock).getByText('77')).toBeTruthy();
+    // Latency under a second reads in milliseconds, from a second up in seconds.
+    expect(within(bedrock).getByText('150 ms')).toBeTruthy();
     const anthropic = within(speeds).getByRole('row', { name: /Anthropic/ });
     expect(within(anthropic).queryByText("This account's")).toBeNull();
-    expect(within(anthropic).getByText('3 days ago')).toBeTruthy();
+    expect(within(anthropic).getByText('1.2 s')).toBeTruthy();
+    expect(within(anthropic).getByText('3 days ago (old)')).toBeTruthy();
+    expect(within(bedrock).queryByText(/old/)).toBeNull();
   });
 
   it('says why evals are missing when only speeds are stored, with no zero or blank', async () => {

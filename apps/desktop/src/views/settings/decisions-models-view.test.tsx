@@ -31,8 +31,8 @@ const FAST = decisionModelDto({
   timeSource: 'openrouter',
 });
 const FREE = decisionModelDto({
-  id: 'lab/free-1',
-  name: 'Free One',
+  id: 'lab/gratis-1',
+  name: 'Gratis One',
   maker: 'Lab',
   inputUsdPerMillion: 0,
   costPerMillionUsd: 0,
@@ -105,7 +105,10 @@ describe('the Decisions view of Models', () => {
     expect(within(fast).getByText('$3')).toBeTruthy();
     expect(within(fast).getByText('0.8 s')).toBeTruthy();
     expect(within(fast).getByText('2')).toBeTruthy();
-    expect(within(list).getByRole('row', { name: /Free One/ }).textContent).toContain('Free');
+    // The cost cell itself reads Free, not a name that happens to say it.
+    expect(
+      within(within(list).getByRole('row', { name: /Gratis One/ })).getByText('Free'),
+    ).toBeTruthy();
     const gap = within(list).getByRole('row', { name: /Gap One/ });
     expect(within(gap).getAllByText('—').length).toBeGreaterThanOrEqual(2);
     expect(within(list).getByText('It cannot answer in JSON.')).toBeTruthy();

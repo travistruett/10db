@@ -18,6 +18,7 @@ import {
   accountModelDto,
   catalogueStatusDto,
   modelEffortDto,
+  modelMeasuresDto,
   modelProfileDto,
   modelRowDto,
   rolePickDto,
@@ -290,10 +291,22 @@ describe('the Models page', () => {
 
   it('opens the drawer from a click anywhere on a row, with the effort table', async () => {
     serve();
+    const measuresAsked: URL[] = [];
+    server.use(
+      http.get(daemonUrl('/models/measures'), ({ request }) => {
+        measuresAsked.push(new URL(request.url));
+        return HttpResponse.json(modelMeasuresDto());
+      }),
+    );
     await renderWithDaemonAndRouter(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(within(rowOf('Alpha Max')).getByText('Capable'));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    // The drawer asks for the model's OpenRouter rows on the page's account.
+    await waitFor(() => {
+      expect(measuresAsked.at(-1)?.searchParams.get('account')).toBe(SUBSCRIPTION.id);
+    });
+    expect(measuresAsked.at(-1)?.searchParams.get('model')).toBe('alpha-max');
     const efforts = within(drawer).getByRole('table', { name: 'Effort table' });
     const high = within(efforts).getByRole('row', { name: /high/ });
     expect(within(high).getByText('$2.50')).toBeTruthy();
@@ -923,6 +936,23 @@ describe('the Models page switch', () => {
       expect(select).toHaveProperty('placeholder', 'No OpenRouter account');
     });
     expect(select).toHaveProperty('disabled', true);
+  });
+
+  it('reads Reading… in the paid-by select while the judge status loads, and the error when it fails', async () => {
+    serve();
+    server.use(
+      http.get(daemonUrl('/judge'), () =>
+        HttpResponse.json({ error: 'internal', message: 'The judge is down' }, { status: 500 }),
+      ),
+    );
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('heading', { name: 'Playbook' });
+    chooseView('Decisions');
+    const select = await screen.findByRole('combobox', { name: 'Account' });
+    expect(select).toHaveProperty('placeholder', 'Reading…');
+    await waitFor(() => {
+      expect(select).toHaveProperty('placeholder', 'The judge is down');
+    });
   });
 
   it('keeps the Agents account chosen across a switch', async () => {

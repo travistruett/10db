@@ -1,20 +1,30 @@
 import type { AccountId, ModelEvalDto, ProviderSpeedDto } from '@10db/contracts';
-import { Badge, Group, Stack, Table, Text, Title } from '@mantine/core';
+import { Stack, Table, Text, Title } from '@mantine/core';
 import { useModelMeasures } from '../../daemon/model-queries';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
 import { formatCost, NO_DATA } from './model-format';
 
-/** A read older than this is shown as old, the age the speed merge itself stops trusting. */
+/** A read older than this is marked old, the age the speed merge itself stops trusting. */
 const STALE_MS = 24 * 60 * 60 * 1000;
 
 const figure = (value: number | null): string =>
   value === null ? NO_DATA : String(Number(value.toPrecision(3)));
 
+/** Under a second in milliseconds; from a second up in seconds with one decimal. */
+const latencyText = (ms: number): string =>
+  ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${String(Math.round(ms))} ms`;
+
 function Read({ at, now }: { readonly at: string; readonly now: number }) {
   const stale = now - Date.parse(at) > STALE_MS;
   return (
-    <Text size="sm" {...(stale ? { c: 'yellow' } : {})} title={absoluteTime(at)}>
+    <Text
+      size="sm"
+      {...(stale ? { c: 'dimmed' } : {})}
+      style={{ whiteSpace: 'nowrap' }}
+      title={absoluteTime(at)}
+    >
       {fromNow(at, now)}
+      {stale ? ' (old)' : ''}
     </Text>
   );
 }
@@ -71,18 +81,18 @@ function Speeds({
         {speeds.map((s) => (
           <Table.Tr key={s.provider}>
             <Table.Td>
-              <Group gap="xs" wrap="nowrap">
-                {s.provider}
+              <Stack gap={0}>
+                <Text size="sm">{s.provider}</Text>
                 {s.provider === accountProvider ? (
-                  <Badge size="sm" variant="light">
+                  <Text size="xs" c="dimmed">
                     This account&apos;s
-                  </Badge>
+                  </Text>
                 ) : null}
-              </Group>
+              </Stack>
             </Table.Td>
             <Table.Td ta="right">{figure(s.tokensPerSecond)}</Table.Td>
             <Table.Td ta="right">
-              {s.latencyMs === null ? NO_DATA : `${String(Math.round(s.latencyMs))} ms`}
+              {s.latencyMs === null ? NO_DATA : latencyText(s.latencyMs)}
             </Table.Td>
             <Table.Td>
               <Read at={s.measuredAt} now={now} />
