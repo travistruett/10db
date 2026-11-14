@@ -20,6 +20,7 @@ import {
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
+  SkipKind,
   SkipSource,
   REVIEW_ROLES,
   StepRole,
@@ -2921,12 +2922,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'judge_denied': {
             const denied = event.call;
-            // A lane has no thread to show it on; the lane's recorded skips are where it will show.
+            // A lane has no thread to show it on: the denial is a skip, listed for the builder.
             if (!pass) {
-              log.info(
-                { toolName: denied.toolName, limit: denied.limit, reason: denied.reason },
-                'auto mode denied a call',
-              );
+              const classifier = denied.by === 'classifier';
+              unattended?.skips.record({
+                toolName: denied.toolName,
+                toolUseId: denied.toolUseId,
+                callKey: null,
+                summary: denied.summary,
+                kind: classifier ? SkipKind.Classifier : SkipKind.SafetyCheck,
+                limit: denied.limit,
+                reason: denied.reason,
+                source: classifier ? SkipSource.AutoMode : SkipSource.SafetyCheck,
+              });
               break;
             }
             // The notice and its offer are one write, so a notice never shows a button with no offer.

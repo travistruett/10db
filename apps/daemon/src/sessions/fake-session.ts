@@ -465,7 +465,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         emit({
           type: 'judge_denied',
           call: {
-            toolUseId: `fake-denied-${String(index)}`,
+            toolUseId: step.toolUseId ?? `fake-denied-${String(index)}`,
             toolName: step.toolName,
             summary: step.summary,
             reason: step.reason,

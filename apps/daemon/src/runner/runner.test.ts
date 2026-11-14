@@ -5162,7 +5162,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(floorNotices(task.id)).toEqual([]);
     });
 
-    it("a lane's denial makes no notice", async () => {
+    // T4 Task 6: an unattended lane's denial is a skip, not only a log line.
+    it("a lane's denial makes no notice and is one skip with a null limit", async () => {
       const { task, workstream } = await start(
         PLAN,
         {},
@@ -5189,6 +5190,43 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         ),
       ).toEqual([]);
       expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+        {
+          toolName: 'Bash',
+          summary: 'npx vercel deploy --prod --yes',
+          kind: 'classifier',
+          source: 'auto_mode',
+          limit: null,
+          reason: 'The classifier judged this action dangerous',
+        },
+      ]);
+    });
+
+    // T4 call 9: one row per call, whichever channel reports it first.
+    it('a safety check denying a call the guard already skipped stays one row', async () => {
+      const { workstream } = await start(
+        PLAN,
+        {},
+        {
+          Alpha: [
+            [
+              shell('SUB=add; pnpm $SUB left-pad'),
+              {
+                do: 'judge_denied' as const,
+                toolName: 'Bash',
+                summary: 'SUB=add; pnpm $SUB left-pad',
+                reason: 'Only a person may approve this',
+                by: 'safety_check' as const,
+                toolUseId: 'fake-tool-0',
+              },
+              turn,
+            ],
+          ],
+        },
+      );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toHaveLength(1);
     });
 
     it('a gateway lane refuses the same deploy and says why once', async () => {
