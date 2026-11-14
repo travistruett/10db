@@ -79,15 +79,16 @@ export const SkippedActionDto = z.object({
 export type SkippedActionDto = z.infer<typeof SkippedActionDto>;
 
 /**
- * How each kind is cleared (T4 call 14): the classifier's denials by intent, only when the builder saw
- * the whole call; the guard's and the broker's asks a person may clear by their exact call; a refused
- * host by seeding it into the run; the rest not at all, since the builder clears them elsewhere (a
- * switch, a claim, the editor).
+ * How each kind is cleared: the classifier's denials by intent; the guard's and the broker's asks a
+ * person may clear by their exact call; a refused host by seeding it into the run; the rest not at
+ * all, since the builder clears them elsewhere (a switch, a claim, the editor). A call whose summary
+ * was cut is never approvable, whatever its kind: the builder never saw all of it.
  */
 export function approvalOf(kind: SkipKind, summaryCut: boolean): Approval {
+  if (summaryCut) return Approval.None;
   switch (kind) {
     case SkipKind.Classifier:
-      return summaryCut ? Approval.None : Approval.Intent;
+      return Approval.Intent;
     case SkipKind.Escalation:
     case SkipKind.DefaultModeCard:
     case SkipKind.Deploy:
