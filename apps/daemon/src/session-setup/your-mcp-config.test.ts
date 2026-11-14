@@ -136,7 +136,7 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
     expect(byName(entries, 'bad')).toMatchObject({
       declared: null,
       configHash: null,
-      refusal: 'It can’t be read: command',
+      refusal: "It can't be read: command",
     });
     expect(byName(entries, 'good')?.refusal).toBeNull();
   });
@@ -145,22 +145,22 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
     [
       'headersHelper',
       { type: 'http', url: 'https://a.example', headersHelper: '/bin/x' },
-      'It runs a command for its headers, which 10db doesn’t run yet.',
+      "It runs a command for its headers, which 10db doesn't run yet.",
     ],
     [
       'oauth',
       { type: 'http', url: 'https://a.example', oauth: { clientId: 'x' } },
-      'It signs in with OAuth, which 10db doesn’t support yet.',
+      "It signs in with OAuth, which 10db doesn't support yet.",
     ],
     [
       'an unknown type',
       { type: 'ws', url: 'wss://a.example' },
-      'Its type isn’t stdio, http or sse.',
+      "Its type isn't stdio, http or sse.",
     ],
     [
       'a command starting with -',
       { command: '-e' },
-      'Its command can’t start with "-". Point it at a script instead.',
+      `Its command can't start with "-". Point it at a script instead.`,
     ],
   ])('%s is refused with its reason', (_name, server, reason) => {
     claudeJson({ mcpServers: { s: server } });
@@ -172,7 +172,7 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
     const { entries } = read();
     expect(byName(entries, 'my server')).toMatchObject({
       key: 'claude_json:my%20server',
-      refusal: 'Its name can’t be an MCP server name.',
+      refusal: "Its name can't be an MCP server name.",
     });
     expect(byName(entries, 'ok')?.refusal).toBeNull();
   });
@@ -183,9 +183,9 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
     );
     const { entries } = read();
     expect(entries.map((e) => [e.name, e.refusal])).toEqual([
-      ['10db-extra', 'Its name is kept for 10db’s own server.'],
-      ['a__b', 'Its name is kept for 10db’s own server.'],
-      ['__proto__', 'Its name is kept for 10db’s own server.'],
+      ['10db-extra', "Its name is kept for 10db's own server."],
+      ['a__b', "Its name is kept for 10db's own server."],
+      ['__proto__', "Its name is kept for 10db's own server."],
     ]);
   });
 

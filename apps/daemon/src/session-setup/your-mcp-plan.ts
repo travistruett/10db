@@ -226,7 +226,7 @@ export function planYourMcp(args: {
   function decide(entry: YourMcpEntry): string | null {
     if (entry.refusal !== null) return entry.refusal;
     const declared = entry.declared;
-    if (declared === null) return 'It can’t be read.';
+    if (declared === null) return "It can't be read.";
     const switched = Object.hasOwn(args.switches.mcpServers, entry.key)
       ? args.switches.mcpServers[entry.key]
       : undefined;

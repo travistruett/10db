@@ -226,14 +226,14 @@ function refusalOf(
   source: YourMcpSource,
   parsed: Parsed,
 ): string | null {
-  if (!McpServerName.safeParse(name).success) return 'Its name can’t be an MCP server name.';
-  if (reservedName(name)) return 'Its name is kept for 10db’s own server.';
+  if (!McpServerName.safeParse(name).success) return "Its name can't be an MCP server name.";
+  if (reservedName(name)) return "Its name is kept for 10db's own server.";
   const fields = RawEntry.safeParse(raw);
-  if (!fields.success) return 'It can’t be read: (root)';
+  if (!fields.success) return "It can't be read: (root)";
   if (fields.data.headersHelper !== undefined)
-    return 'It runs a command for its headers, which 10db doesn’t run yet.';
+    return "It runs a command for its headers, which 10db doesn't run yet.";
   if (fields.data.oauth !== undefined)
-    return 'It signs in with OAuth, which 10db doesn’t support yet.';
+    return "It signs in with OAuth, which 10db doesn't support yet.";
   const type = fields.data.type;
   if (
     source === YourMcpSource.ClaudeJson &&
@@ -242,13 +242,13 @@ function refusalOf(
     type !== 'http' &&
     type !== 'sse'
   )
-    return 'Its type isn’t stdio, http or sse.';
+    return "Its type isn't stdio, http or sse.";
   const field = expandingField(fields.data);
   if (field !== null)
     return `Its ${field} uses \${…}, which would put a value on a command line. Set it in its env block instead.`;
   if (typeof fields.data.command === 'string' && fields.data.command.startsWith('-'))
-    return 'Its command can’t start with "-". Point it at a script instead.';
-  if (parsed.unreadable !== null) return `It can’t be read: ${parsed.unreadable}`;
+    return `Its command can't start with "-". Point it at a script instead.`;
+  if (parsed.unreadable !== null) return `It can't be read: ${parsed.unreadable}`;
   return null;
 }
 
