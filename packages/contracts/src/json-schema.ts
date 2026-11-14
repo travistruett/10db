@@ -112,6 +112,12 @@ import {
   RolePicksDto,
   ModelSetting,
 } from './catalogue';
+import {
+  ModelEvalDto,
+  ModelMeasuresDto,
+  ModelMeasuresQuery,
+  ProviderSpeedDto,
+} from './model-measures';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
@@ -362,6 +368,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'model-effort-dto': ModelEffortDto,
   'model-row-dto': ModelRowDto,
   'models-query': ModelsQuery,
+  'model-measures-query': ModelMeasuresQuery,
+  'model-measures-dto': ModelMeasuresDto,
+  'model-eval-dto': ModelEvalDto,
+  'provider-speed-dto': ProviderSpeedDto,
   'model-picks-query': ModelPicksQuery,
   'role-pick-dto': RolePickDto,
   'role-picks-dto': RolePicksDto,

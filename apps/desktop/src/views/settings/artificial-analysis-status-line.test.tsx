@@ -33,6 +33,21 @@ const ROWS = [
     link: 'Add Key',
   },
   {
+    name: 'no key while OpenRouter is read',
+    status: {
+      keyConfigured: false,
+      openRouter: {
+        keyConfigured: true,
+        outcome: 'ok',
+        lastSuccessAt: TWO_HOURS_AGO,
+        message: null,
+        off: false,
+      },
+    },
+    line: 'No Artificial Analysis key: scores at max effort only, through OpenRouter',
+    link: 'Add Key',
+  },
+  {
     name: 'a daemon started with benchmarks off',
     status: { off: true },
     line: 'Artificial Analysis is off: 10db was started with TENDB_BENCHMARKS=off',

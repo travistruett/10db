@@ -12,11 +12,13 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { benchmarkStatusDto } from '../../test/benchmark-fixtures';
+import { judgeStatusDto, serveJudge } from '../../test/judge-fixtures';
 import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import {
   accountModelDto,
   catalogueStatusDto,
   modelEffortDto,
+  modelMeasuresDto,
   modelProfileDto,
   modelRowDto,
   rolePickDto,
@@ -257,7 +259,8 @@ describe('the Models page', () => {
     expect(row.getByText('Capable')).toBeTruthy();
     // Used by lists only the roles Standard runs (Build and Review), though the pick for Plan is also this model.
     // It is plain text: violet marks a pick on the chart only.
-    expect(row.getByText('Build').getAttribute('style') ?? '').not.toContain('violet');
+    // The picks load after the rows.
+    expect((await row.findByText('Build')).getAttribute('style') ?? '').not.toContain('violet');
     expect(row.queryByText(/Plan/)).toBeNull();
     for (const cell of ['60', '$2.50', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
@@ -288,10 +291,22 @@ describe('the Models page', () => {
 
   it('opens the drawer from a click anywhere on a row, with the effort table', async () => {
     serve();
+    const measuresAsked: URL[] = [];
+    server.use(
+      http.get(daemonUrl('/models/measures'), ({ request }) => {
+        measuresAsked.push(new URL(request.url));
+        return HttpResponse.json(modelMeasuresDto());
+      }),
+    );
     await renderWithDaemonAndRouter(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(within(rowOf('Alpha Max')).getByText('Capable'));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    // The drawer asks for the model's OpenRouter rows on the page's account.
+    await waitFor(() => {
+      expect(measuresAsked.at(-1)?.searchParams.get('account')).toBe(SUBSCRIPTION.id);
+    });
+    expect(measuresAsked.at(-1)?.searchParams.get('model')).toBe('alpha-max');
     const efforts = within(drawer).getByRole('table', { name: 'Effort table' });
     const high = within(efforts).getByRole('row', { name: /high/ });
     expect(within(high).getByText('$2.50')).toBeTruthy();
@@ -302,7 +317,15 @@ describe('the Models page', () => {
     // The header names the ID and the tier; Input, Output and Speed are one dimmed line.
     expect(within(drawer).getByText('alpha-max')).toBeTruthy();
     expect(within(drawer).getByText(/Capable tier/)).toBeTruthy();
-    expect(within(drawer).getByText(/\$5\.00 in · \$25\.00 out · speed 40 tokens\/s/)).toBeTruthy();
+    // The speed is its own element, so its source can be described.
+    expect(
+      within(drawer).getByText(
+        (_, el) =>
+          /^List price per 1M tokens: \$5\.00 in · \$25\.00 out · speed 40 tokens\/s$/.test(
+            (el?.textContent ?? '').trim(),
+          ) && el?.tagName === 'P',
+      ),
+    ).toBeTruthy();
     expect(within(drawer).getByRole('heading', { name: 'Offered by' })).toBeTruthy();
     // The drawer shows AA scores and speed, so it carries the credit.
     expect(within(drawer).getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
@@ -839,7 +862,9 @@ describe('the Models page', () => {
       await renderWithDaemonAndRouter(<ModelsSection />);
       await screen.findByRole('button', { name: 'Open Alpha Max' });
       // Folded, the family's row says a role runs on a version under it.
-      expect(within(rowOf('Alpha Max')).getByText('Review, on an older version')).toBeTruthy();
+      expect(
+        await within(rowOf('Alpha Max')).findByText('Review, on an older version'),
+      ).toBeTruthy();
       fireEvent.click(
         within(rowOf('Alpha Max')).getByRole('button', {
           name: 'Show 1 older version of Alpha Max',
@@ -853,5 +878,112 @@ describe('the Models page', () => {
         }),
       ).toBeTruthy();
     });
+  });
+});
+
+describe('the Models page switch', () => {
+  const chooseView = (name: 'Agents' | 'Decisions') => {
+    fireEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'Models view' })).getByText(name),
+    );
+  };
+  const PAID_BY = accountDto({ kind: 'openrouter', label: 'Decisions key', secretSet: true });
+  const paidBy = () =>
+    judgeStatusDto({
+      config: { ...judgeStatusDto().config, accountId: PAID_BY.id },
+      account: { id: PAID_BY.id, label: PAID_BY.label, secretSet: true, secretState: 'set' },
+    });
+
+  it('opens on Agents, first in the switch, with the playbook', async () => {
+    serveJudge({});
+    serve();
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    const group = await screen.findByRole('radiogroup', { name: 'Models view' });
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual(['agents', 'decisions']);
+    expect(within(group).getByRole('radio', { name: 'Agents' })).toHaveProperty('checked', true);
+    expect(await screen.findByRole('heading', { name: 'Playbook' })).toBeTruthy();
+  });
+
+  it('shows the decisions table and the paid-by account in a disabled select on Decisions', async () => {
+    serveJudge({ status: paidBy() });
+    serve();
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('heading', { name: 'Playbook' });
+    chooseView('Decisions');
+    expect(await screen.findByRole('table', { name: 'Decisions' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Playbook' })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Status' })).toBeNull();
+    const select = await screen.findByRole('combobox', { name: 'Account' });
+    expect(select).toHaveProperty('value', 'Decisions key');
+    expect(select).toHaveProperty('disabled', true);
+    expect(screen.getByText('Paid by')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh Models' })).toBeNull();
+    expect(screen.queryByText(/No Artificial Analysis key/)).toBeNull();
+  });
+
+  it('reads No OpenRouter account on Decisions when none is picked', async () => {
+    serveJudge({});
+    serve();
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('heading', { name: 'Playbook' });
+    chooseView('Decisions');
+    const select = await screen.findByRole('combobox', { name: 'Account' });
+    await waitFor(() => {
+      expect(select).toHaveProperty('placeholder', 'No OpenRouter account');
+    });
+    expect(select).toHaveProperty('disabled', true);
+  });
+
+  it('reads Reading… in the paid-by select while the judge status loads, and the error when it fails', async () => {
+    serve();
+    // The status answers only when released, so the placeholder is read while it is still loading.
+    const { promise: released, resolve: release } = Promise.withResolvers<null>();
+    server.use(
+      http.get(daemonUrl('/judge'), async () => {
+        await released;
+        return HttpResponse.json(
+          { error: 'internal', message: 'The judge is down' },
+          { status: 500 },
+        );
+      }),
+    );
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('heading', { name: 'Playbook' });
+    chooseView('Decisions');
+    const select = await screen.findByRole('combobox', { name: 'Account' });
+    expect(select).toHaveProperty('placeholder', 'Reading…');
+    release(null);
+    await waitFor(() => {
+      expect(select).toHaveProperty('placeholder', 'The judge is down');
+    });
+  });
+
+  it('keeps the Agents account chosen across a switch', async () => {
+    serveJudge({ status: paidBy() });
+    serve();
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    await chooseAccount('Work key');
+    chooseView('Decisions');
+    await screen.findByRole('table', { name: 'Decisions' });
+    chooseView('Agents');
+    expect(await screen.findByRole('combobox', { name: 'Account' })).toHaveProperty(
+      'value',
+      'Work key',
+    );
+  });
+
+  it('still draws Decisions when the model list fails', async () => {
+    serveJudge({});
+    serve();
+    server.use(http.get(daemonUrl('/models'), () => new HttpResponse(null, { status: 500 })));
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    await screen.findByRole('radiogroup', { name: 'Models view' });
+    chooseView('Decisions');
+    expect(await screen.findByRole('table', { name: 'Decisions' })).toBeTruthy();
   });
 });

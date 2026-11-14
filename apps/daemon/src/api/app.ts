@@ -41,6 +41,7 @@ import {
   JudgeCallsPageQuery,
   JudgeConfigPatch,
   BenchmarkKeyInput,
+  ModelMeasuresQuery,
   ModelPicksQuery,
   ModelsQuery,
   KeepAwakeInput,
@@ -1345,6 +1346,14 @@ export function createApp(deps: ApiDeps) {
       (c) => {
         const { account, rigor, project } = c.req.valid('query');
         return c.json(deps.services.modelPicks(account, rigor, project));
+      },
+    )
+    .get(
+      '/models/measures',
+      validator('query', (query) => ModelMeasuresQuery.parse(query)),
+      (c) => {
+        const { model, account } = c.req.valid('query');
+        return c.json(deps.services.modelMeasures(model, account));
       },
     )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))

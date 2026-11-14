@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
 
+/** How long a decision waits for a model before today's rule applies. */
+export const JUDGE_TIMEOUT_MS = 4_000;
+
 /** A routine decision the daemon can ask a fast model to make. */
 export const JudgeDecision = {
   /**

@@ -1,6 +1,7 @@
 import {
   AccountModelDto,
   CatalogueStatusDto,
+  ModelMeasuresDto,
   ModelRowDto,
   RIGORS,
   RolePicksDto,
@@ -92,6 +93,25 @@ export function useEveryRigorPicks(accountId: AccountId | null, projectId: Proje
     queries: RIGORS.map((rigor) => picksQuery(client, accountId, rigor, projectId)),
   });
   return new Map(RIGORS.map((rigor, i) => [rigor, results[i]]));
+}
+
+/**
+ * The OpenRouter rows stored for one model, with the provider the account's speed is measured on; off until a
+ * model is named.
+ */
+export function useModelMeasures(model: string | null, account: AccountId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: [...modelKeys.all, 'measures', model, account],
+    enabled: model !== null,
+    queryFn: async () =>
+      readJson(
+        await client.models.measures.$get({
+          query: { model: model ?? '', ...(account === null ? {} : { account }) },
+        }),
+        ModelMeasuresDto,
+      ),
+  });
 }
 
 /** What each account offers: its launch ID and its own price. */
