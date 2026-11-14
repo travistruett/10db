@@ -51,7 +51,7 @@ describe('Settings › Planning › Send brainstorm messages to fast models', ()
         expect(toggle).toHaveProperty('disabled', disabled);
       });
       const link = screen.getByRole('link', { name: 'Open Decisions' });
-      expect(link.getAttribute('href')).toBe('/settings/decisions?focus=runs-on');
+      expect(link.getAttribute('href')).toBe('/settings/decisions?focus=paid-by');
     },
   );
 

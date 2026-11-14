@@ -1340,6 +1340,8 @@ describe('Plan: past conversations under the composer', () => {
     serve(...conversations(converted, listening));
     const { router } = renderApp('/shape');
     const list = await screen.findByRole('list', { name: 'Recent conversations' });
+    // Plan's measures sit beside the recent conversations on a new conversation.
+    expect(await screen.findByRole('region', { name: 'How Plan is doing' })).toBeTruthy();
     expect(within(list).getAllByRole('listitem')).toHaveLength(2);
     const made = within(list).getByRole('link', { name: /Brainstorm chat/ });
     expect(await within(made).findByText('1 goal · 3 tasks')).toBeTruthy();

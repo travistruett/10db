@@ -74,6 +74,24 @@ export function baseHandlers(
       await delay('infinite');
       return new HttpResponse(null, { status: 204 });
     }),
+    // Plan's measures read the daemon's own log; nothing measured yet.
+    http.get(daemonUrl('/shape-measures', base), () =>
+      HttpResponse.json({
+        sizing: {
+          n: 0,
+          within: 0,
+          buckets: {
+            S: { n: 0, within: 0 },
+            M: { n: 0, within: 0 },
+            L: { n: 0, within: 0 },
+            XL: { n: 0, within: 0 },
+          },
+          overrides: 0,
+        },
+        questions: { converted: { tasks: 0, cards: 0 }, other: { tasks: 0, cards: 0 } },
+        shadow: [],
+      }),
+    ),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
     // Settings › Integrations reads gh's login; signed in, no Sign In running.

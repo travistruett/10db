@@ -137,6 +137,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 | plan-reviewer | fable  | review of a spec or plan                        |
 
 Every report opens with the exact model ID it ran on. The author of a change never reviews it.
+A review converges (`.claude/agents/code-reviewer.md`): round 1 lists everything, later rounds check
+only the earlier findings and what their fixes broke, findings that don't block become follow-up
+tasks, and after two fix rounds the work ships unless a finding blocks. A change with a UI is run
+against the real daemon, by a click-through or an e2e, before it is reviewed.
 `.codex/agents/*.toml` point at the same bodies. Fable is on Amazon Bedrock (inference profile
 `us.anthropic.claude-fable-5-1`), but it answers only when the account's data retention mode in the region is
 `aws_review`; on `default` every call fails with a ValidationException. Until the account is set so, dispatch

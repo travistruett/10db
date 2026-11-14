@@ -1,13 +1,14 @@
 import {
   DecisionModelListDto,
-  JudgeCallDto,
+  DecisionStatsListDto,
+  JudgeCallsPageDto,
   type AccountId,
   JudgeStatusDto,
   JudgeTestResultDto,
+  type JudgeCallsPageQuery,
   type JudgeConfigPatch,
 } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { z } from 'zod';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
@@ -15,16 +16,14 @@ import { useDaemon } from './provider';
 export const judgeKeys = {
   status: ['judge', 'status'],
   calls: ['judge', 'calls'],
+  /** One page of calls; under `calls`, so invalidating `calls` refreshes every page. */
+  callsPage: (query: JudgeCallsPageQuery) => ['judge', 'calls', query] as const,
+  decisions: ['judge', 'decisions'],
   models: ['judge', 'models'],
 } as const;
 
 /** The daemon keeps OpenRouter's list for hours; an open Settings page needn't ask it again sooner than this. */
 const MODELS_STALE_MS = 60 * 60 * 1000;
-
-const JudgeCallList = z.array(JudgeCallDto);
-
-/** How many calls the section lists. */
-const RECENT_CALLS = 20;
 
 /** Calls made by the runner while the section is open arrive without an event, so the list polls. */
 const CALLS_REFRESH_MS = 30_000;
@@ -37,15 +36,35 @@ export function useJudgeStatus() {
   });
 }
 
-export function useJudgeCalls() {
+/** One page of the judge's calls, newest first, as the daemon pages and filters them. */
+export function useJudgeCallsPage(query: JudgeCallsPageQuery) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: judgeKeys.calls,
+    queryKey: judgeKeys.callsPage(query),
     queryFn: async () =>
       readJson(
-        await client.judge.calls.$get({ query: { limit: String(RECENT_CALLS) } }),
-        JudgeCallList,
+        await client.judge.calls.page.$get({
+          query: {
+            limit: String(query.limit),
+            offset: String(query.offset),
+            ...(query.decision === undefined ? {} : { decision: query.decision }),
+            ...(query.outcome === undefined ? {} : { outcome: query.outcome }),
+          },
+        }),
+        JudgeCallsPageDto,
       ),
+    placeholderData: keepPreviousData,
+    refetchInterval: CALLS_REFRESH_MS,
+    refetchOnWindowFocus: 'always',
+  });
+}
+
+/** What each decision's calls came to in the last 30 days; the calls arrive without an event, so it polls. */
+export function useDecisionStats() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: judgeKeys.decisions,
+    queryFn: async () => readJson(await client.judge.decisions.$get(), DecisionStatsListDto),
     refetchInterval: CALLS_REFRESH_MS,
     refetchOnWindowFocus: 'always',
   });

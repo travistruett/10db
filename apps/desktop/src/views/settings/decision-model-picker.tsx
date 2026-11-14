@@ -12,19 +12,17 @@ import {
 import { IconCheck } from '@tabler/icons-react';
 import { DaemonRequestError } from '../../daemon/client';
 import { useDecisionModels, usePatchJudge } from '../../daemon/judge-queries';
-
-/** Three significant figures: $0.042, $0.02, $0.192. */
-const dollars = (usd: number): string => `$${String(Number(usd.toPrecision(3)))}`;
+import { formatDecisionUsd } from './decision-numbers';
 
 /** What a model costs, per million tokens; decision models answer in a few tokens, so most charge for input only. */
 function priceText(
   model: Pick<DecisionModelDto, 'inputUsdPerMillion' | 'outputUsdPerMillion'>,
 ): string {
   if (model.inputUsdPerMillion === 0 && model.outputUsdPerMillion === 0) return 'Free';
-  const input = `${dollars(model.inputUsdPerMillion)} per million input tokens`;
+  const input = `${formatDecisionUsd(model.inputUsdPerMillion)} per million input tokens`;
   return model.outputUsdPerMillion === 0
     ? input
-    : `${input} · ${dollars(model.outputUsdPerMillion)} per million output tokens`;
+    : `${input} · ${formatDecisionUsd(model.outputUsdPerMillion)} per million output tokens`;
 }
 
 /** The line under a model's name: why 10db can't call it, or what it is and what it costs. */
@@ -78,12 +76,12 @@ export function DecisionModelPicker({
   );
   if (!keyed)
     return (
-      <Stack gap={2} align="flex-end">
+      <Stack gap={2} align="flex-start">
         {savedText}
         {status.off ? null : (
           <Text size="xs" c="dimmed">
             {status.account === null
-              ? 'Add an OpenRouter key to pick another model: choose an account under Runs on.'
+              ? 'Add an OpenRouter key to pick another model: choose an account under Paid by.'
               : 'Add an OpenRouter key to pick another model: set the key of the account decisions run on.'}
           </Text>
         )}
@@ -92,7 +90,7 @@ export function DecisionModelPicker({
   if (models.isPending) return <Loader size="sm" aria-label="Loading models" />;
   if (models.isError)
     return (
-      <Stack gap={2} align="flex-end">
+      <Stack gap={2} align="flex-start">
         {savedText}
         <Text size="xs" c="red" role="alert">
           OpenRouter&apos;s decision models could not be read.{' '}
