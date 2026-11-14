@@ -46,6 +46,17 @@ export function recordJudgeOutcome(
   ctx.tx.update(schema.judgeCalls).set({ outcome }).where(eq(schema.judgeCalls.id, callId)).run();
 }
 
+/** What a logged call answered; null when it has no answer or does not exist. */
+export function judgeCallAnswer(db: DbReader, callId: JudgeCallId): string | null {
+  return (
+    db
+      .select({ answer: schema.judgeCalls.answer })
+      .from(schema.judgeCalls)
+      .where(eq(schema.judgeCalls.id, callId))
+      .get()?.answer ?? null
+  );
+}
+
 /** The most recent calls, newest first. The state sent is left out: it is task text and a diff. */
 export function listJudgeCalls(db: DbReader, limit: number): JudgeCallDto[] {
   return pageJudgeCalls(db, { limit, offset: 0 }).calls;

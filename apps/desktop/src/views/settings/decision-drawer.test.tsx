@@ -218,6 +218,7 @@ describe('DecisionDrawer', () => {
           calls: 10,
           acted: 6,
           belowFloor: 2,
+          overridden: 3,
           // A count of timed-out calls, not a wait: named so the load-tolerance check doesn't read it as one.
           fallbacks: { off: 0, no_key: 0, timeout: ONE_CALL, error: 1 },
           costUsd: 0.0123,
@@ -229,6 +230,7 @@ describe('DecisionDrawer', () => {
     for (const part of [
       '6 acted',
       '2 not sure enough',
+      '3 overridden',
       '1 timed out',
       '1 failed',
       '$0.0123',

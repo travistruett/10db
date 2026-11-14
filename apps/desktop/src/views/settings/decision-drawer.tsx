@@ -40,6 +40,7 @@ function lastThirtyDaysParts(stats: DecisionStatsDto): string[] {
     ['calls', stats.calls],
     ['acted', stats.acted],
     ['not sure enough', stats.belowFloor],
+    ['overridden', stats.overridden],
     ['shadow', stats.shadow],
   ];
   const fellBack: readonly (readonly [string, number])[] = [

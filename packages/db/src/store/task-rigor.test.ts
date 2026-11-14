@@ -112,6 +112,22 @@ describe('a task carries its rigor, kinds and effort pin', () => {
     });
   });
 
+  it('hands a task back to sizing when its rigor is cleared, and not for any other change', () => {
+    const project = seedProject(store);
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, { ...brief, rigor: 'careful' }),
+    ).value;
+    const sizedFor = (): unknown =>
+      store.db.$client.prepare('SELECT sized_for FROM tasks WHERE id = ?').get(task.id);
+    const sized = () =>
+      store.db.$client.prepare("UPDATE tasks SET sized_for = 'fp' WHERE id = ?").run(task.id);
+    sized();
+    store.write((ctx) => patchTask(ctx, task.id, { rigor: 'light' }));
+    expect(sizedFor()).toEqual({ sized_for: 'fp' });
+    store.write((ctx) => patchTask(ctx, task.id, { rigor: null }));
+    expect(sizedFor()).toEqual({ sized_for: null });
+  });
+
   it('lets a task keep a kind the builder has deleted, and refuses it on any other task', () => {
     const project = seedProject(store);
     const kind = store.write((ctx) => insertKind(ctx, { key: 'ui', label: 'UI' })).value;

@@ -836,11 +836,14 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/projects/:projectId/batches',
       validator('json', (value): BatchStartInput => BatchStartInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.startBatch(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+      async (c) => {
+        const input = c.req.valid('json');
+        await deps.services.settleSizing(input.taskIds);
+        return c.json(
+          deps.services.startBatch(ProjectId.parse(c.req.param('projectId')), input),
           202,
-        ),
+        );
+      },
     )
     .post(
       '/projects/:projectId/passes',
@@ -1497,6 +1500,8 @@ export function createApp(deps: ApiDeps) {
     })
     .post('/tasks/:taskId/start', async (c) => {
       const taskId = TaskId.parse(c.req.param('taskId'));
+      // Before any read, so two quick Starts of one task run their checks one after the other.
+      await deps.services.settleSizing([taskId]);
       // An empty body is a plain start, whatever its content type; a body that is not JSON is a 400.
       const text = await c.req.text();
       const input = StartTaskInput.parse(text.trim() === '' ? {} : JSON.parse(text));

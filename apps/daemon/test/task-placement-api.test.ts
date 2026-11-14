@@ -178,7 +178,8 @@ describe('the placement proposed when a task is made', () => {
     const { viaMcp } = await makeBoth(created.id, { areas: ['app', ...(entry?.isolate ?? [])] });
     expect(viaMcp).toMatchObject({
       workspaceMode: 'worktree',
-      placementReason: 'touches migrations, deps',
+      // Sizing then adds the kinds the two areas imply, and the copy's reason names them too.
+      placementReason: 'touches migrations, deps, dependencies',
     });
   });
 

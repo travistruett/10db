@@ -360,6 +360,106 @@ describe('TaskDrawer', () => {
     expect(within(await dialog()).queryByTestId('waits-on')).toBeNull();
   });
 
+  it.each([
+    {
+      name: 'judged',
+      source: 'judge',
+      reason: 'judged Careful (0.86)',
+      line: 'Judged Careful (0.86)',
+      kind: 'Docs · judged',
+    },
+    {
+      name: 'raised by rules',
+      source: 'rules',
+      reason: 'at least Careful: migration',
+      line: 'At least Careful: migration',
+      kind: 'Docs · rules',
+    },
+    {
+      name: 'an agent’s',
+      source: 'agent',
+      reason: 'touches the contracts',
+      line: 'An agent: touches the contracts',
+      kind: 'Docs · agent',
+    },
+    {
+      name: 'the builder’s',
+      source: 'builder',
+      reason: null,
+      line: 'Rigor you set',
+      kind: 'Docs · you',
+    },
+  ] as const)('says who sized the rigor and each kind: $name', async (row) => {
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      ...baseHandlers(),
+    );
+    open({
+      task: {
+        rigor: 'careful',
+        effectiveRigor: 'careful',
+        effectiveRigorSource: row.source,
+        effectiveRigorReason: row.reason,
+        kinds: [{ key: 'docs', source: row.source }],
+      },
+    });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(row.line, { exact: false })).toBeTruthy();
+    expect((await within(d).findByTestId('kind-sources')).textContent).toBe(row.kind);
+  });
+
+  it('says a task sized by rules alone was, with no kinds listed', async () => {
+    serve();
+    open({ task: { sizedByRules: true } });
+    const d = await openTab('Edit');
+    expect(await within(d).findByText(/Sized by rules/)).toBeTruthy();
+    expect(within(d).queryByTestId('kind-sources')).toBeNull();
+  });
+
+  it('saves only what the builder changed: a judge answer that lands while it is open is not sent back', async () => {
+    const patched: TaskPatch[] = [];
+    const before = taskDto();
+    server.use(
+      http.get(daemonUrl('/kinds'), () =>
+        HttpResponse.json([kindDto({ key: 'docs', label: 'Docs' })]),
+      ),
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(before);
+      }),
+      ...baseHandlers(),
+    );
+    const view = (task: TaskDto) => (
+      <TaskDrawer task={task} columnName="Ready" peers={peers} onClose={() => undefined} />
+    );
+    const { rerender } = renderWithDaemon(view(before));
+    await dialog();
+    // The judge's answer lands while the drawer is open.
+    const judged = taskDto({
+      id: before.id,
+      rigor: 'careful',
+      effectiveRigor: 'careful',
+      rigorSource: 'judge',
+      effectiveRigorSource: 'judge',
+      kinds: [{ key: 'docs', source: 'judge' }],
+      sizedByRules: false,
+    });
+    rerender(view(judged));
+    await edit('Description', 'Some words');
+    const d = await dialog();
+    // The form follows the live task, and the builder has changed neither field: no discard prompt for them.
+    expect(await within(d).findByText('Docs · judged')).toBeTruthy();
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).not.toHaveProperty('rigor');
+    expect(patched[0]).not.toHaveProperty('kinds');
+    expect(patched[0]).toMatchObject({ description: 'Some words' });
+  });
+
   it('saves the title, description, criteria, kinds, rigor and effort', async () => {
     const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
     const patched: TaskPatch[] = [];
