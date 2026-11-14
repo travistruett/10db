@@ -116,6 +116,7 @@ describe('ConversationDto', () => {
     costUsd: null,
     sendNow: false,
     pausedUntil: null,
+    commands: null,
   };
   it('parses, and refuses an unknown state', () => {
     expect(ConversationDto.safeParse(dto).success).toBe(true);

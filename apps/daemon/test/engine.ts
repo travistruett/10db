@@ -72,7 +72,15 @@ import {
   secretFingerprint,
   type Keychain,
 } from '../src/environment';
-import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
+import {
+  createEventBus,
+  createLiveFrames,
+  createStateStore,
+  type EventBus,
+  type LiveFrames,
+  type StateStore,
+} from '../src/events';
+import { createLiveRegistry, type LiveRegistry } from '../src/conversation';
 import { applySkippedChoice, createDeliveryJobs, skipFollowUpStarter } from '../src/delivery';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
@@ -166,6 +174,10 @@ export interface TestEngine {
   readonly inbox: InboxService;
   /** The running sessions' wait observers and signals, as the MCP side reads them. */
   readonly live: LiveSessions;
+  /** The live frames a task conversation's session sends, as the event socket gets them. */
+  readonly frames: LiveFrames;
+  /** What each task conversation streams now, as `GET /conversations/:id/live` reads it. */
+  readonly laneLive: LiveRegistry;
   /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
   readonly sends: StakeholderSends;
   readonly replyWatch: ReplyWatch;
@@ -243,6 +255,7 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
 /** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
   off: true,
+  ready: () => Promise.resolve(false),
   choose: () =>
     Promise.resolve({
       kind: 'fallback',
@@ -533,7 +546,10 @@ export async function createTestEngine(
   await new Promise((r) => server.once('listening', r));
   // serve() on a TCP port always reports an AddressInfo once listening.
   const mcpUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
+  const frames = createLiveFrames();
+  const laneLive = createLiveRegistry();
   const created = createRunner({
+    judge: triageJudge,
     // The daemon's own git and gh, as `startDaemon` resolves them.
     gitTools: { git: await resolveGit(), gh: resolveGh() },
     laneSandbox: null,
@@ -555,6 +571,8 @@ export async function createTestEngine(
     // No test declares an AWS profile; one that did would have no CLI to ask.
     exportAwsCredentials: () => Promise.reject(new AwsCredentialsError('no AWS CLI in this test')),
     dataDir: data.path,
+    frames,
+    laneLive,
     worktreeRoot: join(data.path, 'worktrees'),
     codexLaneTempRoot: join(data.path, 'lanes'),
     // Never the developer's own home: a test's builder has no instructions, skills or plugins.
@@ -610,6 +628,8 @@ export async function createTestEngine(
     bus,
     inbox,
     live,
+    frames,
+    laneLive,
     sends,
     replyWatch,
     timerWatch,

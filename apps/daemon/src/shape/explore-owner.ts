@@ -11,10 +11,11 @@ import {
   parseItemBody,
   ShapeEventKind,
   TrustSurface,
+  JudgeDecision,
+  JudgeKind,
   type AccountKind,
   type AgentAccountKind,
   type Effort,
-  type JudgeKind,
   type ProjectId,
   type ConversationFileId,
 } from '@10db/contracts';
@@ -63,7 +64,16 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { expandHome } from '../sandbox';
 import type { ShapeImage, ShapeToolRequest, ShapeVerdict } from '../sessions';
-import { buildTrustPolicy, projectLiveSystems } from '../trust';
+import {
+  buildTrustPolicy,
+  judgeForCall,
+  projectGrantLines,
+  projectLiveSystems,
+  startingJudge,
+} from '../trust';
+import { createHookJudge, createLimitNotes } from '../inbox';
+import type { Clock } from '../clock';
+import type { Judge } from '../judge';
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertedStateNote } from './converted-state';
 import { buildDigest } from './digest';
@@ -126,6 +136,9 @@ export interface ShapeOwnerDeps {
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
+  /** 10db's judge, asked whether it is ready as each session starts; absent, a tendb session is on the rules. */
+  readonly judge?: Judge;
+  readonly clock: Clock;
   readonly contextLimitPct: number;
   readonly turnOf: (shapeId: ShapeId) => ShapeTurnState;
   /** Tells the screen the conversation changed, for what no row records. */
@@ -328,9 +341,17 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
   };
 
   /** The PreToolUse hook of a session: confinement, then the read budget's charge (§5.4). */
+  /**
+   * Plan's own judge of a call. `tendbReady` chooses each call's judge, as the hook judge does: a native session's
+   * call outside auto mode has no classifier behind it, so the confinement reads it as 10db's judge or the rules.
+   */
   const preToolUse =
-    (shapeId: ShapeId, access: ShapeAccess, limits: PictureLimits) =>
+    (shapeId: ShapeId, access: ShapeAccess, limits: PictureLimits, tendbReady: boolean) =>
     (req: ShapeToolRequest): ShapeVerdict => {
+      const judge =
+        access.judge === undefined
+          ? undefined
+          : judgeForCall(access.judge, req.reportedMode ?? null, tendbReady);
       let verdict: ShapeVerdict = judgeShapeCall(
         {
           toolName: req.toolName,
@@ -339,7 +360,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           agentType: req.agentType,
           cwd: req.cwd,
         },
-        access,
+        judge === undefined ? access : { ...access, judge },
       );
       // A picture or PDF the session itself Reads is resent with every later request (§5.4); a
       // subagent's reaches the session as text, so only the session's own Reads are counted.
@@ -427,7 +448,14 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const limits = deps.limitsFor(launch.account.kind);
       // Only this conversation's files: another conversation's, in the same project or not, stay unread.
       // Where the judge is native the session runs in auto mode, with the web (trust line §8, §12).
-      const judge = deps.judgeOf(launch.account.kind, launch.modelId);
+      // Plan always asks for its agent's judge; 10db's judge where it is the account's and ready.
+      const tendbReady = (await deps.judge?.ready(JudgeDecision.CrossesLimit)) ?? false;
+      const judge = startingJudge(
+        deps.judgeOf(launch.account.kind, launch.modelId),
+        true,
+        tendbReady,
+      );
+      const limitNotes = createLimitNotes();
       const fileAccess: ShapeAccess = {
         ...launch.access,
         filesDir: shapeFilesDir(deps.filesDir, shapeId),
@@ -481,6 +509,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           ? null
           : await deps.prepare({
               projectId: shape.projectId,
+              conversationId: conv.id,
               shapeId,
               sessionId: start.sessionId,
               accountKind: launch.account.kind,
@@ -488,6 +517,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
               resumeProviderSessionId: resumeId,
               signal: ending.signal,
               observer: start.observer,
+              limits: limitNotes,
             });
       let released: Promise<void> | null = null;
       const release = (): Promise<void> => {
@@ -529,6 +559,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           );
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+        grants: projectGrantLines(state.db, project.id),
       });
       return {
         spec: {
@@ -563,7 +594,45 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
               : ready.canUseTool(req),
-          preToolUse: preToolUse(shapeId, access, limits),
+          preToolUse: preToolUse(shapeId, access, limits, tendbReady),
+          ...(deps.judge === undefined || judge === JudgeKind.Rules
+            ? {}
+            : {
+                judgeCall: createHookJudge(
+                  { judge: deps.judge, state, logger: log },
+                  {
+                    projectId: project.id,
+                    workstreamId: null,
+                    taskId: null,
+                    // Plan writes nothing, so its edits never reach the fast path's write rule.
+                    fastPath: {
+                      checkout: launch.cwd,
+                      tmpDir: launch.cwd,
+                      secretFiles: access.secretFiles ?? [],
+                      preExisting: [],
+                    },
+                    policy,
+                    allowLines: () => projectGrantLines(state.db, project.id),
+                    judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+                    // Plan's allow list holds none of the project's allowed commands, on native too.
+                    coveredByBuilderRule: () => false,
+                    floorVerdict: (req) => {
+                      const floor = preToolUse(
+                        shapeId,
+                        { ...access, judge: JudgeKind.Rules },
+                        limits,
+                        tendbReady,
+                      )({ ...req, toolUseId: req.toolUseId ?? undefined });
+                      // A rewrite of the call is the guard's; its decision is what the floor gives.
+                      return 'updatedInput' in floor ? { decision: 'allow' } : floor;
+                    },
+                    skips: null,
+                    limits: limitNotes,
+                    onFloor: () => undefined,
+                    clock: deps.clock,
+                  },
+                ),
+              }),
           postToolUse: (req) => {
             // The result of a Read the hook counted replaces the allowance it was charged.
             if (req.toolName !== 'Read' || req.agentId !== undefined) return;

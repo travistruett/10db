@@ -61,6 +61,7 @@ describe('App shell', () => {
     expect(order).toEqual([
       'Inbox',
       'Factory',
+      'Sessions',
       'switcher',
       'Board',
       'Plan',

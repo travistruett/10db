@@ -502,6 +502,21 @@ describe('gitDirs', () => {
   });
 });
 
+describe('untrackedAndIgnored', () => {
+  it('lists untracked and ignored entries, an ignored folder once, and no tracked change, up to the cap', async () => {
+    write('.gitignore', 'data/\n');
+    rawGit('add', '.gitignore');
+    rawGit('commit', '-q', '-m', 'ignore data');
+    mkdirSync(join(repo.path, 'data'));
+    write('README.md', 'edited');
+    write('notes.txt', 'n');
+    write('data/a.db', 'x');
+    write('data/b.db', 'y');
+    expect(await git.untrackedAndIgnored(repo.path, 50)).toEqual(['notes.txt', 'data/']);
+    expect(await git.untrackedAndIgnored(repo.path, 1)).toEqual(['notes.txt']);
+  });
+});
+
 describe('changedPaths', () => {
   it.each([
     {

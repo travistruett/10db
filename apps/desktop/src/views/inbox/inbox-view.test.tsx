@@ -212,6 +212,30 @@ describe('InboxView', () => {
     expect(answers).toEqual([]);
   });
 
+  it('a limit card reads Allow once, Always in this project and Deny', async () => {
+    const permission = inboxItemDto({
+      kind: 'permission',
+      title: 'Allow this? It may write to a live system',
+      body: 'vercel deploy --prod',
+      category: 'access',
+      options: [
+        { label: 'allow_once', description: 'Allow this call once' },
+        {
+          label: 'always_in_project',
+          description: 'Allow calls like this in this project from now on.',
+        },
+        { label: 'deny', description: 'Deny; your note is passed to the agent' },
+      ],
+    });
+    inbox([permission]);
+    renderApp('/inbox');
+    expect(await screen.findByText('vercel deploy --prod')).toBeTruthy();
+    for (const name of ['Allow once', 'Always in this project', 'Deny']) {
+      expect(screen.getByRole('radio', { name: new RegExp(`^\\d?\\s*${name}`) })).toBeTruthy();
+    }
+    expect(screen.queryByText('always_in_project')).toBeNull();
+  });
+
   it('shows the four permission choices in words and sends the chosen value', async () => {
     const permission = inboxItemDto({
       kind: 'permission',

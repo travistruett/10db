@@ -54,6 +54,7 @@ import {
   type HookCalls,
   type ToolGate,
 } from './claude-session-hooks';
+import { judgedVerdict } from './session-judge';
 import { deniedCallOf } from './permission-denied';
 import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
@@ -254,16 +255,20 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
                   cardGoesWithCall: true,
                 })
               : null,
-          judge: (hookInput) => {
-            const verdict = spec.preToolUse({
+          judge: async (hookInput, signal) => {
+            const req = {
               toolName: hookInput.tool_name,
               input: hookInput.tool_input,
               cwd: hookInput.cwd,
-              toolUseId: hookInput.tool_use_id,
               // Each call carries the mode Claude Code reports with it; none is not auto mode.
               reportedMode:
                 hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
-            });
+            };
+            const verdict = await judgedVerdict(
+              spec,
+              spec.preToolUse({ ...req, toolUseId: hookInput.tool_use_id }),
+              { ...req, toolUseId: hookInput.tool_use_id, signal, hunk: null },
+            );
             // The call as it will run: an input the guard rewrote is the one auto mode may deny.
             calls.remember(hookInput.tool_use_id, {
               toolName: hookInput.tool_name,
@@ -341,16 +346,26 @@ function exploreQueryOptions(
           cwds,
           beforeCall: deps.beforeCall,
           onDenied: deps.onDenied,
-          judge: (hookInput) =>
-            toShapeHookOutput(
-              spec.preToolUse({
-                toolName: hookInput.tool_name,
-                input: hookInput.tool_input,
-                agentId: hookInput.agent_id,
-                agentType: hookInput.agent_type,
-                cwd: hookInput.cwd,
+          judge: async (hookInput, signal) => {
+            const req = {
+              toolName: hookInput.tool_name,
+              input: hookInput.tool_input,
+              agentId: hookInput.agent_id,
+              agentType: hookInput.agent_type,
+              cwd: hookInput.cwd,
+              // Each call carries the mode Claude Code reports with it; none is not auto mode.
+              reportedMode:
+                hookInput.permission_mode === 'auto' ? ReportedMode.Auto : ReportedMode.Other,
+            };
+            return toShapeHookOutput(
+              await judgedVerdict(spec, spec.preToolUse(req), {
+                ...req,
+                toolUseId: hookInput.tool_use_id,
+                signal,
+                hunk: null,
               }),
-            ),
+            );
+          },
         }),
       ],
       ...measurementHooks(spec, deps.logger),

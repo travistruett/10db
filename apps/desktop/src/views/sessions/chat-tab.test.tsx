@@ -1,0 +1,362 @@
+import {
+  mintId,
+  type ChatDto,
+  type ChatToolResult,
+  type ConversationItemDto,
+} from '@10db/contracts';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { afterEach, describe, expect, it } from 'vitest';
+import { chatDto, chatServer } from '../../test/chat-fixtures';
+import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
+import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
+import { commandCall, mcpCall } from '../../test/tool-call-fixtures';
+
+// A chat's tab over the daemon: its bar, its builder-tool rows, its cards and its states.
+
+const project = projectViewDto({ name: 'ampsio' });
+const CLAUDE = { ...CLAUDE_CAPABILITIES, label: 'Claude Code' };
+
+afterEach(() => {
+  localStorage.clear();
+});
+
+type Chat = Parameters<typeof chatDto>[0];
+
+function openChat(
+  overrides: Chat = {},
+  items: (chat: ChatDto) => ConversationItemDto[] = () => [],
+  extra: Parameters<typeof server.use> = [],
+  projects = [project],
+) {
+  const chat = chatDto({
+    projectId: project.id,
+    ...overrides,
+    conversation: { capabilities: CLAUDE, model: 'claude-opus-5', ...overrides.conversation },
+  });
+  const served = chatServer({ chats: [chat], items: { [chat.conversationId]: items(chat) } });
+  server.use(
+    ...extra,
+    http.get(daemonUrl('/projects'), () => HttpResponse.json(projects)),
+    ...served.handlers,
+    ...baseHandlers(),
+  );
+  const app = renderApp(`/sessions?chat=${chat.id}`);
+  return { chat, served, ...app };
+}
+
+const taskResult = (r: ChatToolResult) => JSON.stringify(r);
+const taskId = mintId('Task');
+
+const createRow = (chat: ChatDto) =>
+  toolItem(
+    chat.conversationId,
+    mcpCall({
+      id: 'create',
+      harnessTool: 'mcp__10db__create_task',
+      server: '10db',
+      tool: 'create_task',
+      title: '10db.create_task',
+      resultTail: taskResult({
+        kind: 'task',
+        taskId,
+        title: 'Retry export on timeout',
+        column: 'Ready',
+      }),
+    }),
+  );
+
+describe('ChatTab: the session bar', () => {
+  it('shows the title, what the session is, the agent and model by capabilities, and the meter', async () => {
+    openChat({ title: 'Login fails after sleep', conversation: { contextPct: 41 } });
+    expect((await screen.findByTitle('Double-click to rename')).textContent).toBe(
+      'Login fails after sleep',
+    );
+    expect(screen.getByText('Chat · reads ampsio')).toBeTruthy();
+    expect(await screen.findByText('Claude Code ·')).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>('combobox', { name: 'Model' }).value).toContain(
+      'claude-opus-5',
+    );
+    expect(screen.getByText('41%')).toBeTruthy();
+  });
+
+  it('renames on a double-click and Enter, sending the new title', async () => {
+    const { served } = openChat({ title: 'Login fails after sleep' });
+    fireEvent.doubleClick(await screen.findByTitle('Double-click to rename'));
+    const field = screen.getByRole('textbox', { name: 'Session name' });
+    fireEvent.change(field, { target: { value: 'Sleep bug' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => {
+      expect(served.patches).toEqual([
+        { chatId: served.chats[0]?.id, body: { title: 'Sleep bug' } },
+      ]);
+    });
+  });
+
+  it('File as Tasks sends the fixed message as the builder’s turn', async () => {
+    const { served } = openChat();
+    fireEvent.click(await screen.findByRole('button', { name: 'File as Tasks' }));
+    await waitFor(() => {
+      expect(served.messages).toHaveLength(1);
+    });
+    expect(served.messages[0]?.body).toEqual({
+      text: 'File the work we agreed on as tasks on the Board.',
+    });
+  });
+
+  it.each([
+    { name: 'a metered account adds the cost', costUsd: 0.42, tip: /\$0\.42 so far/ },
+    { name: 'an account without cost says none', costUsd: null, tip: null },
+  ])('the meter’s tooltip: $name', async ({ costUsd, tip }) => {
+    openChat({ conversation: { contextPct: 41, costUsd } });
+    const meter = await screen.findByRole('img', { name: /41% of the context used/ });
+    expect(meter.getAttribute('aria-label')).toContain(
+      'Past 70%, the next turn continues in a fresh session with a summary.',
+    );
+    if (tip === null) expect(meter.getAttribute('aria-label')).not.toContain('so far');
+    else expect(meter.getAttribute('aria-label')).toMatch(tip);
+  });
+
+  it('with no capabilities beyond the floor: plain-text model, no Attach, no slash hint, no cost', async () => {
+    openChat({
+      conversation: {
+        capabilities: {
+          ...CLAUDE,
+          modelSwitch: 'none',
+          images: [],
+          slashCommands: false,
+          costUsd: false,
+        },
+        contextPct: 41,
+        costUsd: null,
+      },
+    });
+    expect(await screen.findByText('Claude Code · claude-opus-5')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();
+    expect(screen.queryByText(/\/ commands/)).toBeNull();
+    expect(screen.getByRole('img', { name: /41%/ }).getAttribute('aria-label')).not.toContain('$');
+  });
+
+  it('says how a session is judged only on the rules floor', async () => {
+    openChat({ conversation: { capabilities: { ...CLAUDE, judge: 'rules' } } });
+    expect(await screen.findByText(/Judged by 10db’s rules\./)).toBeTruthy();
+  });
+});
+
+describe('ChatTab: the chat’s builder-tool rows', () => {
+  it('Undo removes the task through the daemon, and its refusal is said in the row', async () => {
+    const removed: string[] = [];
+    openChat({}, (chat) => [createRow(chat)], [
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([
+          taskDto({ id: taskId, title: 'Retry export on timeout', boardStatus: 'ready' }),
+        ]),
+      ),
+      http.post(daemonUrl('/tasks/:taskId/remove'), ({ params }) => {
+        removed.push(String(params['taskId']));
+        return HttpResponse.json(
+          { error: 'conflict', message: 'This task has started, so it can’t be removed.' },
+          { status: 409 },
+        );
+      }),
+    ]);
+    expect(await screen.findByText('Retry export on timeout')).toBeTruthy();
+    expect(screen.getByText('Added to Ready')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open on Board' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(await screen.findByText('This task has started, so it can’t be removed.')).toBeTruthy();
+    expect(removed).toEqual([taskId]);
+  });
+
+  it('Undo on a task removes it and the row says so', async () => {
+    openChat({}, (chat) => [createRow(chat)], [
+      http.post(daemonUrl('/tasks/:taskId/remove'), () =>
+        HttpResponse.json(taskDto({ id: taskId })),
+      ),
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    expect(await screen.findByText('Removed')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
+  it('an edit reads "Changed the title", and its Undo puts the old title back, never removing', async () => {
+    const patches: unknown[] = [];
+    let removes = 0;
+    openChat(
+      {},
+      (chat) => [
+        toolItem(
+          chat.conversationId,
+          mcpCall({
+            id: 'edit',
+            harnessTool: 'mcp__10db__edit_task',
+            server: '10db',
+            tool: 'edit_task',
+            resultTail: taskResult({
+              kind: 'task_edit',
+              taskId,
+              title: 'Retry export',
+              previous: { title: 'Retry export on timeout' },
+            }),
+          }),
+        ),
+      ],
+      [
+        http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+          patches.push(await request.json());
+          return HttpResponse.json(taskDto({ id: taskId }));
+        }),
+        http.post(daemonUrl('/tasks/:taskId/remove'), () => {
+          removes += 1;
+          return HttpResponse.json(taskDto({ id: taskId }));
+        }),
+      ],
+    );
+    expect(await screen.findByText('Changed the title')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(patches).toEqual([{ title: 'Retry export on timeout' }]);
+    });
+    expect(removes).toBe(0);
+  });
+
+  it('a start row links the board and has no Undo; a rename row undoes by patching the title back', async () => {
+    const { served } = openChat({ title: 'Sleep bug' }, (chat) => [
+      toolItem(
+        chat.conversationId,
+        mcpCall({
+          id: 'start',
+          harnessTool: 'mcp__10db__start_task',
+          server: '10db',
+          tool: 'start_task',
+          resultTail: taskResult({ kind: 'start', taskId, started: true }),
+        }),
+      ),
+      toolItem(
+        chat.conversationId,
+        mcpCall({
+          id: 'title',
+          harnessTool: 'mcp__10db__set_title',
+          server: '10db',
+          tool: 'set_title',
+          resultTail: taskResult({
+            kind: 'title',
+            title: 'Sleep bug',
+            previousTitle: 'Login fails',
+          }),
+        }),
+      ),
+    ]);
+    expect(await screen.findByText('Renamed this session to ‘Sleep bug’')).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Open on Board' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(served.patches.at(-1)?.body).toEqual({ title: 'Login fails' });
+    });
+  });
+});
+
+describe('ChatTab: cards, held-back calls and states', () => {
+  it('shows a waiting card above the composer and answers it through the Inbox', async () => {
+    const answers: unknown[] = [];
+    const { chat } = openChat();
+    const card = inboxItemDto({
+      kind: 'permission',
+      projectId: project.id,
+      title: 'Run a command',
+      body: 'pnpm vitest run',
+      category: 'access',
+      options: [
+        { label: 'allow_once', description: 'Allow this call once' },
+        { label: 'deny', description: 'Deny' },
+      ],
+      detail: { conversationId: chat.conversationId },
+    });
+    server.use(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json([card])),
+      http.post(daemonUrl('/inbox/:id/answer'), async ({ request }) => {
+        answers.push(await request.json());
+        return HttpResponse.json({ ...card, state: 'ANSWERED' });
+      }),
+    );
+    const region = await screen.findByRole('region', { name: 'Waiting for your answer' });
+    expect(within(region).getByText('Also in your Inbox.')).toBeTruthy();
+    fireEvent.click(within(region).getByRole('radio', { name: /Allow once/ }));
+    fireEvent.click(within(region).getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ choice: 'allow_once' }]);
+    });
+  });
+
+  it('a call the judge held back shows its limit and Allow This, which sends "Go ahead"', async () => {
+    const { served } = openChat({}, (chat) => [
+      builderItem(chat.conversationId, 'Fetch it'),
+      toolItem(
+        chat.conversationId,
+        commandCall({
+          id: 'held',
+          title: 'curl example.com',
+          command: 'curl example.com',
+          status: 'denied',
+          deniedBy: 'judge',
+          limit: 'sends_data_out',
+          soft: true,
+          refusal: null,
+        }),
+      ),
+    ]);
+    expect(await screen.findByText(/Held back: this would send data out/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow This' }));
+    await waitFor(() => {
+      expect(served.messages).toHaveLength(1);
+    });
+    expect(served.messages[0]?.body).toEqual({ text: 'Go ahead: curl example.com' });
+  });
+
+  it('a chat whose project was removed keeps its transcript and has no composer', async () => {
+    openChat(
+      {},
+      (chat) => [builderItem(chat.conversationId, 'Why does it fail?')],
+      [],
+      [projectViewDto({ name: 'other' })],
+    );
+    expect(await screen.findByText('This project was removed from 10db.')).toBeTruthy();
+    expect(await screen.findByText('Why does it fail?')).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+  });
+
+  it('a session that ended in error says so, in words, after the transcript', async () => {
+    openChat({ conversation: { state: 'ended_error' } }, (chat) => [
+      builderItem(chat.conversationId, 'Hi'),
+    ]);
+    expect(
+      await screen.findByText('The session stopped. Send a message to start it again.'),
+    ).toBeTruthy();
+  });
+
+  it('a refused model shows the red alert with the daemon’s words and keeps the draft', async () => {
+    openChat({}, () => [], [
+      http.patch(daemonUrl('/chats/:chatId'), () =>
+        HttpResponse.json(
+          { error: 'refused', message: 'That model is not on this account.' },
+          { status: 409 },
+        ),
+      ),
+    ]);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), {
+      target: { value: 'half a thought' },
+    });
+    const picker = screen.getByRole('combobox', { name: 'Model' });
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole('option', { name: /claude-sonnet-5-5/, hidden: true }));
+    expect(await screen.findByText('Not available on this account')).toBeTruthy();
+    expect(screen.getByText('That model is not on this account.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Choose Another Model' })).toBeTruthy();
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message' }).value).toBe(
+      'half a thought',
+    );
+  });
+});

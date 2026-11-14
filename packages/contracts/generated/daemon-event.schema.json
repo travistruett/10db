@@ -75,6 +75,7 @@
         "goal.created",
         "goal.changed",
         "shape.changed",
+        "chat.changed",
         "conversation.item_added",
         "conversation.item_updated",
         "conversation.state",

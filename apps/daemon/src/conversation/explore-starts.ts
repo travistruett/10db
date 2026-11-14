@@ -175,6 +175,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
       },
     });
     made.launch = launch;
+    rt.judge = launch.spec.profile.judge ?? null;
     // A start Stop cancelled, or one the engine's close overtook, ends here: the row ends, the
     // launch is released, and its starters wait as they were.
     if (cancelled() || core.isClosed()) {

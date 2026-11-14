@@ -8,6 +8,18 @@ import {
 } from './task-screens';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
+  ChatCreateInput,
+  ChatDto,
+  ChatModelsDto,
+  ChatPatchInput,
+  ConversationFilesQuery,
+  ProjectFileMatchDto,
+  SessionStartDto,
+  SessionsSettingsDto,
+} from './chat';
+import { ChatToolResult } from './chat-tools';
+import {
+  AgentCommandDto,
   ConversationDeltaFrame,
   ConversationDto,
   ConversationFullDto,
@@ -272,7 +284,7 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
-import { LiveSystemsDto } from './trust-policy';
+import { LiveSystemsDto, TrustGrantDto } from './trust-policy';
 import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
 
@@ -301,6 +313,16 @@ const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
   'agent-capabilities-dto': AgentCapabilitiesDto,
+  'agent-command-dto': AgentCommandDto,
+  'chat-create-input': ChatCreateInput,
+  'chat-dto': ChatDto,
+  'chat-models-dto': ChatModelsDto,
+  'chat-patch-input': ChatPatchInput,
+  'chat-tool-result': ChatToolResult,
+  'conversation-files-query': ConversationFilesQuery,
+  'project-file-match-dto': ProjectFileMatchDto,
+  'session-start-dto': SessionStartDto,
+  'sessions-settings-dto': SessionsSettingsDto,
   'conversation-delta-frame': ConversationDeltaFrame,
   'conversation-dto': ConversationDto,
   'conversation-full-dto': ConversationFullDto,
@@ -342,6 +364,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,
   'live-systems-dto': LiveSystemsDto,
+  'trust-grant-dto': TrustGrantDto,
   'tool-call-view': ToolCallView,
   'trust-overrides': TrustOverrides,
   'trust-settings-dto': TrustSettingsDto,

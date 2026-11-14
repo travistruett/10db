@@ -77,6 +77,7 @@ import {
   transitionWorkstream,
   updateInboxItem,
   upsertTaskContext,
+  listJudgeCalls,
 } from '@10db/db';
 import { readSkillBody } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -130,7 +131,13 @@ import {
   type LaneSession,
   type LaneSessionInput,
 } from '../sandbox';
-import type { FakeScriptBook, SessionEvent, SessionHandle, LaneSessionSpec } from '../sessions';
+import type {
+  FakeScriptBook,
+  JudgedCallRequest,
+  SessionEvent,
+  SessionHandle,
+  LaneSessionSpec,
+} from '../sessions';
 import {
   createMemoryKeychain,
   FAKE_SRT,
@@ -5627,7 +5634,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         .map((message) => message.body)
         .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
     const GATEWAY_NOTICE =
-      "10db's rules judge this session, not auto mode: auto mode doesn't run through a gateway account yet. A call those rules can't settle waits on a card.";
+      "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.";
 
     it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge', async () => {
       const { specs, task, workstream } = await start(PLAN);
@@ -5800,6 +5807,278 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         ),
       ).toBe(true);
       await engine.runner.idle();
+    });
+  });
+
+  describe("a lane on 10db's judge", () => {
+    const GATEWAY: Parameters<typeof createTestEngine>[3] = {
+      account: {
+        kind: 'gateway',
+        label: 'Gateway',
+        settings: { baseUrl: 'https://gateway.example.com' },
+      },
+      secret: 'sk-gateway-test-key',
+    };
+    let states: string[];
+    /** What 10db's judge's model answers for a state: a choice, or `fail` for an HTTP failure. */
+    let answer: (state: string) => string;
+    const judgeFetch: typeof fetch = (_input, init) => {
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        state?: string;
+      };
+      const state = body.state ?? '';
+      states.push(state);
+      const choice = answer(state);
+      if (choice === 'fail') return Promise.resolve(new Response('{}', { status: 500 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            model: 'typesafe/jev-1.13',
+            answers: {
+              decision: {
+                type: 'choice',
+                choice,
+                confidence: 0.95,
+                probabilities: { [choice]: 0.95 },
+              },
+            },
+            usage: { cost: 0 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    };
+    const start = async (
+      setup: Parameters<typeof createTestEngine>[3] = GATEWAY,
+      project: Parameters<typeof createTestEngine>[1] = {},
+    ) => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        project,
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { ...setup, openRouter: { fetch: judgeFetch } },
+      );
+      if (setup.account?.kind === 'claude_subscription')
+        engine.state.write((ctx) =>
+          patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+        );
+      const specs = recordSpecs();
+      const { task, workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      const judgeCall = spec.judgeCall;
+      if (judgeCall === undefined) throw new Error('the lane has no session judge');
+      return { spec, judgeCall, task, workstream };
+    };
+    const call = (
+      toolName: string,
+      input: Record<string, unknown>,
+      toolUseId: string,
+    ): JudgedCallRequest => ({
+      toolName,
+      input,
+      toolUseId,
+      signal: new AbortController().signal,
+      hunk: null,
+    });
+    const bash = (command: string, toolUseId: string) => call('Bash', { command }, toolUseId);
+    /** The guard, then the session judge, as the hook runs them. */
+    const hook = async (
+      spec: LaneSessionSpec,
+      judgeCall: NonNullable<LaneSessionSpec['judgeCall']>,
+      req: JudgedCallRequest,
+    ) => {
+      const verdict = spec.preToolUse({ ...req, toolUseId: req.toolUseId ?? undefined });
+      return verdict.decision === 'allow' && !('settled' in verdict && verdict.settled)
+        ? judgeCall(req)
+        : verdict;
+    };
+
+    beforeEach(() => {
+      states = [];
+      answer = () => 'allow';
+    });
+
+    it('a gateway lane runs pnpm test after the judge allows it, with no card, in default mode', async () => {
+      const { spec, judgeCall } = await start();
+      expect(spec.profile.lanePermissionMode).toBe('default');
+      expect(spec.prompt).toContain("10db's judge checks each call against four limits");
+      expect(await hook(spec, judgeCall, bash('pnpm test', 'toolu_1'))).toEqual({
+        decision: 'allow',
+        settled: "Allowed by 10db's judge",
+      });
+      expect(states).toHaveLength(1);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      await engine.runner.idle();
+    });
+
+    it("a gateway lane's call the project's allowed commands cover runs with no model; the step's own list settles nothing", async () => {
+      const { spec, judgeCall } = await start(GATEWAY, { allowedCommands: ['psql'] });
+      expect(await hook(spec, judgeCall, bash('psql -c "select 1"', 'toolu_20'))).toEqual({
+        decision: 'allow',
+        settled: "The builder's allow rule covers this call, so it runs, as in Claude Code.",
+      });
+      expect(states).toEqual([]);
+      // The step's own list (`Bash(git log:*)`) is not the builder's: its call still reaches the model.
+      await hook(spec, judgeCall, bash('git log -p', 'toolu_21'));
+      expect(states).toHaveLength(1);
+      await engine.runner.idle();
+    });
+
+    it("a gateway lane's deploy is a tendb_judge skip, with no Inbox card", async () => {
+      const { spec, judgeCall, workstream } = await start();
+      answer = () => 'writes_live';
+      const verdict = await hook(spec, judgeCall, bash('vercel deploy --prod', 'toolu_2'));
+      expect(verdict.decision).toBe('deny');
+      expect(verdict.decision === 'deny' ? verdict.reason : '').toMatch(/^Skipped:/);
+      expect(skipsOf(workstream.id)).toEqual([
+        {
+          toolName: 'Bash',
+          summary: 'vercel deploy --prod',
+          kind: 'classifier',
+          source: 'tendb_judge',
+        },
+      ]);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      await engine.runner.idle();
+    });
+
+    it('a gateway lane runs WebFetch without a card when the judge allows it', async () => {
+      const { spec, judgeCall, workstream } = await start();
+      const verdict = await hook(
+        spec,
+        judgeCall,
+        call('WebFetch', { url: 'https://example.net/', prompt: 'x' }, 'toolu_3'),
+      );
+      expect(verdict).toEqual({ decision: 'allow', settled: "Allowed by 10db's judge" });
+      expect(skipsOf(workstream.id)).toEqual([]);
+      await engine.runner.idle();
+    });
+
+    it("a gateway lane's grep -rn over a checkout holding .env reaches the model", async () => {
+      const { spec, judgeCall } = await start();
+      writeFileSync(join(spec.cwd, '.env'), 'KEY=1\n');
+      await hook(spec, judgeCall, bash('grep -rn KEY .', 'toolu_4'));
+      expect(states).toHaveLength(1);
+      expect(states[0]).toContain('grep -rn KEY .');
+      await engine.runner.idle();
+    });
+
+    it('OpenRouter failing mid-session: the next deploy is a skipped_actions row, the lane never waits, and the thread says so once', async () => {
+      const { spec, judgeCall, task, workstream } = await start();
+      await hook(spec, judgeCall, bash('pnpm test', 'toolu_5'));
+      answer = () => 'fail';
+      await hook(spec, judgeCall, bash('vercel deploy --prod', 'toolu_6'));
+      await hook(spec, judgeCall, bash('vercel deploy --prod --force', 'toolu_7'));
+      expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['guard', 'guard']);
+      expect(ws(workstream.id).state).not.toBe('WAITING_HUMAN');
+      expect(
+        listTaskThread(engine.store.db, task.id).filter((m) =>
+          m.body.startsWith("10db's judge didn't answer"),
+        ),
+      ).toHaveLength(1);
+      await engine.runner.idle();
+    });
+
+    it("a native lane's call reported outside auto mode is judged by 10db's judge", async () => {
+      const { spec, judgeCall } = await start({
+        account: { kind: 'claude_subscription', label: 'Plan' },
+      });
+      expect(spec.profile.lanePermissionMode).toBe('auto');
+      await hook(spec, judgeCall, { ...bash('pnpm test', 'toolu_8'), reportedMode: 'other' });
+      expect(states).toHaveLength(1);
+      await hook(spec, judgeCall, { ...bash('pnpm build', 'toolu_9'), reportedMode: 'auto' });
+      expect(states).toHaveLength(1);
+      await engine.runner.idle();
+    });
+
+    const CODEX: Parameters<typeof createTestEngine>[3] = {
+      account: { kind: 'codex_signin', label: 'ChatGPT plan' },
+    };
+    const startCodex = async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { ...CODEX, openRouter: { fetch: judgeFetch } },
+      );
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, {
+          expectedIdentity: 'chatgpt@example.com · ws-1',
+        }),
+      );
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      const judgeCall = spec.judgeCall;
+      if (judgeCall === undefined) throw new Error('the lane has no session judge');
+      return { spec, judgeCall, workstream };
+    };
+
+    // Codex's cached web search has had no live check that it opens no page, so it is off on every session.
+    it("a Codex lane's deploy is a tendb_judge skip, with web search off and the thread saying why", async () => {
+      const { spec, judgeCall, workstream } = await startCodex();
+      expect(spec.webSearch).toBe('disabled');
+      answer = () => 'writes_live';
+      await hook(spec, judgeCall, bash('vercel deploy --prod', 'call_1'));
+      expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['tendb_judge']);
+      await engine.runner.idle();
+      const notices = listTaskThread(engine.store.db, workstream.taskId).map((m) => m.body);
+      expect(notices.filter((body) => body.startsWith('Web search on ChatGPT'))).toEqual([
+        'Web search on ChatGPT comes after a live check, so this session searches nothing.',
+      ]);
+    });
+
+    it("a Codex lane's patch that deletes a file reaches the model with the hunk named", async () => {
+      const { spec, judgeCall } = await startCodex();
+      await hook(spec, judgeCall, {
+        ...call('Edit', { file_path: join(spec.cwd, 'src', 'api', 'a.txt') }, 'call_2'),
+        hunk: 'delete',
+      });
+      expect(states).toHaveLength(1);
+      expect(states[0]).toContain('Patch: deletes the file');
+      await engine.runner.idle();
+    });
+
+    it('an auto mode denial is a judge_calls row with the auto mode model', async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            [
+              {
+                do: 'judge_denied' as const,
+                toolName: 'Bash',
+                summary: 'npx vercel deploy --prod --yes',
+                reason: 'The classifier judged this action dangerous',
+                by: 'classifier' as const,
+              },
+              turn,
+            ],
+          ],
+        },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { account: { kind: 'claude_subscription', label: 'Plan' } },
+      );
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(listJudgeCalls(engine.store.db, 10)).toMatchObject([
+        {
+          decision: 'crosses_limit',
+          model: 'claude-code-auto-mode',
+          answer: 'limit',
+          outcome: 'acted',
+          workstreamId: workstream.id,
+        },
+      ]);
     });
   });
 

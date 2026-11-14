@@ -54,16 +54,14 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
-  '/tasks/:taskId/thread':
-    "A task's thread is the builder's own words to an agent, and no screen Plan draws shows it.",
   '/tasks/:taskId/screens':
     "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/screens/:screenId':
     "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/projects/:projectId/pictures':
     "The browser for pictures and its sign-in are Settings' own line, and no screen Plan draws shows them.",
-  '/tasks/:taskId/thread/pictures/:fileId':
-    "A picture pasted into a task's thread is for that thread, not for a screen.",
+  '/conversations/:conversationId/files/:fileId':
+    "A picture sent with a message is for that conversation's transcript, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
   '/conversations/:conversationId/items/:itemId/full':
     "A call's whole output is for the card that expands it, not for a screen.",
@@ -134,11 +132,19 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/trust': 'No screen draws a setting.',
   '/projects/:projectId/trust': 'No screen draws a setting.',
   '/projects/:projectId/live-systems': 'No screen draws a setting.',
+  '/projects/:projectId/trust-grants': 'No screen draws a setting.',
   '/settings/self-update': 'No screen draws a setting.',
   '/projects/:projectId/knowledge': 'Only the Knowledge view draws it, and it is not a screen.',
   '/dev-ui/connection': "The dev UI's token is for the app's Open Page, not for a screen.",
   '/decisions/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
   '/principles/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
+  '/chats': "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/chats/recent':
+    "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
+  '/projects/:projectId/chat-models': 'No screen draws the model list.',
+  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
+  '/settings/sessions': 'No screen draws a setting.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

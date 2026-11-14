@@ -440,3 +440,51 @@ describe('loadFakeScriptBook', () => {
     expect(() => loadFakeScriptBook(file)).toThrow();
   });
 });
+
+describe('a chat session from the book', () => {
+  const chatSpec = (prompt: string): ExploreSessionSpec => ({
+    ...spec({ prompt }),
+    profile: {
+      kind: 'explore',
+      systemPrompt: 'You are in a chat.',
+      tools: [],
+      allowedTools: [],
+      disallowedTools: [],
+      agents: {},
+    },
+  });
+  const book: FakeScriptBook = {
+    'Chat: Why does login fail after sleep?': [[{ do: 'say', text: 'From the book.' }]],
+  };
+
+  it.each([
+    {
+      name: "a chat prompt's first message line",
+      prompt: '[m:cvi_1] Why does login fail after sleep?\nMore.',
+      scripted: true,
+    },
+    {
+      name: 'the line with a mention after it',
+      prompt: '[m:cvi_1] Why does login fail after sleep? @src/login.ts',
+      scripted: true,
+    },
+    {
+      name: 'a task prompt',
+      prompt: 'Task: Why does login fail after sleep?\nDo it.',
+      scripted: false,
+    },
+    { name: 'another chat', prompt: '[m:cvi_1] Something else', scripted: false },
+  ])('$name runs the script: $scripted', async ({ prompt, scripted }) => {
+    const adapter = new FakeAdapter(book);
+    adapter.shapeBehaviour = () => Promise.resolve({ text: 'Default.' });
+    const handle = adapter.open(chatSpec(prompt));
+    const events: SessionEvent[] = [];
+    for await (const e of handle.events) {
+      events.push(e);
+      if (e.type === 'message' || e.type === 'turn_complete') break;
+    }
+    await handle.stop();
+    const said = events.find((e) => e.type === 'message');
+    expect(said !== undefined && 'text' in said && said.text === 'From the book.').toBe(scripted);
+  });
+});

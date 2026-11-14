@@ -424,5 +424,6 @@ export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
     gateCommand: null,
     liveSystems: [],
     switches: TRUST_DEFAULTS,
+    grants: [],
   });
 }

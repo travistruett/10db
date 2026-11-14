@@ -12,6 +12,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { chatKeys } from './chat-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
@@ -35,7 +36,6 @@ import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
-import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -72,7 +72,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
-  conversation: [conversationKeys.all],
+  conversation: [conversationKeys.all, chatKeys.all],
+  // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
+  chat: [chatKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
   pass: [passKeys.all],
@@ -117,9 +119,10 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
 export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
   // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
   'session.ended': [accountKeys.usage],
-  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn, and a
-  // message to a page makes it working before its turn starts.
-  'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
+  // A builder message, an agent's reply or a notice joined a task's thread (its conversation's items
+  // follow their own events); a reply ends a turn, so what streams is read again, and a message to a
+  // page makes it working before its turn starts.
+  'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it.

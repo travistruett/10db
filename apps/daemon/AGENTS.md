@@ -67,7 +67,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
-`delivery`, `stakeholders`, `accounts` → `conversation` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
+`delivery`, `stakeholders`, `accounts` → `conversation` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `chat` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 
@@ -81,6 +81,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `accounts/`: account pauses, the monthly cap, readiness and staggered starts (`src/accounts/AGENTS.md`)
 - `benchmarks/`: Artificial Analysis's model list and OpenRouter's scores and speeds, each synced with the builder's own key (`src/benchmarks/AGENTS.md`)
 - `catalogue/`: the model catalogue from models.dev and its four rungs (`src/catalogue/AGENTS.md`)
+- `chat/`: Sessions' chats: their attended sessions, their builder tools, `@` files and Start from (`src/chat/AGENTS.md`)
 - `conversation/`: what every conversation shares, and the explore engine that runs Plan's sessions (`src/conversation/AGENTS.md`)
 - `daemon/`: the composition root: start-up, wiring and the services behind the API (`src/daemon/AGENTS.md`)
 - `delivery/`: batches: cutting, joining, gates, landing and pull requests (`src/delivery/AGENTS.md`)
@@ -114,8 +115,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `sessions/`: Claude Code and Codex sessions: adapters, launch, repo config and tool calls (`src/sessions/AGENTS.md`)
 - `shape/`: Shape (Plan) conversations: ceremony, preview and landings (`src/shape/AGENTS.md`)
 - `team/`: the team configuration and each task's step plan (`src/team/AGENTS.md`)
-- `thread/`: a task's thread (`src/thread/AGENTS.md`)
-- `trust/`: each session's trust policy (`src/trust/AGENTS.md`)
+- `trust/`: each session's trust policy, and 10db's judge: the fast path, `crosses_limit` and the grants (`src/trust/AGENTS.md`)
 - `verify/`: the gate runner and machine-wide gate slots (`src/verify/AGENTS.md`)
 - `watcher/`: flags writes to sensitive paths and strays outside claims (`src/watcher/AGENTS.md`)
 

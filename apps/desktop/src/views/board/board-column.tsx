@@ -11,7 +11,7 @@ import {
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
-import { EdgeFade } from './edge-fade';
+import { EdgeFade } from '../../shell/edge-fade';
 
 /** An open column flexes between these widths, so the board fills the window and a card has room. */
 export const COLUMN_MIN_WIDTH = 260;

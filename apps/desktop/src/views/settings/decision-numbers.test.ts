@@ -223,7 +223,37 @@ describe('outcomeText', () => {
       'Logged in shadow; nothing shown',
     ],
   ] as const)('%s', (_name, decision, outcome, answer, expected) => {
-    expect(outcomeText({ decision, outcome, answer })).toBe(expected);
+    expect(outcomeText({ decision, outcome, answer, model: 'typesafe/jev-1.13' })).toBe(expected);
+  });
+
+  it.each([
+    ['an allow', JudgeOutcome.Acted, 'allow', 'typesafe/jev-1.13', 'Allowed'],
+    ['a limit', JudgeOutcome.Acted, 'writes_live', 'typesafe/jev-1.13', 'Stopped at a limit'],
+    [
+      'an allow below the floor',
+      JudgeOutcome.BelowFloor,
+      'allow',
+      'typesafe/jev-1.13',
+      'Not sure enough; treated as a limit',
+    ],
+    [
+      'no key',
+      JudgeOutcome.FallbackNoKey,
+      null,
+      'typesafe/jev-1.13',
+      "No key; 10db's rules decided",
+    ],
+    [
+      "auto mode's denial",
+      JudgeOutcome.Acted,
+      'limit',
+      'claude-code-auto-mode',
+      'Auto mode stopped it',
+    ],
+  ] as const)('a crosses_limit call: %s', (_name, outcome, answer, model, expected) => {
+    expect(outcomeText({ decision: JudgeDecision.CrossesLimit, outcome, answer, model })).toBe(
+      expected,
+    );
   });
 });
 

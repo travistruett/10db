@@ -717,8 +717,9 @@ describe('judgeShapeCall in the read-only sandbox', () => {
 });
 
 // Trust line §8: where Plan's judge is native, its own session searches and fetches the web and its
-// commands go to auto mode's classifier, not a card. Plan still writes no code, and its reads keep their
-// rules. On a rules or 10db judge every answer is today's.
+// commands go to auto mode's classifier, not a card; on 10db's judge its commands go to that judge, in the
+// foreground, and only the researcher touches the web. Plan still writes no code, and its reads keep their
+// rules. On a rules judge every answer is today's.
 describe('judgeShapeCall by the session’s judge', () => {
   let sandboxed: ShapeAccess;
   beforeEach(() => {
@@ -742,17 +743,21 @@ describe('judgeShapeCall by the session’s judge', () => {
   });
 
   const RESEARCHER = { agentId: 'r1', agentType: 'researcher' } as const;
-  const ROWS: readonly (readonly [string, () => ShapeCall, string, string])[] = [
-    ['a search from the session', () => call('WebSearch', { query: 'x' }), 'allow', 'deny'],
+  // Columns: native, 10db's judge, rules. 10db's judge takes the calls auto mode would, but its session keeps
+  // the rules' foreground-only commands and researcher-only web: no classifier stands behind them.
+  const ROWS: readonly (readonly [string, () => ShapeCall, string, string, string])[] = [
+    ['a search from the session', () => call('WebSearch', { query: 'x' }), 'allow', 'deny', 'deny'],
     [
       'a fetch from the session',
       () => call('WebFetch', { url: 'https://example.com/' }),
       'allow',
       'deny',
+      'deny',
     ],
     [
       'a command that is not read-only',
       () => call('Bash', { command: 'pnpm test' }),
+      'allow',
       'allow',
       'ask',
     ],
@@ -761,18 +766,27 @@ describe('judgeShapeCall by the session’s judge', () => {
       () => call('Bash', { command: 'pnpm dev', run_in_background: true }),
       'allow',
       'deny',
+      'deny',
     ],
     [
       'a command sent to the background with &',
       () => call('Bash', { command: 'pnpm dev &' }),
       'allow',
       'deny',
+      'deny',
     ],
-    ['a command under nohup', () => call('Bash', { command: 'nohup pnpm dev' }), 'allow', 'deny'],
+    [
+      'a command under nohup',
+      () => call('Bash', { command: 'nohup pnpm dev' }),
+      'allow',
+      'deny',
+      'deny',
+    ],
     // What the classifier would not judge for 10db stays 10db's: the caps, and the page rules.
     [
       'a search query past the length cap',
       () => call('WebSearch', { query: 'q'.repeat(RESEARCH_QUERY_LIMIT + 1) }),
+      'deny',
       'deny',
       'deny',
     ],
@@ -781,10 +795,12 @@ describe('judgeShapeCall by the session’s judge', () => {
       () => call('WebFetch', { url: 'http://example.com/' }),
       'deny',
       'deny',
+      'deny',
     ],
     [
       'a fetch of the loopback host',
       () => call('WebFetch', { url: 'https://127.0.0.1:4317/mcp' }),
+      'deny',
       'deny',
       'deny',
     ],
@@ -793,17 +809,26 @@ describe('judgeShapeCall by the session’s judge', () => {
       () => call('WebFetch', { url: 'https://example.com/' }, RESEARCHER),
       'allow',
       'allow',
+      'allow',
     ],
-    ['an Edit', () => call('Edit', { file_path: path('checkout/src/a.ts') }), 'deny', 'deny'],
+    [
+      'an Edit',
+      () => call('Edit', { file_path: path('checkout/src/a.ts') }),
+      'deny',
+      'deny',
+      'deny',
+    ],
     [
       'a Write',
       () => call('Write', { file_path: path('checkout/src/b.ts'), content: 'b' }),
+      'deny',
       'deny',
       'deny',
     ],
     [
       'a Read of the checkout’s .env',
       () => call('Read', { file_path: path('checkout/.env') }),
+      'deny',
       'deny',
       'deny',
     ],
@@ -813,16 +838,12 @@ describe('judgeShapeCall by the session’s judge', () => {
     expect(judgeShapeCall(make(), { ...sandboxed, judge: 'native' }).decision).toBe(native);
   });
 
-  it.each(
-    ROWS.flatMap(
-      ([name, make, , today]) =>
-        [
-          [name, 'rules', make, today],
-          [name, 'tendb', make, today],
-        ] as const,
-    ),
-  )('on a %s judge… answers %s as today', (_name, judge, make, today) => {
-    expect(judgeShapeCall(make(), { ...sandboxed, judge }).decision).toBe(today);
+  it.each(ROWS)("on 10db's judge, answers %s", (_name, make, _native, tendb) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge: 'tendb' }).decision).toBe(tendb);
+  });
+
+  it.each(ROWS)('on a rules judge… answers %s as today', (_name, make, _native, _tendb, today) => {
+    expect(judgeShapeCall(make(), { ...sandboxed, judge: 'rules' }).decision).toBe(today);
   });
 
   it('says Plan writes no code when it refuses an edit, on every judge', () => {

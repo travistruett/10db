@@ -67,6 +67,7 @@ describe('the Comes along preview', () => {
         laneWritableRoots: [],
         laneSandbox: null,
         adapter: new FakeAdapter({}),
+        judge: { ready: () => Promise.resolve(false) },
         log: { warn: () => undefined },
       });
       expect((await trust.projectTrust(project.id)).preview.plugins).toEqual(plugins);

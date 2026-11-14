@@ -5,6 +5,7 @@ import {
   type ConversationId,
   type ConversationItemId,
   type LiveItemDto,
+  type PassTurnId,
   type ToolCallView,
 } from '@10db/contracts';
 import { putItem, type WriteContext } from '@10db/db';
@@ -57,21 +58,29 @@ export function partialItems(inFlight: readonly LiveItemDto[]): readonly Partial
 }
 
 /**
- * Stores what an early end keeps, in the caller's write, each body under the cap; answers the ids,
- * each its live one. `keep` is told what a body left out, for the caller to put on disk after the write.
+ * Stores what an early end keeps, in the caller's write, each body under the cap and under `turnId`, the
+ * turn it ended, when it has one; answers the ids, each its live one. `keep` is told what a body left
+ * out, for the caller to put on disk after the write.
  */
 export function storePartial(
   ctx: WriteContext,
   conversationId: ConversationId,
   inFlight: readonly LiveItemDto[],
-  keep: (
-    id: ConversationItemId,
-    full: { readonly text?: string; readonly patch?: string },
-  ) => void = () => undefined,
+  opts: {
+    readonly turnId?: PassTurnId | null;
+    readonly keep?: (
+      id: ConversationItemId,
+      full: { readonly text?: string; readonly patch?: string },
+    ) => void;
+  } = {},
 ): ConversationItemId[] {
   return partialItems(inFlight).map((item) => {
     const capped = capItemBody(item.kind, { ...item.body });
-    if (capped.full !== null) keep(item.id, capped.full);
-    return putItem(ctx, conversationId, { ...item, body: capped.body }).id;
+    if (capped.full !== null) opts.keep?.(item.id, capped.full);
+    return putItem(ctx, conversationId, {
+      ...item,
+      body: capped.body,
+      turnId: opts.turnId ?? null,
+    }).id;
   });
 }

@@ -62,9 +62,21 @@ import {
   type FileAccessContext,
 } from '../sandbox';
 import { readCheckoutText, type ToolDecision, type ToolRequest } from '../sessions';
-import { answerAway, callKey, routedToPerson, skipMessage, type SkipRecorder } from '../trust';
+import {
+  answerAway,
+  callKey,
+  grantCallSummary,
+  grantTargetOf,
+  projectGrantedCalls,
+  routedToPerson,
+  skipMessage,
+  type LimitAt,
+  type SkipRecorder,
+} from '../trust';
 import { foundHostReason } from './gate-host-card';
 import { leftWithBuilder } from './builder-card';
+import type { LimitNotes } from './hook-judge';
+import { LIMIT_DETAIL, limitCardTitle, limitOptions, NOTE_NEEDED_DETAIL } from './limit-card';
 import { AnsweredAwayError, ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -146,6 +158,11 @@ type BrokerContext = BrokerOwner & {
     readonly taskId: TaskId;
     readonly projectId: ProjectId;
   };
+  /**
+   * The limits 10db's judge stopped calls at in this session (`createHookJudge`): a noted call is asked with
+   * the trust line's three answers, and no stored rule answers it.
+   */
+  readonly limits?: LimitNotes;
 };
 
 const ALLOWING: readonly string[] = [
@@ -153,6 +170,7 @@ const ALLOWING: readonly string[] = [
   PermissionChoice.AllowWorkstream,
   PermissionChoice.AllowProject,
   PermissionChoice.AllowMcpServer,
+  PermissionChoice.AlwaysInProject,
 ];
 
 const AskUserQuestionInput = z.looseObject({
@@ -325,9 +343,7 @@ function unlessTooDeep<T>(read: () => T, fallback: T): T {
 }
 
 function summarize(req: ToolRequest): string {
-  const command = req.input['command'];
-  if (req.toolName === 'Bash' && typeof command === 'string') return command;
-  return JSON.stringify(req.input).slice(0, 2000);
+  return grantCallSummary(req.toolName, req.input);
 }
 
 /**
@@ -517,25 +533,34 @@ export function createPermissionBroker(
     return { behavior: 'deny', message: skipMessage(limit, reason), by: DeniedBy.TenDb };
   }
 
-  async function askPermission(req: ToolRequest, ask: Ask | null = null): Promise<ToolDecision> {
+  async function askPermission(
+    req: ToolRequest,
+    ask: Ask | null = null,
+    noted?: LimitAt,
+  ): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
     const onceOnly = ask?.onceOnly === true;
-    // A call the classifier handed to a person is answered by a person, never by a stored grant.
+    // A call a judge handed to a person (an escalation, or a limit 10db's judge noted) is answered by a
+    // person, never by a stored grant or a carried allowance.
+    const judged = req.escalated || noted !== undefined;
     if (
-      !req.escalated &&
+      !judged &&
       !onceOnly &&
       unlessTooDeep(() => matchPermissionRule(req, rules, paths, ctx.mcpApproved), undefined)
     ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
-    if (!req.escalated && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
+    if (!judged && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
       const { cardId } = allowOnce;
       allowOnce = null;
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
       return { behavior: 'allow' };
     }
+    // The builder's Always in this project on this very call, matched as written.
+    if (judged && !onceOnly && projectGrantedCalls(deps.state.db, ctx.projectId).has(summary))
+      return { behavior: 'allow' };
     if (ctx.unattended !== undefined) return skipUnattended(req, ask, ctx.unattended);
     const storable =
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
@@ -544,14 +569,21 @@ export function createPermissionBroker(
       onceOnly || ctx.mcpApproved === undefined || req.listedTools === undefined
         ? null
         : mcpToolGrant(req.toolName, req.listedTools, ctx.mcpApproved);
-    const options = onceOnly ? ONCE_OPTIONS : optionsFor(storable);
+    // Always in this project keeps the call itself only when it is short enough to keep whole.
+    const noteNeeded = judged && !onceOnly && grantTargetOf(null, summary) === null;
+    // A once-only call offers no rule to store, Always in this project included.
+    const options = onceOnly
+      ? ONCE_OPTIONS
+      : judged
+        ? limitOptions(noteNeeded)
+        : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
-      title: `Allow ${req.toolName}?`,
-      body: ask?.body ?? summary,
+      title: noted === undefined ? `Allow ${req.toolName}?` : limitCardTitle(noted),
+      body: noted === undefined ? (ask?.body ?? summary) : summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
       options:
         grant === null
@@ -568,6 +600,8 @@ export function createPermissionBroker(
         ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
+        ...(noted?.limit == null ? {} : { [LIMIT_DETAIL]: noted.limit }),
+        ...(noteNeeded ? { [NOTE_NEEDED_DETAIL]: true } : {}),
       },
       signal: ctx.signal,
       // An edit's result depends on the file it lands on. Folded with another lane's, both lanes would read the
@@ -868,6 +902,9 @@ export function createPermissionBroker(
 
   async function decide(req: ToolRequest): Promise<ToolDecision> {
     if (req.toolName === 'AskUserQuestion') return askQuestions(req);
+    // 10db's judge stopped this call at a limit: 10db's own gates still refuse what they refuse, and the builder
+    // answers the rest, whatever the lane's rules allow.
+    const noted = req.toolUseId === null ? undefined : ctx.limits?.take(req.toolUseId);
     if (req.toolName === 'Bash' && ctx.passGit !== undefined) {
       const command = stringField(req.input, 'command');
       const call = command === null ? null : passGitCall(command, ctx.passGit.baseBranch);
@@ -876,16 +913,19 @@ export function createPermissionBroker(
         return { behavior: 'deny', message: call.reason, by: DeniedBy.TenDb };
     }
     const { sandbox } = ctx;
-    if (sandbox === undefined) return askPermission(req);
+    if (sandbox === undefined) return askPermission(req, null, noted);
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);
     let verdict: ToolDecision | Ask | null = null;
     if (req.toolName === 'Bash') verdict = judgeBash(req, sandbox);
     else if (req.toolName === 'Monitor') verdict = judgeMonitor(req, sandbox);
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);
-    if (verdict === null) return askPermission(req);
-    if (isDecision(verdict)) return verdict;
-    const decision = await askPermission(req, verdict);
+    if (verdict === null) return askPermission(req, null, noted);
+    if (isDecision(verdict)) {
+      if (verdict.behavior === 'deny' || noted === undefined) return verdict;
+      return askPermission(req, null, noted);
+    }
+    const decision = await askPermission(req, verdict, noted);
     return req.toolName === 'Read' ? servedSecretRead(req, decision, verdict, sandbox) : decision;
   }
 

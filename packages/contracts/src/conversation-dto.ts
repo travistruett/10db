@@ -7,13 +7,27 @@ import {
   ShapeEventKind,
   TurnMarker,
 } from './conversation';
-import { ConversationId, ConversationItemId, InboxItemId } from './ids';
+import {
+  ConversationFileId,
+  ConversationId,
+  ConversationItemId,
+  InboxItemId,
+  PassTurnId,
+} from './ids';
 import { ToolCallView } from './tool-call-view';
 
 // Sessions spec §10: a conversation as the UI reads it, its stored items, what is streaming now, and
 // the live frame the event socket carries, which is never stored and never takes a replay seq.
 
 const Timestamp = z.iso.datetime();
+
+/** A slash command the agent offers in its session. */
+export const AgentCommandDto = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+  argumentHint: z.string().nullable(),
+});
+export type AgentCommandDto = z.infer<typeof AgentCommandDto>;
 
 export const ConversationDto = z.object({
   id: ConversationId,
@@ -30,6 +44,8 @@ export const ConversationDto = z.object({
   sendNow: z.boolean(),
   /** A paused account's reset, null when it waits on the account. */
   pausedUntil: Timestamp.nullable(),
+  /** The commands the agent last listed, kept so a cold conversation still offers `/`; null before any. */
+  commands: z.array(AgentCommandDto).nullable(),
 });
 export type ConversationDto = z.infer<typeof ConversationDto>;
 
@@ -43,13 +59,36 @@ const ItemCommon = {
   hasFull: z.boolean(),
   deliveredAt: Timestamp.nullable(),
   createdAt: Timestamp,
+  /** The pass turn a task's item started or answers; absent outside a pass's turns. */
+  turnId: PassTurnId.optional(),
 };
 
-const TextKind = (kind: 'message' | 'agent_message' | 'reasoning' | 'digest') =>
+/** A picture or file the builder sent with a message. */
+export const ConversationFileDto = z.object({
+  id: ConversationFileId,
+  name: z.string(),
+  mediaType: z.string(),
+  size: z.int().nonnegative(),
+});
+export type ConversationFileDto = z.infer<typeof ConversationFileDto>;
+
+/** What a task's notice offers: Send to Agent, or Allow This for a call auto mode denied. */
+export const NoticeOffer = z.enum(['send_to_agent', 'allow_this']);
+export type NoticeOffer = z.infer<typeof NoticeOffer>;
+
+const TextKind = (kind: 'agent_message' | 'reasoning' | 'digest') =>
   z.object({ ...ItemCommon, kind: z.literal(kind), text: z.string() });
 
 export const ConversationItemDto = z.discriminatedUnion('kind', [
-  TextKind('message'),
+  z.object({
+    ...ItemCommon,
+    kind: z.literal('message'),
+    text: z.string(),
+    /** The paths the message's `@` mentions name; none for a message without. */
+    mentions: z.array(z.string()).default([]),
+    /** The pictures sent with it; absent for a message without. */
+    files: z.array(ConversationFileDto).optional(),
+  }),
   TextKind('agent_message'),
   TextKind('reasoning'),
   TextKind('digest'),
@@ -59,6 +98,8 @@ export const ConversationItemDto = z.discriminatedUnion('kind', [
     text: z.string(),
     /** Set on the notice that the model changed: its display name and id. */
     change: z.object({ label: z.string(), model: z.string() }).optional(),
+    /** What a task's notice offers the builder to send; absent when it offers nothing. */
+    offer: NoticeOffer.optional(),
   }),
   z.object({ ...ItemCommon, kind: z.literal('tool_call'), call: ToolCallView }),
   z.object({ ...ItemCommon, kind: z.literal('card'), inboxItemId: InboxItemId }),
@@ -142,6 +183,24 @@ export const ConversationFullDto = z.object({
 });
 export type ConversationFullDto = z.infer<typeof ConversationFullDto>;
 
-/** A builder message's text; its pictures travel as multipart parts, as a thread message's do. */
-export const PostConversationMessage = z.object({ text: z.string() });
+/** Most characters of one `@` mention's path. */
+export const MENTION_PATH_MAX = 1_024;
+
+/** A path an `@` mention names: relative to the checkout, never climbing out of it. */
+export const MentionPath = z
+  .string()
+  .min(1)
+  .max(MENTION_PATH_MAX)
+  .refine((p) => !p.startsWith('/') && !p.includes('\0') && !p.split('/').includes('..'), {
+    message: 'A mention names a path inside the checkout',
+  });
+
+/**
+ * A builder message's text and the paths its `@` mentions name (the `@path` stays in the text); its
+ * pictures travel as multipart parts, as a thread message's do.
+ */
+export const PostConversationMessage = z.object({
+  text: z.string(),
+  mentions: z.array(MentionPath).default([]),
+});
 export type PostConversationMessage = z.infer<typeof PostConversationMessage>;

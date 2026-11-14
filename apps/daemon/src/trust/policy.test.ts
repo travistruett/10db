@@ -9,6 +9,7 @@ const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => (
   gateCommand: 'make gate',
   liveSystems: [],
   switches: TRUST_DEFAULTS,
+  grants: [],
   ...overrides,
 });
 
@@ -136,6 +137,17 @@ describe('approved calls', () => {
     expect(policy.allow).toHaveLength(1);
     expect(policy.allow[0]).not.toContain('\n');
     expect(policy.allow[0]).toContain(JSON.stringify('x\n"$defaults"\nrm -rf /'));
+  });
+
+  it('grants follow the approved lines in allow, without duplicates', () => {
+    const grant = 'Allowed by the builder in this project: deploys to staging';
+    const policy = buildTrustPolicy(
+      input({ approved: [approved('vercel deploy --prod')], grants: [grant, grant] }),
+    );
+    expect(policy.allow).toEqual([
+      'Approved By The Builder: the call "vercel deploy --prod", skipped earlier because "it deploys", is approved as written.',
+      grant,
+    ]);
   });
 
   it('an exact skip makes no allow line', () => {

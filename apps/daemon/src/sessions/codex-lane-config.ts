@@ -50,6 +50,8 @@ export function codexThreadConfig(spec: LaneSessionSpec): Record<string, unknown
   return {
     ...(skills ? { skills: { include_instructions: true } } : {}),
     permissions: lanePermissions(sandbox),
+    // The thread's own setting over the home's `disabled`: cached search fetches no page the agent names.
+    web_search: spec.webSearch ?? 'disabled',
     shell_environment_policy: { inherit: 'none', set: { ...sandbox.shellEnv } },
     mcp_servers: {
       ...projects,

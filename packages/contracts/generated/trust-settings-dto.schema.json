@@ -118,11 +118,15 @@
         ],
         "additionalProperties": false
       }
+    },
+    "tendbReady": {
+      "type": "boolean"
     }
   },
   "required": [
     "switches",
     "plugins",
-    "judges"
+    "judges",
+    "tendbReady"
   ]
 }

@@ -16,6 +16,7 @@ import {
   RecordedAnswer,
   type PersonId,
   InvalidError,
+  LimitName,
   isParkChoice,
   kindsOfTask,
   MCP_TOOL_GRANT_DETAIL,
@@ -67,15 +68,19 @@ import {
   type DbReader,
   type Json,
   type WriteContext,
+  insertTrustGrant,
 } from '@10db/db';
+import { z } from 'zod';
 import type { StateStore } from '../events';
 import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
 import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
+import { grantTargetOf } from '../trust';
 import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
+import { LIMIT_DETAIL } from './limit-card';
 import { applyMcpApproval } from './mcp-approval';
 import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
@@ -140,7 +145,7 @@ type AskInput = AskOwner & {
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
-export const SHAPE_CARD_KEY = 'shapeId';
+const SHAPE_CARD_KEY = 'shapeId';
 /** The detail key naming the conversation whose session asked a card. */
 const CONVERSATION_CARD_KEY = 'conversationId';
 
@@ -304,7 +309,7 @@ function foldKeyFor(
     AskInput,
     | 'projectId'
     | 'workstreamId'
-    | 'shapeId'
+    | 'conversationId'
     | 'kind'
     | 'title'
     | 'body'
@@ -319,7 +324,9 @@ function foldKeyFor(
     input.projectId,
     // A conversation's card never folds, with a lane's or with its own: two calls a session makes at once
     // each wait on their own card, so one answer can't leave the other waiting.
-    ...(input.shapeId === undefined ? [] : [`shape:${input.shapeId}`, randomUUID()]),
+    ...(input.conversationId === undefined
+      ? []
+      : [`conversation:${input.conversationId}`, randomUUID()]),
     ...(input.foldPerLane === true && input.workstreamId !== null ? [input.workstreamId] : []),
     // A call Claude Code handed to a person never shares a card with an ordinary ask.
     ...(input.escalated === true ? ['escalated'] : []),
@@ -405,6 +412,10 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
     applyMcpServerChoice(ctx, item, answer);
     return;
   }
+  if (answer.choice === PermissionChoice.AlwaysInProject) {
+    applyGrantChoice(ctx, item, answer, summary);
+    return;
+  }
   const rule = storableRule(toolName, summary);
   if (rule === undefined) return;
   if (answer.choice === PermissionChoice.AllowWorkstream) {
@@ -438,6 +449,31 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
       sourceId,
     });
   }
+}
+
+/**
+ * Always in this project on a limit or an escalation card: a grant of the card's limit, whose target is the
+ * builder's note or the call quoted. A call too long to keep needs a note, so the answer is refused without one.
+ */
+function applyGrantChoice(
+  ctx: WriteContext,
+  item: InboxItemDto,
+  answer: InboxAnswer,
+  summary: string,
+): void {
+  const target = grantTargetOf(answer.note ?? null, summary);
+  if (target === null)
+    throw new InvalidError(
+      'Say in the note what to allow: this call is too long to keep as it is.',
+    );
+  // The detail is JSON the broker wrote; read the limit back by its schema.
+  const limit = z.enum(LimitName).safeParse(item.detail?.[LIMIT_DETAIL]);
+  insertTrustGrant(ctx, {
+    projectId: item.projectId,
+    limit: limit.success ? limit.data : null,
+    target,
+    sourceInboxId: item.id,
+  });
 }
 
 /**
@@ -563,9 +599,10 @@ export function createInboxService(deps: {
       if (waiter) waiter.resolve(answer);
       else deps.onParkedAnswer(target, item);
     }
-    // A Plan conversation's session waits with no target, so it is handed the answer here; one that
-    // stopped waiting withdrew its card, and a stored rule from the answer still holds.
-    if (item.detail?.[SHAPE_CARD_KEY] !== undefined)
+    // A conversation's session (a Plan's, a chat's) waits with no target, so it is handed the answer
+    // here. Its card never folds, so the one waiter is the call that raised it; one that stopped waiting
+    // withdrew its card, and a stored rule from the answer still holds.
+    if (item.detail?.[CONVERSATION_CARD_KEY] !== undefined)
       for (const waiter of live?.values() ?? []) waiter.resolve(answer);
     return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
   }
@@ -696,7 +733,11 @@ export function createInboxService(deps: {
           taskIds: targetTaskIds(ctx.tx, target === null ? [] : [target]),
           passPage,
         });
-        const foldKey = input.foldKey ?? foldKeyFor(input, routed.handles);
+        // A conversation's card never takes a caller's fold key either: its one waiter is the call that raised it.
+        const foldKey =
+          input.conversationId === undefined
+            ? (input.foldKey ?? foldKeyFor(input, routed.handles))
+            : foldKeyFor(input, routed.handles);
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
           if (target === null) return existing;

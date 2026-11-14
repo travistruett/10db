@@ -13,6 +13,8 @@ export interface TrustPolicyInput {
   readonly switches: TrustSwitches;
   /** The calls the builder approved by Run these now for this session's task; none when absent. */
   readonly approved?: readonly ApprovedAction[];
+  /** The project's grants as lines (`projectGrantLines`), read as the session starts. */
+  readonly grants: readonly string[];
 }
 
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
@@ -56,6 +58,15 @@ function environmentLines(input: TrustPolicyInput): string[] {
   ];
 }
 
+/** The approved calls a judge reads by intent, as lines: only the classifier's, which it skipped by intent. */
+export function approvedLines(approved: readonly ApprovedAction[]): string[] {
+  return approved.flatMap((a) => {
+    if (a.kind !== SkipKind.Classifier) return [];
+    const line = approvedLine(a);
+    return line === null ? [] : [line];
+  });
+}
+
 /** One session's policy, for every judge alike (trust line §3). */
 export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
   return TrustPolicy.parse({
@@ -65,11 +76,7 @@ export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
     environment: environmentLines(input),
     coordination: coordinationLines(input.surface, input.gateCommand),
     // Only the classifier reads by intent; the guard and the broker match the other approvals' keys.
-    allow: (input.approved ?? []).flatMap((a) => {
-      if (a.kind !== SkipKind.Classifier) return [];
-      const line = approvedLine(a);
-      return line === null ? [] : [line];
-    }),
+    allow: [...new Set([...approvedLines(input.approved ?? []), ...input.grants])],
     switches: input.switches,
   });
 }

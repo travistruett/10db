@@ -94,6 +94,8 @@ export const TrustSettingsDto = z.object({
   plugins: z.array(InstalledPluginDto),
   /** One row per account. */
   judges: z.array(AccountJudgeDto),
+  /** Whether 10db's judge can answer now: a key, and its switches on. A `tendb` row reads the rules without it. */
+  tendbReady: z.boolean(),
 });
 export type TrustSettingsDto = z.infer<typeof TrustSettingsDto>;
 

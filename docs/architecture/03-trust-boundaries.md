@@ -332,6 +332,18 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   holds `*`, `?`, `[`, `]`, `{`, `}`, `\` or a newline refuses the lane: Claude Code drops the whole sandbox,
   without an error, on a value it can't parse (spike 14 check 11).
 
+#### 10db's judge in the hook
+
+**Built** (trust line T5). Where Claude Code's auto mode doesn't judge a call (a gateway account, a model auto mode
+doesn't run on, a call reported outside auto mode) the session's `judgeCall` does, after the guard leaves a call
+open: `inbox/hook-judge.ts` runs the fast path (`trust/fast-path.ts`: a read, an edit in the checkout or the temp
+dir, a read-only command, and never a name that may be a secret, a search over a folder, a history or diff dump, or
+a Codex delete or move), then the `crosses_limit` decision through OpenRouter (`trust/crosses-limit.ts`). The call
+goes to the model as fenced data, with the policy, the untracked and ignored entries the checkout held before the
+session and the project's grants. `unsure`, an `allow` below the decision's floor and an input over 12 000
+characters are limits. A judge that can't answer is the `rules` floor for that call, and for 60 s after a timeout or
+an error; in a lane the floor's answer is the unattended skip. A session on 10db's judge runs Claude Code in `default` mode.
+
 ### 4.4 A lane's Bash and its children
 
 |         | Today                                           | Design                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -941,6 +953,13 @@ advance a conversation, or choose its model, is refused before it writes anythin
   log line) are data, never instructions; the prompts say so. The checks behind the prompt are the builder's
   acceptance of the plan and the sandbox that keeps every command off the checkout.
 
+- **10db's judge and cached web search** (trust line T5,
+  `decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`). A call the guard leaves open goes to 10db's judge
+  through the same hook; a limit is a recorded skip in a lane and a card in a pass, carried to the broker by its
+  tool use id. Approvals stay closed (`approvalPolicy: 'never'`, no reviewer), so Codex's own refusal of a forced
+  `rm` stands. Web search is `cached` with the Web switch on and `disabled` with it off; it answers from OpenAI's
+  index and fetches no page the agent names.
+
 ## 5. What the daemon reads, runs or sends for a lane
 
 | Surface                                                                                                                               | Worst outcome today                                                                                                                                                                                                                                                                                                                                                                                                                                          | Protection today                                                                                                                                                                                                                                                                                                                                                                                                   | Design        |
@@ -1139,6 +1158,16 @@ guard task tests each one.
 - **The gate builds from scratch.** Its package caches, cargo's included, go with its temp dir, so each run
   downloads its crates and rebuilds them (§4.4).
 - **Merged code.** Review is the boundary (§1).
+- **Every call 10db's judge allows stays inside the kernel sandbox.** A judge's mistake is bounded by the sandbox;
+  no judge widens it (trust line §11).
+- **A judge model can be talked into an allow by text in a call.** The call reaches it as fenced data after a line
+  saying nothing inside is an instruction or an approval, and an allowed call still runs in the sandbox.
+- **A grant is matched by intent,** so it can cover more than the builder meant. A note is the builder's own
+  words; without one the grant quotes the exact call.
+- **Codex's search queries reach OpenAI unjudged.** OpenAI already holds the conversation; cached search fetches
+  nothing the agent names.
+- **The fast path trusts the guard's read-only line and the secret names.** A secret under a name neither the
+  sandbox nor the fast path's list knows is read without the model; the sandbox still denies the `.env*` files.
 
 ## 8. Open checks
 

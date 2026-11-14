@@ -178,6 +178,7 @@ export function serveJudge(initial: {
             approval_read: merged(JudgeDecision.ApprovalRead),
             task_rigor: merged(JudgeDecision.TaskRigor),
             task_kinds: merged(JudgeDecision.TaskKinds),
+            crosses_limit: merged(JudgeDecision.CrossesLimit),
           },
         },
       };

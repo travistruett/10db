@@ -1,7 +1,7 @@
 export { autoModeRuns } from './auto-mode-models';
 export { LIMIT_ORDER, LIMITS, limitOfDenial } from './limits';
 export { projectLiveSystems, setProjectLiveSystems } from './live-systems';
-export { buildTrustPolicy } from './policy';
+export { approvedLines, buildTrustPolicy } from './policy';
 export { judgeForCall, ReportedMode, startingJudge } from './call-judge';
 export { deniedNoticeText, goAheadText, offersAllowThis, type DeniedCall } from './go-ahead';
 export { FloorReason, floorNoticeText, floorReason, floorWhy } from './floor-notice';
@@ -10,3 +10,17 @@ export { AWAY_ANSWER, SKIP_RESUMES_MAX, skipMessage, stoppedBySkip } from './ski
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
 export { answerAway, routedToPerson, type AwayLane } from './away-question';
 export { writtenConfig } from './written-config';
+export { PatchHunk, type FastPathContext } from './fast-path';
+export {
+  CROSSES_LIMIT_QUESTION,
+  crossesLimit,
+  PRE_EXISTING_READ_MAX,
+  type LimitAt,
+} from './crosses-limit';
+export {
+  grantCallSummary,
+  grantLine,
+  grantTargetOf,
+  projectGrantedCalls,
+  projectGrantLines,
+} from './grants';

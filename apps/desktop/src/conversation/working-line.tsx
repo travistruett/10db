@@ -2,7 +2,7 @@ import { ConversationState, type ConversationDto, type ToolCallView } from '@10d
 import { Box, Group, Text } from '@mantine/core';
 import { IconPlayerPause } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { formatDuration } from './tool-words';
 
 // Sessions UI spec §7.5: one line pinned under the transcript, outside the windowed list, saying what
@@ -13,10 +13,14 @@ import { formatDuration } from './tool-words';
 export type Streaming = 'text' | 'reasoning' | 'tool' | null;
 
 export interface WorkingLineProps {
-  readonly conversation: ConversationDto;
+  readonly conversation: Pick<ConversationDto, 'state' | 'pausedUntil'>;
   readonly streaming: Streaming;
   /** What the running tool does, as "reading a.ts". */
   readonly tool?: string;
+  /** When the turn began, when the screen knows it: the clock counts from there, not from the line. */
+  readonly startedAt?: string;
+  /** The screen's own words and controls after the line (a page's files so far and Show Log). */
+  readonly extra?: ReactNode;
 }
 
 /** A turn is under way in these states, so the line's clock keeps counting through them. */
@@ -29,12 +33,13 @@ const IN_TURN: ReadonlySet<ConversationState> = new Set([
 
 const TICK_MS = 1_000;
 
-/** The milliseconds since the line saw the turn begin; 0 outside a turn. */
-function useTurnElapsed(inTurn: boolean): number {
+/** The milliseconds since the turn began, or since the line saw it begin; 0 outside a turn. */
+function useTurnElapsed(inTurn: boolean, startedAt: string | undefined): number {
   const [clock, setClock] = useState<{ readonly start: number; readonly now: number } | null>(null);
   useEffect(() => {
     if (!inTurn) return;
-    const start = Date.now();
+    const began = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
+    const start = Number.isNaN(began) ? Date.now() : began;
     const tick = (): void => {
       setClock({ start, now: Date.now() });
     };
@@ -44,13 +49,13 @@ function useTurnElapsed(inTurn: boolean): number {
       clearInterval(timer);
       setClock(null);
     };
-  }, [inTurn]);
-  return clock === null ? 0 : clock.now - clock.start;
+  }, [inTurn, startedAt]);
+  return clock === null ? 0 : Math.max(0, clock.now - clock.start);
 }
 
 /** The line's words in each state, and whether it draws the dot or the pause icon. */
 function lineOf(
-  conversation: ConversationDto,
+  conversation: WorkingLineProps['conversation'],
   streaming: Streaming,
   tool: string | undefined,
   elapsedMs: number,
@@ -63,12 +68,13 @@ function lineOf(
       if (streaming === 'text') return { words: 'Writing…', mark: 'dot' };
       const working = `Working · ${formatDuration(elapsedMs) ?? '0 s'}`;
       return {
-        words: streaming === 'tool' && tool !== undefined ? `${working} · ${tool}` : working,
+        // What the running tool does, or what the screen last heard the turn do.
+        words: tool === undefined ? working : `${working} · ${tool}`,
         mark: 'dot',
       };
     }
     case ConversationState.WaitingCard:
-      return { words: 'Waiting for your answer above', mark: null };
+      return { words: 'Waiting for your answer', mark: null };
     case ConversationState.Stopping:
       return { words: 'Stopping…', mark: 'dot' };
     case ConversationState.PausedAccount:
@@ -107,8 +113,8 @@ export function toolDoing(call: ToolCallView): string {
   }
 }
 
-export function WorkingLine({ conversation, streaming, tool }: WorkingLineProps) {
-  const elapsedMs = useTurnElapsed(IN_TURN.has(conversation.state));
+export function WorkingLine({ conversation, streaming, tool, startedAt, extra }: WorkingLineProps) {
+  const elapsedMs = useTurnElapsed(IN_TURN.has(conversation.state), startedAt);
   const line = lineOf(conversation, streaming, tool, elapsedMs);
   if (line === null) return null;
   return (
@@ -133,6 +139,7 @@ export function WorkingLine({ conversation, streaming, tool }: WorkingLineProps)
       <Text size="sm" c="dimmed" lineClamp={1}>
         {line.words}
       </Text>
+      {extra}
     </Group>
   );
 }

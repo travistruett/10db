@@ -37,7 +37,7 @@ import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
-import { threadKeys, type TaskMessageSend } from './thread-queries';
+import { conversationKeys } from './conversation-queries';
 
 // Workbench spec §4.3: the passes the Workbench reads. Every pass event refetches them; a pass lane's
 // tool calls are written into its page's turn as they come, never refetched one by one.
@@ -344,7 +344,7 @@ export function useWorkbenchSetup(projectId: ProjectId, enabled = true) {
 /** A plain Stop: the page's turn ends and nothing is sent; the page waits for the next message. */
 export function useStopPage(taskId: TaskId) {
   const { client } = useDaemon();
-  const refetch = useRefetchAfter(threadKeys.of(taskId));
+  const refetch = useRefetchAfter(conversationKeys.all);
   return useMutation({
     mutationFn: async () =>
       readJson(await client.tasks[':taskId'].stop.$post({ param: { taskId } }), z.null()),
@@ -352,14 +352,17 @@ export function useStopPage(taskId: TaskId) {
   });
 }
 
-/** Stop and Redo: the page's turn stops, then the builder's message starts the next. */
-export function useRedoTurn(taskId: TaskId) {
+/**
+ * The builder's message to a page whose task has no conversation yet (a page of a pass opened before
+ * every page had one): the task's own intake, which makes it. Its pictures go as one multipart request.
+ */
+export function usePostTaskMessage(taskId: TaskId) {
   const { client } = useDaemon();
-  const refetch = useRefetchAfter(threadKeys.of(taskId));
+  const refetch = useRefetchAfter(conversationKeys.all);
   return useMutation({
-    mutationFn: async ({ text, pictures }: TaskMessageSend) =>
+    mutationFn: async ({ text, pictures }: { text: string; pictures: readonly File[] }) =>
       readJson(
-        await client.tasks[':taskId'].thread.redo.$post({
+        await client.tasks[':taskId'].thread.$post({
           param: { taskId },
           form: { text, picture: [...pictures] },
         }),

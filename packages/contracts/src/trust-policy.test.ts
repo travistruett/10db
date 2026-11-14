@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LiveSystem, TRUST_DEFAULTS, TrustPolicy } from './index';
+import { GrantTarget, LiveSystem, TRUST_DEFAULTS, TrustPolicy } from './index';
 
 describe('LiveSystem', () => {
   it.each([
@@ -20,6 +20,24 @@ describe('LiveSystem', () => {
     ['$defaults fails', '$defaults', false],
   ])('%s', (_name, value, ok) => {
     expect(LiveSystem.safeParse(value).success).toBe(ok);
+  });
+});
+
+describe('GrantTarget', () => {
+  it.each([
+    ['a note passes', 'deploys to staging', true],
+    ['a quoted call passes', 'The call `vercel deploy`', true],
+    ['a newline fails', 'deploys\nhard_deny', false],
+    ['a tab fails', 'deploys\tstaging', false],
+    ['a vertical tab fails', 'deploys\u000bstaging', false],
+    ['a next line (U+0085) fails', 'deploys\u0085staging', false],
+    ['a U+2028 fails', 'deploys\u2028staging', false],
+    ['a U+2029 fails', 'deploys\u2029staging', false],
+    ['a right-to-left override fails', 'deploys\u202estaging', false],
+    ['a zero-width space fails', 'deploys\u200bstaging', false],
+    ['$defaults fails', '$defaults', false],
+  ])('%s', (_name, value, ok) => {
+    expect(GrantTarget.safeParse(value).success).toBe(ok);
   });
 });
 

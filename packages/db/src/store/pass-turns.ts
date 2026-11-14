@@ -121,12 +121,17 @@ export function insertPassTurn(ctx: WriteContext, input: PassTurnInsert): PassTu
 
 /**
  * Ends a turn, saying how, and appends the agent's reply naming it, in one write: the reply is never
- * lost to a restart between the two. An empty reply writes no row. Refused for a turn already ended.
+ * lost to a restart between the two. A reply already in the thread (`replyItemId`) is marked as the
+ * turn's instead; an empty reply writes no row. Refused for a turn already ended.
  */
 export function endPassTurn(
   ctx: WriteContext,
   id: PassTurnId,
-  input: { readonly ending: PassTurnEnding; readonly replyBody: string | null },
+  input: {
+    readonly ending: PassTurnEnding;
+    readonly replyBody: string | null;
+    readonly replyItemId?: TaskMessageId | null;
+  },
 ): PassTurnDto {
   const turn = getPassTurn(ctx.tx, id);
   if (turn.endedAt !== null)
@@ -136,7 +141,14 @@ export function endPassTurn(
     .set({ endedAt: ctx.now, ending: input.ending, updatedAt: ctx.now })
     .where(eq(schema.passTurns.id, id))
     .run();
-  if (input.replyBody !== null && input.replyBody.trim() !== '')
+  const replyItemId = input.replyItemId ?? null;
+  if (replyItemId !== null)
+    insertAgentReply(ctx, turn.taskId, {
+      body: input.replyBody ?? '',
+      turnId: id,
+      itemId: replyItemId,
+    });
+  else if (input.replyBody !== null && input.replyBody.trim() !== '')
     insertAgentReply(ctx, turn.taskId, { body: input.replyBody, turnId: id });
   const ended = getPassTurn(ctx.tx, id);
   emitTurn(ctx, EventType.PassTurnEnded, ended);

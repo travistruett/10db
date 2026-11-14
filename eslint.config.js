@@ -97,8 +97,11 @@ export default defineConfig(
     },
   },
   {
-    // The conversation kit draws what an agent's capabilities say, never what its harness is.
-    files: ['apps/desktop/src/conversation/**/*.{ts,tsx}'],
+    // The conversation kit and Sessions draw what an agent's capabilities say, never what its harness is.
+    files: [
+      'apps/desktop/src/conversation/**/*.{ts,tsx}',
+      'apps/desktop/src/views/sessions/**/*.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',

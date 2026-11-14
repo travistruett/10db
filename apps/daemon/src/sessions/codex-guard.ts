@@ -2,6 +2,8 @@ import { chmod, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { PatchHunk } from '../trust';
+import { judgedVerdict } from './session-judge';
 import type { LaneSessionSpec } from './types';
 
 /** What Codex's `PreToolUse` hook sends: the keys 10db reads, with the rest passed over. */
@@ -17,6 +19,8 @@ export type HookInput = z.infer<typeof HookInput>;
 export interface GuardCall {
   readonly toolName: string;
   readonly input: Record<string, unknown>;
+  /** What the `apply_patch` hunk this edit came from does to its file; null for every other tool. */
+  readonly hunk: PatchHunk | null;
 }
 
 const InputRecord = z.record(z.string(), z.unknown());
@@ -24,6 +28,12 @@ const BashInput = z.looseObject({ command: z.string() });
 const PatchInput = z.looseObject({ command: z.string() });
 
 const PATCH_HEADERS = ['*** Add File: ', '*** Update File: ', '*** Delete File: ', '*** Move to: '];
+
+const HUNK_OF: Readonly<Record<string, PatchHunk>> = {
+  '*** Add File: ': PatchHunk.Add,
+  '*** Update File: ': PatchHunk.Update,
+  '*** Delete File: ': PatchHunk.Delete,
+};
 
 /**
  * Lines of a patch that carry no path. Codex also defines `*** Environment ID: `; 10db has no use for
@@ -42,8 +52,13 @@ function trimmed(text: string): string {
   return text.slice(start, end);
 }
 
+interface PatchEntry {
+  readonly path: string;
+  hunk: PatchHunk;
+}
+
 interface ReadPatch {
-  readonly paths: readonly string[];
+  readonly entries: readonly PatchEntry[];
   /** A line is a hunk header or marker line that 10db cannot account for. */
   readonly unknownMarker: boolean;
 }
@@ -56,7 +71,7 @@ type Hunk = 'none' | 'add' | 'update' | 'delete';
  * A `+` or `-` line is a body line and never a header.
  */
 function readPatch(patch: string): ReadPatch {
-  const paths: string[] = [];
+  const entries: PatchEntry[] = [];
   let unknownMarker = false;
   let hunk: Hunk = 'none';
   for (const raw of patch.split('\n')) {
@@ -71,17 +86,24 @@ function readPatch(patch: string): ReadPatch {
     }
     // Codex keeps whitespace after the prefix as part of the path.
     const path = line.slice(header.length);
-    if (path !== '') paths.push(path);
+    if (header === '*** Move to: ') {
+      // A move takes the file away from where it was and writes it where it lands: both read as a move.
+      const from = entries.at(-1);
+      if (from !== undefined) from.hunk = PatchHunk.Move;
+      if (path !== '') entries.push({ path, hunk: PatchHunk.Move });
+    } else if (path !== '') {
+      entries.push({ path, hunk: HUNK_OF[header] ?? PatchHunk.Update });
+    }
     if (header === '*** Add File: ') hunk = 'add';
     else if (header === '*** Delete File: ') hunk = 'delete';
     else if (header === '*** Update File: ') hunk = 'update';
   }
-  return { paths, unknownMarker };
+  return { entries, unknownMarker };
 }
 
 /** Every path a patch adds, updates, deletes or moves, in order. */
 export function patchPaths(patch: string): readonly string[] {
-  return readPatch(patch).paths;
+  return readPatch(patch).entries.map((e) => e.path);
 }
 
 /**
@@ -93,21 +115,22 @@ export function guardCalls(hook: HookInput): readonly GuardCall[] | null {
   const name = hook.tool_name;
   if (name === 'Bash') {
     const input = BashInput.safeParse(hook.tool_input);
-    return input.success ? [{ toolName: name, input: input.data }] : null;
+    return input.success ? [{ toolName: name, input: input.data, hunk: null }] : null;
   }
   if (name === 'apply_patch') {
     const input = PatchInput.safeParse(hook.tool_input);
     if (!input.success) return null;
-    const { paths, unknownMarker } = readPatch(input.data.command);
+    const { entries, unknownMarker } = readPatch(input.data.command);
     if (unknownMarker) return null;
-    return paths.map((path) => ({
+    return entries.map(({ path, hunk }) => ({
       toolName: 'Edit',
       input: { file_path: hook.cwd === undefined ? path : resolve(hook.cwd, path) },
+      hunk,
     }));
   }
   if (name.startsWith('mcp__')) {
     const input = InputRecord.safeParse(hook.tool_input ?? {});
-    return input.success ? [{ toolName: name, input: input.data }] : null;
+    return input.success ? [{ toolName: name, input: input.data, hunk: null }] : null;
   }
   return null;
 }
@@ -144,7 +167,7 @@ function unreadable(toolName: string): string {
  * 10db doesn't know, and a patch that names no path, are refused rather than read as nothing to judge.
  */
 export async function judgeHookCall(
-  spec: Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool'>,
+  spec: Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool' | 'judgeCall'>,
   hook: HookInput,
   signal: AbortSignal,
 ): Promise<GuardAnswer> {
@@ -154,12 +177,20 @@ export async function judgeHookCall(
     return refuse('10db found no file path in this patch, so it was refused.');
   for (const call of calls) {
     if (signal.aborted) return refuse('The session ended before this call was checked.');
-    const verdict = spec.preToolUse({
+    const req = {
       toolName: call.toolName,
       input: call.input,
       ...(hook.cwd === undefined ? {} : { cwd: hook.cwd }),
-      ...(hook.tool_use_id === undefined ? {} : { toolUseId: hook.tool_use_id }),
-    });
+    };
+    // The session's judge sees each file of a patch, with what its hunk does to it.
+    const verdict = await judgedVerdict(
+      spec,
+      spec.preToolUse({
+        ...req,
+        ...(hook.tool_use_id === undefined ? {} : { toolUseId: hook.tool_use_id }),
+      }),
+      { ...req, toolUseId: hook.tool_use_id ?? null, signal, hunk: call.hunk },
+    );
     if (verdict.decision === 'deny') return refuse(verdict.reason);
     if (verdict.decision === 'allow') continue;
     // A Codex hook cannot change a call, so the broker's `updatedInput` is not used.

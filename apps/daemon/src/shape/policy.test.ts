@@ -282,13 +282,16 @@ describe('a session in its read-only sandbox (§5.2)', () => {
 });
 
 describe('the tools a Plan session approves without a prompt, by its judge', () => {
-  it('leaves the web tools out on a native judge, so auto mode’s classifier judges each call', () => {
-    expect(shapeAllowedTools('native')).not.toContain('WebSearch');
-    expect(shapeAllowedTools('native')).not.toContain('WebFetch');
-    expect(shapeAllowedTools('native')).toContain('Read');
-  });
+  it.each(['native', 'tendb'] as const)(
+    'leaves the web tools out on a %s judge, so the judge sees each call',
+    (judge) => {
+      expect(shapeAllowedTools(judge)).not.toContain('WebSearch');
+      expect(shapeAllowedTools(judge)).not.toContain('WebFetch');
+      expect(shapeAllowedTools(judge)).toContain('Read');
+    },
+  );
 
-  it.each(['rules', 'tendb'] as const)('keeps today’s list on a %s judge', (judge) => {
+  it.each(['rules'] as const)('keeps today’s list on a %s judge', (judge) => {
     expect(shapeAllowedTools(judge)).toEqual(SHAPE_ALLOWED_TOOLS);
   });
 });

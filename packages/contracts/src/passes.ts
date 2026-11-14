@@ -3,6 +3,7 @@ import { BatchDto, FailingCheckDto } from './batches';
 import { NextActionKind, Title } from './entities';
 import {
   BatchId,
+  ConversationId,
   GoalId,
   ClaimId,
   InboxItemId,
@@ -262,6 +263,8 @@ export const PassPageDto = z.object({
   nextActionKind: NextActionKind.nullable(),
   /** Whether the builder has written to the page since the pass opened. */
   spokenTo: z.boolean(),
+  /** The task's conversation, which its thread reads; null while nothing was said on it. */
+  conversationId: ConversationId.nullable(),
   /** The task's latest turn in the pass, or null before its first. */
   turn: z
     .object({

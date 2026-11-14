@@ -30,7 +30,7 @@ import {
 } from '../../daemon/shape-queries';
 import { formatTokens } from '../factory/format-tokens';
 import { Composer } from './composer';
-import { addFiles } from './dropped-files';
+import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { ModelPicker } from './model-picker';
 import { leaveLate, takeLate, useLate } from './late-outcome';

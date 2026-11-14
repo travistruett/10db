@@ -16,7 +16,14 @@ import {
   type ShapeId,
   type AgentAccountKind,
 } from '@10db/contracts';
-import { createTestStore, insertShape, listInbox, recordMcpApproval, seedProject } from '@10db/db';
+import {
+  createTestStore,
+  insertShape,
+  listInbox,
+  recordMcpApproval,
+  seedProject,
+  shapeConversation,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fixtures';
 import { SECRET_VARIABLES } from '../environment';
@@ -159,6 +166,7 @@ const inputFor = (
   env: Record<string, string> = launchEnv(),
 ) => ({
   ...owner,
+  conversationId: shapeConversation(state.db, owner.shapeId).id,
   sessionId: mintId('Session'),
   accountKind,
   env,

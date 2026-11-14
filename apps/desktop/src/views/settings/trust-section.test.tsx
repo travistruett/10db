@@ -14,8 +14,13 @@ import { TRUST_ROWS } from './trust-rows';
 
 // Trust spec §9: Settings › Trust switches what comes along into each session, app-wide.
 
-function serve(initial: Omit<TrustSettingsDto, 'judges'> & Partial<TrustSettingsDto>) {
-  let settings: TrustSettingsDto = { judges: [], ...initial };
+const CODEX_WEB_WAITS =
+  'Web search on ChatGPT comes after a live check: Codex sessions search nothing yet.';
+
+function serve(
+  initial: Omit<TrustSettingsDto, 'judges' | 'tendbReady'> & Partial<TrustSettingsDto>,
+) {
+  let settings: TrustSettingsDto = { judges: [], tendbReady: false, ...initial };
   const put: TrustSwitches[] = [];
   server.use(
     http.get(daemonUrl('/settings/trust'), () => HttpResponse.json(settings)),
@@ -50,6 +55,8 @@ describe('Settings › Trust', () => {
       expect(screen.getByText(row.providers)).toBeTruthy();
       expect(row.description.endsWith('Applies from the next session.')).toBe(true);
     }
+    // With Web on, the row says Codex's web search waits for its live check; off, it says nothing of it.
+    expect(screen.getByText(CODEX_WEB_WAITS)).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Web' }));
     await waitFor(() => {
       expect(put).toEqual([{ ...TRUST_DEFAULTS, web: false }]);
@@ -57,6 +64,7 @@ describe('Settings › Trust', () => {
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Web' })).toHaveProperty('checked', false);
     });
+    expect(screen.queryByText(CODEX_WEB_WAITS)).toBeNull();
   });
 
   it('lists a plugin off in Claude Code as off, and switches it', async () => {
@@ -158,6 +166,37 @@ describe('Settings › Trust', () => {
     expect(within(rules).getByText("10db's rules: a card where they can't decide")).toBeTruthy();
     expect(
       within(rules).getByText("Auto mode doesn't run through a gateway account yet."),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    ["reads 10db's judge with a key", true, "10db's judge"],
+    [
+      "reads 10db's rules without a key",
+      false,
+      "10db's rules: add an OpenRouter key in Settings › Decisions for 10db's judge",
+    ],
+  ])('a gateway account %s', async (_name, tendbReady, label) => {
+    serve({
+      switches: TRUST_DEFAULTS,
+      plugins: [],
+      tendbReady,
+      judges: [
+        {
+          accountId: mintId('Account'),
+          label: 'Gateway',
+          model: 'claude-opus-5-5',
+          judge: JudgeKind.Tendb,
+          why: null,
+        },
+      ],
+    });
+    renderApp('/settings/trust');
+    const list = await screen.findByRole('region', { name: 'Judge' });
+    const row = await within(list).findByRole('listitem', { name: 'Gateway' });
+    expect(within(row).getByText(label)).toBeTruthy();
+    expect(
+      within(list).getByText(/Accounts without auto mode, and Codex, use 10db's judge\./),
     ).toBeTruthy();
   });
 

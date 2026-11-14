@@ -153,6 +153,7 @@ import type {
   ShapeProposalKind,
   ShapeProposalState,
   ShapeState,
+  TrustGrantId,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
@@ -1552,6 +1553,10 @@ export const conversations = sqliteTable(
     /** §6.7; null for a task, whose state is the runner's. */
     state: text('state').$type<ConversationState>(),
     contextPct: real('context_pct'),
+    /** The slash commands the agent last listed, so a cold conversation still offers them; null before any. */
+    commands: text('commands', { mode: 'json' }).$type<
+      { name: string; description: string; argumentHint: string | null }[]
+    >(),
     /** The `seq` the next item takes. */
     nextSeq: integer('next_seq').notNull().default(1),
     createdAt: createdAt(),
@@ -1656,10 +1661,31 @@ export const chats = sqliteTable(
     tabPosition: integer('tab_position'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    lastActivityAt: text('last_activity_at').notNull(),
+    /** When the builder last sent or the agent last ended a turn; null until the first message. */
+    lastActivityAt: text('last_activity_at'),
     archivedAt: text('archived_at'),
   },
-  (t) => [index('chats_project_idx').on(t.projectId)],
+  (t) => [
+    index('chats_project_idx').on(t.projectId),
+    uniqueIndex('chats_conversation_unique').on(t.conversationId),
+  ],
+);
+
+/** The tasks a chat filed: what `edit_task`'s scope, Recent's count and a row's Undo read. */
+export const chatTasks = sqliteTable(
+  'chat_tasks',
+  {
+    chatId: text('chat_id')
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.taskId] }), index('chat_tasks_task_idx').on(t.taskId)],
 );
 
 /**
@@ -2515,3 +2541,30 @@ export const skipFollowUps = sqliteTable('skip_follow_ups', {
   startedAt: text('started_at'),
   createdAt: createdAt(),
 });
+
+/**
+ * A call the builder allowed in a project from now on (Always in this project, trust line §5): the limit its
+ * card named, or none, and a one-line target every judge reads. Gone with its project.
+ */
+export const trustGrants = sqliteTable(
+  'trust_grants',
+  {
+    id: text('id').$type<TrustGrantId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** Not `limit`, a word hand-written SQL reserves. */
+    limitName: text('limit_name').$type<LimitName>(),
+    target: text('target').notNull(),
+    sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('trust_grants_project_idx').on(t.projectId),
+    check(
+      'trust_grants_limit_name',
+      sql`${t.limitName} IS NULL OR ${t.limitName} IN ('destroys_data', 'sends_data_out', 'reads_secrets', 'writes_live')`,
+    ),
+  ],
+);

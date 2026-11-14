@@ -28,7 +28,7 @@ export {
 } from './git';
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
-export { GitError, XCODE_SELECTORS } from './run';
+export { GitError, runGit, XCODE_SELECTORS } from './run';
 export {
   checkoutSwitchCommand,
   trustCard,

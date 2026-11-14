@@ -20,6 +20,8 @@ import {
   type FakeSent,
   type FakeStep,
 } from './fake-script';
+import { FakeTaskRefs } from './fake-task-refs';
+import { judgedVerdict } from './session-judge';
 import { readCheckoutText } from './before-text';
 import { claudeToolCall, claudeToolResult, createClaudeToolCalls } from './claude-tool-calls';
 import {
@@ -27,6 +29,7 @@ import {
   type InterruptReceipt,
   type SessionEvent,
   type SessionHandle,
+  type AgentSessionCore,
   type LaneSessionSpec,
   type ShapeImage,
   type AgentSessionSpec,
@@ -150,8 +153,19 @@ export interface FakeLaneContext {
   stopGate(): Promise<void> | null;
 }
 
+/**
+ * What a scripted session reads of its spec: a lane's, or a chat's that the book scripts too, given
+ * the sequence of its sessions.
+ */
+export type ScriptedSessionSpec = AgentSessionCore & {
+  readonly profile: Pick<LaneSessionSpec['profile'], 'sequence' | 'allowedTools'>;
+};
+
 /** Stands in for a lane's Claude Code session: the scripted steps drive every event. */
-export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneContext): SessionHandle {
+export function runFakeLaneSession(
+  spec: ScriptedSessionSpec,
+  context: FakeLaneContext,
+): SessionHandle {
   const { title, steps, reportedModel } = context;
   const core = createFakeSessionCore();
   const emit = (event: SessionEvent): void => {
@@ -257,6 +271,22 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
     }
   };
 
+  /** The guard, then the session's judge for a call it left open, as Claude Code's hook runs them. */
+  const sessionVerdict = (
+    toolName: string,
+    input: Record<string, unknown>,
+    reportedMode: ReportedMode | undefined,
+    toolUseId: string,
+  ): Promise<GuardVerdict> =>
+    judgedVerdict(spec, guardVerdict(toolName, input, reportedMode, toolUseId), {
+      toolName,
+      input,
+      toolUseId,
+      signal: abort.signal,
+      hunk: null,
+      ...(reportedMode === undefined ? {} : { reportedMode }),
+    });
+
   const applyFileEffect = (toolName: string, input: Record<string, unknown>): void => {
     const file =
       typeof input['file_path'] === 'string' ? resolve(spec.cwd, input['file_path']) : null;
@@ -276,6 +306,8 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
       );
     }
   };
+
+  const taskRefs = new FakeTaskRefs();
 
   const callMcp = async (
     tool: string,
@@ -334,7 +366,7 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         const verdict: GuardVerdict =
           step.toolName === 'SandboxNetworkAccess'
             ? { decision: 'ask', reason: 'network request' }
-            : guardVerdict(step.toolName, input, step.reportedMode, toolUseId);
+            : await sessionVerdict(step.toolName, input, step.reportedMode, toolUseId);
         if (verdict.decision === 'deny') {
           denied(DeniedBy.TenDb, verdict.reason);
           observe(index, 'denied_by_guard', { reason: verdict.reason });
@@ -401,11 +433,39 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
         });
         return 'continue';
       case 'tool_call':
-        emit({ type: 'tool_call', call: step.call });
+        emit({
+          type: 'tool_call',
+          call: step.call,
+          ...(step.full === undefined
+            ? {}
+            : {
+                full: {
+                  ...(step.full.output === undefined ? {} : { output: step.full.output }),
+                  ...(step.full.patch === undefined ? {} : { patch: step.full.patch }),
+                },
+              }),
+        });
         return 'continue';
       case 'mcp': {
-        const result = await Promise.race([callMcp(step.tool, step.args), untilStopped]);
+        const args = taskRefs.resolve(step.args);
+        // A Claude session reports the use and the result of each tool call on 10db's server, which a
+        // chat draws as its builder-tool rows.
+        const useId = `fake-mcp-${String(index)}`;
+        for (const event of toolCalls.use({
+          id: useId,
+          name: `mcp__10db__${step.tool}`,
+          input: args,
+          parentId: null,
+        }))
+          emit(event);
+        const result = await Promise.race([callMcp(step.tool, args), untilStopped]);
         if (result === 'stopped') return 'halt';
+        taskRefs.learn(result.text);
+        for (const event of toolCalls.result(useId, {
+          isError: result.isError,
+          content: result.text,
+        }))
+          emit(event);
         observe(index, 'mcp_result', {
           tool: step.tool,
           isError: result.isError,
@@ -726,6 +786,8 @@ export function runFakeExploreSession(
           emit({ type: 'activity', kind: 'text', summary: String(error) });
         }
       }
+      // A stopped turn ends in error, as Claude Code's and Codex's interrupted turns do.
+      const stopped = current.signal.aborted;
       current = null;
       if (core.ended()) break;
       if (result.end !== undefined) {
@@ -755,7 +817,7 @@ export function runFakeExploreSession(
       emit({
         type: 'turn_complete',
         ...(dropped.length === 0 ? {} : { dropped }),
-        ...(failed ? { result: 'error' as const } : {}),
+        ...(failed || stopped ? { result: 'error' as const } : {}),
         ...(result.text === undefined ? {} : { text: result.text }),
         inputTokens: 100 * number,
         outputTokens: 10 * number,

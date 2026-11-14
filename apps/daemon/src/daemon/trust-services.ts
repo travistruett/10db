@@ -1,4 +1,6 @@
 import {
+  JudgeDecision,
+  NotFoundError,
   Provider,
   agentKind,
   providerOf,
@@ -10,10 +12,11 @@ import {
   type TrustSettingsDto,
   type TrustSwitches,
 } from '@10db/contracts';
-import { getAccountRow, getProject } from '@10db/db';
+import { deleteTrustGrant, getAccountRow, getProject, listTrustGrants } from '@10db/db';
 import type { ApiServices } from '../api';
 import { allCheckouts } from '../delivery';
 import type { StateStore } from '../events';
+import type { Judge } from '../judge';
 import {
   appTrustSwitches,
   projectTrustOverrides,
@@ -41,6 +44,8 @@ export type TrustServices = Pick<
   | 'setProjectTrust'
   | 'liveSystems'
   | 'setLiveSystems'
+  | 'trustGrants'
+  | 'removeTrustGrant'
 >;
 
 /** Claude Code's installed plugins; a list it can't read lists none here, as a session loads none. */
@@ -78,15 +83,19 @@ export function createTrustServices(deps: {
   readonly laneSandbox: LaneSandbox | null;
   /** Says what judges each account's calls. */
   readonly adapter: Pick<AgentAdapter, 'capabilities'>;
+  /** Says whether 10db's judge can answer, for the accounts it judges. */
+  readonly judge: Pick<Judge, 'ready'>;
   /** Told each stored switch that reads as off for not being a shape 10db reads. */
   readonly log: { warn(fields: object, message: string): void };
 }): TrustServices {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
 
-  const trustSettings = (): TrustSettingsDto => {
+  const trustSettings = async (): Promise<TrustSettingsDto> => {
     const switches = appTrustSwitches(db, onInvalid);
+    const tendbReady = await deps.judge.ready(JudgeDecision.CrossesLimit);
     return {
+      tendbReady,
       switches,
       plugins: installedPlugins(deps.builderHome).map((plugin) => ({
         id: plugin.id,
@@ -155,7 +164,7 @@ export function createTrustServices(deps: {
 
   return {
     trustSettings,
-    setTrustSwitches(switches) {
+    async setTrustSwitches(switches) {
       deps.state.write((ctx) => {
         setAppTrustSwitches(ctx, switches);
       });
@@ -176,6 +185,15 @@ export function createTrustServices(deps: {
         setProjectLiveSystems(ctx, projectId, input.liveSystems);
       });
       return liveSystems(projectId);
+    },
+    trustGrants(projectId) {
+      getProject(db, projectId);
+      return listTrustGrants(db, projectId);
+    },
+    removeTrustGrant(projectId, grantId) {
+      getProject(db, projectId);
+      const removed = deps.state.write((ctx) => deleteTrustGrant(ctx, projectId, grantId));
+      if (!removed) throw new NotFoundError('grant', grantId);
     },
   };
 }

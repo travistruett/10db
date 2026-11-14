@@ -617,6 +617,20 @@
       "when": 1794686941245,
       "tag": "0087_drop_old_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1794695344600,
+      "tag": "0088_chat_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1794695350511,
+      "tag": "0089_trust_grants",
+      "breakpoints": true
     }
   ]
 }

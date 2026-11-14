@@ -20,6 +20,8 @@ export const CLAUDE_HOOK_TIMEOUT_SECONDS = 15_000;
 export const BILLING_UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
 
+const CANCELLED_WHILE_JUDGED = 'The call was cancelled while 10db judged it, so it did not run.';
+
 /** Every tool waits for `verified`; from the moment `refused()` is true every tool is denied. */
 export interface ToolGate {
   readonly verified: Promise<boolean>;
@@ -183,14 +185,18 @@ function deniedBy(output: HookJSONOutput): string | null {
 }
 
 /**
- * Denies while the gate is closed; a judge that throws becomes a deny naming 10db's guard. Before it
+ * Denies while the gate is closed; a judge that throws or rejects becomes a deny naming 10db's guard. Before it
  * judges, `beforeCall` sees the call (where its previous text is read), and a deny is told to
  * `onDenied`.
  */
 export function preToolUseHook(hook: {
   readonly gate: ToolGate;
   readonly cwds: HookCwds;
-  readonly judge: (input: PreToolUseHookInput) => HookJSONOutput;
+  /** The guard, then the session's judge where it has one, which may take a model's answer. */
+  readonly judge: (
+    input: PreToolUseHookInput,
+    signal: AbortSignal,
+  ) => HookJSONOutput | Promise<HookJSONOutput>;
   readonly beforeCall?: (input: PreToolUseHookInput) => void;
   readonly onDenied?: OnDenied;
   /**
@@ -221,7 +227,10 @@ export function preToolUseHook(hook: {
     try {
       hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
       hook.beforeCall?.(hookInput);
-      output = hook.judge(hookInput);
+      output = await hook.judge(hookInput, signal);
+      // A slow judge can answer after the session was refused or the call was cancelled.
+      if (hook.gate.refused()) return untold(refuse(BILLING_UNVERIFIED));
+      if (signal.aborted) return untold(refuse(CANCELLED_WHILE_JUDGED));
       if (permissionDecisionOf(output) === 'ask' && input.success) {
         const decision = hook.settleAsk?.(hookInput, input.data, signal) ?? null;
         if (decision !== null) settling = { decision, input: input.data };

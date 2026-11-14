@@ -1,4 +1,5 @@
 import {
+  ConversationId,
   PARK_TASK_OPTION,
   PASS_RETRY_TURN_CHOICE,
   SHARED_ASK_ALLOW_CHOICE,
@@ -16,6 +17,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
@@ -30,7 +32,7 @@ import {
   passPageDto,
   passTurnWithFilesDto,
   passViewDto,
-  taskMessageDto,
+  pageItemDto,
 } from '../../test/pass-fixtures';
 import { clockTime } from './page-status';
 import { PassWorkspace } from './pass-workspace';
@@ -279,23 +281,30 @@ describe('PassWorkspace working line', () => {
 });
 
 describe('PassWorkspace composer', () => {
-  it('sends the shown page’s draft, words and picture, to that page’s thread', async () => {
+  it('sends the shown page’s draft, words and picture, to that page’s conversation', async () => {
     const NodeFile = await useNodeMultipart();
-    let posted: { taskId: string; text: string | undefined; pictures: readonly string[] } | null =
-      null;
+    let posted: {
+      conversationId: string;
+      text: string | undefined;
+      pictures: readonly string[];
+    } | null = null;
     server.use(
-      http.post(daemonUrl('/tasks/:taskId/thread'), async ({ params, request }) => {
-        const parts = multipartParts(await request.text());
-        posted = {
-          taskId: String(params['taskId']),
-          text: parts.text['text'],
-          pictures: parts.files['picture'] ?? [],
-        };
-        return HttpResponse.json(
-          taskMessageDto(TaskId.parse(params['taskId']), { body: 'padding too tight' }),
-          { status: 201 },
-        );
-      }),
+      http.post(
+        daemonUrl('/conversations/:conversationId/messages'),
+        async ({ params, request }) => {
+          const parts = multipartParts(await request.text());
+          const conversationId = ConversationId.parse(params['conversationId']);
+          posted = {
+            conversationId,
+            text: parts.text['text'],
+            pictures: parts.files['picture'] ?? [],
+          };
+          return HttpResponse.json(
+            pageItemDto(conversationId, { kind: 'message', text: 'padding too tight' }),
+            { status: 202 },
+          );
+        },
+      ),
     );
     const { pages } = await renderWorkspace((p) => p.ready.taskId);
     const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message to Settings' });
@@ -305,7 +314,7 @@ describe('PassWorkspace composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => {
       expect(posted).toEqual({
-        taskId: pages.ready.taskId,
+        conversationId: pages.ready.conversationId,
         text: 'padding too tight',
         pictures: ['tight.png'],
       });
@@ -351,14 +360,17 @@ describe('PassWorkspace page actions', () => {
         sent.push({ route: 'stop', taskId: String(params['taskId']) });
         return new HttpResponse(null, { status: 204 });
       }),
-      http.post(daemonUrl('/tasks/:taskId/thread/redo'), async ({ params, request }) => {
-        const taskId = TaskId.parse(params['taskId']);
+      http.post(daemonUrl('/conversations/:conversationId/redo'), async ({ params, request }) => {
+        const conversationId = ConversationId.parse(params['conversationId']);
         sent.push({
           route: 'redo',
-          taskId,
-          text: multipartParts(await request.text()).text['text'],
+          taskId: conversationId,
+          // Words alone go as JSON.
+          text: z.object({ text: z.string() }).parse(await request.json()).text,
         });
-        return HttpResponse.json(taskMessageDto(taskId), { status: 201 });
+        return HttpResponse.json(pageItemDto(conversationId, { kind: 'message' }), {
+          status: 202,
+        });
       }),
       http.post(daemonUrl('/tasks/:taskId/turns/:turnId/opened'), ({ params }) => {
         sent.push({
@@ -394,7 +406,8 @@ describe('PassWorkspace page actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
     await waitFor(() => {
       expect(actionsSent(sent)).toEqual([
-        { route: 'redo', taskId: pages.working.taskId, text: 'not that, the header' },
+        // A redo goes to the page's conversation.
+        { route: 'redo', taskId: pages.working.conversationId, text: 'not that, the header' },
       ]);
     });
   });
@@ -520,30 +533,25 @@ describe('PassWorkspace page actions', () => {
   it("lists under each reply the files its turn changed, read from the page's turns", async () => {
     const pages = pagesByStatus();
     const ready = pages.ready;
+    const turn = passTurnWithFilesDto({
+      taskId: ready.taskId,
+      startedAt: minutesBeforeNow(12),
+      files: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
+    });
+    const conversationId = ready.conversationId ?? mintId('Conversation');
     server.use(
       ...passHandlers({
-        threads: {
-          [ready.taskId]: {
-            taskId: ready.taskId,
-            messages: [
-              taskMessageDto(ready.taskId, {
-                author: 'agent',
-                kind: 'reply',
-                body: 'Tightened the padding',
-                createdAt: minutesBeforeNow(3),
-              }),
-            ],
-          },
-        },
-        turns: {
-          [ready.taskId]: [
-            passTurnWithFilesDto({
-              taskId: ready.taskId,
-              startedAt: minutesBeforeNow(12),
-              files: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
+        conversations: {
+          [conversationId]: [
+            pageItemDto(conversationId, {
+              kind: 'agent_message',
+              author: 'agent',
+              text: 'Tightened the padding',
+              turnId: turn.id,
             }),
           ],
         },
+        turns: { [ready.taskId]: [turn] },
       }),
     );
     renderWithDaemon(

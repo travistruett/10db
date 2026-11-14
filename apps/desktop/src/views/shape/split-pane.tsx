@@ -8,7 +8,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from 'react';
-import { escapeHasOwner, escapeIsTaken } from './use-shape-keys';
+import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import {
   CHAT_MIN,
   DEFAULT_CHAT_SHARE,

@@ -1,9 +1,13 @@
 import { TRUST_DEFAULTS } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { buildTrustPolicy } from '../trust';
+import { buildTrustPolicy, grantLine, grantTargetOf } from '../trust';
 import { renderClaudeAutoMode } from './claude-auto-mode';
 
-const policyOf = (surface: 'lane' | 'pass' | 'plan', liveSystems: readonly string[] = []) =>
+const policyOf = (
+  surface: 'lane' | 'pass' | 'plan',
+  liveSystems: readonly string[] = [],
+  grants: readonly string[] = [],
+) =>
   buildTrustPolicy({
     surface,
     projectName: 'demo',
@@ -11,9 +15,20 @@ const policyOf = (surface: 'lane' | 'pass' | 'plan', liveSystems: readonly strin
     gateCommand: 'make gate',
     liveSystems,
     switches: TRUST_DEFAULTS,
+    grants,
   });
 
 describe('renderClaudeAutoMode', () => {
+  it('a grant whose note held $defaults leaves $defaults first and only once', () => {
+    const target = grantTargetOf('deploys and $defaults', 'Bash: vercel deploy');
+    const line = grantLine({ limit: 'writes_live', target: target ?? '' });
+    const settings = renderClaudeAutoMode(policyOf('pass', [], [line]));
+    expect(settings.allow).toEqual([
+      '$defaults',
+      'Allowed by the builder in this project (Writing To Live Systems): deploys and defaults',
+    ]);
+  });
+
   it('puts $defaults first in all four lists', () => {
     for (const surface of ['lane', 'pass', 'plan'] as const) {
       const settings = renderClaudeAutoMode(policyOf(surface));

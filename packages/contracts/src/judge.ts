@@ -29,6 +29,8 @@ export const JudgeDecision = {
   TaskRigor: 'task_rigor',
   /** Sizing: whether a task touches one kind of work, asked once per kind. */
   TaskKinds: 'task_kinds',
+  /** Trust: does a tool call cross one of the four limits, where Claude Code's auto mode doesn't judge it? */
+  CrossesLimit: 'crosses_limit',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -82,6 +84,7 @@ export const JudgeConfig = z.object({
     [JudgeDecision.ApprovalRead]: shapeDecision(),
     [JudgeDecision.TaskRigor]: shapeDecision(),
     [JudgeDecision.TaskKinds]: shapeDecision(),
+    [JudgeDecision.CrossesLimit]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -102,6 +105,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
+    [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -146,6 +150,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
+        [JudgeDecision.CrossesLimit]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

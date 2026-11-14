@@ -2,7 +2,13 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
-import { createTestStore, insertShape, seedProject, type AccountRow } from '@10db/db';
+import {
+  createTestStore,
+  insertShape,
+  seedProject,
+  shapeConversation,
+  type AccountRow,
+} from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { allSandboxRootsOf, openSandboxRoots, sandboxDepsOf } from '../src/daemon';
@@ -139,6 +145,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     const cards: { title: string; shapeId: unknown }[] = [];
     const prepared = await prepare({
       projectId: project.id,
+      conversationId: shapeConversation(state.db, shape.id).id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
       accountKind: agentKind(account.kind),

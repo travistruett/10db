@@ -4,13 +4,24 @@
 
 export { heldInlineBytes } from './block-pictures';
 export { createDelivery } from './delivery';
-export { outgoingMessage, type DeliverableMessage, type OutgoingMessage } from './delivery-rules';
+export {
+  outgoingMessage,
+  readBackAsk,
+  type DeliverableMessage,
+  type OutgoingMessage,
+} from './delivery-rules';
 export { createExploreEngine, type ExploreEngine, type ExploreEngineDeps } from './explore-engine';
 export { itemsWithFull, readFullOutput, writeFullOutput } from './full-output';
 export { itemDtoOf } from './item-dto';
+export { createItemRecorder, type ItemRecorder } from './item-recorder';
+export { createLiveRegistry, type LiveRegistry } from './live-registry';
 export type { ExploreOwnerHooks, ExploreStart, TurnEnd } from './explore-hooks';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
-export { keepBuilderMessage, removeKeptFiles, type PastedFile } from './intake';
+export { keepBuilderMessage, type PastedFile } from './intake';
+export { buildThreadDigest, builderMessageText, FRESH_SESSION_NOTICE } from './lane-text';
+export { readConversationPicture } from './pictures';
+export { taskFilesDir } from './task-files';
+export { createTaskThread, type TaskThread } from './task-thread';
 export { readImageHeader, readImageSize } from './image-check';
 export {
   FRESH_START_LINE,

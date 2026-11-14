@@ -40,6 +40,7 @@ describe('judge config', () => {
         approval_read: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         task_rigor: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         task_kinds: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        crosses_limit: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);

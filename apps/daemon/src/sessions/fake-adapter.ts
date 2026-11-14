@@ -10,6 +10,7 @@ import {
   FakeSessionClashError,
   runFakeExploreSession,
   runFakeLaneSession,
+  type FakeLaneContext,
   type FakeShapeBehaviour,
 } from './fake-session';
 import {
@@ -30,6 +31,9 @@ import {
 
 /** The email the fake reports for a subscription that expects none, and for an identity probe. */
 export const FAKE_ACCOUNT_EMAIL = 'builder@example.com';
+
+/** A book key that scripts a chat by its first message, as `Task: ` names a task. */
+const CHAT_KEY = 'Chat: ';
 
 const NOTHING_SEEN: SeenAccount = {
   email: undefined,
@@ -282,7 +286,27 @@ export class FakeAdapter implements AgentAdapter {
     spec: ExploreSessionSpec,
   ) => { readonly reason: SessionEndReason; readonly message: string } | null = () => null;
 
+  /** The sessions each scripted chat has opened, for the sequence its next one runs. */
+  private readonly chatSessions = new Map<string, number>();
+
+  /**
+   * The book's `Chat: <text>` key a chat's prompt matches: one of its message lines (`[m:<id>] …`)
+   * reads `<text>`, or starts with it and a space, as a line with a mention after it does.
+   */
+  private chatKey(prompt: string): string | null {
+    const lines = prompt.split('\n').map((line) => line.replace(/^\[m:[^\]]+\] /, ''));
+    return (
+      Object.keys(this.book).find((key) => {
+        if (!key.startsWith(CHAT_KEY)) return false;
+        const text = key.slice(CHAT_KEY.length);
+        return lines.some((line) => line === text || line.startsWith(`${text} `));
+      }) ?? null
+    );
+  }
+
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
+    const chat = this.chatKey(spec.prompt);
+    if (chat !== null) return this.openScriptedChat(spec, providerSessionId, chat);
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
     const failure = refusal === null ? this.shapeStartFailure(spec) : null;
     const sent: string[] = [];
@@ -326,6 +350,32 @@ export class FakeAdapter implements AgentAdapter {
     return handle;
   }
 
+  /** A chat whose prompt the book scripts runs its steps as a lane's do, one script per session. */
+  private openScriptedChat(
+    spec: ExploreSessionSpec,
+    providerSessionId: string,
+    key: string,
+  ): SessionHandle {
+    const sequence = (this.chatSessions.get(key) ?? 0) + 1;
+    this.chatSessions.set(key, sequence);
+    const sent: string[] = [];
+    const uuids: (string | null)[] = [];
+    const inner = runFakeLaneSession(
+      { ...spec, profile: { sequence, allowedTools: spec.profile.allowedTools } },
+      this.scriptContext(providerSessionId, key, this.book[key]?.[sequence - 1], undefined),
+    );
+    const handle: SessionHandle = {
+      ...inner,
+      send: (text, images, uuid) => {
+        sent.push(text);
+        uuids.push(uuid ?? null);
+        inner.send(text, images, uuid);
+      },
+    };
+    this.shapeSessions.push({ spec, sent, uuids, models: [], handle });
+    return handle;
+  }
+
   private openLane(spec: LaneSessionSpec, providerSessionId: string): SessionHandle {
     const { model: reportedModel, ...override } = this.seen(spec);
     const refusal = checkAccount(spec.account, { ...expectedSeen(spec.account), ...override });
@@ -347,11 +397,29 @@ export class FakeAdapter implements AgentAdapter {
       resume: spec.resumeProviderSessionId,
       accountId: spec.account.accountId,
     });
-    return runFakeLaneSession(spec, {
+    return runFakeLaneSession(
+      spec,
+      this.scriptContext(
+        providerSessionId,
+        title,
+        this.book[title]?.[spec.profile.sequence - 1],
+        reportedModel,
+      ),
+    );
+  }
+
+  /** What a scripted session, a lane's or a chat's, is run with. */
+  private scriptContext(
+    providerSessionId: string,
+    title: string,
+    steps: FakeLaneContext['steps'],
+    reportedModel: string | undefined,
+  ): FakeLaneContext {
+    return {
       providerSessionId,
       onEnded: this.claim(providerSessionId),
       title,
-      steps: this.book[title]?.[spec.profile.sequence - 1],
+      steps,
       reportedModel,
       sent: this.sent,
       observations: this.observations,
@@ -383,6 +451,6 @@ export class FakeAdapter implements AgentAdapter {
       interruptReceipt: (untaken) => this.interruptReceipt(untaken),
       interruptEndsSession: () => this.interruptEndsSession,
       stopGate: () => this.laneStopGate,
-    });
+    };
   }
 }

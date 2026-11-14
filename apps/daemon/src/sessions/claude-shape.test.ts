@@ -448,22 +448,35 @@ describe('the PreToolUse hook', () => {
       });
   }
 
-  it('hands the guard the subagent’s id and type, which tell a reviewer from the session', async () => {
+  it('hands the guard the subagent’s id and type, which tell a reviewer from the session, and the mode reported', async () => {
     const seen: ShapeToolRequest[] = [];
     const call = await hookFor((req) => {
       seen.push(req);
       return { decision: 'allow' };
     });
-    await call({ tool_name: 'Read', tool_input: { file_path: 'a' } });
+    await call({ tool_name: 'Read', tool_input: { file_path: 'a' }, permission_mode: 'auto' });
     await call({
       tool_name: 'mcp__10db__report_finding',
       tool_input: {},
       agent_id: 'agent-7',
       agent_type: 'scope',
     });
+    // Each call carries the mode Claude Code reported with it; none is not auto mode.
     expect(seen).toEqual([
-      { toolName: 'Read', input: { file_path: 'a' }, agentId: undefined, agentType: undefined },
-      { toolName: 'mcp__10db__report_finding', input: {}, agentId: 'agent-7', agentType: 'scope' },
+      {
+        toolName: 'Read',
+        input: { file_path: 'a' },
+        agentId: undefined,
+        agentType: undefined,
+        reportedMode: 'auto',
+      },
+      {
+        toolName: 'mcp__10db__report_finding',
+        input: {},
+        agentId: 'agent-7',
+        agentType: 'scope',
+        reportedMode: 'other',
+      },
     ]);
   });
 

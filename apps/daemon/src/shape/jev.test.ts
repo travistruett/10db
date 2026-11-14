@@ -34,6 +34,7 @@ let answers: Partial<Record<JudgeDecision, string>>;
 
 const fakeJudge: Judge = {
   off: false,
+  ready: () => Promise.resolve(true),
   choose: (req) => {
     asked.push(req);
     return Promise.resolve({

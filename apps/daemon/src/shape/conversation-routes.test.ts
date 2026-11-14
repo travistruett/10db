@@ -11,6 +11,8 @@ import {
 } from '@10db/contracts';
 import {
   insertBuilderMessage,
+  insertSystemNotice,
+  offerToAgent,
   insertItem,
   patchConversation,
   shapeConversation,
@@ -20,7 +22,7 @@ import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stubServices } from '../../test/api-stub';
 import { seedWorkstream, waitFor } from '../../test/fixtures';
-import { writeFullOutput } from '../conversation';
+import { createLiveRegistry, createTaskThread, writeFullOutput } from '../conversation';
 import { createConversationServices } from '../daemon';
 import { createApp } from '../api';
 import { devUiMayRead, renderMayRead } from '../screens';
@@ -31,6 +33,11 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 const TOKEN = 'ui-token';
 const RENDER = 'render-token';
 const DEV_UI = 'dev-ui-token';
+
+/** No chat runs here: a Plan's routes never reach one. */
+const noChat = (): never => {
+  throw new Error('no chat in this test');
+};
 let f: ServiceFixture;
 let conv: ConversationId;
 let request: (
@@ -60,7 +67,19 @@ beforeEach(() => {
         state: f.state,
         engine: f.engine,
         shape: f.service,
+        chat: { send: noChat, post: noChat },
+        files: () => Promise.resolve([]),
         dataDir: f.filesDir,
+        laneLive: createLiveRegistry(),
+        task: {
+          // A task in no pass: its message is kept on its thread, and no page's session is handed it.
+          post: (taskId, message, how) =>
+            createTaskThread({
+              state: f.state,
+              dataDir: f.filesDir,
+              pages: { deliver: () => Promise.reject(new Error('no page here')) },
+            }).postTaskMessage(taskId, message, how),
+        },
       }),
     ),
     upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),
@@ -197,17 +216,40 @@ describe('the conversation routes', () => {
       ]).toEqual([method, path, 404]);
   });
 
-  it('reads a task’s conversation, and refuses a message to it with 409', async () => {
+  it('reads a task’s items, takes a message to its thread, and leaves its state to the runner', async () => {
     const ws = seedWorkstream(f.c.store);
-    f.state.write((ctx) => insertBuilderMessage(ctx, ws.task.id, { body: 'First', files: [] }));
+    f.state.write((ctx) => {
+      insertBuilderMessage(ctx, ws.task.id, { body: 'First', files: [] });
+      // A notice the daemon offers with Send to Agent, and one that offers nothing.
+      offerToAgent(ctx, insertSystemNotice(ctx, ws.task.id, 'A check failed').id, 'Fix it');
+      insertSystemNotice(ctx, ws.task.id, 'Started a fresh session');
+    });
     const task = taskConversationOf(f.c.store.db, ws.task.id);
     if (task === null) throw new Error('no thread');
-    await json(await request(`/conversations/${task.id}`), ConversationDto);
     const res = await request(`/conversations/${task.id}/messages`, {
       method: 'POST',
       body: { text: 'Hello' },
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(202);
+    const page = await json(
+      await request(`/conversations/${task.id}/items`),
+      ConversationItemsPage,
+    );
+    expect(
+      page.items.map((i) =>
+        i.kind === 'message' ? i.text : i.kind === 'notice' ? [i.text, i.offer] : i.kind,
+      ),
+    ).toEqual([
+      'First',
+      ['A check failed', 'send_to_agent'],
+      ['Started a fresh session', undefined],
+      'Hello',
+    ]);
+    for (const path of ['', '/stop', '/send-now'])
+      expect(
+        (await request(`/conversations/${task.id}${path}`, path === '' ? {} : { method: 'POST' }))
+          .status,
+      ).toBe(409);
   });
 
   it.each([

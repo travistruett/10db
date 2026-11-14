@@ -12,12 +12,13 @@ import type {
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
+import type { WebSearchMode } from './codex-generated/ts/WebSearchMode';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
-import type { DeniedCall, ReportedMode } from '../trust';
+import type { DeniedCall, PatchHunk, ReportedMode } from '../trust';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -70,6 +71,9 @@ export type ToolDecision =
 
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
+
+/** The web search modes 10db sends Codex; `live` and `indexed` are never among them. */
+export type CodexWebSearch = Extract<WebSearchMode, 'cached' | 'disabled'>;
 
 /** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
 export type LanePermissionMode = 'default' | 'auto';
@@ -132,6 +136,12 @@ export interface AgentSessionCore {
    * coordination lines of its surface and whether a person is in it. Claude renders it for auto mode.
    */
   readonly policy: TrustPolicy;
+  /**
+   * Codex's web search for this thread: `cached` with the Web switch on, answering from OpenAI's index and
+   * fetching no page the agent names; `disabled` with it off, as when absent. Claude ignores it: its web is
+   * WebSearch and WebFetch, judged through the hook.
+   */
+  readonly webSearch?: CodexWebSearch;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /**
@@ -139,6 +149,11 @@ export interface AgentSessionCore {
    * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.
    */
   preToolUse(req: ShapeToolRequest): ShapeVerdict;
+  /**
+   * The session's judge, for a call `preToolUse` left open (a bare `allow`): 10db's judge on a `tendb` session.
+   * Its answer replaces the guard's; one that throws denies. Absent, the guard's answer stands.
+   */
+  readonly judgeCall?: (req: JudgedCallRequest) => Promise<GuardVerdict>;
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
@@ -183,6 +198,16 @@ export interface ExploreProfile {
 export type LaneSessionSpec = AgentSessionCore & { readonly profile: LaneProfile };
 export type ExploreSessionSpec = AgentSessionCore & { readonly profile: ExploreProfile };
 export type AgentSessionSpec = LaneSessionSpec | ExploreSessionSpec;
+
+/**
+ * A call the session judge sees: the hook's call, its tool use id (null where the agent named none), the
+ * hook's signal, and the `apply_patch` hunk a Codex edit came from.
+ */
+export type JudgedCallRequest = Omit<ShapeToolRequest, 'toolUseId'> & {
+  readonly toolUseId: string | null;
+  readonly signal: AbortSignal;
+  readonly hunk: PatchHunk | null;
+};
 
 /** A tool call as a Shape session's PreToolUse hook sees it; `agentId` is set only inside a subagent. */
 export interface ShapeToolRequest {

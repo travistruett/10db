@@ -85,6 +85,8 @@ export const PermissionChoice = {
   AllowProject: 'allow_project',
   /** Only on a card for an approved project MCP server's tool: every tool the server listed, in this project. */
   AllowMcpServer: 'allow_mcp_server',
+  /** On a limit or an escalation card: a grant every judge reads in this project from now on. */
+  AlwaysInProject: 'always_in_project',
   Deny: 'deny',
 } as const;
 export type PermissionChoice = ValueOf<typeof PermissionChoice>;
