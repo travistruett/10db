@@ -155,7 +155,7 @@ runner obeys them`
 - `runner.test.ts`;
 - `packages/contracts/src/review-rounds.ts`: a pure `atRoundLimit(sentBack, rounds)` and its table test;
 - `packages/contracts/src/steps.ts` (`WorkstreamStep.reviewRounds`);
-- `packages/contracts/src/task-state.ts` and its test (the card's "sent back N of 3", 326-331, and "Shipped at the
+- `apps/desktop/src/views/board/task-state.ts` and its test (the card's "sent back N of 3", 326-331, and "Shipped at the
   retry limit", 348);
 - `routing/plan-steps.ts`, which stamps `reviewRounds` when it plans.
 
@@ -183,9 +183,11 @@ runner obeys them`
 - Careful: two rejections go back. A third ships.
 - A security task at the limit fails.
 - Three gate failures with `attempt` at 3, then a review rejection: the work still goes back to Build. Today it
-  fails, which proves the counters are apart.
+  ships at the limit instead, which proves the counters are apart.
 - An `atRoundLimit` table: rounds 0 to 3 by `sentBack` 0 to 3.
 - `task-state.test.ts` rows: "sent back 1 of 1" on a Standard review; a step stored without `reviewRounds`.
+- The card's R is the stamped value, re-stamped at every step write; after a playbook edit it can lag until the
+  next write, while the limit itself is read live. Accepted.
 - A playbook row set to 0 rounds ships on the first rejection.
 - Extend the existing tests that count send-backs against 3. `runner.test.ts` near 3941 ("counts only the
   send-backs before the limit") and the fix-limit test near 4550 change to round semantics. Say which in the
@@ -412,12 +414,30 @@ stores the rigor, as it does today.
 - The remaining pending steps after `stepIndex` are replaced by the planned steps whose role comes after the
   current step's role in role order and is not already kept. Each comes newly routed, with its `reviewRounds`
   stamped.
-- `withCurrentPlan(tx, row, steps, toIndex)` lives in `runner.ts`. It re-reads the task, its kinds, the playbook
-  and the project's account in the same transaction, plans through `planSteps`, and applies `replanSteps`. Every
-  step-advancing write calls it on the steps it is about to write: `advanceTo`, the gate-pass advance, the
-  send-back, the plan approval (Task 5) and the safety net (Task 4). These are writes that change `stepIndex`.
-- A write that parks or ends the workstream (`builder_review`, done, failed) does not re-plan. A Review is never
-  added to finished work.
+- `withCurrentPlan(tx, row, steps)` lives in `runner.ts`. Inside the same transaction it:
+  - re-reads the workstream's steps, the task and its kinds, and the playbook;
+  - uses the account the lane is leased on, as `escalated` does (`:1096`), and not the project's;
+  - plans through `planSteps` and applies `replanSteps`.
+- **Every end of a step** re-plans first, inside its write, and only then chooses its move from the re-planned
+  steps: advance (and to which index), done, park for approval, or the safety net. The step's model and effort come
+  from that choice too, so no target index, model or effort is taken from a row read before the write. This
+  covers:
+  - the gate pass (`:3777-3851`);
+  - the gateless end (`finishWithoutGate`, `:3490`);
+  - `finishReadOnlyStep`'s advance and done;
+  - the send-back;
+  - the plan approval (Task 5).
+
+  So a Light task patched to Standard while its gate runs gets a Review instead of `markDone`. A Careful task
+  patched to Light while its gate runs is done, with no stale index.
+- Implement this by moving the move decision (`moveAfter` and what follows) into the write: compute it in a pure
+  function of the re-planned steps, which the write then applies. Async work that must happen before the write
+  stays before it and is passed in:
+  - the diff for the safety net;
+  - the docs-only check;
+  - the follow-up findings.
+- Work already parked on `builder_review`, already done, or failed is never re-planned. A Review is never added to
+  finished work.
 - A workstream parked on a plan-approval card keeps its card. Its approval's advance re-plans.
 - The review rounds of the new row apply from the next rejection, through Task 2's live read.
 - The same applies when a project's default rigor changes for a task with no rigor of its own: it is the task's
@@ -490,5 +510,5 @@ obeys it`
    it calls `advanceTo`'s write, and the controller wires it at the merge.
 4. The controller merges A into `feat/process-per-rigor` first, then B. Generated contracts and migrations are
    regenerated after each merge and never hand-merged.
-3. Code review (opus) per track, round 1 lists everything, at most two fix rounds. A click-through on a dev daemon
+5. Code review (opus) per track, round 1 lists everything, at most two fix rounds. A click-through on a dev daemon
    covers the row drawer, a Critical task's plan card and a Light lockfile change. Then `make gate` and the PR.
