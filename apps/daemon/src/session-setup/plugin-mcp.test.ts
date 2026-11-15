@@ -110,6 +110,12 @@ describe('readPluginMcp', () => {
     ]);
   });
 
+  it('a plugin whose folder holds a folder an agent can write is refused too', () => {
+    write('.mcp.json', { mcpServers: { gh: { command: 'x' } } });
+    mkdirSync(join(installPath, 'sub'));
+    expect(read('github@m', [join(installPath, 'sub')]).map((e) => e.declared)).toEqual([null]);
+  });
+
   it('a plugin whose install path links into a folder an agent can write is refused too', () => {
     write('.mcp.json', { mcpServers: { gh: { command: 'x' } } });
     const outside = join(root.path, 'writable');

@@ -94,12 +94,14 @@ export function readPluginMcp(
   laneWritable: readonly string[],
 ): YourMcpEntry[] {
   const real = realOrSelf(plugin.installPath);
-  const writable = laneWritable.some(
-    (root) =>
-      isEqualOrUnder(real, root) ||
-      isEqualOrUnder(real, realOrSelf(root)) ||
-      isEqualOrUnder(plugin.installPath, root),
-  );
+  // Either holds the other: a plugin under a root, or one that has a root inside it, where lane-written
+  // files would sit among its own.
+  const writable = laneWritable.some((root) => {
+    const roots = [root, realOrSelf(root)];
+    return [plugin.installPath, real].some((path) =>
+      roots.some((r) => isEqualOrUnder(path, r) || isEqualOrUnder(r, path)),
+    );
+  });
   if (writable) {
     // Nothing inside it is read: an agent could have written any file there.
     return [
