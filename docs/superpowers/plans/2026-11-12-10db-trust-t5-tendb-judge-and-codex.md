@@ -1085,6 +1085,13 @@ for gateway and Codex. Grants apply to every account the project uses.
   the PR body and in the research notes' "Live checks" section (no AA numbers). A gateway account is still not on this
   Mac: say so. If row 5 shows a live fetch or a request at the catcher under `cached`, Codex's web search goes to
   `disabled` in every session, attended ones included, before the PR, with its rows changed.
+- **Row 5, run by hand with `codex exec --json` 0.167.0 on a ChatGPT plan, no request catcher** (none reachable
+  from this Mac): under `-c web_search="cached"` the agent's open-the-page request produced a `webSearch` item with
+  action `open_page` for the probe URL, as it does under `live`; both returned the result `Internal Error`. The
+  `cached` run therefore shows Codex accepting an open-page action, and with no catcher it can't show whether a
+  request left OpenAI. `cached` is not proved to open no page, so Codex's web search stays `disabled` and the
+  "Web search on ChatGPT comes after a live check" copy stays. The check closes with a request catcher on a host
+  the builder owns: a probe URL there under `cached`, no hit in its log.
 - [ ] **Step 3: Commit** as `test(daemon): live rows for 10db's judge on claude and codex`.
 - [ ] **Step 4: File a follow-up task on the Board** (the `10db-task` skill): "Show a dim transcript line when 10db's
   judge denies or skips a call" (spec §9: "A judged call's verdict shows in the transcript as a dim line when it
