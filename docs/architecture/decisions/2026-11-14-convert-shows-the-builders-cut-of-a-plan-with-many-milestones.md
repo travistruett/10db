@@ -15,10 +15,11 @@
   `later` or `cut` that is also selected is refused. `later` stays pending on the Plan. `cut` is dropped as Drop
   drops a row (`rejected`), so its outline stays on the Plan as a tombstone and Restore brings it back.
 - **A later milestone converts once those before it have merged.** In a Plan with more than five goals, a milestone
-  converted without a `needed` mark is refused while any milestone before it is still pending (not cut) or
-  converted with a task still open. A task is merged when its status is `done`, as a task's dependents read it; a
-  removed task needs nothing. So at most one milestone is planned ahead of the work. The marks of a cut decide that
-  call alone and are not held to this, since the builder has just said what the goal needs.
+  converted without a `needed` mark is refused while any milestone before it is still pending (not cut, and not
+  converting in the same call) or converted with a task still open. A task is merged when its status is `done`, as
+  a task's dependents read it; a removed task needs nothing. So milestones the builder chooses together convert
+  together, and none is planned ahead of one that is waiting. The marks of a cut decide that call alone and are not
+  held to this, since the builder has just said what the goal needs.
 - **It holds at every rigor.** The cut is a Plan and Convert rule, not a playbook step, so it does not read the
   rigor: `routing/playbook-defaults.ts` still gates only Critical on plan approval, and this adds nothing there.
 - **Provider-independent.** Convert is the daemon's own write, so a Claude plan, Claude through Bedrock or an API

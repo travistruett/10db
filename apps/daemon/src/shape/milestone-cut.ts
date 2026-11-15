@@ -82,13 +82,17 @@ export function judgeMilestones(
     .filter((m) => markOf.get(m.id) === MilestoneMark.Needed && !selected.has(m.id))
     .map((m) => m.id);
 
-  // Without a mark that says it is needed now, a milestone waits for those before it to merge.
+  // Without a mark that says it is needed now, a milestone waits for those before it to merge. One
+  // converting in this same call, or cut, is not waited for: the builder chose them together.
   if (!required && milestones.length > MILESTONES_BEFORE_CUT) {
+    const converting = new Set([...selected, ...needed]);
     for (const m of wanted.filter((w) => markOf.get(w.id) !== MilestoneMark.Needed)) {
       const before = milestones.slice(0, milestones.indexOf(m));
       const waiting = before.filter(
         (b) =>
-          (b.state === ShapeProposalState.Pending && markOf.get(b.id) !== MilestoneMark.Cut) ||
+          (b.state === ShapeProposalState.Pending &&
+            !converting.has(b.id) &&
+            markOf.get(b.id) !== MilestoneMark.Cut) ||
           (b.state === ShapeProposalState.Accepted && !b.merged),
       );
       if (waiting.length > 0)

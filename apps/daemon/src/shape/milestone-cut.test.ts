@@ -19,7 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
-import { reconcileDraft } from './rounds';
+import { dropProposal, reconcileDraft } from './rounds';
 
 // A Plan with more than five milestones is cut by the builder before Convert makes a task: each
 // milestone is needed for the goal, later or cut, and only the needed ones become tasks. A later one
@@ -188,16 +188,36 @@ describe('a later milestone', () => {
     expect(refusal(convert(['m3']))).toContain('Milestone 2');
   });
 
-  it('converts once the milestones before it have merged, one milestone ahead at a time', () => {
+  it('converts once the milestones before it have merged, and not past one still waiting', () => {
     cutAfterTwo();
     merge('m1');
     merge('m2');
-    expect(refusal(convert(['m3', 'm4']))).toContain('Milestone 4');
+    expect(refusal(convert(['m4']))).toContain('Milestone 3');
     expect(convert(['m3']).ok).toBe(true);
     expect(taskTitles()).toEqual(['Task m1', 'Task m2', 'Task m3']);
     expect(refusal(convert(['m4']))).toContain('Milestone 3');
     merge('m3');
     expect(convert(['m4']).ok).toBe(true);
+  });
+
+  it('converts two adjacent milestones chosen together, and the next waits for both', () => {
+    cutAfterTwo();
+    merge('m1');
+    merge('m2');
+    expect(convert(['m3', 'm4']).ok).toBe(true);
+    expect(refusal(convert(['m5']))).toContain('Milestone 3');
+    merge('m3');
+    merge('m4');
+    expect(convert(['m5']).ok).toBe(true);
+  });
+
+  it('asks for no marks once five milestones are left pending, whatever left the Plan', () => {
+    proposeMilestones(6);
+    write((ctx) => {
+      dropProposal(ctx, rowOf('m6').id);
+    });
+    expect(convert(['m1', 'm2', 'm3', 'm4', 'm5']).ok).toBe(true);
+    expect(taskTitles()).toHaveLength(5);
   });
 
   it('is not held up by a milestone that was cut', () => {
