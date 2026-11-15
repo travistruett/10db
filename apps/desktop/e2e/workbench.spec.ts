@@ -175,34 +175,34 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   const pages = page.getByLabel('Pages', { exact: true }).and(page.locator('input'));
   await page.setViewportSize({ width: 480, height: 900 });
   await pages.click();
-  await expect(page.getByRole('option', { name: /^settings/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^Settings/ })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('option', { name: /^settings/ }).click();
-  await page.getByRole('option', { name: /^people/ }).click();
+  await page.getByRole('option', { name: /^Settings/ }).click();
+  await page.getByRole('option', { name: /^People/ }).click();
   await pages.press('Escape');
   await page.getByRole('textbox', { name: "What's bothering you?" }).fill('these feel cramped');
   await page.getByRole('button', { name: 'Start' }).click();
 
   // People asks, so it rises to the top of the queue; it is answered on the page.
-  await expect(row(page, 'people')).toContainText('Asks a question');
-  expect((await queueOrder(page))[0]).toBe('people');
-  await row(page, 'people')
-    .getByRole('button', { name: /^people/ })
+  await expect(row(page, 'People')).toContainText('Asks a question');
+  expect((await queueOrder(page))[0]).toBe('People');
+  await row(page, 'People')
+    .getByRole('button', { name: /^People/ })
     .click();
-  const people = page.getByRole('region', { name: 'people' });
+  const people = page.getByRole('region', { name: 'People' });
   await expect(people.getByText('Which spacing?')).toBeVisible();
   await people.getByRole('radio', { name: /Roomy/ }).check();
   await people.getByRole('button', { name: 'Send answer' }).click();
-  await expect(row(page, 'people')).toContainText('Ready');
-  await expect(row(page, 'settings')).toContainText('Ready');
+  await expect(row(page, 'People')).toContainText('Ready');
+  await expect(row(page, 'Settings')).toContainText('Ready');
 
   // A Ready page selected: axe at both widths, dark then light.
-  await row(page, 'settings')
-    .getByRole('button', { name: /^settings/ })
+  await row(page, 'Settings')
+    .getByRole('button', { name: /^Settings/ })
     .click();
-  const settings = page.getByRole('region', { name: 'settings' });
+  const settings = page.getByRole('region', { name: 'Settings' });
   await expect(settings.getByText('Tidied the settings form.')).toBeVisible();
   await scan(page, 1280, 'dark', 'pass open, a Ready page');
   await scan(page, 480, 'dark', 'pass open, a Ready page');
@@ -216,7 +216,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await scan(page, 1280, 'light', 'pass open, a Ready page');
 
   // A message with a picture: the picture is drawn with its file name, and the page works.
-  const message = settings.getByRole('textbox', { name: 'Message to settings' });
+  const message = settings.getByRole('textbox', { name: 'Message to Settings' });
   const chooser = page.waitForEvent('filechooser');
   await settings.getByRole('button', { name: 'Add Picture' }).click();
   await (await chooser).setFiles({ name: 'cramped.png', mimeType: 'image/png', buffer: PICTURE });
@@ -226,14 +226,14 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await message.fill('padding too tight');
   await message.press('Meta+Enter');
   await expect(settings.getByRole('img', { name: 'cramped.png' })).toBeVisible();
-  await expect(row(page, 'settings')).toContainText('Working');
+  await expect(row(page, 'Settings')).toContainText('Working');
   await expect(settings.getByRole('button', { name: 'Show Log' })).toBeVisible();
   await expect(settings.getByText(/settings\/page\.tsx/).first()).toBeVisible();
 
   // A word added to the working turn ends it; Ready again, with the files turn 2 changed.
   await message.fill('the header too');
   await message.press('Meta+Enter');
-  await expect(row(page, 'settings')).toContainText('Ready');
+  await expect(row(page, 'Settings')).toContainText('Ready');
   await expect(settings.getByText('Loosened the padding.')).toBeVisible();
   await expect(
     settings.getByRole('list', { name: 'Files this turn changed' }).last(),
@@ -241,8 +241,8 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
 
   // Sign Off: "Signing off…", then green "Signed off".
   await settings.getByRole('button', { name: 'Sign Off' }).click();
-  await expect(row(page, 'settings')).toContainText('Signed off');
-  await expect(row(page, 'settings').getByTestId('status-dot')).toHaveAttribute(
+  await expect(row(page, 'Settings')).toContainText('Signed off');
+  await expect(row(page, 'Settings').getByTestId('status-dot')).toHaveAttribute(
     'data-color',
     'green',
   );
@@ -258,14 +258,14 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // A reload keeps the queue as it was.
   const before = await queueOrder(page);
   await page.reload();
-  await expect(row(page, 'settings')).toContainText('Signed off');
+  await expect(row(page, 'Settings')).toContainText('Signed off');
   expect(await queueOrder(page)).toEqual(before);
 
   // The live region said only pages becoming ready and the question.
   const said = announced.flatMap((text) => text.split('. '));
-  expect(said).toContain('settings is ready');
+  expect(said).toContain('Settings is ready');
   expect(
-    said.filter((line) => !/^(settings|people) (is ready|asks a question)$/.test(line)),
+    said.filter((line) => !/^(Settings|People) (is ready|asks a question)$/.test(line)),
   ).toEqual([]);
 
   // Abandon ends the pass: its confirm names the page that goes back and the one that stays. Later
