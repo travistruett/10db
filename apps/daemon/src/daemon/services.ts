@@ -46,11 +46,9 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  cancelTask,
   closeTask,
-  isSpentTask,
+  removeTaskFromBoard,
   reopenTask,
-  retireTaskUnconditionally,
   deleteBoardColumn,
   getGoal,
   getMcpApproval,
@@ -913,12 +911,7 @@ export function createServices(deps: {
       });
       return { limit: input.limit };
     },
-    // A task with nothing left in it (every run cancelled, no pass, no saved work) is retired as it
-    // is; any other goes through the never-started rule.
-    removeTask: (id) =>
-      deps.state.write((ctx) =>
-        isSpentTask(ctx.tx, id) ? retireTaskUnconditionally(ctx, id) : cancelTask(ctx, id),
-      ),
+    removeTask: (id) => deps.state.write((ctx) => removeTaskFromBoard(ctx, id)),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),

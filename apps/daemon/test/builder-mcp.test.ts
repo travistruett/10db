@@ -585,6 +585,19 @@ describe('the builder MCP endpoint', () => {
       expect(await tasksOf(project.id)).toEqual([]);
     });
 
+    it('removes a task whose every run was cancelled, as an abandoned pass leaves one', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'Settings: UI work');
+      daemon.state.write((ctx) => {
+        const run = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
+        transitionWorkstream(ctx, run.id, { to: WorkstreamState.Cancelled, fence: null });
+      });
+      await callJson('remove_task', { taskId: task.id });
+      expect(await tasksOf(project.id)).toEqual([]);
+    });
+
     it('refuses a started task', async () => {
       const project = await seedProject();
       const task = await seedTask(project.id, 'running');

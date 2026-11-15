@@ -28,6 +28,7 @@ import {
   type PullRequestStatusInput,
 } from './batches';
 import { insertBoardColumn } from './board-columns';
+import { insertPass } from './passes';
 import {
   cancelRefusedStartTask,
   cancelTask,
@@ -38,8 +39,10 @@ import {
   listTasks,
   moveTask,
   patchTask,
+  removeTaskFromBoard,
   reopenTask,
   retireTaskUnconditionally,
+  setTaskKeptWork,
   setTaskStatus,
 } from './tasks';
 import { insertSession } from './sessions';
@@ -298,6 +301,108 @@ describe('retireTaskUnconditionally', () => {
     expect(getTask(store.db, child.id)).toMatchObject({ status: TaskStatus.Open, dependsOn: [] });
     // A second retire answers the retired task and emits nothing.
     expect(store.write((ctx) => retireTaskUnconditionally(ctx, made.id)).events).toEqual([]);
+  });
+});
+
+describe('removeTaskFromBoard', () => {
+  /** A run of the task, cancelled: one that ran in a pass the task has left, say. */
+  const cancelledRun = (taskId: TaskId) => {
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    return ws;
+  };
+  type Project = ReturnType<typeof seedProject>;
+  const rows: {
+    readonly name: string;
+    readonly setUp: (project: Project, taskId: TaskId) => void;
+    readonly refused?: RegExp | typeof TaskStartedError | typeof TaskHasDependentsError;
+  }[] = [
+    { name: 'a task that never started', setUp: () => undefined },
+    { name: 'a task whose every run was cancelled', setUp: (_, id) => cancelledRun(id) },
+    {
+      name: 'a cancelled run beside a live one',
+      setUp: (_, id) => {
+        cancelledRun(id);
+        store.write((ctx) =>
+          insertWorkstream(ctx, id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+        );
+      },
+      refused: TaskStartedError,
+    },
+    {
+      name: 'a spent task still in a pass',
+      setUp: (project, id) => {
+        cancelledRun(id);
+        store.write((ctx) => {
+          insertPass(ctx, {
+            id: mintId('Pass'),
+            projectId: project.id,
+            name: 'Polish',
+            pageCap: 4,
+            returnBranch: 'main',
+            startSha: 'a'.repeat(40),
+            branch: '10db/polish-abc123',
+            baseBranch: 'main',
+            repo: null,
+            taskIds: [id],
+            dirt: [],
+          });
+        });
+      },
+      refused: TaskStartedError,
+    },
+    {
+      name: 'a spent task with saved work',
+      setUp: (_, id) => {
+        cancelledRun(id);
+        store.write((ctx) => {
+          setTaskKeptWork(ctx, id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
+        });
+      },
+      refused: TaskStartedError,
+    },
+    {
+      name: 'a spent task that is not open',
+      setUp: (_, id) => {
+        cancelledRun(id);
+        store.db.update(schema.tasks).set({ status: TaskStatus.Done }).run();
+      },
+      refused: TaskStartedError,
+    },
+    {
+      name: 'a spent task an open task waits on',
+      setUp: (project, id) => {
+        cancelledRun(id);
+        seedTask(project.id, 'child', [id]);
+      },
+      refused: TaskHasDependentsError,
+    },
+    {
+      name: 'a spent task while a batch is being cut',
+      setUp: (project, id) => {
+        cancelledRun(id);
+        store.write((ctx) =>
+          insertBatch(ctx, { projectId: project.id, title: 'Cutting', baseBranch: 'main' }),
+        );
+      },
+      refused: /being cut/,
+    },
+  ];
+  it.each(rows)('$name', ({ setUp, refused }) => {
+    const project = seedProject(store);
+    const task = seedTask(project.id, 'Settings: UI work');
+    setUp(project, task.id);
+    if (refused === undefined) {
+      expect(store.write((ctx) => removeTaskFromBoard(ctx, task.id)).value.status).toBe(
+        TaskStatus.Cancelled,
+      );
+      expect(listTasks(store.db, project.id).map((t) => t.id)).not.toContain(task.id);
+    } else {
+      expect(() => store.write((ctx) => removeTaskFromBoard(ctx, task.id))).toThrow(refused);
+      expect(getTask(store.db, task.id).status).not.toBe(TaskStatus.Cancelled);
+    }
   });
 });
 

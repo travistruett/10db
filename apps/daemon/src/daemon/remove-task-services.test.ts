@@ -1,11 +1,5 @@
-import { TaskStartedError, TaskStatus } from '@10db/contracts';
-import {
-  getTask,
-  insertGoal,
-  insertWorkstream,
-  listShapeQuestions,
-  setTaskKeptWork,
-} from '@10db/db';
+import { TaskStatus } from '@10db/contracts';
+import { getTask, insertGoal, insertWorkstream, listShapeQuestions } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { storeQuestionAbout } from '../../test/shape-question';
@@ -59,38 +53,16 @@ describe('the single-task Remove service', () => {
 });
 
 describe('the Remove service on a task with nothing left in it', () => {
-  /** A task whose one run was cancelled after it began, with `kept` saved work and in no pass. */
-  function spent(kept: boolean) {
+  it('removes one whose every run was cancelled, with no pass and no saved work', () => {
     const task = h.addTask('Settings: UI work', { areas: ['api'] });
-    const dependent = h.addTask('Settings: after', { areas: ['api'], dependsOn: [task.id] });
     const run = h.state.write((ctx) =>
       insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
     );
     h.settle(run.id, 'CANCELLED');
-    if (kept)
-      h.state.write((ctx) => {
-        setTaskKeptWork(ctx, task.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
-      });
-    return { task, dependent };
-  }
-
-  it('retires one whose every run was cancelled, with no pass and no saved work, freeing what waits on it', () => {
-    const { task, dependent } = spent(false);
 
     removalServices().removeTask(task.id);
 
     expect(getTask(h.state.db, task.id).status).toBe(TaskStatus.Cancelled);
-    expect(getTask(h.state.db, dependent.id)).toMatchObject({
-      status: TaskStatus.Open,
-      dependsOn: [],
-    });
-  });
-
-  it('refuses one that still has saved work, as before', () => {
-    const { task } = spent(true);
-
-    expect(() => removalServices().removeTask(task.id)).toThrow(TaskStartedError);
-    expect(getTask(h.state.db, task.id).status).toBe(TaskStatus.Open);
   });
 });
 

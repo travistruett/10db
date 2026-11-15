@@ -796,6 +796,16 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
 }
 
 /**
+ * Remove from the Board and the builder's `remove_task` tool: as `cancelTask`, and also a task with
+ * nothing left in it (`isSpentTask`), whose runs were all cancelled, as one an abandoned pass sent
+ * back leaves. Every other refusal of `cancelTask` holds: an open task waiting on it, a batch being
+ * cut, a task not open.
+ */
+export function removeTaskFromBoard(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, false, isSpentTask(ctx.tx, id));
+}
+
+/**
  * The first of a task's runs that really began: it got past the queue, or it was cancelled after a
  * session. A run only queued, held or cancelled before any session has not begun. Pass every run, not
  * the latest, since a task can start again after a run that ended. This one rule is the goal digest's
@@ -878,7 +888,12 @@ export function cancelRefusedStartTask(ctx: WriteContext, id: TaskId): TaskDto {
   return retireTask(ctx, id);
 }
 
-function removeUnstarted(ctx: WriteContext, id: TaskId, refusedStart: boolean): TaskDto {
+function removeUnstarted(
+  ctx: WriteContext,
+  id: TaskId,
+  refusedStart: boolean,
+  spent = false,
+): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   const run = latestRun(ctx.tx, id);
@@ -886,7 +901,7 @@ function removeUnstarted(ctx: WriteContext, id: TaskId, refusedStart: boolean): 
   const held = run?.state === WorkstreamState.Held ? run : undefined;
   const refusedRun =
     refusedStart && run?.state === WorkstreamState.Cancelled && !hadSession(ctx.tx, run.id);
-  if (task.status !== TaskStatus.Open || (run && !held && !refusedRun))
+  if (task.status !== TaskStatus.Open || (run && !held && !refusedRun && !spent))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -1086,10 +1101,9 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
 }
 
 /**
- * Retires a task with nothing left in it, as `retireTask` does, and never refuses: a task a pass made
- * for a page, as the pass is abandoned, or one whose every run was cancelled with no pass and no saved
- * work. Its dependency edges go both ways, so nothing waits on it and it waits on nothing. Retiring a
- * retired task answers it and emits nothing.
+ * Retires a task as `retireTask` does and never refuses, for an Abandon, which must finish: a task the
+ * pass made for one of its pages. Its dependency edges go both ways, so nothing waits on it and it
+ * waits on nothing. Retiring a retired task answers it and emits nothing.
  */
 export function retireTaskUnconditionally(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
@@ -1102,10 +1116,10 @@ export function retireTaskUnconditionally(ctx: WriteContext, id: TaskId): TaskDt
 }
 
 /**
- * Whether Remove retires the task by `retireTaskUnconditionally`: it has runs and every one is cancelled, it
- * is in no pass and it has no saved work, so nothing of it is left to lose.
+ * Whether the task has nothing left in it: it has runs and every one is cancelled, it is in no pass
+ * and it has no saved work. `removeTaskFromBoard` removes such a task.
  */
-export function isSpentTask(db: DbReader, id: TaskId): boolean {
+function isSpentTask(db: DbReader, id: TaskId): boolean {
   const row = db
     .select({
       status: schema.tasks.status,

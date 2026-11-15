@@ -84,6 +84,7 @@ import { rigorSourceLine } from './sizing-source';
 import { EffortPinSelect, KindSources, KindsSelect, RigorSelect } from './task-fields';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
+import { isSpent } from './task-spent';
 import { HeadlineField, WhyField } from './task-words-fields';
 import {
   canCloseRun,
@@ -700,7 +701,8 @@ function TaskNotices({
 /**
  * The one status line: where the task stands, where its checks stand, the links out to its pull
  * request and CI job, and what the builder can do about the run. For a failed run it adds why; for a
- * queued one its place in line, Run Next and Hold; for a held one Start and Remove. The state is the
+ * queued one its place in line, Run Next and Hold; for a held one Start and Remove, and Remove for one
+ * with nothing left in it (`isSpent`). The state is the
  * run's while it is live or failed, else the column the card sits in ("In review", "Done").
  */
 function StatusLine({
@@ -818,31 +820,31 @@ function StatusLine({
             </Tooltip>
           ) : null}
           {held ? (
-            <>
-              <Button
-                size="xs"
-                variant="default"
-                disabled={busy}
-                loading={start.isPending}
-                onClick={() => {
-                  start.mutate(taskId);
-                }}
-              >
-                Start
-              </Button>
-              <Button
-                size="xs"
-                variant="default"
-                color="red"
-                disabled={busy}
-                loading={remove.isPending}
-                onClick={() => {
-                  remove.mutate(taskId, { onSuccess: onClosed });
-                }}
-              >
-                Remove
-              </Button>
-            </>
+            <Button
+              size="xs"
+              variant="default"
+              disabled={busy}
+              loading={start.isPending}
+              onClick={() => {
+                start.mutate(taskId);
+              }}
+            >
+              Start
+            </Button>
+          ) : null}
+          {held || isSpent(task, workstream) ? (
+            <Button
+              size="xs"
+              variant="default"
+              color="red"
+              disabled={busy}
+              loading={remove.isPending}
+              onClick={() => {
+                remove.mutate(taskId, { onSuccess: onClosed });
+              }}
+            >
+              Remove
+            </Button>
           ) : null}
           {retryable ? (
             <Button

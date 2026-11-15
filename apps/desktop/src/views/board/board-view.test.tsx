@@ -2478,7 +2478,7 @@ describe('BoardView holding a started task', () => {
 
   /** One task with a run in `state`, served with the Hold, Start and Remove routes recording their calls. */
   function serveRun(
-    state: 'QUEUED' | 'HELD' | 'RUNNING',
+    state: 'QUEUED' | 'HELD' | 'RUNNING' | 'CANCELLED',
     title = 'Alpha',
     over: Partial<Parameters<typeof workstreamDto>[0]> = {},
   ) {
@@ -2565,8 +2565,8 @@ describe('BoardView holding a started task', () => {
     });
   });
 
-  it('removes a held task from its card menu', async () => {
-    const { task, calls } = serveRun('HELD');
+  it.each(['HELD', 'CANCELLED'] as const)('removes a %s task from its card menu', async (state) => {
+    const { task, calls } = serveRun(state);
     renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
