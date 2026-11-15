@@ -5,6 +5,7 @@ import {
   JudgeDecision,
   JudgeKind,
   ConversationId,
+  ConversationItemAuthor,
   ConversationItemKind,
   DeniedBy,
   parseItemBody,
@@ -16,6 +17,7 @@ import {
 import {
   chatOfConversation,
   getProject,
+  insertItem,
   listFiles,
   listItemFiles,
   listItems,
@@ -42,6 +44,8 @@ import type { ExploreProfile, ShapeToolRequest } from '../sessions';
 import type { ShapeAccess, ShapeLaunch, ShapePrepared, ShapePrepareInput } from '../shape';
 import {
   buildTrustPolicy,
+  FloorReason,
+  floorNoticeText,
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
@@ -246,6 +250,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
       });
+      // The thread says once per session that 10db's judge stopped answering.
+      let saidUnavailable = false;
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
       const parts = [
         ...(ready?.note === null || ready?.note === undefined ? [] : [ready.note]),
@@ -326,7 +332,22 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     },
                     skips: null,
                     limits: limitNotes,
-                    onFloor: () => undefined,
+                    onFloor: (detail) => {
+                      if (saidUnavailable) return;
+                      saidUnavailable = true;
+                      state.write((ctx) => {
+                        insertItem(ctx, conv.id, {
+                          author: ConversationItemAuthor.System,
+                          kind: ConversationItemKind.Notice,
+                          body: {
+                            text: floorNoticeText(FloorReason.JudgeUnavailable, {
+                              attended: true,
+                              detail,
+                            }),
+                          },
+                        });
+                      });
+                    },
                     clock: deps.clock,
                   },
                 ),

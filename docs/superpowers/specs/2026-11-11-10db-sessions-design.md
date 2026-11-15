@@ -1029,7 +1029,7 @@ The design is the companion UI spec. This spec holds it to these rules:
 **`sessions`** changes:
 
 - It gains `conversation_id`, added by `ALTER TABLE` in an earlier migration than the rebuild (`packages/db/AGENTS.md`
-  explains why, under migrations 0027/0028).
+  explains why).
 - It keeps `workstream_id`.
 - It drops `shape_id`.
 - Check: `conversation_id IS NOT NULL OR workstream_id IS NOT NULL`.

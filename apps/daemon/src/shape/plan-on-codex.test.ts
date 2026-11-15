@@ -52,7 +52,9 @@ describe('Plan on a ChatGPT account', () => {
     expect(spec.hookWaitMs).toBe((f.c.project.humanWaitMinutes + 5) * 60_000);
     expect(spec.hookWaitMs).toBeGreaterThan(spec.mcp.toolTimeoutMs);
     expect(spec.profile.systemPrompt).not.toContain('Agent call');
-    expect(spec.profile.systemPrompt).toContain('need a Claude account');
+    // It says what it lacks and never nudges the builder to another provider.
+    expect(spec.profile.systemPrompt).toContain('this agent does not have here');
+    expect(spec.profile.systemPrompt).not.toContain('Claude account');
     const conversation = f.engine.view(shapeConversation(f.c.store.db, shapeId).id);
     expect(conversation.capabilities).toMatchObject({ label: 'Codex', subagents: false });
   });

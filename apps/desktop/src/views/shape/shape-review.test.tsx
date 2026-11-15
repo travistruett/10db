@@ -1,8 +1,9 @@
-import { mintId, type ShapeProposalDto, type ShapeViewDto } from '@10db/contracts';
+import { ConversationId, mintId, type ShapeProposalDto, type ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { conversationDto, CLAUDE_CAPABILITIES } from '../../test/conversation-fixtures';
 import { projectViewDto } from '../../test/fixtures';
 import {
   findingDto,
@@ -54,6 +55,8 @@ const marks = (row: ShapeProposalDto, rehearsed: boolean): ShapeViewDto['rehears
     rehearsed,
   }));
 
+const disabled = (el: HTMLElement): boolean => el instanceof HTMLButtonElement && el.disabled;
+
 const open = (view: ShapeViewDto): void => {
   renderApp(`/shape/${view.shape.id}`);
 };
@@ -66,6 +69,23 @@ async function openConvert(): Promise<HTMLElement> {
   fireEvent.click(button);
   return screen.findByRole('dialog', { name: 'Convert' });
 }
+
+/**
+ * Presses Convert and waits for its request: a request the page made earlier has reached the network by then,
+ * so "nothing was asked" can be read after it without waiting on a clock.
+ */
+async function convertAsControl(dialog: HTMLElement, converted: unknown[]): Promise<void> {
+  fireEvent.click(within(dialog).getByRole('button', { name: /^Convert \d+$/ }));
+  await waitFor(() => {
+    expect(converted).toHaveLength(1);
+  });
+}
+
+const convertHandler = (converted: unknown[]) =>
+  http.post(daemonUrl('/shapes/:shapeId/convert'), async ({ request }) => {
+    converted.push(await request.json());
+    return HttpResponse.json({ createdNow: 1, results: [] });
+  });
 
 describe('Shape: the implementer rehearsal and Convert', () => {
   it('asks for a rehearsal once when Convert opens with an unrehearsed task', async () => {
@@ -98,8 +118,10 @@ describe('Shape: the implementer rehearsal and Convert', () => {
     });
     const view = { ...base, shape: { ...base.shape, importedAt: '2026-11-12T08:00:00.000Z' } };
     const posted: unknown[] = [];
+    const converted: unknown[] = [];
     serve(
       view,
+      convertHandler(converted),
       http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
         posted.push(await request.json());
         return HttpResponse.json({ status: 'started', tasks: 3 });
@@ -112,7 +134,84 @@ describe('Shape: the implementer rehearsal and Convert', () => {
     ).toBeTruthy();
     expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
     expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
+    await convertAsControl(dialog, converted);
     expect(posted).toHaveLength(0);
+  });
+
+  it('an agent without subagents starts no rehearsal, offers none and names its tasks once', async () => {
+    const goal = goalProposal('brainstorm', ['one', 'two']);
+    const view = proposed([goal], { rehearsals: marks(goal, false) });
+    const posted: unknown[] = [];
+    const converted: unknown[] = [];
+    serve(
+      view,
+      convertHandler(converted),
+      http.get(daemonUrl('/conversations/:conversationId'), ({ params }) =>
+        HttpResponse.json(
+          conversationDto({
+            id: ConversationId.parse(params['conversationId']),
+            capabilities: { ...CLAUDE_CAPABILITIES, label: 'Codex', subagents: false },
+          }),
+        ),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ status: 'started', tasks: 2 });
+      }),
+    );
+    open(view);
+    const dialog = await openConvert();
+    expect(
+      await within(dialog).findByText(/Tasks on Codex aren't rehearsed: 2 tasks/),
+    ).toBeTruthy();
+    expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
+    await convertAsControl(dialog, converted);
+    expect(posted).toHaveLength(0);
+  });
+
+  it('waits for the agent before it rehearses or converts, and rehearses when the agent cannot be read', async () => {
+    const goal = goalProposal('brainstorm', ['one']);
+    const view = proposed([goal], { rehearsals: marks(goal, false) });
+    const posted: unknown[] = [];
+    serve(
+      view,
+      // The conversation never answers: the agent is unknown.
+      http.get(
+        daemonUrl('/conversations/:conversationId'),
+        () => new Promise<never>(() => undefined),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ status: 'started', tasks: 1 });
+      }),
+    );
+    open(view);
+    const dialog = await openConvert();
+    expect(disabled(within(dialog).getByRole('button', { name: 'Convert 1' }))).toBe(true);
+    expect(disabled(await screen.findByRole('button', { name: 'Rehearse' }))).toBe(true);
+    expect(posted).toHaveLength(0);
+  });
+
+  it('rehearses as it always did when the conversation cannot be read', async () => {
+    const goal = goalProposal('brainstorm', ['one']);
+    const view = proposed([goal], { rehearsals: marks(goal, false) });
+    const posted: unknown[] = [];
+    serve(
+      view,
+      http.get(daemonUrl('/conversations/:conversationId'), () =>
+        HttpResponse.json({ error: 'unavailable', message: 'gone' }, { status: 500 }),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ status: 'started', tasks: 1 });
+      }),
+    );
+    open(view);
+    await openConvert();
+    await waitFor(() => {
+      expect(posted).toEqual([{ proposalIds: [goal.id] }]);
+    });
   });
 
   it('does not rehearse a task that already has its mark', async () => {

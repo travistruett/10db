@@ -329,7 +329,7 @@ describe('a conversation’s prepared session', () => {
     const notices = listShapeMessages(f.c.store.db, f.c.shape.id)
       .filter((m) => m.kind === ShapeMessageKind.Notice)
       .map((m) => m.body);
-    expect(notices).toEqual(['Claude could not start: the sandbox could not be built']);
+    expect(notices).toEqual(['The agent could not start: the sandbox could not be built']);
   });
 
   it('runs no command and offers no project tool when nothing is prepared', async () => {
