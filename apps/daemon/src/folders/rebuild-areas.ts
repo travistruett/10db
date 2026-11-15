@@ -16,6 +16,8 @@ import { globReaches } from './area-candidates';
 export interface PlannedPage {
   readonly name: string;
   readonly route?: string;
+  /** What the app's nav calls the page, when it names one. */
+  readonly label?: string;
   readonly routeGlobs: readonly string[];
   readonly takenGlobs: readonly string[];
 }
@@ -69,10 +71,17 @@ const sameArea = (one: AreaDef, other: AreaDef): boolean =>
   sameSet(one.globs, other.globs) &&
   (one.role ?? null) === (other.role ?? null) &&
   (one.route ?? null) === (other.route ?? null) &&
+  (one.label ?? null) === (other.label ?? null) &&
   (one.catchAll ?? false) === (other.catchAll ?? false);
 
 const sameList = (one: readonly AreaDef[], other: readonly AreaDef[]): boolean =>
   one.length === other.length && one.every((a) => other.some((b) => sameArea(a, b)));
+
+/** `area` with a label when it has none and `from` guesses one; a label already there stays. */
+function withLabel(area: AreaDef, from: { readonly label?: string | undefined }): AreaDef {
+  const label = area.label ?? from.label;
+  return label === undefined ? area : { ...area, label };
+}
 
 /** The files of `files` that `area`'s globs match. */
 const filesOf = (area: AreaDef, files: readonly string[]): string[] =>
@@ -89,6 +98,11 @@ const filesOf = (area: AreaDef, files: readonly string[]): string[] =>
 export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
   const used = new Set(input.hazards);
   const skipped = [...input.skipped];
+  /** The page the setup found for a kept page area, by name or route: its guessed label. */
+  const guessFor = (area: AreaDef): { readonly label?: string } =>
+    input.pages.find(
+      (p) => p.name === area.name || (area.route !== undefined && p.route === area.route),
+    ) ?? {};
   const keptReasons: { name: string; reason: string }[] = [];
   const kept: AreaDef[] = [];
   const pending = [...input.pages];
@@ -99,7 +113,7 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
     const page =
       area.role === undefined ? pending.find((p) => isRouteFolderOf(area.globs, p)) : undefined;
     if (page === undefined) {
-      kept.push({ ...area });
+      kept.push(area.role === AreaRole.Page ? withLabel({ ...area }, guessFor(area)) : { ...area });
       keptReasons.push({ name: area.name, reason });
       continue;
     }
@@ -109,7 +123,7 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       globs: [...new Set([...area.globs, ...page.takenGlobs])],
       role: AreaRole.Page,
     };
-    kept.push(page.route === undefined ? grown : { ...grown, route: page.route });
+    kept.push(withLabel(page.route === undefined ? grown : { ...grown, route: page.route }, page));
     keptReasons.push({
       name: area.name,
       reason: `${reason}; it becomes the page${page.route === undefined ? '' : ` at ${page.route}`}`,
@@ -128,12 +142,19 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       continue;
     }
     const taken = page.takenGlobs.filter((g) => !keptPages.some((k) => overlaps([g], k.globs)));
+    const name = unique(page.name, used);
     const area: AreaDef = {
-      name: unique(page.name, used),
+      name,
       globs: [...new Set([...page.routeGlobs, ...taken])],
       role: AreaRole.Page,
     };
-    pages.push(page.route === undefined ? area : { ...area, route: page.route });
+    // A label the builder set stays; a page with none gets the guess.
+    const own = input.existing.find((e) => e.role === AreaRole.Page && e.name === name)?.label;
+    pages.push(
+      withLabel(page.route === undefined ? area : { ...area, route: page.route }, {
+        label: own ?? page.label,
+      }),
+    );
   }
 
   const keptFiles = new Set(kept.flatMap((a) => filesOf(a, input.files)));
@@ -181,8 +202,15 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       skipped: problem === null ? skipped : [...skipped, { name: 'areas', reason: problem }],
     };
 
+  // A page is new only when no page of the project has its name and route: a changed label or one
+  // more glob is no new page, so unticking a row never demotes a page the project already has.
   const newPages = proposed.filter(
-    (a) => a.role === AreaRole.Page && !input.existing.some((e) => sameArea(a, e)),
+    (a) =>
+      a.role === AreaRole.Page &&
+      !input.existing.some(
+        (e) =>
+          e.role === AreaRole.Page && e.name === a.name && (e.route ?? null) === (a.route ?? null),
+      ),
   );
   return {
     proposed,
@@ -194,6 +222,7 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       });
       const row: PageRow = { name: a.name, folders: folders.length > 0 ? folders : [...a.globs] };
       if (a.route !== undefined) row.route = a.route;
+      if (a.label !== undefined) row.label = a.label;
       // A kept area that became this page is put back exactly when the page is unticked.
       const was = input.keep.has(a.name)
         ? input.existing.find((e) => e.name === a.name)

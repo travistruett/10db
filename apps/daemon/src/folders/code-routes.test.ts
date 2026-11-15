@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codeRoutes, routerFiles } from './code-routes';
+import { codeRoutes, navFiles, routerFiles } from './code-routes';
 import { NO_ALIASES, readPathAliases } from './import-graph';
 
 const VIEWS = [
@@ -14,7 +14,9 @@ const VIEWS = [
 interface Row {
   readonly name: string;
   readonly router: string;
-  readonly pages: readonly { name: string; folder: string; route?: string }[];
+  /** The text of a nav file beside the router, read for labels only. */
+  readonly nav?: string;
+  readonly pages: readonly { name: string; folder: string; route?: string; label?: string }[];
   readonly unrouted?: readonly string[];
 }
 
@@ -155,6 +157,98 @@ const tail = <Route path="/inbox" element={<InboxView />} />;`,
       unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
     },
     {
+      name: "a nav array like the app shell's gives each route its label",
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });`,
+      nav: `const NAV = [
+  { to: '/board', label: 'Board', icon: IconLayoutKanban },
+  { to: '/inbox', label: 'Mail and questions', icon: IconInbox },
+] as const;`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board', label: 'Board' },
+        {
+          name: 'inbox',
+          folder: 'ui/src/views/inbox',
+          route: '/inbox',
+          label: 'Mail and questions',
+        },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'no label in the nav, or one for another route, gives a page none',
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });`,
+      nav: `const NAV = [{ to: '/board' }, { to: '/elsewhere', label: 'Elsewhere' }, { label: 'Lost' }];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'two routes on one line, a label before its path, path and href keys',
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });`,
+      nav: `const NAV = [{ to: '/board', label: 'Work' }, { label: 'Mail', href: '/inbox' }];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board', label: 'Work' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox', label: 'Mail' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'a label that is not a plain string of 1-40 characters, or sits in another object, is no guess',
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });`,
+      nav: `const NAV = [
+  { to: '/board', label: t('board') },
+  { to: '/inbox', label: '${'x'.repeat(41)}' },
+  { to: '/inbox', children: [{ label: 'Nested' }] },
+];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'a label in the router file itself, past strings and comments that hold brackets',
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });
+// { to: '/board', label: 'In a comment' }
+const text = "{ to: '/inbox', label: 'In a string' }";
+const NAV = [{ to: '/inbox', label: 'Real' }];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox', label: 'Real' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'a component with its own const before the view it renders still shows that view',
+      router: `
+import { InboxView } from './views/inbox/inbox-view';
+function InboxPage() {
+  const search = useSearch();
+  const navigate = useNavigate();
+  return (<ViewBoundary name="Inbox"><InboxView search={search} onSearch={navigate} /></ViewBoundary>);
+}
+const inbox = createRoute({ path: '/inbox', component: InboxPage });`,
+      pages: [{ name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' }],
+      unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a route to a module directly in views, or to a package, is no page',
       router: `
 import { Shared } from './views/shared';
@@ -163,11 +257,12 @@ const a = createRoute({ path: '/shared', component: Shared });
 const b = createRoute({ path: '/thing', component: Thing });`,
       pages: [],
     },
-  ])('$name', ({ router, pages, unrouted }) => {
+  ])('$name', ({ router, nav, pages, unrouted }) => {
     const files = [...VIEWS, 'ui/src/router.tsx'];
     const found = codeRoutes({
       files,
       routers: new Map([['ui/src/router.tsx', router]]),
+      ...(nav === undefined ? {} : { navs: new Map([['ui/src/app-layout.tsx', nav]]) }),
       aliases: readPathAliases({
         path: 'ui/tsconfig.json',
         text: '{"compilerOptions":{"paths":{"@/*":["./src/*"]}}}',
@@ -212,6 +307,9 @@ describe('codeRoutes over a hostile router file', () => {
       name: 'Route tags left open with no closing one',
       text: '<Route path="/a" element={<A/>}>'.repeat(16_000),
     },
+    { name: 'unclosed nav objects', text: `{ to: "/a", label: "A", `.repeat(20_000) },
+    { name: 'nav objects nested deep', text: `${'{a:'.repeat(20_000)}{ to: "/a", label: "A" }` },
+    { name: 'quotes never closed', text: `{ to: "/a", label: '` + "'x".repeat(30_000) },
     {
       name: 'routes to many components defined nowhere',
       text: Array.from(
@@ -250,6 +348,33 @@ describe('codeRoutes over a hostile router file', () => {
     });
     expect(performance.now() - started).toBeLessThan(1000);
     expect(found.pages).toEqual([]);
+  });
+});
+
+describe('navFiles', () => {
+  it('finds source files named like a layout, nav, sidebar, menu or shell, besides the routers', () => {
+    expect(
+      navFiles(
+        [
+          'ui/src/shell/app-layout.tsx',
+          'ui/src/components/SideBar.tsx',
+          'ui/src/menu.ts',
+          'ui/src/main.tsx',
+          'ui/src/router.tsx',
+          'ui/src/layout.css',
+          'ui/src/views/board/board.tsx',
+          'other/src/nav.tsx',
+        ],
+        'ui',
+      ),
+    ).toEqual(['ui/src/menu.ts', 'ui/src/shell/app-layout.tsx', 'ui/src/components/SideBar.tsx']);
+  });
+
+  it('reads at most 20 of them, the shallowest first', () => {
+    const many = Array.from({ length: 100 }, (_, i) => `ui/src/deep${String(i)}/nav.tsx`);
+    const found = navFiles([...many, 'ui/src/layout.tsx'], 'ui');
+    expect(found).toHaveLength(20);
+    expect(found[0]).toBe('ui/src/layout.tsx');
   });
 });
 

@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import { AreaRoute } from '@10db/contracts';
 import { importBindings, isSourceFile, resolveImport, type PathAliases } from './import-graph';
+import { isNavFile, routeLabelsOf } from './route-labels';
 
 // Workbench setup: an app with no file routes (a Vite or Tauri UI) names its pages in code, in route
 // objects (`path: '/board', component: BoardPage`) or JSX (`<Route path="/board" element={<Board />}`).
@@ -15,6 +16,8 @@ export interface CodePage {
   readonly folder: string;
   /** Absent when only a path with a parameter names it. */
   readonly route?: string;
+  /** What the app's nav calls the page; absent when no nav names its route. */
+  readonly label?: string;
 }
 
 export interface CodeRoutes {
@@ -28,6 +31,8 @@ export interface CodeRoutesInput {
   readonly files: readonly string[];
   /** The text of each router file (`routerFiles`). */
   readonly routers: ReadonlyMap<string, string>;
+  /** The text of each nav-like file (`navFiles`), read for label guesses only. */
+  readonly navs?: ReadonlyMap<string, string>;
   readonly aliases: PathAliases;
 }
 
@@ -46,6 +51,26 @@ export function routerFiles(files: readonly string[], unit: string): string[] {
     .filter((f) => under(f, base) && ROUTER_NAME.test(posix.basename(f)))
     .sort((a, b) => depth(a) - depth(b))
     .slice(0, MAX_ROUTER_FILES);
+}
+
+/** At most this many nav-like files are read per app, the shallowest first. */
+const MAX_NAV_FILES = 20;
+
+/**
+ * The source files of the unit, besides its router files, whose names say they hold its nav (layout,
+ * nav, sidebar, menu or shell), read for the label each page goes by.
+ */
+export function navFiles(files: readonly string[], unit: string): string[] {
+  const src = unit === '' ? 'src' : `${unit}/src`;
+  const base = files.some((f) => under(f, src)) ? src : unit;
+  const depth = (f: string) => f.split('/').length;
+  return files
+    .filter(
+      (f) =>
+        under(f, base) && isSourceFile(f) && isNavFile(f) && !ROUTER_NAME.test(posix.basename(f)),
+    )
+    .sort((a, b) => depth(a) - depth(b))
+    .slice(0, MAX_NAV_FILES);
 }
 
 /** An area name from a folder's name: lowercase words joined by hyphens. */
@@ -174,12 +199,12 @@ function importedNames(text: string): Map<string, string> {
 
 /**
  * The capitalised JSX tags each function or `const` the file declares renders, by its name: a
- * declaration's body runs to the next declaration that starts a line. One pass over the file.
+ * declaration's body runs to the next declaration at the start of a line, so a `const` inside it ends nothing. One pass over the file.
  */
 function localComponents(text: string): Map<string, string[]> {
   const declarations = [
     ...text.matchAll(
-      /(?:^|\n)[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:function[ \t]+([\w$]+)|(?:const|let|class)[ \t]+([\w$]+))/gu,
+      /(?:^|\n)(?:export[ \t]+)?(?:default[ \t]+)?(?:function[ \t]+([\w$]+)|(?:const|let|class)[ \t]+([\w$]+))/gu,
     ),
   ];
   const rendered = new Map<string, string[]>();
@@ -457,6 +482,7 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
       if (folder !== null) found.set(folder, [...(found.get(folder) ?? []), def.path]);
     }
   }
+  const labels = routeLabelsOf([...input.routers.values(), ...(input.navs?.values() ?? [])]);
   const pages = [...found].map(([folder, paths]): CodePage => {
     const name = areaNameOf(posix.basename(folder));
     const route =
@@ -465,7 +491,9 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
         .map(asRoute)
         .filter((r) => r !== null)
         .sort((a, b) => a.length - b.length)[0] ?? definedPrefix(paths, defined);
-    return route === undefined ? { name, folder } : { name, folder, route };
+    if (route === undefined) return { name, folder };
+    const label = labels.get(route);
+    return label === undefined ? { name, folder, route } : { name, folder, route, label };
   });
   const pageDirs = new Set(pages.map((p) => posix.dirname(p.folder)));
   const unrouted = new Set<string>();

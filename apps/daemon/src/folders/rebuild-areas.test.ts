@@ -69,6 +69,80 @@ describe('rebuildAreas', () => {
     expect(setupAreasProblem(result.proposed, ['deps', 'migrations'])).toBeNull();
   });
 
+  it('gives a new page the label its nav guesses, in the area and in its row', () => {
+    const result = rebuildAreas(input({ pages: [{ ...FRIDAY, label: 'Weekly' }, PEOPLE] }));
+    expect(result.proposed[0]).toEqual({ ...FRIDAY_AREA, label: 'Weekly' });
+    expect(result.proposed[1]).toEqual(PEOPLE_AREA);
+    expect(result.pages.map((p) => p.label)).toEqual(['Weekly', undefined]);
+  });
+
+  describe('a project that already has the pages', () => {
+    const existing = (people: Partial<AreaDef> = {}): AreaDef[] => [
+      FRIDAY_AREA,
+      { ...PEOPLE_AREA, ...people },
+      ...OTHERS,
+    ];
+
+    it.each<{
+      name: string;
+      have: Partial<AreaDef>;
+      guess: string | undefined;
+      label: string | undefined;
+    }>([
+      { name: 'an unlabelled page takes the guess', have: {}, guess: 'Team', label: 'Team' },
+      {
+        name: 'a label the builder set beats the guess',
+        have: { label: 'Folks' },
+        guess: 'Team',
+        label: 'Folks',
+      },
+      { name: 'no guess leaves the page unlabelled', have: {}, guess: undefined, label: undefined },
+    ])('$name, and is offered as a rebuild but never as a new page', ({ have, guess, label }) => {
+      const result = rebuildAreas(
+        input({
+          existing: existing(have),
+          pages: [FRIDAY, { ...PEOPLE, ...(guess === undefined ? {} : { label: guess }) }],
+        }),
+      );
+      expect(result.pages).toEqual([]);
+      const people = result.proposed.find((a) => a.name === 'people');
+      expect(people?.label).toBe(label);
+      expect(result.skipped).toEqual([]);
+    });
+
+    it('offers the rebuild when only a label differs, and nothing when the label already matches', () => {
+      const labelled = existing({ label: 'Team' });
+      const same = rebuildAreas(
+        input({ existing: labelled, pages: [FRIDAY, { ...PEOPLE, label: 'Team' }] }),
+      );
+      expect(same.proposed).toEqual(labelled);
+      const added = rebuildAreas(
+        input({ existing: existing(), pages: [FRIDAY, { ...PEOPLE, label: 'Team' }] }),
+      );
+      expect(added.proposed).toEqual(labelled);
+      expect(added.proposed).not.toEqual(existing());
+    });
+
+    it('gives a kept page area with no label the guess, and leaves a labelled one alone', () => {
+      const kept = rebuildAreas(
+        input({
+          existing: existing(),
+          keep: new Map([['people', 'kept: 2 open tasks name it']]),
+          pages: [FRIDAY, { ...PEOPLE, label: 'Team' }],
+        }),
+      );
+      expect(kept.proposed.find((a) => a.name === 'people')?.label).toBe('Team');
+      const own = rebuildAreas(
+        input({
+          existing: existing({ label: 'Folks' }),
+          keep: new Map([['people', 'kept: 2 open tasks name it']]),
+          pages: [FRIDAY, { ...PEOPLE, label: 'Team' }],
+        }),
+      );
+      expect(own.proposed.find((a) => a.name === 'people')?.label).toBe('Folks');
+    });
+  });
+
   it('keeps an area open tasks name as it is, drops new areas with no role whose files it holds, and keeps shared areas and pages beside it', () => {
     const result = rebuildAreas(
       input({ keep: new Map([['repo', 'kept: 146 open tasks name it']]) }),
