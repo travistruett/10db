@@ -6,6 +6,7 @@ import {
   PassSignOff,
   SessionActivityData,
   TaskMessageAuthor,
+  pageLabel,
   WorkstreamState,
   type AreaDef,
   type PassDto,
@@ -44,7 +45,7 @@ import { signingOff } from './sign-off';
 // Workbench spec §4.3, §4.5, §6.1: what the Workbench reads of a pass, built from its rows alone.
 
 /** The page area a task works on: its first page, else the first area the pass holds for it. */
-function pageOf(areas: readonly AreaDef[], task: TaskDto): AreaDef | undefined {
+export function pageOf(areas: readonly AreaDef[], task: TaskDto): AreaDef | undefined {
   const named = (name: string | undefined) => areas.find((a) => a.name === name);
   const page = task.areas.find((name) => named(name)?.role === AreaRole.Page);
   return named(page ?? passHeldAreas(areas, task)[0]);
@@ -107,6 +108,7 @@ function pageView(
   task: TaskDto,
 ): PassPageDto {
   const area = pageOf(areas, task);
+  const areaName = area?.name ?? task.areas[0] ?? '';
   const run = task.workstreamId === null ? null : getWorkstream(db, task.workstreamId);
   const turn = turns.filter((t) => t.taskId === task.id).at(-1);
   const spokenTo = listTaskThreadRows(db, task.id).some(
@@ -115,7 +117,8 @@ function pageView(
   return {
     taskId: task.id,
     title: task.title,
-    area: area?.name ?? task.areas[0] ?? '',
+    area: areaName,
+    label: pageLabel(area ?? { name: areaName }),
     route: area?.route ?? null,
     workstreamId: run?.id ?? null,
     state: run?.state ?? null,

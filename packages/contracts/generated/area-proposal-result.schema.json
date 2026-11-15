@@ -45,6 +45,11 @@
                     "format": "starts_with",
                     "pattern": "^\\/.*"
                   },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
                   "reason": {
                     "type": "string",
                     "minLength": 1,

@@ -227,6 +227,33 @@ export function insertPass(
   return { pass: getPass(ctx.tx, input.id), batch };
 }
 
+/**
+ * Records that `passId` made these tasks for pages, so abandoning the pass can remove them. It runs
+ * after the pass row exists, because the column references it.
+ */
+export function markTasksMadeByPass(
+  ctx: WriteContext,
+  passId: PassId,
+  taskIds: readonly TaskId[],
+): void {
+  for (const taskId of taskIds)
+    ctx.tx
+      .update(schema.tasks)
+      .set({ madeByPassId: passId })
+      .where(eq(schema.tasks.id, taskId))
+      .run();
+}
+
+/** Whether `passId` made the task for one of its pages, rather than the task joining from the Board. */
+export function madeByPass(db: DbReader, passId: PassId, taskId: TaskId): boolean {
+  const row = db
+    .select({ madeByPassId: schema.tasks.madeByPassId })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.madeByPassId === passId;
+}
+
 /** The tasks in the pass now, oldest first: a task that left it is not one. */
 export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
   const rows = db

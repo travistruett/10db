@@ -17,7 +17,7 @@ import {
   type AreaCandidate,
 } from './area-candidates';
 import { areasFromStructure } from './area-naming';
-import { areaNameOf, codeRoutes, routerFiles, type CodePage } from './code-routes';
+import { areaNameOf, codeRoutes, navFiles, routerFiles, type CodePage } from './code-routes';
 import { isSourceFile, readPathAliases } from './import-graph';
 import { literalGlob } from './literal-glob';
 import { readPageCode, type PageSeed, type TextReader } from './page-code';
@@ -30,6 +30,8 @@ interface GroupPage {
   readonly folder?: string;
   readonly files?: readonly string[];
   readonly route: string | undefined;
+  /** What the app's nav calls the page; none for a page named by its files. */
+  readonly label?: string | undefined;
   readonly routeGlobs: readonly string[];
 }
 
@@ -148,13 +150,22 @@ async function codePages(
       .filter((file) => unitOf(file, all) === unit)
       .map((file) => ({ unit, file })),
   );
+  // The nav files are read for label guesses only; a file of another unit is that unit's.
+  const navs = units.flatMap((unit) =>
+    navFiles(files, unit)
+      .filter((file) => unitOf(file, all) === unit)
+      .map((file) => ({ unit, file })),
+  );
   const configs = units.flatMap((unit) =>
     ['tsconfig.json', 'jsconfig.json']
       .map((name) => (unit === '' ? name : `${unit}/${name}`))
       .filter((path) => files.includes(path)),
   );
   if (routers.length === 0) return { pages: [], skipped: [], routers: [] };
-  const { texts } = await read([...routers.map((r) => r.file), ...configs], ROUTER_MAX_BYTES);
+  const { texts } = await read(
+    [...routers.map((r) => r.file), ...navs.map((n) => n.file), ...configs],
+    ROUTER_MAX_BYTES,
+  );
   const pages: (CodePage & { unit: string })[] = [];
   const skipped: { name: string; reason: string }[] = [];
   for (const unit of units) {
@@ -168,6 +179,12 @@ async function codePages(
         mine.flatMap((r) => {
           const text = texts.get(r.file);
           return text === undefined ? [] : [[r.file, text] as const];
+        }),
+      ),
+      navs: new Map(
+        navs.flatMap((n) => {
+          const text = n.unit === unit ? texts.get(n.file) : undefined;
+          return text === undefined ? [] : [[n.file, text] as const];
         }),
       ),
       aliases: readPathAliases(
@@ -364,6 +381,7 @@ export async function proposeSetupAreas(
           name: p.name,
           folder: p.folder,
           route: p.route,
+          label: p.label,
           routeGlobs: treeGlobs(p.folder, files),
         })),
     })),
@@ -396,7 +414,11 @@ export async function proposeSetupAreas(
         routeGlobs: page.routeGlobs,
         takenGlobs: found.taken.get(page.name) ?? [],
       };
-      planned.push(page.route === undefined ? base : { ...base, route: page.route });
+      planned.push({
+        ...base,
+        ...(page.route === undefined ? {} : { route: page.route }),
+        ...(page.label === undefined ? {} : { label: page.label }),
+      });
     }
   }
 

@@ -95,6 +95,7 @@ describe('the Start Pass preview', () => {
     expect(dto.pages).toEqual([
       {
         area: 'settings',
+        label: 'Settings',
         route: '/settings',
         lastChangedAt: settingsAt,
         uncommitted: 2,
@@ -102,12 +103,20 @@ describe('the Start Pass preview', () => {
       },
       {
         area: 'people',
+        label: 'People',
         route: '/people',
         lastChangedAt: null,
         uncommitted: 0,
         heldBy: { taskId: holder.id, title: 'People: tidy' },
       },
-      { area: 'billing', route: null, lastChangedAt: null, uncommitted: 0, heldBy: null },
+      {
+        area: 'billing',
+        label: 'Billing',
+        route: null,
+        lastChangedAt: null,
+        uncommitted: 0,
+        heldBy: null,
+      },
     ]);
     expect(dto.otherUncommitted).toBe(2);
     expect(dto.refusal).toBeNull();

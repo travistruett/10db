@@ -92,6 +92,7 @@ describe('PassWorkspace queue', () => {
       taskId: mintId('Task'),
       title: 'Profile: UI work',
       area: 'Profile',
+      label: 'Profile',
       route: '/profile',
       preview: { route: '/profile', overlay: 'Failed to compile', since: PASS_NOW, turns: 1 },
     });
@@ -937,6 +938,31 @@ describe('PassWorkspace Open Page', () => {
     expect(open).toHaveBeenCalledWith('http://localhost:8800/billing', '_blank');
     expect((await composerOpen())?.textContent).toBe('Copy Link');
     open.mockRestore();
+  });
+});
+
+describe('PassWorkspace labels', () => {
+  it('shows a page by its label, not its area name, in the queue, the pane, the composer and the row menu', async () => {
+    const plan = passPageDto({
+      title: 'Plan: UI work',
+      area: 'shape',
+      label: 'Plan',
+      route: '/shape',
+    });
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: [plan] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={plan.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('list', { name: 'Open pages' });
+    expect(queueRows()[0]?.textContent).toContain('Plan');
+    expect(screen.queryByText('shape')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Message to Plan' })).toBeTruthy();
+    expect(screen.getByLabelText('More actions for Plan')).toBeTruthy();
   });
 });
 

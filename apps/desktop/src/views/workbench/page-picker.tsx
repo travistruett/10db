@@ -13,7 +13,7 @@ import {
 } from '@mantine/core';
 import { IconCheck, IconSubtask } from '@tabler/icons-react';
 import { shortAgo } from '../factory/short-ago';
-import { blockedReason, type JoinableTask, type PickTicks } from './start-pass-rules';
+import { blockedReason, pageLabelIn, type JoinableTask, type PickTicks } from './start-pass-rules';
 
 export interface PagePickerProps {
   readonly pages: readonly PassStartPageDto[];
@@ -163,7 +163,7 @@ export function PagePicker(props: PagePickerProps) {
         ? null
         : blockedReason({ pages: [page.area] }, ticks, areas, inPass);
       choices.set(value, {
-        name: page.area,
+        name: page.label,
         route: page.route,
         kind: 'page',
         aside: changedLine(page, now),
@@ -171,9 +171,9 @@ export function PagePicker(props: PagePickerProps) {
           ...(page.heldBy === null ? [] : [`Waits for ${page.heldBy.title}`]),
           ...(blocked === null ? [] : [blocked]),
         ],
-        haystack: [page.area, page.route ?? ''].join(' ').toLowerCase(),
+        haystack: [page.label, page.area, page.route ?? ''].join(' ').toLowerCase(),
       });
-      return { value, label: page.area, disabled: blocked !== null };
+      return { value, label: page.label, disabled: blocked !== null };
     });
   const taskItems: ComboboxItem[] = tasks.map((task) => {
     const value = taskValue(task.taskId);
@@ -184,9 +184,11 @@ export function PagePicker(props: PagePickerProps) {
       name: task.title,
       route: null,
       kind: 'task',
-      aside: task.pages.join(', '),
+      aside: task.pages.map((name) => pageLabelIn(areas, name)).join(', '),
       notes: blocked === null ? [] : [blocked],
-      haystack: [task.title, ...task.pages].join(' ').toLowerCase(),
+      haystack: [task.title, ...task.pages.flatMap((name) => [name, pageLabelIn(areas, name)])]
+        .join(' ')
+        .toLowerCase(),
     });
     return { value, label: task.title, disabled: blocked !== null };
   });

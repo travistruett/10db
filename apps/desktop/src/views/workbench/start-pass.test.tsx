@@ -25,6 +25,7 @@ const start: PassStartDto = passStartDto({
   pages: [
     {
       area: 'settings',
+      label: 'Settings',
       route: '/settings',
       lastChangedAt: minutesBeforeNow(60 * 24),
       uncommitted: 3,
@@ -32,13 +33,28 @@ const start: PassStartDto = passStartDto({
     },
     {
       area: 'people',
+      label: 'People',
       route: '/people',
       lastChangedAt: minutesBeforeNow(60),
       uncommitted: 0,
       heldBy: null,
     },
-    { area: 'billing', route: null, lastChangedAt: null, uncommitted: 0, heldBy: null },
-    { area: 'forms', route: '/forms', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'billing',
+      label: 'Billing',
+      route: null,
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
+    {
+      area: 'forms',
+      label: 'Forms',
+      route: '/forms',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
 });
 const peopleTask = taskDto({
@@ -82,10 +98,10 @@ describe('StartPass', () => {
     await draw();
     expect(screen.getByText('Work through pages with the agents, live.')).toBeTruthy();
     const list = await openOptions(pagesInput());
-    expect(optionIn(list, /^settings/).textContent).toContain('/settings');
-    expect(optionIn(list, /^settings/).textContent).toContain('changed 1d ago');
-    expect(optionIn(list, /^billing/).textContent).toContain('No route');
-    expect(optionIn(list, /^billing/).textContent).toContain('no changes yet');
+    expect(optionIn(list, /^settings/i).textContent).toContain('/settings');
+    expect(optionIn(list, /^settings/i).textContent).toContain('changed 1d ago');
+    expect(optionIn(list, /^billing/i).textContent).toContain('No route');
+    expect(optionIn(list, /^billing/i).textContent).toContain('no changes yet');
     expect(within(list).getByText('Open UI tasks')).toBeTruthy();
     expect(optionIn(list, /^The people list breathes/).textContent).toContain('people');
     expect(startButton()).toHaveProperty('disabled', true);
@@ -93,9 +109,9 @@ describe('StartPass', () => {
 
   it('starts the picked page and task with the message, with no count on the button', async () => {
     const { onStart } = await draw();
-    await pick(/^settings/);
+    await pick(/^settings/i);
     await pick(/^The people list breathes/);
-    expect(within(picked()).getByText('settings')).toBeTruthy();
+    expect(within(picked()).getByText('Settings')).toBeTruthy();
     expect(within(picked()).getByText('/settings')).toBeTruthy();
     expect(within(picked()).getByText('The people list breathes')).toBeTruthy();
     fireEvent.change(screen.getByLabelText("What's bothering you?"), {
@@ -106,7 +122,7 @@ describe('StartPass', () => {
     expect(onStart).toHaveBeenCalledTimes(1);
     const sent = PassOpenRequest.parse(onStart.mock.calls[0]?.[0]);
     expect(sent).toEqual({
-      name: 'settings and people',
+      name: 'Settings and People',
       pages: ['settings'],
       taskIds: [peopleTask.id],
       pageCap: 4,
@@ -116,39 +132,64 @@ describe('StartPass', () => {
 
   it('marks a picked option with a check on the right, as every multi-select does', async () => {
     await draw();
-    await pick(/^settings/);
+    await pick(/^settings/i);
     const list = await openOptions(pagesInput());
-    expect(within(optionIn(list, /^settings/)).queryByLabelText('Picked')).not.toBeNull();
-    expect(within(optionIn(list, /^people/)).queryByLabelText('Picked')).toBeNull();
+    expect(within(optionIn(list, /^settings/i)).queryByLabelText('Picked')).not.toBeNull();
+    expect(within(optionIn(list, /^people/i)).queryByLabelText('Picked')).toBeNull();
   });
 
   it('disables a page another picked row holds or can share a file with, saying why', async () => {
     await draw();
-    await pick(/^settings/);
+    await pick(/^settings/i);
     let list = await openOptions(pagesInput());
-    const forms = optionIn(list, /^forms/);
+    const forms = optionIn(list, /^forms/i);
     expect(forms.hasAttribute('data-combobox-disabled')).toBe(true);
     expect(forms.textContent).toContain(
-      'settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
+      'Settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
     );
     fireEvent.click(optionIn(list, /^The people list breathes/));
     list = await openOptions(pagesInput());
-    const people = optionIn(list, /^people/);
+    const people = optionIn(list, /^people/i);
     expect(people.hasAttribute('data-combobox-disabled')).toBe(true);
-    expect(people.textContent).toContain('The people list breathes works on people');
+    expect(people.textContent).toContain('The people list breathes works on People');
   });
 
   it('finds a page by its route and a task by the pages it works on', async () => {
     await draw();
     search('peo');
     let list = await openOptions(pagesInput());
-    expect(within(list).queryByRole('option', { name: /^settings/, hidden: true })).toBeNull();
-    expect(optionIn(list, /^people/)).toBeTruthy();
+    expect(within(list).queryByRole('option', { name: /^settings/i, hidden: true })).toBeNull();
+    expect(optionIn(list, /^people/i)).toBeTruthy();
     expect(optionIn(list, /^The people list breathes/)).toBeTruthy();
     search('/sett');
     list = await openOptions(pagesInput());
-    expect(optionIn(list, /^settings/)).toBeTruthy();
-    expect(within(list).queryByRole('option', { name: /^people/, hidden: true })).toBeNull();
+    expect(optionIn(list, /^settings/i)).toBeTruthy();
+    expect(within(list).queryByRole('option', { name: /^people/i, hidden: true })).toBeNull();
+  });
+
+  it('shows a page by its label, and finds it by the label as well as the name', async () => {
+    const labelled = passStartDto({
+      pages: start.pages.map((page) =>
+        page.area === 'forms' ? { ...page, label: 'Sign-up form' } : page,
+      ),
+    });
+    const { onStart } = await draw({
+      start: labelled,
+      project: {
+        ...project,
+        areas: areas.map((a) => (a.name === 'forms' ? { ...a, label: 'Sign-up form' } : a)),
+      },
+    });
+    search('sign-up');
+    let list = await openOptions(pagesInput());
+    expect(optionIn(list, /^sign-up form/i).textContent).toContain('/forms');
+    expect(within(list).queryByRole('option', { name: /^settings/i, hidden: true })).toBeNull();
+    search('forms');
+    list = await openOptions(pagesInput());
+    expect(optionIn(list, /^sign-up form/i)).toBeTruthy();
+    await pick(/^sign-up form/i);
+    fireEvent.click(startButton());
+    expect(onStart.mock.calls[0]?.[0]).toMatchObject({ name: 'Sign-up form', pages: ['forms'] });
   });
 
   it('starts with the pages and tasks a link names picked, and the goal it came from', async () => {
@@ -157,7 +198,7 @@ describe('StartPass', () => {
       initial: { pages: ['billing'], taskIds: [peopleTask.id] },
       goalId,
     });
-    expect(within(picked()).getByText('billing')).toBeTruthy();
+    expect(within(picked()).getByText('Billing')).toBeTruthy();
     expect(within(picked()).getByText('The people list breathes')).toBeTruthy();
     fireEvent.click(startButton());
     expect(onStart.mock.calls[0]?.[0]).toMatchObject({
@@ -169,9 +210,9 @@ describe('StartPass', () => {
 
   it('takes a page back out from its pill', async () => {
     await draw({ initial: { pages: ['billing', 'people'], taskIds: [] } });
-    fireEvent.click(within(picked()).getByLabelText('Remove billing'));
+    fireEvent.click(within(picked()).getByLabelText('Remove Billing'));
     expect(within(picked()).queryByText('billing')).toBeNull();
-    expect(within(picked()).getByText('people')).toBeTruthy();
+    expect(within(picked()).getByText('People')).toBeTruthy();
   });
 
   it("says the daemon's refusal beside Start Pass", async () => {
@@ -190,27 +231,62 @@ describe('StartPass', () => {
         },
       },
     });
-    await pick(/^settings/);
+    await pick(/^settings/i);
     expect(screen.getByText('The folder is on no branch: check one out first.')).toBeTruthy();
     expect(startButton()).toHaveProperty('disabled', true);
   });
 
   it('says what the picked pages take in beside the button, and nothing about shared areas', async () => {
     await draw();
-    expect(screen.queryByText(/settings: 3 files already changed/)).toBeNull();
-    await pick(/^settings/);
-    const line = screen.getByText(/settings: 3 files already changed/);
+    expect(screen.queryByText(/Settings: 3 files already changed/)).toBeNull();
+    await pick(/^settings/i);
+    const line = screen.getByText(/Settings: 3 files already changed/);
     expect(line.closest('[data-start-bar]')?.contains(startButton())).toBe(true);
     expect(screen.queryByText(/count as/)).toBeNull();
   });
 
   it("shows Set Up's count as a badge, not in the label", async () => {
     const onOpen = vi.fn();
-    await draw({ setUp: { count: 2, onOpen } });
+    await draw({ setUp: { count: 2, newPages: [], onOpen } });
     const setUp = screen.getByRole('button', { name: /^Set Up/ });
     expect(setUp.textContent).not.toContain('(');
     expect(within(setUp).getByText('2')).toBeTruthy();
     fireEvent.click(setUp);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Set Up with no count when nothing is counted, and no new-page line', async () => {
+    await draw({ setUp: { count: 0, newPages: [], onOpen: vi.fn() } });
+    const setUp = screen.getByRole('button', { name: 'Set Up' });
+    expect(setUp.querySelector('.mantine-Badge-root')).toBeNull();
+    expect(screen.queryByText(/new pages? found/)).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'one page, by its label and route',
+      pages: [{ name: 'sessions', label: 'Chats', route: '/sessions', folders: ['src/sessions/'] }],
+      says: 'New page found: Chats /sessions',
+    },
+    {
+      name: 'a page with no label, by its capitalised name, and none with no route',
+      pages: [{ name: 'billing', folders: ['src/billing/'] }],
+      says: 'New page found: Billing',
+    },
+    {
+      name: 'several, counted',
+      pages: [
+        { name: 'a', route: '/a', folders: ['a/'] },
+        { name: 'b', route: '/b', folders: ['b/'] },
+      ],
+      says: '2 new pages found: A /a, B /b',
+    },
+  ])('says the new page found: $name, with Set Up beside it', async ({ pages, says }) => {
+    const onOpen = vi.fn();
+    await draw({ setUp: { count: pages.length, newPages: pages, onOpen } });
+    const line = screen.getByRole('status');
+    expect(line.textContent).toContain(says);
+    fireEvent.click(within(line).getByRole('button', { name: 'Set Up' }));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

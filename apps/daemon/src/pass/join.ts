@@ -19,6 +19,7 @@ import {
   insertBuilderMessage,
   joinPass as joinPassRows,
   listPassTasks,
+  markTasksMadeByPass,
   type DbReader,
 } from '@10db/db';
 import {
@@ -93,8 +94,10 @@ export async function joinPass(
         await refuseOffBranch();
         joined = ctx.state.write((w) => {
           refuseJoin(w.tx, getPass(w.tx, passId), project, tasks, newPages);
-          const ids = [...tasks, ...writePageTasks(w, project, newPages)].map((t) => t.id);
+          const made = writePageTasks(w, project, newPages).map((t) => t.id);
+          const ids = [...tasks.map((t) => t.id), ...made];
           joinPassRows(w, passId, ids);
+          markTasksMadeByPass(w, passId, made);
           const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
           const all = ids.map((id) => getTask(w.tx, id));
           const waiting = startPassTasks(w, project, pass.batchId, all, leaseExpiresAt);

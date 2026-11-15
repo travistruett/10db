@@ -594,6 +594,42 @@ describe('POST /projects/:projectId/workbench-setup', () => {
     });
   });
 
+  it("finds a route the project lacks as a new page, labelled by the app's nav, and gives the pages it has their labels without making them new", async () => {
+    commitFiles({
+      'package.json': '{}\n',
+      'src/router.tsx': [
+        "import { SettingsView } from './views/settings/settings-view';",
+        "import { BillingView } from './views/billing/billing-view';",
+        "const a = createRoute({ path: '/settings', component: SettingsView });",
+        "const b = createRoute({ path: '/billing', component: BillingView });",
+        '',
+      ].join('\n'),
+      'src/shell/app-layout.tsx':
+        "const NAV = [{ to: '/settings', label: 'Preferences' }, { to: '/billing', label: 'Invoices' }];\n",
+      'src/views/settings/settings-view.tsx': '\n',
+      'src/views/billing/billing-view.tsx': '\n',
+    });
+    const project = await projectWith([
+      { name: 'settings', globs: ['src/views/settings/**'], role: 'page', route: '/settings' },
+      { name: 'src', globs: ['src/**'], role: 'shared' },
+      { name: 'rest', globs: ['**'], catchAll: true },
+    ]);
+
+    const setup = await api().post(`/projects/${project.id}/workbench-setup`, WorkbenchSetupDto);
+
+    expect(setup.areas.pages.map((p) => [p.name, p.route, p.label])).toEqual([
+      ['billing', '/billing', 'Invoices'],
+    ]);
+    expect(setup.areas.proposed.find((a) => a.name === 'settings')?.label).toBe('Preferences');
+
+    const saved = await api().patch(`/projects/${project.id}`, ProjectDto, {
+      areas: withoutPages(setup.areas.proposed, ['billing'], setup.areas.pages),
+      leftOutPages: ['billing'],
+    });
+    expect(saved.leftOutPages).toEqual(['billing']);
+    expect(saved.areas.find((a) => a.name === 'settings')?.label).toBe('Preferences');
+  });
+
   it('suggests the settings the repository shows, with the UI package found from the proposed pages', async () => {
     commitFiles({
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',

@@ -34,7 +34,7 @@ export function pageChoice(choices: CloseChoices, taskId: TaskId): PassClosePage
 /** A page a file can be added to: one that lands, signed off already or set to Sign Off Now. */
 export interface LandingPage {
   readonly taskId: TaskId;
-  readonly area: string;
+  readonly label: string;
 }
 
 export function landingPages(
@@ -49,7 +49,7 @@ export function landingPages(
         ? pageChoice(choices, page.taskId) === PassClosePageChoice.SignOff
         : page.signOff === PassSignOff.Done,
     )
-    .map((page) => ({ taskId: page.taskId, area: page.area }));
+    .map((page) => ({ taskId: page.taskId, label: page.label }));
 }
 
 /** Where a file goes: the page chosen while that page lands, else left out. */

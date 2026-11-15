@@ -16,6 +16,28 @@ export const AreaRoute = z
   .startsWith('/', 'A route is a path that starts with /, such as /people')
   .refine((r) => !/[\s\p{Cc}]/u.test(r), 'A route has no spaces or control characters');
 
+/** The name the builder reads a page by, such as "Plan": one line of 1 to 40 characters. */
+export const PageLabel = z
+  .string()
+  .min(1, 'A label is at least one character')
+  .max(40, 'A label is at most 40 characters')
+  .refine(
+    (t) => !/[\p{Cc}]/u.test(t),
+    'A label is one line, with no control characters such as newlines or tabs',
+  );
+export type PageLabel = z.infer<typeof PageLabel>;
+
+/**
+ * What a page is called where the builder reads it: its label, else its name with the first letter
+ * upper-cased. The name stays the key everywhere; this is display only.
+ */
+export function pageLabel(area: {
+  readonly name: string;
+  readonly label?: string | undefined;
+}): string {
+  return area.label ?? `${area.name.charAt(0).toUpperCase()}${area.name.slice(1)}`;
+}
+
 /** What the page rules read of an area. */
 interface RoledArea {
   readonly name: string;
@@ -23,6 +45,7 @@ interface RoledArea {
   readonly catchAll?: boolean | undefined;
   readonly role?: AreaRole | undefined;
   readonly route?: string | undefined;
+  readonly label?: string | undefined;
 }
 
 /** Two page areas and the glob of each that can match the same file. */
@@ -67,6 +90,8 @@ function pageOverlap(areas: readonly RoledArea[]): PageOverlap | null {
 export function areaRolesProblem(areas: readonly RoledArea[]): string | null {
   const routed = areas.find((a) => a.route !== undefined && a.role !== AreaRole.Page);
   if (routed !== undefined) return `Only a page has a route: "${routed.name}" is not a page`;
+  const labelled = areas.find((a) => a.label !== undefined && a.role !== AreaRole.Page);
+  if (labelled !== undefined) return `Only a page has a label: "${labelled.name}" is not a page`;
   const overlap = pageOverlap(areas);
   if (overlap === null) return null;
   return (

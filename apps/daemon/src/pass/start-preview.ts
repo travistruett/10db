@@ -1,6 +1,7 @@
 import {
   AreaRole,
   PassLackKind,
+  pageLabel,
   type AreaDef,
   type PassLackDto,
   type PassStartDto,
@@ -154,6 +155,7 @@ export async function passStartPreview(
   for (const page of pages)
     listed.push({
       area: page.name,
+      label: pageLabel(page),
       route: page.route ?? null,
       lastChangedAt: await deps.git.lastChangedAt(project.repoPath, page.globs),
       uncommitted: counts.get(page.name) ?? 0,

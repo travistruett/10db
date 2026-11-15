@@ -33,6 +33,7 @@ import {
   setTaskKeptWork,
   transitionWorkstream,
 } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { silentLogger } from '../log';
@@ -220,8 +221,56 @@ describe('opening a pass', () => {
     expect(opened.waiting).toEqual([]);
   });
 
-  it('makes a page another task holds wait for it, naming the holder', async () => {
+  it('marks the task it makes for a new page with its pass, and leaves a joined task unmarked', async () => {
     harness();
+    const people = page('People: UI work', ['people']);
+
+    const opened = await open([people], { pages: ['settings'] });
+
+    const inPass = h.store.db
+      .select({ id: schema.tasks.id, madeByPassId: schema.tasks.madeByPassId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.passId, opened.pass.id))
+      .all();
+    expect(inPass).toHaveLength(2);
+    expect(inPass.find((t) => t.id === people.id)?.madeByPassId).toBeNull();
+    expect(inPass.find((t) => t.id !== people.id)?.madeByPassId).toBe(opened.pass.id);
+  });
+
+  it("names the task it makes for a new page by the page's label, else its capitalised name", async () => {
+    harness({
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', label: 'Preferences' },
+        { name: 'people', globs: ['src/people/**'], role: 'page' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
+
+    const opened = await open([], { pages: ['settings', 'people'] });
+
+    const titles = h.store.db
+      .select({ title: schema.tasks.title })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.passId, opened.pass.id))
+      .all()
+      .map((t) => t.title);
+    expect(titles.sort()).toEqual(['People: UI work', 'Preferences: UI work']);
+  });
+
+  it('makes a page another task holds wait for it, naming the holder', async () => {
+    harness({
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        {
+          name: 'people',
+          globs: ['src/people/**'],
+          role: 'page',
+          route: '/people',
+          label: 'Folks',
+        },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
     const holder = page('People: copy fix', ['people']);
     // A task waiting on a card with no session holds its claims and no lane in the folder.
     const held = h.state.write((w) => {
@@ -256,7 +305,7 @@ describe('opening a pass', () => {
 
     expect(opened.waiting).toEqual([{ taskId: people.id, area: 'people', heldBy: holder.id }]);
     const waiting = runOf(people);
-    expect(waiting?.notice?.line).toBe('Waiting for area people: task "People: copy fix" holds it');
+    expect(waiting?.notice?.line).toBe('Waiting for area Folks: task "People: copy fix" holds it');
     expect(activeClaims(h.store.db, waiting?.id ?? mintId('Workstream'))).toEqual([]);
     expect(activeClaims(h.store.db, held.id).map((c) => c.name)).toEqual(['people']);
   });

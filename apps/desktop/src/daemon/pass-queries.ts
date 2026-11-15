@@ -270,7 +270,7 @@ export function useRenamePass() {
   });
 }
 
-/** Abandon Pass: every unsigned page goes back, its task keeping the work. */
+/** Abandon Pass: every unsigned page goes back and its changes are deleted. */
 export function useAbandonPass() {
   const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
@@ -314,7 +314,7 @@ export function useTakeOutPage() {
 
 /** `POST /projects/:projectId/workbench-setup`: read again once Apply saves the project. */
 export const setupKeys = {
-  of: (projectId: ProjectId) => ['workbench-setup', projectId] as const,
+  of: queryKeys.workbenchSetup,
 };
 
 /**

@@ -7,18 +7,18 @@ import { PageStatus } from './page-status';
 /** A page as the announcer compares it with how it was. */
 export interface AnnouncedPage {
   readonly taskId: string;
-  readonly area: string;
+  readonly label: string;
   readonly status: PageStatus;
   /** The page's state line; for a page that asks, whether it is a question or a permission. */
   readonly line: string;
 }
 
 const SAID: Partial<Record<PageStatus, (page: AnnouncedPage) => string>> = {
-  [PageStatus.Ready]: (page) => `${page.area} is ready`,
+  [PageStatus.Ready]: (page) => `${page.label} is ready`,
   [PageStatus.Asks]: (page) =>
-    `${page.area} ${page.line.charAt(0).toLowerCase()}${page.line.slice(1)}`,
-  [PageStatus.Failed]: (page) => `${page.area} failed`,
-  [PageStatus.PreviewBroken]: (page) => `${page.area} broke the preview`,
+    `${page.label} ${page.line.charAt(0).toLowerCase()}${page.line.slice(1)}`,
+  [PageStatus.Failed]: (page) => `${page.label} failed`,
+  [PageStatus.PreviewBroken]: (page) => `${page.label} broke the preview`,
 };
 
 /** What to say for the pages `now` that came into a ready, asking, failed or preview-broken state since `before`. */

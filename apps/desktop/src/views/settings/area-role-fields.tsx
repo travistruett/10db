@@ -1,4 +1,4 @@
-import { AreaRole } from '@10db/contracts';
+import { AreaRole, pageLabel } from '@10db/contracts';
 import { NativeSelect, Stack, Text, TextInput } from '@mantine/core';
 
 /** An area's role as a select holds it: empty for an area with none. */
@@ -21,25 +21,48 @@ const WHAT_IT_MEANS: Record<RoleChoice, string> = {
 const isRoleChoice = (value: string): value is RoleChoice =>
   value === '' || value === AreaRole.Page || value === AreaRole.Shared;
 
-/** The role and route fields of an area draft, as a stored area carries them. */
-export function roleFields(role: RoleChoice, route: string): { role?: AreaRole; route?: string } {
+/**
+ * The role, route and label fields of an area draft, as a stored area carries them: a route and a
+ * label only on a page, and an empty one as none.
+ */
+export function roleFields(
+  role: RoleChoice,
+  route: string,
+  label = '',
+): { role?: AreaRole; route?: string; label?: string } {
   if (role === '') return {};
-  const trimmed = route.trim();
-  return role === AreaRole.Page && trimmed !== '' ? { role, route: trimmed } : { role };
+  if (role !== AreaRole.Page) return { role };
+  const trimmedRoute = route.trim();
+  const trimmedLabel = label.trim();
+  return {
+    role,
+    ...(trimmedRoute === '' ? {} : { route: trimmedRoute }),
+    ...(trimmedLabel === '' ? {} : { label: trimmedLabel }),
+  };
 }
 
 /** Choose whether an area is a page or shared, and the route of a page. */
 export function AreaRoleFields({
   index,
+  name,
   role,
   route,
+  label,
   onChange,
 }: {
   /** The area's place in the list, from 1, which names the fields. */
   readonly index: number;
   readonly role: RoleChoice;
   readonly route: string;
-  readonly onChange: (next: { readonly role?: RoleChoice; readonly route?: string }) => void;
+  /** The area's name, whose capitalised form is the label's placeholder. */
+  readonly name?: string;
+  /** A page's label; the field shows only when this is given. */
+  readonly label?: string;
+  readonly onChange: (next: {
+    readonly role?: RoleChoice;
+    readonly route?: string;
+    readonly label?: string;
+  }) => void;
 }) {
   const n = String(index);
   return (
@@ -64,6 +87,19 @@ export function AreaRoleFields({
           value={route}
           onChange={(e) => {
             onChange({ route: e.currentTarget.value });
+          }}
+        />
+      ) : null}
+      {role === AreaRole.Page && label !== undefined ? (
+        <TextInput
+          size="xs"
+          aria-label={`Area ${n} label`}
+          placeholder={pageLabel({ name: name?.trim() ?? '' })}
+          description="What the page is called where you read it. Leave it empty to use its name."
+          maxLength={40}
+          value={label}
+          onChange={(e) => {
+            onChange({ label: e.currentTarget.value });
           }}
         />
       ) : null}

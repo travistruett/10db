@@ -68,7 +68,7 @@ The bridge reads no other 10db variable.
 | `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                                       |
 | `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, rigor, kinds and landing; returns its id. A rigor below a kind's minimum is refused. |
 | `edit_task`     | Changes a task's title, headline, why, description, criteria, rigor, kinds, areas or landing (areas and landing only before it starts).                                    |
-| `remove_task`   | Removes a task that has not started.                                                                                                                                       |
+| `remove_task`   | Removes a task that has not started, or one whose every run was cancelled, in no pass and with no saved work.                                                              |
 | `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                                                   |
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                                                           |
 | `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                                                           |

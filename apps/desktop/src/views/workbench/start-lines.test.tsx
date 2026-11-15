@@ -15,8 +15,22 @@ const areas: AreaDef[] = [
 const project = projectViewDto({ areas, baseBranch: 'main' });
 const quiet: PassStartDto = passStartDto({
   pages: [
-    { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 3, heldBy: null },
-    { area: 'people', route: '/people', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'settings',
+      label: 'Settings',
+      route: '/settings',
+      lastChangedAt: null,
+      uncommitted: 3,
+      heldBy: null,
+    },
+    {
+      area: 'people',
+      label: 'People',
+      route: '/people',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
   otherUncommitted: 0,
   lacks: [],
@@ -25,7 +39,7 @@ const settings: PickTicks = { pages: ['settings'], tasks: [] };
 const people: PickTicks = { pages: ['people'], tasks: [] };
 const none: PickTicks = { pages: [], tasks: [] };
 
-const DIRT = "settings: 3 files already changed in your folder will be part of this page's work.";
+const DIRT = "Settings: 3 files already changed in your folder will be part of this page's work.";
 const OTHER = '12 other changed files stay as they are.';
 const DOCKER = 'Docker is off: the gate needs it.';
 const AHEAD = 'build has 4 commits origin/main lacks: the pull request will carry them.';

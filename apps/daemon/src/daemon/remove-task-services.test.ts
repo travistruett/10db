@@ -52,6 +52,20 @@ describe('the single-task Remove service', () => {
   });
 });
 
+describe('the Remove service on a task with nothing left in it', () => {
+  it('removes one whose every run was cancelled, with no pass and no saved work', () => {
+    const task = h.addTask('Settings: UI work', { areas: ['api'] });
+    const run = h.state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
+    h.settle(run.id, 'CANCELLED');
+
+    removalServices().removeTask(task.id);
+
+    expect(getTask(h.state.db, task.id).status).toBe(TaskStatus.Cancelled);
+  });
+});
+
 describe('the Close service', () => {
   it('leaves no question attached to the closed task, and keeps it stored', () => {
     const task = h.addTask('Alpha', { areas: ['api'] });

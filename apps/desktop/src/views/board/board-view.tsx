@@ -65,6 +65,7 @@ import {
 import { canStart, TaskCardMenu } from './task-card-menu';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld } from './task-hold';
+import { isSpent } from './task-spent';
 import { CancelRunModal } from './cancel-run-modal';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
@@ -374,7 +375,7 @@ function BoardColumns({
                 onHold={() => {
                   actions.hold(task.id);
                 }}
-                {...(isHeld(ws)
+                {...(isHeld(ws) || isSpent(task, ws)
                   ? {
                       onRemove: () => {
                         actions.remove(task.id);

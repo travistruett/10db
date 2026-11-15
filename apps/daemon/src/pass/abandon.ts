@@ -1,6 +1,7 @@
 import {
   AbandonStep,
   BatchState,
+  pageLabel,
   PassState,
   TakeOutStep,
   WorkstreamState,
@@ -20,7 +21,6 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
-  leavePass,
   listPassTakeOuts,
   listPassTasks,
   listSharedChanges,
@@ -39,11 +39,19 @@ import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
 import { dropShared } from './shared-drop';
 import { sharedRef } from './shared-hold';
-import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
+import { pageOf } from './view';
+import {
+  deleteAbandonedWork,
+  leaveAbandonedPass,
+  takeOutSteps,
+  TakeOutWithin,
+  type TakeOutDeps,
+} from './take-out';
 
 // Workbench spec §5.4 (D23): Abandon Pass is the exit that always works. Each unsigned page's files go
-// back to their state before the pass, its work kept with its task, and the pass and its batch end
-// ABANDONED, step by recorded step (`passes.abandon_step`) so a restart goes on from the next.
+// back to their state before the pass and its changes are deleted, a task the pass made for it leaves
+// the Board, and the pass and its batch end ABANDONED, step by recorded step (`passes.abandon_step`)
+// so a restart goes on from the next.
 
 /**
  * What an Abandon needs: a take-out's, and the stop of what ships for the pass (its pull request's
@@ -125,9 +133,31 @@ async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
 }
 
 /**
- * Raises, or raises again, the one card an Abandon leaves: where the folder is, each file left as it
- * was with its page, and a pull request no longer watched. While the folder stays on the pass's
- * branch it offers the move back to the branch the pass came from.
+ * The confirm's own words for what an Abandon did to the pages, by label: those whose changes it
+ * deleted, then those signed off, which stay.
+ */
+function pagesLine(db: DbReader, pass: PassDto): string {
+  const { areas } = getProject(db, pass.projectId);
+  const label = (task: TaskDto): string =>
+    pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
+  // Only the pages this Abandon took out, as its confirm named them: not one taken out before it.
+  const discards = takenOut(db, pass)
+    .rows.filter((row) => row.discarded)
+    .map((row) => label(getTask(db, row.taskId)));
+  const stays = listPassTasks(db, pass.id).filter((task) => signedOff(db, task));
+  return [
+    discards.length > 0 ? `Discards: ${discards.join(', ')} (their changes are deleted).` : '',
+    stays.length > 0 ? `Stays: ${stays.map(label).join(', ')} (signed off).` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Raises, or raises again, the one card an Abandon leaves: where the folder is, the pages whose
+ * changes it deleted and those that stay, each file left as it was with its page, and a pull request
+ * no longer watched. While the folder stays on the pass's branch it offers the move back to the
+ * branch the pass came from.
  */
 export function raiseAbandonCard(
   deps: PassWorkDeps,
@@ -147,6 +177,8 @@ export function raiseAbandonCard(
       ? `Your folder stays on ${branch}, which holds what the pass landed. Merge it into ${pass.returnBranch} with \`git merge ${shellWord(branch)}\`, or move to ${pass.returnBranch}, which takes the landed pages off the screen and keeps them on ${branch}.`
       : `Your folder is on ${where}.`,
   ];
+  const pages = pagesLine(deps.state.db, pass);
+  if (pages !== '') parts.push(pages);
   if (input.left.length > 0)
     parts.push(
       `Left as they are, because they kept changing:\n${input.left.map((f) => `- ${f.path} (${f.page})`).join('\n')}`,
@@ -200,7 +232,8 @@ function beginAbandon(ctx: WriteContext, passId: PassId): void {
  * 2 a ship in flight is aborted (the pull request's checks, a close's job) and a shipping batch fails; 3 every session of the pass
  * is stopped, its last work kept; 4 each shared change not landed is dropped, newest first, its files
  * put back as its hold found them, with no refusal but the hash before each write; 5 each page still in the pass is taken out by the take-out's own steps, inside the
- * Abandon, so files that keep changing are left and named rather than stopping it; 6 signed-off pages
+ * Abandon, so files that keep changing are left and named rather than stopping it, its changes are
+ * deleted and a task the pass made for it is retired; 6 signed-off pages
  * stay as landed; 7 the pass and its batch are ABANDONED in one write; 8 where nothing landed, HEAD is
  * pointed back at the branch the pass came from, and the folder's own index is refreshed for the files
  * the take-outs wrote. A card says where the folder is when it stays, and names each file left.
@@ -266,11 +299,14 @@ export async function abandonPassSteps(
   if (before(AbandonStep.PagesTakenOut)) {
     for (const task of listPassTasks(db, passId)) {
       if (signedOff(db, task)) continue;
-      if (task.workstreamId === null)
+      if (task.workstreamId === null) {
+        // A page with no run has no take-out: its work goes and it leaves the pass as one does.
+        const repo = getProject(db, getPass(db, passId).projectId).repoPath;
+        await deleteAbandonedWork(deps, { repo, taskId: task.id, passId });
         deps.state.write((ctx) => {
-          leavePass(ctx, task.id);
+          leaveAbandonedPass(ctx, { taskId: task.id, passId });
         });
-      else await takeOutSteps(deps, { taskId: task.id, within: TakeOutWithin.Abandon });
+      } else await takeOutSteps(deps, { taskId: task.id, within: TakeOutWithin.Abandon });
     }
     record(AbandonStep.PagesTakenOut);
   }
@@ -300,9 +336,16 @@ export async function abandonPassSteps(
       (await git.commitAt(repo, branch)) === pass.startSha
     )
       await git.pointHeadAt({ repo, from: branch, to: pass.returnBranch, sha: pass.startSha });
+    // A discarded page's kept commit is unnamed once its refs are deleted, and git may have pruned
+    // it after a restart: the files of a commit no longer there are left to git's own refresh.
     const written = new Set<string>();
     for (const row of done.rows)
-      if (row.keptSha !== null && row.keptBaseSha !== null)
+      if (
+        row.keptSha !== null &&
+        row.keptBaseSha !== null &&
+        (await git.hasCommit(repo, row.keptSha)) &&
+        (await git.hasCommit(repo, row.keptBaseSha))
+      )
         for (const path of await git.filesChangedBetween(repo, row.keptBaseSha, row.keptSha))
           if (!row.left.includes(path)) written.add(path);
     await git.refreshIndex(repo, [...written]);

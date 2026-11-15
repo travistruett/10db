@@ -49,7 +49,14 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
     live: null,
     start: passStartDto({
       pages: [
-        { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 0, heldBy: null },
+        {
+          area: 'settings',
+          label: 'Settings',
+          route: '/settings',
+          lastChangedAt: null,
+          uncommitted: 0,
+          heldBy: null,
+        },
       ],
     }),
     tasks: [],
@@ -57,6 +64,7 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
     search: {},
     goalPages: [],
     setupCount: 0,
+    newPages: [],
     now: Date.parse(PASS_NOW),
     onSelect,
     renderWorkspace: (workspace) => <Workspace {...workspace} />,
@@ -102,10 +110,28 @@ describe('WorkbenchScreen', () => {
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
   });
 
-  it('offers no Set Up when nothing is left to suggest', async () => {
+  it('always offers Set Up beside the picker, with no count and no new-page line when nothing is left', async () => {
     await draw();
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Set Up/ })).toBeNull();
+    const setUp = screen.getByRole('button', { name: 'Set Up' });
+    expect(setUp.querySelector('.mantine-Badge-root')).toBeNull();
+    expect(screen.queryByText(/new pages? found/)).toBeNull();
+  });
+
+  it('says a new page found under the Pages field, and its Set Up opens the setup', async () => {
+    server.use(...passHandlers());
+    await draw({
+      setupCount: 1,
+      newPages: [{ name: 'sessions', label: 'Sessions', route: '/sessions', folders: ['src/s/'] }],
+    });
+    const line = await screen.findByText(/New page found:/);
+    expect(line.textContent).toBe('New page found: Sessions /sessions');
+    fireEvent.click(
+      within(line.parentElement ?? document.body).getByRole('button', { name: 'Set Up' }),
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
+    ).toBeTruthy();
   });
 
   it('is the picker while no pass is open', async () => {
@@ -140,7 +166,7 @@ describe('WorkbenchScreen', () => {
         abandon: () => Promise.resolve(),
       },
     });
-    await pickOption(await findPagesInput(), /^settings/);
+    await pickOption(await findPagesInput(), /^settings/i);
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByText('A lane is running in the folder')).toBeTruthy();
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ pages: ['settings'] }));
@@ -148,7 +174,7 @@ describe('WorkbenchScreen', () => {
 
   it("ticks the Board's tasks and the goal's pages a link names", async () => {
     await draw({ goalPages: ['settings'] });
-    expect(within(pillsOf(await findPagesInput())).getByText('settings')).toBeTruthy();
+    expect(within(pillsOf(await findPagesInput())).getByText('Settings')).toBeTruthy();
   });
 
   it('with a pass open, draws its header over its workspace, handing it the selection', async () => {

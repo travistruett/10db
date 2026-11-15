@@ -34,8 +34,22 @@ const areas: AreaDef[] = [
 const project = projectViewDto({ name: 'ampsio', areas });
 const start = passStartDto({
   pages: [
-    { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 0, heldBy: null },
-    { area: 'people', route: '/people', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'settings',
+      label: 'Settings',
+      route: '/settings',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
+    {
+      area: 'people',
+      label: 'People',
+      route: '/people',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
 });
 
@@ -64,7 +78,8 @@ function open(
   return { opened, router, queryClient };
 }
 
-const pick = async (name: string) => pickOption(await findPagesInput(), new RegExp(`^${name}`));
+const pick = async (name: string) =>
+  pickOption(await findPagesInput(), new RegExp(`^${name}`, 'i'));
 const picked = async () => pillsOf(await findPagesInput());
 
 describe('WorkbenchView', () => {
@@ -95,7 +110,7 @@ describe('WorkbenchView', () => {
       goalPages: goalPassPagesDto({ pages: ['people'], fromTasks: [] }),
     });
     await waitFor(async () => {
-      expect(within(await picked()).getByText('people')).toBeTruthy();
+      expect(within(await picked()).getByText('People')).toBeTruthy();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
@@ -119,6 +134,37 @@ describe('WorkbenchView', () => {
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ task: ready.taskId });
     });
+  });
+
+  it('says a page the repository has that the project lacks, from the setup it reads, with a count on Set Up', async () => {
+    open(
+      '/workbench',
+      {},
+      {
+        first: [
+          http.post(daemonUrl('/projects/:projectId/workbench-setup'), () =>
+            HttpResponse.json(
+              workbenchSetupDto({
+                areas: {
+                  proposed: project.areas,
+                  kept: [],
+                  pages: [
+                    { name: 'sessions', route: '/sessions', label: 'Chats', folders: ['src/s/'] },
+                  ],
+                  skipped: [],
+                },
+                settings: [],
+              }),
+            ),
+          ),
+        ],
+      },
+    );
+    expect((await screen.findByText(/New page found:/)).textContent).toBe(
+      'New page found: Chats /sessions',
+    );
+    const setUp = screen.getAllByRole('button', { name: /^Set Up/ })[0];
+    expect(within(setUp ?? document.body).getByText('1')).toBeTruthy();
   });
 
   it('reads the setup for Set Up only while no pass is open', async () => {
@@ -158,7 +204,7 @@ describe('WorkbenchView', () => {
       act: async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
         const dialog = await screen.findByRole('dialog', { name: 'Add Page' });
-        await pickOption(await findPagesInput(dialog), /^people/);
+        await pickOption(await findPagesInput(dialog), /^people/i);
         fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages' }));
       },
       sent: { method: 'POST', path: 'pages', body: { pages: ['people'], taskIds: [] } },

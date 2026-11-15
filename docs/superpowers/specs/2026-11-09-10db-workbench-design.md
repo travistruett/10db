@@ -150,16 +150,19 @@ opens the Workbench; a question shows as its own card (W5).
 
 | From | What the builder does | What the pass starts with |
 |---|---|---|
-| The Workbench | **Start Pass**, after ticking pages | one new task per page, titled "<Page>: UI work", with no brief |
+| The Workbench | **Start Pass**, after ticking pages | one new task per page, titled "<Label>: UI work" (the page's label, §4.2), with no brief |
 | The Board | select open tasks, **Work on These** | those tasks; each must name at least one page area |
 | A goal, in Factory | **Work on This** on a goal whose UI tasks are done or nearly done | one new task per page those tasks committed in (found with `classifyPath` over their commits), linked to the goal, with the goal's kept pictures (§10) as the first thing in each thread |
 
 **With no pass open, the page list is the screen.** The Workbench is most often seen with no pass, so its empty
 state is the picker for the first way in, not a blank page with a button:
 
-- one line of purpose: "Work through pages with the agents, live.";
-- a filter box, then **Pages**: every page area as a checkbox row with its name, its route and when its files last
-  changed; then **Open UI tasks**: Board tasks that name a page area and could join (§4.2's second way in);
+- one line of purpose: "Work through pages with the agents, live.", with **Set Up** beside it, always, and a count
+  of what the setup still offers (new pages not left out, and settings) only above 0;
+- a filter box, then **Pages**: every page area as a checkbox row with its label, its route and when its files last
+  changed (the filter matches the label, the name and the route); then **Open UI tasks**: Board tasks that name a page area and could join (§4.2's second way in);
+- under the Pages field, when the repository has pages the project lacks and the builder has not left out: "New
+  page found: Sessions /sessions" (or "3 new pages found: …"), with **Set Up**;
 - an optional field, "What's bothering you?", one or two rows, autosizing;
 - **Start Pass (n)**, the one filled button, enabled from one ticked row up to the page cap (W11).
 
@@ -169,6 +172,20 @@ empty, each new page waits for the builder's first message.
 A project with no page area shows, in place of the list, the Workbench setup: its areas rebuilt with a page per
 route and the settings a pass wants, applied in one click
 (`decisions/2026-11-10-the-workbench-setup-rebuilds-the-areas-for-one-apply.md`).
+
+**A page has a label** (`decisions/2026-11-14-page-areas-carry-a-display-label.md`). The area's name stays its key
+(claims, `task.areas`, passes); the label is what the builder reads: the picker, the queue, the page, notifications,
+the dialogs, the pass's name ("Plan pass") and the task a pass makes ("Plan: UI work"). It is one line of 1-40
+characters on a page area only, edited in Settings › Areas, and when it is absent the name with its first letter
+capitalised stands (`pageLabel`). The setup guesses it for a page named in code from the app's nav (an object holding
+both a path and a `label`, read from the router files and up to 20 nav-like files an app has); a page named by its
+files gets the capitalised name. A label the builder set always wins over the guess, and a label that differs is
+never a new page: the rebuild offers it on the page the project already has.
+
+**New pages are found from committed code** (HEAD), up to ten minutes after the commit (the setup's cache). With
+page areas, the setup's rebuild starts ticked when it found a page the project lacks and the builder has not left
+out; a page unticked at Apply is remembered (`ProjectDto.leftOutPages`) and not counted again, and still shows,
+unticked, in the next rebuild.
 
 - A task with no brief costs nothing until spoken to: its session starts on the builder's first message. A
   task with a description starts working when the pass opens.
@@ -516,6 +533,7 @@ Off Now are signed off first, in the order the modal lists them, before anything
   ordinary task, gate and all. The kept ref is deleted when the task's work lands or the builder discards it.
 
   The kept commit moves to `refs/10db/kept/<task id>` and stays until the task is removed or its work lands.
+  Inside an Abandon it is deleted instead, with any saved work the task carried in (Abandon Pass, below).
   A later pass that takes the task puts the kept work back file by file: a file still exactly as step 4 left
   it takes the kept version; any other is merged three ways, the commit it was kept on as the base, the file
   on disk as one side and the kept version as the other (`merge-tree` with a named base, as a revert uses it,
@@ -587,11 +605,14 @@ Off Now are signed off first, in the order the modal lists them, before anything
 - If the pull request merges while the pass is open, the pass must close: tasks still open are taken out and
   carry over to a new pass **(call)**. The pull request watch follows a pass's batch from the moment it has a
   pull request (§5.5), so the merge is seen.
-- **Abandon Pass** (in the `⋯` menu) is the exit that always works. By the builder's decision (D23) it puts
-  each unsigned page's files back to their state before the pass; that page's work stays saved with its task,
-  which goes back to the Board with its thread; signed-off pages stay as landed. Its confirm lists both:
-  "Reverts on screen: Billing, People (their work is kept with their tasks). Stays: Settings, Home (signed
-  off)." It also lists shared changes that have not landed, which revert with their pages.
+- **Abandon Pass** (in the `⋯` menu) is the exit that always works. By the builder's decision (D23,
+  `decisions/2026-11-14-abandon-pass-deletes-unsigned-pages-work.md`) it puts each unsigned page's files back to
+  their state before the pass and **deletes that page's changes**: a task the pass made for the page leaves the
+  Board, and a task that joined from the Board goes back to it open, with its thread and without the pass's
+  changes or any saved work it carried in; signed-off pages stay as landed. Its confirm names both, by page
+  label: "Discards: Billing, People (their changes are deleted). Stays: Settings, Home (signed off)." The card an
+  Abandon leaves says the same. Shared changes that have not landed revert with their pages. Take Out is the way
+  to set a page aside with its work.
 
   The built Abandon does not fit: it cancels every member's workstream and has no way out of `SHIPPING`
   (`apps/daemon/src/delivery/ship.ts:2298-2307`). A pass's Abandon is its own sequence, each step recorded on
@@ -603,8 +624,12 @@ Off Now are signed off first, in the order the modal lists them, before anything
   3. **every session of the pass is stopped,** as step 0 of a take-out does, and each one's last work is kept;
   4. each shared change that has not landed is dropped, newest first, as §7.2's Drop does, without Drop's
      refusals blocking the rest: a file that has changed on disk since is left as it is and named;
-  5. each unsigned page is taken out by steps 1 to 5 above. Its workstream is cancelled and its task is open
-     on the Board with no pass, its claims released, its work at `refs/10db/kept/<task id>`;
+  5. each unsigned page is taken out by steps 1 to 5 above. Its workstream is cancelled and its claims
+     released; its kept refs are deleted, `refs/10db/passes/<pass id>/<task id>` and any
+     `refs/10db/kept/<task id>`, before the one write that clears its kept work, so a restart between them
+     writes the same row. In that write a task the pass made is retired (cancelled, off the Board, its
+     dependency edges gone) and a joined task is open on the Board with no pass, its thread saying "Abandoned
+     with <pass name>; its changes were deleted.";
   6. signed-off tasks are untouched: `DONE`, their commits on the pass's branch;
   7. the batch goes to `ABANDONED` (from `OPEN` or `FAILED`; from `SHIPPING` through `FAILED` after step 2,
      since those are the edges that exist), which frees the project's one unfinished shared batch; the pass
@@ -625,7 +650,8 @@ Off Now are signed off first, in the order the modal lists them, before anything
   `return_branch`, or **Move to `<return_branch>`**, the built switch, which takes the landed pages off
   the screen and keeps them on the pass's branch. A pass opened while the folder is still on an abandoned
   pass's branch records that branch as its `return_branch`, as §5.1 would for any branch, and Start Pass
-  says so. Nothing is pushed or deleted by an Abandon. A pull request the pass had already opened stays open
+  says so. Nothing is pushed by an Abandon, and nothing is deleted but the unsigned pages' kept work and the tasks the
+  pass made for them. A pull request the pass had already opened stays open
   and is **no longer watched**: an `ABANDONED` batch is not read by the watch, so its merge or its failing
   checks raise nothing in 10db, and the card says that too.
 
@@ -1331,7 +1357,7 @@ recovery and the sandbox stay on the rung that exercises the real thing.
 | A pass opens on a dirty folder and closes with the dirt still there: nothing is refused, no file is written, the dirt is listed | the delivery harness, a real git repo | a pass that cannot close (the built ship's clean check) |
 | Close fast-forwards the return branch by compare-and-swap and repoints HEAD; a return branch that moved leaves the folder on the pass's branch with one card; after a merge the ref realigns only when trees match | a real git repo | work vanishing from the screen at close, or a forced branch |
 | Take-out, step by step, with a kill after each step: hand edits and untracked files are in the kept commit; a file changed after the check is left; put-back in a later pass merges or names the file | a real git repo, a restart per step | a take-out that loses a hand edit |
-| Abandon Pass: unsigned pages' files return to their state before the pass, earlier dirt included; their work is at a ref and their tasks on the Board; signed-off commits stay; unlanded shared changes are dropped; a ship in flight is aborted; the batch is `ABANDONED` and a new pass can open. Killed after each step, it continues | a real git repo, the delivery harness, a restart per step | a stuck pass holding the next one, or an Abandon that loses a page's work |
+| Abandon Pass: unsigned pages' files return to their state before the pass, earlier dirt included; their kept refs and kept-work columns are gone; a task the pass made is cancelled and off the Board, a joined one open on it; signed-off commits stay; unlanded shared changes are dropped; a ship in flight is aborted; the batch is `ABANDONED` and a new pass can open. Killed after each step, including after the kept-ref deletes and before the row, it continues | a real git repo, the delivery harness, a restart per step | a stuck pass holding the next one, an Abandon that leaves a page's work or task behind, or one that touches a signed-off page |
 | A page file is the page's under an overlapping shared area: the guard denies a write to an unheld page under a held shared claim; the path is in no hold's record and no shared change | the judge's pure table for the row, one test through the hook, a real git repo for the change | a shared hold writing another page's files and landing them as shared |
 | Two page areas that overlap cannot both be saved as pages or both be in a pass | pure, plus one HTTP test | two tasks owning one file |
 | Drop puts a file back to what it was at the grant, the builder's earlier edit included; a take-out puts a file back to its content before the pass | a real git repo | a drop or a take-out that discards the builder's own uncommitted edit |
@@ -1403,7 +1429,7 @@ scenario assumes slice 0 is done there; P1 fails, by design, if it is not.
 | P14 | any | one page working and two Ready with warm sessions when the account hits its usage limit and the project moves to its fallback account | the working page hands off and its turn continues on the fallback account from the handoff and the thread, its row orange only while it is paused; the two Ready pages stay Ready, receive nothing and start no turn; the next message to each starts a fresh session there and is acted on once |
 | P15 | 10db | an ordinary Your-folder task is started while a pass is open | it runs in a separate copy; on ampsio it waits with "Waits for the Workbench pass to close" and starts when the pass closes |
 | P16 | any | send a message to a page signed off ten minutes ago | it reopens, takes the page again, and its next sign-off lands a second commit |
-| P17 | ampsio | a close whose gate fails; then Abandon Pass with one page signed off and two not | the pass is open again with the gate's card. The confirm names the two pages that revert and the one that stays; afterwards the two pages look as they did before the pass, earlier uncommitted edits included, their tasks are on the Board with their threads and kept work; the signed-off page is still on screen and on the pass's branch; one card says where the folder is; a new pass can open |
+| P17 | ampsio | a close whose gate fails; then Abandon Pass with one page signed off and two not | the pass is open again with the gate's card. The confirm names, by label, the two pages it discards ("their changes are deleted") and the one that stays; afterwards the two pages look as they did before the pass, earlier uncommitted edits included, no saved work is left for either, a task the pass made for one is gone from the Board and a joined one is on it open with its thread; the signed-off page is still on screen and on the pass's branch; one card says where the folder is; a new pass can open |
 | P18 | a project whose shared area's globs cover a page's directory (set up for the test) | a task holding the shared area tries to write another page's file | the write is denied with the page named; the shared change holds no page file |
 | P19 | 10db | close a pass; before its pull request merges, open a second pass on two more views, sign one off, open its pull request; then merge the first | the second opens with no refusal and the first's work still on screen; its pull request shows only its own page; no Move card for the first while the second is open; after the first merges the second's pull request targets `main` and still shows only its own page; closing the second leaves `main` at its tip |
 | P20 | any | Close Pass… with two pages working: Cancel once, then confirm | Cancel stops nothing and both turns finish; on confirm both agents stop, neither page goes Ready or notifies, and the close goes on, or shows the lists again if a stopped turn changed them |
@@ -1505,7 +1531,7 @@ One file each under `docs/architecture/decisions/`, in the pull request that bui
 | A pass has a batch of its own kind, whatever the project's delivery: made by the pass, at the folder's HEAD with the dirt recorded, skipped by the scheduler until spoken to and by the ship trigger, shipped with no clean-checkout check, watched from its first pull request; it counts its own lanes and its warm sessions yield | the batch-delivery spec; `decisions/2026-10-29-workspace-per-task.md` |
 | **D8:** at close the folder's branch fast-forwards to the pass's tip by compare-and-swap and the folder returns to it, so the work stays on screen; the built switch-back is not used for a pass; after a squash merge the branch realigns when the trees match; on a `local` project the fast-forward is the landing and the pull request a record | `decisions/2026-10-29-shared-checkout-switch-back.md` |
 | **D22:** on a pull request project a closed pass is not settled until its work is in the base: ordinary folder work keeps waiting or uses a copy; one card, Move `<branch>` to `origin/<base>`, uses the built switch and refuses on overlap or on a commit of the builder's own; a merge with matching trees settles by itself, drift or a CI fix ends at the card; an open pass's pull request is watched for merged and closed only | `decisions/2026-10-29-shared-checkout-switch-back.md`; the batch-delivery spec's fix path |
-| **D23:** Abandon Pass puts unsigned pages back to their state before the pass, keeps their work with their tasks, leaves signed-off pages as landed, and says which is which first; its own recorded sequence, not the built Abandon; it always finishes; where the folder ends | the batch-delivery spec's Abandon |
+| **D23:** Abandon Pass puts unsigned pages back to their state before the pass, deletes their work and the tasks the pass made for them (`decisions/2026-11-14-abandon-pass-deletes-unsigned-pages-work.md`), leaves signed-off pages as landed, and says which is which first; its own recorded sequence, not the built Abandon; it always finishes; where the folder ends | the batch-delivery spec's Abandon |
 | **D24:** a pass may open on a closed, unsettled pass and stack on it: the same return branch, its start at the closed pass's tip, its pull request based on the closed pass's branch and retargeted when that merges; the closed pass's Move card and realignment wait; a `local` project just continues | `decisions/2026-10-29-shared-checkout-switch-back.md`; the batch-delivery spec |
 | **D25:** Close Pass… stops nothing when it opens; on confirm the agents are stopped and the lists worked out again; a stopped turn's work is kept but it never makes a page Ready or notifies | the Workbench's own records |
 | A taken-out task's workstream is cancelled; its kept work is put back by the next start, in a pass or from the Board, or discarded by the builder; a hazard's files ride the kept work of the task that holds it | the task-placement spec; `decisions/2026-10-29-per-copy-hazards-and-waiting-claims.md` |
@@ -1567,8 +1593,9 @@ Made in the engineering revision, where the review found the spec silent:
     where the gate runs in a scratch worktree it runs before any take-out, so a failure reopens the pass as
     it was; where it runs in the folder (a `local` project) the take-outs come first, so a failure reopens
     the pass with those pages already out, and the close modal says so.
-18. ~~Abandon Pass changes no file.~~ Decided by the builder (D23): it puts unsigned pages back and keeps their
-    work with their tasks (§5.4).
+18. ~~Abandon Pass changes no file.~~ Decided by the builder (D23): it puts unsigned pages back and deletes
+    their work, removing the tasks the pass made for them
+    (`decisions/2026-11-14-abandon-pass-deletes-unsigned-pages-work.md`, §5.4).
 19. **A project with no `origin` or no `gh` can still close a pass**, by the fast-forward alone (§5.5).
 20. **Warm sessions yield their lane** to a waiting workstream of any project, and to a page of their own pass
     (§5.2). Otherwise four warm pages hold the account's default limit, and the daemon-wide cap of 4 lanes,

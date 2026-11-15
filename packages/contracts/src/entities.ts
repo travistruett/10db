@@ -4,7 +4,7 @@ import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { HyphenatedKey } from './keys';
-import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
+import { AreaRole, AreaRoute, PageLabel, areaRolesProblem } from './page-areas';
 import { EffectiveRigorSource, Rigor, RigorSource, TaskKind } from './rigor';
 import { ScreensMatrix } from './task-screens';
 import {
@@ -95,13 +95,14 @@ const GlobbedDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(
  * project has at most one (`atMostOneCatchAll`); absent or false is an ordinary area.
  *
  * `role` says whether the area is a page of the project's app or code pages share; absent, the area
- * behaves as it always has. `route` is the path that shows a page, on a page only. Two pages may not
+ * behaves as it always has. `route` is the path that shows a page, and `label` the name the builder reads it by (`pageLabel`), on a page only. Two pages may not
  * share a file (`areaRolesProblem`, checked on create and on patch).
  */
 export const AreaDef = GlobbedDef.extend({
   catchAll: z.boolean().optional(),
   role: z.enum(AreaRole).optional(),
   route: AreaRoute.optional(),
+  label: PageLabel.optional(),
 });
 export type AreaDef = z.infer<typeof AreaDef>;
 
@@ -743,6 +744,8 @@ export const ProjectDto = z.object({
   previewCommand: z.string().nullable(),
   /** The viewports and themes each page's pictures are taken in. */
   screens: ScreensMatrix,
+  /** Page names the builder left out of a Workbench rebuild: the setup never counts them as new. */
+  leftOutPages: z.array(z.string()),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -793,6 +796,8 @@ export const ProjectPatch = z
     /** Run under the gate's sandbox while a pass is open; blank or null forgets it. */
     previewCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
+    /** Replaces the page names left out of a rebuild. */
+    leftOutPages: z.array(AreaName).max(200),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })

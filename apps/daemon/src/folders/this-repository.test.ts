@@ -6,6 +6,7 @@ import { isolatedGitEnv } from '../../test/fixtures';
 import { createGit } from '../git';
 import { classifyPath } from '../guard';
 import { proposeAreas } from './propose-areas';
+import { proposeSetupAreas } from './workbench-setup';
 
 const REPO = join(import.meta.dirname, '..', '..', '..', '..');
 
@@ -77,5 +78,17 @@ describe('the areas proposed for this repository', () => {
           file,
         ).toContain(classified[0]);
     }
+  });
+
+  it('give the desktop app’s pages the labels its nav shows: shape is Plan, sessions is Sessions', async () => {
+    const areas = await proposeSetupAreas(
+      { git: createGit() },
+      { repoPath: REPO, areas: [{ name: 'repo', globs: ['**'] }], hazards: [] },
+      [],
+    );
+    const labelOf = (name: string) => areas.proposed.find((a) => a.name === name)?.label;
+    expect(labelOf('shape')).toBe('Plan');
+    expect(labelOf('sessions')).toBe('Sessions');
+    expect(areas.pages.find((p) => p.name === 'shape')?.label).toBe('Plan');
   });
 });

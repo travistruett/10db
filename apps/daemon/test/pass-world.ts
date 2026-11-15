@@ -15,6 +15,7 @@ import {
   getWorkstreamRow,
   insertInboxItem,
   insertPassTurn,
+  listPassTasks,
   openDatabase,
   openPassTurn,
   transitionWorkstream,
@@ -87,6 +88,8 @@ export async function openPassWorld(
     readonly project?: Partial<ProjectInput>;
     /** The pass's page cap; else the default. */
     readonly pageCap?: number;
+    /** People is a page the pass makes its task for, as Start Pass's pages do, not a Board task. */
+    readonly peopleByPass?: boolean;
   } = {},
 ): Promise<PassWorld> {
   const h = createDeliveryHarness({ ...PASS_PROJECT, ...opts.project });
@@ -102,17 +105,23 @@ export async function openPassWorld(
   h.commit('pnpm-lock.yaml', 'lock: 1\n');
   opts.before?.({ write });
   const settings = h.addTask('Settings: UI work', { areas: ['settings', 'src', 'deps'] });
-  const people = h.addTask('People: UI work', { areas: ['people'] });
+  const boardPeople =
+    opts.peopleByPass === true ? null : h.addTask('People: UI work', { areas: ['people'] });
   const opened = await openPass(
     h.ctx,
     {
       projectId: h.project.id,
       name: 'Polish',
-      taskIds: [settings.id, people.id],
+      taskIds: boardPeople === null ? [settings.id] : [settings.id, boardPeople.id],
+      ...(boardPeople === null ? { pages: ['people'] } : {}),
       ...(opts.pageCap === undefined ? {} : { pageCap: opts.pageCap }),
     },
     { leaseMs: 60_000, putBack: opts.putBack ?? nothingKept },
   );
+  const people =
+    boardPeople ??
+    listPassTasks(h.store.db, opened.pass.id).find((t) => t.areas.includes('people'));
+  if (!people) throw new Error('the pass made no People task');
   const reopened: (() => void)[] = [];
   const runOf = (task: TaskDto): WorkstreamId => {
     const id = getTask(h.store.db, task.id).workstreamId;

@@ -302,6 +302,11 @@ export const projects = sqliteTable('projects', {
     .$type<ScreensMatrix>()
     .notNull()
     .default(sql`'{"viewports":[{"width":1440,"height":900}],"themes":["default"]}'`),
+  /** Page names the builder left out of a Workbench rebuild; the setup never counts them as new. */
+  leftOutPages: text('left_out_pages', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -494,6 +499,10 @@ export const tasks = sqliteTable(
     keptWorkSha: text('kept_work_sha'),
     /** The pass branch tip that saved work was kept on; set with `kept_work_sha`. */
     keptBaseSha: text('kept_base_sha'),
+    /** The pass that made this task for a page; null for a task the builder or a goal made. */
+    madeByPassId: text('made_by_pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -2225,6 +2234,8 @@ export const passTakeOuts = sqliteTable(
       .$type<number[]>()
       .notNull()
       .default(sql`'[]'`),
+    /** The take-out ran inside an Abandon, which deleted the page's changes rather than keeping them. */
+    discarded: integer('discarded', { mode: 'boolean' }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

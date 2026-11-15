@@ -137,23 +137,32 @@ describe('POST /tasks/:id/remove', () => {
     expect((await send('POST', '/tasks/not-an-id/remove')).status).toBe(400);
   });
 
-  it.each([
-    { name: 'a started task', cancelRun: false },
-    { name: 'a task whose workstream was cancelled', cancelRun: true },
-  ])('refuses $name with 409 naming the workstream cancel', async ({ cancelRun }) => {
+  it('refuses a started task with 409 naming the workstream cancel', async () => {
     const project = await seedProject();
     const task = await seedTask(project.id, 'started');
     const started = await api().post(`/tasks/${task.id}/start`, WorkstreamDto);
-    if (cancelRun) await api().post(`/workstreams/${started.id}/cancel`, WorkstreamDto);
 
     const res = await send('POST', `/tasks/${task.id}/remove`);
 
     expect(res.status).toBe(409);
     const error = ConflictBody.parse(res.body);
     expect(error.error).toBe('conflict');
-    expect(error.message.includes(`/workstreams/${started.id}/cancel`)).toBe(!cancelRun);
+    expect(error.message).toContain(`/workstreams/${started.id}/cancel`);
     expect(error.message).toContain(started.id);
     expect((await tasksOf(project.id)).map((t) => [t.id, t.status])).toEqual([[task.id, 'open']]);
+  });
+
+  it('removes a spent task: every run cancelled, no pass, no kept work', async () => {
+    const project = await seedProject();
+    const task = await seedTask(project.id, 'spent');
+    const started = await api().post(`/tasks/${task.id}/start`, WorkstreamDto);
+    await api().post(`/workstreams/${started.id}/cancel`, WorkstreamDto);
+
+    const res = await send('POST', `/tasks/${task.id}/remove`);
+
+    expect(res.status).toBe(200);
+    expect(TaskDto.parse(res.body).status).toBe('cancelled');
+    expect(await tasksOf(project.id)).toEqual([]);
   });
 
   it('refuses a task an open task waits on, naming the dependent', async () => {

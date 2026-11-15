@@ -12,11 +12,11 @@ import { useState } from 'react';
 import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
-import { AreasSection } from './areas-section';
+import { AreasSection, PageRows } from './areas-section';
 import { BranchRow } from './branch-row';
 import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
-import { areasChanged, areasSummary, setupPatch } from './setup-rules';
+import { areasChanged, areasSummary, newPagesOf, setupPatch } from './setup-rules';
 
 function SettingsLink() {
   return (
@@ -48,14 +48,16 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
   const read = useWorkbenchSetup(project.id);
   const queryClient = useQueryClient();
   const apply = usePatchProject(project.id);
-  const [unticked, setUnticked] = useState<readonly string[]>([]);
+  // The builder's ticks on the new pages, over the default that a page left out before starts unticked.
+  const [tickEdits, setTickEdits] = useState<Readonly<Record<string, boolean>>>({});
   // The builder's ticks and edits by field, over the suggestions as the daemon gave them.
   const [settingEdits, setSettingEdits] = useState<Partial<Record<SettingField, SettingChange>>>(
     {},
   );
-  // A first setup rebuilds the areas by default; once the project has pages, rebuilding is opt-in.
+  // A first setup rebuilds the areas by default, and so does one that found a page not yet left out;
+  // otherwise, once the project has pages, rebuilding is opt-in.
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
-  const [rebuild, setRebuild] = useState(!hasPages);
+  const [rebuildEdit, setRebuildEdit] = useState<boolean | null>(null);
   const back =
     onBack === undefined ? null : (
       <Button variant="default" onClick={onBack}>
@@ -107,6 +109,10 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
     );
 
   const setup = read.data;
+  const unticked = setup.areas.pages
+    .filter((page) => !(tickEdits[page.name] ?? !project.leftOutPages.includes(page.name)))
+    .map((page) => page.name);
+  const rebuild = rebuildEdit ?? (!hasPages || newPagesOf(setup, project.leftOutPages).length > 0);
   const drafts: SettingDraft[] = settingDrafts(setup.settings).map((d) => ({
     ...d,
     ...settingEdits[d.field],
@@ -134,9 +140,14 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
         project.hazards.map((h) => h.name),
       )
     : null;
-  const body = setupPatch(setup, project.areas, unticked, settingsPatch(drafts), areasOn);
-  const toggle = <T,>(list: readonly T[], item: T, ticked: boolean): readonly T[] =>
-    ticked ? list.filter((x) => x !== item) : [...list, item];
+  const body = setupPatch(
+    setup,
+    project.areas,
+    unticked,
+    settingsPatch(drafts),
+    areasOn,
+    project.leftOutPages,
+  );
   return (
     <Stack gap="lg" maw={720}>
       {heading}
@@ -146,7 +157,7 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
             <Checkbox
               checked={rebuild}
               onChange={(event) => {
-                setRebuild(event.currentTarget.checked);
+                setRebuildEdit(event.currentTarget.checked);
               }}
               label={`Rebuild areas: ${String(setup.areas.pages.length)} new ${
                 setup.areas.pages.length === 1 ? 'page' : 'pages'
@@ -160,10 +171,19 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
               result={result}
               unticked={unticked}
               onTick={(page, ticked) => {
-                setUnticked((list) => toggle(list, page, ticked));
+                setTickEdits((edits) => ({ ...edits, [page]: ticked }));
               }}
             />
-          ) : null}
+          ) : (
+            // Leaving a page out needs no rebuild: the rows stand on their own and Apply remembers them.
+            <PageRows
+              pages={setup.areas.pages}
+              unticked={unticked}
+              onTick={(page, ticked) => {
+                setTickEdits((edits) => ({ ...edits, [page]: ticked }));
+              }}
+            />
+          )}
         </Stack>
       )}
       {drafts.length === 0 ? null : (

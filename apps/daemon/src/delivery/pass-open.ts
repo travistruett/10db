@@ -9,6 +9,7 @@ import {
   PASS_PAGE_CAP_DEFAULT,
   PASS_PAGE_CAP_MAX,
   PassPageCap,
+  pageLabel,
   passHeldAreas,
   passPagesProblem,
   PassState,
@@ -19,6 +20,7 @@ import {
   type BatchId,
   type GoalId,
   type Notice,
+  type AreaDef,
   type PassDirtEntry,
   type PassDto,
   type PassId,
@@ -41,6 +43,7 @@ import {
   getWorkstreamRow,
   insertPass,
   insertPassPageTask,
+  markTasksMadeByPass,
   listBatches,
   listPassDirt,
   passHoldingTask,
@@ -118,12 +121,12 @@ export function passBranchName(name: string, id: PassId): string {
   return `10db/${slugOf(name, 'pass')}-${id.slice(-6)}`;
 }
 
-/** What a task that waits for a page shows: the area and the task that holds it. */
-function pageWaitNotice(area: string, holder: TaskDto): Notice {
+/** What a task that waits for a page shows: the area, by its label when it is a page, and the holder. */
+function pageWaitNotice(area: string, shown: string, holder: TaskDto): Notice {
   return {
     key: `claim-wait:${ClaimKind.Area}:${area}`,
     tone: 'info',
-    line: `Waiting for area ${area}: task "${holder.title}" holds it`,
+    line: `Waiting for area ${shown}: task "${holder.title}" holds it`,
     body: `This page is claimed by "${holder.title}". It joins the pass as soon as that task lets it go.`,
   };
 }
@@ -264,8 +267,9 @@ export async function openPass(
       written = ctx.state.write((w) => {
         const stray = returnBranchProblem(w.tx, project, start.returnBranch);
         if (stray !== null) throw new ConflictError(stray);
-        const pageTasks = [...tasks, ...writePageTasks(w, project, newPages)];
-        const made = insertPass(w, {
+        const made = writePageTasks(w, project, newPages);
+        const pageTasks = [...tasks, ...made];
+        const inserted = insertPass(w, {
           id,
           projectId: project.id,
           name: input.name,
@@ -278,10 +282,15 @@ export async function openPass(
           taskIds: pageTasks.map((t) => t.id),
           dirt: start.dirt,
         });
+        markTasksMadeByPass(
+          w,
+          id,
+          made.map((t) => t.id),
+        );
         stackOn(w, id, below);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
-        const waiting = startPassTasks(w, project, made.batch.id, pageTasks, leaseExpiresAt);
-        return { ...made, waiting };
+        const waiting = startPassTasks(w, project, inserted.batch.id, pageTasks, leaseExpiresAt);
+        return { ...inserted, waiting };
       });
     } catch (error) {
       const undone = await ctx.git
@@ -367,9 +376,9 @@ export interface NewPageTask {
   readonly goalId: GoalId | null;
 }
 
-/** "Settings: UI work": the title of the task a pass makes for a page (spec §4.2). */
-function pageTaskTitle(area: string): string {
-  return `${area.charAt(0).toUpperCase()}${area.slice(1)}: UI work`;
+/** "Settings: UI work", from the page's label: the title of the task a pass makes for a page (spec §4.2). */
+function pageTaskTitle(area: AreaDef): string {
+  return `${pageLabel(area)}: UI work`;
 }
 
 /**
@@ -385,9 +394,9 @@ export function newPageTasks(
   if (goalId !== null && getGoal(db, goalId).projectId !== project.id)
     throw new InvalidError(`The goal belongs to another project than ${project.name}`);
   return pages.map((page) => {
-    if (!project.areas.some((a) => a.name === page && a.role === AreaRole.Page))
-      throw new InvalidError(`${page} is not a page area of ${project.name}`);
-    return { title: pageTaskTitle(page), areas: [page], goalId };
+    const area = project.areas.find((a) => a.name === page && a.role === AreaRole.Page);
+    if (!area) throw new InvalidError(`${page} is not a page area of ${project.name}`);
+    return { title: pageTaskTitle(area), areas: [page], goalId };
   });
 }
 
@@ -449,7 +458,9 @@ export function startPassTasks(
     if (claimed.ok) continue;
     const holder = getTask(w.tx, getWorkstreamRow(w.tx, claimed.conflict.heldBy).taskId);
     waiting.push({ taskId: task.id, area: claimed.conflict.name, heldBy: holder.id });
-    setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, holder));
+    const held = project.areas.find((a) => a.name === claimed.conflict.name);
+    const shown = held?.role === AreaRole.Page ? pageLabel(held) : claimed.conflict.name;
+    setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, shown, holder));
   }
   return waiting;
 }

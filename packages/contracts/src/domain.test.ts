@@ -24,6 +24,7 @@ import {
   passPagesProblem,
   ProjectInput,
   ProjectPatch,
+  pageLabel,
   STOCK_HAZARD_REVISIONS,
   TaskId,
   WorkstreamId,
@@ -574,6 +575,7 @@ describe("a pass's turns and view", () => {
           taskId: mintId('Task'),
           title: 'Settings',
           area: 'settings',
+          label: 'Settings',
           route: null,
           workstreamId: null,
           state: null,
@@ -615,6 +617,7 @@ describe("a pass's turns and view", () => {
       taskId: mintId('Task'),
       title: 'Settings',
       area: 'settings',
+      label: 'Settings',
       route: '/settings',
       workstreamId: null,
       state: null,
@@ -758,6 +761,20 @@ describe("an area's role and route", () => {
     expect(parsed).not.toHaveProperty('route');
   });
 
+  it.each([
+    ['the label', { name: 'shape', label: 'Plan' }, 'Plan'],
+    ['the name with its first letter capitalised, with no label', { name: 'shape' }, 'Shape'],
+    ['an empty name as it is', { name: '' }, ''],
+  ])('pageLabel gives %s', (_name, area, expected) => {
+    expect(pageLabel(area)).toBe(expected);
+  });
+
+  it('keeps a page label through create and patch', () => {
+    const areas = [{ ...people, label: 'People' }];
+    expect(ProjectInput.parse({ ...project, areas }).areas).toEqual(areas);
+    expect(ProjectPatch.parse({ areas }).areas).toEqual(areas);
+  });
+
   it('is kept when a project is made or patched with one', () => {
     const areas = [people, settings, src];
     expect(ProjectInput.parse({ ...project, areas }).areas).toEqual(areas);
@@ -778,6 +795,15 @@ describe("an area's role and route", () => {
     ],
     ['a route that is not a path', [{ ...people, route: 'people' }], '/'],
     ['a role that is neither', [{ ...people, role: 'screen' }], ''],
+    ['a label on a shared area', [{ ...src, label: 'Source' }], 'Only a page has a label'],
+    [
+      'a label on an area with no role',
+      [{ name: 'api', globs: ['api/**'], label: 'Api' }],
+      'Only a page has a label',
+    ],
+    ['an empty label', [{ ...people, label: '' }], ''],
+    ['a label over 40 characters', [{ ...people, label: 'x'.repeat(41) }], ''],
+    ['a label of two lines', [{ ...people, label: 'a\nb' }], ''],
   ])('refuses %s, on create and on patch', (_name, areas, message) => {
     for (const problem of issues(areas)) {
       expect(problem).not.toBe('');
@@ -851,5 +877,20 @@ describe('the catch-all area', () => {
   it('is not a field of a hazard', () => {
     const hazard = { name: 'locks', globs: ['x'], commands: [], catchAll: true };
     expect(ProjectPatch.parse({ hazards: [hazard] }).hazards?.[0]).not.toHaveProperty('catchAll');
+  });
+});
+
+describe('ProjectPatch.leftOutPages', () => {
+  it.each([
+    { name: 'area names', value: ['sessions', 'billing'], ok: true },
+    { name: 'none', value: [], ok: true },
+    { name: 'a blank name', value: [''], ok: false },
+    {
+      name: 'more than 200',
+      value: Array.from({ length: 201 }, (_, i) => `p${String(i)}`),
+      ok: false,
+    },
+  ])('takes $name: $ok', ({ value, ok }) => {
+    expect(ProjectPatch.safeParse({ leftOutPages: value }).success).toBe(ok);
   });
 });

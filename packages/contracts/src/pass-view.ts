@@ -28,6 +28,8 @@ export type PassLackKind = (typeof PassLackKind)[keyof typeof PassLackKind];
 /** One page area as the picker lists it. */
 export const PassStartPageDto = z.object({
   area: z.string().min(1),
+  /** What the page is called (`pageLabel`). */
+  label: z.string(),
   route: z.string().nullable(),
   /** When a file under the area last changed; null when none is in the repository yet. */
   lastChangedAt: Timestamp.nullable(),
