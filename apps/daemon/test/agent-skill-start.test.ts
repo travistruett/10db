@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentSkillInfo, AgentSkillStatus, SKILL_VERSION_HEADER } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -84,6 +84,6 @@ describe('a started daemon and the agent skill', () => {
     expect(existsSync(join(home, '.agents'))).toBe(false);
     const status = AgentSkillStatus.parse(await (await get('/settings/agent-skill')).json());
     expect(status.installable).toEqual({ reason: 'other_data_dir' });
-    expect(lstatSync(home).isDirectory()).toBe(true);
+    expect(readdirSync(home)).toEqual([]);
   });
 });

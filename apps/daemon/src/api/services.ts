@@ -681,8 +681,8 @@ export interface ApiServices extends PlanRecordServices {
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
   agentSkill(): AgentSkillStatus;
   setAgentSkill(enabled: boolean): AgentSkillStatus;
-  /** What the skill prints about itself: the version this daemon ships and the build commit. */
-  agentSkillInfo(): AgentSkillInfo;
+  /** The skill version this daemon ships; the route adds the build commit. */
+  agentSkillInfo(): Pick<AgentSkillInfo, 'version'>;
   /** Settings › This Mac › Capacity: the lane cap across all projects and the free-disk floor. */
   capacitySettings(): CapacitySettingsDto;
   setCapacitySettings(input: CapacitySettingsDto): CapacitySettingsDto;

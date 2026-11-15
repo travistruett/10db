@@ -113,7 +113,7 @@ describe('the agent skill routes', () => {
         asked.push(enabled);
         return { ...SKILL_STATUS, enabled };
       },
-      agentSkillInfo: () => ({ version: 'aaaaaaaaaaaa', appCommit: null }),
+      agentSkillInfo: () => ({ version: 'aaaaaaaaaaaa' }),
     });
     const get = await app(services).request('/settings/agent-skill', auth);
     expect(AgentSkillStatus.parse(await get.json())).toEqual(SKILL_STATUS);
@@ -128,6 +128,23 @@ describe('the agent skill routes', () => {
     expect(AgentSkillInfo.parse(await info.json())).toEqual({
       version: 'aaaaaaaaaaaa',
       appCommit: null,
+    });
+  });
+
+  it("answers the skill's info with the build commit the app was given", async () => {
+    const res = await createApp({
+      startedAt,
+      allowedOrigins: [],
+      token: TOKEN,
+      commit: 'abc1234',
+      services: stubServices({ agentSkillInfo: () => ({ version: 'aaaaaaaaaaaa' }) }),
+      upgradeWebSocket: noUpgrade,
+      onUnexpectedError: () => undefined,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    }).request('/agent-skill', auth);
+    expect(AgentSkillInfo.parse(await res.json())).toEqual({
+      version: 'aaaaaaaaaaaa',
+      appCommit: 'abc1234',
     });
   });
 

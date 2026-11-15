@@ -757,7 +757,7 @@ export function createServices(deps: {
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     agentSkill: () => deps.agentSkill.status(),
     setAgentSkill: (enabled) => deps.agentSkill.setEnabled(enabled),
-    agentSkillInfo: () => ({ version: deps.agentSkill.shippedVersion(), appCommit: null }),
+    agentSkillInfo: () => ({ version: deps.agentSkill.shippedVersion() }),
     capacitySettings: () => capacitySettings(db),
     setCapacitySettings(input) {
       const saved = setCapacitySettings(deps.state, input);
