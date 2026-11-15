@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONTRACT_SCHEMAS,
+  MilestoneMark,
   mintId,
   ShapeConvertInput,
   ShapeEditInput,
@@ -266,9 +267,26 @@ describe('the builder’s actions', () => {
   it.each([
     ['an empty message', () => ShapeMessageInput.safeParse({ text: '' })],
     ['a convert of nothing', () => ShapeConvertInput.safeParse({ proposalIds: [] })],
+    [
+      'a cut that marks a milestone neither needed, later nor cut',
+      () =>
+        ShapeConvertInput.safeParse({
+          proposalIds: [mintId('ShapeProposal')],
+          cut: [{ proposalId: mintId('ShapeProposal'), mark: 'soon' }],
+        }),
+    ],
     ['a withdrawal with no reason', () => ShapeWithdrawInput.safeParse({ reason: '' })],
   ])('refuses %s', (_, parse) => {
     expect(parse().success).toBe(false);
+  });
+
+  it('takes a convert with the builder’s cut', () => {
+    expect(
+      ShapeConvertInput.safeParse({
+        proposalIds: [mintId('ShapeProposal')],
+        cut: [{ proposalId: mintId('ShapeProposal'), mark: MilestoneMark.Later }],
+      }).success,
+    ).toBe(true);
   });
 
   it('takes a convert that interrupts the turn', () => {

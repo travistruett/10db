@@ -27,6 +27,7 @@ import {
   type ShapeFindingId,
   type ShapeMessageDto,
   type ShapeModelsDto,
+  type MilestoneCut,
   type ShapeProposalId,
   type ShapeViewDto,
   type StartShapeInput,
@@ -238,12 +239,13 @@ export interface ShapeService {
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
    * Converts the selected proposals. Refused with a `ConflictError` while a turn runs, unless the
-   * caller asks to interrupt it. Holds the queue while it writes.
+   * caller asks to interrupt it. Holds the queue while it writes. A Plan with more than five milestones
+   * waiting needs the builder's `cut` of them (`judgeMilestones`).
    */
   convert(
     shapeId: ShapeId,
     proposalIds: readonly ShapeProposalId[],
-    options?: { interrupt?: boolean },
+    options?: { interrupt?: boolean; cut?: readonly MilestoneCut[] },
   ): Promise<ConvertOutcome>;
   /** The handlers the MCP endpoint serves a conversation's session. */
   readonly toolsFor: ShapeToolsFor;
@@ -816,7 +818,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       engine.holdStarts(conversation);
       try {
         return state.write((ctx) => {
-          const outcome = convertProposals(ctx, shapeId, proposalIds, deps.joiningProblem);
+          const outcome = convertProposals(
+            ctx,
+            shapeId,
+            proposalIds,
+            deps.joiningProblem,
+            options?.cut,
+          );
           if (outcome.ok && outcome.createdNow > 0)
             insertShapeMessage(ctx, shapeId, {
               author: ShapeMessageAuthor.Note,
