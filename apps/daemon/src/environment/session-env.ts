@@ -16,6 +16,8 @@ export const BILLING_SWITCH_VARS = [
   // A config directory or an OAuth token picks the subscription, so only an account may set one.
   'CLAUDE_CONFIG_DIR',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  // Which keychain entry holds the sign-ins: only an account's launch may point it at the builder's.
+  'CLAUDE_SECURESTORAGE_CONFIG_DIR',
 ] as const;
 /**
  * Whole families of provider switches, so a provider added in a later Claude Code release is stripped too.

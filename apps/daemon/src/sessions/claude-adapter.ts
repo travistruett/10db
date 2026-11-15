@@ -235,6 +235,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
               ),
             ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
             ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+            ...(opts.loginConfigDir === undefined ? {} : { loginConfigDir: opts.loginConfigDir }),
           }),
       }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),

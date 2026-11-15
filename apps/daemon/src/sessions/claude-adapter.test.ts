@@ -649,9 +649,30 @@ describe('buildQueryOptions', () => {
       expect(JSON.stringify(options.allowedTools)).not.toContain('mcp__mine');
     });
 
-    async function noteFor(status: readonly McpServerStatus[], errors: Record<string, string>) {
+    async function noteFor(
+      status: readonly McpServerStatus[],
+      errors: Record<string, string>,
+      account: {
+        kind?: 'claude_subscription' | 'anthropic_api_key' | 'gateway';
+        env?: Record<string, string>;
+      } = {},
+    ) {
+      const kind = account.kind ?? 'claude_subscription';
+      // What each kind of account reports when it bills what it should.
+      const reports = {
+        claude_subscription: { init: 'none' as const, account: undefined },
+        anthropic_api_key: {
+          init: 'ANTHROPIC_API_KEY' as const,
+          account: { apiProvider: 'firstParty' as const, apiKeySource: 'ANTHROPIC_API_KEY' },
+        },
+        gateway: {
+          init: 'none' as const,
+          account: { apiProvider: 'firstParty' as const, tokenSource: 'ANTHROPIC_AUTH_TOKEN' },
+        },
+      }[kind];
       const fake = fakeQuery({
-        messages: [initMessage()],
+        messages: [initMessage(reports.init)],
+        ...(reports.account === undefined ? {} : { account: reports.account }),
         mcpSet: { added: [CLAUDE_MCP_SERVER], removed: [], errors },
         mcpStatus: status,
       });
@@ -667,6 +688,15 @@ describe('buildQueryOptions', () => {
           spec({
             projectMcpServers: {
               repo: { type: 'http', url: 'https://repo.example/mcp', headers: null },
+            },
+            ...(account.env === undefined
+              ? {}
+              : { env: { PATH: '/usr/bin:/bin', ...account.env } }),
+            account: {
+              accountId: mintId('Account'),
+              label: 'Claude plan',
+              kind: account.kind ?? 'claude_subscription',
+              identity: null,
             },
             yourMcpServers: {
               mine: {
@@ -695,10 +725,79 @@ describe('buildQueryOptions', () => {
       );
     });
 
-    it('names your server that needs OAuth with the OAuth reason', async () => {
-      const prompt = await noteFor([{ name: 'oauthy', status: 'needs-auth' }], {});
-      expect(prompt).toContain("oauthy signs in with OAuth, which 10db doesn't support yet.");
-      expect(prompt).not.toContain('failed to connect');
+    it.each<
+      [
+        string,
+        'claude_subscription' | 'anthropic_api_key' | 'gateway',
+        Record<string, string>,
+        string,
+      ]
+    >([
+      [
+        'a subscription on the default folder',
+        'claude_subscription',
+        {},
+        "oauthy isn't signed in. Sign in to it in Claude Code: run `claude`, then `/mcp`. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'an API key on the builder entry',
+        'anthropic_api_key',
+        { CLAUDE_CONFIG_DIR: '/d', CLAUDE_SECURESTORAGE_CONFIG_DIR: '' },
+        "oauthy isn't signed in. Sign in to it in Claude Code: run `claude`, then `/mcp`. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'a subscription on its own folder',
+        'claude_subscription',
+        { CLAUDE_CONFIG_DIR: '/d' },
+        "oauthy isn't signed in for this account. Settings › Trust shows how to sign in. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'a Gateway',
+        'gateway',
+        { CLAUDE_CONFIG_DIR: '/d' },
+        "oauthy signs in with OAuth, which 10db doesn't run on a Gateway account yet. It is not in this session; don't look for its tools.",
+      ],
+    ])(
+      'names your server that needs OAuth where to sign in: %s',
+      async (_name, kind, env, note) => {
+        const prompt = await noteFor([{ name: 'oauthy', status: 'needs-auth' }], {}, { kind, env });
+        expect(prompt).toContain(note);
+        expect(prompt).not.toContain('failed to connect');
+      },
+    );
+  });
+
+  describe('the needs-auth cache', () => {
+    async function runWith(env: Record<string, string>): Promise<string> {
+      const dir = tempDir('needs-auth-cache');
+      try {
+        const cache = join(dir.path, 'mcp-needs-auth-cache.json');
+        writeFileSync(cache, '{}');
+        const fake = fakeQuery({ messages: [initMessage()] });
+        const adapter = createClaudeAdapter({
+          claudePath: '/usr/local/bin/claude',
+          pluginDir: '/harness',
+          logger: silentLogger,
+          query: fake.query,
+          allowUnsandboxed: true,
+        });
+        await collect(
+          adapter.open(
+            spec({ env: { PATH: '/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir.path, ...env } }),
+          ).events,
+        );
+        return existsSync(cache) ? 'kept' : 'removed';
+      } finally {
+        dir.cleanup();
+      }
+    }
+
+    it('is removed before a session that reads the builder entry', async () => {
+      expect(await runWith({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' })).toBe('removed');
+    });
+
+    it('is left alone for a session on its own entry', async () => {
+      expect(await runWith({})).toBe('kept');
     });
   });
 

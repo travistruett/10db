@@ -14,7 +14,12 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { AccountKind, JudgeKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
-import { AUTOUPDATE_OFF } from '../environment';
+import {
+  AUTOUPDATE_OFF,
+  mcpSignInWhere,
+  McpSignInWhere,
+  staleNeedsAuthCache,
+} from '../environment';
 import type { Logger } from '../log';
 import { atPriority } from '../priority';
 import {
@@ -28,6 +33,7 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import { readCheckoutText } from './before-text';
+import { removeStaleNeedsAuthCache } from './claude-auth-cache';
 import { createClaudeStreamState } from './claude-stream';
 import { createClaudeToolCalls, type ClaudeDenial } from './claude-tool-calls';
 import { judgeDenial } from './judge-denial';
@@ -416,6 +422,8 @@ export interface ClaudeSessionDeps {
   readonly stopGraceMs?: number;
   /** Times the preflight and the stop grace periods; tests pass a ManualClock. */
   readonly clock?: Clock;
+  /** The login shell's absolute `CLAUDE_CONFIG_DIR` (`Launcher.loginConfigDir`); null or absent for the default folder. */
+  readonly loginConfigDir?: () => string | null;
 }
 
 /** One Claude session and what it is for: a lane's task, or one turn of Plan's conversation. */
@@ -474,17 +482,33 @@ function exploreFailedServersNote(names: readonly string[]): string {
   );
 }
 
+const NOT_HERE = "It is not in this session; don't look for its tools.";
+
+/** Why a server that signs in with OAuth isn't connected, and where its sign-in is done. */
+function signedOutText(name: string, where: McpSignInWhere): string {
+  switch (where) {
+    case McpSignInWhere.BuildersClaudeCode:
+      return `${name} isn't signed in. Sign in to it in Claude Code: run \`claude\`, then \`/mcp\`.`;
+    case McpSignInWhere.ThisAccount:
+      return `${name} isn't signed in for this account. Settings › Trust shows how to sign in.`;
+    case McpSignInWhere.NotYet:
+      return `${name} signs in with OAuth, which 10db doesn't run on a Gateway account yet.`;
+  }
+}
+
 /** A line naming the builder's own servers that didn't start, apart from the repo's, so the agent doesn't hunt for them. */
-function yourServersNote(failed: readonly string[], needAuth: readonly string[]): string {
+function yourServersNote(
+  failed: readonly string[],
+  needAuth: readonly string[],
+  where: McpSignInWhere,
+): string {
   const lines: string[] = [];
   if (failed.length > 0)
     lines.push(
       `Note from 10db: these of your own MCP servers failed to connect and are not in this session: ${failed.join(', ')}. Don't look for their tools.`,
     );
   for (const name of needAuth)
-    lines.push(
-      `Note from 10db: ${name} signs in with OAuth, which 10db doesn't support yet. It is not in this session; don't look for its tools.`,
-    );
+    lines.push(`Note from 10db: ${signedOutText(name, where)} ${NOT_HERE}`);
   return lines.join('\n');
 }
 
@@ -899,6 +923,19 @@ function startSession(
       resolvePreflight(false);
       return;
     }
+    // A server an earlier run found signed out stays skipped from this cache, which is stale against the
+    // builder's entry a keyed session reads. The file is deleted unread, before any server connects.
+    const staleCache = staleNeedsAuthCache(spec.env);
+    if (staleCache !== null) {
+      try {
+        await removeStaleNeedsAuthCache(staleCache);
+      } catch (error) {
+        log.warn(
+          { errName: error instanceof Error ? error.name : 'unknown' },
+          'claude needs-auth cache could not be removed',
+        );
+      }
+    }
     let leftOut: string[];
     try {
       leftOut = Object.keys((await q.setMcpServers(buildMcpServers(spec))).errors);
@@ -940,7 +977,13 @@ function startSession(
     const notes = [
       ...(repoLeftOut.length > 0 ? [rules.failedServersNote(repoLeftOut)] : []),
       ...(yourFailed.length + yourNeedAuth.length > 0
-        ? [yourServersNote(yourFailed, yourNeedAuth)]
+        ? [
+            yourServersNote(
+              yourFailed,
+              yourNeedAuth,
+              mcpSignInWhere(spec.account.kind, spec.env, opts.loginConfigDir?.() ?? null),
+            ),
+          ]
         : []),
     ];
     input.push(
