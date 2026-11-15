@@ -112,7 +112,9 @@ state.
 
 The skill talks to the daemon, never to a model provider, so it works the same for every project whatever its
 account: a Claude plan, Bedrock, an API key or a ChatGPT/Codex plan. Claude Code and Codex get the same copy the
-same way, one link each. A tool that isn't installed gets a link it never reads. No provider lacks anything.
+same way, one link each. A tool that isn't installed gets a link it never reads. One gap: an interactive Codex session sandboxes
+the network by default, so the skill's call to `127.0.0.1` can fail there; its error says to allow network access for
+the session, and a follow-up task closes the gap.
 
 ## 7. Tests (testing.md rungs)
 

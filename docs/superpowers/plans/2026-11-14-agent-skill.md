@@ -58,6 +58,46 @@ compares the skill's version header.
 5. The skill run while 10db is closed, or with a stale `daemon.json`: the same messages as today, not a stack trace
    (Task 1, `connection` rows).
 
+## Amendments from plan review (override the tasks below)
+
+- **Task 1 / 2 entry point:** there is no `./build` export (eslint refuses `@10db/x/y`). `index.ts` exports
+  `buildAgentSkill` and `skillDigest` too. The daemon's runtime still never imports the package; only
+  `scripts/build.ts` and tests do. Add `packages/agent-skill` to `knip.json` with `src/main.ts` as an entry.
+- **Task 1 checks:** map a draft's kind keys to `{ key, source: 'builder' }` *before* parsing, and parse with
+  `TaskInput.strict()` / the patch schema `.strict()`, so an unknown field (`dependOn`) is refused as today. Rows:
+  a draft with `kinds: ["docs"]` passes; one with `dependOn` is refused naming the field.
+- **Task 1 coverage:** one fake-API row per command, not only the five named. `account-settings` must send
+  `{ settings: { ...account.settings, ...patch } }` (row: an account with `awsProfile` and `region` keeps both after
+  a `modelMap` patch); `resave-account` sends `{ label }` only; `move`, `join`, `start`, `remove`, `close`, `hold`,
+  `next`, `ship`, `abandon`, `answer`, `inbox`, `principle`, `goal`, `plan-import`, `areas` each assert the method,
+  path and body they send.
+- **Task 1 behavior kept:** an unknown command exits 2 with the usage line, as today. `GET /agent-skill` answering
+  404 (an older daemon) gives `skillVersion: null, appVersion: null`, never a failure. `TendbError` uses
+  `override readonly name = 'TendbError'`. Commit scope: none (`feat: ...`), not `repo`.
+- **Task 2:** target `node22` is deliberate (the skill runs on the builder's own `node`, Node 22+), unlike the
+  daemon's `node26`. The bundle test runs `tendb.mjs` with no args and expects exit 2 and `usage:`. Also assert in
+  `apps/daemon/test/bundle.test.ts` (it already runs the real build) that `agent-skill/10db-task/VERSION` exists.
+- **Task 3 swap:** `rename` onto a non-empty folder fails, so replace the copy in three moves: write the new copy
+  to `~/.10db/skills/.10db-task-new-<random>`, rename the old one to `.10db-task-old-<random>`, rename the new one
+  in, remove the old. Crash rows: `old moved aside, new not in` (no `10db-task`, an `-old-` and a `-new-` folder)
+  and `new written, old still in` both end with a whole, current copy and no leftovers. Also: a matching `VERSION`
+  with `tendb.mjs` or `SKILL.md` missing is rewritten; each link is tried even when the other failed (both results
+  returned, the first error kept); a `~/.claude/skills` that is itself a symlink is followed as it is (a builder's
+  dotfiles link is their choice) and the row says so.
+- **Task 4 safety:** with a `not_installable` placement, `setEnabled` saves the setting and touches no file. Row:
+  `not_installable` + `setEnabled(false)` leaves an installed copy and both links byte-identical. `createApp`'s
+  `skillVersion` is optional (`skillVersion?: string | null`, default null) like `commit?`; `GET /agent-skill`'s
+  `appCommit` comes from the existing `deps.commit`. `index.ts` re-exports `installedSkillDir` for Task 5.
+- **Every test that starts a daemon or builds services** passes a temp `builderHome`, and a placement of
+  `{ kind: 'not_installable', reason: 'other_data_dir', shippedDir: <temp> }` unless the row is about installing,
+  in which case `installable` with a temp shipped dir *and* a temp `builderHome`. No test reaches `homedir()`.
+- **Task 6:** update both tables in `apps/desktop/src/views/settings/sections.test.ts` (~:15, ~:54). The section sits
+  in the app-wide list after Keep-awake, under the same subhead Keep-awake uses.
+- **Task 8:** add `packages/agent-skill` to the Layout table in root `AGENTS.md`.
+- **Provider parity (spec §6):** a builder's interactive Codex session sandboxes the network by default, so the
+  skill's loopback call fails. Task 1's connection error for an unreachable daemon adds: "In Codex, the sandbox may
+  block localhost: allow network access for this session." A follow-up task closes the gap.
+
 ---
 
 ### Task 1: `@10db/agent-skill`: the skill's files and its CLI
