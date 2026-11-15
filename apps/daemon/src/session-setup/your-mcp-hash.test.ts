@@ -87,6 +87,8 @@ describe('yourMcpConfigHash', () => {
       'AUTH_ENDPOINT',
       'PASSWORD_URI',
       'SIGNING_KEY_FILE',
+      'KEY_SERVER',
+      'KEY_VAULT_NAME',
     ].map((name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
       `a changed ${name} value does`,
       { ...stdio, env: { ...stdio.env, [name]: 'https://one.example' } },

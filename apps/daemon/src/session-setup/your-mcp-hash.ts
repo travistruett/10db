@@ -5,7 +5,7 @@ import type { DeclaredYourServer } from './your-mcp-entry';
 
 /** A secret's name, in whole segments so `AUTHORITY_URL` is not one. */
 const SECRET_NAME =
-  /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|KEY|CREDENTIALS?|AUTH|DSN)(?:_|$)|_PAT$/i;
+  /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|CREDENTIALS?|AUTH|DSN)(?:_|$)|_KEY$|_KEY_ID$|_PAT$/i;
 
 /** Names of destinations, files, programs, commands and sockets: a changed one is somewhere or something else, so an approval covers it. */
 const NEVER_SECRET =
