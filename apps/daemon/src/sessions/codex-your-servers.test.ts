@@ -52,7 +52,7 @@ const remote = (codex: CodexServerExtras = NONE): YourSessionServer => ({
 describe('codexYourServers', () => {
   it('adds your stdio server as its launch, with no env block', () => {
     const mine = stdioServer();
-    const { servers } = codexYourServers({ yourMcpServers: { mine } }, { stdio: true });
+    const servers = codexYourServers({ yourMcpServers: { mine } });
     expect(servers['mine']).toMatchObject({
       command: '/usr/bin/env',
       default_tools_approval_mode: 'approve',
@@ -68,17 +68,15 @@ describe('codexYourServers', () => {
       startupTimeoutSec: 30,
       toolTimeoutSec: 120,
     });
-    expect(codexYourServers({ yourMcpServers: { docs } }, { stdio: true }).servers['docs']).toEqual(
-      {
-        url: 'https://docs.example/mcp',
-        http_headers: { 'X-Key': 'k' },
-        default_tools_approval_mode: 'approve',
-        enabled_tools: ['read'],
-        disabled_tools: ['write'],
-        startup_timeout_sec: 30,
-        tool_timeout_sec: 120,
-      },
-    );
+    expect(codexYourServers({ yourMcpServers: { docs } })['docs']).toEqual({
+      url: 'https://docs.example/mcp',
+      http_headers: { 'X-Key': 'k' },
+      default_tools_approval_mode: 'approve',
+      enabled_tools: ['read'],
+      disabled_tools: ['write'],
+      startup_timeout_sec: 30,
+      tool_timeout_sec: 120,
+    });
   });
 
   it('leaves out filters and timeouts that are not set, and headers that are null', () => {
@@ -86,17 +84,9 @@ describe('codexYourServers', () => {
       connect: { type: 'sse', url: 'https://p.example/sse', headers: null },
       codex: NONE,
     };
-    expect(
-      codexYourServers({ yourMcpServers: { plain } }, { stdio: true }).servers['plain'],
-    ).toEqual({ url: 'https://p.example/sse', default_tools_approval_mode: 'approve' });
-  });
-
-  it('with stdio off, leaves stdio servers out and names them', () => {
-    const result = codexYourServers(
-      { yourMcpServers: { mine: stdioServer(), docs: remote() } },
-      { stdio: false },
-    );
-    expect(Object.keys(result.servers)).toEqual(['docs']);
-    expect(result.leftOutStdio).toEqual(['mine']);
+    expect(codexYourServers({ yourMcpServers: { plain } })['plain']).toEqual({
+      url: 'https://p.example/sse',
+      default_tools_approval_mode: 'approve',
+    });
   });
 });

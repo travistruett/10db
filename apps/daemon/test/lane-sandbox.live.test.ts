@@ -57,6 +57,7 @@ import {
   laneTempRoot,
   removeLaneTempDir,
   type LaneSession,
+  type LaneSessionInput,
   type SetupInput,
   type StdioMcpServer,
 } from '../src/sandbox';
@@ -64,6 +65,14 @@ import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { bashWrites } from './bash-writes';
 import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { captureLogs } from './log-capture';
+import {
+  LANE_WROTE,
+  laneProbeScript,
+  PROBE_ARG,
+  PROBE_TOKEN,
+  PROBES_HELD,
+  YOUR_MCP_PROBE_SERVER,
+} from './your-mcp-probe';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 
@@ -259,6 +268,10 @@ async function runLane(opts: {
   readonly hosts?: readonly string[];
   /** Approved repo stdio servers, launched under srt as the runner launches them. */
   readonly mcpServers?: Readonly<Record<string, StdioMcpServer>>;
+  /** The builder's own stdio servers, launched outside the sandbox from the home as the runner launches them. */
+  readonly yourMcpServers?: LaneSessionInput['yourMcpServers'];
+  /** Runs once when a tool card the builder allows opens: the session and its servers are up then. */
+  readonly whileLive?: () => void;
   /** Tools allowed on top of the lane's own, such as a repo server's. */
   readonly extraAllowedTools?: readonly string[];
   /**
@@ -361,6 +374,7 @@ async function runLane(opts: {
       configDir,
       checkouts: [opts.checkout],
       mcpServers: opts.mcpServers ?? {},
+      ...(opts.yourMcpServers === undefined ? {} : { yourMcpServers: opts.yourMcpServers }),
       ...(opts.setup === undefined ? {} : { setup: opts.setup }),
     });
     const lane = laneSession;
@@ -399,6 +413,7 @@ async function runLane(opts: {
             const toolName = item.detail?.['toolName'];
             const allowed =
               typeof toolName === 'string' && (opts.allowCardsFor ?? []).includes(toolName);
+            if (allowed) opts.whileLive?.();
             queueMicrotask(() =>
               inbox.answer(item.id, {
                 choice: allowed ? PermissionChoice.AllowOnce : PermissionChoice.Deny,
@@ -435,7 +450,20 @@ async function runLane(opts: {
       env,
       account: launch.expect,
       projectMcpServers: lane.mcpServers,
-      yourMcpServers: {},
+      yourMcpServers: Object.fromEntries(
+        Object.entries(lane.yourMcpServers ?? {}).map(([name, connect]) => [
+          name,
+          {
+            connect,
+            codex: {
+              enabledTools: null,
+              disabledTools: [],
+              startupTimeoutSec: null,
+              toolTimeoutSec: null,
+            },
+          },
+        ]),
+      ),
       sandbox: lane.spec,
       setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
       // Nothing listens here; the session runs without 10db's tools.
@@ -926,6 +954,82 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       expect(existsSync(join(checkout, 'mcp-wrote'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it("a builder stdio server's tool answers in a Claude lane, and the lane's Bash can't read ~/.claude.json", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    // Outside every root a lane writes: the builder's servers run from the home, never from a checkout.
+    mkdirSync(join(homedir(), '.10db'), { recursive: true, mode: 0o700 });
+    const serverDir = realpathSync(mkdtempSync(join(homedir(), '.10db', 'claude-live-ymcp-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      const canary = plant('your-mcp-home', join(serverDir, 'canary'));
+      writeFileSync(join(serverDir, 'probe.mjs'), YOUR_MCP_PROBE_SERVER);
+      const filesRoot = sandboxRoots().files;
+      const login = await captureLoginEnv({ inherited: process.env });
+      // What a process outside the sandbox sees of the server, read while its session is up.
+      const control = { pid: 0, env: '', args: '', file: '' };
+      const run = await runLane({
+        checkout,
+        dataDir,
+        extraEnv: {},
+        yourMcpServers: {
+          probe: {
+            command: process.execPath,
+            args: [join(serverDir, 'probe.mjs'), canary.path, PROBE_ARG],
+            cwd: null,
+            env: { ...login.vars, TOKEN: PROBE_TOKEN },
+            declaredEnv: ['TOKEN'],
+          },
+        },
+        whileLive: () => {
+          const listing = execFileSync('/bin/ps', ['-Aww', '-o', 'pid=,command='], {
+            encoding: 'utf8',
+          });
+          const line = listing.split('\n').find((l) => l.includes(PROBE_ARG));
+          control.pid = Number(line?.trim().split(/\s+/)[0] ?? 0);
+          control.args = line ?? '';
+          control.env = execFileSync('/bin/ps', ['-E', '-ww', '-p', String(control.pid)], {
+            encoding: 'utf8',
+          });
+          const file = readdirSync(filesRoot).find((f) => f.startsWith('10db-ymcp-'));
+          control.file = file === undefined ? '' : readFileSync(join(filesRoot, file), 'utf8');
+        },
+        probe: ({ tmpDir }) =>
+          [`exec > '${tmpDir}/probe-out' 2>&1`, laneProbeScript(filesRoot)].join('\n'),
+        extraAllowedTools: ['mcp__probe__check'],
+        allowCardsFor: ['mcp__probe__check'],
+        prompt: [
+          'This is a sandbox check. Do exactly these steps in order and nothing else:',
+          '1. Call the MCP tool mcp__probe__check once, with no arguments.',
+          '2. Run this Bash command: bash probe.sh',
+          'Some steps may be refused; that is expected. Never retry a step or try another way.',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('your-mcp-server', run, [canary]);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      const check = run.calls.find((call) => call.name === 'mcp__probe__check');
+      expect(check?.isError).toBe(false);
+      // The server answered from outside the sandbox: it got its token and read the home's canary.
+      expect(run.transcript).toContain('token=set');
+      expect(run.transcript).toContain('server-read-home-canary=ok');
+      expect(run.transcript).not.toContain(canary.token);
+      // Positive controls: what the lane is kept from was there to find from outside the sandbox.
+      expect(control.pid).toBeGreaterThan(0);
+      expect(control.args).toContain(PROBE_ARG);
+      expect(control.env).toContain(PROBE_TOKEN);
+      expect(control.file).toContain(PROBE_TOKEN);
+      for (const held of PROBES_HELD) expect.soft(run.probeOutput, held).toContain(held);
+    } finally {
+      rmSync(join(sandboxRoots().files, LANE_WROTE), { force: true });
+      rmSync(root, { recursive: true, force: true });
+      rmSync(serverDir, { recursive: true, force: true });
     }
   }, 300_000);
 });

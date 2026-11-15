@@ -176,8 +176,7 @@ export function createShapePreparer(deps: {
       laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
     });
     const instructions = setupPlan.instructions.text;
-    // The builder's own servers, planned as the session is prepared. A Codex chat or Plan gets the remote
-    // ones: an explore thread's read of a stdio server's files is not ruled out yet, so those wait.
+    // The builder's own servers, planned as the session is prepared; Claude and Codex chats and Plan get the same.
     const yours = yourMcpForSession({
       db: state.db,
       home: deps.builderHome,
@@ -196,17 +195,6 @@ export function createShapePreparer(deps: {
         logger.warn({ stored }, 'a stored MCP approvals or switch value is not a shape 10db reads');
       },
     });
-    const onCodex = providerOf(input.accountKind) === Provider.Codex;
-    const yourStdio = onCodex ? {} : yours.stdio;
-    const yourLeftOut = [
-      ...yours.leftOut,
-      ...(onCodex
-        ? Object.keys(yours.stdio).map((name) => ({
-            what: `your MCP server ${name}`,
-            why: 'it runs in Codex chats and Plan once 10db closes their sandbox’s read of its files',
-          }))
-        : []),
-    ];
     const yourServers = (
       launched: LaneSession['yourMcpServers'],
     ): Record<string, YourSessionServer> => ({
@@ -238,7 +226,7 @@ export function createShapePreparer(deps: {
         configDir: sessionConfigDir(input.accountKind, input.env, homedir()),
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
-        yourMcpServers: yourStdio,
+        yourMcpServers: yours.stdio,
         readOnly: true,
         // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
         provider: providerOf(input.accountKind),
@@ -254,7 +242,7 @@ export function createShapePreparer(deps: {
         yourMcpServers: {},
         note: [
           `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
-          leftOutNote([...setupPlan.leftOut, ...yourLeftOut]),
+          leftOutNote([...setupPlan.leftOut, ...yours.leftOut]),
         ]
           .filter((line) => line !== null)
           .join('\n\n'),
@@ -322,7 +310,7 @@ export function createShapePreparer(deps: {
             leftOutNote([
               ...setupPlan.leftOut,
               ...sandboxed.setup.leftOut,
-              ...yourLeftOut,
+              ...yours.leftOut,
               ...(sandboxed.yourMcpLeftOut ?? []),
             ]),
           ]

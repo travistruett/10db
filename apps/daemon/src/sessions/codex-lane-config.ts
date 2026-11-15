@@ -43,9 +43,7 @@ export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknow
   const projects = Object.fromEntries(
     Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
   );
-  // An explore thread's sandbox is read-only, with no read of the builder's server files proven yet, so only
-  // a lane starts the builder's stdio servers; a chat and Plan get the remote ones.
-  const yours = codexYourServers(spec, { stdio: spec.profile.kind === 'lane' }).servers;
+  const yours = codexYourServers(spec);
   const { sandbox } = spec;
   if (sandbox === null) {
     throw new CodexLaneConfigError('a Codex session needs the lane sandbox');

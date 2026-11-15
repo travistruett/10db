@@ -273,7 +273,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       }
     });
 
-    it('Codex Plan gets your remote server, and names the stdio one as waiting for the explore sandbox', async () => {
+    it('Codex Plan plans the same servers as Claude Plan: your remote one, and the stdio one left out with its reason', async () => {
       const owner = conversation({ mcpServers: {} });
       approveYours();
       // The real sandbox, with a Codex temp root it can make under the test's own root.
@@ -286,7 +286,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       try {
         expect(Object.keys(prepared.yourMcpServers)).toEqual(['mine']);
         expect(prepared.note).toContain('your MCP server local');
-        expect(prepared.note).toContain('Codex chats and Plan');
+        expect(prepared.note).not.toContain('Codex chats and Plan');
       } finally {
         await prepared.release();
       }

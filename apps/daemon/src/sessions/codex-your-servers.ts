@@ -17,21 +17,14 @@ function codexKeys(codex: YourSessionServer['codex']): Record<string, unknown> {
 /**
  * The builder's own MCP servers as Codex's `mcp_servers` entries. A stdio server is 10db's launch from the
  * builder's home through `env -i`, so it gets no `env` block, which Codex would merge over its own
- * environment. Its tool filters and timeouts from `config.toml` apply here. With `stdio: false`, stdio
- * servers are left out and their names come back, for the note.
+ * environment. Its tool filters and timeouts from `config.toml` apply here.
  */
 export function codexYourServers(
   spec: Pick<AgentSessionCore, 'yourMcpServers'>,
-  opts: { readonly stdio: boolean },
-): { servers: Record<string, Record<string, unknown>>; leftOutStdio: string[] } {
+): Record<string, Record<string, unknown>> {
   const servers: Record<string, Record<string, unknown>> = {};
-  const leftOutStdio: string[] = [];
   for (const [name, { connect, codex }] of Object.entries(spec.yourMcpServers)) {
     if (connect instanceof YourMcpServer) {
-      if (!opts.stdio) {
-        leftOutStdio.push(name);
-        continue;
-      }
       const { command, args } = connect.launch();
       servers[name] = {
         command,
@@ -48,5 +41,5 @@ export function codexYourServers(
       };
     }
   }
-  return { servers, leftOutStdio };
+  return servers;
 }
