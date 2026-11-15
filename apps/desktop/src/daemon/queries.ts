@@ -1,5 +1,6 @@
 import {
   BatchDto,
+  AgentSkillStatus,
   BoardColumnDto,
   InboxItemDto,
   KeepAwakeStatus,
@@ -60,6 +61,7 @@ export const queryKeys = {
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
+  agentSkill: ['agent-skill'],
   lanePermissions: ['lane-permissions'],
   system: ['system'],
   candidates: (projectId: ProjectId, size: number, goalId: GoalId | null) =>
@@ -221,6 +223,14 @@ export function useKeepAwake() {
   return useQuery({
     queryKey: queryKeys.keepAwake,
     queryFn: async () => readJson(await client.settings['keep-awake'].$get(), KeepAwakeStatus),
+  });
+}
+
+export function useAgentSkill() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.agentSkill,
+    queryFn: async () => readJson(await client.settings['agent-skill'].$get(), AgentSkillStatus),
   });
 }
 
@@ -530,6 +540,18 @@ export function useSetKeepAwake() {
       readJson(await client.settings['keep-awake'].$put({ json: { mode } }), KeepAwakeStatus),
     onSuccess: (status) => {
       queryClient.setQueryData(queryKeys.keepAwake, status);
+    },
+  });
+}
+
+export function useSetAgentSkill() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) =>
+      readJson(await client.settings['agent-skill'].$put({ json: { enabled } }), AgentSkillStatus),
+    onSuccess: (status) => {
+      queryClient.setQueryData(queryKeys.agentSkill, status);
     },
   });
 }

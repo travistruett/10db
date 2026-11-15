@@ -15,6 +15,7 @@ import {
   PROTOCOL_VERSION,
   RoutedBy,
   agentKind,
+  AgentSkillNotInstallable,
   providerOf,
   WorkstreamId,
   WorkstreamState,
@@ -200,6 +201,7 @@ import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
+import { createAgentSkill, type AgentSkillPlacement } from '../agent-skill';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import {
   capacitySettings,
@@ -402,6 +404,11 @@ export interface DaemonOptions {
    * (Settings › Trust). Defaults to the user's home; tests give a temp one.
    */
   readonly builderHome?: string;
+  /**
+   * Whether this daemon installs the shipped `10db-task` skill into the builder's home, and where the
+   * shipped copy is. Absent: from source, nothing is installed.
+   */
+  readonly agentSkill?: AgentSkillPlacement;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -682,6 +689,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   state.write((ctx) => {
     addStockHazardCommands(ctx);
   });
+  const agentSkill = createAgentSkill({
+    state,
+    placement: opts.agentSkill ?? {
+      kind: 'not_installable',
+      reason: AgentSkillNotInstallable.FromSource,
+      shippedDir: null,
+    },
+    home: builderHome,
+    logger,
+  });
+  // A failed install is kept for Settings and never stops the daemon.
+  agentSkill.atStart();
   const launcher = createLauncher({
     base: opts.loginEnv ?? { PATH: DEFAULT_SESSION_PATH },
     clientApp: CLIENT_APP,
@@ -2110,6 +2129,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     moves,
     inbox,
     keepAwake,
+    agentSkill,
     admission,
     systemCheck: () =>
       opts.systemCheck
@@ -2425,6 +2445,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const app = createApp({
     commit: build?.commit ?? null,
+    skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
     devUi: opts.devUiOrigin ? { token: devUiToken(opts.dataDir), mayRead: devUiMayRead } : null,

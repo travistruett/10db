@@ -1,5 +1,7 @@
 import type {
   AdmissionDto,
+  AgentSkillInfo,
+  AgentSkillStatus,
   CapacitySettingsDto,
   ChatCreateInput,
   ChatDto,
@@ -676,6 +678,11 @@ export interface ApiServices extends PlanRecordServices {
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
+  /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
+  agentSkill(): AgentSkillStatus;
+  setAgentSkill(enabled: boolean): AgentSkillStatus;
+  /** The skill version this daemon ships; the route adds the build commit. */
+  agentSkillInfo(): Pick<AgentSkillInfo, 'version'>;
   /** Settings › This Mac › Capacity: the lane cap across all projects and the free-disk floor. */
   capacitySettings(): CapacitySettingsDto;
   setCapacitySettings(input: CapacitySettingsDto): CapacitySettingsDto;

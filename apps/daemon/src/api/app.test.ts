@@ -1,5 +1,8 @@
 import {
+  AgentSkillInfo,
+  AgentSkillStatus,
   BatchStartResult,
+  SKILL_VERSION_HEADER,
   ConflictError,
   GoalDigestDto,
   GoalListDto,
@@ -38,8 +41,10 @@ const noUpgrade = defineWebSocketHelper(() => new Response(null, { status: 426 }
 function app(
   services = stubServices(),
   onUnexpectedError: (error: unknown) => void = () => undefined,
+  skillVersion: string | null = null,
 ) {
   return createApp({
+    skillVersion,
     onUnexpectedError,
     startedAt,
     allowedOrigins: ['http://localhost:1420'],
@@ -52,6 +57,106 @@ function app(
 }
 const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
 const json = { headers: { ...auth.headers, 'content-type': 'application/json' } };
+
+const SKILL_STATUS: AgentSkillStatus = {
+  enabled: true,
+  installable: true,
+  version: 'aaaaaaaaaaaa',
+  installedVersion: 'aaaaaaaaaaaa',
+  installedPath: '/home/.10db/skills/10db-task',
+  links: [],
+  error: null,
+};
+
+describe('the skill version check', () => {
+  const SHIPS = 'aaaaaaaaaaaa';
+  it.each([
+    { name: 'equal', ships: SHIPS, header: SHIPS, path: '/projects', status: 200 },
+    { name: 'differs', ships: SHIPS, header: 'bbbbbbbbbbbb', path: '/projects', status: 409 },
+    { name: 'absent', ships: SHIPS, header: null, path: '/projects', status: 200 },
+    { name: 'ships none', ships: null, header: 'bbbbbbbbbbbb', path: '/projects', status: 200 },
+    {
+      name: '/health is never checked',
+      ships: SHIPS,
+      header: 'bbbbbbbbbbbb',
+      path: '/health',
+      status: 200,
+    },
+  ])('$name answers $status', async ({ ships, header, path, status }) => {
+    const headers: Record<string, string> = { ...auth.headers };
+    if (header !== null) headers[SKILL_VERSION_HEADER] = header;
+    const res = await app(stubServices(), undefined, ships).request(path, {
+      headers,
+    });
+    expect(res.status).toBe(status);
+    if (status === 409)
+      expect(await res.json()).toEqual({
+        error: 'skill_version',
+        message: `This 10db-task skill (${header ?? ''}) isn't the one this 10db ships (${ships ?? ''}). Restart 10db to update it, or turn on Settings › Agent skill › Agents in any repo can use 10db.`,
+      });
+  });
+
+  it('answers 401 before it compares versions', async () => {
+    const res = await app(stubServices(), undefined, 'aaaaaaaaaaaa').request('/projects', {
+      headers: { [SKILL_VERSION_HEADER]: 'bbbbbbbbbbbb' },
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('the agent skill routes', () => {
+  it('serves, switches and describes the skill', async () => {
+    const asked: boolean[] = [];
+    const services = stubServices({
+      agentSkill: () => SKILL_STATUS,
+      setAgentSkill: (enabled) => {
+        asked.push(enabled);
+        return { ...SKILL_STATUS, enabled };
+      },
+      agentSkillInfo: () => ({ version: 'aaaaaaaaaaaa' }),
+    });
+    const get = await app(services).request('/settings/agent-skill', auth);
+    expect(AgentSkillStatus.parse(await get.json())).toEqual(SKILL_STATUS);
+    const put = await app(services).request('/settings/agent-skill', {
+      method: 'PUT',
+      ...json,
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(AgentSkillStatus.parse(await put.json()).enabled).toBe(false);
+    expect(asked).toEqual([false]);
+    const info = await app(services).request('/agent-skill', auth);
+    expect(AgentSkillInfo.parse(await info.json())).toEqual({
+      version: 'aaaaaaaaaaaa',
+      appCommit: null,
+    });
+  });
+
+  it("answers the skill's info with the build commit the app was given", async () => {
+    const res = await createApp({
+      startedAt,
+      allowedOrigins: [],
+      token: TOKEN,
+      commit: 'abc1234',
+      services: stubServices({ agentSkillInfo: () => ({ version: 'aaaaaaaaaaaa' }) }),
+      upgradeWebSocket: noUpgrade,
+      onUnexpectedError: () => undefined,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    }).request('/agent-skill', auth);
+    expect(AgentSkillInfo.parse(await res.json())).toEqual({
+      version: 'aaaaaaaaaaaa',
+      appCommit: 'abc1234',
+    });
+  });
+
+  it('refuses a body that is not { enabled: boolean }', async () => {
+    const res = await app().request('/settings/agent-skill', {
+      method: 'PUT',
+      ...json,
+      body: JSON.stringify({ enabled: 'yes' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
 
 describe('API', () => {
   it.each([

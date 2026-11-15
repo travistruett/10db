@@ -95,7 +95,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
-  app_setting: [queryKeys.keepAwake],
+  app_setting: [queryKeys.keepAwake, queryKeys.agentSkill],
   // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
   // and so do the Models page's picks.
