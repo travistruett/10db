@@ -27,8 +27,8 @@ Claude Code and Codex:
   plan login. The check before the prompt refuses an API-key session that isn't billing the key, and a Bedrock
   one that isn't on Bedrock. It doesn't compare plan names, though. Task 8 first confirms the entry really holds a
   plan login, then runs one live session of each kind.
-- **Connectors could fail to load.** A short Claude Code start with no prompt reads them, in about 2 s, cached for
-  10 minutes. If it fails, the session starts without them and says so.
+- **Connectors could fail to load.** A short Claude Code start with no prompt reads them, in about 2 s (up to 10 s
+  on an account with none), cached for 10 minutes. If it fails, the session starts without them and says so.
 - **Managed MCP config.** If an organization's `managed-mcp.json` ever appears on this Mac, the connector start
   would launch its servers, and Claude Code has no switch to skip it. That start stops at the first entry that
   isn't a connector, and Task 8 checks it.
@@ -324,7 +324,7 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
 
 **Interfaces:**
 
-- Produces, from `environment`:
+- Produces, from `environment` (all in `launch.ts`, the one file that sets or reads these variables' values):
   - `build()` sets `CLAUDE_SECURESTORAGE_CONFIG_DIR` to `loginConfigDir() ?? ''` on `AnthropicApiKey` and
     `Bedrock` only. Session and probe launches alike go through `build()`. Gateway and the subscription kinds
     never get it.
@@ -335,8 +335,10 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
     `{ BuildersClaudeCode: 'builders_claude_code', ThisAccount: 'this_account', NotYet: 'not_yet' }`.
   - `mcpSignInWhere(kind: AgentAccountKind, env): McpSignInWhere` decides in this order:
     1. `NotYet` for Gateway.
-    2. `ThisAccount` when `CLAUDE_CONFIG_DIR` is set and `CLAUDE_SECURESTORAGE_CONFIG_DIR` is not.
-    3. Otherwise `BuildersClaudeCode`.
+    2. `BuildersClaudeCode` when `CLAUDE_CONFIG_DIR` equals `loginConfigDir()` (the default account whose
+       login shell sets one).
+    3. `ThisAccount` when `CLAUDE_CONFIG_DIR` is set and `CLAUDE_SECURESTORAGE_CONFIG_DIR` is not.
+    4. Otherwise `BuildersClaudeCode`.
 - Produces, from `sessions`:
   - `removeStaleNeedsAuthCache(path): Promise<void>` unlinks the file without reading it.
   - It ignores `ENOENT`.
@@ -351,7 +353,8 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
     - "builds a probe like a session" asserts the probe has it too.
   - Pure tables in `launch.test.ts`:
     - `staleNeedsAuthCache`: rows for set `''`, set `/x`, and absent.
-    - `mcpSignInWhere`: rows for Gateway, `''`, absent with `CLAUDE_CONFIG_DIR` set, and neither set.
+    - `mcpSignInWhere`: rows for Gateway, `''`, absent with `CLAUDE_CONFIG_DIR` set, `CLAUDE_CONFIG_DIR` equal to
+      the login shell's, and neither set.
   - `session-env.test.ts`: a login env holding `CLAUDE_SECURESTORAGE_CONFIG_DIR=/x` loses it.
   - `claude-auth-cache.test.ts`, on a real temp dir:
     - The file goes and its sibling stays.
@@ -404,8 +407,9 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
   - `ClaudeConnector { name: string; url: string; id: string }`.
   - `connectorsFromStatus(status: unknown): ClaudeConnector[] | null` is the zod boundary.
     - It keeps entries with `scope: 'claudeai'` and `config: { type: 'claudeai-proxy', url: https, id: string(min 1) }`.
-    - It answers null as soon as any entry has another scope. The probe then closes at once and logs only the
-      count.
+    - It drops a `dynamic` entry (one set over the control channel, never a file). It answers null as soon as
+      any entry has another scope (`user`, `local`, `project`, `managed` or one it doesn't know). The probe then
+      closes at once and logs only the count.
   - `mcpToolPrefix(name: string): string` is the server-name rule `mcpStatusToolNames` already uses.
   - `connectorsForSession(connectors, takenNames: readonly string[]): ClaudeConnector[]` drops a connector whose
     `mcpToolPrefix` equals that of a project, builder or 10db server.
@@ -421,7 +425,8 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
     - A CLI that never answered, threw, or loaded other scopes gives `null`, meaning failed. It is cached for
       `CONNECTOR_RETRY_MS = 60_000`.
     - Concurrent callers share one probe. `stop()` closes a probe in flight.
-    - Nothing warms the cache at start. The cost: the first plan session per 10 minutes waits about 2 s.
+    - Nothing warms the cache at start. The cost: the first plan session per 10 minutes waits for the probe,
+      about 2 s with connectors and up to `CONNECTOR_PROBE_MS` for an account that has none.
   - `AgentSessionCore.claudeConnectors: boolean` is `yours.connectorsOn && account.kind === ClaudeSubscription`.
   - `TrustPolicyInput.claudeConnectors: boolean`.
 
