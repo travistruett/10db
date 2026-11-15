@@ -67,6 +67,7 @@ export { createUnavailableAdapter } from './unavailable-adapter';
 export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';
 export {
   readRepoConfigFile,
+  readRepoConfigFileIn,
   readRepoFileBytes,
   readRepoFileBytesIn,
   RepoConfigFileError,

@@ -78,14 +78,12 @@ function plan(switches: Partial<TrustSwitches> = {}): Summary {
   );
 }
 
-const MCP_NOTE = "q@m's MCP servers: until 10db runs your MCP servers (T6)";
-
 const ALL: Summary = {
   instructions: ['AGENTS.md', '~/.claude/CLAUDE.md'],
   skills: ['s'],
   plugins: ['p@m', 'q@m'],
   projectFiles: ['skills/ps/SKILL.md'],
-  leftOut: [MCP_NOTE],
+  leftOut: [],
 };
 
 describe('planSessionSetup', () => {
@@ -125,15 +123,12 @@ describe('planSessionSetup', () => {
     });
   });
 
-  it('a plugin with a .mcp.json gets the MCP left-out item, one without gets none', () => {
+  it('a plugin with a .mcp.json gets no left-out item: its servers come through your MCP servers', () => {
     const installPath = join(home, '.claude/plugins/cache/m/p/1');
     write(
       join(installPath, '.claude-plugin/plugin.json'),
       JSON.stringify({ name: 'p', mcpServers: { s: { command: 'x' } } }),
     );
-    expect(plan().leftOut).toEqual([
-      "p@m's MCP servers: until 10db runs your MCP servers (T6)",
-      MCP_NOTE,
-    ]);
+    expect(plan().leftOut).toEqual([]);
   });
 });

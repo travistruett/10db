@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { McpConfigEntry, YourMcpSource } from '@10db/contracts';
 import { SENSITIVE_NAME } from '../sessions';
-import type { DeclaredYourServer } from './your-mcp-config';
+import type { DeclaredYourServer } from './your-mcp-entry';
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>

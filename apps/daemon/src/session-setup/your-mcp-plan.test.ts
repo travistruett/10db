@@ -175,6 +175,12 @@ describe('planYourMcp', () => {
     expect(serverState(p, new Map())).toBe(YourMcpServerState.Approved);
   });
 
+  it('a plugin server follows its own switch, off here and named nowhere', () => {
+    const p = entry('browser', stdio(), { source: YourMcpSource.Plugin, pluginId: 'tools@m' });
+    const off = plan([p], { switches: { ...TRUST_DEFAULTS, mcpServers: { [p.key]: false } } });
+    expect(off).toEqual({ stdio: {}, remote: {}, leftOut: [] });
+  });
+
   it('serverState names each state', () => {
     const a = entry('a', stdio());
     expect(serverState(a, new Map())).toBe(YourMcpServerState.New);

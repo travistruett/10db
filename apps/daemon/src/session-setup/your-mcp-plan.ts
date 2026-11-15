@@ -6,7 +6,7 @@ import {
 } from '@10db/contracts';
 import { expandFrom, YourMcpExpandError, type CodexServerExtras } from '../sessions';
 import type { LeftOut } from './left-out';
-import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-config';
+import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
 
 /**
  * The names Codex gives a stdio server from its own environment before the entry's `env_vars` and `env`
