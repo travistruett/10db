@@ -179,8 +179,18 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
       </Stack>
     );
   return (
-    // The open pass takes the height the shell leaves, so the queue and the page run to its foot.
-    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
+    // The open pass takes the height the shell leaves, so the queue and the page run to its foot. The
+    // shell's main area only has a minimum height, so without the cap a long thread would grow the
+    // page and push the composer below the fold, where the thread's own scroll area is what should move.
+    <Stack
+      gap="sm"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        maxHeight:
+          'calc(100dvh - var(--app-shell-header-offset, 0px) - var(--app-shell-padding, 0px) * 2)',
+      }}
+    >
       <PassHeader
         project={project}
         view={live}

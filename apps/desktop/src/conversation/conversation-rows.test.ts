@@ -8,6 +8,7 @@ import {
 } from '../test/tool-call-fixtures';
 import {
   ARTICLE_ROWS,
+  collapseWork,
   conversationArticles,
   conversationRows,
   type ConversationRow,
@@ -41,6 +42,8 @@ function shape(rows: readonly ConversationRow[]): string[] {
         return `group ${row.entries.map((e) => e.id).join(' ')}`;
       case 'edit_group':
         return `edits ${row.entries.map((e) => e.id).join(' ')}`;
+      case 'work':
+        return `work(${String(row.steps)}) [${shape(row.rows).join(', ')}]`;
     }
   });
 }
@@ -106,6 +109,67 @@ describe('conversationRows', () => {
   it('keeps the group id of its first entry', () => {
     const [row] = conversationRows([read('first'), read('second')]);
     expect(row?.kind === 'tool_group' ? row.id : null).toBe('first');
+  });
+});
+
+describe('collapseWork', () => {
+  const thought = (id: string): ConversationEntry => ({
+    kind: 'reasoning',
+    id,
+    text: id,
+    durationMs: null,
+  });
+  const notice = (id: string): ConversationEntry => ({
+    kind: 'notice',
+    id,
+    text: id,
+    tone: 'info',
+  });
+
+  it.each<[string, ConversationEntry[], string[]]>([
+    [
+      'a run of work between replies is one closed row; the replies stay',
+      [reply('t1'), read('r1'), read('r2'), command('c1'), reply('t2')],
+      ['entry t1', 'work(3) [group r1 r2, tool c1]', 'entry t2'],
+    ],
+    [
+      'reasoning folds with the calls around it and adds no step',
+      [thought('th'), command('c1'), reply('t1')],
+      ['work(1) [entry th, tool c1]', 'entry t1'],
+    ],
+    [
+      'reasoning alone is a run with no steps',
+      [thought('th'), reply('t1')],
+      ['work(0) [entry th]', 'entry t1'],
+    ],
+    [
+      'a denied call and a failed call stay in view and split the run',
+      [command('c1'), deniedEdit('d1'), failedRead('f1'), command('c2')],
+      ['work(1) [tool c1]', 'tool d1', 'tool f1', 'work(1) [tool c2]'],
+    ],
+    [
+      'a notice splits the run',
+      [command('c1'), notice('n1'), command('c2')],
+      ['work(1) [tool c1]', 'entry n1', 'work(1) [tool c2]'],
+    ],
+    [
+      "a subagent's calls count with it",
+      [subagent('a1'), read('k1', 'a1'), read('k2', 'a1')],
+      ['work(3) [tool a1 [k1 k2]]'],
+    ],
+    [
+      'a running call is work too',
+      [toolEntry(commandCall({ id: 'c1', status: 'running' }))],
+      ['work(1) [tool c1]'],
+    ],
+    ['no work, no work row', [reply('t1'), builder('b1')], ['entry t1', 'entry b1']],
+  ])('%s', (_name, entries, expected) => {
+    expect(shape(collapseWork(conversationRows(entries)))).toEqual(expected);
+  });
+
+  it('keeps the first row’s id for the run, so its state follows it', () => {
+    const [row] = collapseWork(conversationRows([read('first'), read('second'), edit('e1')]));
+    expect(row?.kind === 'work' ? row.id : null).toBe('first');
   });
 });
 

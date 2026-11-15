@@ -118,7 +118,7 @@ describe('WorkbenchScreen', () => {
     expect(screen.queryByText(/new pages? found/)).toBeNull();
   });
 
-  it('says a new page found under the Pages field, and its Set Up opens the setup', async () => {
+  it('says a new page found under the Pages field, and the one Set Up opens the setup', async () => {
     server.use(...passHandlers());
     await draw({
       setupCount: 1,
@@ -126,9 +126,9 @@ describe('WorkbenchScreen', () => {
     });
     const line = await screen.findByText(/New page found:/);
     expect(line.textContent).toBe('New page found: Sessions /sessions');
-    fireEvent.click(
-      within(line.parentElement ?? document.body).getByRole('button', { name: 'Set Up' }),
-    );
+    expect(within(line).queryByRole('button')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /^Set Up/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /^Set Up/ }));
     expect(
       await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
     ).toBeTruthy();

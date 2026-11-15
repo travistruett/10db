@@ -8,7 +8,15 @@ export type ConversationRow =
   | { readonly kind: 'entry'; readonly entry: ConversationEntry }
   | { readonly kind: 'tool'; readonly entry: ToolEntry; readonly nested: readonly ToolEntry[] }
   | { readonly kind: 'tool_group'; readonly id: string; readonly entries: readonly ToolEntry[] }
-  | { readonly kind: 'edit_group'; readonly id: string; readonly entries: readonly ToolEntry[] };
+  | { readonly kind: 'edit_group'; readonly id: string; readonly entries: readonly ToolEntry[] }
+  /** A run of the agent's settled work, closed until the builder opens it (see `collapseWork`). */
+  | {
+      readonly kind: 'work';
+      readonly id: string;
+      readonly rows: readonly ConversationRow[];
+      /** The tool calls inside, counting a subagent's. */
+      readonly steps: number;
+    };
 
 type Fold = 'tool_group' | 'edit_group';
 
@@ -98,6 +106,66 @@ export function conversationRows(
   return rows;
 }
 
+/** Whether the row is the agent's work: reasoning, and a call that is running or done. */
+function isWork(row: ConversationRow): boolean {
+  switch (row.kind) {
+    case 'entry':
+      return row.entry.kind === 'reasoning';
+    case 'tool':
+      return row.entry.call.status === 'done' || row.entry.call.status === 'running';
+    case 'tool_group':
+    case 'edit_group':
+      return true;
+    case 'work':
+      return false;
+  }
+}
+
+function stepsOf(row: ConversationRow): number {
+  switch (row.kind) {
+    case 'entry':
+      return 0;
+    case 'tool':
+      return 1 + row.nested.length;
+    case 'tool_group':
+    case 'edit_group':
+      return row.entries.length;
+    case 'work':
+      return row.steps;
+  }
+}
+
+/**
+ * Each run of consecutive work rows becomes one closed row, so the replies and what needs the builder
+ * (a call that failed or was denied, a notice, a screen's own row) stay in view among them. Every
+ * screen that draws a conversation gets it, so a long turn reads as the messages between builder and
+ * agent with the work behind a click.
+ */
+export function collapseWork(rows: readonly ConversationRow[]): readonly ConversationRow[] {
+  const out: ConversationRow[] = [];
+  let run: ConversationRow[] = [];
+  const close = () => {
+    const [first] = run;
+    if (first !== undefined)
+      out.push({
+        kind: 'work',
+        id: rowId(first),
+        rows: run,
+        steps: run.reduce((sum, row) => sum + stepsOf(row), 0),
+      });
+    run = [];
+  };
+  for (const row of rows) {
+    if (isWork(row)) run.push(row);
+    else {
+      close();
+      out.push(row);
+    }
+  }
+  close();
+  return out;
+}
+
 /**
  * The most rows one article draws. A longer turn is windowed in parts, each a virtual item of its own,
  * so a turn of thousands of rows never mounts whole.
@@ -122,6 +190,7 @@ export function rowId(row: ConversationRow): string {
       return row.entry.id;
     case 'tool_group':
     case 'edit_group':
+    case 'work':
       return row.id;
   }
 }

@@ -150,6 +150,9 @@ describe('PageThread', () => {
       `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`,
     );
     expect(pictureAsked).toBe(`${picture.id} Bearer test-token`);
+    // A sent picture is a thumbnail in a row, never drawn at the width of the thread.
+    expect(image.style.height).toBe('96px');
+    expect(image.style.maxWidth).toBe('160px');
     const files = screen.getByRole('list', { name: 'Files this turn changed' });
     expect(files.textContent).toBe('src/settings/page.tsx+4 −1');
     expect(screen.getByText(NOTICE).style.color).toBe('var(--mantine-color-dimmed)');

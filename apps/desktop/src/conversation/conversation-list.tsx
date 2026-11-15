@@ -4,6 +4,7 @@ import { IconArrowDown } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
+  collapseWork,
   conversationArticles,
   conversationRows,
   rowId,
@@ -14,6 +15,7 @@ import type { ConversationEntry } from './entry';
 import { ConversationEntryView } from './entry-view';
 import { RowStateProvider } from './row-state';
 import { EditGroupRow, ToolCallCard, ToolGroupRow } from './tool-call-card';
+import { WorkRow } from './work-row';
 
 /** Marks a row with the id of the entry it draws, or its group's first. */
 const MESSAGE_ATTRIBUTE = 'data-message-id';
@@ -50,6 +52,8 @@ function idsOf(row: ConversationRow): readonly string[] {
     case 'tool_group':
     case 'edit_group':
       return row.entries.map((e) => e.id);
+    case 'work':
+      return row.rows.flatMap(idsOf);
   }
 }
 
@@ -80,7 +84,7 @@ export function ConversationList({
   agentLabel,
   busy = false,
 }: ConversationListProps) {
-  const articles = conversationArticles(conversationRows(entries));
+  const articles = conversationArticles(collapseWork(conversationRows(entries)));
   const marked = new Set(highlight?.ids ?? []);
   const targetIndex =
     highlight === null
@@ -276,39 +280,56 @@ function Article({ article, marked, loadFull, onAllow, agentLabel }: ArticleProp
               : agentLabel}
         </h2>
       </VisuallyHidden>
-      {article.rows.map((row, i) => {
-        const highlighted = idsOf(row).some((id) => marked.has(id));
-        return (
-          <Box
-            key={rowId(row)}
-            mt={gapAbove(article.rows[i - 1], row)}
-            {...{ [MESSAGE_ATTRIBUTE]: rowId(row) }}
-            {...(highlighted ? { 'data-highlighted': true } : {})}
-            style={
-              highlighted
-                ? {
-                    background: 'var(--mantine-color-default-hover)',
-                    borderRadius: 'var(--mantine-radius-sm)',
-                    margin: '0 calc(var(--mantine-spacing-xs) * -1)',
-                    padding: '0 var(--mantine-spacing-xs)',
-                  }
-                : undefined
-            }
-          >
-            <RowView row={row} loadFull={loadFull} onAllow={onAllow} />
-          </Box>
-        );
-      })}
+      <Rows rows={article.rows} marked={marked} loadFull={loadFull} onAllow={onAllow} />
     </article>
   );
 }
 
+/** The rows in order, each with its spacing and, when Why? points at it, its highlight. */
+function Rows({
+  rows,
+  marked,
+  loadFull,
+  onAllow,
+}: {
+  readonly rows: readonly ConversationRow[];
+  readonly marked: ReadonlySet<string>;
+  readonly loadFull: LoadFull | undefined;
+  readonly onAllow: ((call: ToolCallView) => void) | undefined;
+}) {
+  return rows.map((row, i) => {
+    const highlighted = idsOf(row).some((id) => marked.has(id));
+    return (
+      <Box
+        key={rowId(row)}
+        mt={gapAbove(rows[i - 1], row)}
+        {...{ [MESSAGE_ATTRIBUTE]: rowId(row) }}
+        {...(highlighted ? { 'data-highlighted': true } : {})}
+        style={
+          highlighted
+            ? {
+                background: 'var(--mantine-color-default-hover)',
+                borderRadius: 'var(--mantine-radius-sm)',
+                margin: '0 calc(var(--mantine-spacing-xs) * -1)',
+                padding: '0 var(--mantine-spacing-xs)',
+              }
+            : undefined
+        }
+      >
+        <RowView row={row} marked={marked} loadFull={loadFull} onAllow={onAllow} />
+      </Box>
+    );
+  });
+}
+
 function RowView({
   row,
+  marked,
   loadFull,
   onAllow,
 }: {
   readonly row: ConversationRow;
+  readonly marked: ReadonlySet<string>;
   readonly loadFull: LoadFull | undefined;
   readonly onAllow: ((call: ToolCallView) => void) | undefined;
 }) {
@@ -329,5 +350,16 @@ function RowView({
       return <ToolGroupRow entries={row.entries} />;
     case 'edit_group':
       return <EditGroupRow entries={row.entries} {...load} />;
+    case 'work':
+      return (
+        <WorkRow
+          id={row.id}
+          steps={row.steps}
+          // A Why? that points into the run opens it, so the marked row is there to be seen.
+          defaultOpen={idsOf(row).some((id) => marked.has(id))}
+        >
+          <Rows rows={row.rows} marked={marked} loadFull={loadFull} onAllow={onAllow} />
+        </WorkRow>
+      );
   }
 }

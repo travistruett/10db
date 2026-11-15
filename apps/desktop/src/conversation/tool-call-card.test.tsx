@@ -104,7 +104,10 @@ describe('ToolCallCard', () => {
       refusal: 'writes outside the checkout',
     });
     renderWithTheme(<ToolCallCard entry={toolEntry(call)} nested={[]} />);
-    expect(screen.getByText('10db stopped this: writes outside the checkout')).toBeTruthy();
+    const meta = screen.getByText('10db stopped this: writes outside the checkout');
+    // A long refusal is cut with an ellipsis, never run past the thread's column; hover has it whole.
+    expect(meta.getAttribute('data-truncate')).toBe('end');
+    expect(meta.getAttribute('title')).toBe('10db stopped this: writes outside the checkout');
     fireEvent.click(screen.getByRole('button', { name: /10db stopped this/ }));
     expect(screen.getByText('writes outside the checkout')).toBeTruthy();
   });

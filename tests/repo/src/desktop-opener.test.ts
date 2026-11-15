@@ -74,4 +74,19 @@ describe("the desktop app's window", () => {
     const main = config.app.windows.find((window) => window.label === 'main');
     expect(main?.minWidth).toBe(420);
   });
+
+  it("leaves a file dropped on the window to the page's own drop targets, such as the composer", () => {
+    // With Tauri's native handler on, a dropped file never reaches the page's `drop` event.
+    const config = z
+      .object({
+        app: z.object({
+          windows: z.array(
+            z.object({ label: z.string(), dragDropEnabled: z.boolean().optional() }),
+          ),
+        }),
+      })
+      .parse(JSON.parse(readRepoFile('apps/desktop/src-tauri/tauri.conf.json')));
+    const main = config.app.windows.find((window) => window.label === 'main');
+    expect(main?.dragDropEnabled).toBe(false);
+  });
 });

@@ -154,6 +154,7 @@ describe('ConversationList', () => {
       count = LONG + 1;
       const row = toolEntry(commandCall({ id: 'cmd', outputTail: 'PASS all' }));
       render(ui({ entries: [row, ...conversation(LONG)] }));
+      fireEvent.click(screen.getByRole('button', { name: 'Worked · 1 Step' }));
       fireEvent.click(screen.getByRole('button', { name: /^Ran pnpm/ }));
       scrollViewportTo(1000 * ROW);
       await screen.findByText('Message 1000');
@@ -223,12 +224,39 @@ describe('ConversationList', () => {
       expect(screen.getByText('Stopped here.')).toBeTruthy();
     });
 
-    it('folds three reads into one row', () => {
+    it('folds three reads into one row, behind a closed Worked row that opens to it', () => {
       const entries = ['a', 'b', 'c'].map((p) =>
         toolEntry(readCall({ id: p, path: `src/${p}.ts` })),
       );
       render(ui({ entries }));
+      expect(screen.queryByRole('button', { name: 'Read 3 files' })).toBeNull();
+      const work = screen.getByRole('button', { name: 'Worked · 3 Steps' });
+      expect(work.getAttribute('aria-expanded')).toBe('false');
+      fireEvent.click(work);
       expect(screen.getByRole('button', { name: 'Read 3 files' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Worked · 3 Steps' }));
+      expect(screen.queryByRole('button', { name: 'Read 3 files' })).toBeNull();
+    });
+
+    it('keeps the replies in view and the work between them closed', () => {
+      render(
+        ui({
+          entries: [
+            { kind: 'reply', id: 'r1', text: 'Looking now', partial: false },
+            toolEntry(commandCall({ id: 'c1' })),
+            { kind: 'reply', id: 'r2', text: 'All done', partial: false },
+          ],
+        }),
+      );
+      expect(screen.getByText('Looking now')).toBeTruthy();
+      expect(screen.getByText('All done')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /^Ran pnpm/ })).toBeNull();
+    });
+
+    it('opens the Worked row a Why? points into', () => {
+      const entries = ['a', 'b'].map((p) => toolEntry(readCall({ id: p, path: `src/${p}.ts` })));
+      render(ui({ entries, highlight: { ids: ['b'], nonce: 1 } }));
+      expect(screen.getByRole('button', { name: 'Read 2 files' })).toBeTruthy();
     });
 
     it('draws what a custom entry returns', () => {
@@ -252,6 +280,7 @@ describe('ConversationList', () => {
         ui({ entries: [{ kind: 'reasoning', id: 'th', text: 'Weighing it', durationMs: 12_000 }] }),
       );
       expect(screen.queryByText('Weighing it')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Thought' }));
       fireEvent.click(screen.getByRole('button', { name: 'Thought for 12 s' }));
       expect(screen.getByText('Weighing it')).toBeTruthy();
     });
