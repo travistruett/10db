@@ -54,7 +54,6 @@ export {
   ProjectMcpError,
   readRepoMcp,
   RemoteUrl,
-  SENSITIVE_NAME,
   TENDB_MCP_SERVER,
   YourMcpExpandError,
   resolveProjectMcp,

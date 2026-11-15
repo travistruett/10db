@@ -2145,7 +2145,7 @@ describe('codexThreadConfig', () => {
     expect(servers['mine']).toMatchObject({ disabled_tools: ['rm'] });
   });
 
-  it('an explore thread gets the builder’s remote server and not its stdio one', () => {
+  it('an explore thread gets the builder’s stdio and remote servers, as a lane does', () => {
     const dir = tempDir('codex-explore-yours');
     const launched = launchYourMcpServers({
       home: dir.path,
@@ -2190,7 +2190,11 @@ describe('codexThreadConfig', () => {
           agents: {},
         },
       });
-      expect(Object.keys(config['mcp_servers'] as object)).toEqual(['docs', '10db']);
+      expect(Object.keys(config['mcp_servers'] as object).sort()).toEqual([
+        '10db',
+        'docs',
+        'local',
+      ]);
     } finally {
       launched.dispose();
       dir.cleanup();
