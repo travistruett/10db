@@ -210,10 +210,29 @@ export type ShapeMessageInput = z.infer<typeof ShapeMessageInput>;
 export const ShapeProposeResult = z.object({ status: z.enum(['started', 'ignored']) });
 export type ShapeProposeResult = z.infer<typeof ShapeProposeResult>;
 
+/**
+ * The builder's cut of one milestone (a goal of the Plan): `needed` for the goal becomes tasks now, `later`
+ * stays pending on the Plan until the milestones before it have merged, `cut` is dropped but keeps its
+ * outline on the Plan as a tombstone.
+ */
+export const MilestoneMark = { Needed: 'needed', Later: 'later', Cut: 'cut' } as const;
+export type MilestoneMark = (typeof MilestoneMark)[keyof typeof MilestoneMark];
+
+/** A Plan with more milestones than this shows the cut list before Convert creates any task. */
+export const MILESTONES_BEFORE_CUT = 5;
+
+export const MilestoneCut = z.object({
+  proposalId: ShapeProposalId,
+  mark: z.enum(MilestoneMark),
+});
+export type MilestoneCut = z.infer<typeof MilestoneCut>;
+
 export const ShapeConvertInput = z.object({
   proposalIds: z.array(ShapeProposalId).min(1),
   /** Stops the turn that is running instead of answering 409. */
   interrupt: z.boolean().optional(),
+  /** One mark per pending milestone; Convert refuses a Plan with more than five of them without it. */
+  cut: z.array(MilestoneCut).optional(),
 });
 export type ShapeConvertInput = z.infer<typeof ShapeConvertInput>;
 

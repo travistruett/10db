@@ -70,11 +70,10 @@ export function createShapeServices(deps: {
     proposeShape: (id) => shape.propose(id),
     chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
-      const outcome = await shape.convert(
-        id,
-        input.proposalIds,
-        input.interrupt === undefined ? undefined : { interrupt: input.interrupt },
-      );
+      const outcome = await shape.convert(id, input.proposalIds, {
+        ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
+        ...(input.cut === undefined ? {} : { cut: input.cut }),
+      });
       if (!outcome.ok) return { kind: 'refused', errors: [...outcome.errors] };
       return {
         kind: 'converted',
