@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { McpConfigEntry, YourMcpSource } from '@10db/contracts';
 import { loadsCode } from '../sandbox';
-import { SENSITIVE_NAME } from '../sessions';
 import type { DeclaredYourServer } from './your-mcp-entry';
 
-/** Names of programs, commands and sockets: a changed one runs something else, so an approval covers it. */
-const NEVER_SECRET = /ASKPASS|_CMD$|_COMMAND$|^SSH_AUTH_SOCK$/i;
+/** A secret's name, in whole segments so `AUTHORITY_URL` is not one. */
+const SECRET_NAME =
+  /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|CREDENTIALS?|AUTH|DSN)(?:_|$)|_KEY$|_PAT$/i;
+
+/** Names of destinations, programs, commands and sockets: a changed one is somewhere or something else, so an approval covers it. */
+const NEVER_SECRET = /_(?:URL|HOST|ENDPOINT|URI)$|ASKPASS|_CMD$|_COMMAND$|^SSH_AUTH_SOCK$/i;
 
 /**
  * The value with a URL's userinfo taken out, so a rotated password doesn't ask again but a new host does. Only
@@ -23,7 +26,7 @@ const withoutUserinfo = (value: string): string => {
 
 /** Whether an env name holds a secret: named like one, and never a name that makes a program load code. */
 const isSecretName = (name: string): boolean =>
-  !loadsCode(name) && !NEVER_SECRET.test(name) && SENSITIVE_NAME.test(name);
+  !loadsCode(name) && !NEVER_SECRET.test(name) && SECRET_NAME.test(name);
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>
