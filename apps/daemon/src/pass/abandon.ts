@@ -137,7 +137,10 @@ function pagesLine(db: DbReader, pass: PassDto): string {
   const { areas } = getProject(db, pass.projectId);
   const label = (task: TaskDto): string =>
     pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
-  const discards = takenOut(db, pass).reverted.map((id) => label(getTask(db, id)));
+  // Only the pages this Abandon took out, as its confirm named them: not one taken out before it.
+  const discards = takenOut(db, pass)
+    .rows.filter((row) => row.discarded)
+    .map((row) => label(getTask(db, row.taskId)));
   const stays = listPassTasks(db, pass.id).filter((task) => signedOff(db, task));
   return [
     discards.length > 0 ? `Discards: ${discards.join(', ')} (their changes are deleted).` : '',
@@ -328,9 +331,16 @@ export async function abandonPassSteps(
       (await git.commitAt(repo, branch)) === pass.startSha
     )
       await git.pointHeadAt({ repo, from: branch, to: pass.returnBranch, sha: pass.startSha });
+    // A discarded page's kept commit is unnamed once its refs are deleted, and git may have pruned
+    // it after a restart: the files of a commit no longer there are left to git's own refresh.
     const written = new Set<string>();
     for (const row of done.rows)
-      if (row.keptSha !== null && row.keptBaseSha !== null)
+      if (
+        row.keptSha !== null &&
+        row.keptBaseSha !== null &&
+        (await git.hasCommit(repo, row.keptSha)) &&
+        (await git.hasCommit(repo, row.keptBaseSha))
+      )
         for (const path of await git.filesChangedBetween(repo, row.keptBaseSha, row.keptSha))
           if (!row.left.includes(path)) written.add(path);
     await git.refreshIndex(repo, [...written]);

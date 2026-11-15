@@ -134,7 +134,11 @@ export function leavePassForBoard(
   if (abandoned && madeByPass(ctx.tx, input.passId, input.taskId))
     retireTaskUnconditionally(ctx, input.taskId);
   else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
-  advanceTakeOut(ctx, { taskId: input.taskId, passId: input.passId }, { step: TakeOutStep.Done });
+  advanceTakeOut(
+    ctx,
+    { taskId: input.taskId, passId: input.passId },
+    { step: TakeOutStep.Done, ...(abandoned ? { discarded: true } : {}) },
+  );
   insertSystemNotice(
     ctx,
     input.taskId,
@@ -307,15 +311,16 @@ export async function takeOutSteps(
   if (keptBaseSha === null) throw new ConflictError(`The take-out of ${task.title} kept nothing`);
   const project = getProject(db, pass.projectId);
   const repo = project.repoPath;
-  const files =
-    row.keptSha === null
-      ? []
-      : (await git.filesChangedBetween(repo, keptBaseSha, row.keptSha)).filter(
-          pageMatcher(db, project, getTask(db, task.id), pass.id),
-        );
-
   if (row.step < TakeOutStep.PutBack) {
     const keptSha = row.keptSha;
+    // Read only before the put-back: inside an Abandon a restart past it may find the kept commit
+    // deleted and pruned.
+    const files =
+      keptSha === null
+        ? []
+        : (await git.filesChangedBetween(repo, keptBaseSha, keptSha)).filter(
+            pageMatcher(db, project, getTask(db, task.id), pass.id),
+          );
     let left: string[] = [];
     // A folder on another branch holds that branch's files: the pass's are never written into it.
     const on = await git.currentBranch(repo);

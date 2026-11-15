@@ -1,0 +1,1 @@
+ALTER TABLE `pass_take_outs` ADD `discarded` integer DEFAULT false NOT NULL;

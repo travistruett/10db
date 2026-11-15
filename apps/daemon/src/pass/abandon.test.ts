@@ -17,6 +17,7 @@ import {
   insertPassPageTask,
   insertTask,
   joinPass as joinPassRows,
+  lastTakeOut,
   listInbox,
   listSharedChanges,
   listTasks,
@@ -341,7 +342,25 @@ describe('abandonPass', () => {
         },
       },
       {
-        name: "after a page's kept refs were deleted, before its row was written",
+        name: "at a page's first kept-ref delete, before anything of it is deleted",
+        step: AbandonStep.SharedDropped,
+        kill: async (world) => {
+          const git = world.deps.git;
+          await expect(
+            abandonPassSteps(
+              deps(world.deps, {
+                ...git,
+                deleteKeptRef: dying(1, (...a: Parameters<Git['deleteKeptRef']>) =>
+                  git.deleteKeptRef(...a),
+                ),
+              }),
+              world.opened.pass.id,
+            ),
+          ).rejects.toThrow('the daemon died');
+        },
+      },
+      {
+        name: "after a page's kept refs were deleted and their commit pruned, before its row was written",
         step: AbandonStep.SharedDropped,
         kill: async (world) => {
           const git = world.deps.git;
@@ -357,6 +376,12 @@ describe('abandonPass', () => {
               world.opened.pass.id,
             ),
           ).rejects.toThrow('the daemon died');
+          // Nothing names the deleted commit any more, so git may drop it before the restart.
+          const kept = lastTakeOut(world.h.store.db, world.settings.id)?.keptSha;
+          if (kept == null) throw new Error('the take-out kept nothing');
+          world.h.git$('reflog', 'expire', '--expire=now', '--all');
+          world.h.git$('gc', '--prune=now', '--quiet');
+          expect(() => world.h.git$('cat-file', '-e', `${kept}^{commit}`)).toThrow();
         },
       },
       {
@@ -583,6 +608,26 @@ describe('abandonPass', () => {
     expect(read('src/settings/page.tsx')).toBe('settings\n');
     expect(read('src/shared.ts')).toBe('an uncommitted edit\n');
     expect(abandonCards()).toEqual([]);
+  });
+
+  it('names on its card only the pages it discarded, not one taken out before it, whose work stays', async () => {
+    w = await openPassWorld();
+    w.h.commit('src/shared.ts', 'landed\n');
+    const turn = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'settings, the turn\n');
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+    w.endTurn(turn);
+    await takeOutSteps(deps(), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+
+    await abandonPass(deps(), w.opened.pass.id);
+
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    expect(card.body).toContain('Discards: People (their changes are deleted).');
+    expect(card.body).not.toContain('Settings');
+    expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
+      'settings, the turn',
+    );
   });
 
   it('keeps naming the files it left when a Move on its card is refused', async () => {

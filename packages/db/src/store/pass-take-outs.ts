@@ -58,6 +58,7 @@ export function insertTakeOut(
     keptBaseSha: null,
     left: [],
     drops: [...input.drops],
+    discarded: false,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -78,6 +79,7 @@ export function advanceTakeOut(
     readonly keptSha?: string | null;
     readonly keptBaseSha?: string | null;
     readonly left?: readonly string[];
+    readonly discarded?: boolean;
   },
 ): PassTakeOutRow {
   const row = getTakeOut(ctx.tx, key);
