@@ -67,6 +67,20 @@ describe('yourMcpConfigHash', () => {
       { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:two@h/db' } },
       true,
     ],
+    ...['GIT_ASKPASS', 'SSH_ASKPASS', 'SUDO_ASKPASS', 'SSH_AUTH_SOCK', 'DEPLOY_CMD'].map(
+      (name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
+        `a changed ${name} value does`,
+        { ...stdio, env: { ...stdio.env, [name]: '/a/prog' } },
+        { ...stdio, env: { ...stdio.env, [name]: '/b/prog' } },
+        false,
+      ],
+    ),
+    [
+      'a changed host in a URL with userinfo does',
+      { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h1/db' } },
+      { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h2/db' } },
+      false,
+    ],
     [
       'a changed NODE_OPTIONS value does',
       stdio,

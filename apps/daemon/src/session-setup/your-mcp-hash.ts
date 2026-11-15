@@ -1,14 +1,20 @@
 import { createHash } from 'node:crypto';
 import type { McpConfigEntry, YourMcpSource } from '@10db/contracts';
+import { loadsCode } from '../sandbox';
 import { SENSITIVE_NAME } from '../sessions';
 import type { DeclaredYourServer } from './your-mcp-entry';
 
 /** A value that is a URL with a user and password in it. */
 const URL_WITH_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]+@/i;
 
-/** Whether an env entry holds a secret: named like one, or a URL carrying userinfo. */
-const isSecret = (name: string, value: string): boolean =>
-  SENSITIVE_NAME.test(name) || URL_WITH_USERINFO.test(value);
+/** The value with a URL's userinfo taken out, so a rotated password doesn't ask again but a new host does. */
+const withoutUserinfo = (value: string): string =>
+  URL_WITH_USERINFO.test(value)
+    ? value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i, '$1')
+    : value;
+
+/** Whether an env name holds a secret: named like one, and never a name that makes a program load code. */
+const isSecretName = (name: string): boolean => !loadsCode(name) && SENSITIVE_NAME.test(name);
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>
@@ -32,7 +38,7 @@ function normalized(source: YourMcpSource, server: DeclaredYourServer): unknown 
       args: server.args,
       cwd: server.cwd,
       env: sortedEntries(server.env).map(([name, value]) =>
-        isSecret(name, value) ? [name] : [name, value],
+        isSecretName(name) ? [name] : [name, withoutUserinfo(value)],
       ),
       envVars: sorted(server.envVars),
       ...filters,
@@ -59,6 +65,6 @@ export function yourMcpConfigHash(source: YourMcpSource, server: DeclaredYourSer
 export function shownEnvOf(server: DeclaredYourServer): McpConfigEntry[] {
   if (server.transport !== 'stdio') return [];
   return sortedEntries(server.env)
-    .filter(([name, value]) => !isSecret(name, value))
-    .map(([name, value]) => ({ name, value }));
+    .filter(([name]) => !isSecretName(name))
+    .map(([name, value]) => ({ name, value: withoutUserinfo(value) }));
 }
