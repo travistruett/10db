@@ -1,6 +1,6 @@
 # 10db ships the 10db-task skill and installs it for Claude Code and Codex
 
-**Status:** designed on 2026-11-14. Nothing in it is built.
+**Status:** built (designed on 2026-11-14). The skill's files and CLI are in `packages/agent-skill`; the daemon installs it from `apps/daemon/src/agent-skill`.
 
 **Decision:** `docs/architecture/decisions/2026-11-14-10db-installs-its-agent-skill-on-launch.md`.
 
