@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -60,6 +61,9 @@ const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscript
 // subscription through the logged-in claude; never in CI and never in `make gate`
 // (TENDB_LIVE_CLAUDE=1). Re-run it after each Claude Code or SDK upgrade.
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
+// Claude Code renders a PDF's pages with poppler's pdftoppm; without it a Read that names pages comes back
+// as an error and stores no page, so there is nothing to measure.
+const hasPdftoppm = spawnSync('pdftoppm', ['-v']).error === undefined;
 
 interface Judged {
   readonly req: ShapeToolRequest;
@@ -522,33 +526,37 @@ describe.skipIf(!live)('a Shape session, live', () => {
   // Shape spec §5.4: what a PDF Read adds to a request the session resends. The hook charges a page
   // READ_CHARGE_MAX_BYTES and refuses a Read that names no pages (read-budget.ts). These find what
   // Claude Code stored for the Read and print it, so the charge can be set from it.
-  it('returns the pages of a many-page PDF within the charge for each page', async () => {
-    const repo = createTempRepo();
-    const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
-    const long = join(filesDir, 'long.pdf');
-    writeFileSync(long, textPdf(40));
+  it.skipIf(!hasPdftoppm)(
+    'returns the pages of a many-page PDF within the charge for each page',
+    async () => {
+      const repo = createTempRepo();
+      const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
+      const long = join(filesDir, 'long.pdf');
+      writeFileSync(long, textPdf(40));
 
-    try {
-      const { transcript, reads } = await readInSession(
-        repo.path,
-        filesDir,
-        `Use the Read tool once on ${long} with its pages parameter set to "2-4", then say "done".`,
-      );
-      const blocks = mediaBlocks(transcript);
-      console.log(
-        `A 3-page Read of a ${String(statSync(long).size)} byte, 40-page PDF, bytes before base64: ${JSON.stringify(blocks)}`,
-      );
-      expect(reads.map((read) => read.input)).toEqual([{ file_path: long, pages: '2-4' }]);
-      expect(blocks).toHaveLength(3);
-      for (const block of blocks) {
-        expect(block.type).toBe('image');
-        expect(block.bytes).toBeLessThanOrEqual(READ_CHARGE_MAX_BYTES);
+      try {
+        const { transcript, reads } = await readInSession(
+          repo.path,
+          filesDir,
+          `Use the Read tool once on ${long} with its pages parameter set to "2-4", then say "done".`,
+        );
+        const blocks = mediaBlocks(transcript);
+        console.log(
+          `A 3-page Read of a ${String(statSync(long).size)} byte, 40-page PDF, bytes before base64: ${JSON.stringify(blocks)}`,
+        );
+        expect(reads.map((read) => read.input)).toEqual([{ file_path: long, pages: '2-4' }]);
+        expect(blocks).toHaveLength(3);
+        for (const block of blocks) {
+          expect(block.type).toBe('image');
+          expect(block.bytes).toBeLessThanOrEqual(READ_CHARGE_MAX_BYTES);
+        }
+      } finally {
+        repo.cleanup();
+        rmSync(filesDir, { recursive: true, force: true });
       }
-    } finally {
-      repo.cleanup();
-      rmSync(filesDir, { recursive: true, force: true });
-    }
-  }, 240_000);
+    },
+    240_000,
+  );
 
   it('returns a small PDF read whole within the charge for its pages', async () => {
     // The hook refuses this Read today; what it returns says whether a whole Read could be charged instead.
@@ -627,7 +635,9 @@ async function readInSession(
     home: homedir(),
     protectedReads: [],
     filesDir,
-    sandboxRoots: [realpathSync(tmpdir())],
+    // A daemon's sandbox roots are its own folders, not the whole temp dir: the checkout and the files
+    // this test makes sit in the temp dir and must stay readable.
+    sandboxRoots: [join(realpathSync(tmpdir()), '10db-sandbox-roots')],
   };
 
   let providerSessionId = '';
