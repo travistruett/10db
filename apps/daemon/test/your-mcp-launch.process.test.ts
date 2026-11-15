@@ -3,7 +3,7 @@ import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { laneWritableRoots, launchYourMcpServers } from '../src/sandbox';
-import { tempDir, type TempDir } from './fixtures';
+import { homeOutsideTemp, type TempDir } from './fixtures';
 
 // A builder's MCP server runs outside the sandbox, started by Claude Code with Claude Code's own
 // environment. The launch must hand it only its own env, from the home.
@@ -14,7 +14,7 @@ let checkout: string;
 let filesRoot: string;
 
 beforeEach(() => {
-  root = tempDir('your-mcp-process');
+  root = homeOutsideTemp('your-mcp-process');
   const base = realpathSync(root.path);
   home = join(base, 'home');
   checkout = join(base, 'checkout');

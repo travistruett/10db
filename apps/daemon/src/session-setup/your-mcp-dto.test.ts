@@ -8,7 +8,7 @@ import {
   type YourMcpServerKey,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { laneWritableRoots } from '../sandbox';
 import { yourMcpServerDtos } from './your-mcp-dto';
 import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
@@ -18,7 +18,7 @@ let root: TempDir;
 let home: string;
 let checkout: string;
 beforeEach(() => {
-  root = tempDir('your-mcp-dto');
+  root = homeOutsideTemp('your-mcp-dto');
   const base = realpathSync(root.path);
   home = join(base, 'home');
   checkout = join(base, 'checkout');

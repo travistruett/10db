@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { laneWritableRoots, type LaneWritableRoot } from './lane-writable';
 import {
   launchYourMcpServers,
@@ -32,7 +32,7 @@ function executable(path: string): void {
 }
 
 beforeEach(() => {
-  root = tempDir('your-mcp-launch');
+  root = homeOutsideTemp('your-mcp-launch');
   const base = realpathSync(root.path);
   home = join(base, 'home');
   checkout = join(base, 'checkout');

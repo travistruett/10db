@@ -1,7 +1,7 @@
 import { mkdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { LaneWritableKind, laneWritableRoots, underLaneWritable } from './lane-writable';
 
 let root: TempDir;
@@ -12,7 +12,7 @@ let worktrees: string;
 let lanes: string;
 
 beforeEach(() => {
-  root = tempDir('lane-writable');
+  root = homeOutsideTemp('lane-writable');
   base = realpathSync(root.path);
   home = join(base, 'home');
   checkout = join(base, 'checkout');
