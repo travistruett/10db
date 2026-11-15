@@ -948,24 +948,46 @@ describe.skipIf(!live)(
       expect(readFileSync(join(world.checkout, 'patch-allowed.txt'), 'utf8')).toBe('allowed\n');
     });
 
-    // The hook's tool_use_id is the thread item's id, which is how a refusal reaches its tool call. In code
-    // mode (the only way a lane's model runs a command) Codex reports no item for a call the hook refused, so
-    // the refusal has no call to carry it, and the model is told the reason only.
-    it('names a call by the same id in the hook and in its thread item', async () => {
+    // The hook's tool_use_id is the thread item's id (an allowed call's item has the id its hook call had). In code
+    // mode Codex reports no item for a call the hook refused, so the session shows that call from the hook's input,
+    // under the same id, with who refused it.
+    it('shows a refused call as denied, by whom, and names an allowed call by its hook id', async () => {
       const run_ = await runSession(world, [
         run(`echo ${DENIED} > bash-denied.txt`),
+        patch(addFile(`${DENIED}-patch.txt`, 'denied')),
+        run(`echo ${JUDGED} > bash-judged.txt`),
         run('echo allowed > bash-allowed.txt'),
         { say: 'done' },
       ]);
       expectTurn(run_);
-      const hookIds = world.calls.map((c) => c.toolUseId);
-      const itemIds = new Set(
-        run_.events.flatMap((e) => (e.type === 'tool_call' ? [e.call.id] : [])),
-      );
-      const [refused, allowed] = hookIds;
-      expect(allowed).toBeTruthy();
-      expect(itemIds).toEqual(new Set([allowed]));
-      expect(itemIds.has(refused ?? '')).toBe(false);
+      const idOf = (needle: string): string => {
+        const id = world.calls.find((c) => c.input.includes(needle))?.toolUseId;
+        if (id === undefined || id === null) throw new Error(`no hook id for ${needle}`);
+        return id;
+      };
+      // The last event of each call is its final view; a patch's per-file call is `<item id>:<index>`.
+      const finalOf = (id: string) =>
+        run_.events
+          .flatMap((e) => (e.type === 'tool_call' ? [e.call] : []))
+          .filter((c) => c.id === id || c.id.startsWith(`${id}:`))
+          .at(-1);
+      expect(finalOf(idOf(`${DENIED} >`))).toMatchObject({
+        status: 'denied',
+        deniedBy: '10db',
+        refusal: DENIAL_REASON,
+      });
+      expect(finalOf(idOf(`${DENIED}-patch`))).toMatchObject({
+        status: 'denied',
+        deniedBy: '10db',
+      });
+      expect(finalOf(idOf(JUDGED))).toMatchObject({
+        status: 'denied',
+        deniedBy: 'judge',
+        limit: 'writes_live',
+        soft: false,
+        refusal: 'Skipped: a limit.',
+      });
+      expect(finalOf(idOf('bash-allowed'))).toMatchObject({ status: 'done', deniedBy: null });
     });
 
     // Sessions spec §5.5, §16 check 3, trust line L1: a chat's thread on Codex. The judge stops a call at a
@@ -1394,7 +1416,7 @@ describe.skipIf(!live)(
         ),
       );
       // So 10db sends Codex every picture as a local image, on every push.
-      expect(outputs[0]).toContain('does not allow the tool "view_image" in a lane');
+      expect(outputs[0]).toContain('does not allow the tool "view_image" in this session');
       expect(outputs[1]).toContain('operation not permitted');
       expect(outputs[1]).toContain('exit=1');
     });

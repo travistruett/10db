@@ -165,7 +165,7 @@ function unreadable(toolName: string): string {
 }
 
 /** Who refused a hook call, told for the call's tool item once Codex reports it declined. */
-export type OnDenied = (toolUseId: string, denial: ClaudeDenial) => void;
+export type OnDenied = (toolUseId: string, denial: ClaudeDenial, hook: HookInput) => void;
 
 const refusedByTenDb = (reason: string): ClaudeDenial => ({
   by: DeniedBy.TenDb,
@@ -182,14 +182,10 @@ export async function judgeHookCall(
   spec: Pick<AgentSessionCore, 'preToolUse' | 'canUseTool' | 'judgeCall'>,
   hook: HookInput,
   signal: AbortSignal,
-  denials: {
-    /** Whether the builder is in the session, so a judge's refusal is one a go-ahead may clear. */
-    readonly attended: boolean;
-    readonly onDenied: OnDenied;
-  } = { attended: false, onDenied: () => undefined },
+  onDenied: OnDenied = () => undefined,
 ): Promise<GuardAnswer> {
   const refused = (denial: ClaudeDenial, interrupt = false): GuardAnswer => {
-    if (hook.tool_use_id !== undefined) denials.onDenied(hook.tool_use_id, denial);
+    if (hook.tool_use_id !== undefined) onDenied(hook.tool_use_id, denial, hook);
     return refuse(denial.reason, interrupt);
   };
   const calls = guardCalls(hook);
@@ -220,8 +216,8 @@ export async function judgeHookCall(
               by: DeniedBy.Judge,
               reason: verdict.reason,
               limit: verdict.judged.limit,
-              // An attended session's builder may still say go ahead; a lane's skip is final.
-              soft: denials.attended,
+              // A judge's refusal that reaches the hook is final: an attended limit is a card, not a deny.
+              soft: false,
             }
           : refusedByTenDb(verdict.reason),
       );
