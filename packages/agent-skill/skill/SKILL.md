@@ -1,0 +1,160 @@
+---
+name: 10db-task
+description: Use when the user asks to create, add, file or queue a task, card or ticket in 10db (the local Claude Code factory app), or to edit, remove or start one, e.g. "create a task for this in 10db", "put this on the 10db board", "file that as a bug", from any Claude Code session. Also use to assess or fix a 10db project's hazards (lockfiles, migrations, the commands that write them), e.g. after a project is added or when its hazards look wrong, and to read or verify a project's settings (gate, delivery, base branch, account, rigor, areas) or what a task depends on.
+---
+
+# Create and manage 10db tasks
+
+The running 10db app takes tasks over a local API. `tendb.mjs` (next to this file) finds the app,
+reads its token, checks a draft against the New Task form's rules and posts it. Talk to the app only
+through it: never `cat`, echo or interpolate `ui-token` (not even in `$(...)`), and never print it.
+
+```
+T=~/.10db/skills/10db-task/tendb.mjs
+node $T context                          # projects for this repo: areas, default rigor, kinds, open tasks
+                                         #   (each with dependsOn, rigor, effectiveRigor and kinds)
+node $T project <projectId|name>         # one project's settings; reads only
+node $T areas <projectId> <path>...      # which areas repo-relative paths fall in
+node $T create <projectId> <draft.json> [--dry-run]
+node $T edit <taskId> <patch.json> [--dry-run]   # title, description, acceptanceCriteria, rigor, kinds
+node $T remove <taskId>                  # a task that has never started
+node $T start <taskId>                   # as the card menu's Start does
+node $T join <taskId> <batchId>          # start a task inside an open batch: one branch, one PR
+node $T goal <projectId> <brief.md> [--dry-run]  # adopt a goal brief (goals spec §11)
+node $T plan-import <projectId> <bundle.json> [--dry-run]  # import a planning effort's bundle into one Plan
+node $T hazards <projectId> [additions.json] [--dry-run]  # print hazards, or add to them (never removes)
+```
+
+**Landing:** related tasks go in one batch by default (start the first, `join` the rest), not one PR
+per task. The builder works in big shifts and prefers fewer, larger landings.
+
+## Create
+
+The builder files tasks by describing a problem; they never copy a draft into the app. Create the
+task as soon as it is drafted, then report it. No confirmation step: a wrong task is edited or removed.
+
+1. **Project.** Run `context`. One match (`"matched": 1`): use it. Several: ask which. None: it
+   lists every project; ask which, or say this repo isn't a 10db project.
+2. **Draft** from the conversation and the code it touches:
+   - **title**: one line, under 200 characters, says the outcome ("Keep the Board's scrollbar off
+     the columns"), not the activity ("Fix scrollbar bug").
+   - **headline**: always. The plain-words what, a few words on one line, at most 80 characters
+     ("Odd files can't freeze 10db"). The Board names the card by it; the title stays the PR's.
+   - **why**: whenever the reason isn't obvious from the headline. One sentence, one line, at most
+     200 characters, on why the task matters to the user.
+   - **description**: what is wrong or wanted, where, and why it matters; name the files or views
+     involved. State what the user reported; a cause or effect you inferred is marked as a guess.
+     Leave the approach to the agent unless the user chose one.
+   - **acceptanceCriteria**: one array entry per thing that must hold when done, each something
+     someone could see or measure. The agent works until all hold; a reviewer checks each and asks for
+     a test, and the gate runs anyway, so never add "tests pass" or "a test covers this".
+     - ✗ Make search faster → ✓ Search shows results in under a second with 10,000 tasks
+     - ✗ Fix the login bug → ✓ Signing in with an expired password says so, instead of showing a blank page
+   - **areas**: find the files involved (search the repo for the view, module or command named),
+     run `areas` on them and use the areas they fall in. With one area, use it without searching.
+     Only the project's area names are valid; hazards (migrations, deps, harness) are not areas.
+   - **dependsOn**: ids from `openTasks`, only when this work needs another task finished first.
+   - **kinds**: keys from `kinds` (security, auth, migration, dependency, schema, infra, ui, docs, or the
+     builder's own), only when the user says the work is of that kind. Leave it out otherwise: 10db's rules
+     (areas) and its judge add kinds on their own. A kind you give pins.
+   - **rigor**: leave it out, so 10db sizes the task (rules, then the judge; the project's default without one).
+     Give `light`, `standard`, `careful` or `critical` only when the user names one; it pins, and the daemon
+     refuses one below a kind's minimum.
+3. **Write** the draft to a temp file (the session's scratchpad if there is one) and run `create`.
+   If it reports problems, fix the draft and rerun.
+4. **Report** the task id, title, areas and criteria in a few lines, and say it can be changed or
+   removed.
+
+Several tasks from one conversation: create each, then report them together.
+
+**Preview first** only when the user says dry run, preview, "draft it" or "don't create": run
+`create ... --dry-run`, show the draft and create nothing until they say so.
+
+## Edit, remove, start
+
+- **Edit** an open task's title, headline, why, description, criteria, rigor or kinds with a patch file holding only
+  the fields that change. Areas and dependencies can't be edited: remove the task and create it again
+  while it hasn't started.
+- **Remove** works only on a task that has never started and that no open task depends on. A task
+  that has run is cancelled from its batch on the Board (Abandon) instead; the daemon's refusal says so.
+- **Start** only when the user asks. It starts work and spends usage, as the card menu's Start does.
+  The daemon can still refuse after answering (a dirty checkout, a git trust card); that refusal lands
+  in the Inbox, so check it if the task doesn't move to In progress.
+
+## Import a planning effort
+
+`plan-import` hands a whole planning effort (documents, findings, decisions, tasks) to 10db as one Plan. The bundle
+is a `PlanBundle` JSON file; its document bodies may be `bodyPath` files beside it. The daemon reads the files itself,
+so pass the path, never the text. Always run `--dry-run` first and show what it would write. The bundle must not sit
+under `/tmp`, the data dir or a worktree root, and no file may have a second hard link. Importing the same bundle id
+again adds only new revisions and versions. The builder Converts the Plan in the app; importing starts nothing.
+
+## Verify a project's setup
+
+`project` prints what the project's Settings hold, and `context` what each open task depends on. Both only read.
+When the builder asks you to check a project, or after one is added or changed, compare:
+
+- **gate**: `gate.command` is the command the repo's own docs say proves a change (its AGENTS.md or Makefile), and
+  runs from the repo root. `changedCheck` and `precheck` are optional faster checks; null is fine.
+- **delivery and landing**: `delivery.label` is "Open a pull request" or "Commit directly". Under pull requests,
+  `baseBranch` exists on origin and is the branch the repo opens PRs to, and `landing.label` says whether GitHub
+  merges by itself or holds for the builder. Under "Commit directly", Settings hides both and `note` says so.
+- **account**: `account.label` is the account the builder meant for this repo; `fallbackAccount` takes over when it
+  runs out, or is null.
+- **defaultRigor**: what a task gets when no rule or kind sizes it.
+- **areas**: every tracked file falls in one (run `areas` on a sample, or check a `catchAll` area exists).
+- **hazards**: assess them as below.
+- **dependencies**: each task's `dependsOn` names the tasks that must finish first; a chain reads backward
+  from the last task.
+
+Report each value with what you expected and say which differ. Never change a setting from here: hazards are the only
+thing this skill adds to, and the builder changes the rest in Settings.
+
+## Assess a project's hazards
+
+A hazard is something only one task may change at a time: its globs make an edit need the claim and
+flag an unclaimed change after a session; its commands are word prefixes the guard refuses until the
+claim is held. 10db adds every project with one stock list (pnpm, npm, yarn, bun, cargo, drizzle), so a
+repo on another stack, or one that wraps its tools in `make` or `docker compose exec`, is under-covered.
+The builder never edits hazards by hand; you assess and fix them.
+
+1. **Read the current list:** `hazards <projectId>`.
+2. **Gather evidence from the repo, never from memory:**
+   - Tracked lockfiles and manifests anywhere: `git ls-files | grep -E '(^|/)(uv\.lock|poetry\.lock|Pipfile\.lock|requirements[^/]*\.txt|pyproject\.toml|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|package\.json|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?)$'`.
+     A root-only stock glob such as `pnpm-lock.yaml` misses a nested one; add `**/` forms.
+   - Migration folders (`git ls-files | grep /migrations/`), and generated folders the repo declares.
+   - The commands that write them, from the repo's own words: `AGENTS.md` files, `Makefile` targets,
+     `package.json` scripts, compose services, `docs/development`. Prefer the entry points the repo
+     tells agents to use (`make migration`, `make backend-lock`) plus the tool's own writing commands
+     (`uv lock`, `uv add`). A command the guard sees through a wrapper it doesn't unwrap
+     (`docker compose exec <svc> …`, `make …`, `python3 script …`) needs its literal prefix listed.
+   - Commands that apply migrations to the shared database count too (`manage.py migrate`,
+     `make db-prepare`), as the stock `pnpm db:migrate` does.
+   - A prefix also catches read-only uses of the same command. When the repo has its own entry point
+     for the write (`make migration`), list that and leave the check (`makemigrations --check`) free.
+     When the write and the check share a prefix, list it anyway: a check that needs the claim only
+     waits, while a missed write lets two lanes make clashing migrations. Never list `make gate`.
+3. **Prove it:** with the merged list, run the guard's own `judgeToolUse`
+   (`apps/daemon/src/guard/judge.ts`) through `pnpm exec tsx` from `apps/daemon` on the real command
+   forms (with flags, args, `cd … &&`): each writing command is denied unclaimed and allowed claimed,
+   each read-only one is allowed, and against the old list the writing ones were allowed. Keep the
+   script in the scratchpad.
+4. **Apply** with `hazards <projectId> <additions.json>` (a list of `{ name, globs?, commands?, scope? }`).
+   It appends to the hazard of the same name, or adds a new one (needs a glob; scope `project` unless
+   given), reports how many tracked files each new glob covers (0 means a wrong glob), and refuses
+   removals and scope changes. Rerun it: it should say nothing is left to add.
+5. **Removing or loosening** a hazard only makes 10db less safe: never do it here. Say what you'd
+   remove and why, and let the builder decide. A hazard only makes a lane wait for a claim; a command
+   no lane should ever run (one that touches a remote or production database, or deploys) is not a
+   hazard. Report it to the builder as a guard gap instead.
+6. **Report** what you added and the evidence for each entry, in a few lines.
+
+## Errors
+
+| Message                             | Do                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| 10db isn't running / couldn't reach | Ask the user to open the 10db app, then rerun                            |
+| refused the token (401)             | The app restarted; rerun once, then ask the user                         |
+| doesn't fit 10db's New Task rules   | Fix the listed fields; don't bypass the check                            |
+| failed with 400                     | The daemon's own validation; fix the draft from its message              |
+| failed with 409                     | The task has started, is done, or has dependents; the message says which |

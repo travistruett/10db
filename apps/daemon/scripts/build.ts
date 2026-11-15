@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { buildAgentSkill } from '@10db/agent-skill';
 import { DB_MIGRATIONS_DIR } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { build } from 'esbuild';
@@ -19,6 +20,7 @@ for (const name of [
   'vendor',
   'drizzle',
   'harness',
+  'agent-skill',
   'better_sqlite3.node',
   'build-info.json',
   'release',
@@ -85,6 +87,8 @@ const snapshot = z
 if (snapshot !== undefined) cpSync(snapshot, resolve(outDir, 'catalogue-snapshot.json'));
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
+// The 10db-task skill the app installs for the builder's agents, with the version it is judged by.
+await buildAgentSkill(resolve(outDir, 'agent-skill', '10db-task'));
 // The scripts the app installs a newer build with (src/self-update), laid out as in the repository
 // because they find each other relative to it.
 for (const name of ['install-app.sh', 'installed-app.sh']) {

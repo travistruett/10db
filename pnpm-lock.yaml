@@ -275,6 +275,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@10db/agent-skill':
+        specifier: workspace:*
+        version: link:../../packages/agent-skill
       '@anthropic-ai/sdk':
         specifier: 0.137.0
         version: 0.137.0(zod@4.6.7)
@@ -407,7 +410,7 @@ importers:
         version: link:../daemon
       '@axe-core/playwright':
         specifier: 4.14.0
-        version: 4.14.0(playwright-core@1.64.1)
+        version: 4.14.0(playwright-core@1.65.0)
       '@babel/core':
         specifier: 8.0.10
         version: 8.0.10
@@ -462,6 +465,19 @@ importers:
       vite:
         specifier: 8.3.5
         version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(sugarss@5.0.2(postcss@8.5.32))(tsx@4.23.15)(yaml@2.9.1)
+
+  packages/agent-skill:
+    dependencies:
+      '@10db/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
 
   packages/contracts:
     dependencies:
@@ -5523,10 +5539,10 @@ snapshots:
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
 
-  '@axe-core/playwright@4.14.0(playwright-core@1.64.1)':
+  '@axe-core/playwright@4.14.0(playwright-core@1.65.0)':
     dependencies:
       axe-core: 4.14.0
-      playwright-core: 1.64.1
+      playwright-core: 1.65.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
