@@ -1,6 +1,7 @@
 import type { Culprit, Owner, OverloadNote, OverloadReport } from './guard';
 
 export const OVERLOAD_FOLD_KEY = 'machine-overloaded';
+export const DISK_FOLD_KEY = 'machine-disk-low';
 
 export interface OverloadCard {
   readonly title: string;
@@ -55,6 +56,24 @@ export function overloadCard(report: OverloadReport): OverloadCard {
     title: 'The Mac is overloaded: 10db is holding new lanes and gates',
     body: `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
     foldKey: OVERLOAD_FOLD_KEY,
+  };
+}
+
+/** Whole gigabytes, rounded down so a reading just under the floor never reads as the floor. */
+export function gigabytes(bytes: number): string {
+  return String(Math.floor(bytes / 1_000_000_000));
+}
+
+/** The one card the builder gets while free disk is below the floor. */
+export function diskCard(reading: {
+  readonly freeBytes: number;
+  readonly floorBytes: number;
+  readonly clearBytes: number;
+}): OverloadCard {
+  return {
+    title: 'Free disk is low: 10db is holding new lanes',
+    body: `${gigabytes(reading.freeBytes)} GB free on the volume 10db makes worktrees on, below the ${gigabytes(reading.floorBytes)} GB floor. 10db starts no new lane until more than ${gigabytes(reading.clearBytes)} GB is free, and starts them again by itself then. Lanes, gates and ships already running carry on, and each batch that ships removes its worktree.`,
+    foldKey: DISK_FOLD_KEY,
   };
 }
 
