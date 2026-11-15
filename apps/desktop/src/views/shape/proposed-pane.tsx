@@ -11,6 +11,7 @@ import {
 import { shortAgo } from '../factory/short-ago';
 import { useNow } from '../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
+import { agentRehearses } from './agent-rehearsal';
 import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
 import { PreviewPanel } from './preview-panel';
@@ -75,8 +76,7 @@ export function ProposedPane({
   const dismiss = useDismissFinding(view?.shape.id ?? null);
   const rehearse = useRehearseShape(view?.shape.id ?? null);
   // An agent without subagents can't run the rehearsal's implementer.
-  const rehearses =
-    useConversation(view?.conversationId ?? null).data?.capabilities.subagents ?? false;
+  const rehearses = agentRehearses(useConversation(view?.conversationId ?? null));
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -186,12 +186,16 @@ export function ProposedPane({
           </Text>
           <Group gap="xs" wrap="nowrap">
             {/* An imported Plan's tasks were planned elsewhere, and a rehearsal can't read them or run without subagents. */}
-            {view?.shape.importedAt == null && rehearses ? (
+            {view?.shape.importedAt == null && rehearses !== false ? (
               <Button
                 variant="default"
                 size="xs"
                 disabled={
-                  view === undefined || !unread || view.turn.rehearsing || rehearse.isPending
+                  view === undefined ||
+                  rehearses === null ||
+                  !unread ||
+                  view.turn.rehearsing ||
+                  rehearse.isPending
                 }
                 onClick={() => {
                   rehearse.mutate(undefined);
@@ -327,7 +331,8 @@ function ConvertPanel({
   const stop = useStopConversation();
   const rehearse = useRehearseShape(view.shape.id);
   // Until the conversation loads the agent is unknown, so no rehearsal starts yet.
-  const capabilities = useConversation(view.conversationId).data?.capabilities;
+  const conversation = useConversation(view.conversationId);
+  const capabilities = conversation.data?.capabilities;
   const { mutate: startRehearsal } = rehearse;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const close = () => {
@@ -343,7 +348,7 @@ function ConvertPanel({
       view={view}
       answering={view.turn.running}
       agentLabel={capabilities?.label ?? 'the agent'}
-      rehearses={capabilities?.subagents ?? false}
+      rehearses={agentRehearses(conversation)}
       pending={convert.isPending}
       refusals={refusals}
       failure={convert.error?.message ?? null}

@@ -33,8 +33,11 @@ export interface ConvertModalProps {
   readonly answering: boolean;
   /** The agent's name as the UI shows it. */
   readonly agentLabel: string;
-  /** The agent can run the rehearsal's implementer; without it no rehearsal starts and none is offered. */
-  readonly rehearses: boolean;
+  /**
+   * The agent can run the rehearsal's implementer; without it no rehearsal starts and none is offered.
+   * Null while that is not known yet: nothing starts and Convert waits.
+   */
+  readonly rehearses: boolean | null;
   readonly pending: boolean;
   /** Every reason the last Convert was refused; nothing was written. */
   readonly refusals: readonly string[];
@@ -85,7 +88,7 @@ function ConvertForm({
   // An imported Plan's tasks were planned elsewhere, and an agent without subagents can't run the
   // rehearsal: no rehearsal reads them, and they are named once.
   const imported = view.shape.importedAt !== null;
-  const unrehearsed = imported || !rehearses;
+  const unrehearsed = imported || rehearses === false;
   const unrehearsedTasks = unrehearsed ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
   const unrehearsedWhy = imported ? 'Imported tasks' : `Tasks on ${agentLabel}`;
   const warnings = [
@@ -105,10 +108,11 @@ function ConvertForm({
       asked.current = false;
       return;
     }
-    if (unrehearsed || asked.current || rehearsing || unread.length === 0) return;
+    if (rehearses === null || unrehearsed || asked.current || rehearsing || unread.length === 0)
+      return;
     asked.current = true;
     onRehearse(unread);
-  }, [opened, unrehearsed, rehearsing, unread, onRehearse]);
+  }, [opened, rehearses, unrehearsed, rehearsing, unread, onRehearse]);
 
   const convert = async (interrupt: boolean): Promise<void> => {
     const ids = chosen.map((r) => r.id);
@@ -152,7 +156,7 @@ function ConvertForm({
           ) : null}
           <Button
             loading={pending}
-            disabled={chosen.length === 0 || answering}
+            disabled={chosen.length === 0 || answering || (rehearses === null && !imported)}
             onClick={() => {
               void convert(false);
             }}
