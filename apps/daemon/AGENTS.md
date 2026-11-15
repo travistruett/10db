@@ -36,6 +36,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   given, so an in-process harness never reaches Slack). Only the installed app's daemon messages people; the e2e
   web server, the live acceptance daemon, `scripts/dev.sh` and every daemon test that spawns the entry set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
+- `TENDB_DISK=off` keeps a daemon from reading free disk, so a runner's or container's low disk never holds its
+  lanes (`DaemonOptions.disk` is off unless given; the entry point gives it otherwise). The e2e web server sets it.
 - `slack/` is the only module that calls Slack: `createSlackClient` takes an injected `fetch`, token reader and
   `Clock`, reads parse with zod, and a `SlackError` names the method and a code, never the token. Reads are GETs and
   writes JSON POSTs. `stakeholders/` holds the pure texts and rules around it (compose, escape, scan, read a reply,
