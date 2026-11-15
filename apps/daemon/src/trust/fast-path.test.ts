@@ -26,6 +26,12 @@ beforeAll(() => {
   mkdirSync(join(checkout, 'a', 'b'), { recursive: true });
   symlinkSync(join('a', 'b'), join(checkout, 'lnk'));
   writeFileSync(join(root, 'outside.txt'), 'private\n');
+  // A folder holding a link to a folder inside the checkout, and one holding a link out in node_modules.
+  mkdirSync(join(checkout, 'tree'));
+  symlinkSync(join('..', 'a'), join(checkout, 'tree', 'to-dir'));
+  mkdirSync(join(checkout, 'deps', 'node_modules'), { recursive: true });
+  writeFileSync(join(checkout, 'deps', 'x.ts'), 'x\n');
+  symlinkSync(root, join(checkout, 'deps', 'node_modules', 'escape'));
   // A link inside the checkout that leads out of it.
   symlinkSync(root, join(checkout, 'out'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
@@ -65,6 +71,15 @@ describe('fastPathAllows', () => {
     ['Glob through a link out in its literal prefix', 'Glob', { pattern: 'out/*.txt' }, false],
     ['Glob over a folder holding a link out', 'Glob', { pattern: '**/*.ts' }, false],
     ['Glob for TypeScript', 'Glob', { pattern: '**/*.ts', path: 'src' }, true],
+    ['Glob over a link to a folder inside', 'Glob', { pattern: '**/*.ts', path: 'tree' }, false],
+    [
+      'Glob that can reach a link out in node_modules',
+      'Glob',
+      { pattern: '**/*.ts', path: 'deps' },
+      false,
+    ],
+    ['Glob one level down into node_modules', 'Glob', { pattern: '*/*.ts', path: 'deps' }, false],
+    ['Glob that cannot enter node_modules', 'Glob', { pattern: '*.ts', path: 'deps' }, true],
     ['Glob with a brace holding ..', 'Glob', { pattern: '{..,x}/*.txt' }, false],
     ['Glob with an extglob holding ..', 'Glob', { pattern: '@(..)/*.txt' }, false],
     ['Glob with a plus extglob', 'Glob', { pattern: '+(..)/*.txt' }, false],

@@ -118,7 +118,7 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
 /** Brace, extglob and escape syntax: each can spell a path no segment-by-segment check sees. */
 const GLOB_SYNTAX = /[{}\\]|[@!+*?]\(/;
 const GLOB_MAGIC = /[*?[\]]/;
-/** The most directory entries a glob's search root is read for links before the judge is asked instead. */
+/** The most directory entries a glob's search is read for links before the judge is asked instead. */
 const GLOB_WALK_MAX = 5000;
 
 /** Whether a glob pattern matches only below the folder it is run in: plain syntax, not absolute or climbing. */
@@ -131,56 +131,63 @@ function patternStaysBelow(pattern: string): boolean {
   );
 }
 
-/** The leading segments of a pattern with no wildcard in them, and whether the pattern has a wildcard at all. */
-function literalPrefix(pattern: string): { readonly prefix: string; readonly wild: boolean } {
+/**
+ * The leading segments of a pattern with no wildcard in them, whether the pattern has a wildcard at all, and how
+ * many folder levels below the prefix it can descend (unbounded for `**`).
+ */
+function splitPattern(pattern: string): {
+  readonly prefix: string;
+  readonly wild: boolean;
+  readonly depth: number;
+} {
   const segments = pattern.split('/');
   const at = segments.findIndex((segment) => GLOB_MAGIC.test(segment));
-  return at === -1
-    ? { prefix: pattern, wild: false }
-    : { prefix: segments.slice(0, at).join('/'), wild: true };
+  if (at === -1) return { prefix: pattern, wild: false, depth: 0 };
+  const rest = segments.slice(at);
+  return {
+    prefix: segments.slice(0, at).join('/'),
+    wild: true,
+    depth: rest.includes('**') ? Infinity : rest.length - 1,
+  };
 }
 
 /**
- * Whether a folder tree holds no link that leads out of the checkout or the temp dir. A link is not followed.
- * A tree too large to read within the limit counts as holding one; `.git` and dependency installs are not
- * entered unless the walk starts in them.
+ * Whether the folders a pattern can descend into, `depth` levels below `root`, hold no link at all: the tool may
+ * follow one and chain through more. A tree too large to read within the limit counts as holding one. Every
+ * folder is entered, `.git` and `node_modules` too, since a pattern that can reach them reads them.
  */
-function holdsNoLinkOut(root: string, ctx: FastPathContext): boolean {
+function holdsNoLink(root: string, depth: number): boolean {
   let seen = 0;
-  const pending = [root];
+  const pending: { readonly dir: string; readonly level: number }[] = [{ dir: root, level: 0 }];
   while (pending.length > 0) {
-    const dir = pending.pop() ?? root;
+    const next = pending.pop();
+    if (next === undefined) break;
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = readdirSync(next.dir, { withFileTypes: true });
     } catch {
       return false;
     }
     for (const entry of entries) {
       seen += 1;
-      if (seen > GLOB_WALK_MAX) return false;
-      const path = join(dir, entry.name);
-      if (entry.isSymbolicLink()) {
-        if (![ctx.checkout, ctx.tmpDir].some((inside) => isWithinOnEveryReading(inside, path))) {
-          return false;
-        }
-      } else if (entry.isDirectory() && entry.name !== '.git' && entry.name !== 'node_modules') {
-        pending.push(path);
+      if (seen > GLOB_WALK_MAX || entry.isSymbolicLink()) return false;
+      if (entry.isDirectory() && next.level < depth) {
+        pending.push({ dir: join(next.dir, entry.name), level: next.level + 1 });
       }
     }
   }
   return true;
 }
 
-/** Whether a Glob may run with no model: plain syntax, and a search that stays inside with no link out. */
+/** Whether a Glob may run with no model: plain syntax, and a search that stays inside and meets no link. */
 function globStaysIn(pattern: string, path: string, cwd: string, ctx: FastPathContext): boolean {
   if (!patternStaysBelow(pattern)) return false;
   if (pattern.split('/').some((segment) => nameIsSecret(segment))) return false;
-  const { prefix, wild } = literalPrefix(pattern);
+  const { prefix, wild, depth } = splitPattern(pattern);
   const reach = prefix === '' ? path : join(path, prefix);
   const target = from(cwd, reach);
   if (namesSecret(target, ctx.secretFiles) || !staysIn(reach, cwd, ctx)) return false;
-  return !wild || (isDirectory(target) && holdsNoLinkOut(target, ctx));
+  return !wild || (isDirectory(target) && holdsNoLink(target, depth));
 }
 
 /** Whether a read command may open or list `word`: an existing, non-secret file (or folder) inside. */
