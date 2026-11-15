@@ -22,7 +22,9 @@ function unescaped(raw: string): string {
 
 /** A route without a trailing slash, the root kept: `/board/` is `/board`. */
 export function routeKey(route: string): string {
-  return route.length > 1 ? route.replace(/\/+$/u, '') || '/' : route;
+  let end = route.length;
+  while (end > 1 && route[end - 1] === '/') end -= 1;
+  return route.slice(0, end);
 }
 
 const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\w$]/u.test(ch);

@@ -361,6 +361,10 @@ describe('codeRoutes over a hostile router file', () => {
     { name: 'nav objects nested deep', text: `${'{a:'.repeat(20_000)}{ to: "/a", label: "A" }` },
     { name: 'quotes never closed', text: `{ to: "/a", label: '` + "'x".repeat(30_000) },
     {
+      name: 'a route of slashes not at its end',
+      text: `{ to: "${'/'.repeat(80_000)}x", label: "A" }`,
+    },
+    {
       name: 'routes to many components defined nowhere',
       text: Array.from(
         { length: 8_000 },
