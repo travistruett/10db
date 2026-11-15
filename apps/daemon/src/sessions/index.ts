@@ -22,6 +22,7 @@ export {
 } from './types';
 export type {
   AccountLogin,
+  CodexServerExtras,
   AgentCommand,
   ConversationReadSpec,
   InterruptReceipt,
@@ -44,10 +45,17 @@ export type {
   ToolDecision,
   ToolRequest,
   TurnResult,
+  YourSessionServer,
 } from './types';
 export {
+  EnvName,
+  expandFrom,
+  HeaderMap,
   ProjectMcpError,
   readRepoMcp,
+  RemoteUrl,
+  TENDB_MCP_SERVER,
+  YourMcpExpandError,
   resolveProjectMcp,
   skippedServersNote,
   splitProjectMcp,
@@ -59,10 +67,14 @@ export { createUnavailableAdapter } from './unavailable-adapter';
 export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';
 export {
   readRepoConfigFile,
+  readRepoConfigFileIn,
+  readRepoFileBytes,
   readRepoFileBytesIn,
   RepoConfigFileError,
   REPO_CONFIG_MAX_BYTES,
   type RepoFileBytes,
 } from './repo-config-file';
 export { streamEventLogFields } from './stream-log';
+export { describeIssuePaths } from './config-issues';
+export { McpServerName } from './mcp-server-name';
 export { toolCallActivity, type ToolTarget } from './tool-target';

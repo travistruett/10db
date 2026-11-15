@@ -1,6 +1,10 @@
 import {
+  ConflictError,
+  InvalidError,
   JudgeDecision,
   NotFoundError,
+  YourMcpServerState,
+  YourMcpSource,
   Provider,
   agentKind,
   providerOf,
@@ -18,19 +22,23 @@ import { allCheckouts } from '../delivery';
 import type { StateStore } from '../events';
 import type { Judge } from '../judge';
 import {
+  approveMcpServer,
   appTrustSwitches,
+  mcpApprovals,
   projectTrustOverrides,
   setAppTrustSwitches,
   setProjectTrustOverrides,
   trustSwitchesFor,
   warnInvalidTrust,
 } from '../permissions';
-import type { LaneSandbox } from '../sandbox';
+import { laneWritableRoots, SYSTEM_TEMP_ROOTS, type LaneSandbox } from '../sandbox';
 import type { AgentAdapter } from '../sessions';
 import {
   InstalledPluginsError,
   planSessionSetup,
   readInstalledPlugins,
+  readYourMcpConfig,
+  yourMcpServerDtos,
   type InstalledPlugin,
 } from '../session-setup';
 import { projectLiveSystems, setProjectLiveSystems } from '../trust';
@@ -40,6 +48,7 @@ export type TrustServices = Pick<
   ApiServices,
   | 'trustSettings'
   | 'setTrustSwitches'
+  | 'approveYourMcpServer'
   | 'projectTrust'
   | 'setProjectTrust'
   | 'liveSystems'
@@ -79,6 +88,13 @@ export function createTrustServices(deps: {
   readonly builderHome: string;
   /** The roots lanes write outside the registered checkouts: the worktree root and the lane temp roots. */
   readonly laneWritableRoots: readonly string[];
+  /** The folder worktrees are made in, whole: a lane can write anywhere in it. */
+  readonly worktreeBase: string;
+  /** The login shell's own `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, which 10db's servers list doesn't follow. */
+  readonly login: {
+    readonly configDir: () => string | null;
+    readonly codexHome: () => string | null;
+  };
   /** Judges the preview's real paths; null (no sandbox) shows the plan alone. */
   readonly laneSandbox: LaneSandbox | null;
   /** Says what judges each account's calls. */
@@ -91,9 +107,63 @@ export function createTrustServices(deps: {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
 
+  /** The builder's servers, read now: from their files and the plugins a session would load. */
+  const yourServers = (switches: TrustSwitches) => {
+    const roots = laneWritableRoots({
+      checkouts: allCheckouts(db),
+      worktreeBase: deps.worktreeBase,
+      sandboxTempRoots: deps.laneWritableRoots,
+      systemTempRoots: SYSTEM_TEMP_ROOTS,
+    });
+    const plugins = switches.yourPlugins
+      ? installedPlugins(deps.builderHome).filter(
+          (plugin) => switches.plugins[plugin.id] ?? plugin.enabledInClaude,
+        )
+      : [];
+    const { entries, fileProblems } = readYourMcpConfig({
+      home: deps.builderHome,
+      laneWritable: [...allCheckouts(db), ...deps.laneWritableRoots],
+      plugins,
+    });
+    const servers = yourMcpServerDtos({
+      entries,
+      switches,
+      approvals: mcpApprovals(db, () => {
+        deps.log.warn({}, 'the stored MCP approvals are not a shape 10db reads, so none holds');
+      }),
+      home: deps.builderHome,
+      laneWritable: roots,
+    });
+    return { servers, fileProblems };
+  };
+
+  /** Said above the servers when the builder's shell points Claude Code or Codex somewhere else. */
+  const mcpNotice = (): string | null => {
+    const lines = [
+      ...(deps.login.configDir() === null
+        ? []
+        : [
+            'Your shell sets CLAUDE_CONFIG_DIR. 10db reads your servers from ~/.claude.json, not from there.',
+          ]),
+      ...(deps.login.codexHome() === null
+        ? []
+        : [
+            'Your shell sets CODEX_HOME. 10db reads your servers from ~/.codex/config.toml, not from there.',
+          ]),
+    ];
+    return lines.length === 0 ? null : lines.join(' ');
+  };
+
   const trustSettings = async (): Promise<TrustSettingsDto> => {
     const switches = appTrustSwitches(db, onInvalid);
     const tendbReady = await deps.judge.ready(JudgeDecision.CrossesLimit);
+    const { servers, fileProblems } = yourServers(switches);
+    const notice = [
+      mcpNotice(),
+      ...fileProblems.map((problem) => `${problem.what}: ${problem.why}`),
+    ]
+      .filter((line) => line !== null)
+      .join(' ');
     return {
       tendbReady,
       switches,
@@ -105,6 +175,8 @@ export function createTrustServices(deps: {
         on: switches.yourPlugins && (switches.plugins[plugin.id] ?? plugin.enabledInClaude),
       })),
       judges: accountJudges(db, deps.adapter),
+      mcpServers: servers,
+      mcpNotice: notice === '' ? null : notice,
     };
   };
 
@@ -167,6 +239,21 @@ export function createTrustServices(deps: {
     async setTrustSwitches(switches) {
       deps.state.write((ctx) => {
         setAppTrustSwitches(ctx, switches);
+      });
+      return trustSettings();
+    },
+    async approveYourMcpServer(input) {
+      const switches = appTrustSwitches(db, onInvalid);
+      const server = yourServers(switches).servers.find((s) => s.key === input.key);
+      // The page showed a config that is gone or changed since: nothing is stored.
+      if (server?.configHash !== input.configHash)
+        throw new ConflictError('This server changed since the page loaded. Review it again.');
+      if (server.source === YourMcpSource.Plugin)
+        throw new InvalidError("A plugin's servers come with the plugin.");
+      if (server.state === YourMcpServerState.LeftOut)
+        throw new ConflictError(server.reason ?? "10db can't run this server.");
+      deps.state.write((ctx) => {
+        approveMcpServer(ctx, input.key, input.configHash);
       });
       return trustSettings();
     },

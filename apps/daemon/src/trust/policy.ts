@@ -15,6 +15,8 @@ export interface TrustPolicyInput {
   readonly approved?: readonly ApprovedAction[];
   /** The project's grants as lines (`projectGrantLines`), read as the session starts. */
   readonly grants: readonly string[];
+  /** The names of the builder's own MCP servers in this session; their tools act outside the sandbox. */
+  readonly yourMcpServers: readonly string[];
 }
 
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
@@ -48,6 +50,11 @@ function environmentLines(input: TrustPolicyInput): string[] {
     ...(works(input.surface)
       ? [
           "Trusted repo: files tracked in this checkout are the session's to change; git keeps them, so deleting or rewriting them is not destroying data. Untracked or ignored files, files outside the checkout, databases and history others have are.",
+        ]
+      : []),
+    ...(input.yourMcpServers.length > 0
+      ? [
+          `Outside the sandbox: the MCP servers ${input.yourMcpServers.join(', ')} are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.`,
         ]
       : []),
     ...(input.liveSystems.length > 0

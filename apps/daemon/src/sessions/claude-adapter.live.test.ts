@@ -100,6 +100,7 @@ async function liveSession(spec: {
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
+    yourMcpServers: {},
     sandbox: null,
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
@@ -181,6 +182,7 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     sandbox: null,
     projectMcpServers: {},
+    yourMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.', by: '10db' }),

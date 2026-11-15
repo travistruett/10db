@@ -62,6 +62,23 @@ export function tempDir(prefix: string): TempDir {
   };
 }
 
+/**
+ * A directory outside every system temp folder, under the package's gitignored cache. Tests that
+ * stand in for the builder's home use it: 10db counts `/tmp` and `/var/tmp` as lane-writable, so a
+ * home made under `tmpdir()` is refused as a temp folder wherever `tmpdir()` is `/tmp`.
+ */
+export function homeOutsideTemp(prefix: string): TempDir {
+  const parent = join(import.meta.dirname, '../node_modules/.cache/10db-test-homes');
+  mkdirSync(parent, { recursive: true });
+  const path = mkdtempSync(join(parent, `${prefix}-`));
+  return {
+    path,
+    cleanup: () => {
+      rmSync(path, { recursive: true, force: true });
+    },
+  };
+}
+
 /** How much of a check's output 10db keeps: `TAIL_BYTES` in `src/verify/gate-runner.ts`. */
 const CHECK_TAIL_CHARS = 4096;
 
@@ -425,5 +442,6 @@ export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
     liveSystems: [],
     switches: TRUST_DEFAULTS,
     grants: [],
+    yourMcpServers: [],
   });
 }

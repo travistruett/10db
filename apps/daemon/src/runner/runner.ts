@@ -103,6 +103,7 @@ import {
   getPersona,
   getProject,
   getSessionByProviderId,
+  listProjects,
   getTask,
   getPassTurn,
   getTaskMessageRow,
@@ -259,6 +260,7 @@ import {
   loadedLine,
   planSessionSetup,
   projectInstructionsLoaded,
+  yourMcpForSession,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
 import {
@@ -289,6 +291,7 @@ import {
   type SessionHandle,
   type ToolTarget,
   type TurnResult,
+  type YourSessionServer,
 } from '../sessions';
 import {
   actionEntering,
@@ -2448,6 +2451,28 @@ export function createRunner(opts: RunnerOptions): Runner {
       switches,
       laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
     });
+    // The builder's own MCP servers, planned from their files, switches and approvals as the session starts.
+    const yours = yourMcpForSession({
+      db,
+      home: opts.builderHome,
+      projectId: project.id,
+      projectServerNames: [
+        ...Object.keys(projectMcp.servers),
+        ...projectMcp.pending.map((review) => review.name),
+        ...projectMcp.denied,
+        ...projectMcp.failures.map((failure) => failure.name),
+      ],
+      loginEnv: opts.launcher.projectEnv(),
+      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+      localBinding: listProjects(db).some((other) => other.sandboxLoopback),
+      plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
+      onInvalid: (stored) => {
+        opts.logger.warn(
+          { stored },
+          'a stored MCP approvals or switch value is not a shape 10db reads',
+        );
+      },
+    });
     // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
     const releaseStart =
       account.kind === AccountKind.ClaudeSubscription
@@ -2467,6 +2492,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           configDir,
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
+          yourMcpServers: yours.stdio,
           provider,
           taskFiles: taskFilesDir(opts.dataDir, task.id),
           // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
@@ -2494,7 +2520,39 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
-    const setupLeftOut = [...setupPlan.leftOut, ...(laneSession?.setup.leftOut ?? [])];
+    // Without a lane sandbox the builder's stdio servers are left out, as the project's are; remote ones still go.
+    const yourServers: Record<string, YourSessionServer> = {
+      ...Object.fromEntries(
+        Object.entries(laneSession?.yourMcpServers ?? {}).flatMap(([name, connect]) => {
+          const planned = yours.stdio[name];
+          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+        }),
+      ),
+      ...Object.fromEntries(
+        Object.entries(yours.remote).map(([name, remote]) => [
+          name,
+          {
+            connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            codex: remote.codex,
+          },
+        ]),
+      ),
+    };
+    const yourLeftOut = [
+      ...yours.leftOut,
+      ...(laneSession?.yourMcpLeftOut ?? []),
+      ...(opts.laneSandbox
+        ? []
+        : Object.keys(yours.stdio).map((name) => ({
+            what: `your MCP server ${name}`,
+            why: 'it runs only beside the lane sandbox, which is off',
+          }))),
+    ];
+    const setupLeftOut = [
+      ...setupPlan.leftOut,
+      ...(laneSession?.setup.leftOut ?? []),
+      ...yourLeftOut,
+    ];
     if (setupLeftOut.length > 0)
       opts.logger.info({ workstreamId: id, leftOut: setupLeftOut }, 'session setup left out');
     const setupNote = leftOutNote(setupLeftOut);
@@ -2524,6 +2582,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       switches,
       approved,
       grants: projectGrantLines(db, project.id),
+      yourMcpServers: Object.keys(yourServers),
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3047,6 +3106,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         env: launch.env,
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
+        yourMcpServers: yourServers,
         // Cached web search has had no live check that it opens no page, so no Codex session searches.
         webSearch: 'disabled',
         sandbox: laneSession?.spec ?? null,

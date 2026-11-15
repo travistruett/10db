@@ -2135,6 +2135,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       builderHome,
       laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+      worktreeBase: worktreeRoot,
+      login: {
+        configDir: () => launcher.loginConfigDir(),
+        codexHome: () => launcher.loginCodexHome(),
+      },
       laneSandbox,
       adapter,
       judge,

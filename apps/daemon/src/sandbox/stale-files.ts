@@ -11,10 +11,10 @@ import {
 } from './temp-dir';
 
 /**
- * What 10db seals: the lane env file, a gate's settings, and an MCP server's settings, env file,
- * refusal preload and refusal log.
+ * What 10db seals: the lane env file, a gate's settings, a repo MCP server's settings, env file,
+ * refusal preload and refusal log, and a builder's MCP server's env file.
  */
-const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
+const SEALED_FILE = /^10db-(?:env|gate|mcp|ymcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
 /** What `createProcessLedger` makes, and the next content a ledger is given beside it. */
 const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\.tmp)?$/;
 /** A session's setup dir (`createSetupDir`) or secret reads dir (`createSecretReadsDir`), in the files root. */

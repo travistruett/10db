@@ -25,14 +25,17 @@ const PROJECT_MCP_FILE = '.mcp.json';
 /** `${NAME}` or `${NAME:-default}`, as Claude Code writes them in `.mcp.json`. */
 const VARIABLE_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** An environment variable's name, as a shell writes it. */
+export const EnvName = z.string().regex(ENV_NAME, 'must be a variable name');
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
-const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
+export const SENSITIVE_NAME =
+  /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASS|AUTH|DSN|API_?KEY|CREDENTIAL|_KEY$|_PAT$/i;
 
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 /** http or https only; a `${VAR}` may stand in the URL, which the URL parser accepts. */
-const RemoteUrl = z.string().refine(
+export const RemoteUrl = z.string().refine(
   (value) => {
     try {
       const protocol = new URL(value).protocol;
@@ -43,7 +46,7 @@ const RemoteUrl = z.string().refine(
   },
   { message: 'must be an http or https URL' },
 );
-const HeaderMap = z.record(
+export const HeaderMap = z.record(
   z.string().regex(HEADER_NAME, 'must be an HTTP header name'),
   z.string(),
 );
@@ -51,7 +54,7 @@ const StdioServer = z.strictObject({
   type: z.literal('stdio').optional(),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string().regex(ENV_NAME, 'must be a variable name'), z.string()).optional(),
+  env: z.record(EnvName, z.string()).optional(),
 });
 const RemoteServer = z.strictObject({
   type: z.enum(['http', 'sse']),
@@ -307,6 +310,38 @@ export function readRepoMcp(repoPath: string): RepoMcp {
     servers.push({ name, declared, review: reviewOf(name, declared, named) });
   }
   return { servers, warnings: [...warnings, ...strayHosts(hosts, servers)] };
+}
+
+/** A builder's server references a variable 10db can't expand. Names the variable, never a value. */
+export class YourMcpExpandError extends Error {
+  override readonly name = 'YourMcpExpandError';
+  /** The variable, or null for a `${` that names none. */
+  readonly variable: string | null;
+
+  constructor(variable: string | null) {
+    super(
+      variable === null
+        ? 'it holds a "${" that names no variable'
+        : `\${${variable}} is not set in the login environment`,
+    );
+    this.variable = variable;
+  }
+}
+
+/**
+ * Expands `${NAME}` and `${NAME:-default}` from `env`, any name, as Claude Code does for the builder's own
+ * servers. An unset name with no default throws, and so does a result that still holds `${`.
+ */
+export function expandFrom(value: string, env: Readonly<Record<string, string>>): string {
+  const result = value.replace(VARIABLE_REF, (_ref, name: string, fallback: string | undefined) => {
+    // Own keys only, so `${constructor}` is unset rather than Object's.
+    const found = Object.hasOwn(env, name) ? env[name] : undefined;
+    if (found !== undefined) return found;
+    if (fallback !== undefined) return fallback;
+    throw new YourMcpExpandError(name);
+  });
+  if (result.includes('${')) throw new YourMcpExpandError(null);
+  return result;
 }
 
 interface ExpandScope {

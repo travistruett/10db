@@ -86,6 +86,7 @@ function startSession(adapter: FakeAdapter): SessionHandle {
       identity: null,
     },
     projectMcpServers: {},
+    yourMcpServers: {},
     sandbox: null,
     mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },
     preToolUse: () => ({ decision: 'allow' }),

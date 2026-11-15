@@ -7,3 +7,6 @@ export {
   type InstalledPlugin,
 } from './installed-plugins';
 export { planSessionSetup } from './plan';
+export { yourMcpForSession } from './your-mcp-for-session';
+export { readYourMcpConfig } from './your-mcp-config';
+export { yourMcpServerDtos } from './your-mcp-dto';

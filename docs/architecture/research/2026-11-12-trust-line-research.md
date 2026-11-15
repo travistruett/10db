@@ -562,3 +562,40 @@ Ruling on T5's call 1, from these runs: Codex stays on `approvalPolicy: "never"`
 sees escalations and forced `rm` only. Under `never`, Codex refuses a forced `rm -rf` itself, and 10db leaves that
 refusal as Codex's. An untrusted hook is skipped silently, so a Codex session refuses to start when its guard hook
 isn't trusted (`checkGuardHook`), and 10db never sends `bypass_hook_trust`.
+
+### L6: the builder's MCP servers
+
+What ran (2026-11-13): L6a and L6b read only; L6c and L6d live, once each, against the pinned Claude Code `2.1.302`,
+SDK `0.3.316` and Codex app-server `0.167.0`. Codex ran on the ChatGPT-plan account's own `CODEX_HOME` (its 10db
+template, `default_permissions = "lane"`) with no model turn: `initialize`, `thread/start`, then
+`mcpServerStatus/list`. Claude ran on the Claude plan's default config dir, with `settingSources: []`,
+`strictMcpConfig: true` and no prompt sent. No token or header value was printed.
+
+- **L6a, how Claude Code names a plugin's server (read from the pinned bundle).** A plugin's servers are keyed
+  `plugin:<pluginName>:<server>` with `scope: "dynamic"`, and their tools are `mcp__plugin_<pluginName>_<server>__*`
+  (the bundle's own test fixture: `plugin:claude-test:browser` and `mcp__plugin_claude-test_browser__`). So call 15
+  holds. M1 found `strictMcpConfig` keeps plugin servers out, and the session without it was not run (reading only),
+  so the working folder Claude Code gives a plugin's server is not recorded.
+- **L6b, Codex's env and `cwd` for a stdio server (read from `rust-v0.167.0`).** The child's env is cleared, then
+  filled with `DEFAULT_ENV_VARS` (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `USER`, `__CF_USER_TEXT_ENCODING`, `LANG`,
+  `LC_ALL`, `TERM`, `TMPDIR`, `TZ`) from app-server's own env, the custom CA variables, and the entry's `env`, less the
+  non-inheritable names (`rmcp-client/src/utils.rs` L16-56, L162-176). An unset `env_vars` name is skipped silently.
+  `cwd` is honoured, with the thread's cwd as the fallback (`stdio_server_launcher.rs` L466, L471). A stdio server is
+  spawned with no sandbox (L453-520). These names become `CODEX_MCP_BASE_ENV`. The keys Task 2 reads (`command`,
+  `args`, `env`, `env_vars`, `cwd`, `url`, `bearer_token_env_var`, `http_headers`, `env_http_headers`, `enabled`,
+  `enabled_tools`, `disabled_tools`, `startup_timeout_sec`, `tool_timeout_sec`) are all accepted.
+- **L6c, a Codex stdio server outside Codex's sandbox: pass.** The thread's `permissions.lane` opened only
+  `:minimal` and a scratch repo, with an empty domain list. The probe server, given `cwd` and `env.CANARY_PATH`,
+  read a canary in a folder under the home that the profile does not open (`ok`) and fetched `https://example.com`
+  (`200`). Its working folder was its `cwd`, and its env names were `CANARY_PATH`, `HOME`, `PATH` and
+  `__CF_USER_TEXT_ENCODING`: the base names app-server itself had, plus the entry's own. Codex sandboxes commands,
+  not MCP servers, so Task 6's rows stand.
+- **L6d, a server that signs in with OAuth (`https://mcp.linear.app/mcp`, no headers).**
+  - Claude, through `setMcpServers`: `added: ["oauthprobe"]`, then `mcpServerStatus()` gave `status: "needs-auth"`.
+  - Codex, as an `mcp_servers` entry: `mcpServer/startupStatus/updated` went `starting`, then `failed` with
+    `error: "The oauthprobe MCP server is not logged in. Run \`codex mcp login oauthprobe\`."`and`failureReason:
+    null`. `mcpServerStatus/list`gave`runtimeStatus: "authenticationRequired"`, `authStatus: "notLoggedIn"`, empty
+`tools`and a`toolsError`. A stdio server's `authStatus`is`unsupported`.
+
+Meaning for the plan: Task 5 maps `needs-auth` to the OAuth reason; Task 6 maps `authStatus: "notLoggedIn"` or
+`runtimeStatus: "authenticationRequired"`, not `failureReason`, which stays null for a server never signed in.

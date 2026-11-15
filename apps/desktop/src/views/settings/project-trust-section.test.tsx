@@ -7,6 +7,10 @@ import {
   TrustOverrides,
   type ProjectTrustDto,
   type SetupPreviewDto,
+  YourMcpServerState,
+  YourMcpSource,
+  yourMcpServerKey,
+  type YourMcpServerDto,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -23,6 +27,7 @@ function serve(
   overrides: TrustOverrides = {},
   liveSystems: readonly string[] = [],
   initialGrants: readonly TrustGrantDto[] = [],
+  mcpServers: YourMcpServerDto[] = [],
 ) {
   let grants = [...initialGrants];
   const removed: string[] = [];
@@ -42,6 +47,8 @@ function serve(
         plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: true }],
         judges: [],
         tendbReady: false,
+        mcpServers,
+        mcpNotice: null,
       }),
     ),
     http.get(daemonUrl('/projects/:projectId/live-systems'), () => HttpResponse.json(live)),
@@ -153,6 +160,46 @@ describe('Settings › project Trust', () => {
     fireEvent.click(within(plugin).getByLabelText('Off'));
     await waitFor(() => {
       expect(put).toEqual([{ plugins: { 'p@m': false } }]);
+    });
+  });
+
+  it('Off for one server sends mcpServers with it false, and As app removes it', async () => {
+    const key = yourMcpServerKey(YourMcpSource.ClaudeJson, 'github');
+    const github: YourMcpServerDto = {
+      key,
+      name: 'github',
+      source: YourMcpSource.ClaudeJson,
+      pluginId: null,
+      transport: 'http',
+      command: null,
+      args: [],
+      cwd: null,
+      url: 'https://gh.example/mcp',
+      envNames: [],
+      headerNames: [],
+      shownEnv: [],
+      configHash: 'a'.repeat(64),
+      state: YourMcpServerState.Approved,
+      reason: null,
+      on: true,
+      codexOnly: [],
+      enabledTools: null,
+      disabledTools: [],
+      sendsNoHeaders: false,
+    };
+    const { put } = serve(NOTHING, {}, [], [], [github]);
+    renderApp('/settings/project-trust');
+    const control = await screen.findByRole('radiogroup', { name: 'github' });
+    await waitFor(() => {
+      expect(within(control).getByLabelText('Off')).toHaveProperty('disabled', false);
+    });
+    fireEvent.click(within(control).getByLabelText('Off'));
+    await waitFor(() => {
+      expect(put).toEqual([{ mcpServers: { [key]: false } }]);
+    });
+    fireEvent.click(within(control).getByLabelText('As app'));
+    await waitFor(() => {
+      expect(put.at(-1)).toEqual({});
     });
   });
 

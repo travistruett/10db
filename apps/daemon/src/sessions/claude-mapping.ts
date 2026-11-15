@@ -11,7 +11,7 @@ import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
 import { z } from 'zod';
 import type { GuardVerdict } from '../guard';
-import { SandboxedMcpServer } from '../sandbox';
+import { SandboxedMcpServer, YourMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
   AgentCommand,
@@ -311,12 +311,12 @@ export function userMessage(
 }
 
 /**
- * A repo-declared MCP server in the SDK's shape. A stdio server is the lane sandbox's own launch
- * under srt, through `env -i`; it never gets an `env` block, which Claude Code would merge over the
+ * A repo-declared or builder-declared MCP server in the SDK's shape. A stdio server is 10db's own launch,
+ * the lane sandbox's under srt or the builder's from home, both through `env -i`; it never gets an `env` block, which Claude Code would merge over the
  * session's environment, credentials and all.
  */
-export function toSdkMcpServer(server: SessionMcpServer): McpServerConfig {
-  if (server instanceof SandboxedMcpServer) {
+export function toSdkMcpServer(server: SessionMcpServer | YourMcpServer): McpServerConfig {
+  if (server instanceof SandboxedMcpServer || server instanceof YourMcpServer) {
     const { command, args } = server.launch();
     return { type: 'stdio', command, args: [...args] };
   }

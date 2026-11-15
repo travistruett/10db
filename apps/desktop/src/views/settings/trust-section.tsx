@@ -8,6 +8,7 @@ import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from
 import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
+import { YourMcpServers } from './your-mcp-servers';
 import {
   JUDGE_LABELS,
   JUDGE_LIST_NOTE,
@@ -237,6 +238,7 @@ export function TrustSection() {
               </SettingRow>
             ))}
       </SettingsCard>
+      <YourMcpServers />
       {trust.data === undefined ? null : (
         <JudgeList judges={trust.data.judges} tendbReady={trust.data.tendbReady} />
       )}

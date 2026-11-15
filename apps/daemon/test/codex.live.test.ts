@@ -64,6 +64,15 @@ import {
 } from './fake-responses';
 import { createMemoryKeychain, isolatedGitEnv, TEST_REPO_CONFIG, testPolicy } from './fixtures';
 import { noisePng } from './png';
+import {
+  LANE_WROTE,
+  laneProbeScript,
+  PROBE_ARG,
+  PROBE_TOKEN,
+  PROBES_HELD,
+  PS_RAN,
+  YOUR_MCP_PROBE_SERVER,
+} from './your-mcp-probe';
 
 const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
 
@@ -601,6 +610,8 @@ function laneInput(
     readonly taskFiles?: string;
     /** What comes along into the session, as the runner plans it. */
     readonly setup?: SetupInput;
+    /** The builder's own stdio servers, as the runner hands them to the sandbox. */
+    readonly yours?: LaneSessionInput['yourMcpServers'];
   } = {},
 ): LaneSessionInput {
   return {
@@ -619,9 +630,72 @@ function laneInput(
     configDir: world.codexHome,
     checkouts: [world.checkout, world.other],
     mcpServers: {},
+    ...(opts.yours === undefined ? {} : { yourMcpServers: opts.yours }),
     ...(opts.taskFiles === undefined ? {} : { taskFiles: opts.taskFiles }),
     ...(opts.setup === undefined ? {} : { setup: opts.setup }),
     ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes, provider: Provider.Codex }),
+  };
+}
+
+/** The builder's servers a lane session launched, as a session spec takes them. */
+function yourSessionServers(
+  laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
+): LaneSessionSpec['yourMcpServers'] {
+  return Object.fromEntries(
+    Object.entries(laneSession.yourMcpServers ?? {}).map(([name, connect]) => [
+      name,
+      {
+        connect,
+        codex: {
+          enabledTools: null,
+          disabledTools: [],
+          startupTimeoutSec: null,
+          toolTimeoutSec: null,
+        },
+      },
+    ]),
+  );
+}
+
+/**
+ * One stdio server standing in for the builder's, in a folder no lane writes, and what the test sees of it
+ * from outside the sandbox while a session's shell runs.
+ */
+function yourProbeServer(world: World): {
+  readonly yours: NonNullable<LaneSessionInput['yourMcpServers']>;
+  readonly seen: { pid: number; args: string; env: string; file: string };
+  readonly observe: () => void;
+} {
+  const dir = join(world.root, 'your-server');
+  mkdirSync(dir);
+  const canary = join(dir, 'canary');
+  plant(canary);
+  writeFileSync(join(dir, 'probe.mjs'), YOUR_MCP_PROBE_SERVER);
+  const seen = { pid: 0, args: '', env: '', file: '' };
+  return {
+    yours: {
+      probe: {
+        command: process.execPath,
+        args: [join(dir, 'probe.mjs'), canary, PROBE_ARG],
+        cwd: null,
+        env: { ...launcher.projectEnv(), TOKEN: PROBE_TOKEN },
+        declaredEnv: ['TOKEN'],
+      },
+    },
+    seen,
+    observe: () => {
+      const listing = execFileSync('/bin/ps', ['-Aww', '-o', 'pid=,command='], {
+        encoding: 'utf8',
+      });
+      const line = listing.split('\n').find((l) => l.includes(PROBE_ARG));
+      seen.pid = Number(line?.trim().split(/\s+/)[0] ?? 0);
+      seen.args = line ?? '';
+      seen.env = execFileSync('/bin/ps', ['-E', '-ww', '-p', String(seen.pid)], {
+        encoding: 'utf8',
+      });
+      const file = readdirSync(world.roots.files).find((f) => f.startsWith('10db-ymcp-'));
+      seen.file = file === undefined ? '' : readFileSync(join(world.roots.files, file), 'utf8');
+    },
   };
 }
 
@@ -640,6 +714,7 @@ async function runSession(
     readonly taskFiles?: string;
     readonly setup?: SetupInput;
     readonly instructions?: string;
+    readonly yours?: LaneSessionInput['yourMcpServers'];
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
@@ -680,6 +755,7 @@ async function runOnLane(
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
+    yourMcpServers: yourSessionServers(laneSession),
     sandbox: laneSession.spec,
     ...(opts.instructions === undefined ? {} : { instructions: opts.instructions }),
     setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
@@ -732,10 +808,15 @@ async function runExplore(
   world: World,
   steps: Parameters<FakeResponses['script']>[0],
   goAhead: { asked: string[] },
+  opts: {
+    readonly yours?: LaneSessionInput['yourMcpServers'];
+    /** Runs on each Bash call before it is judged, while the session's servers are up. */
+    readonly onBash?: () => void;
+  } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
   const laneSession = await world.laneSandbox.forSession({
-    ...laneInput(world, launch.env),
+    ...laneInput(world, launch.env, opts),
     readOnly: true,
   });
   try {
@@ -761,6 +842,7 @@ async function runExplore(
       env: launch.env,
       account: launch.expect,
       projectMcpServers: {},
+      yourMcpServers: yourSessionServers(laneSession),
       sandbox: laneSession.spec,
       setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
       mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
@@ -770,6 +852,7 @@ async function runExplore(
           input: JSON.stringify(req.input),
           toolUseId: req.toolUseId ?? null,
         });
+        if (req.toolName === 'Bash') opts.onBash?.();
         return { decision: 'allow' };
       },
       judgeCall: (req) =>
@@ -843,6 +926,7 @@ describe.skipIf(!live)(
       open = true;
     });
     afterEach(async () => {
+      rmSync(join(world.roots.files, LANE_WROTE), { force: true });
       if (!open) return;
       open = false;
       await world.close();
@@ -1007,6 +1091,58 @@ describe.skipIf(!live)(
       expect(goAhead.asked[0]).toContain(DENIED);
       expect(outputs[0]).toContain(DENIED);
       expect(existsSync(join(world.checkout, 'explore-write.txt'))).toBe(false);
+    });
+
+    // The builder's stdio server runs outside Codex's sandbox, as Codex runs one; the thread's shell must
+    // learn none of its env, arguments or env file, nor the builder's config files.
+    it('a builder stdio server answers in a Codex lane thread, and the lane shell cannot read its env, args, env file or ~/.claude.json', async () => {
+      const server = yourProbeServer(world);
+      world.onCall = (call) => {
+        if (call.toolName === 'Bash') server.observe();
+      };
+      const outputs = expectTurn(
+        await runSession(
+          world,
+          [
+            codeMode('tools.mcp__probe__check({})'),
+            run(laneProbeScript(world.roots.files)),
+            { say: 'done' },
+          ],
+          { yours: server.yours },
+        ),
+      );
+      expect(outputs[0]).toContain('token=set');
+      expect(outputs[0]).toContain('server-read-home-canary=ok');
+      expect(server.seen.pid).toBeGreaterThan(0);
+      expect(server.seen.args).toContain(PROBE_ARG);
+      expect(server.seen.env).toContain(PROBE_TOKEN);
+      expect(server.seen.file).toContain(PROBE_TOKEN);
+      expect(outputs[1]).toMatch(PS_RAN);
+      for (const held of PROBES_HELD) expect.soft(outputs[1], held).toContain(held);
+    });
+
+    it('a builder stdio server answers in an explore thread on the read-only sandboxPolicy, and the shell cannot read its env, args, env file or ~/.claude.json', async () => {
+      const server = yourProbeServer(world);
+      const goAhead = { asked: [] as string[] };
+      const outputs = expectTurn(
+        await runExplore(
+          world,
+          [
+            codeMode('tools.mcp__probe__check({})'),
+            run(laneProbeScript(world.roots.files)),
+            { say: 'done' },
+          ],
+          goAhead,
+          { yours: server.yours, onBash: server.observe },
+        ),
+      );
+      expect(outputs[0]).toContain('token=set');
+      expect(server.seen.pid).toBeGreaterThan(0);
+      expect(server.seen.args).toContain(PROBE_ARG);
+      expect(server.seen.env).toContain(PROBE_TOKEN);
+      expect(server.seen.file).toContain(PROBE_TOKEN);
+      expect(outputs[1]).toMatch(PS_RAN);
+      for (const held of PROBES_HELD) expect.soft(outputs[1], held).toContain(held);
     });
 
     it('refuses the call when the guard socket is gone', async () => {

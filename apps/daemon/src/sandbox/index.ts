@@ -7,6 +7,7 @@ export {
   type LaneProfileInput,
 } from './profile';
 export { isEqualOrUnder, protectedReads } from './protected-reads';
+export { realOrSelf } from './real-or-self';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
@@ -79,3 +80,10 @@ export type { SetupInput } from './setup-input';
 export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
 export { writeSecretRead } from './secret-reads';
+export { laneWritableRoots, type LaneWritableRoot } from './lane-writable';
+export {
+  launchYourMcpServers,
+  loadsCode,
+  prepareYourMcpRun,
+  YourMcpServer,
+} from './your-mcp-launch';

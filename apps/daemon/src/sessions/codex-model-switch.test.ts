@@ -111,6 +111,7 @@ function start(): {
         identity: 'me@example.com · ws-1',
       },
       projectMcpServers: {},
+      yourMcpServers: {},
       sandbox,
       mcp: { url: 'http://127.0.0.1:7777/mcp', token: 'tok', toolTimeoutMs: 905_000 },
       preToolUse: () => ({ decision: 'allow' }),

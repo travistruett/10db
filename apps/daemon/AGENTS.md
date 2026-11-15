@@ -110,7 +110,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `routing/`: the playbook and the router that picks a model per role (pure) (`src/routing/AGENTS.md`)
 - `runner/`: runs a workstream step by step: checks, messages and launches (`src/runner/AGENTS.md`)
 - `runtime-files/`: the data directory's runtime files and tokens (`src/runtime-files/AGENTS.md`)
-- `sandbox/`: the lane, gate and MCP sandboxes (srt and Seatbelt profiles) (`src/sandbox/AGENTS.md`)
+- `sandbox/`: the lane, gate and MCP sandboxes (srt and Seatbelt profiles), `lane-writable.ts` (every root a lane can write) and `your-mcp-launch.ts` (the builder's own servers, outside the sandbox, refused when lane-written code is in them) (`src/sandbox/AGENTS.md`)
 - `screens/`: Shape's `see_screen`: screenshots of the app (`src/screens/AGENTS.md`)
 - `self-update/`: the installed app follows `main` (`src/self-update/AGENTS.md`)
 - `session-setup/`: what comes along into a session: instructions, skills, definitions (`src/session-setup/AGENTS.md`)
@@ -126,7 +126,9 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - **The security rule.** No process outside a sandbox acts on lane-writable input (a file in a checkout, a
   `PATH` entry or tool variable that names one, a lockfile). Remove a capability rather than check for its
   misuse. Never deny individual secrets inside an otherwise open tree: open only what is needed. Its
-  exceptions are what the builder approved: a pass's plain commit, push or merge the builder allowed on a card,
+  exceptions are what the builder approved or installed: the builder's own MCP servers (`~/.claude.json`,
+  `~/.codex/config.toml`, their plugins), which run outside the sandbox from the home once approved, and only
+  after `sandbox/your-mcp-launch.ts` finds no lane-writable path in them; and a pass's plain commit, push or merge the builder allowed on a card,
   which 10db runs once as the builder would (`git/run-as-builder.ts`: in the checkout's own git dir, a commit or merge inside the gate's
   sandbox, whose hooks then run contained, and a push or `gh pr merge` outside it with no hook; the card says which), and what the builder installed: Claude Code reads the builder's skills and plugins (Settings ›
   Trust) outside the sandbox, and each skill or plugin whose real path a lane could write is left out. Their

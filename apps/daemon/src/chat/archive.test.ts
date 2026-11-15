@@ -34,6 +34,7 @@ function observing(): {
       return Promise.resolve({
         sandbox: null,
         projectMcpServers: {},
+        yourMcpServers: {},
         note: null,
         credentialsExpireAt: null,
         instructions: null,

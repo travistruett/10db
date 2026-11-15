@@ -63,6 +63,7 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
     sandbox: null,
     projectMcpServers: {},
+    yourMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),

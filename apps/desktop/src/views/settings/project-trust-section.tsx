@@ -4,6 +4,7 @@ import {
   TrustOverrides,
   type ProjectDto,
   type SetupPreviewDto,
+  YourMcpServerState,
   type TrustSwitchKey,
 } from '@10db/contracts';
 import {
@@ -89,6 +90,19 @@ function withPlugin(
   const { plugins, ...switches } = overrides;
   const next = setOrClear(plugins ?? {}, id, value);
   return Object.keys(next).length === 0 ? switches : { ...switches, plugins: next };
+}
+
+/** The overrides with one MCP server set, or removed for As app; no mcpServers key once none is left. */
+function withMcpServer(
+  overrides: TrustOverrides,
+  key: string,
+  value: boolean | undefined,
+): TrustOverrides {
+  const { mcpServers, ...rest } = overrides;
+  const next = setOrClear(mcpServers ?? {}, key, value);
+  return TrustOverrides.parse(
+    Object.keys(next).length === 0 ? rest : { ...rest, mcpServers: next },
+  );
 }
 
 function boolOf(choice: Choice): boolean | undefined {
@@ -273,6 +287,9 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   const set = useSetProjectTrust(project.id);
   const overrides = trust.data?.overrides;
   const plugins = app.data?.plugins ?? [];
+  const mcpServers = (app.data?.mcpServers ?? []).filter(
+    (server) => server.state === YourMcpServerState.Approved,
+  );
   if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
     <Stack gap="lg">
@@ -320,6 +337,29 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
                 onChange={(value) => {
                   if (isChoice(value))
                     set.mutate((saved) => withPlugin(saved, plugin.id, boolOf(value)));
+                }}
+              />
+            </SettingRow>
+          ))}
+        </SettingsCard>
+      )}
+      {mcpServers.length === 0 ? null : (
+        <SettingsCard title="Your MCP servers in this project">
+          {mcpServers.map((server) => (
+            <SettingRow
+              key={server.key}
+              label={server.name}
+              description="Applies from the next session."
+            >
+              <SegmentedControl
+                aria-label={server.name}
+                fullWidth
+                disabled={overrides === undefined}
+                value={choiceOf(overrides?.mcpServers?.[server.key])}
+                data={CHOICES}
+                onChange={(value) => {
+                  if (isChoice(value))
+                    set.mutate((saved) => withMcpServer(saved, server.key, boolOf(value)));
                 }}
               />
             </SettingRow>

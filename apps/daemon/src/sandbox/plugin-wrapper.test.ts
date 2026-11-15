@@ -210,13 +210,13 @@ describe('wrapPlugin', () => {
       'an agent’s mcpServers',
       'agents/a.md',
       'mcpServers:\n  s: {command: evil}\n',
-      'MCP servers arrive with Your MCP servers (T6)',
+      'MCP servers in a definition are stripped; your own servers come from Settings › Trust',
     ],
     [
       'a nested agent’s mcp_servers',
       'agents/sub/b.md',
       'mcp_servers: {}\n',
-      'MCP servers arrive with Your MCP servers (T6)',
+      'MCP servers in a definition are stripped; your own servers come from Settings › Trust',
     ],
   ])('re-emits %s without it, keeping every other key and the body', (_name, file, keys, note) => {
     write(join(plugin, file), `---\nname: n\n${keys}description: d\n---\nBody !\`ls\`\n`);

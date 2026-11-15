@@ -1,4 +1,5 @@
 import {
+  type ApproveYourMcpServer,
   LiveSystemsDto,
   ProjectTrustDto,
   TrustGrantDto,
@@ -49,6 +50,27 @@ export function useSetTrust() {
     onSuccess: async (settings) => {
       queryClient.setQueryData(trustKeys.app, settings);
       await queryClient.invalidateQueries({ queryKey: ['trust', 'project'] });
+    },
+  });
+}
+
+/** Approves one of the builder's MCP servers as the page showed it; the daemon refuses a config that changed since. */
+export function useApproveYourMcpServer() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ApproveYourMcpServer) =>
+      readJson(
+        await client.settings.trust['mcp-servers'].approve.$post({ json: input }),
+        TrustSettingsDto,
+      ),
+    onSuccess: async (settings) => {
+      queryClient.setQueryData(trustKeys.app, settings);
+      await queryClient.invalidateQueries({ queryKey: ['trust', 'project'] });
+    },
+    onError: async () => {
+      // A stale hash or a server that can't run: the list as it is now shows why.
+      await queryClient.invalidateQueries({ queryKey: trustKeys.app });
     },
   });
 }

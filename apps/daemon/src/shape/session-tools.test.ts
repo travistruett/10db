@@ -79,6 +79,17 @@ function preparing(
       projectMcpServers: {
         docs: { type: 'http', url: 'https://docs.example.com/mcp', headers: null },
       },
+      yourMcpServers: {
+        mine: {
+          connect: { type: 'http', url: 'https://mine.example.com/mcp', headers: null },
+          codex: {
+            enabledTools: null,
+            disabledTools: [],
+            startupTimeoutSec: null,
+            toolTimeoutSec: null,
+          },
+        },
+      },
       note: 'Note from 10db: billing is waiting for your approval.',
       credentialsExpireAt,
       ...setup,
@@ -108,6 +119,8 @@ describe('a conversation’s prepared session', () => {
     const { spec } = must(f.adapter.shapeSessions[0], 'a session');
     expect(spec.sandbox).toBe(SANDBOX);
     expect(Object.keys(spec.projectMcpServers)).toEqual(['docs']);
+    expect(Object.keys(spec.yourMcpServers)).toEqual(['mine']);
+    expect(spec.policy.environment.join('\n')).toContain('the MCP servers mine are the builder');
     expect(spec.profile.tools).toContain('Bash');
     expect(spec.profile.disallowedTools).not.toContain('Bash');
     expect(spec.profile.agents['code-researcher']?.tools).toContain('Bash');

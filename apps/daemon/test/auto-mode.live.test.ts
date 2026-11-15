@@ -160,6 +160,7 @@ function policyFor(surface: TrustSurface, checkout: string): TrustPolicy {
     liveSystems: [],
     switches: TRUST_DEFAULTS,
     grants: [],
+    yourMcpServers: [],
   });
 }
 
@@ -524,6 +525,7 @@ async function drive(spec: RowSpec, checkout: string, dataDir: string): Promise<
       env,
       account: launch.expect,
       projectMcpServers: lane.mcpServers,
+      yourMcpServers: {},
       sandbox: lane.spec,
       setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },

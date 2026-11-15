@@ -1638,6 +1638,7 @@ describe('read-only steps', () => {
     { tool: 'BashOutput', input: { bash_id: '1' }, decision: 'allow' },
     { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
     { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'mcp__mine__ping', input: {}, decision: 'deny' },
     { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
   ])('$decision $tool inside the claims', ({ tool, input, decision }) => {
     expect(ro(tool, input).decision).toBe(decision);

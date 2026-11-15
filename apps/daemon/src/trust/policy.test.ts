@@ -10,6 +10,7 @@ const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => (
   liveSystems: [],
   switches: TRUST_DEFAULTS,
   grants: [],
+  yourMcpServers: [],
   ...overrides,
 });
 
@@ -25,6 +26,17 @@ describe('buildTrustPolicy', () => {
     expect(policy.attended).toBe(attended);
     expect(policy.coordination).toHaveLength(lines);
     expect(policy.environment[1]).toContain(host);
+  });
+
+  it("a session with the builder's servers names them as outside the sandbox; one without has no such line", () => {
+    const outside = (names: readonly string[]) =>
+      buildTrustPolicy(input({ yourMcpServers: names })).environment.filter((l) =>
+        l.startsWith('Outside the sandbox'),
+      );
+    expect(outside([])).toEqual([]);
+    expect(outside(['github', 'plugin_x_y'])).toEqual([
+      "Outside the sandbox: the MCP servers github, plugin_x_y are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.",
+    ]);
   });
 
   it('no live systems means no Sensitive remote targets line', () => {

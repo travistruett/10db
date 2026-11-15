@@ -250,6 +250,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
+        yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
@@ -292,6 +293,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
+          yourMcpServers: ready?.yourMcpServers ?? {},
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })

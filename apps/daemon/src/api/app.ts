@@ -55,6 +55,7 @@ import {
   LiveSystemsDto,
   TrustOverrides,
   TrustSwitches,
+  ApproveYourMcpServer,
   ModelProfileId,
   NetworkHostInput,
   Month,
@@ -1818,6 +1819,11 @@ export function createApp(deps: ApiDeps) {
       '/settings/trust',
       validator('json', (value): TrustSwitches => TrustSwitches.parse(value)),
       async (c) => c.json(await deps.services.setTrustSwitches(c.req.valid('json'))),
+    )
+    .post(
+      '/settings/trust/mcp-servers/approve',
+      validator('json', (value): ApproveYourMcpServer => ApproveYourMcpServer.parse(value)),
+      async (c) => c.json(await deps.services.approveYourMcpServer(c.req.valid('json'))),
     )
     .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
     .put(

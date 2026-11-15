@@ -207,6 +207,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
         sandbox,
         projectMcpServers: prepared.projectMcpServers,
+        yourMcpServers: {},
         canUseTool: (req) => prepared.canUseTool(req),
         preToolUse: (req) => {
           const verdict = judgeShapeCall(

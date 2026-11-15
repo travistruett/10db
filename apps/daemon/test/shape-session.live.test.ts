@@ -149,6 +149,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
       projectMcpServers: {},
+      yourMcpServers: {},
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
@@ -317,6 +318,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: `http://127.0.0.1:${String(port)}/mcp`, token, toolTimeoutMs: 30_000 },
       sandbox: null,
       projectMcpServers: {},
+      yourMcpServers: {},
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
@@ -444,6 +446,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
       projectMcpServers: {},
+      yourMcpServers: {},
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
@@ -664,6 +667,7 @@ async function readInSession(
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     sandbox: null,
     projectMcpServers: {},
+    yourMcpServers: {},
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
     preToolUse: (req) => {
       if (req.toolName === 'Read') reads.push(req);

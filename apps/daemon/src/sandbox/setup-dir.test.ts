@@ -482,7 +482,10 @@ describe('keepSetup and createSetupDir', () => {
     writeFileSync(join(dir, 'run.sh'), 'echo hi\n');
     const s = builderSkill('s', dir);
     const leftOut = [
-      { what: '~/.claude/skills/s', why: 'MCP servers arrive with Your MCP servers (T6)' },
+      {
+        what: '~/.claude/skills/s',
+        why: 'MCP servers in a definition are stripped; your own servers come from Settings › Trust',
+      },
     ];
     // The Settings preview names it as the session does.
     expect(keepSetup(input({ skills: [s] }), judge, home).leftOut).toEqual(leftOut);

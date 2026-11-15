@@ -52,7 +52,14 @@ import {
   MAX_SANDBOX_TMP_BYTES,
   removeAll,
   removeLaneTempDir,
+  SYSTEM_TEMP_ROOTS,
 } from './temp-dir';
+import { laneWritableRoots } from './lane-writable';
+import {
+  launchYourMcpServers,
+  type UnsandboxedStdioServer,
+  type YourMcpServer,
+} from './your-mcp-launch';
 
 /**
  * Tools a lane never needs: 10db makes its worktrees, and nothing a lane starts may outlive it. The
@@ -106,6 +113,13 @@ export interface LaneSession {
   readonly mcpServers: Readonly<Record<string, SandboxedMcpServer>>;
   /** Approved stdio servers left out because their sandbox couldn't be built. */
   readonly mcpFailures: readonly McpSandboxFailure[];
+  /**
+   * The builder's own stdio servers, each launched from the home with a sealed env. Optional only so a
+   * session double built before them still types; `forSession` always sets it.
+   */
+  readonly yourMcpServers?: Readonly<Record<string, YourMcpServer>>;
+  /** The builder's servers refused for what a lane can write, and the login variables dropped. */
+  readonly yourMcpLeftOut?: readonly { readonly what: string; readonly why: string }[];
   /** What the session's setup brought along, as the sandbox kept it; empty without a setup. */
   readonly setup: SessionSetup;
   /**
@@ -153,6 +167,11 @@ export interface LaneSessionInput {
   readonly checkouts: readonly string[];
   /** The repo's approved stdio MCP servers, expanded: each runs under srt, never as written. */
   readonly mcpServers: Readonly<Record<string, StdioMcpServer>>;
+  /**
+   * The builder's own approved stdio servers, expanded: each runs outside the sandbox from the home, unless
+   * it would run what a lane can write. None by default.
+   */
+  readonly yourMcpServers?: Readonly<Record<string, UnsandboxedStdioServer>>;
   /** The root this session's temp dir is made in; the temp root by default. */
   readonly tempRoot?: string;
   /**
@@ -357,6 +376,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       let envFile: string | null = null;
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
+      let yours: ReturnType<typeof launchYourMcpServers> | null = null;
       let setupDir: ReturnType<typeof createSetupDir> | null = null;
       let readsDir: string | null = null;
       try {
@@ -485,6 +505,17 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           ...(deps.log === undefined ? {} : { log: deps.log }),
           ...(deps.clock === undefined ? {} : { clock: deps.clock }),
         });
+        yours = launchYourMcpServers({
+          home: deps.home,
+          filesRoot,
+          laneWritable: laneWritableRoots({
+            checkouts: [...input.checkouts, input.project.repoPath, checkout],
+            worktreeBase: deps.worktreeRoot,
+            sandboxTempRoots: laneRoots,
+            systemTempRoots: SYSTEM_TEMP_ROOTS,
+          }),
+          servers: input.yourMcpServers ?? {},
+        });
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {
           settings,
@@ -540,6 +571,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const ownEnvFile = envFile;
         const ownLedger = ledger;
         const ownMcp = mcp;
+        const ownYours = yours;
         const ownSetup = setupDir;
         const ownReads = readsDir;
         let disposed = false;
@@ -550,6 +582,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           commandEnv,
           mcpServers: ownMcp.servers,
           mcpFailures: ownMcp.failures,
+          yourMcpServers: ownYours.servers,
+          yourMcpLeftOut: ownYours.leftOut,
           setup,
           secretReadsDir: ownReads,
           setProviderSession(id) {
@@ -563,6 +597,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             removeAll([
               () => {
                 ownMcp.dispose();
+              },
+              () => {
+                ownYours.dispose();
               },
               () => {
                 removeLaneFiles(ownEnvFile, tmpDir, roots);
@@ -587,12 +624,20 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       } catch (error) {
         try {
           const made = mcp;
+          const launched = yours;
           removeAll([
             ...(made === null
               ? []
               : [
                   () => {
                     made.dispose();
+                  },
+                ]),
+            ...(launched === null
+              ? []
+              : [
+                  () => {
+                    launched.dispose();
                   },
                 ]),
             () => {

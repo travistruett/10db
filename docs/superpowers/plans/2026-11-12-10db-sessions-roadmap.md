@@ -262,6 +262,10 @@ per behaviour.
 - Run the project's commit checks for chat commits (M6's git tools run with hooks off).
 - Whether a writing call through the builder's own MCP servers waits for the folder hold (spec §7.3's gap, after
   T6).
+- Your MCP servers, after T6: `headersHelper`; the local scope of `~/.claude.json`; tool filters on Claude; a
+  `CLAUDE_CONFIG_DIR` or `CODEX_HOME` set in the builder's shell; Codex's OAuth status
+  (`mcpServerStatus/list`) mapped into the same note as Claude's `needs-auth`; the system temp dirs in the list
+  the readers of the builder's files check, as the launch's already is.
 - Keyboard reordering of tabs (UI spec review, finding 22).
 
 ## Live checks

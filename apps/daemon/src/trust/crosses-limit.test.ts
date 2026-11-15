@@ -91,6 +91,7 @@ function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface 
       liveSystems: [],
       switches: TRUST_DEFAULTS,
       grants: [],
+      yourMcpServers: [],
     }),
     allow: [],
     signal: new AbortController().signal,
