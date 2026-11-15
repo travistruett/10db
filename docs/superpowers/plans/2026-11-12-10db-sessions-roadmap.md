@@ -136,6 +136,15 @@ predecessors have merged.
   - the Codex attended profile options table, one row per judge (the hook judge, the `rules` floor)
   - a guard row: a write attempt in Plan's thread is refused
   - the live Codex chat test (opt-in): the judge stops a call at a limit, and the builder's go-ahead (L1)
+  - Live-check notes (`TENDB_LIVE_CODEX=1 pnpm exec vitest run --maxWorkers=1 test/codex.live.test.ts`, the pinned
+    Codex on a fake model): the chat test (the judge stops a call at a limit, the builder's go-ahead) passes. Before
+    the follow-ups 23 of 25 passed, after them 24 of 26; the failures are two tests outside this work
+    (`about 200 skills` failed once and passed on the rerun, `cannot open its task's stored picture` fails before and
+    after: the model's script completes where the guard's refusal text is expected). The hook's `tool_use_id` is the
+    thread item's id (`exec-<uuid>`), but Codex reports no item for a code-mode call the hook refused, so a refusal
+    reaches the model as text only and no tool call carries `deniedBy`; the matching is built for an item that does
+    come (a patch's per-file calls, a direct tool) and the gap is a follow-up: show a refused call from the hook's own
+    input.
 - **Decision:** M5b's §14 record, which amends the ChatGPT decision.
 
 ### M6: The folder hold, a chat that writes in Your folder, and Do it

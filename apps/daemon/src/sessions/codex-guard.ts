@@ -1,8 +1,10 @@
 import { chmod, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
+import { DeniedBy } from '@10db/contracts';
 import { z } from 'zod';
 import { PatchHunk } from '../trust';
+import type { ClaudeDenial } from './claude-tool-calls';
 import { judgedVerdict } from './session-judge';
 import type { AgentSessionCore } from './types';
 
@@ -162,6 +164,16 @@ function unreadable(toolName: string): string {
   return `10db does not allow the tool "${toolName}" in this session.`;
 }
 
+/** Who refused a hook call, told for the call's tool item once Codex reports it declined. */
+export type OnDenied = (toolUseId: string, denial: ClaudeDenial) => void;
+
+const refusedByTenDb = (reason: string): ClaudeDenial => ({
+  by: DeniedBy.TenDb,
+  reason,
+  limit: null,
+  soft: null,
+});
+
 /**
  * Runs the session's guard and broker over one hook call. Every call a patch holds must pass; a tool
  * 10db doesn't know, and a patch that names no path, are refused rather than read as nothing to judge.
@@ -170,13 +182,23 @@ export async function judgeHookCall(
   spec: Pick<AgentSessionCore, 'preToolUse' | 'canUseTool' | 'judgeCall'>,
   hook: HookInput,
   signal: AbortSignal,
+  denials: {
+    /** Whether the builder is in the session, so a judge's refusal is one a go-ahead may clear. */
+    readonly attended: boolean;
+    readonly onDenied: OnDenied;
+  } = { attended: false, onDenied: () => undefined },
 ): Promise<GuardAnswer> {
+  const refused = (denial: ClaudeDenial, interrupt = false): GuardAnswer => {
+    if (hook.tool_use_id !== undefined) denials.onDenied(hook.tool_use_id, denial);
+    return refuse(denial.reason, interrupt);
+  };
   const calls = guardCalls(hook);
-  if (calls === null) return refuse(unreadable(hook.tool_name));
+  if (calls === null) return refused(refusedByTenDb(unreadable(hook.tool_name)));
   if (calls.length === 0)
-    return refuse('10db found no file path in this patch, so it was refused.');
+    return refused(refusedByTenDb('10db found no file path in this patch, so it was refused.'));
   for (const call of calls) {
-    if (signal.aborted) return refuse('The session ended before this call was checked.');
+    if (signal.aborted)
+      return refused(refusedByTenDb('The session ended before this call was checked.'));
     const req = {
       toolName: call.toolName,
       input: call.input,
@@ -191,7 +213,18 @@ export async function judgeHookCall(
       }),
       { ...req, toolUseId: hook.tool_use_id ?? null, signal, hunk: call.hunk },
     );
-    if (verdict.decision === 'deny') return refuse(verdict.reason);
+    if (verdict.decision === 'deny')
+      return refused(
+        verdict.judged !== undefined
+          ? {
+              by: DeniedBy.Judge,
+              reason: verdict.reason,
+              limit: verdict.judged.limit,
+              // An attended session's builder may still say go ahead; a lane's skip is final.
+              soft: denials.attended,
+            }
+          : refusedByTenDb(verdict.reason),
+      );
     if (verdict.decision === 'allow') continue;
     // A Codex hook cannot change a call, so the broker's `updatedInput` is not used.
     const decision = await spec.canUseTool({
@@ -202,13 +235,17 @@ export async function judgeHookCall(
       signal,
       ...(hook.cwd === undefined ? {} : { cwd: hook.cwd }),
     });
-    if (decision.behavior === 'deny') return refuse(decision.message, decision.interrupt === true);
+    if (decision.behavior === 'deny')
+      return refused(
+        { by: decision.by, reason: decision.message, limit: null, soft: null },
+        decision.interrupt === true,
+      );
     // Codex would run its own copy of a call 10db already ran, which fails, and the agent retries:
     // the refusal carries the result instead.
     if (decision.ranForBuilder !== undefined) return refuse(ranForBuilder(decision.ranForBuilder));
   }
   return signal.aborted
-    ? refuse('The session ended before this call was checked.')
+    ? refused(refusedByTenDb('The session ended before this call was checked.'))
     : { allow: true };
 }
 

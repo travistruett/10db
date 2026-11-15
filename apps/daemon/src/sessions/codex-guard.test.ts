@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
+import { DeniedBy } from '@10db/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SANDBOXED } from '../../test/fixtures';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
@@ -16,6 +17,7 @@ import {
   type GuardSocket,
   type HookInput,
 } from './codex-guard';
+import type { ClaudeDenial } from './claude-tool-calls';
 import type { LaneSessionSpec } from './types';
 
 type Spec = Pick<LaneSessionSpec, 'preToolUse' | 'canUseTool' | 'judgeCall'>;
@@ -264,6 +266,70 @@ describe('judgeHookCall', () => {
     const answer = await judgeHookCall(plan, hook, NEVER);
     expect(answer).toMatchObject({ allow: false });
     expect(answer.allow ? '' : answer.reason).toContain('Plan writes no code');
+  });
+
+  // The hook's `tool_use_id` is the item's id, so a refusal is told with it for the item's tool call to carry.
+  describe('who refused a call', () => {
+    const call: HookInput = { ...bash('make'), tool_use_id: 'call-9' };
+    const told = async (spec: Spec, hook: HookInput, attended = false) => {
+      const denials: [string, ClaudeDenial][] = [];
+      await judgeHookCall(spec, hook, NEVER, {
+        attended,
+        onDenied: (id, denial) => denials.push([id, denial]),
+      });
+      return denials;
+    };
+    it.each<[string, Spec, boolean, ClaudeDenial | null]>([
+      [
+        "the guard's deny is 10db's",
+        { ...ALLOW_ALL, preToolUse: () => ({ decision: 'deny', reason: 'no' }) },
+        false,
+        { by: DeniedBy.TenDb, reason: 'no', limit: null, soft: null },
+      ],
+      [
+        "a lane judge's limit is the judge's, final",
+        {
+          ...ALLOW_ALL,
+          judgeCall: () =>
+            Promise.resolve({
+              decision: 'deny',
+              reason: 'skipped',
+              judged: { limit: 'writes_live' },
+            }),
+        },
+        false,
+        { by: DeniedBy.Judge, reason: 'skipped', limit: 'writes_live', soft: false },
+      ],
+      [
+        "an attended judge's limit is the judge's, and a go-ahead may clear it",
+        {
+          ...ALLOW_ALL,
+          judgeCall: () =>
+            Promise.resolve({ decision: 'deny', reason: 'asked', judged: { limit: null } }),
+        },
+        true,
+        { by: DeniedBy.Judge, reason: 'asked', limit: null, soft: true },
+      ],
+      [
+        "a card's Deny is the builder's",
+        {
+          preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
+          canUseTool: () =>
+            Promise.resolve({ behavior: 'deny', message: 'card said no', by: DeniedBy.Builder }),
+        },
+        false,
+        { by: DeniedBy.Builder, reason: 'card said no', limit: null, soft: null },
+      ],
+      ['an allowed call is told of nothing', ALLOW_ALL, false, null],
+    ])('%s', async (_name, spec, attended, expected) => {
+      const denials = await told(spec, call, attended);
+      expect(denials).toEqual(expected === null ? [] : [['call-9', expected]]);
+    });
+
+    it('tells nothing for a call Codex gave no id', async () => {
+      const spec: Spec = { ...ALLOW_ALL, preToolUse: () => ({ decision: 'deny', reason: 'no' }) };
+      expect(await told(spec, bash('make'))).toEqual([]);
+    });
   });
 
   it('allows on allow', async () => {

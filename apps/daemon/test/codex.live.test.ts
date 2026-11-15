@@ -101,6 +101,8 @@ const EXEC_TOOLS: readonly string[] = [
 
 /** What the guard refuses, so a script can ask for a refusal by naming it. */
 const DENIED = 'DENYME';
+/** What 10db's judge refuses at a limit, so a script can ask for one by naming it. */
+const JUDGED = 'JUDGEME';
 const DENIAL_REASON = 'the live test refused this call';
 
 /** Removes a directory this file made, and only such a directory: never a link, never another path. */
@@ -376,6 +378,8 @@ function codexOnFakeModel(dir: string, codex: string, baseUrl: string): string {
 interface GuardCall {
   readonly toolName: string;
   readonly input: string;
+  /** The hook's `tool_use_id`: the id of the call's thread item. */
+  readonly toolUseId: string | null;
 }
 
 /** A `codex` the adapter started, and whether it still runs. */
@@ -681,13 +685,23 @@ async function runOnLane(
     setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
     mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
     preToolUse: (req) => {
-      const call = { toolName: req.toolName, input: JSON.stringify(req.input) };
+      const call = {
+        toolName: req.toolName,
+        input: JSON.stringify(req.input),
+        toolUseId: req.toolUseId ?? null,
+      };
       world.calls.push(call);
       world.onCall(call, spec);
       return call.input.includes(DENIED)
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
     },
+    judgeCall: (req) =>
+      Promise.resolve(
+        JSON.stringify(req.input).includes(JUDGED)
+          ? { decision: 'deny', reason: 'Skipped: a limit.', judged: { limit: 'writes_live' } }
+          : { decision: 'allow' },
+      ),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
@@ -751,7 +765,11 @@ async function runExplore(
       setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
       mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
       preToolUse: (req) => {
-        world.calls.push({ toolName: req.toolName, input: JSON.stringify(req.input) });
+        world.calls.push({
+          toolName: req.toolName,
+          input: JSON.stringify(req.input),
+          toolUseId: req.toolUseId ?? null,
+        });
         return { decision: 'allow' };
       },
       judgeCall: (req) =>
@@ -904,6 +922,7 @@ describe.skipIf(!live)(
           run(`echo ${DENIED} > bash-denied.txt`),
           patch(addFile(`${DENIED}-patch.txt`, 'denied')),
           commit(DENIED),
+          run(`echo ${JUDGED} > bash-judged.txt`),
           run('echo allowed > bash-allowed.txt'),
           patch(addFile('patch-allowed.txt', 'allowed')),
           commit('allowed'),
@@ -915,16 +934,38 @@ describe.skipIf(!live)(
         'Edit',
         'mcp__10db__commit',
         'Bash',
+        'Bash',
         'Edit',
         'mcp__10db__commit',
       ]);
       // Each refusal reached the model with the guard's reason, and nothing it asked for happened.
       for (const output of outputs.slice(0, 3)) expect(output).toContain(DENIAL_REASON);
+      expect(existsSync(join(world.checkout, 'bash-judged.txt'))).toBe(false);
       expect(existsSync(join(world.checkout, 'bash-denied.txt'))).toBe(false);
       expect(existsSync(join(world.checkout, `${DENIED}-patch.txt`))).toBe(false);
       expect(world.mcp.calls).toEqual([JSON.stringify({ message: 'allowed' })]);
       expect(readFileSync(join(world.checkout, 'bash-allowed.txt'), 'utf8')).toBe('allowed\n');
       expect(readFileSync(join(world.checkout, 'patch-allowed.txt'), 'utf8')).toBe('allowed\n');
+    });
+
+    // The hook's tool_use_id is the thread item's id, which is how a refusal reaches its tool call. In code
+    // mode (the only way a lane's model runs a command) Codex reports no item for a call the hook refused, so
+    // the refusal has no call to carry it, and the model is told the reason only.
+    it('names a call by the same id in the hook and in its thread item', async () => {
+      const run_ = await runSession(world, [
+        run(`echo ${DENIED} > bash-denied.txt`),
+        run('echo allowed > bash-allowed.txt'),
+        { say: 'done' },
+      ]);
+      expectTurn(run_);
+      const hookIds = world.calls.map((c) => c.toolUseId);
+      const itemIds = new Set(
+        run_.events.flatMap((e) => (e.type === 'tool_call' ? [e.call.id] : [])),
+      );
+      const [refused, allowed] = hookIds;
+      expect(allowed).toBeTruthy();
+      expect(itemIds).toEqual(new Set([allowed]));
+      expect(itemIds.has(refused ?? '')).toBe(false);
     });
 
     // Sessions spec §5.5, §16 check 3, trust line L1: a chat's thread on Codex. The judge stops a call at a
