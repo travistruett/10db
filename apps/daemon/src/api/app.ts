@@ -45,7 +45,9 @@ import {
   ModelMeasuresQuery,
   ModelPicksQuery,
   ModelsQuery,
+  AgentSkillInput,
   KeepAwakeInput,
+  SKILL_VERSION_HEADER,
   KindId,
   KindInput,
   KindOrderInput,
@@ -170,6 +172,11 @@ export interface ApiDeps {
   readonly taskRemoval?: TaskRemovalServices;
   /** The commit the app was built from, for `/health`; null or absent for a run from source. */
   readonly commit?: string | null;
+  /**
+   * The version of the skill this daemon ships. A call carrying another `x-10db-skill-version` is refused
+   * with 409; null or absent when it ships none, or for a call with no header.
+   */
+  readonly skillVersion?: string | null;
   /** The browser origin opted in as 10db's own dev UI, for `/health`; absent when none is. */
   readonly devUiOrigin?: string | null;
   /**
@@ -377,6 +384,24 @@ export function createApp(deps: ApiDeps) {
           ? next()
           : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
       return c.json({ error: 'unauthorized' }, 401);
+    })
+    .use('*', async (c, next) => {
+      const shipped = deps.skillVersion ?? null;
+      const presented = c.req.header(SKILL_VERSION_HEADER);
+      if (
+        OPEN_PATHS.has(c.req.path) ||
+        shipped === null ||
+        presented === undefined ||
+        presented === shipped
+      )
+        return next();
+      return c.json(
+        {
+          error: 'skill_version',
+          message: `This 10db-task skill (${presented}) isn't the one this 10db ships (${shipped}). Restart 10db to update it, or turn on Settings › Agent skill › Agents in any repo can use 10db.`,
+        },
+        409,
+      );
     })
     // After the token check, before any route reads the body. A declared length over the limit is
     // refused unread; a body with none is read only up to the limit.
@@ -1800,6 +1825,15 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/agent-skill', (c) => c.json(deps.services.agentSkill()))
+    .put(
+      '/settings/agent-skill',
+      validator('json', (value): z.infer<typeof AgentSkillInput> => AgentSkillInput.parse(value)),
+      (c) => c.json(deps.services.setAgentSkill(c.req.valid('json').enabled)),
+    )
+    .get('/agent-skill', (c) =>
+      c.json({ ...deps.services.agentSkillInfo(), appCommit: deps.commit ?? null }),
     )
     .get('/settings/capacity', (c) => c.json(deps.services.capacitySettings()))
     .put(

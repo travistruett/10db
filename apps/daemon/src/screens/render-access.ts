@@ -128,6 +128,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/models/offers': 'No screen draws the model list.',
   '/models/status': 'No screen draws the model list.',
   '/settings/keep-awake': 'No screen draws a setting.',
+  '/settings/agent-skill': 'No screen draws a setting.',
+  '/agent-skill': 'No screen draws a setting.',
   '/settings/lane-permissions': 'No screen draws a setting.',
   '/settings/trust': 'No screen draws a setting.',
   '/projects/:projectId/trust': 'No screen draws a setting.',

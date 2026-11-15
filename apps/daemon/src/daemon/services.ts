@@ -163,6 +163,7 @@ import {
   type PassJoined,
   type TakeOutInput,
 } from '../pass';
+import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Admission, Scheduler } from '../scheduler';
@@ -272,6 +273,7 @@ export function createServices(deps: {
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
+  readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
   readonly admission: Pick<Admission, 'status'>;
   /** Probes the tools and gh's login; the services keep its last answer. */
@@ -753,6 +755,9 @@ export function createServices(deps: {
     },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    agentSkill: () => deps.agentSkill.status(),
+    setAgentSkill: (enabled) => deps.agentSkill.setEnabled(enabled),
+    agentSkillInfo: () => ({ version: deps.agentSkill.shippedVersion(), appCommit: null }),
     capacitySettings: () => capacitySettings(db),
     setCapacitySettings(input) {
       const saved = setCapacitySettings(deps.state, input);
