@@ -13,6 +13,7 @@ export const TRUST_SWITCH_KEYS = [
   'yourInstructions',
   'yourSkills',
   'yourPlugins',
+  'yourMcpServers',
   'projectSkills',
 ] as const;
 export type TrustSwitchKey = (typeof TRUST_SWITCH_KEYS)[number];

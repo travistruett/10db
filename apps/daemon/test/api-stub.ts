@@ -68,6 +68,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     setLanePermissions: none,
     trustSettings: none,
     setTrustSwitches: none,
+    approveYourMcpServer: none,
     projectTrust: none,
     setProjectTrust: none,
     liveSystems: none,

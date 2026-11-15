@@ -65,12 +65,48 @@ describe('the Comes along preview', () => {
         state,
         builderHome: home,
         laneWritableRoots: [],
+        worktreeBase: join(root.path, 'worktrees'),
+        login: { configDir: () => null, codexHome: () => null },
         laneSandbox: null,
         adapter: new FakeAdapter({}),
         judge: { ready: () => Promise.resolve(false) },
         log: { warn: () => undefined },
       });
       expect((await trust.projectTrust(project.id)).preview.plugins).toEqual(plugins);
+    } finally {
+      test.close();
+    }
+  });
+});
+
+describe("the builder's MCP servers notice", () => {
+  it.each<[() => string | null, () => string | null, string | null]>([
+    [() => null, () => null, null],
+    [
+      () => '/elsewhere',
+      () => null,
+      'Your shell sets CLAUDE_CONFIG_DIR. 10db reads your servers from ~/.claude.json, not from there.',
+    ],
+    [
+      () => '/elsewhere',
+      () => '/codex',
+      'Your shell sets CLAUDE_CONFIG_DIR. 10db reads your servers from ~/.claude.json, not from there. Your shell sets CODEX_HOME. 10db reads your servers from ~/.codex/config.toml, not from there.',
+    ],
+  ])('says what the shell sets that 10db does not follow', async (configDir, codexHome, notice) => {
+    const test = createTestStore();
+    try {
+      const trust = createTrustServices({
+        state: createStateStore(test.store, createEventBus()),
+        builderHome: home,
+        laneWritableRoots: [],
+        worktreeBase: join(root.path, 'worktrees'),
+        login: { configDir, codexHome },
+        laneSandbox: null,
+        adapter: new FakeAdapter({}),
+        judge: { ready: () => Promise.resolve(false) },
+        log: { warn: () => undefined },
+      });
+      expect((await trust.trustSettings()).mcpNotice).toBe(notice);
     } finally {
       test.close();
     }

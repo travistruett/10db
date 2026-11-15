@@ -110,7 +110,7 @@ const project = async (path: string, name: string) =>
   });
 
 async function send(
-  method: 'GET' | 'PUT' | 'DELETE',
+  method: 'GET' | 'PUT' | 'POST' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<Response> {
@@ -344,5 +344,94 @@ describe("a project's grants over HTTP", () => {
 
   it("trust settings say whether 10db's judge is ready", async () => {
     expect((await settings('GET')).tendbReady).toBe(false);
+  });
+});
+
+describe("the builder's MCP servers over HTTP", () => {
+  const writeServers = (servers: Record<string, unknown>): void => {
+    writeFileSync(
+      join(home, '.claude.json'),
+      JSON.stringify({ primaryApiKey: 'sk-canary', mcpServers: servers }),
+    );
+  };
+  const DOCS = {
+    type: 'http',
+    url: 'https://docs.example/mcp',
+    headers: { Authorization: 'Bearer sk-canary' },
+  };
+  const approve = (key: string, configHash: string | null) =>
+    send('POST', '/settings/trust/mcp-servers/approve', { key, configHash });
+  const serverOf = async (name: string) => {
+    const found = (await settings('GET')).mcpServers.find((s) => s.name === name);
+    if (!found) throw new Error(`${name} is not listed`);
+    return found;
+  };
+
+  it('lists a new server from ~/.claude.json with its header names and no secret', async () => {
+    writeServers({ docs: DOCS });
+    const raw = JSON.stringify(await (await send('GET', '/settings/trust')).json());
+    expect(raw).not.toContain('sk-canary');
+    expect(await serverOf('docs')).toMatchObject({
+      state: 'new',
+      on: false,
+      transport: 'http',
+      url: 'https://docs.example/mcp',
+      headerNames: ['Authorization'],
+      sendsNoHeaders: false,
+    });
+  });
+
+  it('a server whose name has a space is listed left out, and the page loads', async () => {
+    writeServers({
+      'two words': { command: 'x' },
+      ok: { type: 'http', url: 'https://ok.example/mcp' },
+    });
+    expect(await serverOf('two words')).toMatchObject({
+      state: 'left_out',
+      reason: "Its name can't be an MCP server name.",
+    });
+    expect((await serverOf('ok')).state).toBe('new');
+  });
+
+  it("an entry that can't be read is listed left out, and the page loads", async () => {
+    writeServers({ broken: { type: 'http' }, ok: { type: 'http', url: 'https://ok.example/mcp' } });
+    expect(await serverOf('broken')).toMatchObject({ state: 'left_out', transport: null });
+    expect((await serverOf('ok')).state).toBe('new');
+  });
+
+  it('approves with the hash it showed, and the server is on', async () => {
+    writeServers({ docs: DOCS });
+    const shown = await serverOf('docs');
+    const response = await approve(shown.key, shown.configHash);
+    expect(response.status).toBe(200);
+    expect(await serverOf('docs')).toMatchObject({ state: 'approved', on: true });
+  });
+
+  it('refuses a stale hash with 409 and stores nothing', async () => {
+    writeServers({ docs: DOCS });
+    const shown = await serverOf('docs');
+    writeServers({ docs: { ...DOCS, url: 'https://elsewhere.example/mcp' } });
+    const response = await approve(shown.key, shown.configHash);
+    expect(response.status).toBe(409);
+    expect((await serverOf('docs')).state).toBe('new');
+  });
+
+  it('refuses to approve a server it cannot run', async () => {
+    writeServers({ 'two words': { command: 'x' } });
+    const shown = await serverOf('two words');
+    expect((await approve(shown.key, shown.configHash ?? 'f'.repeat(64))).status).toBe(409);
+  });
+
+  it("a project's override turns one server off there only", async () => {
+    writeServers({ docs: DOCS });
+    const shown = await serverOf('docs');
+    await approve(shown.key, shown.configHash);
+    const one = await project(repo.path, 'one');
+    const two = await project(other.path, 'two');
+    const off = { mcpServers: { [shown.key]: false } };
+    expect((await projectTrust(one.id, 'PUT', off)).effective.mcpServers).toEqual({
+      [shown.key]: false,
+    });
+    expect((await projectTrust(two.id, 'GET')).effective.mcpServers).toEqual({});
   });
 });

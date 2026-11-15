@@ -103,6 +103,7 @@ import type {
   TrustOverrides,
   TrustSettingsDto,
   TrustSwitches,
+  ApproveYourMcpServer,
   McpServerStatusDto,
   ModelProfileDto,
   ModelMeasuresDto,
@@ -679,6 +680,11 @@ export interface ApiServices extends PlanRecordServices {
   /** Settings › Trust: the app-wide switches and the builder's installed plugins; read when each session starts. */
   trustSettings(): Promise<TrustSettingsDto>;
   setTrustSwitches(switches: TrustSwitches): Promise<TrustSettingsDto>;
+  /**
+   * Approves one of the builder's MCP servers as it is now; throws ConflictError when its config changed since
+   * the page loaded or 10db can't run it, and InvalidError for a plugin's server.
+   */
+  approveYourMcpServer(input: ApproveYourMcpServer): Promise<TrustSettingsDto>;
   /** A project's Trust: its overrides, the switches its sessions use, and what would come along; throws NotFoundError. */
   projectTrust(projectId: ProjectId): Promise<ProjectTrustDto>;
   setProjectTrust(projectId: ProjectId, overrides: TrustOverrides): Promise<ProjectTrustDto>;

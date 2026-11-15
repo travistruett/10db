@@ -46,7 +46,14 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Your plugins',
     description: `The plugins Claude Code has installed for you, each switchable below. ${NEXT}`,
     providers:
-      "Claude: skills, agents, commands and hooks, as Claude Code runs them; their MCP servers wait for 10db's support for your MCP servers. Codex: skills only.",
+      "Claude: skills, agents, commands and hooks, as Claude Code runs them. Their MCP servers are listed under Your MCP servers. Codex: skills, and the plugins' MCP servers.",
+    whileOn: null,
+  },
+  yourMcpServers: {
+    label: 'Your MCP servers',
+    description: `The MCP servers in your ~/.claude.json, ~/.codex/config.toml and plugins. Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. ${NEXT}`,
+    providers:
+      'Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth, and claude.ai connectors, are not here yet.',
     whileOn: null,
   },
   projectSkills: {
