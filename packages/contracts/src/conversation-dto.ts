@@ -14,6 +14,7 @@ import {
   InboxItemId,
   PassTurnId,
 } from './ids';
+import { Effort } from './states';
 import { ToolCallView } from './tool-call-view';
 
 // Sessions spec §10: a conversation as the UI reads it, its stored items, what is streaming now, and
@@ -35,6 +36,8 @@ export const ConversationDto = z.object({
   state: z.enum(ConversationState),
   capabilities: AgentCapabilitiesDto,
   model: z.string().nullable(),
+  /** A chat's effort; null runs the model's own default, and for a Plan the effort is on the Plan. */
+  effort: z.enum(Effort).nullable(),
   contextPct: z.number().nullable(),
   /** The turn starters waiting in the queue. */
   queued: z.int().nonnegative(),

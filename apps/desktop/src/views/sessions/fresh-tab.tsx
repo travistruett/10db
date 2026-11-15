@@ -1,6 +1,7 @@
 import {
   CODEX_WEB_WAITS,
   type ChatDto,
+  type Effort,
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
@@ -10,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { composerPhase } from '../../conversation/composer-phase';
 import { hasContent, type Draft } from '../../conversation/drafts';
-import { ModelPicker } from '../../conversation/model-picker';
+import { ModelMenu } from '../../conversation/model-menu';
 import {
   useChatModels,
   useCreateChat,
@@ -36,7 +37,7 @@ export interface FreshTabProps {
   readonly tab: FreshTabState;
   readonly projects: readonly ProjectViewDto[];
   readonly onProject: (projectId: ProjectId) => void;
-  readonly onModel: (model: string | null) => void;
+  readonly onModel: (model: string | null, effort: Effort | null) => void;
   /** The chat exists: the screen replaces this tab with it and, when `send`, sends the draft there. */
   readonly onChatMade: (chat: ChatDto, send: boolean) => void;
   readonly onOpenRecent: (chat: ChatDto) => void;
@@ -78,7 +79,12 @@ export function FreshTab({
     }
     const want = { send };
     const promise = create
-      .mutateAsync({ projectId: tab.projectId, model: tab.model, tabPosition: tab.position })
+      .mutateAsync({
+        projectId: tab.projectId,
+        model: tab.model,
+        effort: tab.effort,
+        tabPosition: tab.position,
+      })
       .then((chat) => {
         onChatMade(chat, want.send);
         return chat;
@@ -133,17 +139,6 @@ export function FreshTab({
               if (next !== undefined) onProject(next.id);
             }}
           />
-          {models.data !== undefined ? (
-            <ModelPicker
-              offered={models.data.offered}
-              default={models.data.default}
-              picked={tab.model}
-              busy={false}
-              pending={chosen}
-              width={220}
-              onPick={onModel}
-            />
-          ) : null}
         </Group>
         <Text size="xs" c="dimmed" mb="sm">
           {web
@@ -164,6 +159,19 @@ export function FreshTab({
             disabledReason={null}
             error={createError}
             inputRef={input}
+            modelControl={
+              models.data === undefined ? null : (
+                <ModelMenu
+                  offered={models.data.offered}
+                  default={models.data.default}
+                  picked={tab.model}
+                  effort={tab.effort}
+                  busy={false}
+                  pending={chosen}
+                  onPick={onModel}
+                />
+              )
+            }
             onSend={async () => {
               await ensureChat(true);
             }}

@@ -20,7 +20,13 @@ afterEach(() => {
 describe('fresh tabs', () => {
   it('opens after the given position, in the selected project', () => {
     const made = openFreshTab([], [a, b], b.id, 2, 'x');
-    expect(made?.opened).toEqual({ id: 'x', projectId: b.id, model: null, position: 3 });
+    expect(made?.opened).toEqual({
+      id: 'x',
+      projectId: b.id,
+      model: null,
+      effort: null,
+      position: 3,
+    });
   });
 
   it('falls back to the first project, and to none when there are none', () => {
@@ -32,15 +38,27 @@ describe('fresh tabs', () => {
     const one = openFreshTab([], [a], a.id, 2, 'one');
     const two = openFreshTab(one?.tabs ?? [], [a], a.id, 4, 'two');
     expect(removeFreshTab(two?.tabs ?? [], 'one')).toEqual([
-      { id: 'two', projectId: a.id, model: null, position: 5 },
+      { id: 'two', projectId: a.id, model: null, effort: null, position: 5 },
     ]);
   });
 
   it('changing the project clears the model, and a model is kept per tab', () => {
     const made = openFreshTab([], [a, b], a.id, 0, 'x');
-    const picked = setFreshModel(made?.tabs ?? [], 'x', 'opus');
-    expect(picked[0]?.model).toBe('opus');
-    expect(setFreshProject(picked, 'x', b.id)[0]).toMatchObject({ projectId: b.id, model: null });
+    const picked = setFreshModel(made?.tabs ?? [], 'x', 'opus', 'high');
+    expect(picked[0]).toMatchObject({ model: 'opus', effort: 'high' });
+    expect(setFreshProject(picked, 'x', b.id)[0]).toMatchObject({
+      projectId: b.id,
+      model: null,
+      effort: null,
+    });
+  });
+
+  it('a tab kept before efforts existed reads with no effort', () => {
+    localStorage.setItem(
+      FRESH_TABS_KEY,
+      JSON.stringify([{ id: 'x', projectId: a.id, model: 'opus', position: 0 }]),
+    );
+    expect(readFreshTabs()[0]).toMatchObject({ model: 'opus', effort: null });
   });
 
   it('round-trips through localStorage', () => {

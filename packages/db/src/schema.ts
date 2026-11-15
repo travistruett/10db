@@ -1548,6 +1548,8 @@ export const conversations = sqliteTable(
       .references(() => accounts.id),
     /** The model the builder chose; null runs it on its role's. */
     model: text('model'),
+    /** The effort the builder chose for a chat; null runs the model's own default. A Plan keeps its own on `shapes`. */
+    effort: text('effort').$type<Effort>(),
     /** The agent session the next one resumes; null before the first turn. */
     providerSessionId: text('provider_session_id'),
     /** §6.7; null for a task, whose state is the runner's. */

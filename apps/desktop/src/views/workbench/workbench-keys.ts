@@ -5,7 +5,7 @@ import { queueRank } from './queue-order';
 // Workbench spec §4.3, §4.6: J and K move through the queue and Enter selects; N goes to the next page
 // that waits on the builder; ⌘L copies the shown page's link; Escape leaves the composer for the queue.
 // Letters typed into the composer are text, and a region marked with `KEYS_IGNORE_ATTRIBUTE` keeps its
-// own keys. ⌘↩ is the composer's.
+// own keys. Enter and Shift+Enter are the composer's.
 
 /** Marks a region that handles its own keys; the Workbench's keys skip it. */
 export const KEYS_IGNORE_ATTRIBUTE = 'data-workbench-keys-ignore';

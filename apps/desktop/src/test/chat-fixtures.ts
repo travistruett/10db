@@ -147,6 +147,11 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
         ...chat,
         ...(body.title === undefined ? {} : { title: body.title, titleSource: 'builder' as const }),
         ...(body.tabPosition === undefined ? {} : { tabPosition: body.tabPosition }),
+        conversation: {
+          ...chat.conversation,
+          ...(body.model === undefined ? {} : { model: body.model }),
+          ...(body.effort === undefined ? {} : { effort: body.effort }),
+        },
       });
       chats.splice(chats.indexOf(chat), 1, changed);
       return HttpResponse.json(changed);

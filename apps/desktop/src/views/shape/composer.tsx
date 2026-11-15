@@ -1,9 +1,17 @@
 import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@mantine/core';
-import { IconPaperclip } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { IconCornerDownLeft, IconPaperclip, IconPlayerStopFilled } from '@tabler/icons-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
+import { DictationButton } from '../../conversation/dictation-button';
 import { FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
 import { keepBoth, withoutSent, type LateOutcome } from './late-outcome';
-import { isSendKey } from '../../conversation/escape';
+import { isComposing, isSendKey } from '../../conversation/escape';
 
 export interface ComposerProps {
   /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */
@@ -41,6 +49,8 @@ export interface ComposerProps {
    * is not offered, since a proposal round would replace what was imported.
    */
   readonly imported?: string;
+  /** The model and effort chip and the context ring, beside Attach. */
+  readonly modelControl?: ReactNode;
 }
 
 const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
@@ -181,6 +191,7 @@ export function Composer(props: ComposerProps) {
           }}
           onPaste={onPaste}
           onKeyDown={(event) => {
+            if (isComposing(event)) return;
             if (isSendKey(event)) {
               event.preventDefault();
               void send();
@@ -211,7 +222,7 @@ export function Composer(props: ComposerProps) {
             {props.imported ??
               (firstRun
                 ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
-                : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops')}
+                : '↵ sends · ⇧↵ new line · ⌘⇧↩ proposes · Esc stops')}
           </Text>
           {nothingDecided && props.imported === undefined ? (
             <Text id="shape-composer-propose-hint" size="xs" c="dimmed">
@@ -230,21 +241,25 @@ export function Composer(props: ComposerProps) {
           >
             <IconPaperclip size={18} stroke={1.5} />
           </ActionIcon>
+          <DictationButton inputRef={input} onError={setFailure} />
+          {props.modelControl}
           {answering ? (
-            <Button variant="default" onClick={props.onStop}>
-              Stop
-            </Button>
+            <ActionIcon variant="default" size="lg" aria-label="Stop" onClick={props.onStop}>
+              <IconPlayerStopFilled size={16} />
+            </ActionIcon>
           ) : null}
-          <Button
+          <ActionIcon
             variant="default"
+            size="lg"
+            aria-label="Send"
             loading={sending}
             disabled={draft.trim() === ''}
             onClick={() => {
               void send();
             }}
           >
-            Send
-          </Button>
+            <IconCornerDownLeft size={18} stroke={1.5} />
+          </ActionIcon>
           {props.imported === undefined ? (
             <Button
               loading={proposing}

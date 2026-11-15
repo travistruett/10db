@@ -1,16 +1,19 @@
-import type { ChatDto, ProjectViewDto, ToolCallView } from '@10db/contracts';
-import { Alert, Box, Button, Group, Text } from '@mantine/core';
+import type { ChatDto, Effort, ProjectViewDto, ToolCallView } from '@10db/contracts';
+import { Box, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
 import { composerPhase } from '../../conversation/composer-phase';
+import { ContextRing } from '../../conversation/context-ring';
 import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
+import { ModelMenu } from '../../conversation/model-menu';
+import { nameOf } from '../../conversation/model-menu-options';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
-import { fetchConversationFiles, usePatchChat } from '../../daemon/chat-queries';
+import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
 import {
   useConversation,
   useConversationItemsState,
@@ -21,6 +24,7 @@ import {
   useStopConversation,
   useToolCallFull,
 } from '../../daemon/conversation-queries';
+import { useModels } from '../../daemon/model-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
 import dayjs from 'dayjs';
@@ -29,6 +33,8 @@ import { sessionAnnouncement, type SessionEvent } from './session-announcements'
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
+
+const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
 const NARROW_QUERY = '(max-width: 639px)';
 
@@ -111,7 +117,10 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
-  const bar = useRef<HTMLDivElement>(null);
+  const models = useChatModels(chat.projectId);
+  const modelRows = useModels(null);
+  const offered = models.data?.offered ?? [];
+  const named = conversation.model ?? models.data?.default ?? null;
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
@@ -264,10 +273,10 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const reconnecting = daemon.kind === 'reconnecting';
   const disabledReason = reconnecting ? 'Reconnecting… your message stays here.' : null;
 
-  const changeModel = (model: string | null): void => {
+  const changeModel = (model: string | null, effort: Effort | null): void => {
     setModelRefusal(null);
     patch.mutate(
-      { chatId: chat.id, model },
+      { chatId: chat.id, model, effort },
       {
         onError: (error) => {
           setModelRefusal(error.message);
@@ -278,16 +287,12 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div ref={bar} style={{ flex: 'none' }}>
+      <div style={{ flex: 'none' }}>
         <SessionBar
           chat={chat}
           conversation={conversation}
           projectName={project?.name ?? ''}
           loading={loading}
-          working={working}
-          modelPending={patch.isPending}
-          modelError={null}
-          onModel={changeModel}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
           {...(renaming === undefined ? {} : { renaming })}
@@ -324,25 +329,6 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           </Text>
         ) : (
           <>
-            {modelRefusal === null ? null : (
-              <Alert color="red" mx="md" mb="xs" title="Not available on this account">
-                <Group justify="space-between" wrap="nowrap" align="flex-start">
-                  <Text size="sm">{modelRefusal}</Text>
-                  <Button
-                    size="compact-sm"
-                    variant="default"
-                    onClick={() => {
-                      setModelRefusal(null);
-                      bar.current
-                        ?.querySelector<HTMLInputElement>('input[aria-label="Model"]')
-                        ?.focus();
-                    }}
-                  >
-                    Choose Another Model
-                  </Button>
-                </Group>
-              </Alert>
-            )}
             <Composer
               draft={draft}
               onDraft={(next) => {
@@ -359,6 +345,37 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               disabledReason={disabledReason}
               error={sendError}
               inputRef={input}
+              modelControl={
+                <Group gap={4} wrap="nowrap">
+                  {caps.modelSwitch === 'none' || offered.length === 0 ? (
+                    named === null ? null : (
+                      <Text size="xs" c="dimmed">
+                        {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
+                      </Text>
+                    )
+                  ) : (
+                    <ModelMenu
+                      offered={offered}
+                      default={models.data?.default ?? null}
+                      picked={conversation.model}
+                      effort={conversation.effort}
+                      busy={working}
+                      pending={patch.isPending}
+                      error={modelRefusal}
+                      onPick={changeModel}
+                    />
+                  )}
+                  <ContextRing
+                    percent={conversation.contextPct}
+                    more={[
+                      CONTEXT_TIP,
+                      ...(conversation.costUsd === null
+                        ? []
+                        : [`$${conversation.costUsd.toFixed(2)} so far`]),
+                    ]}
+                  />
+                </Group>
+              }
               onSend={post}
               onStop={stopNow}
               onRedo={async (d) => {

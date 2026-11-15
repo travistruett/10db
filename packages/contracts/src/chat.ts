@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ConversationDto } from './conversation-dto';
 import { ChatId, ConversationId, PassId, ProjectId, TaskId } from './ids';
 import { ShapeModelOption } from './shape-view';
+import { Effort } from './states';
 
 // Sessions spec §7.1, §10, §11: a chat (a tab of its own over an attended conversation), what the
 // Sessions screen reads about it, and the routes that serve its `@` files and its Start from lines.
@@ -53,6 +54,7 @@ export type ChatDto = z.infer<typeof ChatDto>;
 export const ChatCreateInput = z.strictObject({
   projectId: ProjectId,
   model: z.string().min(1).nullable(),
+  effort: z.enum(Effort).nullable().optional(),
   tabPosition: z.int().nonnegative(),
 });
 export type ChatCreateInput = z.infer<typeof ChatCreateInput>;
@@ -62,6 +64,7 @@ export const ChatPatchInput = z
     title: z.string().trim().min(1).max(CHAT_RENAME_MAX).optional(),
     tabPosition: z.int().nonnegative().nullable().optional(),
     model: z.string().min(1).nullable().optional(),
+    effort: z.enum(Effort).nullable().optional(),
   })
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ChatPatchInput = z.infer<typeof ChatPatchInput>;

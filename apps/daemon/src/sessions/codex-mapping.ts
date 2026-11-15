@@ -346,10 +346,17 @@ export function mapCodexNotification(
         output: total.outputTokens ?? 0,
       };
       if (!state.baselineFixed) state.baseline = state.latest;
+      // Without a window there is no share to show; a 0% ring would claim an empty context.
+      if (
+        modelContextWindow === null ||
+        modelContextWindow === undefined ||
+        modelContextWindow <= 0
+      )
+        return [];
       return [
         contextEvent({
           totalTokens: last.totalTokens,
-          maxTokens: modelContextWindow ?? 0,
+          maxTokens: modelContextWindow,
           percentage: 0,
         }),
       ];

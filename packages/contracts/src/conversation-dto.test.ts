@@ -112,6 +112,7 @@ describe('ConversationDto', () => {
     state: 'idle_cold',
     capabilities,
     model: null,
+    effort: null,
     contextPct: null,
     queued: 0,
     costUsd: null,

@@ -156,6 +156,23 @@
             "null"
           ]
         },
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "contextPct": {
           "type": [
             "number",
@@ -233,6 +250,7 @@
         "state",
         "capabilities",
         "model",
+        "effort",
         "contextPct",
         "queued",
         "costUsd",

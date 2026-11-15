@@ -201,3 +201,12 @@ export async function notifyText(title: string, body: string): Promise<void> {
   if (!(await canNotify())) return;
   sendNotification({ title, body });
 }
+
+/**
+ * Starts macOS Dictation in the focused field, as Edit > Start Dictation does; the shell sends the
+ * action down the responder chain, so no Accessibility permission is asked. A plain browser has no
+ * such shell, and the caller shows no button there.
+ */
+export async function startDictation(): Promise<void> {
+  if (isTauri()) await invoke('start_dictation');
+}

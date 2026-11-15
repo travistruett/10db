@@ -12,6 +12,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
 import { useEffect, useRef } from 'react';
 import { JudgeLine, toolDoing, WorkingLine } from '../../conversation';
+import { ContextRing } from '../../conversation/context-ring';
 import { streamingOf } from '../../conversation/live-items';
 import {
   useConversation,
@@ -33,7 +34,7 @@ import { AgentsLine } from './agents-line';
 import { Composer } from './composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
-import { ModelPicker } from './model-picker';
+import { PlanModelMenu } from './plan-model-menu';
 import { leaveLate, takeLate, useLate } from './late-outcome';
 import { PlanMeasures } from './plan-measures';
 import { RecentConversations } from './recent-conversations';
@@ -258,7 +259,6 @@ export function ConversationPane({
         </Group>
         {shapeId === null ? null : (
           <Group gap="xs" wrap="nowrap" align="flex-start">
-            {view === undefined ? null : <ModelPicker view={view} />}
             {hasRecord ? (
               // An icon, so the header still fits beside the Proposed pane at its narrowest.
               <Tooltip label="Record" withArrow>
@@ -330,6 +330,14 @@ export function ConversationPane({
         </Text>
       ) : null}
       <Composer
+        modelControl={
+          view === undefined ? null : (
+            <>
+              <PlanModelMenu view={view} />
+              <ContextRing percent={conversation?.contextPct ?? null} />
+            </>
+          )
+        }
         firstRun={!heardBuilder}
         answering={answering}
         agentLabel={conversation?.capabilities.label ?? 'the agent'}

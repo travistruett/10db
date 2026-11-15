@@ -9,7 +9,7 @@ export interface ShapeKeys {
   readonly answering: boolean;
 }
 
-/** ⌘↩ is the input's (`isSendKey`); the screen's own keys are ⌘⇧↩ and Esc. */
+/** Enter is the input's (`isSendKey`); the screen's own keys are ⌘⇧↩ and Esc. */
 export function useShapeKeys(keys: ShapeKeys): void {
   const latest = useRef(keys);
   useEffect(() => {

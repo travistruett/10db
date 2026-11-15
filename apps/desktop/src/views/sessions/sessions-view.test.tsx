@@ -57,7 +57,7 @@ describe('Sessions: a fresh tab', () => {
       ),
     ).toBeTruthy();
     expect(composer().getAttribute('placeholder')).toBe('Ask about ampsio…');
-    expect(screen.getByText('⌘↩ sends · @ files')).toBeTruthy();
+    expect(screen.getByText('↵ sends · ⇧↵ new line · @ files')).toBeTruthy();
   });
 
   it('on a ChatGPT-plan project says once that the chat searches nothing, and never that it does', async () => {

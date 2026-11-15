@@ -12,6 +12,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
+import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
 // Sessions spec §10: chats, what a fresh tab offers (models, Start from, Recent) and the files an `@`
@@ -139,6 +140,13 @@ export function usePatchChat() {
   return useMutation({
     mutationFn: async ({ chatId, ...patch }: ChatPatchInput & { readonly chatId: ChatId }) =>
       readJson(await client.chats[':chatId'].$patch({ param: { chatId }, json: patch }), ChatDto),
+    // A model or effort change emits no conversation event when no session is warm, so the open
+    // conversation is refetched here for the chip to show the pick.
+    onSuccess: (chat) =>
+      queryClient.invalidateQueries({
+        queryKey: conversationKeys.one(chat.conversationId),
+        exact: true,
+      }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: chatKeys.all }),
   });
 }

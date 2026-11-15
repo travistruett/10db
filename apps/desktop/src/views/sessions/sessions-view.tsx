@@ -303,8 +303,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               onProject={(projectId) => {
                 changeProject(selected.tab, projectId);
               }}
-              onModel={(model) => {
-                setFresh((tabsNow) => setFreshModel(tabsNow, selected.tab.id, model));
+              onModel={(model, effort) => {
+                setFresh((tabsNow) => setFreshModel(tabsNow, selected.tab.id, model, effort));
               }}
               onChatMade={(chat, send) => {
                 chatMade(selected.tab, chat, send);

@@ -678,6 +678,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         state: rt.state,
         capabilities: rt.judge === null ? capabilities : { ...capabilities, judge: rt.judge },
         model: conv.model,
+        effort: conv.effort,
         contextPct: conv.contextPct,
         queued: unpushed(rt).length,
         costUsd: capabilities.costUsd ? (conversationCostUsd(state.db, id) ?? 0) : null,

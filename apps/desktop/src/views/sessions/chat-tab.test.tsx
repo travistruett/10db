@@ -11,6 +11,7 @@ import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
+import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
 import { commandCall, mcpCall } from '../../test/tool-call-fixtures';
 
 // A chat's tab over the daemon: its bar, its builder-tool rows, its cards and its states.
@@ -68,17 +69,17 @@ const createRow = (chat: ChatDto) =>
   );
 
 describe('ChatTab: the session bar', () => {
-  it('shows the title, what the session is, the agent and model by capabilities, and the meter', async () => {
+  it('shows the title, what the session is, the agent, and the composer’s model chip and context ring', async () => {
     openChat({ title: 'Login fails after sleep', conversation: { contextPct: 41 } });
     expect((await screen.findByTitle('Double-click to rename')).textContent).toBe(
       'Login fails after sleep',
     );
     expect(screen.getByText('Chat · reads ampsio')).toBeTruthy();
-    expect(await screen.findByText('Claude Code ·')).toBeTruthy();
-    expect(screen.getByRole<HTMLInputElement>('combobox', { name: 'Model' }).value).toContain(
+    expect(await screen.findByText('Claude Code')).toBeTruthy();
+    expect((await screen.findByRole('button', { name: 'Model and effort' })).textContent).toContain(
       'claude-opus-5',
     );
-    expect(screen.getByText('41%')).toBeTruthy();
+    expect(screen.getByRole('img', { name: /41% of the context used/ })).toBeTruthy();
   });
 
   it('renames on a double-click and Enter, sending the new title', async () => {
@@ -119,21 +120,29 @@ describe('ChatTab: the session bar', () => {
   });
 
   it('with no capabilities beyond the floor: plain-text model, no Attach, no slash hint, no cost', async () => {
-    openChat({
-      conversation: {
-        capabilities: {
-          ...CLAUDE,
-          modelSwitch: 'none',
-          images: [],
-          slashCommands: false,
-          costUsd: false,
+    openChat(
+      {
+        conversation: {
+          capabilities: {
+            ...CLAUDE,
+            modelSwitch: 'none',
+            images: [],
+            slashCommands: false,
+            costUsd: false,
+          },
+          contextPct: 41,
+          costUsd: null,
         },
-        contextPct: 41,
-        costUsd: null,
       },
-    });
-    expect(await screen.findByText('Claude Code · claude-opus-5')).toBeTruthy();
-    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
+      () => [],
+      [
+        http.get(daemonUrl('/models'), () =>
+          HttpResponse.json([modelRowDto({ model: 'claude-opus-5', name: 'Opus 5' })]),
+        ),
+      ],
+    );
+    expect(await screen.findByText('Opus 5')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Model and effort' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();
     expect(screen.queryByText(/\/ commands/)).toBeNull();
     expect(screen.getByRole('img', { name: /41%/ }).getAttribute('aria-label')).not.toContain('$');
@@ -337,7 +346,7 @@ describe('ChatTab: cards, held-back calls and states', () => {
     ).toBeTruthy();
   });
 
-  it('a refused model shows the red alert with the daemon’s words and keeps the draft', async () => {
+  it('a refused model says so beside the chip and keeps the draft', async () => {
     openChat({}, () => [], [
       http.patch(daemonUrl('/chats/:chatId'), () =>
         HttpResponse.json(
@@ -349,14 +358,52 @@ describe('ChatTab: cards, held-back calls and states', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), {
       target: { value: 'half a thought' },
     });
-    const picker = screen.getByRole('combobox', { name: 'Model' });
-    fireEvent.click(picker);
-    fireEvent.click(await screen.findByRole('option', { name: /claude-sonnet-5-5/, hidden: true }));
-    expect(await screen.findByText('Not available on this account')).toBeTruthy();
-    expect(screen.getByText('That model is not on this account.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Choose Another Model' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Model and effort' }));
+    fireEvent.click(
+      await screen.findByRole('menuitemradio', { name: /claude-sonnet-5-5/, hidden: true }),
+    );
+    expect(await screen.findByText('That model is not on this account.')).toBeTruthy();
     expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message' }).value).toBe(
       'half a thought',
     );
+  });
+
+  it('a model picked in the composer is sent to the chat, to apply from its next turn', async () => {
+    const { served } = openChat();
+    fireEvent.click(await screen.findByRole('button', { name: 'Model and effort' }));
+    fireEvent.click(
+      await screen.findByRole('menuitemradio', { name: /claude-sonnet-5-5/, hidden: true }),
+    );
+    await waitFor(() => {
+      expect(served.patches).toEqual([
+        { chatId: served.chats[0]?.id, body: { model: 'claude-sonnet-5-5', effort: null } },
+      ]);
+    });
+  });
+
+  it('an effort picked on a chat with no warm session shows on the chip at once', async () => {
+    openChat({ conversation: { state: 'idle_cold' } }, () => [], [
+      http.get(daemonUrl('/models'), () =>
+        HttpResponse.json([
+          modelRowDto({
+            model: 'claude-opus-5',
+            name: 'Opus 5',
+            efforts: [modelEffortDto({ effort: 'high' }), modelEffortDto({ effort: 'low' })],
+          }),
+        ]),
+      ),
+    ]);
+    const chip = await screen.findByRole('button', { name: 'Model and effort' });
+    await waitFor(() => {
+      expect(chip.textContent).toContain('Opus 5');
+    });
+    fireEvent.click(chip);
+    fireEvent.keyDown(await screen.findByRole('menuitem', { name: /Effort/, hidden: true }), {
+      key: 'ArrowRight',
+    });
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Low', hidden: true }));
+    await waitFor(() => {
+      expect(chip.textContent).toBe('Opus 5 Low');
+    });
   });
 });

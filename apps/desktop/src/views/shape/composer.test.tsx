@@ -128,3 +128,20 @@ describe('the composer’s alert', () => {
     expect(screen.queryAllByRole('alert')).toHaveLength(1);
   });
 });
+
+describe('Enter in the input', () => {
+  it('does not send on the Enter that ends an IME composition, and sends on a plain one', async () => {
+    mount();
+    fireEvent.change(input(), { target: { value: 'a message' } });
+    const sending = (): boolean =>
+      screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading');
+
+    fireEvent.keyDown(input(), { key: 'Enter', keyCode: 229 });
+    expect(sending()).toBe(false);
+
+    fireEvent.keyDown(input(), { key: 'Enter', keyCode: 13 });
+    await waitFor(() => {
+      expect(sending()).toBe(true);
+    });
+  });
+});

@@ -24,8 +24,13 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 url = "=2.5.8"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSApplication", "NSResponder"] }
+
 [lints.rust]
-unsafe_code = "forbid"
+# Denied, not forbidden: dictation.rs allows its one AppKit call.
+unsafe_code = "deny"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

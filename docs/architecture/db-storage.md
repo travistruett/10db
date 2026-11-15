@@ -91,4 +91,6 @@ these stores. Add a line here when a migration adds or changes a store.
   CHECK over the four), a one-line `target` parsed with `GrantTarget` before it is written, and the card it came
   from. `listTrustGrants` answers a project's oldest first; `deleteTrustGrant` answers false for a grant that isn't
   that project's. The writes append no event.
+- Chat effort, migration 0090 (generated): `conversations.effort`, the effort a chat's next session launches at (null runs the
+  model's own). Its generated name, `organic_shadow_king`, stays: generated migrations are never renamed by hand.
 - `rigorFigures` (`store/rigor-figures.ts`) computes, with nothing stored, what each rigor's tasks that became done in a period took: a task is in the window by its last `task.changed` to `done` (its `updated_at` when none was logged) and a task still in a Workbench pass is left out (one taken out runs as an ordinary task); a step counts when `startedAt` is set, send-backs are the `step.changed` events whose `sentBackBy` is not `builder`, pull requests are distinct batch PR URLs, and the judge-override share reads the project's answered (acted or overridden) `task_rigor` rows in `judge_calls` through `task_id`. `humanTouchDays` counts every `InboxKind` through one `Record<InboxKind, number>`, so a new kind fails typecheck until it has a column.

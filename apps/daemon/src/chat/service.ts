@@ -133,7 +133,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           profile: ConversationProfile.Explore,
           state: ConversationState.IdleCold,
         });
-        if (input.model !== null) patchConversation(ctx, conv.id, { model: input.model });
+        const effort = input.effort ?? null;
+        if (input.model !== null || effort !== null)
+          patchConversation(ctx, conv.id, { model: input.model, effort });
         return insertChat(ctx, {
           id: chatId,
           projectId: input.projectId,
@@ -154,12 +156,29 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async patch(id, input) {
       const chat = getChat(state.db, id);
-      if (input.model !== undefined) {
+      if (input.model !== undefined || input.effort !== undefined) {
         const conv = getConversation(state.db, chat.conversationId);
         if (conv.state !== null && BUSY.has(conv.state))
           throw new ConflictError(CHANGE_MODEL_BETWEEN_TURNS);
-        if (input.model !== null) offered(chat.projectId, input.model);
-        if (input.model !== conv.model) await engine.modelChanged(chat.conversationId, input.model);
+        if (input.model !== undefined && input.model !== null) offered(chat.projectId, input.model);
+        const model = input.model === undefined ? conv.model : input.model;
+        const effort = input.effort === undefined ? conv.effort : input.effort;
+        if (model !== conv.model || effort !== conv.effort) {
+          // The effort is stored first, so the engine's launch for the next turn reads it; a switch
+          // the engine refuses puts the old effort back with the old model.
+          if (effort !== conv.effort)
+            state.write((ctx) => {
+              patchConversation(ctx, chat.conversationId, { effort });
+            });
+          try {
+            await engine.modelChanged(chat.conversationId, model);
+          } catch (error) {
+            state.write((ctx) => {
+              patchConversation(ctx, chat.conversationId, { effort: conv.effort });
+            });
+            throw error;
+          }
+        }
       }
       state.write((ctx) => {
         if (input.title !== undefined) setChatTitle(ctx, id, input.title, ChatTitleSource.Builder);
