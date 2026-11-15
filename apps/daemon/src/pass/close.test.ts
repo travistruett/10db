@@ -298,6 +298,8 @@ describe('Finish', () => {
     const ends = [
       {
         name: 'an Abandon finishes',
+        // An Abandon deletes the page's changes, the saved work it carried back in included.
+        kept: null,
         end: async (deps: CloseDeps) => {
           await startAbandon(deps, w.opened.pass.id);
           return 'ABANDONED';
@@ -305,6 +307,7 @@ describe('Finish', () => {
       },
       {
         name: 'the next close finishes',
+        kept: 'People: UI work work',
         end: async (deps: CloseDeps) => {
           deps.state.write((ctx) => patchProject(ctx, w.h.project.id, { gateCommand: 'true' }));
           const closes = createPassCloses(deps);
@@ -326,7 +329,7 @@ describe('Finish', () => {
         { ...row, restart: false, name: `${row.name} in one daemon` },
         { ...row, restart: true, name: `${row.name} after a restart` },
       ]),
-    )('$name', async ({ end, restart }) => {
+    )('$name', async ({ end, restart, kept }) => {
       await world({ gateCommand: 'false', delivery: 'local' });
       await twoTurns();
       await confirm(closeDeps());
@@ -344,9 +347,11 @@ describe('Finish', () => {
       expect(passState()).toBe(state);
       expect(getTask(w.h.store.db, w.people.id)).toMatchObject({ passId: null, status: 'open' });
       expect(read('src/people/page.tsx')).toBe('people\n');
-      expect(w.h.git$('show', `refs/10db/kept/${w.people.id}:src/people/page.tsx`)).toBe(
-        'People: UI work work',
-      );
+      if (kept === null)
+        expect(
+          w.h.git$('for-each-ref', '--format=%(refname)', `refs/10db/kept/${w.people.id}`),
+        ).toBe('');
+      else expect(w.h.git$('show', `refs/10db/kept/${w.people.id}:src/people/page.tsx`)).toBe(kept);
     });
   });
 

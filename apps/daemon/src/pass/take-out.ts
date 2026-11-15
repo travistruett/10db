@@ -178,7 +178,7 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * before (one changed since is left and named), then drops each shared change chosen Drop, newest
  * first (inside an Abandon or a close without its refusals, never without the hash before each
  * write; a refused one stays on the chain and the thread says why); 5 leaves the pass for the Board,
- * its work at its kept ref. While Your folder is off the pass's branch nothing of the page can be
+ * its work at its kept ref, or, inside an Abandon, with its changes deleted. While Your folder is off the pass's branch nothing of the page can be
  * kept and none of its files is written: a take-out asked for alone fails, and one inside an Abandon
  * or a close keeps the last kept commit, writes no file and goes on to step 5.
  */
@@ -370,6 +370,18 @@ export async function takeOutSteps(
     });
   }
 
+  if (row.step < TakeOutStep.Done && input.within === TakeOutWithin.Abandon) {
+    deps.inbox.cancelForWorkstream(workstreamId);
+    // An Abandon deletes the page's changes: the pass's kept ref and any saved work the task carried
+    // in go before the row forgets them, so a restart between the two deletes nothing more and
+    // writes the same row.
+    await git.deleteKeptRef(repo, passKeptRef(pass.id, task.id));
+    await git.deleteKeptRef(repo, keptRef(task.id));
+    deps.state.write((ctx) => {
+      leavePassForBoard(ctx, { taskId: task.id, passId: pass.id, kept: null, files: 0 });
+    });
+    row = { ...row, step: TakeOutStep.Done };
+  }
   if (row.step < TakeOutStep.Done) {
     deps.inbox.cancelForWorkstream(workstreamId);
     // Work saved from an earlier take-out that is still not in the folder is never written over:
