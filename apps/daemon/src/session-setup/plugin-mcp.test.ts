@@ -24,7 +24,8 @@ function write(relative: string, content: unknown): void {
   writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content));
 }
 
-const read = (id = 'github@m') => readPluginMcp({ id, installPath });
+const read = (id = 'github@m', laneWritable: readonly string[] = []) =>
+  readPluginMcp({ id, installPath }, laneWritable);
 
 describe('readPluginMcp', () => {
   it('reads a plugin’s .mcp.json server, CLAUDE_PLUGIN_ROOT expanded in its command and env', () => {
@@ -95,6 +96,30 @@ describe('readPluginMcp', () => {
   it('${TOKEN} in a plugin server’s argument is refused, and the server’s own name is kept', () => {
     write('.mcp.json', { mcpServers: { gh: { command: 'x', args: ['--k=${TOKEN}'] } } });
     expect(read()[0]?.refusal).toContain('Its argument 1 uses ${…}');
+  });
+
+  it('a plugin installed where an agent can write is one refused entry and its files are not read', () => {
+    write('.mcp.json', { mcpServers: { gh: { command: 'x' } } });
+    const entries = read('github@m', [join(installPath, '..')]);
+    expect(entries.map((e) => [e.name, e.declared, e.refusal])).toEqual([
+      [
+        'plugin_github',
+        null,
+        'Its plugin is installed in a folder an agent can write, so none of its MCP servers load.',
+      ],
+    ]);
+  });
+
+  it('a plugin whose install path links into a folder an agent can write is refused too', () => {
+    write('.mcp.json', { mcpServers: { gh: { command: 'x' } } });
+    const outside = join(root.path, 'writable');
+    mkdirSync(outside);
+    const linked = join(root.path, 'linked-plugin');
+    symlinkSync(installPath, linked);
+    const entries = readPluginMcp({ id: 'github@m', installPath: linked }, [installPath]);
+    expect(entries.map((e) => e.refusal)).toEqual([
+      'Its plugin is installed in a folder an agent can write, so none of its MCP servers load.',
+    ]);
   });
 
   it('a .mcp.json with no servers key, or not JSON, is no entries', () => {

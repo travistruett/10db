@@ -1,4 +1,5 @@
 import { YourMcpSource, yourMcpServerKey } from '@10db/contracts';
+import { isEqualOrUnder, realOrSelf } from '../sandbox';
 import { McpServerName, readRepoConfigFileIn, RepoConfigFileError } from '../sessions';
 import {
   parseClaudeEntry,
@@ -88,7 +89,33 @@ function declaredServers(installPath: string): Record<string, unknown> {
  * servers need no approval, but they take the same refusals as the builder's files and run through 10db's
  * launch, never as a checkout's.
  */
-export function readPluginMcp(plugin: PluginToRead): YourMcpEntry[] {
+export function readPluginMcp(
+  plugin: PluginToRead,
+  laneWritable: readonly string[],
+): YourMcpEntry[] {
+  const real = realOrSelf(plugin.installPath);
+  const writable = laneWritable.some(
+    (root) =>
+      isEqualOrUnder(real, root) ||
+      isEqualOrUnder(real, realOrSelf(root)) ||
+      isEqualOrUnder(plugin.installPath, root),
+  );
+  if (writable) {
+    // Nothing inside it is read: an agent could have written any file there.
+    return [
+      {
+        key: yourMcpServerKey(YourMcpSource.Plugin, 'all', plugin.id),
+        name: yourMcpName(plugin.id, '').replace(/_$/, ''),
+        source: YourMcpSource.Plugin,
+        pluginId: plugin.id,
+        declared: null,
+        configHash: null,
+        enabledInSource: true,
+        refusal:
+          'Its plugin is installed in a folder an agent can write, so none of its MCP servers load.',
+      },
+    ];
+  }
   const entries: YourMcpEntry[] = [];
   const servers = declaredServers(plugin.installPath);
   for (const serverName of Object.keys(servers)) {

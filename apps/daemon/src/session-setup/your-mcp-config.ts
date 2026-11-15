@@ -134,7 +134,7 @@ export function readYourMcpConfig(input: {
     }
   } else if (codex !== null) fileProblems.push(codex);
 
-  for (const plugin of input.plugins) entries.push(...readPluginMcp(plugin));
+  for (const plugin of input.plugins) entries.push(...readPluginMcp(plugin, input.laneWritable));
 
   return { entries, fileProblems };
 }
