@@ -18,6 +18,7 @@ export default defineConfig({
       'packages/contracts',
       'packages/db',
       'packages/harness',
+      'packages/agent-skill',
       'apps/daemon',
       'apps/daemon/vitest.delivery.config.ts',
       'apps/desktop',
