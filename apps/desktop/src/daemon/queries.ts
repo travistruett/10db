@@ -608,7 +608,11 @@ export function usePatchProject(projectId: ProjectId) {
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.workbenchSetup(projectId) }),
+        // Marked stale, read again only when the setup is next asked for.
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workbenchSetup(projectId),
+          refetchType: 'none',
+        }),
       ]),
   });
 }
