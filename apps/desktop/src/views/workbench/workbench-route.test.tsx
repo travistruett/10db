@@ -136,6 +136,37 @@ describe('WorkbenchView', () => {
     });
   });
 
+  it('says a page the repository has that the project lacks, from the setup it reads, with a count on Set Up', async () => {
+    open(
+      '/workbench',
+      {},
+      {
+        first: [
+          http.post(daemonUrl('/projects/:projectId/workbench-setup'), () =>
+            HttpResponse.json(
+              workbenchSetupDto({
+                areas: {
+                  proposed: project.areas,
+                  kept: [],
+                  pages: [
+                    { name: 'sessions', route: '/sessions', label: 'Chats', folders: ['src/s/'] },
+                  ],
+                  skipped: [],
+                },
+                settings: [],
+              }),
+            ),
+          ),
+        ],
+      },
+    );
+    expect((await screen.findByText(/New page found:/)).textContent).toBe(
+      'New page found: Chats /sessions',
+    );
+    const setUp = screen.getAllByRole('button', { name: /^Set Up/ })[0];
+    expect(within(setUp ?? document.body).getByText('1')).toBeTruthy();
+  });
+
   it('reads the setup for Set Up only while no pass is open', async () => {
     let asked = 0;
     const { ready } = pagesByStatus();

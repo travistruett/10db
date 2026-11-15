@@ -3,6 +3,7 @@ import {
   PassState,
   passHoldsTasks,
   type InboxItemDto,
+  type PageRow,
   type PassJoinRequest,
   type PassDto,
   type PassOpenRequest,
@@ -42,7 +43,7 @@ import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { RenameModal } from './rename-modal';
 import { WorkbenchSetup } from './setup/workbench-setup';
-import { setUpCount } from './setup/setup-rules';
+import { newPagesOf, setUpCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
 
@@ -69,8 +70,10 @@ export interface WorkbenchScreenProps {
   /** The open Inbox items. */
   readonly inbox: readonly InboxItemDto[];
   readonly search: WorkbenchSearch;
-  /** The settings and branch note the setup still has for a project with pages; 0 offers no Set Up. */
+  /** The new pages and settings the setup still has for a project with pages; 0 shows no count. */
   readonly setupCount: number;
+  /** The pages the repository has that the project lacks and the builder has not left out. */
+  readonly newPages?: readonly PageRow[];
   /** The pages a `goal` link's tasks committed in, which the picker starts ticked. */
   readonly goalPages: readonly string[];
   /** Now, in epoch milliseconds. */
@@ -103,6 +106,7 @@ function closeFinished(before: PassDto | null, after: PassDto | null): PassDto |
  */
 export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const { project, live, start, tasks, inbox, search, goalPages, now, setupCount } = props;
+  const { newPages = [] } = props;
   const { onSelect, renderWorkspace, actions } = props;
   const [dialog, setDialog] = useState<Dialog>(null);
   // The live pass last read, and the one whose close finished while it was on screen, which the picker
@@ -163,16 +167,13 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             }}
             starting={opening.isPending}
             error={opening.error?.message ?? null}
-            setUp={
-              setupCount === 0
-                ? null
-                : {
-                    count: setupCount,
-                    onOpen: () => {
-                      setDialog('setup');
-                    },
-                  }
-            }
+            setUp={{
+              count: setupCount,
+              newPages,
+              onOpen: () => {
+                setDialog('setup');
+              },
+            }}
           />
         )}
       </Stack>
@@ -311,7 +312,8 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
       inbox={inbox}
       search={search}
       goalPages={goalPages}
-      setupCount={setup.data === undefined ? 0 : setUpCount(setup.data)}
+      setupCount={setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages)}
+      newPages={setup.data === undefined ? [] : newPagesOf(setup.data, project.leftOutPages)}
       now={now}
       onSelect={(task) => {
         void navigate({ to: '/workbench', search: { task } });

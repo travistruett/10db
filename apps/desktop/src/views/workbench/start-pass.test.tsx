@@ -247,11 +247,46 @@ describe('StartPass', () => {
 
   it("shows Set Up's count as a badge, not in the label", async () => {
     const onOpen = vi.fn();
-    await draw({ setUp: { count: 2, onOpen } });
+    await draw({ setUp: { count: 2, newPages: [], onOpen } });
     const setUp = screen.getByRole('button', { name: /^Set Up/ });
     expect(setUp.textContent).not.toContain('(');
     expect(within(setUp).getByText('2')).toBeTruthy();
     fireEvent.click(setUp);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Set Up with no count when nothing is counted, and no new-page line', async () => {
+    await draw({ setUp: { count: 0, newPages: [], onOpen: vi.fn() } });
+    const setUp = screen.getByRole('button', { name: 'Set Up' });
+    expect(setUp.querySelector('.mantine-Badge-root')).toBeNull();
+    expect(screen.queryByText(/new pages? found/)).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'one page, by its label and route',
+      pages: [{ name: 'sessions', label: 'Chats', route: '/sessions', folders: ['src/sessions/'] }],
+      says: 'New page found: Chats /sessions',
+    },
+    {
+      name: 'a page with no label, by its capitalised name, and none with no route',
+      pages: [{ name: 'billing', folders: ['src/billing/'] }],
+      says: 'New page found: Billing',
+    },
+    {
+      name: 'several, counted',
+      pages: [
+        { name: 'a', route: '/a', folders: ['a/'] },
+        { name: 'b', route: '/b', folders: ['b/'] },
+      ],
+      says: '2 new pages found: A /a B /b',
+    },
+  ])('says the new page found: $name, with Set Up beside it', async ({ pages, says }) => {
+    const onOpen = vi.fn();
+    await draw({ setUp: { count: pages.length, newPages: pages, onOpen } });
+    const line = screen.getByRole('status');
+    expect(line.textContent).toContain(says.replaceAll(' /', ' /'));
+    fireEvent.click(within(line).getByRole('button', { name: 'Set Up' }));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

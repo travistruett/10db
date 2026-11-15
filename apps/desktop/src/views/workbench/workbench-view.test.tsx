@@ -109,10 +109,28 @@ describe('WorkbenchScreen', () => {
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
   });
 
-  it('offers no Set Up when nothing is left to suggest', async () => {
+  it('always offers Set Up beside the picker, with no count and no new-page line when nothing is left', async () => {
     await draw();
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Set Up/ })).toBeNull();
+    const setUp = screen.getByRole('button', { name: 'Set Up' });
+    expect(setUp.querySelector('.mantine-Badge-root')).toBeNull();
+    expect(screen.queryByText(/new pages? found/)).toBeNull();
+  });
+
+  it('says a new page found under the Pages field, and its Set Up opens the setup', async () => {
+    server.use(...passHandlers());
+    await draw({
+      setupCount: 1,
+      newPages: [{ name: 'sessions', label: 'Sessions', route: '/sessions', folders: ['src/s/'] }],
+    });
+    const line = await screen.findByText(/New page found:/);
+    expect(line.textContent).toBe('New page found: Sessions /sessions');
+    fireEvent.click(
+      within(line.parentElement ?? document.body).getByRole('button', { name: 'Set Up' }),
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
+    ).toBeTruthy();
   });
 
   it('is the picker while no pass is open', async () => {

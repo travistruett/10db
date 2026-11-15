@@ -150,16 +150,19 @@ opens the Workbench; a question shows as its own card (W5).
 
 | From | What the builder does | What the pass starts with |
 |---|---|---|
-| The Workbench | **Start Pass**, after ticking pages | one new task per page, titled "<Page>: UI work", with no brief |
+| The Workbench | **Start Pass**, after ticking pages | one new task per page, titled "<Label>: UI work" (the page's label, §4.2), with no brief |
 | The Board | select open tasks, **Work on These** | those tasks; each must name at least one page area |
 | A goal, in Factory | **Work on This** on a goal whose UI tasks are done or nearly done | one new task per page those tasks committed in (found with `classifyPath` over their commits), linked to the goal, with the goal's kept pictures (§10) as the first thing in each thread |
 
 **With no pass open, the page list is the screen.** The Workbench is most often seen with no pass, so its empty
 state is the picker for the first way in, not a blank page with a button:
 
-- one line of purpose: "Work through pages with the agents, live.";
-- a filter box, then **Pages**: every page area as a checkbox row with its name, its route and when its files last
-  changed; then **Open UI tasks**: Board tasks that name a page area and could join (§4.2's second way in);
+- one line of purpose: "Work through pages with the agents, live.", with **Set Up** beside it, always, and a count
+  of what the setup still offers (new pages not left out, and settings) only above 0;
+- a filter box, then **Pages**: every page area as a checkbox row with its label, its route and when its files last
+  changed (the filter matches the label, the name and the route); then **Open UI tasks**: Board tasks that name a page area and could join (§4.2's second way in);
+- under the Pages field, when the repository has pages the project lacks and the builder has not left out: "New
+  page found: Sessions /sessions" (or "3 new pages found: …"), with **Set Up**;
 - an optional field, "What's bothering you?", one or two rows, autosizing;
 - **Start Pass (n)**, the one filled button, enabled from one ticked row up to the page cap (W11).
 
@@ -169,6 +172,20 @@ empty, each new page waits for the builder's first message.
 A project with no page area shows, in place of the list, the Workbench setup: its areas rebuilt with a page per
 route and the settings a pass wants, applied in one click
 (`decisions/2026-11-10-the-workbench-setup-rebuilds-the-areas-for-one-apply.md`).
+
+**A page has a label** (`decisions/2026-11-14-page-areas-carry-a-display-label.md`). The area's name stays its key
+(claims, `task.areas`, passes); the label is what the builder reads: the picker, the queue, the page, notifications,
+the dialogs, the pass's name ("Plan pass") and the task a pass makes ("Plan: UI work"). It is one line of 1-40
+characters on a page area only, edited in Settings › Areas, and when it is absent the name with its first letter
+capitalised stands (`pageLabel`). The setup guesses it for a page named in code from the app's nav (an object holding
+both a path and a `label`, read from the router files and up to 20 nav-like files an app has); a page named by its
+files gets the capitalised name. A label the builder set always wins over the guess, and a label that differs is
+never a new page: the rebuild offers it on the page the project already has.
+
+**New pages are found from committed code** (HEAD), up to ten minutes after the commit (the setup's cache). With
+page areas, the setup's rebuild starts ticked when it found a page the project lacks and the builder has not left
+out; a page unticked at Apply is remembered (`ProjectDto.leftOutPages`) and not counted again, and still shows,
+unticked, in the next rebuild.
 
 - A task with no brief costs nothing until spoken to: its session starts on the builder's first message. A
   task with a description starts working when the pass opens.

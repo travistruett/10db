@@ -2,6 +2,7 @@ import {
   AreaRole,
   withoutPages,
   type AreaDef,
+  type PageRow,
   type ProjectPatch,
   type WorkbenchSetupDto,
 } from '@10db/contracts';
@@ -13,6 +14,7 @@ const sameArea = (one: AreaDef, other: AreaDef): boolean =>
   one.globs.every((g) => other.globs.includes(g)) &&
   (one.role ?? null) === (other.role ?? null) &&
   (one.route ?? null) === (other.route ?? null) &&
+  (one.label ?? null) === (other.label ?? null) &&
   (one.catchAll ?? false) === (other.catchAll ?? false);
 
 /** Whether `next` is another list than `current`, the order of either aside. */
@@ -25,18 +27,40 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
   return setup.areas.pages.length + setup.settings.length;
 }
 
+/** The pages the repository has that the project lacks, less those the builder left out before. */
+export function newPagesOf(setup: WorkbenchSetupDto, leftOut: readonly string[]): PageRow[] {
+  return setup.areas.pages.filter((page) => !leftOut.includes(page.name));
+}
+
 /**
- * What the picker's Set Up badge counts once the project has pages: the settings only. New page rows
- * still show in the setup, but a page the builder left out is not asked for again, and the branch
- * note is not counted: Apply can't clear it, so it would keep the link up.
+ * What the picker's Set Up badge counts once the project has pages: the new pages not left out, and
+ * the settings. The branch note is not counted: Apply can't clear it, so it would keep the badge up.
  */
-export function setUpCount(setup: WorkbenchSetupDto): number {
-  return setup.settings.length;
+export function setUpCount(setup: WorkbenchSetupDto, leftOut: readonly string[]): number {
+  return newPagesOf(setup, leftOut).length + setup.settings.length;
+}
+
+/**
+ * The pages left out after Apply: those left out before, less each new page ticked, plus each new
+ * page unticked. A name the setup no longer finds stays as it was.
+ */
+export function leftOutAfter(
+  setup: WorkbenchSetupDto,
+  leftOut: readonly string[],
+  untickedPages: readonly string[],
+): string[] {
+  const offered = setup.areas.pages.map((page) => page.name);
+  const ticked = offered.filter((name) => !untickedPages.includes(name));
+  return [
+    ...leftOut.filter((name) => !ticked.includes(name)),
+    ...untickedPages.filter((name) => offered.includes(name) && !leftOut.includes(name)),
+  ];
 }
 
 /**
  * The one `PATCH /projects/:id` Apply sends: the rebuilt areas, when `rebuildAreas`, with each
- * unticked page folded back (left out when that is the list the project has), and the ticked
+ * unticked page folded back (left out when that is the list the project has), the pages left out
+ * from now on (`leftOutAfter`, sent only with the areas and only when it changes), and the ticked
  * settings as edited (`settingsPatch`); null when it changes nothing.
  */
 export function setupPatch(
@@ -45,10 +69,16 @@ export function setupPatch(
   untickedPages: readonly string[],
   settings: ProjectPatch,
   rebuildAreas = true,
+  leftOut: readonly string[] = [],
 ): ProjectPatch | null {
   const patch: ProjectPatch = { ...settings };
   const areas = withoutPages(setup.areas.proposed, untickedPages, setup.areas.pages);
   if (rebuildAreas && areasChanged(areas, current)) patch.areas = areas;
+  if (rebuildAreas) {
+    const next = leftOutAfter(setup, leftOut, untickedPages);
+    if (next.length !== leftOut.length || next.some((name) => !leftOut.includes(name)))
+      patch.leftOutPages = next;
+  }
   return Object.keys(patch).length === 0 ? null : patch;
 }
 

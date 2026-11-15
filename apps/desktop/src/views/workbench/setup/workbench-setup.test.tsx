@@ -80,7 +80,9 @@ describe('WorkbenchSetup', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Make inbox a page at /inbox' }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
-      expect(patches).toEqual([{ areas: SETUP.areas.proposed.filter((a) => a.name !== 'inbox') }]);
+      expect(patches).toEqual([
+        { areas: SETUP.areas.proposed.filter((a) => a.name !== 'inbox'), leftOutPages: ['inbox'] },
+      ]);
     });
   });
 
@@ -116,10 +118,11 @@ describe('WorkbenchSetup', () => {
     });
   });
 
-  it('once the project has pages, offers the rebuild unticked and applies only what is ticked', async () => {
+  it('once the project has pages and the builder left every new one out, offers the rebuild unticked and applies only what is ticked', async () => {
     const paged = projectViewDto({
       name: 'ampsio',
       areas: [{ name: 'repo', globs: ['**'] }, ...SETUP.areas.proposed.slice(1, 2)],
+      leftOutPages: ['board', 'inbox'],
     });
     const setting = {
       field: SettingField.AppUrl,
@@ -136,7 +139,50 @@ describe('WorkbenchSetup', () => {
       expect(patches).toEqual([{ appUrl: 'http://localhost:1420' }]);
     });
     fireEvent.click(rebuild);
-    expect(screen.getByRole('checkbox', { name: 'Make board a page at /board' })).toBeTruthy();
+    // A page left out before still shows, unticked.
+    expect(screen.getByRole('checkbox', { name: 'Make board a page at /board' })).toHaveProperty(
+      'checked',
+      false,
+    );
+  });
+
+  describe('a page the repository has that the project lacks', () => {
+    const paged = (leftOutPages: string[]) =>
+      projectViewDto({
+        name: 'ampsio',
+        areas: [{ name: 'repo', globs: ['**'] }, ...SETUP.areas.proposed.slice(1, 2)],
+        leftOutPages,
+      });
+
+    it('starts the rebuild ticked, and Apply sends what the builder unticked as left out', async () => {
+      const patches = serve(SETUP);
+      await renderWithDaemonAndRouter(<WorkbenchSetup project={paged([])} />);
+      const rebuild = await screen.findByRole('checkbox', { name: /^Rebuild areas: 2 new pages/ });
+      expect(rebuild).toHaveProperty('checked', true);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Make inbox a page at /inbox' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+      await waitFor(() => {
+        expect(patches).toEqual([
+          {
+            areas: SETUP.areas.proposed.filter((a) => a.name !== 'inbox'),
+            leftOutPages: ['inbox'],
+          },
+        ]);
+      });
+    });
+
+    it('shows a page left out unticked, and ticking it takes it off the left-out list', async () => {
+      const patches = serve(SETUP);
+      await renderWithDaemonAndRouter(<WorkbenchSetup project={paged(['board', 'inbox'])} />);
+      fireEvent.click(await screen.findByRole('checkbox', { name: /^Rebuild areas/ }));
+      const board = screen.getByRole('checkbox', { name: 'Make board a page at /board' });
+      expect(board).toHaveProperty('checked', false);
+      fireEvent.click(board);
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+      await waitFor(() => {
+        expect(patches).toEqual([expect.objectContaining({ leftOutPages: ['inbox'] })]);
+      });
+    });
   });
 
   it('offers no Areas when the rebuild changes nothing, and applies the settings alone', async () => {

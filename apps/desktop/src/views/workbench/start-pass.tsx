@@ -1,17 +1,22 @@
-import type {
-  GoalId,
-  PassOpenRequest,
-  PassStartDto,
-  ProjectViewDto,
-  TaskDto,
-  TaskId,
+import {
+  pageLabel,
+  type GoalId,
+  type PageRow,
+  type PassOpenRequest,
+  type PassStartDto,
+  type ProjectViewDto,
+  type TaskDto,
+  type TaskId,
 } from '@10db/contracts';
-import { Button, Group, Stack, Text, Textarea } from '@mantine/core';
-import { useState } from 'react';
+import { Button, Code, Group, Stack, Text, Textarea } from '@mantine/core';
+import { Fragment, useState, type ReactNode } from 'react';
 import { CountBadge } from '../../shell/count-badge';
 import { PagePicker } from './page-picker';
 import { StartLines } from './start-lines';
 import { joinableTasks, openRequest, type PickTicks } from './start-pass-rules';
+
+/** How many new pages the line names; the rest are counted. */
+const NEW_PAGES_SHOWN = 3;
 
 export interface StartPassProps {
   readonly project: ProjectViewDto;
@@ -29,7 +34,38 @@ export interface StartPassProps {
   /** Why the daemon refused the last Start Pass; said beside the button. */
   readonly error: string | null;
   /** The setup's suggestions still to look at, and how to open them; null when there are none. */
-  readonly setUp?: { readonly count: number; readonly onOpen: () => void } | null;
+  readonly setUp?: {
+    readonly count: number;
+    /** The pages the repository has that the project lacks and the builder has not left out. */
+    readonly newPages: readonly PageRow[];
+    readonly onOpen: () => void;
+  } | null;
+}
+
+/** "New page found: Sessions /sessions", or the count and the first few of several. */
+function newPagesLine(pages: readonly PageRow[]): ReactNode {
+  const shown = pages.slice(0, NEW_PAGES_SHOWN).map((page) => (
+    <Fragment key={page.name}>
+      {' '}
+      {pageLabel(page)}
+      {page.route === undefined ? null : (
+        <>
+          {' '}
+          <Code>{page.route}</Code>
+        </>
+      )}
+    </Fragment>
+  ));
+  const more = pages.length - NEW_PAGES_SHOWN;
+  return pages.length === 1 ? (
+    <>New page found:{shown}</>
+  ) : (
+    <>
+      {`${String(pages.length)} new pages found:`}
+      {shown}
+      {more > 0 ? ` and ${String(more)} more` : null}
+    </>
+  );
 }
 
 /**
@@ -54,7 +90,7 @@ export function StartPass(props: StartPassProps) {
           <Button
             variant="default"
             size="xs"
-            rightSection={<CountBadge count={setUp.count} />}
+            rightSection={setUp.count === 0 ? null : <CountBadge count={setUp.count} />}
             onClick={setUp.onOpen}
           >
             Set Up
@@ -69,6 +105,14 @@ export function StartPass(props: StartPassProps) {
         onTicks={setTicks}
         now={now}
       />
+      {setUp == null || setUp.newPages.length === 0 ? null : (
+        <Group gap="sm" wrap="nowrap" justify="space-between" role="status">
+          <Text size="sm">{newPagesLine(setUp.newPages)}</Text>
+          <Button variant="default" size="xs" onClick={setUp.onOpen}>
+            Set Up
+          </Button>
+        </Group>
+      )}
       <Textarea
         label="What's bothering you?"
         description="Sent to every new page as its first message. Left empty, each page waits for yours."

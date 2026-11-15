@@ -1,6 +1,14 @@
 import { AreaRole, SettingField, type AreaDef, type WorkbenchSetupDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { areasChanged, areasSummary, setUpCount, setupPatch, suggestionCount } from './setup-rules';
+import {
+  areasChanged,
+  areasSummary,
+  leftOutAfter,
+  newPagesOf,
+  setUpCount,
+  setupPatch,
+  suggestionCount,
+} from './setup-rules';
 
 const CURRENT: AreaDef[] = [
   { name: 'repo', globs: ['**'] },
@@ -41,7 +49,7 @@ describe('setupPatch', () => {
       name: 'an unticked page is folded back into the shared area that holds its files',
       unticked: ['board'],
       settings: {},
-      patch: { areas: PROPOSED.filter((a) => a.name !== 'board') },
+      patch: { areas: PROPOSED.filter((a) => a.name !== 'board'), leftOutPages: ['board'] },
     },
     {
       name: 'an unticked page no shared area holds stays an area with no role',
@@ -51,6 +59,7 @@ describe('setupPatch', () => {
         areas: PROPOSED.map((a) =>
           a.name === 'inbox' ? { name: 'inbox', globs: ['app/inbox/**'] } : a,
         ),
+        leftOutPages: ['inbox'],
       },
     },
   ])('$name', ({ unticked, settings, patch }) => {
@@ -95,16 +104,83 @@ describe('areasChanged and suggestionCount', () => {
   });
 });
 
-describe('setUpCount', () => {
-  it('counts the settings only: never the page rows, nor the branch note Apply cannot clear', () => {
-    expect(setUpCount(SETUP)).toBe(1);
-    expect(
-      setUpCount({
-        ...SETUP,
-        branch: { branch: 'build', ahead: 3, command: 'git push origin build' },
-      }),
-    ).toBe(1);
-    expect(setUpCount({ ...SETUP, settings: [] })).toBe(0);
+describe('setUpCount and newPagesOf', () => {
+  const BRANCH = { branch: 'build', ahead: 3, command: 'git push origin build' };
+  it.each<{ name: string; setup: WorkbenchSetupDto; leftOut: string[]; count: number }>([
+    { name: 'two new pages and a setting', setup: SETUP, leftOut: [], count: 3 },
+    { name: 'a page left out is not counted', setup: SETUP, leftOut: ['inbox'], count: 2 },
+    {
+      name: 'every page left out leaves the settings',
+      setup: SETUP,
+      leftOut: ['board', 'inbox'],
+      count: 1,
+    },
+    {
+      name: 'a name that is no new page changes nothing',
+      setup: SETUP,
+      leftOut: ['gone'],
+      count: 3,
+    },
+    {
+      name: 'the branch note is never counted',
+      setup: { ...SETUP, branch: BRANCH },
+      leftOut: [],
+      count: 3,
+    },
+    {
+      name: 'nothing found counts nothing',
+      setup: { ...SETUP, settings: [], areas: { ...SETUP.areas, pages: [] } },
+      leftOut: [],
+      count: 0,
+    },
+  ])('$name', ({ setup, leftOut, count }) => {
+    expect(setUpCount(setup, leftOut)).toBe(count);
+    expect(newPagesOf(setup, leftOut).length).toBe(count - setup.settings.length);
+  });
+});
+
+describe('leftOutAfter and what Apply sends of it', () => {
+  it.each<{ name: string; leftOut: string[]; unticked: string[]; after: string[] }>([
+    { name: 'an unticked page is added', leftOut: [], unticked: ['inbox'], after: ['inbox'] },
+    {
+      name: 'a ticked page that was left out is removed',
+      leftOut: ['inbox'],
+      unticked: [],
+      after: [],
+    },
+    {
+      name: 'a page left out and left unticked stays once',
+      leftOut: ['inbox'],
+      unticked: ['inbox'],
+      after: ['inbox'],
+    },
+    {
+      name: 'a name no longer found stays',
+      leftOut: ['gone'],
+      unticked: ['board'],
+      after: ['gone', 'board'],
+    },
+  ])('$name', ({ leftOut, unticked, after }) => {
+    expect(leftOutAfter(SETUP, leftOut, unticked)).toEqual(after);
+  });
+
+  it('sends the left-out pages with the areas, only when they change', () => {
+    expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, true, [])?.leftOutPages).toEqual(['inbox']);
+    expect(setupPatch(SETUP, CURRENT, [], {}, true, ['inbox'])?.leftOutPages).toEqual([]);
+    expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, true, ['inbox'])).not.toHaveProperty(
+      'leftOutPages',
+    );
+    expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, false, [])).toBeNull();
+  });
+});
+
+describe('a label difference', () => {
+  it('is a change, so a label-only rebuild is offered and sent', () => {
+    const labelled = PROPOSED.map((a) => (a.name === 'board' ? { ...a, label: 'Work' } : a));
+    expect(areasChanged(labelled, PROPOSED)).toBe(true);
+    expect(areasChanged(PROPOSED, PROPOSED)).toBe(false);
+    const setup = { ...SETUP, areas: { ...SETUP.areas, proposed: labelled, pages: [] } };
+    expect(setupPatch(setup, PROPOSED, [], {})?.areas).toEqual(labelled);
   });
 });
 
