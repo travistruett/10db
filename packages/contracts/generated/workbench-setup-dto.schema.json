@@ -37,6 +37,11 @@
                 "maxLength": 500,
                 "format": "starts_with",
                 "pattern": "^\\/.*"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
               }
             },
             "required": [
@@ -78,6 +83,11 @@
                 "format": "starts_with",
                 "pattern": "^\\/.*"
               },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
               "folders": {
                 "minItems": 1,
                 "type": "array",
@@ -116,6 +126,11 @@
                     "maxLength": 500,
                     "format": "starts_with",
                     "pattern": "^\\/.*"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
                   }
                 },
                 "required": [

@@ -10,13 +10,13 @@ export interface TakeOutModalProps {
   readonly passId: PassId;
   readonly taskId: TaskId;
   /** The page's name. */
-  readonly area: string;
+  readonly label: string;
   readonly onClose: () => void;
 }
 
 /** What a take-out that stopped short says: the page stays, and why. */
-function stillChangingLine(area: string, files: readonly string[]): string {
-  return `${area} stays open: its files kept changing (${files.join(', ')}). Try again once they settle.`;
+function stillChangingLine(label: string, files: readonly string[]): string {
+  return `${label} stays open: its files kept changing (${files.join(', ')}). Try again once they settle.`;
 }
 
 /**
@@ -24,7 +24,7 @@ function stillChangingLine(area: string, files: readonly string[]): string {
  * task, and its files go back to how they were before the pass. Its shared changes that have not
  * landed are read first; each is kept, or dropped where Drop is offered.
  */
-export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProps) {
+export function TakeOutModal({ passId, taskId, label, onClose }: TakeOutModalProps) {
   const preview = useTakeOutPreview({ passId, taskId });
   const [chosen, setChosen] = useState<ReadonlyMap<number, SharedChoiceKind>>(new Map());
   const taking = useTakeOutPage();
@@ -34,12 +34,12 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
     <FormModal
       opened
       onClose={onClose}
-      title={`Remove ${area}`}
+      title={`Remove ${label}`}
       size="md"
       error={
         taking.error?.message ??
         preview.error?.message ??
-        (stopped === null ? null : stillChangingLine(area, stopped))
+        (stopped === null ? null : stillChangingLine(label, stopped))
       }
       actions={
         <>
@@ -71,7 +71,7 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
     >
       <Stack gap="sm">
         <Text size="sm">
-          {`Remove ${area}? A turn that is working stops. Its changes leave your folder and wait on its Board task, which puts them back when it next starts.`}
+          {`Remove ${label}? A turn that is working stops. Its changes leave your folder and wait on its Board task, which puts them back when it next starts.`}
         </Text>
         {preview.isPending ? (
           <Loader size="xs" role="status" aria-label="Reading its shared changes" />

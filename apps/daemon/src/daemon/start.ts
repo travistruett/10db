@@ -15,6 +15,7 @@ import {
   PROTOCOL_VERSION,
   RoutedBy,
   agentKind,
+  AgentSkillNotInstallable,
   providerOf,
   WorkstreamId,
   WorkstreamState,
@@ -200,6 +201,8 @@ import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
+import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
+import { createAgentSkill, type AgentSkillPlacement } from '../agent-skill';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import {
   capacitySettings,
@@ -402,6 +405,11 @@ export interface DaemonOptions {
    * (Settings › Trust). Defaults to the user's home; tests give a temp one.
    */
   readonly builderHome?: string;
+  /**
+   * Whether this daemon installs the shipped `10db-task` skill into the builder's home, and where the
+   * shipped copy is. Absent: from source, nothing is installed.
+   */
+  readonly agentSkill?: AgentSkillPlacement;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -678,12 +686,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
   backfillAttachmentRevisions(state);
+  // The projects there are when page labels first ship wait for a label guess; later ones never do.
+  seedPendingPageLabels(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
   state.write((ctx) => {
     addStockHazardCommands(ctx);
   });
+  const agentSkill = createAgentSkill({
+    state,
+    placement: opts.agentSkill ?? {
+      kind: 'not_installable',
+      reason: AgentSkillNotInstallable.FromSource,
+      shippedDir: null,
+    },
+    home: builderHome,
+    logger,
+  });
+  // A failed install is kept for Settings and never stops the daemon.
+  agentSkill.atStart();
   const launcher = createLauncher({
     base: opts.loginEnv ?? { PATH: DEFAULT_SESSION_PATH },
     clientApp: CLIENT_APP,
@@ -1998,6 +2020,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.warn({ err: error }, 'tasks on retired landing branches not moved');
     },
   );
+  // Pages of the projects listed at the first start take the labels the app's nav shows. It reads
+  // git, so it runs beside the start and ends with it.
+  const pageLabelsAbort = new AbortController();
+  const pageLabels = guessPendingPageLabels(
+    { state, git, logger: logger.child({ component: 'page-labels' }) },
+    pageLabelsAbort.signal,
+  ).catch((error: unknown) => {
+    if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
+  });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
@@ -2126,6 +2157,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     moves,
     inbox,
     keepAwake,
+    agentSkill,
     admission,
     systemCheck: () =>
       opts.systemCheck
@@ -2429,6 +2461,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const app = createApp({
     commit: build?.commit ?? null,
+    skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
     devUi: opts.devUiOrigin ? { token: devUiToken(opts.dataDir), mayRead: devUiMayRead } : null,
@@ -2582,7 +2615,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await prWatch.stop();
       await Promise.all([replyWatch.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
-      await retiredLandings;
+      pageLabelsAbort.abort();
+      await Promise.all([retiredLandings, pageLabels]);
       systemTempAbort.abort();
       await systemTempSwept;
       backupsAbort.abort();

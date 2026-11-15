@@ -965,7 +965,7 @@ describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
 });
 
 describe('POST /passes/:passId/abandon', () => {
-  it('abandons a pass with a working page: its work kept, the folder home, and a new pass opens', async () => {
+  it('abandons a pass with a working page: its changes deleted, the folder home, and a new pass opens', async () => {
     const { task, pass, project } = await openedPage(WORKING);
     await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
 
@@ -978,8 +978,8 @@ describe('POST /passes/:passId/abandon', () => {
     });
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
-    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
-    expect(getTaskRow(task).passId).toBeNull();
+    expect(rawGit('for-each-ref', '--format=%(refname)', `refs/10db/kept/${task.id}`)).toBe('');
+    expect(getTaskRow(task)).toMatchObject({ passId: null, keptWork: false });
     expect((await post(`/passes/${pass.id}/abandon`, {})).status).toBe(409);
 
     const next = await taskOn(project, 'People: next', ['people']);

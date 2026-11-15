@@ -4,6 +4,7 @@ import {
   globsOverlap,
   PASS_PAGE_CAP_DEFAULT,
   PASS_PAGE_CAP_MAX,
+  pageLabel,
   passHeldAreas,
   TaskStatus,
   WorkspaceMode,
@@ -64,6 +65,11 @@ export function joinableTasks(
   });
 }
 
+/** A page area's label by its name, the name's own fallback when the project lacks the area. */
+export function pageLabelIn(areas: readonly AreaDef[], name: string): string {
+  return pageLabel(areas.find((a) => a.name === name) ?? { name });
+}
+
 /** The first pair of globs, one of each area, that can match the same file; the catch-all shares none. */
 function sharedGlobs(
   first: AreaDef | undefined,
@@ -92,13 +98,17 @@ export function blockedReason(
   if (inPass.length + ticks.pages.length + ticks.tasks.length >= PASS_PAGE_CAP_MAX)
     return `At most ${String(PASS_PAGE_CAP_MAX)} pages can be open at once`;
   const area = (name: string) => areas.find((a) => a.name === name);
+  const labelOf = (name: string) => pageLabelIn(areas, name);
   const holders: { readonly pages: readonly string[]; readonly holds: (page: string) => string }[] =
     [
-      ...inPass.map((page) => ({ pages: [page], holds: () => `${page} is already open` })),
-      ...ticks.pages.map((page) => ({ pages: [page], holds: () => `${page} is ticked` })),
+      ...inPass.map((page) => ({
+        pages: [page],
+        holds: () => `${labelOf(page)} is already open`,
+      })),
+      ...ticks.pages.map((page) => ({ pages: [page], holds: () => `${labelOf(page)} is ticked` })),
       ...ticks.tasks.map((task) => ({
         pages: task.pages,
-        holds: (page: string) => `${task.title} works on ${page}`,
+        holds: (page: string) => `${task.title} works on ${labelOf(page)}`,
       })),
     ];
   for (const holder of holders) {
@@ -107,7 +117,7 @@ export function blockedReason(
       for (const held of holder.pages) {
         const globs = sharedGlobs(area(held), area(page));
         if (globs)
-          return `${held} can share a file with it: ${globs[0]} and ${globs[1]} both match one`;
+          return `${labelOf(held)} can share a file with it: ${globs[0]} and ${globs[1]} both match one`;
       }
     }
   }
@@ -138,14 +148,21 @@ export function openRequest(
   ticks: PickTicks,
   bothering: string,
   goalId: GoalId | null,
+  areas: readonly AreaDef[],
 ): PassOpenRequest {
   const firstMessage = bothering.trim();
-  const names = [...ticks.pages, ...ticks.tasks.map((task) => task.pages[0] ?? task.title)];
+  const labels = [
+    ...ticks.pages.map((name) => pageLabelIn(areas, name)),
+    ...ticks.tasks.map((task) => {
+      const first = task.pages[0];
+      return first === undefined ? task.title : pageLabelIn(areas, first);
+    }),
+  ];
   return {
-    name: passName(names),
+    name: passName(labels),
     pages: [...ticks.pages],
     taskIds: ticks.tasks.map((task) => task.taskId),
-    pageCap: pageCap(names.length),
+    pageCap: pageCap(labels.length),
     ...(firstMessage === '' ? {} : { firstMessage }),
     ...(goalId === null ? {} : { goalId }),
   };

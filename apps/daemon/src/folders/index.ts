@@ -3,6 +3,7 @@ export { modelJson, oneLine } from './area-naming';
 export { inspectFolder } from './inspect';
 export { NAMING_MS, proposeAreas, type AreaNamer } from './propose-areas';
 export { proposeSetupAreas } from './workbench-setup';
+export { withGuessedLabels } from './guessed-labels';
 export { askWithin } from './ask-within';
 export {
   appAddressCandidates,

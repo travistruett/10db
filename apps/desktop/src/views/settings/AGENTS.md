@@ -29,3 +29,4 @@ The Decisions view (`decisions-models-view.tsx`) draws, top to bottom: "Which mo
   `WorkstreamDto.waitingOn` draws "Waiting on Mark in Slack · 3h" on a card that keeps its plain border. A popover
   that holds a Select draws the Select's list inside itself (`comboboxProps={{ withinPortal: false }}`), or a click
   on an option closes it. `e2e/stakeholder-questions.spec.ts` seeds its cards with `apps/daemon/scripts/seed-*.ts`.
+- Settings › Agent skill (`agent-skill-section.tsx`) shows `/settings/agent-skill`: the installed copy's state, each tool's link (a link of the builder's is shown and left as it is), and the switch, which is disabled when this 10db installs nothing (another data folder, or run from source).

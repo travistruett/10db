@@ -27,9 +27,11 @@ import {
   insertTakeOut,
   lastTakeOut,
   leavePass,
+  madeByPass,
   openHolds,
   passHoldingTask,
   releaseClaims,
+  retireTaskUnconditionally,
   setTaskKeptWork,
   setTaskStatus,
   settleTurnsLeaving,
@@ -58,8 +60,8 @@ import {
 } from './kept-work';
 
 // Workbench spec §5.4: taking a task out of its pass, step by recorded step, so a restart goes on from
-// the step its `pass_take_outs` row reached. Its work is kept with the task, its page's files go back
-// to what they were without it, and it returns to the Board.
+// the step its `pass_take_outs` row reached. Its work is kept with the task, or deleted inside an
+// Abandon, its page's files go back to what they were without it, and it returns to the Board.
 
 /** What a take-out is part of: the builder's ask alone, or an Abandon or a close, which must finish. */
 export const TakeOutWithin = { Alone: 'alone', Abandon: 'abandon', Close: 'close' } as const;
@@ -94,7 +96,8 @@ const listed = (paths: readonly string[]): string => paths.map((p) => `- ${p}`).
  * Step 5 of a take-out, in the caller's write: the task's run is cancelled from whatever state it is
  * in (a queued one would start an ordinary session in the folder the moment the pass let go of it),
  * its claims released, every turn of it ended and settled with nothing Ready, the task leaves the
- * pass for the Board, open, with its kept work recorded, and the thread says so.
+ * pass for the Board, open, with its kept work recorded, and the thread says so. Inside an Abandon a
+ * task the pass made for its page is retired instead, so it leaves the Board too.
  */
 export function leavePassForBoard(
   ctx: WriteContext,
@@ -104,6 +107,8 @@ export function leavePassForBoard(
     readonly kept: TaskKeptWork | null;
     /** How many files the kept work holds. */
     readonly files: number;
+    /** The pass is being abandoned, and the page's changes were deleted. */
+    readonly abandoned?: boolean;
   },
 ): void {
   const task = getTask(ctx.tx, input.taskId);
@@ -123,10 +128,15 @@ export function leavePassForBoard(
   // No turn of the task is left for a later run of it to finish, nor a sign-off waiting for it.
   settleTurnsLeaving(ctx, input.taskId);
   deleteSignOffWait(ctx, input.taskId);
+  if (input.abandoned === true) {
+    leaveAbandonedPass(ctx, input);
+    advanceTakeOut(ctx, input, { step: TakeOutStep.Done, discarded: true });
+    return;
+  }
   leavePass(ctx, input.taskId);
-  if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);
-  advanceTakeOut(ctx, { taskId: input.taskId, passId: input.passId }, { step: TakeOutStep.Done });
+  if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
+  advanceTakeOut(ctx, input, { step: TakeOutStep.Done });
   insertSystemNotice(
     ctx,
     input.taskId,
@@ -134,6 +144,37 @@ export function leavePassForBoard(
       ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
       : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
   );
+}
+
+/**
+ * Deletes a task's work as an Abandon does, before the write that forgets it: the pass's kept ref for
+ * its page, then any saved work it carried in. One already gone is no error, so a rerun deletes
+ * nothing more.
+ */
+export async function deleteAbandonedWork(
+  deps: PassWorkDeps,
+  input: { readonly repo: string; readonly taskId: TaskId; readonly passId: PassId },
+): Promise<void> {
+  await deps.git.deleteKeptRef(input.repo, passKeptRef(input.passId, input.taskId));
+  await deps.git.deleteKeptRef(input.repo, keptRef(input.taskId));
+}
+
+/**
+ * A task leaves an abandoned pass, in the caller's write, once `deleteAbandonedWork` has run: it keeps
+ * no work; a task the pass made for its page is retired, so it leaves the Board, and any other goes
+ * back to the Board open, its thread saying its changes were deleted.
+ */
+export function leaveAbandonedPass(
+  ctx: WriteContext,
+  input: { readonly taskId: TaskId; readonly passId: PassId },
+): void {
+  const task = getTask(ctx.tx, input.taskId);
+  const pass = getPass(ctx.tx, input.passId);
+  leavePass(ctx, input.taskId);
+  setTaskKeptWork(ctx, input.taskId, null);
+  if (madeByPass(ctx.tx, input.passId, input.taskId)) retireTaskUnconditionally(ctx, input.taskId);
+  else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
+  insertSystemNotice(ctx, input.taskId, `Abandoned with ${pass.name}; its changes were deleted.`);
 }
 
 /** The page files whose content on disk is not what `kept` holds: something wrote after the keep. */
@@ -178,7 +219,7 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * before (one changed since is left and named), then drops each shared change chosen Drop, newest
  * first (inside an Abandon or a close without its refusals, never without the hash before each
  * write; a refused one stays on the chain and the thread says why); 5 leaves the pass for the Board,
- * its work at its kept ref. While Your folder is off the pass's branch nothing of the page can be
+ * its work at its kept ref, or, inside an Abandon, with its changes deleted. While Your folder is off the pass's branch nothing of the page can be
  * kept and none of its files is written: a take-out asked for alone fails, and one inside an Abandon
  * or a close keeps the last kept commit, writes no file and goes on to step 5.
  */
@@ -297,15 +338,16 @@ export async function takeOutSteps(
   if (keptBaseSha === null) throw new ConflictError(`The take-out of ${task.title} kept nothing`);
   const project = getProject(db, pass.projectId);
   const repo = project.repoPath;
-  const files =
-    row.keptSha === null
-      ? []
-      : (await git.filesChangedBetween(repo, keptBaseSha, row.keptSha)).filter(
-          pageMatcher(db, project, getTask(db, task.id), pass.id),
-        );
-
   if (row.step < TakeOutStep.PutBack) {
     const keptSha = row.keptSha;
+    // Read only before the put-back: inside an Abandon a restart past it may find the kept commit
+    // deleted and pruned.
+    const files =
+      keptSha === null
+        ? []
+        : (await git.filesChangedBetween(repo, keptBaseSha, keptSha)).filter(
+            pageMatcher(db, project, getTask(db, task.id), pass.id),
+          );
     let left: string[] = [];
     // A folder on another branch holds that branch's files: the pass's are never written into it.
     const on = await git.currentBranch(repo);
@@ -370,6 +412,23 @@ export async function takeOutSteps(
     });
   }
 
+  if (row.step < TakeOutStep.Done && input.within === TakeOutWithin.Abandon) {
+    deps.inbox.cancelForWorkstream(workstreamId);
+    // An Abandon deletes the page's changes: the pass's kept ref and any saved work the task carried
+    // in go before the row forgets them, so a restart between the two deletes nothing more and
+    // writes the same row.
+    await deleteAbandonedWork(deps, { repo, taskId: task.id, passId: pass.id });
+    deps.state.write((ctx) => {
+      leavePassForBoard(ctx, {
+        taskId: task.id,
+        passId: pass.id,
+        kept: null,
+        files: 0,
+        abandoned: true,
+      });
+    });
+    row = { ...row, step: TakeOutStep.Done };
+  }
   if (row.step < TakeOutStep.Done) {
     deps.inbox.cancelForWorkstream(workstreamId);
     // Work saved from an earlier take-out that is still not in the folder is never written over:

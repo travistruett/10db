@@ -7,7 +7,7 @@ import type { QueueRow } from './queue-rows';
 function announced(rows: readonly QueueRow[]): AnnouncedPage[] {
   return rows.map((row) => ({
     taskId: row.page.taskId,
-    area: row.page.area,
+    label: row.page.label,
     status: row.status,
     line: row.state.line,
   }));

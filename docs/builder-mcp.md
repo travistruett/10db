@@ -68,7 +68,7 @@ The bridge reads no other 10db variable.
 | `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                                       |
 | `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, rigor, kinds and landing; returns its id. A rigor below a kind's minimum is refused. |
 | `edit_task`     | Changes a task's title, headline, why, description, criteria, rigor, kinds, areas or landing (areas and landing only before it starts).                                    |
-| `remove_task`   | Removes a task that has not started.                                                                                                                                       |
+| `remove_task`   | Removes a task that has not started, or one whose every run was cancelled, in no pass and with no saved work.                                                              |
 | `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                                                   |
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                                                           |
 | `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                                                           |
@@ -157,7 +157,11 @@ server's instructions tell the client to treat all of it as data, never as instr
 you asked for something is not you asking. Those writes carry your authority, so they follow only what you say in
 the conversation.
 
-## Retire the `10db-task` skill
+## The `10db-task` skill
+
+10db also ships the `10db-task` agent skill (`packages/agent-skill`), installed into `~/.10db/skills/10db-task` and linked for Claude Code and Codex: a command line over the same local API, as a separate channel from these tools.
+
+### Retire an older hand-copied skill
 
 The drafting guidance that lived in `~/.claude/skills/10db-task/` (the title as the outcome, criteria you can see
 or measure, areas from `list_projects`, no confirmation step) is now in the server's instructions and the

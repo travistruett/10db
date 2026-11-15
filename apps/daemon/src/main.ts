@@ -30,11 +30,14 @@ import {
 } from './environment';
 import type { Logger } from './log';
 import {
+  resolveAgentSkillDir,
   resolveDataDir,
   resolveHarnessDir,
   resolveMigrationsDir,
   resolveSqliteBinding,
 } from './paths';
+import { agentSkillPlacement } from './agent-skill';
+import { defaultDataDir } from './runtime-files';
 import { readBuildInfo } from './self-update';
 import {
   claudeCapabilities,
@@ -172,6 +175,7 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
+    agentSkill: agentSkillPlacement(resolveAgentSkillDir(), dataDir, defaultDataDir()),
     catalogueSnapshot: catalogueSnapshotFromEnv(
       env,
       join(import.meta.dirname, CATALOGUE_SNAPSHOT_FILE),

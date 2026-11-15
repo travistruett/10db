@@ -28,7 +28,11 @@ function expectEachFileInOneCandidate(tracked: readonly string[], context = ''):
     candidates.reduce((sum, c) => sum + c.files, 0),
     context,
   ).toBe(tracked.length);
-  expect(areaRolesProblem(candidates.map((c) => ({ ...c, name: c.label }))), context).toBeNull();
+  // A candidate's label is its path, not a page label, so it stays out of the areas checked.
+  expect(
+    areaRolesProblem(candidates.map(({ label, ...area }) => ({ ...area, name: label }))),
+    context,
+  ).toBeNull();
 }
 
 /** xorshift32: the same layouts on every run, so a failure names a seed that shows it again. */

@@ -87,6 +87,9 @@
           "area": {
             "type": "string"
           },
+          "label": {
+            "type": "string"
+          },
           "route": {
             "type": [
               "string",
@@ -381,6 +384,7 @@
           "taskId",
           "title",
           "area",
+          "label",
           "route",
           "workstreamId",
           "state",

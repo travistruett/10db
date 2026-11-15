@@ -1,6 +1,8 @@
 import {
   AreaRole,
+  pageLabel,
   type AreaDef,
+  type PageRow,
   type ProjectViewDto,
   type WorkbenchSetupAreas,
 } from '@10db/contracts';
@@ -9,6 +11,45 @@ import { useDisclosure } from '@mantine/hooks';
 import { useId } from 'react';
 import { CountBadge } from '../../../shell/count-badge';
 import { areasSummary } from './setup-rules';
+
+export interface PageRowsProps {
+  readonly pages: readonly PageRow[];
+  readonly unticked: readonly string[];
+  readonly onTick: (page: string, ticked: boolean) => void;
+}
+
+/**
+ * A row per new page the builder may untick, named by the label it will save and its area name. A page
+ * unticked here is left out: it is not made, and not asked for again.
+ */
+export function PageRows({ pages, unticked, onTick }: PageRowsProps) {
+  if (pages.length === 0) return null;
+  return (
+    <Stack gap="xs">
+      {pages.map((page) => (
+        <Checkbox
+          key={page.name}
+          checked={!unticked.includes(page.name)}
+          onChange={(event) => {
+            onTick(page.name, event.currentTarget.checked);
+          }}
+          label={
+            <>
+              {`Make ${pageLabel(page)} (`}
+              <Code>{page.name}</Code>
+              {`)${
+                page.route === undefined
+                  ? ' a page, which no single path shows'
+                  : ` a page at ${page.route}`
+              }`}
+            </>
+          }
+          description={page.folders.join(', ')}
+        />
+      ))}
+    </Stack>
+  );
+}
 
 export interface AreasSectionProps {
   readonly project: ProjectViewDto;
@@ -33,29 +74,7 @@ export function AreasSection({ project, areas, result, unticked, onTick }: Areas
         Areas
       </Title>
       <Text size="sm">{areasSummary(project.areas, result)}</Text>
-      {areas.pages.length === 0 ? null : (
-        <Stack gap="xs">
-          {areas.pages.map((page) => (
-            <Checkbox
-              key={page.name}
-              checked={!unticked.includes(page.name)}
-              onChange={(event) => {
-                onTick(page.name, event.currentTarget.checked);
-              }}
-              label={
-                <>
-                  {`Make `}
-                  <Code>{page.name}</Code>
-                  {page.route === undefined
-                    ? ' a page, which no single path shows'
-                    : ` a page at ${page.route}`}
-                </>
-              }
-              description={page.folders.join(', ')}
-            />
-          ))}
-        </Stack>
-      )}
+      <PageRows pages={areas.pages} unticked={unticked} onTick={onTick} />
       {areas.kept.length === 0 ? null : (
         <Stack gap={4}>
           <Text size="sm" fw={500}>

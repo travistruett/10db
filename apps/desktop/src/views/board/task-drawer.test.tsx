@@ -1413,6 +1413,7 @@ describe('TaskDrawer', () => {
       { state: 'FAILED', buttons: ['Retry', 'Close task'] },
       { state: 'RUNNING', buttons: ['Cancel Run'] },
       { state: 'HELD', buttons: ['Start', 'Remove'] },
+      { state: 'CANCELLED', buttons: ['Remove'] },
     ] as const)(
       'puts the run actions of a $state task on the status line',
       async ({ state, buttons }) => {

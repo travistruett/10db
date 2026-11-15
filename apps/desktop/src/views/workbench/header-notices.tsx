@@ -83,7 +83,7 @@ function NoticeRow(props: NoticeRowProps) {
   const color = COLOR[notice.kind];
   const Icon = color === 'red' ? IconAlertTriangle : IconInfoCircle;
   const sentTo = send.isSuccess
-    ? pages.find((page) => page.taskId === send.variables.taskId)?.area
+    ? pages.find((page) => page.taskId === send.variables.taskId)?.label
     : undefined;
   const failure =
     send.error?.message ??
@@ -194,7 +194,7 @@ function NoticeRow(props: NoticeRowProps) {
                     send.mutate({ taskId: page.taskId, noticeId: notice.id });
                   }}
                 >
-                  {page.area}
+                  {page.label}
                 </Menu.Item>
               ))}
             </Menu.Dropdown>

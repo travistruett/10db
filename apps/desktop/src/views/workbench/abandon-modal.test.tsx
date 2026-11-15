@@ -25,16 +25,17 @@ function draw(
 const dialog = () => screen.findByRole('dialog', { name: 'Abandon' });
 
 describe('AbandonModal', () => {
-  it('names every page that goes back to how it was, then abandons', async () => {
-    const { abandon, onClose } = draw();
+  it('names every page whose changes it deletes, by its label, then abandons', async () => {
+    const { notStarted, working, ready } = pagesByStatus();
+    const { abandon, onClose } = draw(
+      undefined,
+      passViewDto({ pages: [{ ...notStarted, label: 'Start' }, working, ready] }),
+    );
     const d = await dialog();
-    const reverts = within(d).getByRole('list', { name: 'Pages that go back' });
     expect(
-      within(reverts)
-        .getAllByRole('listitem')
-        .map((item) => item.textContent),
-    ).toEqual(['Home', 'Billing', 'Settings']);
-    expect(within(d).queryByRole('list', { name: 'Pages that stay' })).toBeNull();
+      within(d).getByText('Discards: Start, Billing, Settings (their changes are deleted).'),
+    ).toBeTruthy();
+    expect(within(d).queryByText(/^Stays:/)).toBeNull();
     fireEvent.click(within(d).getByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
@@ -65,12 +66,8 @@ describe('AbandonModal', () => {
       });
       const { abandon } = draw(undefined, view);
       const d = await dialog();
-      expect(
-        within(within(d).getByRole('list', { name: 'Pages that stay' })).getByText('Settings'),
-      ).toBeTruthy();
-      expect(
-        within(within(d).getByRole('list', { name: 'Pages that go back' })).getByText('Billing'),
-      ).toBeTruthy();
+      expect(within(d).getByText('Stays: Settings (signed off).')).toBeTruthy();
+      expect(within(d).getByText('Discards: Billing (their changes are deleted).')).toBeTruthy();
       const button = within(d).getByRole('button', { name: 'Abandon' });
       expect(button).toHaveProperty('disabled', !offered);
       expect(

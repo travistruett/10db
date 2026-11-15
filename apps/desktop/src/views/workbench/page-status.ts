@@ -166,7 +166,7 @@ function unsignedState(
  */
 function waitedFor(waitsFor: NonNullable<PassPageDto['waitsFor']>, pass: PassAround) {
   const page = pass.pages.find((candidate) => candidate.taskId === waitsFor.taskId);
-  return `${page?.area ?? waitsFor.title}'s turn`;
+  return `${page?.label ?? waitsFor.title}'s turn`;
 }
 
 type SignOffState = (

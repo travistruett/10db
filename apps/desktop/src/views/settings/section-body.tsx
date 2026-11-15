@@ -1,6 +1,7 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Text, Title } from '@mantine/core';
 import { AccountsSection } from './accounts/accounts-section';
+import { AgentSkillSection } from './agent-skill-section';
 import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
@@ -141,6 +142,13 @@ export function SectionBody({
         <>
           {heading}
           <KeepAwakeSection />
+        </>
+      );
+    case SettingsSectionKey.AgentSkill:
+      return (
+        <>
+          {heading}
+          <AgentSkillSection />
         </>
       );
     case SettingsSectionKey.Updates:

@@ -290,4 +290,11 @@ describe('the bundled daemon', () => {
     expect(existsSync(join(dist, 'harness', '.claude-plugin', 'plugin.json'))).toBe(true);
     expect(existsSync(join(dist, 'harness', 'skills', 'planning', 'SKILL.md'))).toBe(true);
   });
+
+  it('ships the 10db-task skill with its version beside the bundle', () => {
+    const skill = join(work.path, 'dist', 'agent-skill', '10db-task');
+    expect(readFileSync(join(skill, 'VERSION'), 'utf8')).toMatch(/^[0-9a-f]{12}\n$/);
+    expect(existsSync(join(skill, 'tendb.mjs'))).toBe(true);
+    expect(existsSync(join(skill, 'SKILL.md'))).toBe(true);
+  });
 });

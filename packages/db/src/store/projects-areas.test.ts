@@ -192,4 +192,20 @@ describe('patching areas and hazards', () => {
       areas,
     );
   });
+
+  it('keeps the page names the builder left out of a rebuild, none to begin with', () => {
+    const project = seedProject(store);
+    expect(project.leftOutPages).toEqual([]);
+    store.write((ctx) => patchProject(ctx, project.id, { leftOutPages: ['sessions'] }));
+    expect(getProject(store.db, project.id).leftOutPages).toEqual(['sessions']);
+  });
+
+  it('keeps a page label through a save of the areas', () => {
+    const project = seedProject(store);
+    const areas = [
+      { name: 'shape', globs: ['src/shape/**'], role: 'page' as const, label: 'Plan' },
+    ];
+    store.write((ctx) => patchProject(ctx, project.id, { areas }));
+    expect(getProject(store.db, project.id).areas).toEqual(areas);
+  });
 });

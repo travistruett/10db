@@ -38,9 +38,6 @@ export interface PageThreadProps {
   readonly onAllow: (call: ToolCallView) => void;
 }
 
-/** A page area's name as a picture names it: "settings" reads "Settings". */
-const pageName = (area: string): string => area.charAt(0).toUpperCase() + area.slice(1);
-
 /** A picture the builder sent, read with the UI token; its alt text is its file name. */
 function MessagePicture({
   conversationId,
@@ -140,12 +137,12 @@ function WherePageIs({ page }: { readonly page: PassPageDto }) {
   if (page.route === null)
     return (
       <Text size="sm" c="dimmed">
-        {page.area} names no route.
+        {page.label} names no route.
       </Text>
     );
   return (
     <Text size="sm" c="dimmed">
-      <span>{page.area} is at</span> <Code>{page.route}</Code>
+      <span>{page.label} is at</span> <Code>{page.route}</Code>
     </Text>
   );
 }
@@ -162,7 +159,7 @@ export function PageThread({ page, turns, live, busy, canSend, onAllow }: PageTh
   const pictures = useTaskScreens(page.taskId).data;
   const screens = pictures?.screens ?? [];
   const fromGoal = pictures?.fromGoal ?? [];
-  const name = pageName(page.area);
+  const name = page.label;
   const befores = screens.filter((s) => s.kind === ScreenKind.Before);
   if (loading)
     return (

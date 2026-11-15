@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AppUrl, AreaDef, AreaName, PathPattern, ProjectPatch } from './entities';
 import { BranchName } from './git-names';
 import { globsOverlap } from './glob-overlap';
-import { AreaRole, AreaRoute } from './page-areas';
+import { AreaRole, AreaRoute, PageLabel } from './page-areas';
 
 // Workbench setup (`POST /projects/:projectId/workbench-setup`): what 10db proposes so a project is
 // ready for its first pass: its areas rebuilt with pages, and settings, all saved by one Apply.
@@ -22,6 +22,8 @@ export const PageRow = z.object({
   name: AreaName,
   /** Absent for a page no single path shows. */
   route: AreaRoute.optional(),
+  /** The name the setup guesses for the page; absent when it guesses none. */
+  label: PageLabel.optional(),
   /** Its route folder, then the folders and files of its code outside it, as repository paths. */
   folders: z.array(z.string().min(1)).min(1),
   /** For an area open tasks name that becomes this page: the area as it is, which unticking restores. */

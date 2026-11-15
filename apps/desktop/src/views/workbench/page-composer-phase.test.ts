@@ -61,14 +61,16 @@ describe('pageComposerPhase', () => {
     },
   ])('$name', ({ phase, hasContent, shows }) => {
     expect(
-      buttons(pageComposerPhase(phase, { hasContent, area: 'Settings', firstMessage: false })),
+      buttons(pageComposerPhase(phase, { hasContent, label: 'Settings', firstMessage: false })),
     ).toEqual(shows);
   });
 
   it('never has two filled buttons', () => {
     for (const phase of Object.values(P))
       for (const hasContent of [false, true]) {
-        const b = buttons(pageComposerPhase(phase, { hasContent, area: 'S', firstMessage: false }));
+        const b = buttons(
+          pageComposerPhase(phase, { hasContent, label: 'S', firstMessage: false }),
+        );
         const filled = [b.signOff === 'filled', b.send === 'filled' && hasContent].filter(Boolean);
         expect(filled.length).toBeLessThanOrEqual(1);
       }
@@ -84,7 +86,7 @@ describe('pageComposerPhase', () => {
     },
   ])('asks $says', ({ phase, firstMessage, says }) => {
     expect(
-      pageComposerPhase(phase, { hasContent: false, area: 'Settings', firstMessage }).phase
+      pageComposerPhase(phase, { hasContent: false, label: 'Settings', firstMessage }).phase
         .placeholder,
     ).toBe(says);
   });

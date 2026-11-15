@@ -32,6 +32,15 @@ export function resolveHarnessDir(): string {
   return existsSync(bundled) ? bundled : HARNESS_PLUGIN_DIR;
 }
 
+/**
+ * The bundle carries the `10db-task` skill beside itself; from source there is none, and null says so.
+ * A folder without `VERSION` is a build that failed half way and counts as absent.
+ */
+export function resolveAgentSkillDir(): string | null {
+  const bundled = join(import.meta.dirname, 'agent-skill', '10db-task');
+  return existsSync(join(bundled, 'VERSION')) ? bundled : null;
+}
+
 export class SandboxRuntimeError extends Error {
   override readonly name = 'SandboxRuntimeError';
 }

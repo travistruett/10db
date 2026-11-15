@@ -1,5 +1,6 @@
 import {
   BatchDto,
+  AgentSkillStatus,
   BoardColumnDto,
   InboxItemDto,
   KeepAwakeStatus,
@@ -48,6 +49,8 @@ import { useDaemon } from './provider';
 /** Query keys; events invalidate by prefix (`['tasks']` covers every project's task list). */
 export const queryKeys = {
   projects: ['projects'],
+  /** The Workbench setup read for a project (`useWorkbenchSetup`). */
+  workbenchSetup: (projectId: ProjectId) => ['workbench-setup', projectId] as const,
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
   batches: (projectId: ProjectId) => ['batches', projectId] as const,
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
@@ -58,6 +61,7 @@ export const queryKeys = {
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
+  agentSkill: ['agent-skill'],
   lanePermissions: ['lane-permissions'],
   system: ['system'],
   candidates: (projectId: ProjectId, size: number, goalId: GoalId | null) =>
@@ -219,6 +223,14 @@ export function useKeepAwake() {
   return useQuery({
     queryKey: queryKeys.keepAwake,
     queryFn: async () => readJson(await client.settings['keep-awake'].$get(), KeepAwakeStatus),
+  });
+}
+
+export function useAgentSkill() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.agentSkill,
+    queryFn: async () => readJson(await client.settings['agent-skill'].$get(), AgentSkillStatus),
   });
 }
 
@@ -532,6 +544,18 @@ export function useSetKeepAwake() {
   });
 }
 
+export function useSetAgentSkill() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) =>
+      readJson(await client.settings['agent-skill'].$put({ json: { enabled } }), AgentSkillStatus),
+    onSuccess: (status) => {
+      queryClient.setQueryData(queryKeys.agentSkill, status);
+    },
+  });
+}
+
 export function useCreateBoardColumn(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -602,7 +626,16 @@ export function usePatchProject(projectId: ProjectId) {
         await client.projects[':projectId'].$patch({ param: { projectId }, json: patch }),
         ProjectDto,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    // A saved project makes the setup read of it stale: an Apply must not send an old proposal over it.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        // Marked stale, read again only when the setup is next asked for.
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workbenchSetup(projectId),
+          refetchType: 'none',
+        }),
+      ]),
   });
 }
 

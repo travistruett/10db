@@ -23,7 +23,7 @@ function Harness(props: { status: PageStatus; actions: PageActions; firstMessage
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   return (
     <PageComposer
-      area="Settings"
+      label="Settings"
       status={props.status}
       firstMessage={props.firstMessage ?? false}
       draft={draft}

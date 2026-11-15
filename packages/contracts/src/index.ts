@@ -70,6 +70,7 @@ export * from './rigor';
 export * from './rigor-figures';
 export * from './states';
 export * from './agent-capabilities';
+export * from './agent-skill';
 export * from './steps';
 export * from './system';
 export * from './skipped-actions';

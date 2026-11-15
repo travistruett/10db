@@ -12,13 +12,21 @@ import {
   getBatch,
   getPass,
   getTask,
+  getTaskKeptWork,
   getWorkstreamRow,
+  insertPassPageTask,
+  insertTask,
+  joinPass as joinPassRows,
+  lastTakeOut,
   listInbox,
   listSharedChanges,
+  listTasks,
   listTaskThreadRows,
+  markTasksMadeByPass,
   openHolds,
   schema,
   setAbandonStep,
+  setTaskKeptWork,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -43,8 +51,8 @@ import {
 import { abandonPassSteps } from './abandon';
 
 // Workbench spec §5.4 (D23): Abandon Pass puts every unsigned page back to its state before the pass,
-// keeps its work with its task, and ends the pass and its batch ABANDONED, going on from its recorded
-// step after a restart; it always finishes.
+// deletes its changes, and ends the pass and its batch ABANDONED, going on from its recorded step
+// after a restart; it always finishes.
 
 let w: PassWorld;
 afterEach(() => {
@@ -63,13 +71,45 @@ const abandonCards = () =>
     (item) => item.detail?.['passCard'] === 'abandon',
   );
 
+/** No saved work is left for the task: no kept ref, in the pass or on the Board, and no kept columns. */
+function expectNoKeptWork(world: PassWorld, task: PassWorld['settings']): void {
+  for (const ref of [keptRef(task.id), `refs/10db/passes/${world.opened.pass.id}/${task.id}`])
+    expect(world.h.git$('for-each-ref', '--format=%(refname)', ref)).toBe('');
+  expect(getTaskKeptWork(world.h.store.db, task.id)).toBeNull();
+  expect(getTask(world.h.store.db, task.id).keptWork).toBe(false);
+}
+
 /**
- * A pass on a folder whose Settings page and shared file were edited before it opened; Settings'
- * turn edits the page, deletes a file and, holding the shared area, edits the shared file further
- * and adds a button, and People's adds a page file.
+ * Settings, which joined from the Board, is back on it open and its thread says its changes went;
+ * People, the task the pass made for its page, is cancelled and off the Board. Neither keeps any work.
+ */
+function expectBoardAfter(world: PassWorld): void {
+  const db = world.h.store.db;
+  for (const task of [world.settings, world.people]) {
+    expectNoKeptWork(world, task);
+    expect(getWorkstreamRow(db, world.runOf(task)).state).toBe(WorkstreamState.Cancelled);
+  }
+  expect(getTask(db, world.settings.id)).toMatchObject({ passId: null, status: 'open' });
+  expect(getTask(db, world.people.id)).toMatchObject({ passId: null, status: 'cancelled' });
+  const onBoard = listTasks(db, world.h.project.id).map((t) => t.id);
+  expect(onBoard).toContain(world.settings.id);
+  expect(onBoard).not.toContain(world.people.id);
+  expect(
+    listTaskThreadRows(db, world.settings.id)
+      .filter((m) => m.kind === 'notice')
+      .map((m) => m.body),
+  ).toContain('Abandoned with Polish; its changes were deleted.');
+}
+
+/**
+ * A pass on a folder whose Settings page and shared file were edited before it opened, Settings a
+ * Board task that joined it and People a page the pass made its task for; Settings' turn edits the
+ * page, deletes a file and, holding the shared area, edits the shared file further and adds a
+ * button, and People's adds a page file.
  */
 async function worked(): Promise<PassWorld> {
   const world = await openPassWorld({
+    peopleByPass: true,
     before: ({ write }) => {
       write('src/settings/page.tsx', 'edited before the pass\n');
       write('src/shared.ts', 'shared, edited before the pass\n');
@@ -105,17 +145,8 @@ function expectAbandoned(world: PassWorld): void {
     [1, 2, null],
     [2, null, 1],
   ]);
-  // Each page's work is kept with its task, which is back on the Board.
-  expect(world.h.git$('show', `${keptRef(world.settings.id)}:src/settings/page.tsx`)).toBe(
-    'edited before the pass\nand in the turn',
-  );
-  expect(world.h.git$('show', `${keptRef(world.people.id)}:src/people/new.tsx`)).toBe(
-    'added by People',
-  );
-  for (const task of [world.settings, world.people]) {
-    expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
-    expect(getWorkstreamRow(db, world.runOf(task)).state).toBe(WorkstreamState.Cancelled);
-  }
+  // Each page's changes are deleted: the joined task is back on the Board, the one the pass made gone.
+  expectBoardAfter(world);
   // Nothing landed, so the folder is back where the pass came from.
   expect(world.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
 }
@@ -158,6 +189,45 @@ describe('abandonPass', () => {
     expect(opened.pass.state).toBe(PassState.Open);
   });
 
+  it('retires a page the pass made before it had a run, and takes a Board task with none out open, its saved work deleted', async () => {
+    w = await openPassWorld();
+    const pass = w.opened.pass.id;
+    const { made, joined } = w.h.state.write((ctx) => {
+      const page = insertPassPageTask(ctx, w.h.project.id, {
+        title: 'Settings: more UI work',
+        area: 'settings',
+        goalId: null,
+      });
+      const board = insertTask(ctx, w.h.project.id, {
+        title: 'People: copy',
+        acceptanceCriteria: ['ok'],
+        areas: ['people'],
+      });
+      // The Board task carries saved work from an earlier pass into this one.
+      setTaskKeptWork(ctx, board.id, {
+        keptSha: w.opened.pass.startSha,
+        keptBaseSha: w.opened.pass.startSha,
+      });
+      joinPassRows(ctx, pass, [page.id, board.id]);
+      markTasksMadeByPass(ctx, pass, [page.id]);
+      return { made: page, joined: board };
+    });
+    w.h.git$('update-ref', keptRef(joined.id), w.opened.pass.startSha);
+
+    await abandonPass(deps(), pass);
+
+    const db = w.h.store.db;
+    expect(getTask(db, made.id)).toMatchObject({ passId: null, status: 'cancelled' });
+    expect(getTask(db, joined.id)).toMatchObject({ passId: null, status: 'open' });
+    expectNoKeptWork(w, joined);
+    expect(
+      listTaskThreadRows(db, joined.id)
+        .filter((m) => m.kind === 'notice')
+        .map((m) => m.body),
+    ).toContain('Abandoned with Polish; its changes were deleted.');
+    expect(listTasks(db, w.h.project.id).map((t) => t.id)).not.toContain(made.id);
+  });
+
   it('refuses the built batch Abandon on an open pass, changing nothing', async () => {
     w = await openPassWorld();
     expect(() => w.h.shipper.abandon(w.opened.batch.id)).toThrow(/pass/i);
@@ -172,6 +242,16 @@ describe('abandonPass', () => {
       return (...a: A): Promise<T> => {
         n += 1;
         return n === nth ? Promise.reject(new Error('the daemon died')) : real(...a);
+      };
+    };
+    /** Dies just after the `nth` call has done its work, before its caller goes on. */
+    const dyingAfter = <A extends unknown[], T>(nth: number, real: (...a: A) => Promise<T>) => {
+      let n = 0;
+      return async (...a: A): Promise<T> => {
+        n += 1;
+        const done = await real(...a);
+        if (n === nth) throw new Error('the daemon died');
+        return done;
       };
     };
     const kills: {
@@ -275,6 +355,49 @@ describe('abandonPass', () => {
         },
       },
       {
+        name: "at a page's first kept-ref delete, before anything of it is deleted",
+        step: AbandonStep.SharedDropped,
+        kill: async (world) => {
+          const git = world.deps.git;
+          await expect(
+            abandonPassSteps(
+              deps(world.deps, {
+                ...git,
+                deleteKeptRef: dying(1, (...a: Parameters<Git['deleteKeptRef']>) =>
+                  git.deleteKeptRef(...a),
+                ),
+              }),
+              world.opened.pass.id,
+            ),
+          ).rejects.toThrow('the daemon died');
+        },
+      },
+      {
+        name: "after a page's kept refs were deleted and their commit pruned, before its row was written",
+        step: AbandonStep.SharedDropped,
+        kill: async (world) => {
+          const git = world.deps.git;
+          await expect(
+            abandonPassSteps(
+              deps(world.deps, {
+                ...git,
+                // The pass's ref and then the Board's go, and the daemon dies with the row unwritten.
+                deleteKeptRef: dyingAfter(2, (...a: Parameters<Git['deleteKeptRef']>) =>
+                  git.deleteKeptRef(...a),
+                ),
+              }),
+              world.opened.pass.id,
+            ),
+          ).rejects.toThrow('the daemon died');
+          // Nothing names the deleted commit any more, so git may drop it before the restart.
+          const kept = lastTakeOut(world.h.store.db, world.settings.id)?.keptSha;
+          if (kept == null) throw new Error('the take-out kept nothing');
+          world.h.git$('reflog', 'expire', '--expire=now', '--all');
+          world.h.git$('gc', '--prune=now', '--quiet');
+          expect(() => world.h.git$('cat-file', '-e', `${kept}^{commit}`)).toThrow();
+        },
+      },
+      {
         name: 'after every page was taken out',
         step: AbandonStep.SignedOffKept,
         kill: async (world) => {
@@ -367,9 +490,8 @@ describe('abandonPass', () => {
         expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
       }
       expect(read('src/settings/page.tsx')).toBe('settings\n');
-      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
-        'settings, the turn',
-      );
+      // The saved work it carried back in is deleted with the pass's changes.
+      expectNoKeptWork(w, w.settings);
       expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     }
 
@@ -446,18 +568,12 @@ describe('abandonPass', () => {
 
       const db = w.h.store.db;
       expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Abandoned);
-      for (const task of [w.settings, w.people]) {
-        expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
-        expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
-      }
+      expectBoardAfter(w);
       // No file is written on a branch the pass does not own: each stays as the builder has it.
       expect(read('src/settings/page.tsx')).toBe('edited before the pass\nand in the turn\n');
       expect(existsSync(join(w.h.repo, 'src/settings/old.tsx'))).toBe(false);
       expect(read('src/people/new.tsx')).toBe('added by People\n');
-      // What the turn kept stays with its task.
-      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
-        'edited before the pass\nand in the turn',
-      );
+      // The pass's changes are deleted: only the files the builder took along hold them.
       expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
       // No hold stays open on an abandoned pass: one its turn left is let go, its files left as
       // they are.
@@ -493,6 +609,8 @@ describe('abandonPass', () => {
     const [card] = abandonCards();
     if (!card) throw new Error('no Abandon card');
     expect(card.body).toContain(`Your folder stays on ${w.branch}`);
+    // It names the pages whose changes it deleted, as its confirm did, by their labels.
+    expect(card.body).toContain('Discards: Settings, People (their changes are deleted).');
     expect(card.options.map((o) => o.label)).toEqual(['Move to main']);
 
     w.write('src/shared.ts', 'an uncommitted edit\n');
@@ -503,6 +621,26 @@ describe('abandonPass', () => {
     expect(read('src/settings/page.tsx')).toBe('settings\n');
     expect(read('src/shared.ts')).toBe('an uncommitted edit\n');
     expect(abandonCards()).toEqual([]);
+  });
+
+  it('names on its card only the pages it discarded, not one taken out before it, whose work stays', async () => {
+    w = await openPassWorld();
+    w.h.commit('src/shared.ts', 'landed\n');
+    const turn = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'settings, the turn\n');
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+    w.endTurn(turn);
+    await takeOutSteps(deps(), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+
+    await abandonPass(deps(), w.opened.pass.id);
+
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    expect(card.body).toContain('Discards: People (their changes are deleted).');
+    expect(card.body).not.toContain('Settings');
+    expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
+      'settings, the turn',
+    );
   });
 
   it('keeps naming the files it left when a Move on its card is refused', async () => {
@@ -533,6 +671,7 @@ describe('abandonPass', () => {
     const [again] = abandonCards();
     expect(again?.body).toContain('10db could not move it');
     expect(again?.body).toContain(left);
+    expect(again?.body).toContain('Discards: Settings, People (their changes are deleted).');
   });
 
   it('finishes when a page keeps changing, leaving its files and naming them on the card with the page', async () => {

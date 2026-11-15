@@ -46,8 +46,8 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  cancelTask,
   closeTask,
+  removeTaskFromBoard,
   reopenTask,
   deleteBoardColumn,
   getGoal,
@@ -144,6 +144,7 @@ import {
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
+import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
@@ -163,6 +164,7 @@ import {
   type PassJoined,
   type TakeOutInput,
 } from '../pass';
+import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Admission, Scheduler } from '../scheduler';
@@ -272,6 +274,7 @@ export function createServices(deps: {
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
+  readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
   readonly admission: Pick<Admission, 'status'>;
   /** Probes the tools and gh's login; the services keep its last answer. */
@@ -755,6 +758,9 @@ export function createServices(deps: {
     },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    agentSkill: () => deps.agentSkill.status(),
+    setAgentSkill: (enabled) => deps.agentSkill.setEnabled(enabled),
+    agentSkillInfo: () => ({ version: deps.agentSkill.shippedVersion() }),
     capacitySettings: () => capacitySettings(db),
     setCapacitySettings(input) {
       const saved = setCapacitySettings(deps.state, input);
@@ -880,10 +886,21 @@ export function createServices(deps: {
       if (patch.appUrl != null && port !== null && isDaemonAddress(patch.appUrl, port))
         throw new InvalidError(APP_URL_IS_DAEMON);
       await refuseMissingDefaultBranch(getProject(db, id), patch);
-      return patch.accountId === undefined
-        ? deps.state.write((ctx) => patchProject(ctx, id, patch))
-        : // The account through the move, with the other fields in the same write.
-          deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch });
+      // Areas the builder saved stand as saved: no label is guessed onto them after.
+      const saved =
+        patch.accountId === undefined
+          ? deps.state.write((ctx) => {
+              const project = patchProject(ctx, id, patch);
+              if (patch.areas !== undefined) dropPendingPageLabels(ctx, id);
+              return project;
+            })
+          : // The account through the move, with the other fields in the same write.
+            deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch });
+      if (patch.areas !== undefined && patch.accountId !== undefined)
+        deps.state.write((ctx) => {
+          dropPendingPageLabels(ctx, id);
+        });
+      return saved;
     },
     listAccounts: () => deps.accounts.list(),
     createAccount: (input) => deps.accounts.create(input),
@@ -915,7 +932,7 @@ export function createServices(deps: {
       });
       return { limit: input.limit };
     },
-    removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
+    removeTask: (id) => deps.state.write((ctx) => removeTaskFromBoard(ctx, id)),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),

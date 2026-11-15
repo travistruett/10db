@@ -120,7 +120,7 @@ export async function notifyPassReady(
   if (!isTauri() || listening === null) return;
   await listening;
   if (document.hasFocus() || !(await canNotify())) return;
-  const area = pass?.pages.find((page) => page.taskId === detail.taskId)?.area;
+  const label = pass?.pages.find((page) => page.taskId === detail.taskId)?.label;
   const id = takeNotificationId();
   shown = [
     ...shown,
@@ -128,7 +128,7 @@ export async function notifyPassReady(
   ].slice(-REMEMBERED);
   sendNotification({
     id,
-    title: area === undefined ? item.title : `${area} is ready`,
+    title: label === undefined ? item.title : `${label} is ready`,
     body: item.title,
   });
 }

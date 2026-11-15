@@ -101,6 +101,7 @@ describe('a ready notification', () => {
       workstreamId: mintId('Workstream'),
       title: 'People: UI work',
       area: 'People',
+      label: 'People',
       route: '/people',
     };
     const view = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, people] });
@@ -150,7 +151,13 @@ describe('a ready notification', () => {
       areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
     });
     const { ready } = pagesByStatus();
-    const people = { ...ready, taskId: mintId('Task'), title: 'People: UI work', area: 'People' };
+    const people = {
+      ...ready,
+      taskId: mintId('Task'),
+      title: 'People: UI work',
+      area: 'People',
+      label: 'People',
+    };
     const view = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, people] });
     const items = [readyItem(view, ready), readyItem(view, people)];
     const sockets: { send(data: string): void }[] = [];

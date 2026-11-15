@@ -1,10 +1,12 @@
 import { mintId, type PassState, type ProjectId } from '@10db/contracts';
-import { screen } from '@testing-library/react';
+import { projectDto } from '../test/fixtures';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../test/daemon';
 import { passViewDto } from '../test/pass-fixtures';
-import { livePassOf, useLivePass } from './pass-queries';
+import { livePassOf, setupKeys, useLivePass } from './pass-queries';
+import { usePatchProject } from './queries';
 
 describe('livePassOf', () => {
   const project = mintId('Project');
@@ -70,5 +72,35 @@ describe('useLivePass', () => {
     renderWithDaemon(<LivePassName projectId={project} />);
     expect(await screen.findByText('Mine')).toBeTruthy();
     expect(asked).toEqual(['?live=true']);
+  });
+});
+
+function SaveAreas({ projectId }: { readonly projectId: ProjectId }) {
+  const patch = usePatchProject(projectId);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        patch.mutate({ areas: [{ name: 'src', globs: ['src/**'] }] });
+      }}
+    >
+      Save
+    </button>
+  );
+}
+
+describe('usePatchProject', () => {
+  it("makes the project's cached setup stale once it saves, so an Apply never sends an old proposal", async () => {
+    const project = projectDto();
+    server.use(
+      http.patch(daemonUrl('/projects/:projectId'), () => HttpResponse.json(project)),
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderWithDaemon(<SaveAreas projectId={project.id} />);
+    queryClient.setQueryData(setupKeys.of(project.id), { stale: false });
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(queryClient.getQueryState(setupKeys.of(project.id))?.isInvalidated).toBe(true);
+    });
   });
 });
