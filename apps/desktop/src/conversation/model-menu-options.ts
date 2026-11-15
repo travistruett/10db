@@ -46,7 +46,7 @@ export function effortRun(
   return nearest ?? null;
 }
 
-/** The chip's words: "Opus 5.5 High", the model alone when it runs at its own effort. */
+/** The chip's words: the model's name and its effort ("… High"), the model alone when it runs at its own effort. */
 export function chipLabel(
   model: string | null,
   effort: Effort | null,
