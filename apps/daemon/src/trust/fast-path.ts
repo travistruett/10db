@@ -124,28 +124,43 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
 /** Brace, extglob and escape syntax: each can spell a path no segment-by-segment check sees. */
 const GLOB_SYNTAX = /[{}\\]|[@!+*?]\(/;
 
-/** Whether a glob pattern matches only below the folder it is run in: plain syntax, not absolute or climbing. */
+/** A pattern's wildcard characters, and the control characters no plain name holds. */
+const GLOB_MAGIC = /[*?[\]]/;
+// eslint-disable-next-line no-control-regex -- the point is to match them
+const CONTROL = /[\x00-\x1f\x7f]/;
+
+/** Whether a pattern segment is plain: no padding whitespace and no control character. */
+const isPlainSegment = (segment: string): boolean =>
+  segment === segment.trim() && !CONTROL.test(segment);
+
+/**
+ * Whether a glob pattern matches only below the folder it is run in: plain text and syntax, not absolute,
+ * home-relative or climbing.
+ */
 function patternStaysBelow(pattern: string): boolean {
+  const segments = pattern.split('/');
   return (
+    isPlainPath(pattern) &&
     !GLOB_SYNTAX.test(pattern) &&
     !isAbsolute(pattern) &&
-    !pattern.startsWith('~') &&
-    !pattern.split('/').includes('..')
+    !segments.includes('..') &&
+    segments.every(isPlainSegment)
   );
 }
 
 /**
- * Whether a Glob may run with no model: plain syntax and a search folder inside. The tool runs
- * `rg --files --null --glob <pattern> --sort=modified --no-ignore --hidden` there, which never follows a link
- * inside the tree and reads only the search folder's own real path, so the pattern can't reach outside it.
+ * Whether a Glob may run with no model: a plain pattern, and a search folder and the pattern's literal prefix
+ * inside. The tool runs `rg --files --null --glob <pattern> --sort=modified --no-ignore --hidden` there, which
+ * follows no link inside the tree, so past the prefix the pattern can't reach outside the search folder.
  */
 function globStaysIn(pattern: string, path: string, cwd: string, ctx: FastPathContext): boolean {
-  return (
-    patternStaysBelow(pattern) &&
-    !pattern.split('/').some((segment) => nameIsSecret(segment)) &&
-    isPlainPath(path) &&
-    !namesSecret(from(cwd, path), ctx.secretFiles) &&
-    staysIn(path, cwd, ctx)
+  if (!patternStaysBelow(pattern) || !isPlainPath(path)) return false;
+  const segments = pattern.split('/');
+  if (segments.some((segment) => nameIsSecret(segment))) return false;
+  const at = segments.findIndex((segment) => GLOB_MAGIC.test(segment));
+  const prefix = (at === -1 ? segments : segments.slice(0, at)).join('/');
+  return [path, prefix === '' ? path : join(path, prefix)].every(
+    (reach) => !namesSecret(from(cwd, reach), ctx.secretFiles) && staysIn(reach, cwd, ctx),
   );
 }
 

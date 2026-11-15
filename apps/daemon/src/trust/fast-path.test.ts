@@ -81,7 +81,7 @@ describe('fastPathAllows', () => {
     ['Glob with a parent segment', 'Glob', { pattern: '../*.txt' }, false],
     ['Glob through a link out of the checkout', 'Glob', { pattern: '*.txt', path: 'out' }, false],
     // rg never follows a link inside the tree, so a link out of the checkout or in node_modules is not reached.
-    ['Glob with a literal prefix through a link out', 'Glob', { pattern: 'out/*.txt' }, true],
+    ['Glob with a literal prefix through a link out', 'Glob', { pattern: 'out/*.txt' }, false],
     ['Glob over a root holding a link out', 'Glob', { pattern: '**/*.ts' }, true],
     [
       'Glob for TypeScript in a pnpm-style root',
@@ -102,6 +102,12 @@ describe('fastPathAllows', () => {
       { file_path: '~/x', old_string: 'a', new_string: 'b' },
       false,
     ],
+    ['Glob with a leading space', 'Glob', { pattern: ' *.ts' }, false],
+    ['Glob with a trailing space', 'Glob', { pattern: '*.ts ' }, false],
+    ['Glob with a home pattern', 'Glob', { pattern: '~/*.ts' }, false],
+    ['Glob with a padded segment', 'Glob', { pattern: 'src/ ../*.ts' }, false],
+    ['Glob with a control character', 'Glob', { pattern: 'src/\u0001*.ts' }, false],
+    ['Glob with a literal link prefix', 'Glob', { pattern: 'lnk/*.ts' }, true],
     ['Glob with a brace holding ..', 'Glob', { pattern: '{..,x}/*.txt' }, false],
     ['Glob with an extglob holding ..', 'Glob', { pattern: '@(..)/*.txt' }, false],
     ['Glob with a plus extglob', 'Glob', { pattern: '+(..)/*.txt' }, false],
