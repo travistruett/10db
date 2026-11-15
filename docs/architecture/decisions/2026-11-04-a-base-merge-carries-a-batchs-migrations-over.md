@@ -77,8 +77,8 @@ still be told.
 
 Built. `generate` diffs the schema as merged, so run plainly the first of two generated migrations would take all of
 the branch's schema changes and the second would have nothing left: drizzle-kit exits 0 and writes no file. Folding
-them into one would be wrong as well as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028 of
-`packages/db/AGENTS.md`; the rebuild's `INSERT … SELECT` fails on a column added in the same step). So with two or
+them into one would be wrong as well as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028, in
+`docs/architecture/db-storage.md`; the rebuild's `INSERT … SELECT` fails on a column added in the same step). So with two or
 more generated migrations each is made from the schema as it stood at that migration, merged with the base's
 (`schemaSteps`, `stepRuns`, `stepSchema`):
 
