@@ -121,12 +121,12 @@ export function passBranchName(name: string, id: PassId): string {
   return `10db/${slugOf(name, 'pass')}-${id.slice(-6)}`;
 }
 
-/** What a task that waits for a page shows: the area and the task that holds it. */
-function pageWaitNotice(area: string, holder: TaskDto): Notice {
+/** What a task that waits for a page shows: the area, by its label when it is a page, and the holder. */
+function pageWaitNotice(area: string, shown: string, holder: TaskDto): Notice {
   return {
     key: `claim-wait:${ClaimKind.Area}:${area}`,
     tone: 'info',
-    line: `Waiting for area ${area}: task "${holder.title}" holds it`,
+    line: `Waiting for area ${shown}: task "${holder.title}" holds it`,
     body: `This page is claimed by "${holder.title}". It joins the pass as soon as that task lets it go.`,
   };
 }
@@ -458,7 +458,9 @@ export function startPassTasks(
     if (claimed.ok) continue;
     const holder = getTask(w.tx, getWorkstreamRow(w.tx, claimed.conflict.heldBy).taskId);
     waiting.push({ taskId: task.id, area: claimed.conflict.name, heldBy: holder.id });
-    setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, holder));
+    const held = project.areas.find((a) => a.name === claimed.conflict.name);
+    const shown = held?.role === AreaRole.Page ? pageLabel(held) : claimed.conflict.name;
+    setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, shown, holder));
   }
   return waiting;
 }

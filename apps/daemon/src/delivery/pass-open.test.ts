@@ -258,7 +258,19 @@ describe('opening a pass', () => {
   });
 
   it('makes a page another task holds wait for it, naming the holder', async () => {
-    harness();
+    harness({
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        {
+          name: 'people',
+          globs: ['src/people/**'],
+          role: 'page',
+          route: '/people',
+          label: 'Folks',
+        },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
     const holder = page('People: copy fix', ['people']);
     // A task waiting on a card with no session holds its claims and no lane in the folder.
     const held = h.state.write((w) => {
@@ -293,7 +305,7 @@ describe('opening a pass', () => {
 
     expect(opened.waiting).toEqual([{ taskId: people.id, area: 'people', heldBy: holder.id }]);
     const waiting = runOf(people);
-    expect(waiting?.notice?.line).toBe('Waiting for area people: task "People: copy fix" holds it');
+    expect(waiting?.notice?.line).toBe('Waiting for area Folks: task "People: copy fix" holds it');
     expect(activeClaims(h.store.db, waiting?.id ?? mintId('Workstream'))).toEqual([]);
     expect(activeClaims(h.store.db, held.id).map((c) => c.name)).toEqual(['people']);
   });

@@ -60,6 +60,24 @@ const builderMessages = (taskId: TaskDto['id']) =>
     .map((m) => m.body);
 
 describe('Add Page', () => {
+  it('marks the task it makes for a new page with its pass and leaves a joined task unmarked', async () => {
+    w = await openPassWorld({ project: PROJECT });
+    const home = w.h.addTask('Home: tidy', { areas: ['home'], description: 'Tidy the home page' });
+
+    const joined = await join({ pages: ['billing'], taskIds: [home.id] });
+
+    const marks = new Map(
+      w.h.store.db
+        .select({ id: schema.tasks.id, madeBy: schema.tasks.madeByPassId })
+        .from(schema.tasks)
+        .all()
+        .map((t) => [t.id, t.madeBy]),
+    );
+    const made = joined.joined.find((id) => id !== home.id);
+    expect(marks.get(made ?? home.id)).toBe(w.opened.pass.id);
+    expect(marks.get(home.id)).toBeNull();
+  });
+
   it('adds a new page and an open task, each running in the pass with its page claimed, and sends neither a word', async () => {
     w = await openPassWorld({ project: PROJECT });
     const home = w.h.addTask('Home: tidy', { areas: ['home'], description: 'Tidy the home page' });
@@ -134,7 +152,7 @@ describe('Add Page', () => {
     const [billing] = joined;
     expect(waiting).toEqual([{ taskId: billing, area: 'billing', heldBy: holder.id }]);
     const run = getWorkstream(w.h.store.db, w.runOf(getTask(w.h.store.db, billing ?? holder.id)));
-    expect(run.notice?.line).toBe('Waiting for area billing: task "Billing: copy fix" holds it');
+    expect(run.notice?.line).toBe('Waiting for area Billing: task "Billing: copy fix" holds it');
     expect(activeClaims(w.h.store.db, run.id)).toEqual([]);
   });
 
