@@ -49,7 +49,14 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
     live: null,
     start: passStartDto({
       pages: [
-        { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 0, heldBy: null },
+        {
+          area: 'settings',
+          label: 'Settings',
+          route: '/settings',
+          lastChangedAt: null,
+          uncommitted: 0,
+          heldBy: null,
+        },
       ],
     }),
     tasks: [],

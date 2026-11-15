@@ -34,8 +34,22 @@ const areas: AreaDef[] = [
 const project = projectViewDto({ name: 'ampsio', areas });
 const start = passStartDto({
   pages: [
-    { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 0, heldBy: null },
-    { area: 'people', route: '/people', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'settings',
+      label: 'Settings',
+      route: '/settings',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
+    {
+      area: 'people',
+      label: 'People',
+      route: '/people',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
 });
 

@@ -33,6 +33,7 @@ import {
   setTaskKeptWork,
   transitionWorkstream,
 } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { silentLogger } from '../log';
@@ -218,6 +219,22 @@ describe('opening a pass', () => {
       );
     }
     expect(opened.waiting).toEqual([]);
+  });
+
+  it('marks the task it makes for a new page with its pass, and leaves a joined task unmarked', async () => {
+    harness();
+    const people = page('People: UI work', ['people']);
+
+    const opened = await open([people], { pages: ['settings'] });
+
+    const inPass = h.store.db
+      .select({ id: schema.tasks.id, madeByPassId: schema.tasks.madeByPassId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.passId, opened.pass.id))
+      .all();
+    expect(inPass).toHaveLength(2);
+    expect(inPass.find((t) => t.id === people.id)?.madeByPassId).toBeNull();
+    expect(inPass.find((t) => t.id !== people.id)?.madeByPassId).toBe(opened.pass.id);
   });
 
   it('makes a page another task holds wait for it, naming the holder', async () => {

@@ -41,6 +41,7 @@ import {
   getWorkstreamRow,
   insertPass,
   insertPassPageTask,
+  markTasksMadeByPass,
   listBatches,
   listPassDirt,
   passHoldingTask,
@@ -264,8 +265,9 @@ export async function openPass(
       written = ctx.state.write((w) => {
         const stray = returnBranchProblem(w.tx, project, start.returnBranch);
         if (stray !== null) throw new ConflictError(stray);
-        const pageTasks = [...tasks, ...writePageTasks(w, project, newPages)];
-        const made = insertPass(w, {
+        const made = writePageTasks(w, project, newPages);
+        const pageTasks = [...tasks, ...made];
+        const inserted = insertPass(w, {
           id,
           projectId: project.id,
           name: input.name,
@@ -278,10 +280,15 @@ export async function openPass(
           taskIds: pageTasks.map((t) => t.id),
           dirt: start.dirt,
         });
+        markTasksMadeByPass(
+          w,
+          id,
+          made.map((t) => t.id),
+        );
         stackOn(w, id, below);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
-        const waiting = startPassTasks(w, project, made.batch.id, pageTasks, leaseExpiresAt);
-        return { ...made, waiting };
+        const waiting = startPassTasks(w, project, inserted.batch.id, pageTasks, leaseExpiresAt);
+        return { ...inserted, waiting };
       });
     } catch (error) {
       const undone = await ctx.git

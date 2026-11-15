@@ -15,8 +15,22 @@ const areas: AreaDef[] = [
 const project = projectViewDto({ areas, baseBranch: 'main' });
 const quiet: PassStartDto = passStartDto({
   pages: [
-    { area: 'settings', route: '/settings', lastChangedAt: null, uncommitted: 3, heldBy: null },
-    { area: 'people', route: '/people', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'settings',
+      label: 'Settings',
+      route: '/settings',
+      lastChangedAt: null,
+      uncommitted: 3,
+      heldBy: null,
+    },
+    {
+      area: 'people',
+      label: 'People',
+      route: '/people',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
   otherUncommitted: 0,
   lacks: [],

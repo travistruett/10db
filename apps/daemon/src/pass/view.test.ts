@@ -168,6 +168,7 @@ describe('the view of a pass', () => {
       taskId: settings,
       title: 'Settings: UI work',
       area: 'settings',
+      label: 'Settings',
       route: '/settings',
       workstreamId: runs[0],
       state: S.Queued,
@@ -185,6 +186,7 @@ describe('the view of a pass', () => {
     expect(open?.conversationId).toEqual(expect.any(String));
     expect(readyPage).toMatchObject({
       area: 'people',
+      label: 'People',
       route: '/people',
       state: S.WaitingHuman,
       nextActionKind: 'pass_review',
@@ -202,6 +204,7 @@ describe('the view of a pass', () => {
     expect(readyPage?.turn?.readyAt).not.toBeNull();
     expect(failedPage).toMatchObject({
       area: 'billing',
+      label: 'Billing',
       route: null,
       nextActionKind: 'pass_review',
       turn: { id: failed.turn.id, readyAt: null },

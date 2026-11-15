@@ -62,6 +62,11 @@
             "maxLength": 500,
             "format": "starts_with",
             "pattern": "^\\/.*"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
           }
         },
         "required": [
@@ -325,6 +330,12 @@
         "viewports",
         "themes"
       ]
+    },
+    "leftOutPages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "createdAt": {
       "type": "string",
@@ -1308,6 +1319,7 @@
     "devLoginCommand",
     "previewCommand",
     "screens",
+    "leftOutPages",
     "createdAt",
     "updatedAt"
   ]

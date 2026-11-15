@@ -25,6 +25,7 @@ const start: PassStartDto = passStartDto({
   pages: [
     {
       area: 'settings',
+      label: 'Settings',
       route: '/settings',
       lastChangedAt: minutesBeforeNow(60 * 24),
       uncommitted: 3,
@@ -32,13 +33,28 @@ const start: PassStartDto = passStartDto({
     },
     {
       area: 'people',
+      label: 'People',
       route: '/people',
       lastChangedAt: minutesBeforeNow(60),
       uncommitted: 0,
       heldBy: null,
     },
-    { area: 'billing', route: null, lastChangedAt: null, uncommitted: 0, heldBy: null },
-    { area: 'forms', route: '/forms', lastChangedAt: null, uncommitted: 0, heldBy: null },
+    {
+      area: 'billing',
+      label: 'Billing',
+      route: null,
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
+    {
+      area: 'forms',
+      label: 'Forms',
+      route: '/forms',
+      lastChangedAt: null,
+      uncommitted: 0,
+      heldBy: null,
+    },
   ],
 });
 const peopleTask = taskDto({

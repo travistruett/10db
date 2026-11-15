@@ -17,6 +17,7 @@ const areas: AreaDef[] = names.map((name) => ({
 const project = projectViewDto({ areas });
 const start: PassStartDto = passStartDto({
   pages: names.map((area) => ({
+    label: area.charAt(0).toUpperCase() + area.slice(1),
     area,
     route: `/${area}`,
     lastChangedAt: null,

@@ -255,6 +255,8 @@ export const PassPageDto = z.object({
   title: z.string(),
   /** The page area the task works on. */
   area: z.string(),
+  /** What the page is called (`pageLabel`). */
+  label: z.string(),
   /** The page's path in the app, or null when its area names none. */
   route: z.string().nullable(),
   /** The task's run, its state and its next action; null before it has one. */
