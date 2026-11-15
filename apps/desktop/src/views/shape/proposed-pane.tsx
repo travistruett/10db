@@ -358,6 +358,7 @@ function ConvertPanel({
           .mutateAsync({
             proposalIds: ids,
             ...(options?.interrupt === true ? { interrupt: true } : {}),
+            ...(options?.cut === undefined ? {} : { cut: options.cut }),
           })
           .catch(() => undefined);
         if (result?.kind === 'refused') setRefusals(result.errors);
