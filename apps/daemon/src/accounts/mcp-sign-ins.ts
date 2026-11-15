@@ -36,6 +36,7 @@ const UNREADABLE = "Couldn't read whether it's signed in.";
 export interface SignInCandidate {
   readonly key: YourMcpServerKey;
   readonly name: string;
+  readonly url: string;
   readonly server: YourSessionServer;
 }
 
@@ -47,6 +48,7 @@ export function signInCandidates(plan: Pick<YourMcpPlan, 'remote'>): SignInCandi
           {
             key: remote.key,
             name,
+            url: remote.url,
             server: {
               connect: { type: remote.type, url: remote.url, headers: null },
               claudeOAuth: remote.oauth,
@@ -82,7 +84,7 @@ interface Slot {
 export function createMcpSignIns(deps: {
   readonly state: StateStore;
   readonly adapter: Pick<AgentAdapter, 'startMcpSignIn' | 'mcpAuthStatus'>;
-  readonly launcher: Pick<Launcher, 'probe'>;
+  readonly launcher: Pick<Launcher, 'probe' | 'loginConfigDir'>;
   readonly clock: Clock;
   /** The builder's servers as a session on the app's switches would get them. */
   readonly plan: () => YourMcpPlan;
@@ -92,8 +94,16 @@ export function createMcpSignIns(deps: {
   /** Sign-ins under way or failed since this daemon started; never stored. */
   const slots = new Map<string, Slot>();
   const slotKey = (accountId: AccountId, key: YourMcpServerKey): string => `${accountId}:${key}`;
-  const cache = new Map<AccountId, { readonly at: number; readonly read: Read }>();
-  const inFlight = new Map<AccountId, Promise<Read>>();
+  /** A read is kept for the servers it asked about: a server approved since is asked again. */
+  const cache = new Map<
+    AccountId,
+    { readonly at: number; readonly read: Read; readonly asked: string }
+  >();
+  const inFlight = new Map<AccountId, { readonly asked: string; readonly read: Promise<Read> }>();
+  /** Bumped when an account's sign-in ends, so a read that began before it is not kept. */
+  const generation = new Map<AccountId, number>();
+  /** Sign-in starts that have not yet answered; shutdown waits for them. */
+  const starting = new Set<Promise<unknown>>();
 
   const emit = (accountId: AccountId, key: YourMcpServerKey, state: McpSignInState): void => {
     const data: McpSignInChangedData = { accountId, key, state };
@@ -140,10 +150,8 @@ export function createMcpSignIns(deps: {
             { errName: error instanceof Error ? error.name : 'unknown', accountId },
             'an account’s mcp sign-in status could not be read',
           );
-          return {
-            kind: 'unreadable',
-            message: error instanceof McpSignInError ? error.message : UNREADABLE,
-          };
+          // What the adapter said is not for the builder: Settings has one line for a read that failed.
+          return { kind: 'unreadable', message: UNREADABLE };
         },
       );
     try {
@@ -158,21 +166,25 @@ export function createMcpSignIns(deps: {
     candidates: readonly SignInCandidate[],
   ): Promise<Read> => {
     const now = deps.clock.now().getTime();
+    const asked = candidates.map((c) => `${c.name} ${c.url}`).join('\n');
     const cached = cache.get(accountId);
-    if (cached !== undefined && now - cached.at < SIGN_IN_STATUS_TTL_MS)
+    if (cached?.asked === asked && now - cached.at < SIGN_IN_STATUS_TTL_MS)
       return Promise.resolve(cached.read);
     const running = inFlight.get(accountId);
-    if (running !== undefined) return running;
+    if (running?.asked === asked) return running.read;
+    const began = generation.get(accountId) ?? 0;
     const started = readStatus(accountId, candidates)
       .then((read) => {
-        // A failure is not kept: the next look asks again.
-        if (read.kind === 'read') cache.set(accountId, { at: now, read });
+        // A failure is not kept, and neither is a read that began before a sign-in ended: it may show the
+        // server signed out after it signed in.
+        if (read.kind === 'read' && (generation.get(accountId) ?? 0) === began)
+          cache.set(accountId, { at: now, read, asked });
         return read;
       })
       .finally(() => {
-        inFlight.delete(accountId);
+        if (inFlight.get(accountId)?.read === started) inFlight.delete(accountId);
       });
-    inFlight.set(accountId, started);
+    inFlight.set(accountId, { asked, read: started });
     return started;
   };
 
@@ -214,7 +226,10 @@ export function createMcpSignIns(deps: {
         return read === undefined ? [] : rowsFor(account, candidates, read);
       }),
       terminal: accounts.flatMap((account) =>
-        account.kind === AccountKind.ClaudeSubscription && account.configDir !== null
+        account.kind === AccountKind.ClaudeSubscription &&
+        account.configDir !== null &&
+        // The login shell's own folder is the default account's, which signs in in the builder's Claude Code.
+        account.configDir !== deps.launcher.loginConfigDir()
           ? [
               {
                 accountId: account.id,
@@ -238,6 +253,8 @@ export function createMcpSignIns(deps: {
     // A slot stopped or replaced meanwhile has said its piece.
     if (slots.get(id) !== slot) return;
     cache.delete(accountId);
+    inFlight.delete(accountId);
+    generation.set(accountId, (generation.get(accountId) ?? 0) + 1);
     if (outcome.ok) {
       slots.delete(id);
       emit(accountId, key, McpSignInState.SignedIn);
@@ -278,31 +295,38 @@ export function createMcpSignIns(deps: {
     };
     slots.set(id, slot);
     emit(account.id, candidate.key, McpSignInState.SigningIn);
-    try {
-      const handle = await deps.adapter.startMcpSignIn({
-        kind: AccountKind.CodexSignin,
-        env,
-        name: candidate.name,
-        server: candidate.server,
-      });
-      if (slots.get(id) !== slot) {
-        // The daemon is stopping: nothing is left waiting on the browser.
-        await handle.cancel();
-        return await list();
+    const launch = async (): Promise<void> => {
+      try {
+        const handle = await deps.adapter.startMcpSignIn({
+          kind: AccountKind.CodexSignin,
+          env,
+          name: candidate.name,
+          server: candidate.server,
+        });
+        if (slots.get(id) !== slot) {
+          // The daemon is stopping: nothing is left waiting on the browser.
+          await handle.cancel();
+          return;
+        }
+        slot.handle = handle;
+        void handle.outcome.then((outcome) => {
+          ended(account.id, candidate.key, slot, outcome);
+        });
+      } catch (error) {
+        ended(account.id, candidate.key, slot, {
+          ok: false,
+          message:
+            error instanceof McpSignInError
+              ? error.message
+              : 'The sign-in did not start. Try Sign in again.',
+        });
       }
-      slot.handle = handle;
-      void handle.outcome.then((outcome) => {
-        ended(account.id, candidate.key, slot, outcome);
-      });
-    } catch (error) {
-      ended(account.id, candidate.key, slot, {
-        ok: false,
-        message:
-          error instanceof McpSignInError
-            ? error.message
-            : 'The sign-in did not start. Try Sign in again.',
-      });
-    }
+    };
+    const launching = launch();
+    starting.add(launching);
+    await launching.finally(() => {
+      starting.delete(launching);
+    });
     return list();
   };
 
@@ -310,13 +334,18 @@ export function createMcpSignIns(deps: {
     list,
     start,
     async stopAll() {
-      const stopping = [...slots.values()];
-      slots.clear();
+      // A failed slot is a state the builder has not seen the end of; only sign-ins under way are cancelled.
+      const stopping = [...slots.entries()].filter(
+        ([, slot]) => slot.state === McpSignInState.SigningIn,
+      );
+      for (const [id] of stopping) slots.delete(id);
       cache.clear();
-      for (const slot of stopping) {
+      for (const [, slot] of stopping) {
         await slot.handle?.cancel();
         emit(slot.accountId, slot.key, McpSignInState.NotSignedIn);
       }
+      // A start that has not answered cancels its own sign-in when it finds its slot gone.
+      await Promise.all([...starting]);
     },
   };
 }

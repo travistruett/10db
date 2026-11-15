@@ -37,10 +37,14 @@ export interface McpSignInDeps {
   readonly openPage?: (url: string) => Promise<void>;
 }
 
-/** How long a start (spawn, initialize, thread, login call) has to finish. */
+/** How long a sign-in's start (initialize, thread, login call) has to finish. */
 const START_MS = 30_000;
-/** How long a status read has to finish, so its process never outlives the service's own wait. */
-export const MCP_AUTH_STATUS_MS = 12_000;
+/**
+ * A status read is bounded as a whole, start and read together, inside the 15 s Settings waits for it, so no
+ * process outlives that wait: the start gets `STATUS_START_MS`, the read `MCP_AUTH_STATUS_MS` after it.
+ */
+const STATUS_START_MS = 5_000;
+export const MCP_AUTH_STATUS_MS = 6_000;
 
 const PORT_MESSAGE =
   'Codex could not listen for the sign-in on its callback port: another program is using it. Close it and try Sign in again.';
@@ -67,13 +71,15 @@ const openWithSystem = (url: string): Promise<void> =>
     });
   });
 
-/** Whether a page is plain https with no userinfo: the only kind 10db hands the browser. */
-function isPlainHttps(url: string): boolean {
+/** The parsed address of a page that is plain https with no userinfo, the only kind 10db hands the browser; else null. */
+function plainHttpsHref(url: string): string | null {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '';
+    return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === ''
+      ? parsed.href
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -95,6 +101,7 @@ export async function openCodexHome(
   deps: McpSignInDeps,
   env: Readonly<Record<string, string>>,
   servers: Readonly<Record<string, YourSessionServer>>,
+  startMs: number = START_MS,
 ): Promise<OpenHome> {
   const clock = deps.clock ?? systemClock;
   const { codexHome, home } = codexChildHome(env);
@@ -126,7 +133,7 @@ export async function openCodexHome(
   const deadline = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
       reject(new McpSignInError('Codex did not start in time.'));
-    }, START_MS);
+    }, startMs);
   });
   const start = (async () => {
     await rpc.call('initialize', { clientInfo: CODEX_CLIENT_INFO }, InitializeResponse);
@@ -170,7 +177,7 @@ export async function codexMcpAuthStatus(
   deps: McpSignInDeps,
 ): Promise<Readonly<Record<string, McpAuthState>>> {
   const clock = deps.clock ?? systemClock;
-  const opened = await openCodexHome(deps, spec.env, spec.servers);
+  const opened = await openCodexHome(deps, spec.env, spec.servers, STATUS_START_MS);
   let timer: { cancel(): void } = { cancel: () => undefined };
   const deadline = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
@@ -293,8 +300,8 @@ export async function startCodexMcpSignIn(
     startDeadline.catch(() => undefined);
   }
 
-  const url = answered.authorizationUrl;
-  if (!isPlainHttps(url)) {
+  const url = plainHttpsHref(answered.authorizationUrl);
+  if (url === null) {
     settle({ ok: false, message: 'The sign-in did not start.' });
     await outcome;
     throw new McpSignInError('Codex gave a sign-in address that 10db will not open.');

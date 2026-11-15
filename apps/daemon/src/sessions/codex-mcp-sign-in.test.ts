@@ -1,13 +1,19 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
 import { silentLogger } from '../log';
 import type { CodexHome } from './codex-home';
 import { McpAuthState } from './codex-mcp-auth';
-import { codexMcpAuthStatus, startCodexMcpSignIn, type McpSignInDeps } from './codex-mcp-sign-in';
+import {
+  codexMcpAuthStatus,
+  MCP_AUTH_STATUS_MS,
+  startCodexMcpSignIn,
+  type McpSignInDeps,
+} from './codex-mcp-sign-in';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import { codexYourServers } from './codex-your-servers';
 import { LOGIN_MS, McpSignInError, type McpSignInSpec, type YourSessionServer } from './types';
@@ -326,9 +332,50 @@ describe('codexMcpAuthStatus', () => {
     expect(read).toEqual({ linear: McpAuthState.SignedIn, notion: McpAuthState.NotSignedIn });
     expect(w.order).toEqual(['ensureConfig', 'spawn']);
     const start = server.sent().find((m) => m.method === 'thread/start');
-    expect(
-      Object.keys((start?.params as { config: { mcp_servers: object } }).config.mcp_servers),
-    ).toEqual(['linear', 'notion']);
+    const params = z
+      .object({ config: z.object({ mcp_servers: z.record(z.string(), z.unknown()) }) })
+      .parse(start?.params);
+    expect(Object.keys(params.config.mcp_servers)).toEqual(['linear', 'notion']);
     expect(server.ended()).toBe(true);
+  });
+
+  it('gives up inside the status wait, and closes the child, when Codex never starts', async () => {
+    const w = world();
+    const server = appServer({
+      initialize: INITIALIZE,
+      'thread/start': () => new Promise(() => undefined),
+    });
+    const read = codexMcpAuthStatus(
+      {
+        kind: AccountKind.CodexSignin,
+        env: { CODEX_HOME: '/h/codex' },
+        servers: { linear: SERVER },
+      },
+      w.deps(server),
+    );
+    const failure = expect(read).rejects.toBeInstanceOf(McpSignInError);
+    await vi.waitFor(() => {
+      expect(w.clock.pendingTimers()).toBeGreaterThan(0);
+      expect(server.sent().some((m) => m.method === 'thread/start')).toBe(true);
+    });
+    // The service waits 15 s; the whole read, start included, is done well inside it.
+    w.clock.advance(MCP_AUTH_STATUS_MS);
+    await failure;
+    expect(server.ended()).toBe(true);
+  });
+});
+
+describe('the page that is opened', () => {
+  it('is the parsed address, not the raw string Codex sent', async () => {
+    const w = world();
+    const server = appServer(
+      scripted({ authorizationUrl: 'https://Linear.example/a b?x=1', loginId: 'L1' }),
+    );
+    const started = await startCodexMcpSignIn(w.spec(), w.deps(server));
+    await started.reopen();
+    expect(w.opened).toEqual([
+      'https://linear.example/a%20b?x=1',
+      'https://linear.example/a%20b?x=1',
+    ]);
   });
 });

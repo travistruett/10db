@@ -20,7 +20,7 @@ import { claudeMcpSignInCommand, createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
 import type { YourMcpPlan } from '../session-setup';
-import { FakeAdapter, McpAuthState } from '../sessions';
+import { FakeAdapter, McpAuthState, McpSignInError } from '../sessions';
 import {
   createMcpSignIns,
   SIGN_IN_STATUS_MS,
@@ -59,12 +59,12 @@ let events: DaemonEvent[];
 let plan: YourMcpPlan;
 let codexId: AccountId;
 
-function service(): McpSignIns {
+function service(base: Record<string, string> = { PATH: '/bin' }): McpSignIns {
   return createMcpSignIns({
     state,
     adapter,
     launcher: createLauncher({
-      base: { PATH: '/bin' },
+      base,
       clientApp: 'test',
       keychain: createMemoryKeychain(),
     }),
@@ -166,6 +166,50 @@ describe('the rows', () => {
   });
 });
 
+describe('a status that cannot be trusted', () => {
+  it('reads an adapter failure as unknown with the one line of copy, whatever the adapter said', async () => {
+    adapter.mcpAuthError = new McpSignInError('Codex could not start.');
+    expect((await service().list()).rows).toMatchObject([
+      { state: McpSignInState.Unknown, message: "Couldn't read whether it's signed in." },
+    ]);
+  });
+
+  it('drops a read that started before a sign-in ended, so the sign-in shows', async () => {
+    const signIns = service();
+    await signIns.start({ accountId: codexId, key: LINEAR.key });
+    clock.advance(SIGN_IN_STATUS_TTL_MS);
+    // This read sees the server signed out, as Codex did when it started.
+    let release: () => void = () => undefined;
+    adapter.mcpAuthGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stale = signIns.list();
+    await vi.waitFor(() => {
+      expect(adapter.mcpAuthReads).toHaveLength(2);
+    });
+    adapter.completeMcpSignIn('linear', true);
+    await vi.waitFor(() => {
+      expect(changes()).toContain(McpSignInState.SignedIn);
+    });
+    release();
+    await stale;
+    adapter.mcpAuthGate = null;
+    expect((await signIns.list()).rows.map((r) => r.state)).toEqual([McpSignInState.SignedIn]);
+  });
+
+  it('reads again when a server is approved after the last read', async () => {
+    const signIns = service();
+    await signIns.list();
+    plan = planOf({ linear: LINEAR, notion: remote('notion', null) });
+    const { rows } = await signIns.list();
+    expect(rows.map((r) => [r.name, r.state])).toEqual([
+      ['linear', McpSignInState.NotSignedIn],
+      ['notion', McpSignInState.NotSignedIn],
+    ]);
+    expect(adapter.mcpAuthReads).toHaveLength(2);
+  });
+});
+
 describe('a sign-in', () => {
   const key = LINEAR.key;
 
@@ -228,6 +272,35 @@ describe('a sign-in', () => {
     expect(adapter.mcpSignIns.map((s) => s.cancelled)).toEqual([true, true]);
     expect(changes().filter((s) => s === McpSignInState.NotSignedIn)).toHaveLength(2);
     expect((await signIns.list()).rows.map((r) => r.state)).not.toContain(McpSignInState.SigningIn);
+  });
+
+  it('stopAll leaves a failed slot and its state alone, and cancels a start still under way', async () => {
+    plan = planOf({ linear: LINEAR, notion: remote('notion', null) });
+    const signIns = service();
+    await signIns.start({ accountId: codexId, key });
+    adapter.completeMcpSignIn('linear', false);
+    await vi.waitFor(() => {
+      expect(changes()).toContain(McpSignInState.Failed);
+    });
+    let release: () => void = () => undefined;
+    adapter.mcpSignInGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notionKey = plan.remote['notion']?.key ?? key;
+    const starting = signIns.start({ accountId: codexId, key: notionKey });
+    await vi.waitFor(() => {
+      expect(changes().filter((s) => s === McpSignInState.SigningIn)).toHaveLength(2);
+    });
+    const stopped = signIns.stopAll();
+    release();
+    // Shutdown does not return while a start is still to cancel its sign-in.
+    await stopped;
+    expect(adapter.mcpSignIns.find((s) => s.spec.name === 'notion')?.cancelled).toBe(true);
+    await starting;
+    // The start that finished after the stop was cancelled, and the failed one was not touched.
+    expect(adapter.mcpSignIns.find((s) => s.spec.name === 'notion')?.cancelled).toBe(true);
+    expect(changes().filter((s) => s === McpSignInState.NotSignedIn)).toHaveLength(1);
+    expect(changes().filter((s) => s === McpSignInState.Failed)).toHaveLength(1);
   });
 
   it('never puts a url in an event', async () => {
@@ -304,6 +377,19 @@ describe('the terminal entries', () => {
     expect((await service().list()).terminal).toEqual([
       { accountId: own.id, accountLabel: 'Own plan', command: claudeMcpSignInCommand(ownDir) },
     ]);
+  });
+
+  it('gives the default account none when the login shell moves its folder, though the folder is set', async () => {
+    const dflt = seedAccount(store, { kind: AccountKind.ClaudeSubscription, label: 'Default' });
+    store.write((ctx) => {
+      ctx.tx
+        .update(schema.accounts)
+        .set({ configDir: '/h/b/.claude-other' })
+        .where(eq(schema.accounts.id, dflt.id))
+        .run();
+    });
+    const signIns = service({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/h/b/.claude-other' });
+    expect((await signIns.list()).terminal).toEqual([]);
   });
 
   it('gives none when no server can sign in', async () => {

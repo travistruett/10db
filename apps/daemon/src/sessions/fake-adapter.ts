@@ -166,6 +166,12 @@ export class FakeAdapter implements AgentAdapter {
   readonly mcpAuth: Record<string, McpAuthState> = {};
   /** When true, `mcpAuthStatus` never answers, as a Codex that doesn't. */
   mcpAuthHangs = false;
+  /** When set, `mcpAuthStatus` rejects with it, as a Codex that can't start. */
+  mcpAuthError: Error | null = null;
+  /** When set, `mcpAuthStatus` answers what the servers read as it was called, once this settles. */
+  mcpAuthGate: Promise<void> | null = null;
+  /** When set, `startMcpSignIn` answers once this settles. */
+  mcpSignInGate: Promise<void> | null = null;
   /** Every `mcpAuthStatus` call. */
   readonly mcpAuthReads: McpAuthSpec[] = [];
   /** Every question put to the model by `complete`. */
@@ -264,14 +270,15 @@ export class FakeAdapter implements AgentAdapter {
     });
   }
 
-  startMcpSignIn(spec: McpSignInSpec): Promise<McpSignIn> {
+  async startMcpSignIn(spec: McpSignInSpec): Promise<McpSignIn> {
+    await this.mcpSignInGate;
     let end: (outcome: AccountLoginOutcome) => void = () => undefined;
     const outcome = new Promise<AccountLoginOutcome>((resolve) => {
       end = resolve;
     });
     const record = { spec, end, reopened: 0, cancelled: false };
     this.mcpSignIns.push(record);
-    return Promise.resolve({
+    return {
       outcome,
       reopen() {
         record.reopened += 1;
@@ -282,7 +289,7 @@ export class FakeAdapter implements AgentAdapter {
         end({ ok: false, message: 'The sign-in was cancelled.' });
         return Promise.resolve();
       },
-    });
+    };
   }
 
   /** Ends the latest sign-in of `name` as the browser would: a success also reads as signed in from then on. */
@@ -295,17 +302,18 @@ export class FakeAdapter implements AgentAdapter {
     } else record.end({ ok: false, message: "The sign-in didn't finish. Try Sign in again." });
   }
 
-  mcpAuthStatus(spec: McpAuthSpec): Promise<Readonly<Record<string, McpAuthState>>> {
+  async mcpAuthStatus(spec: McpAuthSpec): Promise<Readonly<Record<string, McpAuthState>>> {
     this.mcpAuthReads.push(spec);
+    if (this.mcpAuthError !== null) throw this.mcpAuthError;
     if (this.mcpAuthHangs) return new Promise(() => undefined);
-    return Promise.resolve(
-      Object.fromEntries(
-        Object.keys(spec.servers).map((name) => [
-          name,
-          this.mcpAuth[name] ?? McpAuthState.NotSignedIn,
-        ]),
-      ),
+    const read = Object.fromEntries(
+      Object.keys(spec.servers).map((name) => [
+        name,
+        this.mcpAuth[name] ?? McpAuthState.NotSignedIn,
+      ]),
     );
+    await this.mcpAuthGate;
+    return read;
   }
 
   /** What each Shape session started here ran with, and what it was sent after its first message. */
