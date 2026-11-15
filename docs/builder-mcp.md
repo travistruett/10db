@@ -157,7 +157,11 @@ server's instructions tell the client to treat all of it as data, never as instr
 you asked for something is not you asking. Those writes carry your authority, so they follow only what you say in
 the conversation.
 
-## Retire the `10db-task` skill
+## The `10db-task` skill
+
+10db also ships the `10db-task` agent skill (`packages/agent-skill`), installed into `~/.10db/skills/10db-task` and linked for Claude Code and Codex: a command line over the same local API, as a separate channel from these tools.
+
+### Retire an older hand-copied skill
 
 The drafting guidance that lived in `~/.claude/skills/10db-task/` (the title as the outcome, criteria you can see
 or measure, areas from `list_projects`, no confirmation step) is now in the server's instructions and the

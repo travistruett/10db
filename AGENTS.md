@@ -14,14 +14,15 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 
 ## Layout
 
-| Path                 | Holds                                               |
-| -------------------- | --------------------------------------------------- |
-| `apps/daemon`        | the TypeScript daemon: the only database writer     |
-| `apps/desktop`       | the React + Mantine UI and its Tauri 2 shell        |
-| `packages/contracts` | zod schemas: the source of API, event and MCP types |
-| `packages/db`        | Drizzle schema, migrations, repositories            |
-| `packages/harness`   | the plugin dir injected into managed sessions       |
-| `tests/repo`         | tests that enforce these rules                      |
+| Path                   | Holds                                               |
+| ---------------------- | --------------------------------------------------- |
+| `apps/daemon`          | the TypeScript daemon: the only database writer     |
+| `apps/desktop`         | the React + Mantine UI and its Tauri 2 shell        |
+| `packages/agent-skill` | the `10db-task` agent skill: its files and CLI      |
+| `packages/contracts`   | zod schemas: the source of API, event and MCP types |
+| `packages/db`          | Drizzle schema, migrations, repositories            |
+| `packages/harness`     | the plugin dir injected into managed sessions       |
+| `tests/repo`           | tests that enforce these rules                      |
 
 ## Rules
 
