@@ -42,7 +42,8 @@ describe('isSendKey', () => {
   it.each([
     { name: '⌘↩', key: 'Enter', metaKey: true, ctrlKey: false, shiftKey: false, want: true },
     { name: 'Ctrl↩', key: 'Enter', metaKey: false, ctrlKey: true, shiftKey: false, want: true },
-    { name: '↩', key: 'Enter', metaKey: false, ctrlKey: false, shiftKey: false, want: false },
+    { name: '↩', key: 'Enter', metaKey: false, ctrlKey: false, shiftKey: false, want: true },
+    { name: '⇧↩', key: 'Enter', metaKey: false, ctrlKey: false, shiftKey: true, want: false },
     { name: '⌘⇧↩', key: 'Enter', metaKey: true, ctrlKey: false, shiftKey: true, want: false },
   ])('$name', ({ want, ...key }) => {
     expect(isSendKey(key)).toBe(want);

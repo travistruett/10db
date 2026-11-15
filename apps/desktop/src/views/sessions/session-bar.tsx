@@ -11,23 +11,17 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { IconDots } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { JudgeLine } from '../../conversation';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
-import { ModelPicker } from '../../conversation/model-picker';
-import { useChatModels, usePatchChat } from '../../daemon/chat-queries';
-import { ContextGauge } from '../factory/context-gauge';
+import { usePatchChat } from '../../daemon/chat-queries';
 import { kindLine } from './kind-line';
-import { COMPACT_MAX } from './strip-layout';
 import { TabMenuItems, type TabActions } from './tab-menu';
 
 // Sessions UI spec §4, §7.10: the 44 px row under the header. At its left the title over what the session
-// is; at its right the agent and model, the context meter, File as Tasks and the ⋯ menu.
-
-const CONTEXT_TIP =
-  'of the context used. Past 70%, the next turn continues in a fresh session with a summary.';
+// is; at its right the agent's name, File as Tasks and the ⋯ menu. The model's menu and the
+// context ring are the composer's.
 
 export interface SessionBarProps {
   readonly chat: ChatDto;
@@ -35,12 +29,6 @@ export interface SessionBarProps {
   readonly projectName: string;
   /** The transcript is still being read. */
   readonly loading: boolean;
-  /** A turn runs or waits: the model changes between turns. */
-  readonly working: boolean;
-  /** The model change on its way, and the daemon's refusal of the last one. */
-  readonly modelPending: boolean;
-  readonly modelError: string | null;
-  readonly onModel: (model: string | null) => void;
   /** File as Tasks, disabled with this reason when it cannot be sent. */
   readonly fileDisabledReason: string | null;
   readonly onFileAsTasks: () => void;
@@ -120,59 +108,20 @@ function Title({
   );
 }
 
-/** The context meter, 40 px wide, with what it means and, on a metered account, what the session cost. */
-function ContextMeter({ conversation }: { readonly conversation: ConversationDto }) {
-  const { contextPct, costUsd } = conversation;
-  const lines = [
-    ...(contextPct === null ? [] : [`${String(Math.round(contextPct))}% ${CONTEXT_TIP}`]),
-    ...(costUsd === null ? [] : [`$${costUsd.toFixed(2)} so far`]),
-  ];
-  const meter = <ContextGauge pct={contextPct} width={40} />;
-  if (lines.length === 0) return meter;
-  return (
-    <Tooltip
-      multiline
-      w={260}
-      label={
-        <Stack gap={2}>
-          {lines.map((line) => (
-            <Text key={line} size="xs">
-              {line}
-            </Text>
-          ))}
-        </Stack>
-      }
-    >
-      <Box tabIndex={0} aria-label={lines.join(' ')} role="img">
-        {meter}
-      </Box>
-    </Tooltip>
-  );
-}
-
 export function SessionBar({
   chat,
   conversation,
   projectName,
   loading,
-  working,
-  modelPending,
-  modelError,
-  onModel,
   fileDisabledReason,
   onFileAsTasks,
   actions,
   renaming = false,
   onRenamed,
 }: SessionBarProps) {
-  // From 640 to 899 px the model and the meter move into ⋯, where they are read, not changed.
-  const compact = useMediaQuery(`(max-width: ${String(COMPACT_MAX)}px)`);
   const [typing, setEditing] = useState(false);
   const editing = typing || renaming;
-  const models = useChatModels(chat.projectId);
   const { capabilities } = conversation;
-  const offered = models.data?.offered ?? [];
-  const named = conversation.model ?? models.data?.default ?? null;
   return (
     <Box style={{ flex: 'none' }}>
       <Group h={44} px="md" justify="space-between" wrap="nowrap" gap="sm">
@@ -196,28 +145,9 @@ export function SessionBar({
           </Stack>
         </Group>
         <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-          {compact ? null : (
-            <>
-              {capabilities.modelSwitch === 'none' || offered.length === 0 ? (
-                <Text size="xs" c="dimmed">
-                  {named === null ? capabilities.label : `${capabilities.label} · ${named}`}
-                </Text>
-              ) : (
-                <ModelPicker
-                  offered={offered}
-                  default={models.data?.default ?? null}
-                  picked={conversation.model}
-                  busy={working}
-                  pending={modelPending}
-                  error={modelError}
-                  prefix={capabilities.label}
-                  width={230}
-                  onPick={onModel}
-                />
-              )}
-              <ContextMeter conversation={conversation} />
-            </>
-          )}
+          <Text size="xs" c="dimmed">
+            {capabilities.label}
+          </Text>
           <Tooltip label={fileDisabledReason ?? ''} disabled={fileDisabledReason === null}>
             <Button
               variant="default"
@@ -235,19 +165,6 @@ export function SessionBar({
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
-              {compact ? (
-                <>
-                  <Menu.Label>
-                    {named === null ? capabilities.label : `${capabilities.label} · ${named}`}
-                  </Menu.Label>
-                  {conversation.contextPct === null ? null : (
-                    <Menu.Label>
-                      {`${String(Math.round(conversation.contextPct))}% of the context used`}
-                    </Menu.Label>
-                  )}
-                  <Menu.Divider />
-                </>
-              ) : null}
               <TabMenuItems
                 actions={{
                   othersOpen: false,

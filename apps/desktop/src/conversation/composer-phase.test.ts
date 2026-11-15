@@ -24,19 +24,19 @@ const rows: readonly {
       stop: null,
       send: 'default',
       placeholder: 'Reply…',
-      hint: '⌘↩ sends · Esc stops · / commands · @ files',
+      hint: '↵ sends · ⇧↵ new line · Esc stops · / commands · @ files',
     },
   },
   { name: 'idle with text', input: { hasText: true }, want: { stop: null, send: 'filled' } },
   {
     name: 'a fresh tab',
     input: { fresh: true, state: ConversationState.IdleCold },
-    want: { placeholder: 'Ask about ampsio…', hint: '⌘↩ sends · @ files' },
+    want: { placeholder: 'Ask about ampsio…', hint: '↵ sends · ⇧↵ new line · @ files' },
   },
   {
     name: 'no slash commands',
     input: { slashCommands: false },
-    want: { hint: '⌘↩ sends · Esc stops · @ files' },
+    want: { hint: '↵ sends · ⇧↵ new line · Esc stops · @ files' },
   },
   {
     name: 'working, nothing typed',
@@ -45,7 +45,7 @@ const rows: readonly {
       stop: 'stop',
       send: 'hidden',
       placeholder: 'Add to this turn…',
-      hint: '⌘↩ adds to this turn',
+      hint: '↵ adds to this turn · ⇧↵ new line',
     },
   },
   {
@@ -68,7 +68,7 @@ const rows: readonly {
     input: { state: ConversationState.Running, steer: 'queue' },
     want: {
       placeholder: 'Queue for the next turn…',
-      hint: '⌘↩ sends · Esc stops · / commands · @ files',
+      hint: '↵ sends · ⇧↵ new line · Esc stops · / commands · @ files',
     },
   },
   {

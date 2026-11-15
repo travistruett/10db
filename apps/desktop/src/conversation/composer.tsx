@@ -1,15 +1,6 @@
 import type { AgentCapabilitiesDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Box,
-  Button,
-  CloseButton,
-  Group,
-  Stack,
-  Text,
-  VisuallyHidden,
-} from '@mantine/core';
-import { IconPaperclip } from '@tabler/icons-react';
+import { ActionIcon, Box, CloseButton, Group, Stack, Text, VisuallyHidden } from '@mantine/core';
+import { IconCornerDownLeft, IconPaperclip, IconPlayerStopFilled } from '@tabler/icons-react';
 import {
   useEffect,
   useRef,
@@ -20,15 +11,16 @@ import {
   type RefObject,
 } from 'react';
 import { ComposerInput, type ComposerMentions } from './composer-mentions';
+import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
 import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
 import { isSendKey } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
 
-// Sessions UI spec §7.9, §7.11: one frame holding the input and its bar, with the hint under it. ⌘↩
-// sends and Enter is a new line, never while an IME composes; pictures paste, drop or attach and wait
-// as thumbnails.
+// Sessions UI spec §7.9, §7.11: one frame holding the input and its bar, with the hint under it. Enter
+// sends and Shift+Enter is a new line, never while an IME composes and never while an `@` or `/` list
+// is open, where Enter picks; pictures paste, drop or attach and wait as thumbnails.
 
 export interface ComposerProps {
   readonly draft: Draft;
@@ -60,6 +52,8 @@ export interface ComposerProps {
   readonly leading?: ReactNode;
   /** The screen's own buttons before Send (a page's Sign Off). */
   readonly actions?: ReactNode;
+  /** The model chip and the context ring, beside Attach. */
+  readonly modelControl?: ReactNode;
 }
 
 /** Whether the input's suggestion list is open: the list it controls is in the page only then. */
@@ -127,12 +121,15 @@ export function Composer({
   attachLabel = 'Attach',
   leading,
   actions,
+  modelControl,
 }: ComposerProps) {
   const [busy, setBusy] = useState<'send' | 'stop' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [refused, setRefused] = useState<readonly string[]>([]);
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  const ownInput = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const field = inputRef ?? ownInput;
   const canAttach = capabilities.images.length > 0;
   const filled = hasContent(draft);
 
@@ -239,7 +236,7 @@ export function Composer({
           describedBy={phase.hint === null ? undefined : 'composer-hint'}
           placeholder={phase.placeholder}
           disabled={locked}
-          inputRef={inputRef}
+          inputRef={field}
           onPaste={onPaste}
           onKeyDown={(event) => {
             // An IME's Enter picks a candidate; it is never a send. Safari ends a composition with a
@@ -247,7 +244,7 @@ export function Composer({
             // eslint-disable-next-line @typescript-eslint/no-deprecated -- keyCode 229 is the only signal.
             if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (!isSendKey(event)) return;
-            // With a suggestion list open ⌘↩ belongs to the list, which picks the highlighted one.
+            // With a suggestion list open Enter belongs to the list, which picks the highlighted one.
             if (suggestionsOpen(event.currentTarget)) return;
             event.preventDefault();
             send();
@@ -296,6 +293,8 @@ export function Composer({
                 <IconPaperclip size={18} stroke={1.5} />
               </ActionIcon>
             ) : null}
+            <DictationButton inputRef={field} disabled={locked} onError={setFailure} />
+            {modelControl}
           </Group>
           <Group gap="xs" wrap="nowrap">
             {disabledReason !== null ? (
@@ -308,20 +307,29 @@ export function Composer({
               </Text>
             )}
             {phase.stop === null ? null : (
-              <Button variant="default" loading={busy === 'stop'} disabled={locked} onClick={stop}>
-                {phase.stop === 'stop_and_redo' ? 'Stop and Redo' : 'Stop'}
-              </Button>
+              <ActionIcon
+                variant="default"
+                size="lg"
+                loading={busy === 'stop'}
+                disabled={locked}
+                aria-label={phase.stop === 'stop_and_redo' ? 'Stop and Redo' : 'Stop'}
+                onClick={stop}
+              >
+                <IconPlayerStopFilled size={16} />
+              </ActionIcon>
             )}
             {actions}
             {phase.send === 'hidden' ? null : (
-              <Button
+              <ActionIcon
                 variant={phase.send === 'filled' ? 'filled' : 'default'}
+                size="lg"
                 loading={busy === 'send'}
                 disabled={locked || disabledReason !== null || !filled}
+                aria-label="Send"
                 onClick={send}
               >
-                Send
-              </Button>
+                <IconCornerDownLeft size={18} stroke={1.5} />
+              </ActionIcon>
             )}
           </Group>
         </Group>

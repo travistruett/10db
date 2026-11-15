@@ -1,4 +1,4 @@
-// Esc and ⌘↩ as the conversation screens share them: what owns Esc (an open layer, a form, a waiting
+// Esc and Enter as the conversation screens share them: what owns Esc (an open layer, a form, a waiting
 // card), and the key that sends.
 
 /** Marks a form that cancels on Esc itself, so a key pressed inside it is left to it. */
@@ -32,12 +32,13 @@ export function escapeHasOwner(event: KeyboardEvent): boolean {
   );
 }
 
-/** ⌘↩ sends from the input. */
+/** Enter sends from the input; Shift+Enter is a new line, and ⌘↩ and Ctrl+↩ still send. */
 export function isSendKey(event: {
   key: string;
   metaKey: boolean;
   ctrlKey: boolean;
   shiftKey: boolean;
+  altKey?: boolean;
 }): boolean {
-  return event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey;
+  return event.key === 'Enter' && !event.shiftKey && event.altKey !== true;
 }

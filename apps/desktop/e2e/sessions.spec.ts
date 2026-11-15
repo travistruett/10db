@@ -94,13 +94,13 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(page.getByText(/A chat reads sessions/)).toBeVisible();
   await scan(page, [1280, 480], 'a fresh tab');
 
-  // The first line, then an @ file, then ⌘↩: the tab is a chat, named by the agent once it calls set_title (the first-line title is gone before a
+  // The first line, then an @ file, then Enter: the tab is a chat, named by the agent once it calls set_title (the first-line title is gone before a
   // browser can look).
   const composer = page.getByRole('textbox', { name: 'Message' });
   await composer.click();
   await composer.pressSequentially(`${FIRST_LINE} @log`);
   await page.getByRole('option', { name: /login\.ts/ }).click();
-  await composer.press('Meta+Enter');
+  await composer.press('Enter');
   await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
 
   // The reply, in an article headed by the agent's label, with a read row and a search row.

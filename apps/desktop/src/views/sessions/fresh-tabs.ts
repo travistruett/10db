@@ -1,4 +1,4 @@
-import { ProjectId } from '@10db/contracts';
+import { Effort, ProjectId } from '@10db/contracts';
 import { z } from 'zod';
 
 // A fresh tab lives in the client until its first `@` or its first send, and is
@@ -11,6 +11,8 @@ export const FreshTab = z.object({
   id: z.string().min(1),
   projectId: ProjectId,
   model: z.string().min(1).nullable(),
+  /** A tab kept before efforts existed has none, which runs the model's own. */
+  effort: z.enum(Effort).nullable().default(null),
   /** Where the tab sits in the strip, which the chat made from it takes. */
   position: z.int().nonnegative(),
 });
@@ -41,25 +43,34 @@ export function openFreshTab(
 ): Opened | null {
   const project = projects.find((p) => p.id === selected) ?? projects[0];
   if (project === undefined) return null;
-  const opened: FreshTab = { id, projectId: project.id, model: null, position: afterPosition + 1 };
+  const opened: FreshTab = {
+    id,
+    projectId: project.id,
+    model: null,
+    effort: null,
+    position: afterPosition + 1,
+  };
   return { tabs: [...tabs, opened], opened };
 }
 
-/** The tab's project changed; its model is the new project's own to choose. */
+/** The tab's project changed; its model and effort are the new project's own to choose. */
 export function setFreshProject(
   tabs: readonly FreshTab[],
   id: string,
   projectId: ProjectId,
 ): readonly FreshTab[] {
-  return tabs.map((tab) => (tab.id === id ? { ...tab, projectId, model: null } : tab));
+  return tabs.map((tab) =>
+    tab.id === id ? { ...tab, projectId, model: null, effort: null } : tab,
+  );
 }
 
 export function setFreshModel(
   tabs: readonly FreshTab[],
   id: string,
   model: string | null,
+  effort: Effort | null,
 ): readonly FreshTab[] {
-  return tabs.map((tab) => (tab.id === id ? { ...tab, model } : tab));
+  return tabs.map((tab) => (tab.id === id ? { ...tab, model, effort } : tab));
 }
 
 /** Removing a tab shifts nothing else. */

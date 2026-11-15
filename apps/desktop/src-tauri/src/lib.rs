@@ -2,6 +2,7 @@
 
 mod app_page;
 mod connection;
+mod dictation;
 mod supervisor;
 mod tray;
 mod web_link;
@@ -78,6 +79,7 @@ pub fn run() {
             daemon_connection,
             update_tray,
             open_app_page,
+            dictation::start_dictation,
             web_link::open_web_link
         ])
         .setup(|app| {

@@ -1,3 +1,4 @@
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -39,13 +40,21 @@ function Held(props: Partial<ComposerProps> & { readonly start?: Draft }) {
 const input = (): HTMLElement => screen.getByRole('textbox', { name: 'Message' });
 
 describe('Composer', () => {
-  it('⌘↩ sends the draft and clears it; Enter is a new line', async () => {
+  it.each([
+    { name: 'Enter', key: { key: 'Enter' }, sends: true },
+    { name: '⌘↩', key: { key: 'Enter', metaKey: true }, sends: true },
+    { name: 'Shift+Enter', key: { key: 'Enter', shiftKey: true }, sends: false },
+  ])('$name: sends is $sends; the draft clears only when it sends', async ({ key, sends }) => {
     const onSend = vi.fn();
     renderWithTheme(<Held onSend={onSend} />);
     fireEvent.change(input(), { target: { value: 'hello\nthere' } });
-    fireEvent.keyDown(input(), { key: 'Enter' });
-    expect(onSend).not.toHaveBeenCalled();
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    // A key that is not sent is not cancelled either: the browser makes its new line.
+    const notCancelled = fireEvent.keyDown(input(), key);
+    expect(notCancelled).toBe(!sends);
+    if (!sends) {
+      expect(onSend).not.toHaveBeenCalled();
+      return;
+    }
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith({ text: 'hello\nthere', mentions: [], pictures: [] });
     });
@@ -57,8 +66,8 @@ describe('Composer', () => {
   it('never sends while an IME composes', () => {
     const onSend = vi.fn();
     renderWithTheme(<Held onSend={onSend} start={{ ...EMPTY_DRAFT, text: 'こんにちは' }} />);
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true, keyCode: 229 });
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true, isComposing: true });
+    fireEvent.keyDown(input(), { key: 'Enter', keyCode: 229 });
+    fireEvent.keyDown(input(), { key: 'Enter', isComposing: true });
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -131,6 +140,44 @@ describe('Composer', () => {
   });
 });
 
+describe('Composer: Dictate', () => {
+  it('shows no Dictate button outside the desktop shell', () => {
+    renderWithTheme(<Held />);
+    expect(screen.queryByRole('button', { name: 'Dictate' })).toBeNull();
+  });
+
+  it('focuses the input and asks the shell to start dictation', async () => {
+    const asked: string[] = [];
+    mockIPC((command) => {
+      asked.push(command);
+    });
+    try {
+      renderWithTheme(<Held />);
+      expect(document.activeElement).not.toBe(input());
+      fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+      await waitFor(() => {
+        expect(asked).toEqual(['start_dictation']);
+      });
+      expect(document.activeElement).toBe(input());
+    } finally {
+      clearMocks();
+    }
+  });
+
+  it('says why when the shell cannot start it', async () => {
+    mockIPC(() => {
+      throw new Error('Dictation is off in System Settings');
+    });
+    try {
+      renderWithTheme(<Held />);
+      fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+      expect(await screen.findByText('Dictation is off in System Settings')).toBeTruthy();
+    } finally {
+      clearMocks();
+    }
+  });
+});
+
 describe('Composer: @ files and / commands', () => {
   const files = [
     { path: 'src/login.ts', matches: [[4, 9]] as [number, number][] },
@@ -157,20 +204,20 @@ describe('Composer: @ files and / commands', () => {
     expect(lookup).toHaveBeenCalledWith('log', expect.any(AbortSignal));
   });
 
-  it('Enter picks a file as a chip without sending; ⌘↩ sends its path in the text and the list of mentions', async () => {
+  it('Enter picks a file as a chip without sending; the next Enter sends its path in the text and the list of mentions', async () => {
     const onSend = vi.fn();
     const lookup = vi.fn().mockResolvedValue(files);
     renderWithTheme(<Held onSend={onSend} mentions={{ files: lookup, commands: null }} />);
     type('@log');
     await screen.findAllByRole('option', { hidden: true });
-    // ⌘↩ with the list open belongs to the list.
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    // Enter with the list open belongs to the list.
+    fireEvent.keyDown(input(), { key: 'Enter' });
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => {
       expect((input() as HTMLTextAreaElement).value).toBe('@src/login.ts ');
     });
     type('@src/login.ts why');
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(input(), { key: 'Enter' });
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith({
         text: '@src/login.ts why',
@@ -221,7 +268,7 @@ describe('Composer: @ files and / commands', () => {
     expect((input() as HTMLTextAreaElement).value).toBe('/co');
   });
 
-  it('picking a command inserts it, and ⌘↩ sends it as /name', async () => {
+  it('picking a command inserts it, and Enter then sends it as /name', async () => {
     const onSend = vi.fn();
     renderWithTheme(<Held onSend={onSend} mentions={{ commands }} />);
     type('/co');
@@ -230,7 +277,7 @@ describe('Composer: @ files and / commands', () => {
     await waitFor(() => {
       expect((input() as HTMLTextAreaElement).value).toBe('/compact ');
     });
-    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(input(), { key: 'Enter' });
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith({ text: '/compact ', mentions: [], pictures: [] });
     });

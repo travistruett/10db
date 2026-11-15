@@ -5,7 +5,7 @@
   explore conversation the engine runs. `service.ts` keeps the chat's row (`chats`, `chat_tasks` in
   `@10db/db`'s `store/chats.ts`): it creates the conversation on the project's account, takes the message
   route's chat branch (the message queued with its `mentions` and pictures, the chat titled from its first line,
-  `last_activity_at` touched), moves the tab, and changes the model only between turns. Archive goes through
+  `last_activity_at` touched), moves the tab, and changes the model and the effort (`conversations.effort`, read by the launch of the next session; an effort-only change closes a warm session, as a model change on an agent that cannot switch does) only between turns. Archive goes through
   `ExploreEngine.retire` (a start cancelled, a turn stopped with its partial kept, a card withdrawn, a warm
   session closed with its row ended, so its token reaches nothing), then removes `<dataDir>/conversations/<id>/`.
 - `hooks.ts` is the chat as an engine owner: the attended explore profile (Plan's read-only sandbox through the

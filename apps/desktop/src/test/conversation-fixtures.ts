@@ -38,6 +38,7 @@ export function conversationDto(
     state: 'idle_cold',
     capabilities: CLAUDE_CAPABILITIES,
     model: null,
+    effort: null,
     contextPct: null,
     queued: 0,
     costUsd: null,

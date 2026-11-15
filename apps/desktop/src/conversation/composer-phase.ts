@@ -41,9 +41,9 @@ function placeholderOf(input: ComposerPhaseInput, working: boolean): string {
 function hintOf(input: ComposerPhaseInput, working: boolean): string | null {
   if (input.narrow) return null;
   if (input.state === ConversationState.PausedAccount) return 'Sends when the limit resets';
-  if (input.fresh) return '⌘↩ sends · @ files';
-  if (working && input.steer === 'inject') return '⌘↩ adds to this turn';
-  const parts = ['⌘↩ sends', 'Esc stops'];
+  if (input.fresh) return '↵ sends · ⇧↵ new line · @ files';
+  if (working && input.steer === 'inject') return '↵ adds to this turn · ⇧↵ new line';
+  const parts = ['↵ sends', '⇧↵ new line', 'Esc stops'];
   if (input.slashCommands === true) parts.push('/ commands');
   parts.push('@ files');
   return parts.join(' · ');
