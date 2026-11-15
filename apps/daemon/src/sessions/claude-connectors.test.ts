@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { mintId } from '@10db/contracts';
@@ -12,8 +12,10 @@ import {
   CONNECTOR_RETRY_MS,
   CONNECTOR_TTL_MS,
   connectorsForSession,
+  ConnectorProbeRefusedError,
   connectorsFromStatus,
   createConnectorDirectory,
+  sweepConnectorProbeRoot,
   type ClaudeConnector,
 } from './claude-connectors';
 import type { QueryFn } from './claude-session';
@@ -95,7 +97,11 @@ async function run(clock: ManualClock, steps: number, stepMs: number, timers = 1
   }
 }
 
-function setup(answers: readonly unknown[], hold = false) {
+function setup(
+  answers: readonly unknown[],
+  hold = false,
+  over: { probeRoot?: string; managedMcpPath?: string } = {},
+) {
   const clock = new ManualClock();
   const probes: Probe[] = [];
   const query: QueryFn = ({ prompt, options }) => {
@@ -119,7 +125,9 @@ function setup(answers: readonly unknown[], hold = false) {
   const directory = createConnectorDirectory({
     query,
     claudePath: '/usr/local/bin/claude',
-    probeRoot: join(root.path, 'connector-probe'),
+    probeRoot: over.probeRoot ?? join(root.path, 'connector-probe'),
+    // No managed file unless a row makes one: the builder's own must not decide a row.
+    managedMcpPath: over.managedMcpPath ?? join(root.path, 'no-managed-mcp.json'),
     clock,
     logger: silentLogger,
   });
@@ -235,5 +243,73 @@ describe('the connector directory', () => {
     expect(await listed).toBeNull();
     expect(probes[0]?.closed).toBe(1);
     expect(rootEntries()).toEqual([]);
+  });
+});
+
+describe('a folder above the probe that holds MCP servers', () => {
+  // Claude Code reads a `.mcp.json` in the cwd and every folder above it, and a non-strict probe would start
+  // the servers in it before the list is read: so the probe never starts under one.
+  it.each<{ name: string; make: (dir: string) => string | undefined }>([
+    {
+      name: 'the folder holding the probe root',
+      make: (dir) => {
+        writeFileSync(join(dir, '.mcp.json'), '{"mcpServers":{}}');
+        return undefined;
+      },
+    },
+    {
+      name: 'the probe root itself',
+      make: (dir) => {
+        mkdirSync(join(dir, 'connector-probe'), { recursive: true });
+        writeFileSync(join(dir, 'connector-probe', '.mcp.json'), '{}');
+        return undefined;
+      },
+    },
+    {
+      name: 'the managed file',
+      make: (dir) => {
+        const managed = join(dir, 'managed-mcp.json');
+        writeFileSync(managed, '{}');
+        return managed;
+      },
+    },
+  ])('is refused, as a failed read and with no start: $name', async ({ make }) => {
+    const managedMcpPath = make(root.path);
+    const { probes, directory } = setup([[proxy('a')]], false, {
+      ...(managedMcpPath === undefined ? {} : { managedMcpPath }),
+    });
+    expect(await directory.list(account, env)).toBeNull();
+    expect(probes).toHaveLength(0);
+    // Nothing is left in the probe root but what a row put there.
+    expect(rootEntries().filter((name) => name.startsWith('probe-'))).toEqual([]);
+    // Kept as a failure for the retry time, not asked again.
+    expect(await directory.list(account, env)).toBeNull();
+    expect(probes).toHaveLength(0);
+  });
+});
+
+describe('the probe folder', () => {
+  it('is made 0700 even when it already exists wider', async () => {
+    const probeRoot = join(root.path, 'connector-probe');
+    mkdirSync(probeRoot, { mode: 0o755 });
+    chmodSync(probeRoot, 0o755);
+    const { directory } = setup([[proxy('a')]]);
+    await directory.list(account, env);
+    expect(statSync(probeRoot).mode & 0o777).toBe(0o700);
+  });
+
+  it('is refused when it is a link, by the probe and by the sweep, and the target is left alone', async () => {
+    const target = join(root.path, 'elsewhere');
+    mkdirSync(target);
+    writeFileSync(join(target, 'keep.txt'), 'x');
+    const probeRoot = join(root.path, 'connector-probe');
+    symlinkSync(target, probeRoot);
+    const { probes, directory } = setup([[proxy('a')]]);
+    expect(await directory.list(account, env)).toBeNull();
+    expect(probes).toHaveLength(0);
+    await expect(sweepConnectorProbeRoot(probeRoot)).rejects.toBeInstanceOf(
+      ConnectorProbeRefusedError,
+    );
+    expect(readdirSync(target)).toEqual(['keep.txt']);
   });
 });

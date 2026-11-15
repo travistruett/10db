@@ -767,6 +767,14 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
   - The probe's status held only `scope: 'claudeai'`, and `probeRoot` is empty afterwards.
   - No `Claude Code-credentials-<sha256(freshDir)[:8]>` entry exists (attribute lookup only).
   - The lane's probes hold.
+  - **Parent `.mcp.json`.** Plant a `.mcp.json` in a parent of the probe's cwd that names a stand-in stdio server
+    which would write a marker file. The probe is refused, the session says "your claude.ai connectors didn't load
+    in this session", and the marker file does not exist. Repeat with the marker server in
+    `/Library/Application Support/ClaudeCode/managed-mcp.json` only if the builder's Mac has that folder writable;
+    otherwise the unit row stands for it.
+  - **Stale needs-auth cache.** Seed the account's `mcp-needs-auth-cache.json` naming a server that has since been
+    signed in. The session connects the server (the cache is removed before it starts), on a plan account and on a
+    keyed one.
 - **L2 API key** (`TENDB_LIVE_API_KEY=1`, `ANTHROPIC_API_KEY`, the account folder from `homeOutsideTemp`). In order:
   1. **Show that the shared entry holds a plan login.** On a fresh folder, with `CLAUDE_SECURESTORAGE_CONFIG_DIR`
      set as Task 2 sets it and no key, `claude auth status --json` reports a claude.ai subscription. It reports
@@ -779,6 +787,10 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
   3. **Check the folder.** After the session and one `Launcher.probe` run, the account folder's `.claude.json`
      has no `oauthAccount` key. Only key names are read.
   4. The lane's probes hold.
+  5. **Keyed accountInfo and refresh.** The keyed session's `accountInfo` and `Launcher.probe` report the key's
+     organization, not the plan's. Then refresh the plan login while a keyed session and a connector probe, each on
+     its own `CLAUDE_CONFIG_DIR`, share the one keychain item: note whether either loses its login, and record it in
+     the PR.
 - **L3 Bedrock** (`TENDB_LIVE_BEDROCK=1`). Step 1 of L2 first. Then the same server connects, `checkAccount`
   passes, the account reads `apiProvider: 'bedrock'`, there is no `oauthAccount`, and the probes hold.
 - **L4 Codex** (`TENDB_LIVE_CODEX=1`). The account's `configDir` is under the test daemon's data directory

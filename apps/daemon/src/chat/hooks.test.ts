@@ -72,6 +72,7 @@ const prepared = (): Promise<ShapePrepared> =>
         },
       },
     },
+    claudeConnectors: true,
     note: null,
     credentialsExpireAt: null,
     instructions: 'Use pnpm.',
@@ -119,6 +120,9 @@ describe("a chat's session", () => {
     expect(Object.keys(spec.projectMcpServers)).toEqual(['docs']);
     expect(Object.keys(spec.yourMcpServers)).toEqual(['mine']);
     expect(spec.policy.environment.join('\n')).toContain('the MCP servers mine are the builder');
+    // A plan account takes the connectors the preparation allowed, and the policy names them.
+    expect(spec.claudeConnectors).toBe(true);
+    expect(spec.policy.environment.join('\n')).toContain('claude.ai connectors');
     expect(spec.mcp.url).toBe('http://127.0.0.1:4317/mcp');
     expect(spec.setup?.plugins).toEqual(['/setup/yours', '/setup/project']);
     expect(spec.instructions).toBe('Use pnpm.');

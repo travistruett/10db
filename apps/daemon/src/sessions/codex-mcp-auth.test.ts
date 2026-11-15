@@ -38,6 +38,17 @@ describe('readCodexMcpAuth', () => {
     ]);
   });
 
+  it('reads every server of a page', async () => {
+    const { call } = server([
+      [
+        { name: 'linear', authStatus: 'oAuth' },
+        { name: 'notion', authStatus: 'notLoggedIn' },
+      ],
+    ]);
+    const read = await readCodexMcpAuth(call, 'thr_1', names, new ManualClock());
+    expect(read).toEqual({ linear: McpAuthState.SignedIn, notion: McpAuthState.NotSignedIn });
+  });
+
   it('follows nextCursor across pages', async () => {
     const asked: unknown[] = [];
     const call: CodexCall = (_method, params, schema) => {
@@ -85,5 +96,19 @@ describe('readCodexMcpAuth', () => {
       clock.advance(250);
     }
     expect(await read).toEqual({ linear: McpAuthState.Unknown });
+  });
+
+  it('stops following a cursor the server repeats, so a looping server never hangs the read', async () => {
+    let asked = 0;
+    const call: CodexCall = (_method, _params, schema) => {
+      asked += 1;
+      if (asked > 20) return Promise.reject(new Error('followed a repeated cursor'));
+      return Promise.resolve(
+        schema.parse({ data: [{ name: 'linear', authStatus: 'oAuth' }], nextCursor: 'same' }),
+      );
+    };
+    const read = await readCodexMcpAuth(call, 'thr_1', ['linear'], new ManualClock());
+    expect(read).toEqual({ linear: McpAuthState.SignedIn });
+    expect(asked).toBeLessThanOrEqual(3);
   });
 });

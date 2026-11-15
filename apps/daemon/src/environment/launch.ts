@@ -110,11 +110,6 @@ export interface Launcher {
   ): SessionLaunch;
   /** The same environment, for reading who the account is without a prompt. */
   probe(account: AccountRow): ProbeLaunch;
-  /**
-   * The environment of a connector probe for a plan account on a fresh config folder (`connectorProbeEnv`
-   * over the account's own launch); null for every other kind, which has no claude.ai login to read.
-   */
-  connectorProbe(account: AccountRow, freshDir: string): Record<string, string> | null;
   /** Where the builder's own login lives when the login shell moves it: an absolute directory, or null for Claude Code's default. */
   loginConfigDir(): string | null;
   /** Why the login shell's directory was ignored (it is relative), naming the variable and never its value; null otherwise. */
@@ -361,11 +356,6 @@ export function createLauncher(opts: {
     },
     probe(account) {
       return { env: build(account), expect: expectation(account) };
-    },
-    connectorProbe(account, freshDir) {
-      return agentKindOf(account) === AccountKind.ClaudeSubscription
-        ? connectorProbeEnv(build(account), freshDir)
-        : null;
     },
     loginConfigDir() {
       return loginConfigDirOf(opts.base);

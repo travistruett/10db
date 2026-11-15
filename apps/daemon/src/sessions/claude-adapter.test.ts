@@ -855,7 +855,8 @@ describe('buildQueryOptions', () => {
       for (const over of [
         { claudeConnectors: false },
         {
-          claudeConnectors: false,
+          // The spec's flag alone must not reach the directory: a keyed account has no claude.ai login.
+          claudeConnectors: true,
           account: {
             accountId: mintId('Account'),
             label: 'Key',

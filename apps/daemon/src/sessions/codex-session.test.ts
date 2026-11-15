@@ -14,7 +14,7 @@ import { silentLogger, type Logger } from '../log';
 import { launchYourMcpServers, type LaneSandboxSpec } from '../sandbox';
 import { createCodexAdapter } from './codex-adapter';
 import { codexThreadConfig } from './codex-lane-config';
-import { CODEX_MCP_STATUS_WAIT_MS } from './codex-mcp-auth';
+import { CODEX_MCP_STATUS_BOUND_MS, CODEX_MCP_STATUS_WAIT_MS } from './codex-mcp-auth';
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
   CodexHomeError,
@@ -1167,6 +1167,44 @@ describe('a server of yours that is not signed in', () => {
     await handle.stop();
   });
 
+  it('names the server that reads signed out even while another stays unknown to the deadline', async () => {
+    const clock = new ManualClock();
+    const { handle, server } = startWith(
+      {
+        'mcpServerStatus/list': {
+          data: [
+            { name: 'oauthy', authStatus: 'notLoggedIn' },
+            { name: 'slow', authStatus: 'unknown' },
+          ],
+          nextCursor: null,
+        },
+      },
+      {
+        yourMcpServers: {
+          ...oauthy.yourMcpServers,
+          slow: {
+            connect: { type: 'http', url: 'https://slow.example/mcp', headers: null },
+            claudeOAuth: null,
+            codex: none,
+          },
+        },
+      },
+      { clock },
+    );
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('mcpServerStatus/list');
+      expect(clock.pendingTimers()).toBeGreaterThan(1);
+    });
+    // The read's own wait ends as the session's does: the known server must not be lost to the tie.
+    clock.advance(CODEX_MCP_STATUS_WAIT_MS);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(firstTurnText(server)).toBe(`${NOTE}\n\nDo the task`);
+    await handle.stop();
+  });
+
   it('sends the prompt with no note when the status read does not answer in time', async () => {
     const clock = new ManualClock();
     const { handle, server } = startWith(
@@ -1181,7 +1219,7 @@ describe('a server of yours that is not signed in', () => {
     await vi.waitFor(() => {
       expect(clock.pendingTimers()).toBeGreaterThan(0);
     });
-    clock.advance(CODEX_MCP_STATUS_WAIT_MS);
+    clock.advance(CODEX_MCP_STATUS_BOUND_MS);
     await vi.waitFor(() => {
       expect(methods(server)).toContain('turn/start');
     });

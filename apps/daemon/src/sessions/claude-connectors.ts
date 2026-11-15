@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { AccountId } from '@10db/contracts';
@@ -98,8 +98,59 @@ export interface ConnectorDirectory {
 /** Where the connector probe keeps its scratch folders under the data directory. */
 export const connectorProbeRoot = (dataDir: string): string => join(dataDir, 'connector-probe');
 
+/** Where Claude Code reads the servers an administrator manages on macOS. */
+const MANAGED_MCP_PATH = '/Library/Application Support/ClaudeCode/managed-mcp.json';
+
+/** The probe folder can't be used: it is a link, or a folder above it holds MCP servers a start would run. */
+export class ConnectorProbeRefusedError extends Error {
+  override readonly name = 'ConnectorProbeRefusedError';
+}
+
+const missing = (error: unknown): boolean =>
+  error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (missing(error)) return false;
+    throw error;
+  }
+}
+
+/** Refuses a link at `probeRoot`: what a sweep or a probe does there lands wherever the link points. */
+async function refuseLink(probeRoot: string): Promise<void> {
+  try {
+    if ((await lstat(probeRoot)).isSymbolicLink())
+      throw new ConnectorProbeRefusedError('The connector probe folder is a link.');
+  } catch (error) {
+    if (!missing(error)) throw error;
+  }
+}
+
+/**
+ * Makes `probeRoot` a folder only the builder can enter. Refuses a `.mcp.json` in it or any folder above it,
+ * and the managed file: a non-strict start reads those and would run their servers outside any sandbox
+ * before the list is read.
+ */
+async function prepareProbeRoot(probeRoot: string, managedMcpPath: string): Promise<void> {
+  await refuseLink(probeRoot);
+  await mkdir(probeRoot, { recursive: true, mode: 0o700 });
+  // `mkdir` leaves a folder that already exists as it was.
+  await chmod(probeRoot, 0o700);
+  for (let dir = probeRoot; ; dir = dirname(dir)) {
+    if (await exists(join(dir, '.mcp.json')))
+      throw new ConnectorProbeRefusedError('A folder above the connector probe holds MCP servers.');
+    if (dirname(dir) === dir) break;
+  }
+  if (await exists(managedMcpPath))
+    throw new ConnectorProbeRefusedError('Managed MCP servers are set on this Mac.');
+}
+
 /** Empties `probeRoot`, which a probe that was cut off may have left folders in; a missing folder is already empty. */
 export async function sweepConnectorProbeRoot(probeRoot: string): Promise<void> {
+  await refuseLink(probeRoot);
   let names: string[];
   try {
     names = await readdir(probeRoot);
@@ -125,6 +176,8 @@ export function createConnectorDirectory(deps: {
   readonly query: QueryFn;
   readonly claudePath: string;
   readonly probeRoot: string;
+  /** Claude Code's managed MCP file; a probe never starts where it exists. Tests pass a path of their own. */
+  readonly managedMcpPath?: string;
   readonly clock?: Clock;
   readonly logger: Logger;
 }): ConnectorDirectory {
@@ -138,7 +191,7 @@ export function createConnectorDirectory(deps: {
   const nowMs = (): number => clock.now().getTime();
 
   async function probe(env: Readonly<Record<string, string>>): Promise<ClaudeConnector[] | null> {
-    await mkdir(deps.probeRoot, { recursive: true, mode: 0o700 });
+    await prepareProbeRoot(deps.probeRoot, deps.managedMcpPath ?? MANAGED_MCP_PATH);
     const base = await mkdtemp(join(deps.probeRoot, 'probe-'));
     const cwd = join(base, 'cwd');
     const config = join(base, 'config');
@@ -239,7 +292,11 @@ export function createConnectorDirectory(deps: {
       const running = inFlight.get(accountId);
       if (running !== undefined) return running;
       const started = probe(env)
-        .catch((): null => null)
+        .catch((error: unknown): null => {
+          if (error instanceof ConnectorProbeRefusedError)
+            deps.logger.warn({}, 'the connector probe was refused: it would start MCP servers');
+          return null;
+        })
         .then((connectors) => {
           if (!state.stopped)
             cache.set(accountId, {

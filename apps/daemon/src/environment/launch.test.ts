@@ -7,6 +7,7 @@ import {
   BILLING_SWITCH_VARS,
   createLauncher,
   claudeMcpSignInCommand,
+  connectorProbeEnv,
   codexSignInCommand,
   mcpSignInWhere,
   McpSignInWhere,
@@ -521,14 +522,9 @@ describe('mcpSignInWhere', () => {
   });
 });
 
-describe('connectorProbe', () => {
+describe('connectorProbeEnv', () => {
   const FRESH = '/data/connector-probe/probe-1/config';
-  it.each<{
-    name: string;
-    row: AccountRow;
-    base?: Readonly<Record<string, string>>;
-    lookup: string | null;
-  }>([
+  it.each<{ name: string; row: AccountRow; lookup: string }>([
     {
       name: "the default account on Claude Code's default folder reads the default entry",
       row: account({ configDir: null }),
@@ -540,17 +536,9 @@ describe('connectorProbe', () => {
       lookup: '/h/b/.claude-other',
     },
     { name: 'an own-folder subscription reads its folder', row: account({}), lookup: SUB_DIR },
-    {
-      name: 'an API key has no connectors to read',
-      row: keyed({ kind: 'anthropic_api_key' }),
-      lookup: null,
-    },
-  ])('$name', ({ row, base, lookup }) => {
-    const env = launcher(undefined, base).connectorProbe(row, FRESH);
-    if (lookup === null) {
-      expect(env).toBeNull();
-      return;
-    }
+  ])('$name', ({ row, lookup }) => {
+    const sessionEnv = launcher().session(row, 'sonnet', []).env;
+    const env = connectorProbeEnv(sessionEnv, FRESH);
     expect(env).toMatchObject({
       CLAUDE_CONFIG_DIR: FRESH,
       CLAUDE_SECURESTORAGE_CONFIG_DIR: lookup,

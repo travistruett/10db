@@ -4,6 +4,8 @@ import type { CodexCall } from './codex-account-read';
 
 /** Codex's own deadline for an MCP server's status; a name still reading `unknown` then is not known. */
 export const CODEX_MCP_STATUS_WAIT_MS = 5_000;
+/** What a caller that bounds the whole read waits: past the read's own wait, so its answer is not lost to a tie. */
+export const CODEX_MCP_STATUS_BOUND_MS = CODEX_MCP_STATUS_WAIT_MS + 1_000;
 /** How often a name that reads `unknown` is asked again. */
 const UNKNOWN_RETRY_MS = 250;
 
@@ -57,7 +59,9 @@ async function listStatuses(
       ListMcpServerStatusResponse,
     );
     for (const server of page.data) found.set(server.name, stateOf(server.authStatus));
-    cursor = page.nextCursor ?? null;
+    const next: string | null = page.nextCursor ?? null;
+    // A server that repeats a cursor would be followed forever.
+    cursor = next === cursor ? null : next;
   } while (cursor !== null);
   return found;
 }

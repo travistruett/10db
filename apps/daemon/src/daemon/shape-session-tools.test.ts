@@ -13,6 +13,7 @@ import {
   Provider,
   mintId,
   ShapeOrigin,
+  TRUST_DEFAULTS,
   type ProjectId,
   type ShapeId,
   type AgentAccountKind,
@@ -31,7 +32,7 @@ import { SECRET_VARIABLES } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService } from '../inbox';
-import { approveMcpServer } from '../permissions';
+import { approveMcpServer, setAppTrustSwitches } from '../permissions';
 import { readYourMcpConfig } from '../session-setup';
 import { silentLogger } from '../log';
 import { createLaneSandbox, SandboxedMcpServer, type LaneSandbox } from '../sandbox';
@@ -268,6 +269,21 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
           headers: null,
         });
         expect(prepared.projectMcpServers).toEqual({});
+        expect(prepared.claudeConnectors).toBe(true);
+      } finally {
+        await prepared.release();
+      }
+    });
+
+    it('a Plan session takes no claude.ai connector with the Your MCP servers switch off', async () => {
+      const owner = conversation({ mcpServers: {} });
+      approveYours();
+      state.write((ctx) => {
+        setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, yourMcpServers: false });
+      });
+      const prepared = await preparer().prepare(inputFor(owner));
+      try {
+        expect(prepared.claudeConnectors).toBe(false);
       } finally {
         await prepared.release();
       }

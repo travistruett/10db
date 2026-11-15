@@ -214,11 +214,8 @@ function toYourSdkServer(server: YourSessionServer): McpServerConfig {
  * `connectorsFromStatus`, so the cast only names the one shape the type lacks.
  */
 function toSdkConnector(connector: ClaudeConnector): McpServerConfig {
-  return {
-    type: 'claudeai-proxy',
-    url: connector.url,
-    id: connector.id,
-  } as unknown as McpServerConfig;
+  const entry: unknown = { type: 'claudeai-proxy', url: connector.url, id: connector.id };
+  return entry as McpServerConfig;
 }
 
 /**
@@ -975,7 +972,12 @@ function startSession(
     // leaves them out and says so, never ending the session.
     let connectors: readonly ClaudeConnector[] = [];
     let connectorsMissing = false;
-    if (spec.claudeConnectors === true && opts.connectors !== undefined) {
+    // Only a plan account has a claude.ai login; a keyed one never reads connectors, whatever the flag says.
+    if (
+      spec.claudeConnectors === true &&
+      spec.account.kind === AccountKind.ClaudeSubscription &&
+      opts.connectors !== undefined
+    ) {
       const read = await settleWithin(
         clock,
         opts.connectors.list(spec.account.accountId, spec.env),

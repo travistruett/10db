@@ -24,7 +24,7 @@ import {
   type CodexHome,
 } from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
-import { CODEX_MCP_STATUS_WAIT_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
+import { CODEX_MCP_STATUS_BOUND_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
 import { refusedToolCalls } from './codex-refused-calls';
 import {
   createTurnState,
@@ -551,7 +551,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     try {
       const states = await Promise.race([
         read,
-        pause(CODEX_MCP_STATUS_WAIT_MS).then((): null => null),
+        pause(CODEX_MCP_STATUS_BOUND_MS).then((): null => null),
       ]);
       if (states === null) return [];
       return remote
