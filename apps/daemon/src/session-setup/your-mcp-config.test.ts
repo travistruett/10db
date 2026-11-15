@@ -148,9 +148,14 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
       "It runs a command for its headers, which 10db doesn't run yet.",
     ],
     [
-      'oauth',
-      { type: 'http', url: 'https://a.example', oauth: { clientId: 'x' } },
-      "It signs in with OAuth, which 10db doesn't support yet.",
+      'an oauth block with a client secret',
+      { type: 'http', url: 'https://a.example', oauth: { clientSecret: 'sk-canary' } },
+      "It can't be read: oauth",
+    ],
+    [
+      'an oauth block with an authServerMetadataUrl that is not https',
+      { type: 'http', url: 'https://a.example', oauth: { authServerMetadataUrl: 'http://a' } },
+      "It can't be read: oauth.authServerMetadataUrl",
     ],
     [
       'an unknown type',
@@ -165,6 +170,27 @@ env_http_headers = { "X-Key" = "DOCS_KEY" }
   ])('%s is refused with its reason', (_name, server, reason) => {
     claudeJson({ mcpServers: { s: server } });
     expect(read().entries[0]?.refusal).toBe(reason);
+  });
+
+  it('an oauth block is accepted and kept in declared', () => {
+    claudeJson({
+      mcpServers: {
+        s: { type: 'http', url: 'https://a.example', oauth: { clientId: 'x', callbackPort: 8080 } },
+      },
+    });
+    expect(read().entries[0]).toMatchObject({
+      refusal: null,
+      declared: { oauth: { clientId: 'x', callbackPort: 8080 } },
+    });
+  });
+
+  it('a refused oauth block names its path and never its value', () => {
+    claudeJson({
+      mcpServers: {
+        s: { type: 'http', url: 'https://a.example', oauth: { clientSecret: 'sk-canary' } },
+      },
+    });
+    expect(read().entries[0]?.refusal).not.toContain('sk-canary');
   });
 
   it('a name with a space is refused with a key, and the rest load', () => {

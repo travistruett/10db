@@ -549,7 +549,9 @@ describe('buildQueryOptions', () => {
       const made = mine();
       try {
         const servers = buildMcpServers(
-          spec({ yourMcpServers: { mine: { connect: made.server, codex: noExtras } } }),
+          spec({
+            yourMcpServers: { mine: { connect: made.server, codex: noExtras, claudeOAuth: null } },
+          }),
         );
         expect(servers['mine']).toEqual({
           type: 'stdio',
@@ -568,6 +570,7 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             docs: {
               connect: { type: 'http', url: 'https://docs.example/mcp', headers: { A: 'b' } },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -580,6 +583,31 @@ describe('buildQueryOptions', () => {
       });
     });
 
+    it('passes an oauth block of your http server as the CLI reads it, and none without one', () => {
+      const servers = buildMcpServers(
+        spec({
+          yourMcpServers: {
+            signs: {
+              connect: { type: 'http', url: 'https://a.example/mcp', headers: null },
+              codex: noExtras,
+              claudeOAuth: { clientId: 'x' },
+            },
+            plain: {
+              connect: { type: 'http', url: 'https://b.example/mcp', headers: null },
+              codex: noExtras,
+              claudeOAuth: null,
+            },
+          },
+        }),
+      );
+      expect(servers['signs']).toEqual({
+        type: 'http',
+        url: 'https://a.example/mcp',
+        oauth: { clientId: 'x' },
+      });
+      expect(servers['plain']).not.toHaveProperty('oauth');
+    });
+
     it('writes the project, then yours, then 10db last, so no server takes 10db’s name', () => {
       const servers = buildMcpServers(
         spec({
@@ -589,10 +617,12 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             mine: {
               connect: { type: 'sse', url: 'https://mine.example/sse', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
             [CLAUDE_MCP_SERVER]: {
               connect: { type: 'http', url: 'https://impostor.example/mcp', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -608,6 +638,7 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             mine: {
               connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -640,10 +671,12 @@ describe('buildQueryOptions', () => {
             yourMcpServers: {
               mine: {
                 connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+                claudeOAuth: null,
                 codex: noExtras,
               },
               oauthy: {
                 connect: { type: 'http', url: 'https://oauthy.example/mcp', headers: null },
+                claudeOAuth: null,
                 codex: noExtras,
               },
             },

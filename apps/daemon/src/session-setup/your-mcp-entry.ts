@@ -1,6 +1,7 @@
 import { YourMcpSource, yourMcpServerKey, type YourMcpServerKey } from '@10db/contracts';
 import { z } from 'zod';
 import {
+  ClaudeOAuth,
   describeIssuePaths,
   EnvName,
   HeaderMap,
@@ -32,6 +33,8 @@ export type DeclaredYourServer =
       readonly envHeaders: Readonly<Record<string, string>>;
       /** Codex's `bearer_token_env_var`. */
       readonly bearerTokenVar: string | null;
+      /** Claude Code's `oauth` block; always null for `config.toml`. */
+      readonly oauth: ClaudeOAuth | null;
       readonly codex: CodexServerExtras;
     };
 
@@ -70,6 +73,7 @@ const ClaudeRemote = z.looseObject({
   type: z.enum(['http', 'sse']),
   url: RemoteUrl,
   headers: HeaderMap.optional(),
+  oauth: ClaudeOAuth.optional(),
 });
 
 const CodexCommon = {
@@ -100,7 +104,6 @@ const RawEntry = z.looseObject({
   command: z.unknown().optional(),
   args: z.unknown().optional(),
   headersHelper: z.unknown().optional(),
-  oauth: z.unknown().optional(),
 });
 
 interface Parsed {
@@ -134,6 +137,7 @@ export function parseClaudeEntry(raw: unknown): Parsed {
         headers: parsed.data.headers ?? {},
         envHeaders: {},
         bearerTokenVar: null,
+        oauth: parsed.data.oauth ?? null,
         codex: NO_EXTRAS,
       },
       enabled: true,
@@ -188,6 +192,7 @@ export function parseCodexEntry(raw: unknown): Parsed {
       headers: parsed.data.http_headers ?? {},
       envHeaders: parsed.data.env_http_headers ?? {},
       bearerTokenVar: parsed.data.bearer_token_env_var ?? null,
+      oauth: null,
       codex: extrasOf(parsed.data),
     },
     enabled: parsed.data.enabled ?? true,
@@ -220,8 +225,6 @@ export function refusalOf(
   if (!fields.success) return "It can't be read: (root)";
   if (fields.data.headersHelper !== undefined)
     return "It runs a command for its headers, which 10db doesn't run yet.";
-  if (fields.data.oauth !== undefined)
-    return "It signs in with OAuth, which 10db doesn't support yet.";
   const type = fields.data.type;
   if (
     source !== YourMcpSource.CodexConfig &&

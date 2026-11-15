@@ -4,7 +4,12 @@ import {
   type TrustSwitches,
   type YourMcpServerKey,
 } from '@10db/contracts';
-import { expandFrom, YourMcpExpandError, type CodexServerExtras } from '../sessions';
+import {
+  expandFrom,
+  YourMcpExpandError,
+  type ClaudeOAuth,
+  type CodexServerExtras,
+} from '../sessions';
 import type { LeftOut } from './left-out';
 import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
 
@@ -43,6 +48,8 @@ export interface YourRemotePlan {
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>> | null;
+  /** Claude Code's `oauth` block, as the approval covered it. */
+  readonly oauth: ClaudeOAuth | null;
   readonly codex: CodexServerExtras;
 }
 
@@ -165,6 +172,7 @@ function remotePlan(
     type: server.transport,
     url,
     headers: Object.keys(headers).length === 0 ? null : headers,
+    oauth: server.oauth,
     codex: server.codex,
   };
 }

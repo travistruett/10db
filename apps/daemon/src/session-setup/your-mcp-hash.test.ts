@@ -26,6 +26,7 @@ const remote: DeclaredYourServer = {
   headers: { Authorization: 'Bearer one' },
   envHeaders: {},
   bearerTokenVar: null,
+  oauth: null,
   codex: NO_EXTRAS,
 };
 
@@ -147,12 +148,23 @@ describe('yourMcpConfigHash', () => {
       { ...remote, headers: { ...remote.headers, 'X-More': '1' } },
       false,
     ],
+    ['an oauth block does', remote, { ...remote, oauth: { clientId: 'x' } }, false],
+    [
+      'a changed oauth callbackPort does',
+      { ...remote, oauth: { clientId: 'x', callbackPort: 8080 } },
+      { ...remote, oauth: { clientId: 'x', callbackPort: 9090 } },
+      false,
+    ],
   ])('%s', (_name, one, two, same) => {
     expect(claude(one) === claude(two)).toBe(same);
   });
 
   it('the source is part of it', () => {
     expect(claude(stdio)).not.toBe(yourMcpConfigHash(YourMcpSource.CodexConfig, stdio));
+  });
+
+  it('a remote server with no oauth block keeps the hash it had before oauth was read', () => {
+    expect(claude(remote)).toBe('ae792cc356c3d085b003c157f6897d6fd6bd7d20fb2e07d07314c05e69a14cc1');
   });
 
   it('is 64 hex characters', () => {

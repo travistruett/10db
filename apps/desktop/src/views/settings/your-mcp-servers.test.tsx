@@ -37,6 +37,7 @@ function mcp(name: string, over: Partial<YourMcpServerDto> = {}): YourMcpServerD
     codexOnly: [],
     enabledTools: null,
     disabledTools: [],
+    oauth: [],
     sendsNoHeaders: false,
     ...over,
   };

@@ -63,6 +63,7 @@ const prepared = (): Promise<ShapePrepared> =>
     yourMcpServers: {
       mine: {
         connect: { type: 'http', url: 'https://mine.example.com/mcp', headers: null },
+        claudeOAuth: null,
         codex: {
           enabledTools: null,
           disabledTools: [],

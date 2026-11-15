@@ -201,7 +201,9 @@ export function createShapePreparer(deps: {
       ...Object.fromEntries(
         Object.entries(launched ?? {}).flatMap(([name, connect]) => {
           const planned = yours.stdio[name];
-          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+          return planned === undefined
+            ? []
+            : [[name, { connect, claudeOAuth: null, codex: planned.codex }]];
         }),
       ),
       ...Object.fromEntries(
@@ -209,6 +211,7 @@ export function createShapePreparer(deps: {
           name,
           {
             connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            claudeOAuth: remote.oauth,
             codex: remote.codex,
           },
         ]),

@@ -41,11 +41,12 @@ function stdioServer(codex: CodexServerExtras = NONE): YourSessionServer {
   };
   const connect = launched.servers['mine'];
   if (!(connect instanceof YourMcpServer)) throw new Error('the probe server was refused');
-  return { connect, codex };
+  return { connect, claudeOAuth: null, codex };
 }
 
 const remote = (codex: CodexServerExtras = NONE): YourSessionServer => ({
   connect: { type: 'http', url: 'https://docs.example/mcp', headers: { 'X-Key': 'k' } },
+  claudeOAuth: null,
   codex,
 });
 
@@ -82,6 +83,7 @@ describe('codexYourServers', () => {
   it('leaves out filters and timeouts that are not set, and headers that are null', () => {
     const plain: YourSessionServer = {
       connect: { type: 'sse', url: 'https://p.example/sse', headers: null },
+      claudeOAuth: null,
       codex: NONE,
     };
     expect(codexYourServers({ yourMcpServers: { plain } })['plain']).toEqual({

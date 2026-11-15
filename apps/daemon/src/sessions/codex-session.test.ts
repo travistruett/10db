@@ -2130,6 +2130,7 @@ describe('codexThreadConfig', () => {
         yourMcpServers: {
           mine: {
             connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+            claudeOAuth: null,
             codex: {
               enabledTools: null,
               disabledTools: ['rm'],
@@ -2173,9 +2174,10 @@ describe('codexThreadConfig', () => {
       const config = codexThreadConfig({
         ...specOf({
           yourMcpServers: {
-            local: { connect: local, codex: none },
+            local: { connect: local, claudeOAuth: null, codex: none },
             docs: {
               connect: { type: 'http', url: 'https://docs.example/mcp', headers: null },
+              claudeOAuth: null,
               codex: none,
             },
           },

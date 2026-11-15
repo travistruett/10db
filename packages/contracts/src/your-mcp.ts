@@ -67,6 +67,8 @@ export const YourMcpServerDto = z.strictObject({
   /** The tool filters an approval covers, as `config.toml` sets them: null where no allow list is set. */
   enabledTools: z.array(z.string()).nullable(),
   disabledTools: z.array(z.string()),
+  /** A remote server's `oauth` block as text, which an approval covers: its keys and values, or none. */
+  oauth: z.array(McpConfigEntry),
   /** A remote server with no header and no bearer token, which likely signs in with OAuth. */
   sendsNoHeaders: z.boolean(),
 });

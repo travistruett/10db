@@ -2524,7 +2524,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...Object.fromEntries(
         Object.entries(laneSession?.yourMcpServers ?? {}).flatMap(([name, connect]) => {
           const planned = yours.stdio[name];
-          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+          return planned === undefined
+            ? []
+            : [[name, { connect, claudeOAuth: null, codex: planned.codex }]];
         }),
       ),
       ...Object.fromEntries(
@@ -2532,6 +2534,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           name,
           {
             connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            claudeOAuth: remote.oauth,
             codex: remote.codex,
           },
         ]),

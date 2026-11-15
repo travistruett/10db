@@ -71,7 +71,9 @@ import {
   type ShapeImage,
   type ExploreSessionSpec,
   type LaneSessionSpec,
+  type YourSessionServer,
 } from './types';
+import type { ClaudeOAuth } from './claude-oauth';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
 /** How long each start of a lane's Claude Code may take to report its account before the prompt is sent. */
@@ -181,6 +183,20 @@ export function spawnClaude(
 }
 
 /**
+ * One of the builder's servers as the SDK takes it, with the `oauth` block its entry declared. The SDK's
+ * http and sse types lack that field but the CLI reads it, so it rides on a typed variable, not a literal.
+ */
+function toYourSdkServer(server: YourSessionServer): McpServerConfig {
+  const base = toSdkMcpServer(server.connect);
+  if (server.claudeOAuth === null || (base.type !== 'http' && base.type !== 'sse')) return base;
+  const withOAuth: typeof base & { readonly oauth: ClaudeOAuth } = {
+    ...base,
+    oauth: server.claudeOAuth,
+  };
+  return withOAuth;
+}
+
+/**
  * The repo's approved servers, then the builder's own, then 10db's, keyed by name. 10db's is written last,
  * so it keeps its name.
  */
@@ -195,10 +211,7 @@ export function buildMcpServers(
       ]),
     ),
     ...Object.fromEntries(
-      Object.entries(spec.yourMcpServers).map(([name, server]) => [
-        name,
-        toSdkMcpServer(server.connect),
-      ]),
+      Object.entries(spec.yourMcpServers).map(([name, server]) => [name, toYourSdkServer(server)]),
     ),
     [CLAUDE_MCP_SERVER]: {
       type: 'http',

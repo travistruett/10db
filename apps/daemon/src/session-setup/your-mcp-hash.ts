@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { McpConfigEntry, YourMcpSource } from '@10db/contracts';
 import { loadsCode } from '../sandbox';
+import type { ClaudeOAuth } from '../sessions';
 import type { DeclaredYourServer } from './your-mcp-entry';
 
 /** A secret's name, in whole segments so `AUTHORITY_URL` is not one. */
@@ -28,6 +29,15 @@ const withoutUserinfo = (value: string): string => {
 /** Whether an env name holds a secret: named like one, and never a name that makes a program load code. */
 const isSecretName = (name: string): boolean =>
   !loadsCode(name) && !NEVER_SECRET.test(name) && SECRET_NAME.test(name);
+
+/** An `oauth` block's keys and values as text, in the order Settings shows them. */
+export function oauthText(oauth: ClaudeOAuth): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(oauth)
+      .filter(([, value]) => value !== undefined)
+      .map(([name, value]) => [name, String(value)]),
+  );
+}
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>
@@ -63,6 +73,7 @@ function normalized(source: YourMcpSource, server: DeclaredYourServer): unknown 
     headers: sorted(Object.keys(server.headers)),
     envHeaders: sortedEntries(server.envHeaders),
     bearerTokenVar: server.bearerTokenVar,
+    ...(server.oauth === null ? {} : { oauth: sortedEntries(oauthText(server.oauth)) }),
     ...filters,
   };
 }

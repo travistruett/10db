@@ -76,5 +76,6 @@ export {
 } from './repo-config-file';
 export { streamEventLogFields } from './stream-log';
 export { describeIssuePaths } from './config-issues';
+export { ClaudeOAuth } from './claude-oauth';
 export { McpServerName } from './mcp-server-name';
 export { toolCallActivity, type ToolTarget } from './tool-target';

@@ -456,6 +456,7 @@ async function runLane(opts: {
           name,
           {
             connect,
+            claudeOAuth: null,
             codex: {
               enabledTools: null,
               disabledTools: [],

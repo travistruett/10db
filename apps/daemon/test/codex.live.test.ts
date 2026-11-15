@@ -646,6 +646,7 @@ function yourSessionServers(
       name,
       {
         connect,
+        claudeOAuth: null,
         codex: {
           enabledTools: null,
           disabledTools: [],

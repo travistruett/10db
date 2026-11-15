@@ -16,6 +16,7 @@ import type { WebSearchMode } from './codex-generated/ts/WebSearchMode';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer, YourMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
+import type { ClaudeOAuth } from './claude-oauth';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
 import type { DeniedCall, PatchHunk, ReportedMode } from '../trust';
@@ -84,6 +85,8 @@ export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 export interface YourSessionServer {
   /** A stdio server is 10db's launch from the builder's home; a remote one is its url and headers. */
   readonly connect: YourMcpServer | RemoteMcpServer;
+  /** Claude Code's `oauth` block for a remote server, as the approval covered it. */
+  readonly claudeOAuth: ClaudeOAuth | null;
   readonly codex: CodexServerExtras;
 }
 

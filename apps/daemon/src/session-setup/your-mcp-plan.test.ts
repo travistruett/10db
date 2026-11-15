@@ -38,6 +38,7 @@ function remote(over: Partial<Extract<DeclaredYourServer, { transport: 'http' | 
     headers: {},
     envHeaders: {},
     bearerTokenVar: null,
+    oauth: null,
     codex: NO_EXTRAS,
     ...over,
   };
@@ -232,6 +233,7 @@ describe('planYourMcp', () => {
       type: 'http',
       url: 'https://mcp.example/mcp',
       headers: { Authorization: 'Bearer sk-1' },
+      oauth: null,
       codex: NO_EXTRAS,
     });
   });
