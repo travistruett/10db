@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, statSync } from 'node:fs';
+import { lstatSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   foldPathCase,
@@ -108,6 +108,12 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/**
+ * Whether a tool's path is plain text: Claude Code trims it and expands a leading `~`, so a path 10db would read
+ * as a name inside the checkout can open another file. Such a path goes to the judge.
+ */
+const isPlainPath = (path: string): boolean => path === path.trim() && !path.startsWith('~');
+
 /** Whether every reading of a path, with its `..` kept as written, is inside the checkout or the temp dir. */
 function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
   // `..` is kept as written: after a link it means something else, and both readings must be inside.
@@ -117,9 +123,6 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
 
 /** Brace, extglob and escape syntax: each can spell a path no segment-by-segment check sees. */
 const GLOB_SYNTAX = /[{}\\]|[@!+*?]\(/;
-const GLOB_MAGIC = /[*?[\]]/;
-/** The most directory entries a glob's search is read for links before the judge is asked instead. */
-const GLOB_WALK_MAX = 5000;
 
 /** Whether a glob pattern matches only below the folder it is run in: plain syntax, not absolute or climbing. */
 function patternStaysBelow(pattern: string): boolean {
@@ -132,62 +135,18 @@ function patternStaysBelow(pattern: string): boolean {
 }
 
 /**
- * The leading segments of a pattern with no wildcard in them, whether the pattern has a wildcard at all, and how
- * many folder levels below the prefix it can descend (unbounded for `**`).
+ * Whether a Glob may run with no model: plain syntax and a search folder inside. The tool runs
+ * `rg --files --null --glob <pattern> --sort=modified --no-ignore --hidden` there, which never follows a link
+ * inside the tree and reads only the search folder's own real path, so the pattern can't reach outside it.
  */
-function splitPattern(pattern: string): {
-  readonly prefix: string;
-  readonly wild: boolean;
-  readonly depth: number;
-} {
-  const segments = pattern.split('/');
-  const at = segments.findIndex((segment) => GLOB_MAGIC.test(segment));
-  if (at === -1) return { prefix: pattern, wild: false, depth: 0 };
-  const rest = segments.slice(at);
-  return {
-    prefix: segments.slice(0, at).join('/'),
-    wild: true,
-    depth: rest.includes('**') ? Infinity : rest.length - 1,
-  };
-}
-
-/**
- * Whether the folders a pattern can descend into, `depth` levels below `root`, hold no link at all: the tool may
- * follow one and chain through more. A tree too large to read within the limit counts as holding one. Every
- * folder is entered, `.git` and `node_modules` too, since a pattern that can reach them reads them.
- */
-function holdsNoLink(root: string, depth: number): boolean {
-  let seen = 0;
-  const pending: { readonly dir: string; readonly level: number }[] = [{ dir: root, level: 0 }];
-  while (pending.length > 0) {
-    const next = pending.pop();
-    if (next === undefined) break;
-    let entries;
-    try {
-      entries = readdirSync(next.dir, { withFileTypes: true });
-    } catch {
-      return false;
-    }
-    for (const entry of entries) {
-      seen += 1;
-      if (seen > GLOB_WALK_MAX || entry.isSymbolicLink()) return false;
-      if (entry.isDirectory() && next.level < depth) {
-        pending.push({ dir: join(next.dir, entry.name), level: next.level + 1 });
-      }
-    }
-  }
-  return true;
-}
-
-/** Whether a Glob may run with no model: plain syntax, and a search that stays inside and meets no link. */
 function globStaysIn(pattern: string, path: string, cwd: string, ctx: FastPathContext): boolean {
-  if (!patternStaysBelow(pattern)) return false;
-  if (pattern.split('/').some((segment) => nameIsSecret(segment))) return false;
-  const { prefix, wild, depth } = splitPattern(pattern);
-  const reach = prefix === '' ? path : join(path, prefix);
-  const target = from(cwd, reach);
-  if (namesSecret(target, ctx.secretFiles) || !staysIn(reach, cwd, ctx)) return false;
-  return !wild || (isDirectory(target) && holdsNoLink(target, depth));
+  return (
+    patternStaysBelow(pattern) &&
+    !pattern.split('/').some((segment) => nameIsSecret(segment)) &&
+    isPlainPath(path) &&
+    !namesSecret(from(cwd, path), ctx.secretFiles) &&
+    staysIn(path, cwd, ctx)
+  );
 }
 
 /** Whether a read command may open or list `word`: an existing, non-secret file (or folder) inside. */
@@ -241,7 +200,7 @@ const EDIT_TOOLS: Readonly<Record<string, string>> = {
 };
 
 function editStaysIn(call: LimitCall, path: string | null, ctx: FastPathContext): boolean {
-  if (path === null || path === '') return false;
+  if (path === null || path === '' || !isPlainPath(path)) return false;
   if (call.hunk === PatchHunk.Delete || call.hunk === PatchHunk.Move) return false;
   const target = from(call.cwd, path);
   if (namesSecret(target, ctx.secretFiles)) return false;
@@ -291,7 +250,11 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
     case 'Read':
     case 'LS': {
       const path = field(fields, tool === 'Read' ? 'file_path' : 'path') ?? call.cwd;
-      return !namesSecret(from(call.cwd, path), ctx.secretFiles) && staysIn(path, call.cwd, ctx);
+      return (
+        isPlainPath(path) &&
+        !namesSecret(from(call.cwd, path), ctx.secretFiles) &&
+        staysIn(path, call.cwd, ctx)
+      );
     }
     case 'Glob': {
       const pattern = field(fields, 'pattern');
@@ -303,6 +266,7 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
       if (path === null) return false;
       const target = from(call.cwd, path);
       return (
+        isPlainPath(path) &&
         isRegularFile(target) &&
         !namesSecret(target, ctx.secretFiles) &&
         staysIn(path, call.cwd, ctx)
