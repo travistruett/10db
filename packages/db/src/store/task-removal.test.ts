@@ -39,6 +39,7 @@ import {
   moveTask,
   patchTask,
   reopenTask,
+  retirePassMadeTask,
   setTaskStatus,
 } from './tasks';
 import { insertSession } from './sessions';
@@ -267,6 +268,36 @@ describe('cancelTask', () => {
     );
     store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
     expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(/already run/);
+  });
+});
+
+describe('retirePassMadeTask', () => {
+  it('retires the task whatever waits on it: cancelled, unparked, its questions detached, its edges gone both ways', () => {
+    const project = seedProject(store);
+    const base = seedTask(project.id, 'base');
+    const made = seedTask(project.id, 'made', [base.id]);
+    const child = seedTask(project.id, 'child', [made.id]);
+    const column = store.write((ctx) =>
+      insertBoardColumn(ctx, project.id, { name: 'Later' }),
+    ).value;
+    store.write((ctx) => moveTask(ctx, made.id, { to: column.id, after: null, before: null }));
+    const seeded = seedQuestionOf(project.id, made.id);
+
+    const { value } = store.write((ctx) => retirePassMadeTask(ctx, made.id));
+
+    expect(value).toMatchObject({ status: TaskStatus.Cancelled, boardColumnId: null });
+    expect(listTasks(store.db, project.id).map((t) => t.title)).toEqual(['base', 'child']);
+    expectDetached(seeded);
+    expect(
+      store.db
+        .select()
+        .from(schema.taskDeps)
+        .all()
+        .filter((edge) => edge.taskId === made.id || edge.dependsOnId === made.id),
+    ).toEqual([]);
+    expect(getTask(store.db, child.id)).toMatchObject({ status: TaskStatus.Open, dependsOn: [] });
+    // A second retire answers the retired task and emits nothing.
+    expect(store.write((ctx) => retirePassMadeTask(ctx, made.id)).events).toEqual([]);
   });
 });
 

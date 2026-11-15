@@ -14,9 +14,14 @@ import {
   getTask,
   getTaskKeptWork,
   getWorkstreamRow,
+  insertPassPageTask,
+  insertTask,
+  joinPass as joinPassRows,
   listInbox,
   listSharedChanges,
+  listTasks,
   listTaskThreadRows,
+  markTasksMadeByPass,
   openHolds,
   schema,
   setAbandonStep,
@@ -73,6 +78,28 @@ function expectNoKeptWork(world: PassWorld, task: PassWorld['settings']): void {
 }
 
 /**
+ * Settings, which joined from the Board, is back on it open and its thread says its changes went;
+ * People, the task the pass made for its page, is cancelled and off the Board. Neither keeps any work.
+ */
+function expectBoardAfter(world: PassWorld): void {
+  const db = world.h.store.db;
+  for (const task of [world.settings, world.people]) {
+    expectNoKeptWork(world, task);
+    expect(getWorkstreamRow(db, world.runOf(task)).state).toBe(WorkstreamState.Cancelled);
+  }
+  expect(getTask(db, world.settings.id)).toMatchObject({ passId: null, status: 'open' });
+  expect(getTask(db, world.people.id)).toMatchObject({ passId: null, status: 'cancelled' });
+  const onBoard = listTasks(db, world.h.project.id).map((t) => t.id);
+  expect(onBoard).toContain(world.settings.id);
+  expect(onBoard).not.toContain(world.people.id);
+  expect(
+    listTaskThreadRows(db, world.settings.id)
+      .filter((m) => m.kind === 'notice')
+      .map((m) => m.body),
+  ).toContain('Abandoned with Polish; its changes were deleted.');
+}
+
+/**
  * A pass on a folder whose Settings page and shared file were edited before it opened, Settings a
  * Board task that joined it and People a page the pass made its task for; Settings' turn edits the
  * page, deletes a file and, holding the shared area, edits the shared file further and adds a
@@ -116,12 +143,8 @@ function expectAbandoned(world: PassWorld): void {
     [1, 2, null],
     [2, null, 1],
   ]);
-  // Each page's changes are deleted, and its task is back on the Board.
-  for (const task of [world.settings, world.people]) {
-    expectNoKeptWork(world, task);
-    expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
-    expect(getWorkstreamRow(db, world.runOf(task)).state).toBe(WorkstreamState.Cancelled);
-  }
+  // Each page's changes are deleted: the joined task is back on the Board, the one the pass made gone.
+  expectBoardAfter(world);
   // Nothing landed, so the folder is back where the pass came from.
   expect(world.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
 }
@@ -162,6 +185,33 @@ describe('abandonPass', () => {
       { leaseMs: 60_000, putBack: () => Promise.resolve({ applied: [], left: [] }) },
     );
     expect(opened.pass.state).toBe(PassState.Open);
+  });
+
+  it('retires a page the pass made before it had a run, and takes a Board task with none out open', async () => {
+    w = await openPassWorld();
+    const pass = w.opened.pass.id;
+    const { made, joined } = w.h.state.write((ctx) => {
+      const page = insertPassPageTask(ctx, w.h.project.id, {
+        title: 'Settings: more UI work',
+        area: 'settings',
+        goalId: null,
+      });
+      const board = insertTask(ctx, w.h.project.id, {
+        title: 'People: copy',
+        acceptanceCriteria: ['ok'],
+        areas: ['people'],
+      });
+      joinPassRows(ctx, pass, [page.id, board.id]);
+      markTasksMadeByPass(ctx, pass, [page.id]);
+      return { made: page, joined: board };
+    });
+
+    await abandonPass(deps(), pass);
+
+    const db = w.h.store.db;
+    expect(getTask(db, made.id)).toMatchObject({ passId: null, status: 'cancelled' });
+    expect(getTask(db, joined.id)).toMatchObject({ passId: null, status: 'open' });
+    expect(listTasks(db, w.h.project.id).map((t) => t.id)).not.toContain(made.id);
   });
 
   it('refuses the built batch Abandon on an open pass, changing nothing', async () => {
@@ -480,16 +530,12 @@ describe('abandonPass', () => {
 
       const db = w.h.store.db;
       expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Abandoned);
-      for (const task of [w.settings, w.people]) {
-        expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
-        expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
-      }
+      expectBoardAfter(w);
       // No file is written on a branch the pass does not own: each stays as the builder has it.
       expect(read('src/settings/page.tsx')).toBe('edited before the pass\nand in the turn\n');
       expect(existsSync(join(w.h.repo, 'src/settings/old.tsx'))).toBe(false);
       expect(read('src/people/new.tsx')).toBe('added by People\n');
       // The pass's changes are deleted: only the files the builder took along hold them.
-      for (const task of [w.settings, w.people]) expectNoKeptWork(w, task);
       expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
       // No hold stays open on an abandoned pass: one its turn left is let go, its files left as
       // they are.

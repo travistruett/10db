@@ -48,7 +48,9 @@ import {
 import {
   cancelTask,
   closeTask,
+  isSpentTask,
   reopenTask,
+  retirePassMadeTask,
   deleteBoardColumn,
   getGoal,
   getMcpApproval,
@@ -911,7 +913,12 @@ export function createServices(deps: {
       });
       return { limit: input.limit };
     },
-    removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
+    // A task with nothing left in it (every run cancelled, no pass, no saved work) is retired as it
+    // is; any other goes through the never-started rule.
+    removeTask: (id) =>
+      deps.state.write((ctx) =>
+        isSpentTask(ctx.tx, id) ? retirePassMadeTask(ctx, id) : cancelTask(ctx, id),
+      ),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),

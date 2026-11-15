@@ -27,9 +27,11 @@ import {
   insertTakeOut,
   lastTakeOut,
   leavePass,
+  madeByPass,
   openHolds,
   passHoldingTask,
   releaseClaims,
+  retirePassMadeTask,
   setTaskKeptWork,
   setTaskStatus,
   settleTurnsLeaving,
@@ -94,7 +96,8 @@ const listed = (paths: readonly string[]): string => paths.map((p) => `- ${p}`).
  * Step 5 of a take-out, in the caller's write: the task's run is cancelled from whatever state it is
  * in (a queued one would start an ordinary session in the folder the moment the pass let go of it),
  * its claims released, every turn of it ended and settled with nothing Ready, the task leaves the
- * pass for the Board, open, with its kept work recorded, and the thread says so.
+ * pass for the Board, open, with its kept work recorded, and the thread says so. Inside an Abandon a
+ * task the pass made for its page is retired instead, so it leaves the Board too.
  */
 export function leavePassForBoard(
   ctx: WriteContext,
@@ -104,6 +107,8 @@ export function leavePassForBoard(
     readonly kept: TaskKeptWork | null;
     /** How many files the kept work holds. */
     readonly files: number;
+    /** The pass is being abandoned, and the page's changes were deleted. */
+    readonly abandoned?: boolean;
   },
 ): void {
   const task = getTask(ctx.tx, input.taskId);
@@ -124,15 +129,20 @@ export function leavePassForBoard(
   settleTurnsLeaving(ctx, input.taskId);
   deleteSignOffWait(ctx, input.taskId);
   leavePass(ctx, input.taskId);
-  if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);
+  const abandoned = input.abandoned === true;
+  if (abandoned && madeByPass(ctx.tx, input.passId, input.taskId))
+    retirePassMadeTask(ctx, input.taskId);
+  else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   advanceTakeOut(ctx, { taskId: input.taskId, passId: input.passId }, { step: TakeOutStep.Done });
   insertSystemNotice(
     ctx,
     input.taskId,
-    input.kept === null
-      ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
-      : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
+    abandoned
+      ? `Abandoned with ${pass.name}; its changes were deleted.`
+      : input.kept === null
+        ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
+        : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
   );
 }
 
@@ -378,7 +388,13 @@ export async function takeOutSteps(
     await git.deleteKeptRef(repo, passKeptRef(pass.id, task.id));
     await git.deleteKeptRef(repo, keptRef(task.id));
     deps.state.write((ctx) => {
-      leavePassForBoard(ctx, { taskId: task.id, passId: pass.id, kept: null, files: 0 });
+      leavePassForBoard(ctx, {
+        taskId: task.id,
+        passId: pass.id,
+        kept: null,
+        files: 0,
+        abandoned: true,
+      });
     });
     row = { ...row, step: TakeOutStep.Done };
   }

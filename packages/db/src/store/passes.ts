@@ -244,6 +244,16 @@ export function markTasksMadeByPass(
       .run();
 }
 
+/** Whether `passId` made the task for one of its pages, rather than the task joining from the Board. */
+export function madeByPass(db: DbReader, passId: PassId, taskId: TaskId): boolean {
+  const row = db
+    .select({ madeByPassId: schema.tasks.madeByPassId })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.madeByPassId === passId;
+}
+
 /** The tasks in the pass now, oldest first: a task that left it is not one. */
 export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
   const rows = db

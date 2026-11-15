@@ -45,7 +45,7 @@ import {
   type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, ne, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
@@ -1083,6 +1083,47 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
     data: { status: TaskStatus.Cancelled },
   });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * Retires a task with nothing left in it, as `retireTask` does, and never refuses: a task a pass made
+ * for a page, as the pass is abandoned, or one whose every run was cancelled with no pass and no saved
+ * work. Its dependency edges go both ways, so nothing waits on it and it waits on nothing. Retiring a
+ * retired task answers it and emits nothing.
+ */
+export function retirePassMadeTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status === TaskStatus.Cancelled) return task;
+  ctx.tx
+    .delete(schema.taskDeps)
+    .where(or(eq(schema.taskDeps.taskId, id), eq(schema.taskDeps.dependsOnId, id)))
+    .run();
+  return retireTask(ctx, id);
+}
+
+/**
+ * Whether Remove retires the task by `retirePassMadeTask`: it has runs and every one is cancelled, it
+ * is in no pass and it has no saved work, so nothing of it is left to lose.
+ */
+export function isSpentTask(db: DbReader, id: TaskId): boolean {
+  const row = db
+    .select({
+      status: schema.tasks.status,
+      passId: schema.tasks.passId,
+      keptWorkSha: schema.tasks.keptWorkSha,
+    })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, id))
+    .get();
+  if (!row) throw new NotFoundError('task', id);
+  if (row.status === TaskStatus.Cancelled || row.passId !== null || row.keptWorkSha !== null)
+    return false;
+  const runs = db
+    .select({ state: schema.workstreams.state })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, id))
+    .all();
+  return runs.length > 0 && runs.every((run) => run.state === WorkstreamState.Cancelled);
 }
 
 /**

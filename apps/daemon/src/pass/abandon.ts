@@ -25,7 +25,9 @@ import {
   listPassTasks,
   listSharedChanges,
   listSignOffWaits,
+  madeByPass,
   openHolds,
+  retirePassMadeTask,
   setAbandonStep,
   transitionBatch,
   type DbReader,
@@ -269,6 +271,7 @@ export async function abandonPassSteps(
       if (task.workstreamId === null)
         deps.state.write((ctx) => {
           leavePass(ctx, task.id);
+          if (madeByPass(ctx.tx, passId, task.id)) retirePassMadeTask(ctx, task.id);
         });
       else await takeOutSteps(deps, { taskId: task.id, within: TakeOutWithin.Abandon });
     }
