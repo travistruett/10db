@@ -131,6 +131,7 @@ import {
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
+  CapacitySettingsDto,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -1799,6 +1800,13 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
     )
+    .get('/settings/capacity', (c) => c.json(deps.services.capacitySettings()))
+    .put(
+      '/settings/capacity',
+      validator('json', (value): CapacitySettingsDto => CapacitySettingsDto.parse(value)),
+      (c) => c.json(deps.services.setCapacitySettings(c.req.valid('json'))),
+    )
+    .get('/admission', (c) => c.json(deps.services.admission()))
     .get('/settings/sessions', (c) => c.json(deps.services.sessionsSettings()))
     .put(
       '/settings/sessions',

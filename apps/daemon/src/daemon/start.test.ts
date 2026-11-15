@@ -17,6 +17,9 @@ import { dirname, join } from 'node:path';
 import {
   BenchmarkStatusDto,
   BoardColumnDto,
+  AdmissionDto,
+  AdmissionHoldKind,
+  CapacitySettingsDto,
   DaemonEvent,
   EventsHead,
   GithubSigninDto,
@@ -1261,10 +1264,72 @@ describe('startDaemon', () => {
       expect(specs).toEqual([]);
       expect(getWorkstream(daemon.state.db, ws.id).state).toBe('QUEUED');
       expect(await overloadCards()).toHaveLength(1);
+      expect((await api.get('/admission', AdmissionDto)).holds.map((h) => h.kind)).toEqual([
+        AdmissionHoldKind.Load,
+      ]);
 
       load = 1;
       await waitFor(() => specs.length > 0);
       await waitForAsync(async () => ((await overloadCards()).length === 0 ? true : undefined));
+      expect((await api.get('/admission', AdmissionDto)).holds).toEqual([]);
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it('starts no lane while free disk is below the Capacity floor, and starts it once the floor is lowered', async () => {
+    const repo = createTempRepo();
+    const GB = 1_000_000_000;
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+    const specs: LaneSessionSpec[] = [];
+    adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    try {
+      daemon = await startDaemonWithProfiles({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        tickMs: 20,
+        ...QUIET,
+        disk: { freeBytes: () => 10 * GB },
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        defaultRigor: 'light',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
+      expect(await daemon.scheduler.tick()).toBe(0);
+      expect(getWorkstream(daemon.state.db, ws.id).state).toBe('QUEUED');
+      const admission = await api.get('/admission', AdmissionDto);
+      expect(admission).toMatchObject({ freeBytes: 10 * GB, diskFloorBytes: 20 * GB });
+      expect(admission.holds.map((h) => h.kind)).toEqual([AdmissionHoldKind.Disk]);
+      const diskCards = async () =>
+        (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+          item.title.startsWith('Free disk is low'),
+        );
+      expect(await diskCards()).toHaveLength(1);
+
+      await api.put('/settings/capacity', CapacitySettingsDto, {
+        machineLaneCap: 4,
+        diskFloorGb: 1,
+      });
+      await waitFor(() => specs.length > 0);
+      expect(await diskCards()).toEqual([]);
     } finally {
       await daemon?.stop();
       daemon = null;

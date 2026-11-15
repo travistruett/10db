@@ -165,7 +165,8 @@ import {
 } from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
-import type { Scheduler } from '../scheduler';
+import type { Admission, Scheduler } from '../scheduler';
+import { capacitySettings, setCapacitySettings } from '../load';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import {
   allowFoundHosts,
@@ -271,6 +272,8 @@ export function createServices(deps: {
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
+  /** The one gate in front of new lanes, for Factory's note. */
+  readonly admission: Pick<Admission, 'status'>;
   /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   /** The pinned Claude Code and Codex, read for each request; null where none are managed. */
@@ -750,6 +753,14 @@ export function createServices(deps: {
     },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    capacitySettings: () => capacitySettings(db),
+    setCapacitySettings(input) {
+      const saved = setCapacitySettings(deps.state, input);
+      // A higher cap launches queued work at once rather than on the next tick.
+      deps.scheduler.requestTick();
+      return saved;
+    },
+    admission: () => deps.admission.status(),
     lanePermissions: () => ({ autoMode: laneAutoMode(db) }),
     setLanePermissions(autoMode) {
       deps.state.write((ctx) => {
