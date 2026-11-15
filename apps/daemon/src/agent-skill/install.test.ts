@@ -15,7 +15,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentSkillLinkState, AgentSkillTool } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installAgentSkill, installedSkillDir, skillLinkPaths } from './install';
+import {
+  installAgentSkill,
+  installedSkillDir,
+  skillLinkPaths,
+  uninstallAgentSkill,
+} from './install';
 
 let root: string;
 let home: string;
@@ -263,5 +268,45 @@ describe('installAgentSkill copy', () => {
     installAgentSkill(home, shipped);
     expect(copyFiles()).toEqual(['SKILL.md', 'VERSION', 'tendb.mjs']);
     expect(readdirSync(skillsDir())).toEqual(['10db-task']);
+  });
+});
+
+describe('uninstallAgentSkill', () => {
+  it('removes its links and the copy', () => {
+    installAgentSkill(home, shipped);
+    uninstallAgentSkill(home);
+    expect(existsSync(ours())).toBe(false);
+    expect(() => lstatSync(claudePath())).toThrow();
+    expect(() => lstatSync(agentsPath())).toThrow();
+  });
+
+  it('removes a relative link that resolves to the copy', () => {
+    installAgentSkill(home, shipped);
+    rmSync(claudePath());
+    symlinkSync('../../.10db/skills/10db-task', claudePath());
+    uninstallAgentSkill(home);
+    expect(() => lstatSync(claudePath())).toThrow();
+  });
+
+  it('keeps a link to elsewhere and a real folder, and still removes the copy', () => {
+    mkdirSync(join(root, 'mine'));
+    mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
+    symlinkSync(join(root, 'mine'), claudePath());
+    installAgentSkill(home, shipped);
+    rmSync(agentsPath());
+    mkdirSync(agentsPath(), { recursive: true });
+    writeFileSync(join(agentsPath(), 'SKILL.md'), 'builder');
+    uninstallAgentSkill(home);
+    expect(readlinkSync(claudePath())).toBe(join(root, 'mine'));
+    expect(readFileSync(join(agentsPath(), 'SKILL.md'), 'utf8')).toBe('builder');
+    expect(existsSync(ours())).toBe(false);
+  });
+
+  it('is a no-op the second time and on a home that never had it', () => {
+    uninstallAgentSkill(home);
+    installAgentSkill(home, shipped);
+    uninstallAgentSkill(home);
+    uninstallAgentSkill(home);
+    expect(existsSync(ours())).toBe(false);
   });
 });

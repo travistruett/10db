@@ -199,3 +199,17 @@ export function installAgentSkill(
     error: results.find((r) => r.error !== null)?.error ?? null,
   };
 }
+
+/** Removes the links that resolve to 10db's copy, then the copy; what the builder put at a path stays. */
+export function uninstallAgentSkill(home: string): void {
+  try {
+    for (const { path } of skillLinkPaths(home)) {
+      if (judgeLink(path, home).state === AgentSkillLinkState.Linked) rmSync(path);
+    }
+    rmSync(installedSkillDir(home), { recursive: true, force: true });
+    const skillsDir = dirname(installedSkillDir(home));
+    if (kindOf(skillsDir).kind !== 'missing') sweepLeftovers(skillsDir);
+  } catch (error) {
+    throw new AgentSkillInstallError(describeError(error));
+  }
+}
