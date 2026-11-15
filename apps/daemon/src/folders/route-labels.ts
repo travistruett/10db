@@ -6,8 +6,24 @@ import { PageLabel } from '@10db/contracts';
 
 const PATH_KEYS: ReadonlySet<string> = new Set(['to', 'path', 'href']);
 const LABEL_KEY = 'label';
-/** Base names that hold an app's nav: the label guesses are read from these besides the routers. */
-const NAV_WORDS: readonly string[] = ['layout', 'nav', 'sidebar', 'menu', 'shell'];
+
+/** A string literal's text with an escaped quote or backslash read as the character it stands for. */
+function unescaped(raw: string): string {
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    const next = raw[i + 1];
+    if (raw[i] === '\\' && (next === "'" || next === '"' || next === '\\')) {
+      out += next;
+      i += 1;
+    } else out += raw.charAt(i);
+  }
+  return out;
+}
+
+/** A route without a trailing slash, the root kept: `/board/` is `/board`. */
+export function routeKey(route: string): string {
+  return route.length > 1 ? route.replace(/\/+$/u, '') || '/' : route;
+}
 
 const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\w$]/u.test(ch);
 
@@ -74,8 +90,9 @@ export function routeLabels(text: string): Map<string, string> {
       i += 1;
     } else if (ch === '}') {
       const done = objects.pop();
-      if (done?.path !== undefined && done.label !== undefined && !guesses.has(done.path))
-        guesses.set(done.path, done.label);
+      const key = done?.path === undefined ? undefined : routeKey(done.path);
+      if (key !== undefined && done?.label !== undefined && !guesses.has(key))
+        guesses.set(key, done.label);
       i += 1;
     } else if (isWordChar(ch) && !isWordChar(text[i - 1])) {
       let end = i + 1;
@@ -92,7 +109,7 @@ export function routeLabels(text: string): Map<string, string> {
       if (quote !== "'" && quote !== '"') continue;
       const stop = quotedEnd(text, at);
       if (text[stop - 1] !== quote || stop - 1 === at) continue;
-      const value = text.slice(at + 1, stop - 1);
+      const value = unescaped(text.slice(at + 1, stop - 1));
       i = stop;
       if (PATH_KEYS.has(word) && value.startsWith('/') && entry.path === undefined)
         entry.path = value;
@@ -105,16 +122,48 @@ export function routeLabels(text: string): Map<string, string> {
   return guesses;
 }
 
-/** The label guesses of every text, the first text's winning for a route. */
-export function routeLabelsOf(texts: Iterable<string>): Map<string, string> {
-  const all = new Map<string, string>();
-  for (const text of texts)
-    for (const [route, label] of routeLabels(text)) if (!all.has(route)) all.set(route, label);
-  return all;
+/**
+ * The label guesses of every file's text. Where two labels claim a route, a file named like a nav
+ * (`isNavFile`) beats another file, and the first read beats a later one.
+ */
+export function routeLabelsOf(
+  files: Iterable<readonly [file: string, text: string]>,
+): Map<string, string> {
+  const all = [...files];
+  const out = new Map<string, string>();
+  for (const wantNav of [true, false])
+    for (const [file, text] of all) {
+      if (isNavFile(file) !== wantNav) continue;
+      for (const [route, label] of routeLabels(text)) if (!out.has(route)) out.set(route, label);
+    }
+  return out;
 }
 
-/** Whether a file's name says it holds an app's nav: `app-layout.tsx`, `Sidebar.tsx`, `main-menu.ts`. */
+/** Names a nav file is called by, whole words of its base name. */
+const NAV_WORDS: ReadonlySet<string> = new Set([
+  'layout',
+  'nav',
+  'navbar',
+  'navigation',
+  'sidebar',
+  'menu',
+  'shell',
+]);
+
+/** Where a file is a test, a story or an end-to-end script, whose fixtures are no nav. */
+const NOT_NAV = /(?:\.(?:test|spec|stories)\.)|(?:^|\/)(?:__tests__|e2e)\//u;
+
+/**
+ * Whether a file's name says it holds an app's nav: a whole word of its base name (split on `-`, `_`,
+ * `.` and case) is layout, nav, navbar, navigation, sidebar, menu or shell. `navigate.ts`, tests,
+ * stories and `e2e/` files are not.
+ */
 export function isNavFile(path: string): boolean {
-  const name = posix.basename(path).toLowerCase();
-  return NAV_WORDS.some((word) => name.includes(word));
+  if (NOT_NAV.test(path)) return false;
+  const stem = posix.basename(path, posix.extname(path));
+  const words = stem
+    .replace(/([a-z0-9])([A-Z])/gu, '$1 $2')
+    .split(/[\s\-_.]+/u)
+    .map((word) => word.toLowerCase());
+  return words.some((word) => NAV_WORDS.has(word));
 }

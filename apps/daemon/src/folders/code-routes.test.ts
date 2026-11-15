@@ -221,6 +221,33 @@ const b = createRoute({ path: '/inbox', component: InboxView });`,
       unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
     },
     {
+      name: 'a label with escaped quotes, and a route written with a trailing slash',
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });`,
+      nav: `const NAV = [{ to: '/board/', label: 'Bob\\'s \\"work\\"' }];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board', label: 'Bob\'s "work"' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: "two labels for one route: the nav file's beats another file's, whichever is read first",
+      router: `import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+const a = createRoute({ path: '/board', component: BoardView });
+const b = createRoute({ path: '/inbox', component: InboxView });
+const OTHER = [{ to: '/board', label: 'From the router' }, { to: '/inbox', label: 'Router inbox' }];`,
+      nav: `const NAV = [{ to: '/board', label: 'From the nav' }];`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/board', label: 'From the nav' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox', label: 'Router inbox' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a label in the router file itself, past strings and comments that hold brackets',
       router: `import { BoardView } from './views/board/board-view';
 import { InboxView } from './views/inbox/inbox-view';
@@ -247,6 +274,29 @@ function InboxPage() {
 const inbox = createRoute({ path: '/inbox', component: InboxPage });`,
       pages: [{ name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' }],
       unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
+      name: 'a component declared inside another function is still read, and its inner consts are not components',
+      router: `
+import { InboxView } from './views/inbox/inbox-view';
+import { BoardView } from './views/board/board-view';
+export function Routes() {
+  const base = useBase();
+  function InboxPage() {
+    const search = useSearch();
+    return <InboxView search={search} />;
+  }
+  const BoardPage = () => <BoardView />;
+  return [
+    createRoute({ path: '/inbox', component: InboxPage }),
+    createRoute({ path: '/board', component: BoardPage }),
+  ];
+}`,
+      pages: [
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' },
+        { name: 'board', folder: 'ui/src/views/board', route: '/board' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
     },
     {
       name: 'a route to a module directly in views, or to a package, is no page',
@@ -357,8 +407,14 @@ describe('navFiles', () => {
       navFiles(
         [
           'ui/src/shell/app-layout.tsx',
-          'ui/src/components/SideBar.tsx',
+          'ui/src/components/Sidebar.tsx',
           'ui/src/menu.ts',
+          'ui/src/navigate.ts',
+          'ui/src/MainNavigation.tsx',
+          'ui/src/nav.test.tsx',
+          'ui/src/nav.stories.tsx',
+          'ui/src/__tests__/nav.tsx',
+          'ui/e2e/nav.ts',
           'ui/src/main.tsx',
           'ui/src/router.tsx',
           'ui/src/layout.css',
@@ -367,7 +423,12 @@ describe('navFiles', () => {
         ],
         'ui',
       ),
-    ).toEqual(['ui/src/menu.ts', 'ui/src/shell/app-layout.tsx', 'ui/src/components/SideBar.tsx']);
+    ).toEqual([
+      'ui/src/menu.ts',
+      'ui/src/MainNavigation.tsx',
+      'ui/src/shell/app-layout.tsx',
+      'ui/src/components/Sidebar.tsx',
+    ]);
   });
 
   it('reads at most 20 of them, the shallowest first', () => {

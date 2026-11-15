@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { AreaRoute } from '@10db/contracts';
 import { importBindings, isSourceFile, resolveImport, type PathAliases } from './import-graph';
-import { isNavFile, routeLabelsOf } from './route-labels';
+import { isNavFile, routeKey, routeLabelsOf } from './route-labels';
 
 // Workbench setup: an app with no file routes (a Vite or Tauri UI) names its pages in code, in route
 // objects (`path: '/board', component: BoardPage`) or JSX (`<Route path="/board" element={<Board />}`).
@@ -199,17 +199,19 @@ function importedNames(text: string): Map<string, string> {
 
 /**
  * The capitalised JSX tags each function or `const` the file declares renders, by its name: a
- * declaration's body runs to the next declaration at the start of a line, so a `const` inside it ends nothing. One pass over the file.
+ * declaration's body runs to the next declaration that starts a line or names a component. One pass over the file.
  */
 function localComponents(text: string): Map<string, string[]> {
+  // A declaration at the start of a line starts a body, and so does an indented one that names a
+  // component (a capitalised name), so a `const` inside a component ends nothing.
   const declarations = [
     ...text.matchAll(
-      /(?:^|\n)(?:export[ \t]+)?(?:default[ \t]+)?(?:function[ \t]+([\w$]+)|(?:const|let|class)[ \t]+([\w$]+))/gu,
+      /(?:^|\n)([ \t]*)(?:export[ \t]+)?(?:default[ \t]+)?(?:function[ \t]+([\w$]+)|(?:const|let|class)[ \t]+([\w$]+))/gu,
     ),
-  ];
+  ].filter((m) => m[1] === '' || /^[A-Z]/u.test(m[2] ?? m[3] ?? ''));
   const rendered = new Map<string, string[]>();
   declarations.forEach((match, n) => {
-    const name = match[1] ?? match[2];
+    const name = match[2] ?? match[3];
     if (name === undefined || rendered.has(name)) return;
     const body = text.slice(
       match.index + match[0].length,
@@ -482,7 +484,7 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
       if (folder !== null) found.set(folder, [...(found.get(folder) ?? []), def.path]);
     }
   }
-  const labels = routeLabelsOf([...input.routers.values(), ...(input.navs?.values() ?? [])]);
+  const labels = routeLabelsOf([...input.routers, ...(input.navs ?? [])]);
   const pages = [...found].map(([folder, paths]): CodePage => {
     const name = areaNameOf(posix.basename(folder));
     const route =
@@ -492,7 +494,7 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
         .filter((r) => r !== null)
         .sort((a, b) => a.length - b.length)[0] ?? definedPrefix(paths, defined);
     if (route === undefined) return { name, folder };
-    const label = labels.get(route);
+    const label = labels.get(routeKey(route));
     return label === undefined ? { name, folder, route } : { name, folder, route, label };
   });
   const pageDirs = new Set(pages.map((p) => posix.dirname(p.folder)));
