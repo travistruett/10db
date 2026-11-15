@@ -20,7 +20,6 @@ export {
   CompletionError,
   ConversationUnreadError,
   McpSignInError,
-  McpSignInUnsupportedError,
   SessionEndReason,
 } from './types';
 export type {
@@ -36,9 +35,7 @@ export type {
   ExploreSessionSpec,
   LaneProfile,
   LaneSessionSpec,
-  McpAuthSpec,
   McpSignIn,
-  McpSignInSpec,
   SessionEvent,
   ShapeAgentDefinition,
   SessionHandle,
