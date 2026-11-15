@@ -11,7 +11,7 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AgentSkillLinkState, AgentSkillTool, type AgentSkillLink } from '@10db/contracts';
 import { z } from 'zod';
 
@@ -61,6 +61,19 @@ function realOrNull(path: string): string | null {
   }
 }
 
+/**
+ * Where a link leads. Only a target that does not exist is `dangling`; one that cannot be read (a folder
+ * macOS privacy or its mode refuses) is `unknown` and is the builder's, never replaced.
+ */
+function resolveLink(path: string): 'dangling' | 'unknown' | { readonly real: string } {
+  try {
+    return { real: realpathSync.native(path) };
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : undefined;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling' : 'unknown';
+  }
+}
+
 type PathKind =
   | { readonly kind: 'missing' }
   | { readonly kind: 'link'; readonly text: string }
@@ -88,10 +101,11 @@ function judgeLink(
     return { state: AgentSkillLinkState.Missing, target: null, dangling: false };
   if (found.kind === 'other')
     return { state: AgentSkillLinkState.InTheWay, target: null, dangling: false };
-  const resolved = realOrNull(resolve(dirname(path), found.text));
-  if (resolved === null)
+  // The link itself is resolved, so a relative text is read against its real parent, as the system does.
+  const resolved = resolveLink(path);
+  if (resolved === 'dangling')
     return { state: AgentSkillLinkState.Missing, target: null, dangling: true };
-  if (resolved === realOrNull(installedSkillDir(home)))
+  if (typeof resolved === 'object' && resolved.real === realOrNull(installedSkillDir(home)))
     return { state: AgentSkillLinkState.Linked, target: null, dangling: false };
   return { state: AgentSkillLinkState.PointsElsewhere, target: found.text, dangling: false };
 }
@@ -204,7 +218,12 @@ export function installAgentSkill(
 export function uninstallAgentSkill(home: string): void {
   try {
     for (const { path } of skillLinkPaths(home)) {
-      if (judgeLink(path, home).state === AgentSkillLinkState.Linked) rmSync(path);
+      const judged = judgeLink(path, home);
+      const found = kindOf(path);
+      // A link written as the copy's own path stays ours after the copy is gone.
+      const oursDangling =
+        judged.dangling && found.kind === 'link' && found.text === installedSkillDir(home);
+      if (judged.state === AgentSkillLinkState.Linked || oursDangling) rmSync(path);
     }
     rmSync(installedSkillDir(home), { recursive: true, force: true });
     const skillsDir = dirname(installedSkillDir(home));
