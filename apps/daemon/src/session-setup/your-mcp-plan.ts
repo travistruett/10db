@@ -189,9 +189,13 @@ function isLoopback(url: string): boolean {
   );
 }
 
+const PLAIN_SEGMENT = /^[A-Za-z0-9._-]{1,24}$/;
+const MAX_SEGMENTS = 4;
+
 /**
  * Whether a remote server sends something a lane could read off a port it listens on: headers, or a secret
- * in its URL (userinfo, a query, or a `${}` reference that expands into it).
+ * in its URL: userinfo, a query, a fragment, a `${}` reference that expands into it, or a path that isn't a
+ * short plain endpoint such as `/mcp` or `/v1/sse` (a token can sit in a path segment).
  */
 function sendsCredentials(
   declaredUrl: string,
@@ -200,7 +204,15 @@ function sendsCredentials(
   if (planned.headers !== null || declaredUrl.includes('${')) return true;
   try {
     const parsed = new URL(planned.url);
-    return parsed.username !== '' || parsed.password !== '' || parsed.search !== '';
+    if (
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      parsed.search !== '' ||
+      parsed.hash !== ''
+    )
+      return true;
+    const segments = parsed.pathname.split('/').filter((segment) => segment !== '');
+    return segments.length > MAX_SEGMENTS || !segments.every((s) => PLAIN_SEGMENT.test(s));
   } catch {
     return true;
   }

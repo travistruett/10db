@@ -74,8 +74,8 @@ const SEPARATORS = /[=,:;"'`()[\]{}<>|&!\s]+/;
 
 /**
  * Every path `text` could name: each piece split on separators and quotes, as written (so a bare relative
- * one is judged against the folder the server starts in), and from its first `/` or `~/` on, so a path
- * glued to a flag (`-I/root`, `--x/root`) is read too.
+ * one is judged against the folder the server starts in), from its first `/` or `~/` on, and after any
+ * leading flag, so a path glued to a flag (`-I/root`, `-rsome/x.js`) is read too.
  */
 function pathPieces(text: string): string[] {
   const pieces: string[] = [];
@@ -84,6 +84,11 @@ function pathPieces(text: string): string[] {
     pieces.push(piece);
     for (const start of [piece.indexOf('/'), piece.indexOf('~/')]) {
       if (start > 0) pieces.push(piece.slice(start));
+    }
+    // A path glued to a flag: `-I../root`, `-rsome/x.js`, `--include../root`.
+    const flag = /^-{1,2}[A-Za-z0-9_-]*/.exec(piece);
+    if (flag !== null) {
+      for (let at = 1; at <= flag[0].length; at += 1) pieces.push(piece.slice(at));
     }
   }
   return pieces;

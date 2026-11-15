@@ -283,6 +283,10 @@ describe('planYourMcp', () => {
     ['userinfo', 'http://user:pw@localhost:3000/mcp'],
     ['a ${} reference in the path', 'http://localhost:3000/${TOKEN}/mcp'],
     ['a ${} reference in the query', 'http://127.0.0.1:3000/mcp?k=${TOKEN}'],
+    ['a fragment', 'http://localhost:3000/mcp#abc'],
+    ['a long token in a path segment', 'http://127.0.0.1:3000/t/9f8a7c6b5d4e3f2a1b0c9d8e7f6a5b4c'],
+    ['an encoded path segment', 'http://localhost:3000/a%2Fb'],
+    ['more than four path segments', 'http://localhost:3000/a/b/c/d/e'],
   ])('a loopback server whose url carries %s counts as one with headers', (_name, url) => {
     const local = [entry('local', remote({ url }))];
     const loginEnv = { ...LOGIN, TOKEN: 'sk-1' };
@@ -293,6 +297,14 @@ describe('planYourMcp', () => {
     );
     expect(Object.keys(plan(local, { localBinding: false, loginEnv }).remote)).toEqual(['local']);
   });
+
+  it.each([['http://localhost:3000/mcp'], ['http://localhost:3000/sse'], ['http://[::1]/v1/mcp/']])(
+    'an ordinary loopback path %s with no headers is kept while the loopback is on',
+    (url) => {
+      const local = [entry('local', remote({ url }))];
+      expect(Object.keys(plan(local, { localBinding: true }).remote)).toEqual(['local']);
+    },
+  );
 
   it('a remote server on another host keeps its query and userinfo while the loopback is on', () => {
     const far = [entry('far', remote({ url: 'https://user:pw@mcp.example/mcp?key=abc' }))];

@@ -224,6 +224,50 @@ describe('prepareYourMcpRun', () => {
       `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
     ],
     [
+      'a link into a checkout folder followed by .. is judged where the kernel opens it',
+      () => {
+        mkdirSync(join(checkout, 'sub'), { recursive: true });
+        symlinkSync(join(checkout, 'sub'), join(home, 'deep'));
+        return { args: ['deep/../server.js'] };
+      },
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'the same through a link inside an option value',
+      () => {
+        mkdirSync(join(checkout, 'sub'), { recursive: true });
+        symlinkSync(join(checkout, 'sub'), join(home, 'deep'));
+        return { args: ['--config=deep/../x.json'] };
+      },
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a flag letter glued to a relative path that climbs into a checkout is refused',
+      () => ({ args: ['-I../checkout'] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a long flag glued to a relative path that climbs into a checkout is refused',
+      () => ({ args: ['--include../checkout/inc'] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a flag letter glued to a relative path through a link into a checkout is refused',
+      () => {
+        symlinkSync(checkout, join(home, 'linked-dir'));
+        return { args: ['-rlinked-dir/x.js'] };
+      },
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a declared NODE_OPTIONS with a flag glued to a relative path is refused',
+      () => ({
+        env: { ...server().env, NODE_OPTIONS: '-r../checkout/x.js' },
+        declaredEnv: ['NODE_OPTIONS'],
+      }),
+      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+    ],
+    [
       'a declared variable with a newline refuses the server',
       () => ({ env: { ...server().env, CERT: 'a\nb' }, declaredEnv: ['CERT'] }),
       "Its env variable CERT can't be passed to it.",

@@ -60,8 +60,16 @@ export function underLaneWritable(
   roots: readonly LaneWritableRoot[],
   base: string,
 ): LaneWritableKind | null {
-  const written = isAbsolute(path) ? resolve(path) : resolve(base, path);
-  const real = realOrSelf(written);
-  const root = roots.find((r) => isEqualOrUnder(written, r.path) || isEqualOrUnder(real, r.path));
+  // The raw spelling keeps its `..`: the kernel resolves a link before the `..` after it, so the real path
+  // is taken from the unnormalized text, and the raw text is checked as written too.
+  const raw = isAbsolute(path) ? path : `${base}/${path}`;
+  const written = resolve(raw);
+  const real = realOrSelf(raw);
+  const root = roots.find(
+    (r) =>
+      isEqualOrUnder(raw, r.path) ||
+      isEqualOrUnder(written, r.path) ||
+      isEqualOrUnder(real, r.path),
+  );
   return root?.kind ?? null;
 }

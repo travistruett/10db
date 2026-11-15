@@ -7,7 +7,8 @@ import { basename, dirname, join } from 'node:path';
  */
 export function realOrSelf(path: string): string {
   try {
-    return realpathSync(path);
+    // The native call resolves a link before the `..` after it, as the kernel does when it opens the path.
+    return realpathSync.native(path);
   } catch {
     const parent = dirname(path);
     return parent === path ? path : join(realOrSelf(parent), basename(path));
