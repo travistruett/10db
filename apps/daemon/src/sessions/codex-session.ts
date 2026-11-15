@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
 import { checkAccount, missingAccountRefusal, modelMatches, noAccountWhy } from './account-check';
+import { YourMcpServer } from '../sandbox';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount, type CodexCall } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
@@ -18,6 +19,7 @@ import {
 } from './codex-guard';
 import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
+import { CODEX_MCP_STATUS_WAIT_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
 import { refusedToolCalls } from './codex-refused-calls';
 import {
   createTurnState,
@@ -526,6 +528,43 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     return thread;
   };
 
+  /**
+   * Lines naming the builder's OAuth servers that Codex reports signed out in this home, for the first turn.
+   * A read that errors, or does not answer within Codex's own wait, names none: the prompt is never held for it.
+   */
+  const signedOutNotes = async (thread: string): Promise<string[]> => {
+    const remote = Object.entries(spec.yourMcpServers)
+      .filter(
+        ([, server]) =>
+          !(server.connect instanceof YourMcpServer) && server.connect.headers === null,
+      )
+      .map(([name]) => name);
+    if (remote.length === 0) return [];
+    const read = readCodexMcpAuth(ask, thread, remote, clock);
+    // Whichever loses the race must not become an unhandled rejection.
+    read.catch(() => undefined);
+    try {
+      const states = await Promise.race([
+        read,
+        pause(CODEX_MCP_STATUS_WAIT_MS).then((): null => null),
+      ]);
+      if (states === null) return [];
+      return remote
+        .filter((name) => states[name] === McpAuthState.NotSignedIn)
+        .map(
+          (name) =>
+            `Note from 10db: ${name} isn't signed in for this account. Sign in in Settings › Trust. It is not in this session; don't look for its tools.`,
+        );
+    } catch (error) {
+      if (error instanceof SessionOver) throw error;
+      log.warn(
+        { errName: error instanceof Error ? error.name : 'unknown' },
+        'codex mcp sign-in status could not be read',
+      );
+      return [];
+    }
+  };
+
   /** The end of the child's stderr, for the message of a session that ended because the child did. */
   const stderrNote = (): string => {
     const tail = stderrTail.replace(/\s+/g, ' ').trim().slice(-EXIT_STDERR_CHARS);
@@ -975,9 +1014,10 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
     events.push({ type: 'commands', commands: CODEX_COMMANDS });
+    const notes = await signedOutNotes(thread.thread.id);
     try {
       await startTurn(thread.thread.id, {
-        text: spec.prompt,
+        text: notes.length === 0 ? spec.prompt : `${notes.join('\n')}\n\n${spec.prompt}`,
         images: spec.images ?? [],
         uuid: spec.promptUuid,
         command: null,

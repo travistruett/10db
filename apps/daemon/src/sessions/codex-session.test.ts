@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountKind, AccountProblem, JudgeKind, mintId } from '@10db/contracts';
 import { parse } from 'smol-toml';
+import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FAKE_SRT, SANDBOXED, tempDir, testPolicy } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
@@ -13,6 +14,7 @@ import { silentLogger, type Logger } from '../log';
 import { launchYourMcpServers, type LaneSandboxSpec } from '../sandbox';
 import { createCodexAdapter } from './codex-adapter';
 import { codexThreadConfig } from './codex-lane-config';
+import { CODEX_MCP_STATUS_WAIT_MS } from './codex-mcp-auth';
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
   CodexHomeError,
@@ -532,6 +534,7 @@ describe('the hook trust', () => {
       path: real(path).path,
       emptyHome: real(path).emptyHome,
       prepare: (dir) => real(path).prepare(dir),
+      ensureConfig: () => real(path).ensureConfig(),
       trustGuardHook: () => Promise.reject(new CodexHomeError('config.toml is not valid TOML')),
     });
     const { handle } = startWith(
@@ -569,6 +572,7 @@ describe('the process', () => {
           await home.prepare(dir);
           order.push('prepare');
         },
+        ensureConfig: () => home.ensureConfig(),
         trustGuardHook: (key, hash) => home.trustGuardHook(key, hash),
       };
     };
@@ -1076,6 +1080,113 @@ describe('the thread and the first turn', () => {
     expect(JSON.stringify(events.at(-1))).toContain('gpt-6-astra');
     expect(methods(server)).not.toContain('turn/start');
     expect(server.killed()).toBe(true);
+  });
+});
+
+describe('a server of yours that is not signed in', () => {
+  const NOTE =
+    "Note from 10db: oauthy isn't signed in for this account. Sign in in Settings › Trust. It is not in this session; don't look for its tools.";
+  const none = {
+    enabledTools: null,
+    disabledTools: [],
+    startupTimeoutSec: null,
+    toolTimeoutSec: null,
+  };
+  const oauthy: Partial<LaneSessionSpec> = {
+    yourMcpServers: {
+      oauthy: {
+        connect: { type: 'http', url: 'https://oauthy.example/mcp', headers: null },
+        claudeOAuth: null,
+        codex: none,
+      },
+    },
+  };
+  const firstTurnText = (server: FakeAppServer): string => {
+    const params = z
+      .object({ input: z.array(z.object({ text: z.string() })) })
+      .parse(sentParams(server, 'turn/start'));
+    return params.input[0]?.text ?? '';
+  };
+
+  it('puts a note before the first turn text, and asks the status on the thread', async () => {
+    const { handle, server } = startWith(
+      {
+        'mcpServerStatus/list': {
+          data: [{ name: 'oauthy', authStatus: 'notLoggedIn' }],
+          nextCursor: null,
+        },
+      },
+      oauthy,
+    );
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(firstTurnText(server)).toBe(`${NOTE}\n\nDo the task`);
+    expect(sentParams(server, 'mcpServerStatus/list')).toEqual({
+      threadId: 'thr-1',
+      detail: 'toolsAndAuthOnly',
+    });
+    await handle.stop();
+  });
+
+  it('adds no note for a signed-in server, and reads nothing without a remote server of yours', async () => {
+    const signedIn = startWith(
+      {
+        'mcpServerStatus/list': {
+          data: [{ name: 'oauthy', authStatus: 'oAuth' }],
+          nextCursor: null,
+        },
+      },
+      oauthy,
+    );
+    await firstEvent(signedIn.handle);
+    await vi.waitFor(() => {
+      expect(methods(signedIn.server)).toContain('turn/start');
+    });
+    expect(firstTurnText(signedIn.server)).toBe('Do the task');
+    await signedIn.handle.stop();
+
+    const bare = startWith({});
+    await firstEvent(bare.handle);
+    await vi.waitFor(() => {
+      expect(methods(bare.server)).toContain('turn/start');
+    });
+    expect(methods(bare.server)).not.toContain('mcpServerStatus/list');
+    await bare.handle.stop();
+  });
+
+  it('sends the prompt with no note when the status read errors', async () => {
+    // The default script has no mcpServerStatus/list, which the fake answers as an error.
+    const { handle, server } = startWith({}, oauthy);
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(firstTurnText(server)).toBe('Do the task');
+    await handle.stop();
+  });
+
+  it('sends the prompt with no note when the status read does not answer in time', async () => {
+    const clock = new ManualClock();
+    const { handle, server } = startWith(
+      { 'mcpServerStatus/list': () => new Promise(() => undefined) },
+      oauthy,
+      { clock },
+    );
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('mcpServerStatus/list');
+    });
+    await vi.waitFor(() => {
+      expect(clock.pendingTimers()).toBeGreaterThan(0);
+    });
+    clock.advance(CODEX_MCP_STATUS_WAIT_MS);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(firstTurnText(server)).toBe('Do the task');
+    await handle.stop();
   });
 });
 
