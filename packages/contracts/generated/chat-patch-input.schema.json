@@ -29,6 +29,23 @@
           "type": "null"
         }
       ]
+    },
+    "effort": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false

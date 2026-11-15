@@ -43,6 +43,39 @@ describe('the chat service', () => {
     );
   });
 
+  it('an effort picked mid-conversation applies from the next turn, and an effort-only change closes the warm session', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const say = (text: string): void => {
+      w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] });
+    };
+    say('first');
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions.map((s) => s.spec.effort)).toEqual(['high']);
+    const patched = await w.chat.patch(chat.id, { effort: 'low' });
+    expect(patched.conversation.effort).toBe('low');
+    expect(getConversation(w.state.db, chat.conversationId).effort).toBe('low');
+    say('second');
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions.map((s) => s.spec.effort)).toEqual(['high', 'low']);
+    // Back to the model's own default.
+    expect((await w.chat.patch(chat.id, { effort: null })).conversation.effort).toBeNull();
+  });
+
+  it('a chat made with an effort starts its first turn on it', async () => {
+    w = chatWorld();
+    const chat = w.chat.create({
+      projectId: w.project.id,
+      model: null,
+      effort: 'max',
+      tabPosition: 0,
+    });
+    expect(chat.conversation.effort).toBe('max');
+    w.chat.send(chat.conversationId, { text: 'go', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions[0]?.spec.effort).toBe('max');
+  });
+
   it('makes and runs a chat on a ChatGPT-plan project, as on a Claude one', async () => {
     w = chatWorld();
     w.launchOn(AccountKind.CodexSignin);

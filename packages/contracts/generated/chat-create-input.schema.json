@@ -17,6 +17,23 @@
         }
       ]
     },
+    "effort": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "tabPosition": {
       "type": "integer",
       "minimum": 0,

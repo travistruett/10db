@@ -4,6 +4,7 @@ import {
   type AgentAccountKind,
   type ChatDto,
   type DaemonEvent,
+  type Effort,
   type ProjectDto,
 } from '@10db/contracts';
 import { createTestStore, seedProject, type Store } from '@10db/db';
@@ -81,11 +82,11 @@ export function chatWorld(
       inbox.withdraw(id);
     },
   });
-  const launch = (model: string | null): ShapeLaunch => ({
+  const launch = (model: string | null, effort: Effort | null): ShapeLaunch => ({
     cwd: '/repo',
     model: model ?? 'claude-opus-5-5',
     modelId: model ?? 'claude-opus-5-5',
-    effort: 'high',
+    effort: effort ?? 'high',
     agentModels: shapeAgentModels(launched.kind),
     env: {},
     account: {
@@ -105,7 +106,7 @@ export function chatWorld(
       dataDir: dir.path,
       now: () => clock.now(),
       mcp: { url: 'http://127.0.0.1:4317/mcp' },
-      launch: (_projectId, model) => launch(model),
+      launch: (_projectId, model, effort) => launch(model, effort),
       ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,

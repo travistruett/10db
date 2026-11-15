@@ -44,6 +44,7 @@ export function insertConversation(
     profile: input.profile,
     accountId: input.accountId ?? getProject(ctx.tx, input.projectId).accountId,
     model: null,
+    effort: null,
     providerSessionId: null,
     state: input.state,
     contextPct: null,
@@ -96,7 +97,7 @@ export function patchConversation(
   patch: Partial<
     Pick<
       ConversationRow,
-      'model' | 'providerSessionId' | 'state' | 'contextPct' | 'accountId' | 'commands'
+      'model' | 'effort' | 'providerSessionId' | 'state' | 'contextPct' | 'accountId' | 'commands'
     >
   >,
 ): ConversationRow {

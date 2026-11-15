@@ -10,6 +10,7 @@ import {
   parseItemBody,
   TrustSurface,
   type AccountKind,
+  type Effort,
   type AgentAccountKind,
   type ProjectId,
 } from '@10db/contracts';
@@ -100,8 +101,8 @@ export interface ChatHooksDeps {
   readonly dataDir: string;
   readonly now: () => Date;
   readonly mcp: { readonly url: string };
-  /** Resolves a project's launch on `model` or, with null, on the `plan` role's. */
-  launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  /** Resolves a project's launch on `model` or, with null, on the `plan` role's, at `effort` or the model's own. */
+  launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
@@ -152,7 +153,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     return chat;
   };
   const describe = (conv: ConversationRow, model: string | null) => {
-    const launch = deps.launch(conv.projectId, model);
+    const launch = deps.launch(conv.projectId, model, conv.effort);
     const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
     return {
       model: launch.modelId,
@@ -166,12 +167,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     freshAtContextPct: CHAT_FRESH_AT_CONTEXT_PCT,
 
     limits(conv) {
-      return deps.limitsFor(deps.launch(conv.projectId, conv.model).account.kind);
+      return deps.limitsFor(deps.launch(conv.projectId, conv.model, conv.effort).account.kind);
     },
 
     async spec(conv, start) {
       chatOf(conv);
-      const launch = deps.launch(conv.projectId, conv.model);
+      const launch = deps.launch(conv.projectId, conv.model, conv.effort);
       const limits = deps.limitsFor(launch.account.kind);
       // A chat asks for its agent's judge, as Plan does; 10db's judge where it is the account's and ready.
       const tendbReady = (await deps.judge?.ready(JudgeDecision.CrossesLimit)) ?? false;

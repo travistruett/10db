@@ -1599,7 +1599,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           return mcpUrl;
         },
       },
-      launch: (projectId, model) => conversationLaunch(projectId, model, null),
+      launch: conversationLaunch,
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
