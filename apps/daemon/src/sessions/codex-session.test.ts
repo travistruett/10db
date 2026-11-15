@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { AccountKind, AccountProblem, JudgeKind, mintId } from '@10db/contracts';
 import { parse } from 'smol-toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FAKE_SRT, SANDBOXED, testPolicy } from '../../test/fixtures';
+import { FAKE_SRT, SANDBOXED, tempDir, testPolicy } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock } from '../clock';
 import { silentLogger, type Logger } from '../log';
-import type { LaneSandboxSpec } from '../sandbox';
+import { launchYourMcpServers, type LaneSandboxSpec } from '../sandbox';
 import { createCodexAdapter } from './codex-adapter';
 import { codexThreadConfig } from './codex-lane-config';
 import {
@@ -2119,6 +2119,82 @@ describe('codexThreadConfig', () => {
       plain: { url: 'https://plain.example/sse', default_tools_approval_mode: 'approve' },
     });
     expect(config['mcp_servers']).not.toHaveProperty('plain.http_headers');
+  });
+
+  it("keeps 10db's entry and the project's beside the builder's", () => {
+    const config = codexThreadConfig(
+      specOf({
+        projectMcpServers: {
+          repo: { type: 'http', url: 'https://repo.example/mcp', headers: null },
+        },
+        yourMcpServers: {
+          mine: {
+            connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+            codex: {
+              enabledTools: null,
+              disabledTools: ['rm'],
+              startupTimeoutSec: null,
+              toolTimeoutSec: null,
+            },
+          },
+        },
+      }),
+    );
+    const servers = config['mcp_servers'] as Record<string, Record<string, unknown>>;
+    expect(Object.keys(servers)).toEqual(['repo', 'mine', '10db']);
+    expect(servers['mine']).toMatchObject({ disabled_tools: ['rm'] });
+  });
+
+  it('an explore thread gets the builder’s remote server and not its stdio one', () => {
+    const dir = tempDir('codex-explore-yours');
+    const launched = launchYourMcpServers({
+      home: dir.path,
+      filesRoot: dir.path,
+      laneWritable: [],
+      servers: {
+        local: {
+          command: 'npx',
+          args: ['x'],
+          cwd: null,
+          env: { PATH: '/usr/bin' },
+          declaredEnv: [],
+        },
+      },
+    });
+    try {
+      const local = launched.servers['local'];
+      if (!local) throw new Error('the probe server was refused');
+      const none = {
+        enabledTools: null,
+        disabledTools: [],
+        startupTimeoutSec: null,
+        toolTimeoutSec: null,
+      };
+      const config = codexThreadConfig({
+        ...specOf({
+          yourMcpServers: {
+            local: { connect: local, codex: none },
+            docs: {
+              connect: { type: 'http', url: 'https://docs.example/mcp', headers: null },
+              codex: none,
+            },
+          },
+        }),
+        profile: {
+          kind: 'explore',
+          judge: JudgeKind.Tendb,
+          systemPrompt: 'You are a chat.',
+          tools: [],
+          allowedTools: [],
+          disallowedTools: [],
+          agents: {},
+        },
+      });
+      expect(Object.keys(config['mcp_servers'] as object)).toEqual(['docs', '10db']);
+    } finally {
+      launched.dispose();
+      dir.cleanup();
+    }
   });
 
   // The sandboxed launch is made under a short root in the shared `/tmp`, which no sandbox can write.
