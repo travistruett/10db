@@ -16,22 +16,31 @@ export const MACOS_APP_DIR_SEGMENTS = ['Library', 'Application Support', '10db']
 export const appDirIn = (home: string): string => join(home, ...MACOS_APP_DIR_SEGMENTS);
 
 const DaemonFile = z.object({ port: z.int() });
+// The header value must survive HTTP: no whitespace or control characters anywhere.
+const Token = z
+  .string()
+  .trim()
+  .regex(/^[^\s\p{Cc}]+$/u);
 
 /** Where the running app listens and the token it takes, read from its data directory. */
 export function connectionFrom(appDir: string, readFile: (path: string) => string): Connection {
   let raw: unknown;
-  let token: string;
+  let tokenText: string;
   try {
     raw = JSON.parse(readFile(join(appDir, 'daemon.json')));
-    token = readFile(join(appDir, 'ui-token')).trim();
+    tokenText = readFile(join(appDir, 'ui-token'));
   } catch {
     throw new TendbError(
       `10db isn't running: no daemon.json or ui-token in ${appDir}. Open the 10db app.`,
     );
   }
+  const token = Token.safeParse(tokenText);
+  if (!token.success) {
+    throw new TendbError(`10db isn't running: no usable ui-token in ${appDir}. Open the 10db app.`);
+  }
   const file = DaemonFile.safeParse(raw);
   if (!file.success) throw new TendbError('daemon.json has no port. Restart the 10db app.');
-  return { base: `http://127.0.0.1:${String(file.data.port)}`, token };
+  return { base: `http://127.0.0.1:${String(file.data.port)}`, token: token.data };
 }
 
 const SkillVersionRefusal = z.object({ error: z.literal('skill_version'), message: z.string() });

@@ -1,5 +1,5 @@
 import { matchesGlob, resolve } from 'node:path';
-import { Rigor } from '@10db/contracts';
+import { BatchId, Rigor, TaskId } from '@10db/contracts';
 import { z } from 'zod';
 import {
   AccountView,
@@ -35,8 +35,6 @@ export interface CommandDeps {
   realpath(path: string): string;
 }
 
-const TASK_ID = /^tsk_[0-9a-f-]{36}$/;
-const BATCH_ID = /^bat_[0-9a-f-]{36}$/;
 // Only these settings keys may change here; secrets live in the Keychain and never pass through.
 const ACCOUNT_SETTING_KEYS = ['modelMap', 'awsProfile', 'region'];
 const DELIVERY_LABELS: Record<string, string> = {
@@ -132,14 +130,14 @@ function readJson(deps: CommandDeps, file: string): unknown {
 
 function taskId(id: string | undefined, usage: string): string {
   if (!id) throw new TendbError(`usage: ${usage}`);
-  if (!TASK_ID.test(id)) {
+  if (!TaskId.safeParse(id).success) {
     throw new TendbError(`${id} isn't a task id (tsk_…). Run context to list open tasks.`);
   }
   return id;
 }
 
 function batchId(id: string | undefined, usage: string): string {
-  if (!id || !BATCH_ID.test(id)) throw new TendbError(`usage: ${usage} (bat_…)`);
+  if (!id || !BatchId.safeParse(id).success) throw new TendbError(`usage: ${usage} (bat_…)`);
   return id;
 }
 
@@ -609,7 +607,7 @@ const COMMANDS: Record<string, Command> = {
 };
 
 const USAGE =
-  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (see the header of this file)';
+  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (commands and arguments: SKILL.md beside this file)';
 
 /** Runs one command line, as `node tendb.mjs <argv>` does. */
 export async function runCommand(argv: readonly string[], deps: CommandDeps): Promise<void> {

@@ -151,10 +151,13 @@ The builder never edits hazards by hand; you assess and fix them.
 
 ## Errors
 
-| Message                             | Do                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| 10db isn't running / couldn't reach | Ask the user to open the 10db app, then rerun                            |
-| refused the token (401)             | The app restarted; rerun once, then ask the user                         |
-| doesn't fit 10db's New Task rules   | Fix the listed fields; don't bypass the check                            |
-| failed with 400                     | The daemon's own validation; fix the draft from its message              |
-| failed with 409                     | The task has started, is done, or has dependents; the message says which |
+| Message                                          | Do                                                                                            |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| 10db isn't running / couldn't reach              | Ask the user to open the 10db app, then rerun                                                 |
+| refused the token (401)                          | The app restarted; rerun once, then ask the user                                              |
+| doesn't fit 10db's New Task rules                | Fix the listed fields; don't bypass the check                                                 |
+| failed with 400                                  | The daemon's own validation; fix the draft from its message                                   |
+| failed with 409                                  | The task has started, is done, or has dependents; the message says which                      |
+| isn't the one this 10db ships                    | The app updated. Restart 10db; if it persists, Settings › Agent skill shows the install error |
+| answered something this skill doesn't understand | The action may have happened: run `context` to check before retrying                          |
+| In Codex, the sandbox may block localhost        | Allow network access for the Codex session, then rerun                                        |

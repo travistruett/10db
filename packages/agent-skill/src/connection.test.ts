@@ -25,6 +25,17 @@ describe('connectionFrom', () => {
     expect(() => connectionFrom('/app', files(f))).toThrow(message);
   });
 
+  const tokens: { name: string; token: string }[] = [
+    { name: 'an empty token', token: '\n' },
+    { name: 'a token with a space inside', token: 'to ken' },
+    { name: 'a token with a newline inside', token: 'to\nken' },
+    { name: 'a token with a control character', token: 'to\u0007ken' },
+  ];
+  it.each(tokens)("says 10db isn't running for $name", ({ token }) => {
+    const f = files({ '/app/daemon.json': '{"port":1}', '/app/ui-token': token });
+    expect(() => connectionFrom('/app', f)).toThrow("10db isn't running");
+  });
+
   it('reads the port and trims the token', () => {
     const conn = connectionFrom(
       '/app',

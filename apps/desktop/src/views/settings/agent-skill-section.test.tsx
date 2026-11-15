@@ -115,6 +115,20 @@ describe('AgentSkillSection', () => {
     expect(toggle.hasAttribute('disabled')).toBe(true);
   });
 
+  it('shows the switch off and nothing installed when the builder has turned it off', async () => {
+    serving(
+      status({
+        enabled: false,
+        installedVersion: null,
+        links: [link('claude_code', { state: 'missing' }), link('codex', { state: 'missing' })],
+      }),
+    );
+    renderWithDaemon(<AgentSkillSection />);
+    expect(await screen.findByText('Not installed')).toBeTruthy();
+    const toggle = screen.getByRole('switch', { name: 'Agents in any repo can use 10db' });
+    expect(toggle).toHaveProperty('checked', false);
+  });
+
   it('sends the switch to the daemon', async () => {
     const puts = serving(status());
     renderWithDaemon(<AgentSkillSection />);
