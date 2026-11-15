@@ -76,6 +76,12 @@ describe('yourMcpConfigHash', () => {
       ],
     ),
     [
+      'an @ after a ? is not userinfo, so it does not hash like the host after it',
+      { ...stdio, env: { ...stdio.env, DB_URL: 'http://a.example?x@evil.example/' } },
+      { ...stdio, env: { ...stdio.env, DB_URL: 'http://evil.example/' } },
+      false,
+    ],
+    [
       'a changed host in a URL with userinfo does',
       { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h1/db' } },
       { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h2/db' } },

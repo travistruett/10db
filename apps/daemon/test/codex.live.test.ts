@@ -70,6 +70,7 @@ import {
   PROBE_ARG,
   PROBE_TOKEN,
   PROBES_HELD,
+  PS_RAN,
   YOUR_MCP_PROBE_SERVER,
 } from './your-mcp-probe';
 
@@ -1053,6 +1054,7 @@ describe.skipIf(!live)(
       expect(server.seen.args).toContain(PROBE_ARG);
       expect(server.seen.env).toContain(PROBE_TOKEN);
       expect(server.seen.file).toContain(PROBE_TOKEN);
+      expect(outputs[1]).toMatch(PS_RAN);
       for (const held of PROBES_HELD) expect.soft(outputs[1], held).toContain(held);
     });
 
@@ -1073,8 +1075,10 @@ describe.skipIf(!live)(
       );
       expect(outputs[0]).toContain('token=set');
       expect(server.seen.pid).toBeGreaterThan(0);
+      expect(server.seen.args).toContain(PROBE_ARG);
       expect(server.seen.env).toContain(PROBE_TOKEN);
       expect(server.seen.file).toContain(PROBE_TOKEN);
+      expect(outputs[1]).toMatch(PS_RAN);
       for (const held of PROBES_HELD) expect.soft(outputs[1], held).toContain(held);
     });
 

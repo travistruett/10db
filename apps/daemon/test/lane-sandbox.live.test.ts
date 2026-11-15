@@ -71,6 +71,7 @@ import {
   PROBE_ARG,
   PROBE_TOKEN,
   PROBES_HELD,
+  PS_RAN,
   YOUR_MCP_PROBE_SERVER,
 } from './your-mcp-probe';
 
@@ -1025,6 +1026,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       expect(control.args).toContain(PROBE_ARG);
       expect(control.env).toContain(PROBE_TOKEN);
       expect(control.file).toContain(PROBE_TOKEN);
+      expect(run.probeOutput).toMatch(PS_RAN);
       for (const held of PROBES_HELD) expect.soft(run.probeOutput, held).toContain(held);
     } finally {
       rmSync(join(sandboxRoots().files, LANE_WROTE), { force: true });

@@ -4,17 +4,26 @@ import { loadsCode } from '../sandbox';
 import { SENSITIVE_NAME } from '../sessions';
 import type { DeclaredYourServer } from './your-mcp-entry';
 
-/** A value that is a URL with a user and password in it. */
-const URL_WITH_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]+@/i;
+/** Names of programs, commands and sockets: a changed one runs something else, so an approval covers it. */
+const NEVER_SECRET = /ASKPASS|_CMD$|_COMMAND$|^SSH_AUTH_SOCK$/i;
 
-/** The value with a URL's userinfo taken out, so a rotated password doesn't ask again but a new host does. */
-const withoutUserinfo = (value: string): string =>
-  URL_WITH_USERINFO.test(value)
-    ? value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i, '$1')
-    : value;
+/**
+ * The value with a URL's userinfo taken out, so a rotated password doesn't ask again but a new host does. Only
+ * what the URL parser reports as a user or password goes; a value that doesn't parse is kept as it is.
+ */
+const withoutUserinfo = (value: string): string => {
+  try {
+    const url = new URL(value);
+    if (url.username === '' && url.password === '') return value;
+    return `${url.protocol}//${url.host}${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value;
+  }
+};
 
 /** Whether an env name holds a secret: named like one, and never a name that makes a program load code. */
-const isSecretName = (name: string): boolean => !loadsCode(name) && SENSITIVE_NAME.test(name);
+const isSecretName = (name: string): boolean =>
+  !loadsCode(name) && !NEVER_SECRET.test(name) && SENSITIVE_NAME.test(name);
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>

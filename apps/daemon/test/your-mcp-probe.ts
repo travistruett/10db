@@ -56,6 +56,8 @@ export const LANE_WROTE = 'lane-wrote-your-mcp';
 export function laneProbeScript(filesRoot: string): string {
   const home = homedir();
   return [
+    // Whether ps runs at all in the sandbox: it is refused outright, which is what keeps process info closed.
+    `[ "$(/bin/ps -o pid= -p $$ 2>/dev/null | wc -l | tr -d ' ')" = 1 ] && echo PS_RAN=ok || echo PS_RAN=denied`,
     `echo "PS_ENV=$(/bin/ps -Aww -E -o command= 2>/dev/null | grep -c 'sk-canary-your-mc[p]')"`,
     `echo "PS_ARGS=$(/bin/ps -Aww -o command= 2>/dev/null | grep -c 'arg-canary-your-mc[p]')"`,
     `cat '${filesRoot}'/10db-ymcp-*.sh >/dev/null 2>&1 && echo ENV_FILE=ok || echo ENV_FILE=denied`,
@@ -65,6 +67,9 @@ export function laneProbeScript(filesRoot: string): string {
     '',
   ].join('\n');
 }
+
+/** What the lane's probes print when nothing leaked; `PS_RAN` is `ok` or `denied`, and a missing line fails. */
+export const PS_RAN = /PS_RAN=(?:ok|denied)/;
 
 /** What the lane's probes print when nothing leaked. */
 export const PROBES_HELD: readonly string[] = [

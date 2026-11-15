@@ -29,7 +29,7 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const EnvName = z.string().regex(ENV_NAME, 'must be a variable name');
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
 export const SENSITIVE_NAME =
-  /^(?!.*ASKPASS)(?!.*_(?:CMD|COMMAND)$)(?!SSH_AUTH_SOCK$)(?:(?:ANTHROPIC_|CLAUDE_|AWS_)|.*(?:TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL|DSN|_KEY$|_PAT$|(?:^|_)(?:PASSWD|PASSPHRASE|AUTH)(?:_|$)))/i;
+  /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASS|AUTH|DSN|API_?KEY|CREDENTIAL|_KEY$|_PAT$/i;
 
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;

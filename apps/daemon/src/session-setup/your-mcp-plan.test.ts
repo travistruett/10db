@@ -279,7 +279,7 @@ describe('planYourMcp', () => {
       const on = plan(local, { localBinding: true });
       expect(on.remote).toEqual({});
       expect(on.leftOut[0]?.why).toBe(
-        "it sends its headers to this Mac, where this project's commands may listen; turn the project's loopback off to use it",
+        "it sends its headers to this Mac, where a project that lets its lanes bind local ports may have commands listening; turn that project's loopback off to use it",
       );
       expect(Object.keys(plan(local, { localBinding: false }).remote)).toEqual(['local']);
     },
@@ -301,7 +301,7 @@ describe('planYourMcp', () => {
     const on = plan(local, { localBinding: true, loginEnv });
     expect(on.remote).toEqual({});
     expect(on.leftOut[0]?.why).toBe(
-      "it sends its headers to this Mac, where this project's commands may listen; turn the project's loopback off to use it",
+      "it sends its headers to this Mac, where a project that lets its lanes bind local ports may have commands listening; turn that project's loopback off to use it",
     );
     expect(Object.keys(plan(local, { localBinding: false, loginEnv }).remote)).toEqual(['local']);
   });

@@ -283,7 +283,7 @@ export function planYourMcp(args: {
       } else {
         const planned = remotePlan(entry, declared, args.loginEnv);
         if (args.localBinding && isLoopback(planned.url) && sendsCredentials(declared.url, planned))
-          return "it sends its headers to this Mac, where this project's commands may listen; turn the project's loopback off to use it";
+          return "it sends its headers to this Mac, where a project that lets its lanes bind local ports may have commands listening; turn that project's loopback off to use it";
         remote[entry.name] = planned;
       }
     } catch (error) {
