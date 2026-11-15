@@ -231,7 +231,13 @@ describe('the areas and hazards editor', () => {
   describe('the role and route of an area', () => {
     const roled = projectDto({
       areas: [
-        { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+        {
+          name: 'people',
+          globs: ['app/people/**'],
+          role: 'page',
+          route: '/people',
+          label: 'Folks',
+        },
         { name: 'ui', globs: ['src/ui/**'], role: 'shared' },
         { name: 'api', globs: ['src/api/**'] },
       ],
@@ -269,6 +275,51 @@ describe('the areas and hazards editor', () => {
       );
       expect(screen.queryByRole('textbox', { name: 'Area 2 route' })).toBeNull();
       expect(screen.queryByRole('textbox', { name: 'Area 3 route' })).toBeNull();
+    });
+
+    it("shows a page's label, with the capitalised name as the placeholder, and a label on a page only", async () => {
+      serve([]);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      expect(screen.getByRole('textbox', { name: 'Area 1 label' })).toHaveProperty(
+        'value',
+        'Folks',
+      );
+      expect(screen.queryByRole('textbox', { name: 'Area 2 label' })).toBeNull();
+      choose(3, 'page');
+      expect(screen.getByRole('textbox', { name: 'Area 3 label' })).toHaveProperty(
+        'placeholder',
+        'Api',
+      );
+    });
+
+    it('saves an edited label, and an emptied one as none', async () => {
+      const patched: unknown[] = [];
+      serve(patched);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      type('Area 1 label', 'Team');
+      choose(3, 'page');
+      type('Area 3 label', '  ');
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      await waitFor(() => {
+        expect(patched).toEqual([
+          {
+            areas: [
+              {
+                name: 'people',
+                globs: ['app/people/**'],
+                role: 'page',
+                route: '/people',
+                label: 'Team',
+              },
+              { name: 'ui', globs: ['src/ui/**'], role: 'shared' },
+              { name: 'api', globs: ['src/api/**'], role: 'page' },
+            ],
+            hazards: [],
+          },
+        ]);
+      });
     });
 
     it('saves a changed role and route, and drops the route of an area that is no longer a page', async () => {

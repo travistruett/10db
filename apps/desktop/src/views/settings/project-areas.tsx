@@ -27,6 +27,8 @@ interface AreaDraft extends PathsDraft {
   readonly role: RoleChoice;
   /** A page's route; kept while the role changes, sent only for a page. */
   readonly route: string;
+  /** A page's label; kept while the role changes, sent only for a page. */
+  readonly label: string;
 }
 interface HazardDraft extends PathsDraft {
   readonly perCopy: boolean;
@@ -46,6 +48,7 @@ const areaDrafts = (project: ProjectDto): AreaDraft[] =>
     catchAll: a.catchAll === true,
     role: a.role ?? '',
     route: a.route ?? '',
+    label: a.label ?? '',
   }));
 const hazardDrafts = (project: ProjectDto): HazardDraft[] =>
   project.hazards.map((h) => ({
@@ -65,7 +68,7 @@ function toPatch(
       name: a.name.trim(),
       globs: lines(a.paths),
       ...(a.catchAll ? { catchAll: true } : {}),
-      ...roleFields(a.role, a.route),
+      ...roleFields(a.role, a.route, a.label),
     })),
     hazards: hazards.map((h) => ({
       name: h.name.trim(),
@@ -79,7 +82,7 @@ function toPatch(
   const [list, index, field] = issue?.path ?? [];
   const where =
     typeof index === 'number' && (list === 'areas' || list === 'hazards')
-      ? `${list === 'areas' ? 'Area' : 'Hazard'} ${String(index + 1)}${field === 'globs' ? ' paths' : field === 'name' ? ' name' : field === 'route' ? ' route' : ''}`
+      ? `${list === 'areas' ? 'Area' : 'Hazard'} ${String(index + 1)}${field === 'globs' ? ' paths' : field === 'name' ? ' name' : field === 'route' ? ' route' : field === 'label' ? ' label' : ''}`
       : 'Areas and hazards';
   return { error: `${where}: ${issue?.message ?? 'is not valid'}` };
 }
@@ -212,8 +215,10 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
             />
             <AreaRoleFields
               index={index + 1}
+              name={area.name}
               role={area.role}
               route={area.route}
+              label={area.label}
               onChange={(next) => {
                 setArea(index, next);
               }}
@@ -227,7 +232,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
             onClick={() => {
               setAreas((all) => [
                 ...all,
-                { name: '', paths: '', catchAll: false, role: '', route: '' },
+                { name: '', paths: '', catchAll: false, role: '', route: '', label: '' },
               ]);
             }}
           >
