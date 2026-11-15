@@ -5,7 +5,7 @@ import type {
   PreToolUseHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { DeniedBy } from '@10db/contracts';
+import { DeniedBy, type LimitName } from '@10db/contracts';
 import type { Logger } from '../log';
 import { toHookOutput, toPermissionResult } from './claude-mapping';
 import type { ClaudeDenial } from './claude-tool-calls';
@@ -110,6 +110,15 @@ export function isClassifierEscalation(options: unknown): boolean {
 }
 
 /** A refusal 10db made, as a tool call records who denied it. */
+/** A hook answer that is 10db's judge refusing the call at a limit (null: it named none), not a rule. */
+export interface JudgedHookAnswer {
+  readonly output: HookJSONOutput;
+  readonly judged: { readonly limit: LimitName | null };
+}
+
+const isJudgedAnswer = (answer: HookJSONOutput | JudgedHookAnswer): answer is JudgedHookAnswer =>
+  'judged' in answer;
+
 const tenDb = (reason: string): ClaudeDenial => ({
   by: DeniedBy.TenDb,
   reason,
@@ -196,7 +205,7 @@ export function preToolUseHook(hook: {
   readonly judge: (
     input: PreToolUseHookInput,
     signal: AbortSignal,
-  ) => HookJSONOutput | Promise<HookJSONOutput>;
+  ) => HookJSONOutput | JudgedHookAnswer | Promise<HookJSONOutput | JudgedHookAnswer>;
   readonly beforeCall?: (input: PreToolUseHookInput) => void;
   readonly onDenied?: OnDenied;
   /**
@@ -216,18 +225,27 @@ export function preToolUseHook(hook: {
   const answer = async (
     hookInput: PreToolUseHookInput,
     signal: AbortSignal,
-  ): Promise<{ readonly output: HookJSONOutput; readonly told: boolean }> => {
+  ): Promise<{
+    readonly output: HookJSONOutput;
+    readonly told: boolean;
+    readonly judged?: JudgedHookAnswer['judged'];
+  }> => {
     const untold = (output: HookJSONOutput) => ({ output, told: false });
     if (!(await hook.gate.verified) || hook.gate.refused())
       return untold(refuse(BILLING_UNVERIFIED));
     let output: HookJSONOutput;
+    let judged: JudgedHookAnswer['judged'] | undefined;
     let settling: { decision: Promise<ToolDecision>; input: Record<string, unknown> } | null = null;
     // The model's own JSON, read here: a call whose input is no object is left to Claude Code.
     const input = InputRecord.safeParse(hookInput.tool_input);
     try {
       hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
       hook.beforeCall?.(hookInput);
-      output = await hook.judge(hookInput, signal);
+      const answered = await hook.judge(hookInput, signal);
+      if (isJudgedAnswer(answered)) {
+        output = answered.output;
+        judged = answered.judged;
+      } else output = answered;
       // A slow judge can answer after the session was refused or the call was cancelled.
       if (hook.gate.refused()) return untold(refuse(BILLING_UNVERIFIED));
       if (signal.aborted) return untold(refuse(CANCELLED_WHILE_JUDGED));
@@ -241,7 +259,8 @@ export function preToolUseHook(hook: {
         refuse(`10db's guard failed: ${error instanceof Error ? error.message : String(error)}`),
       );
     }
-    if (settling === null) return untold(output);
+    if (settling === null)
+      return { output, told: false, ...(judged === undefined ? {} : { judged }) };
     hook.cwds.take(hookInput.tool_use_id);
     const decision = await settling.decision;
     // The session can be refused while the answer was pending.
@@ -268,9 +287,16 @@ export function preToolUseHook(hook: {
     hooks: [
       async (hookInput, _toolUseId, { signal }) => {
         if (hookInput.hook_event_name !== 'PreToolUse') return {};
-        const { output, told } = await answer(hookInput, signal);
+        const { output, told, judged } = await answer(hookInput, signal);
         const reason = told ? null : deniedBy(output);
-        if (reason !== null) onDenied(hookInput.tool_use_id, tenDb(reason));
+        if (reason !== null)
+          onDenied(
+            hookInput.tool_use_id,
+            judged === undefined
+              ? tenDb(reason)
+              : // A lane's skip is final: no go-ahead clears it.
+                { by: DeniedBy.Judge, reason, limit: judged.limit, soft: false },
+          );
         return output;
       },
     ],
