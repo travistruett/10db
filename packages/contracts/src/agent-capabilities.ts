@@ -36,7 +36,7 @@ export const AgentCapabilitiesDto = z.strictObject({
   plan: z.boolean(),
   reasoning: z.boolean(),
   subagents: z.boolean(),
-  /** The agent searches the web: Codex's web search stays off until a live check. */
+  /** The agent searches the web: Codex's runs live on OpenAI's servers, under the Web switch. */
   webSearch: z.boolean(),
   modelSwitch: z.enum(ModelSwitch),
   /** The builder can take the session over in a terminal. */

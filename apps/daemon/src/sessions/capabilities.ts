@@ -59,8 +59,8 @@ export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = 
   plan: true,
   reasoning: true,
   subagents: false,
-  // `cached` waits on a live check that it fetches no page the agent names.
-  webSearch: false,
+  // Live search runs on OpenAI's servers, so 10db's judge never sees a search or page URL before it is fetched.
+  webSearch: true,
   modelSwitch: ModelSwitch.NextTurn,
   takeover: true,
   costUsd: false,

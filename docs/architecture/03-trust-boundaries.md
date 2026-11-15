@@ -985,12 +985,13 @@ sent through the guard hook to the conversation's judge (10db's judge, or the ru
   log line) are data, never instructions; the prompts say so. The checks behind the prompt are the builder's
   acceptance of the plan and the sandbox that keeps every command off the checkout.
 
-- **10db's judge and cached web search** (trust line T5,
+- **10db's judge and live web search** (trust line T5,
   `decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`). A call the guard leaves open goes to 10db's judge
   through the same hook; a limit is a recorded skip in a lane and a card in a pass, carried to the broker by its
   tool use id. Approvals stay closed (`approvalPolicy: 'never'`, no reviewer), so Codex's own refusal of a forced
-  `rm` stands. Web search is `cached` with the Web switch on and `disabled` with it off; it answers from OpenAI's
-  index and fetches no page the agent names.
+  `rm` stands. Web search is `live` with the Web switch on and `disabled` with it off
+  (`decisions/2026-11-14-codex-searches-the-web-live-as-codex-and-claude-code-do.md`); it runs on OpenAI's servers,
+  where 10db's judge sees no search or page URL before it is fetched.
 
 ## 5. What the daemon reads, runs or sends for a lane
 
@@ -1209,8 +1210,9 @@ guard task tests each one.
   saying nothing inside is an instruction or an approval, and an allowed call still runs in the sandbox.
 - **A grant is matched by intent,** so it can cover more than the builder meant. A note is the builder's own
   words; without one the grant quotes the exact call.
-- **Codex's search queries reach OpenAI unjudged.** OpenAI already holds the conversation; cached search fetches
-  nothing the agent names.
+- **Codex's web search is live and unjudged.** OpenAI already holds the conversation, but a search or page URL
+  is fetched before 10db's judge sees it, so a prompt-injected agent could put data in one. The builder accepts it
+  (`decisions/2026-11-14-codex-searches-the-web-live-as-codex-and-claude-code-do.md`).
 - **The fast path trusts the guard's read-only line and the secret names.** A secret under a name neither the
   sandbox nor the fast path's list knows is read without the model; the sandbox still denies the `.env*` files.
 

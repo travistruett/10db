@@ -87,8 +87,8 @@ export interface YourSessionServer {
   readonly codex: CodexServerExtras;
 }
 
-/** The web search modes 10db sends Codex; `live` and `indexed` are never among them. */
-export type CodexWebSearch = Extract<WebSearchMode, 'cached' | 'disabled'>;
+/** The web search modes 10db sends Codex; `cached` and `indexed` are never among them. */
+export type CodexWebSearch = Extract<WebSearchMode, 'live' | 'disabled'>;
 
 /** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
 export type LanePermissionMode = 'default' | 'auto';
@@ -157,8 +157,8 @@ export interface AgentSessionCore {
    */
   readonly policy: TrustPolicy;
   /**
-   * Codex's web search for this thread: `cached` with the Web switch on, answering from OpenAI's index and
-   * fetching no page the agent names; `disabled` with it off, as when absent. Claude ignores it: its web is
+   * Codex's web search for this thread: `live` with the Web switch on, run on OpenAI's servers where 10db's
+   * judge sees no search or page URL; `disabled` with it off, as when absent. Claude ignores it: its web is
    * WebSearch and WebFetch, judged through the hook.
    */
   readonly webSearch?: CodexWebSearch;

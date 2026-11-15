@@ -1,5 +1,6 @@
 import {
   AccountKind,
+  TRUST_DEFAULTS,
   ChatToolName,
   ConversationItemKind,
   JudgeKind,
@@ -11,6 +12,7 @@ import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { createJudge, type Judge } from '../judge';
+import { setAppTrustSwitches } from '../permissions';
 import { silentLogger } from '../log';
 import { EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { ExploreSessionSpec } from '../sessions';
@@ -140,20 +142,35 @@ describe("a chat's session", () => {
     },
   );
 
-  // Web search stays off on Codex until a live check: a chat there is never told it searches the web.
+  // Codex's web search follows the Web switch as a lane's does, and its chat is told only what it has. A Claude
+  // chat's web is its hook's, so the switch doesn't move what it is told.
   it.each([
-    { kind: AccountKind.ClaudeSubscription, web: true },
-    { kind: AccountKind.CodexSignin, web: false },
-  ])('on a $kind account tells the agent it searches the web: $web', async ({ kind, web }) => {
-    w = chatWorld({ prepare: prepared, judge: JudgeKind.Tendb });
-    w.launchOn(kind);
-    const chat = w.open();
-    w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });
-    await w.engine.settled(chat.conversationId);
-    const prompt = w.adapter.shapeSessions[0]?.spec.profile.systemPrompt ?? '';
-    expect(prompt.includes('search the web')).toBe(web);
-    expect(prompt.includes('no web search')).toBe(!web);
-  });
+    { kind: AccountKind.ClaudeSubscription, web: true, says: true, mode: 'live' },
+    { kind: AccountKind.ClaudeSubscription, web: false, says: true, mode: 'disabled' },
+    { kind: AccountKind.CodexSignin, web: true, says: true, mode: 'live' },
+    { kind: AccountKind.CodexSignin, web: false, says: false, mode: 'disabled' },
+  ])(
+    'on a $kind account with the Web switch $web the chat asks for web search $mode and says it searches: $says',
+    async ({ kind, web, says, mode }) => {
+      w = chatWorld({ prepare: prepared, judge: JudgeKind.Tendb });
+      w.launchOn(kind);
+      w.state.write((ctx) => {
+        setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, web });
+      });
+      const chat = w.open();
+      w.chat.send(chat.conversationId, {
+        text: 'Why does login fail?',
+        mentions: [],
+        pictures: [],
+      });
+      await w.engine.settled(chat.conversationId);
+      const spec = w.adapter.shapeSessions[0]?.spec;
+      expect(spec?.webSearch).toBe(mode);
+      const prompt = spec?.profile.systemPrompt ?? '';
+      expect(prompt.includes('search the web')).toBe(says);
+      expect(prompt.includes('no web search')).toBe(!says);
+    },
+  );
 
   it("runs on the chat's pick, or the plan role's when it has none", async () => {
     expect((await firstSpec(JudgeKind.Native, 'claude-sonnet-5-5')).model).toBe(
