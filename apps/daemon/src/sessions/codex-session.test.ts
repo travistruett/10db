@@ -164,6 +164,7 @@ function specOf(over: Partial<LaneSessionSpec> = {}): LaneSessionSpec {
       identity: 'me@example.com · ws-1',
     },
     projectMcpServers: {},
+    yourMcpServers: {},
     sandbox,
     mcp: { url: 'http://127.0.0.1:7777/mcp', token: 'tok-secret-1', toolTimeoutMs: 905_000 },
     preToolUse: () => ({ decision: 'allow' }),

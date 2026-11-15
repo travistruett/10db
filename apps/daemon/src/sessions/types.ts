@@ -14,7 +14,7 @@ import type {
 import type { AccountExpectation } from '../environment';
 import type { WebSearchMode } from './codex-generated/ts/WebSearchMode';
 import type { GuardVerdict } from '../guard';
-import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
+import type { LaneSandboxSpec, SandboxedMcpServer, YourMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { AgentCapabilities } from './capabilities';
 import type { RemoteMcpServer } from './project-mcp';
@@ -79,6 +79,13 @@ export interface CodexServerExtras {
 
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
+
+/** One of the builder's own MCP servers as a session takes it: how to connect, and what only Codex applies. */
+export interface YourSessionServer {
+  /** A stdio server is 10db's launch from the builder's home; a remote one is its url and headers. */
+  readonly connect: YourMcpServer | RemoteMcpServer;
+  readonly codex: CodexServerExtras;
+}
 
 /** The web search modes 10db sends Codex; `live` and `indexed` are never among them. */
 export type CodexWebSearch = Extract<WebSearchMode, 'cached' | 'disabled'>;
@@ -157,6 +164,11 @@ export interface AgentSessionCore {
   readonly webSearch?: CodexWebSearch;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
+  /**
+   * The builder's own approved MCP servers, passed after the project's and before 10db's. They run outside
+   * the sandbox with the builder's access, so no allow rule ever names their tools: each call is judged.
+   */
+  readonly yourMcpServers: Readonly<Record<string, YourSessionServer>>;
   /**
    * Runs before every tool call, before permission rules. An explore session's call also names the
    * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.

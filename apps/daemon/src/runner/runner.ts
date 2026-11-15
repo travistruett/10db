@@ -3047,6 +3047,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         env: launch.env,
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
+        yourMcpServers: {},
         // Cached web search has had no live check that it opens no page, so no Codex session searches.
         webSearch: 'disabled',
         sandbox: laneSession?.spec ?? null,

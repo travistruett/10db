@@ -596,6 +596,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
+          yourMcpServers: {},
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })

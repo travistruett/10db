@@ -180,15 +180,24 @@ export function spawnClaude(
   return child;
 }
 
-/** 10db's own server and the repo's approved ones, keyed by name. 10db's is written last, so it keeps its name. */
+/**
+ * The repo's approved servers, then the builder's own, then 10db's, keyed by name. 10db's is written last,
+ * so it keeps its name.
+ */
 export function buildMcpServers(
-  spec: Pick<AgentSessionCore, 'projectMcpServers' | 'mcp'>,
+  spec: Pick<AgentSessionCore, 'projectMcpServers' | 'yourMcpServers' | 'mcp'>,
 ): Record<string, McpServerConfig> {
   return {
     ...Object.fromEntries(
       Object.entries(spec.projectMcpServers).map(([name, server]) => [
         name,
         toSdkMcpServer(server),
+      ]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(spec.yourMcpServers).map(([name, server]) => [
+        name,
+        toSdkMcpServer(server.connect),
       ]),
     ),
     [CLAUDE_MCP_SERVER]: {
@@ -430,6 +439,9 @@ export const LANE_STARTS: StartPlan = {
 /** Plan's conversation is the builder's to wait on: one start, which waits 30 s. */
 export const EXPLORE_STARTS: StartPlan = { waitsMs: [30_000], backoffMs: [] };
 
+/** How long the preflight waits for the status of the builder's own servers. */
+const MCP_STATUS_WAIT_MS = 5_000;
+
 /** A line for the prompt naming repo servers that didn't connect, so the agent doesn't hunt for their tools. */
 function laneFailedServersNote(names: readonly string[]): string {
   return (
@@ -444,6 +456,20 @@ function exploreFailedServersNote(names: readonly string[]): string {
     `Note from 10db: these MCP servers of the project failed to connect and are not in this session: ${names.join(', ')}. ` +
     "Don't look for their tools; tell the builder when the plan needs one."
   );
+}
+
+/** A line naming the builder's own servers that didn't start, apart from the repo's, so the agent doesn't hunt for them. */
+function yourServersNote(failed: readonly string[], needAuth: readonly string[]): string {
+  const lines: string[] = [];
+  if (failed.length > 0)
+    lines.push(
+      `Note from 10db: these of your own MCP servers failed to connect and are not in this session: ${failed.join(', ')}. Don't look for their tools.`,
+    );
+  for (const name of needAuth)
+    lines.push(
+      `Note from 10db: ${name} signs in with OAuth, which 10db doesn't support yet. It is not in this session; don't look for its tools.`,
+    );
+  return lines.join('\n');
 }
 
 /**
@@ -873,14 +899,37 @@ function startSession(
       resolvePreflight(false);
       return;
     }
-    const repoLeftOut = leftOut.filter((name) => name !== CLAUDE_MCP_SERVER);
-    const logged = rules.failedServersLogTendb ? leftOut : repoLeftOut;
+    const yourNames = Object.keys(spec.yourMcpServers);
+    const repoLeftOut = leftOut.filter(
+      (name) => name !== CLAUDE_MCP_SERVER && !yourNames.includes(name),
+    );
+    const yourFailed = yourNames.filter((name) => leftOut.includes(name));
+    const yourNeedAuth: string[] = [];
+    if (yourNames.length > 0) {
+      // Startup doesn't block, so a server that signs in with OAuth shows as `needs-auth` here, once.
+      const status = await settleWithin(clock, q.mcpServerStatus(), MCP_STATUS_WAIT_MS);
+      for (const server of status ?? []) {
+        if (!yourNames.includes(server.name) || yourFailed.includes(server.name)) continue;
+        if (server.status === 'needs-auth') yourNeedAuth.push(server.name);
+        else if (server.status === 'failed') yourFailed.push(server.name);
+      }
+      if (halted()) {
+        resolvePreflight(false);
+        return;
+      }
+    }
+    const logged = rules.failedServersLogTendb ? leftOut : [...repoLeftOut, ...yourFailed];
     if (logged.length > 0) log.warn({ servers: logged }, rules.failedServersLog);
+    if (yourNeedAuth.length > 0) log.warn({ servers: yourNeedAuth }, 'your mcp servers need OAuth');
+    const notes = [
+      ...(repoLeftOut.length > 0 ? [rules.failedServersNote(repoLeftOut)] : []),
+      ...(yourFailed.length + yourNeedAuth.length > 0
+        ? [yourServersNote(yourFailed, yourNeedAuth)]
+        : []),
+    ];
     input.push(
       userMessage(
-        repoLeftOut.length > 0
-          ? `${spec.prompt}\n\n${rules.failedServersNote(repoLeftOut)}`
-          : spec.prompt,
+        notes.length > 0 ? `${spec.prompt}\n\n${notes.join('\n')}` : spec.prompt,
         undefined,
         spec.images ?? [],
         session.profile === 'lane' ? session.spec.promptUuid : undefined,

@@ -435,6 +435,7 @@ async function runLane(opts: {
       env,
       account: launch.expect,
       projectMcpServers: lane.mcpServers,
+      yourMcpServers: {},
       sandbox: lane.spec,
       setup: { plugins: lane.setup.pluginDirs, skillRoots: lane.setup.skillRoots },
       // Nothing listens here; the session runs without 10db's tools.

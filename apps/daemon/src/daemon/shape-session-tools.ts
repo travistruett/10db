@@ -195,6 +195,7 @@ export function createShapePreparer(deps: {
       return {
         sandbox: null,
         projectMcpServers: {},
+        yourMcpServers: {},
         note: [
           `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
           leftOutNote(setupPlan.leftOut),

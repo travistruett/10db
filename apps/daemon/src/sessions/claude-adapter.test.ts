@@ -50,7 +50,7 @@ import { CLAUDE_HOOK_TIMEOUT_SECONDS } from './claude-session-hooks';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
 import type { GuardVerdict } from '../guard';
-import type { LaneSandboxSpec } from '../sandbox';
+import { launchYourMcpServers, YourMcpServer, type LaneSandboxSpec } from '../sandbox';
 import {
   CompletionError,
   type SessionEvent,
@@ -59,6 +59,7 @@ import {
   type LaneProfile,
   type LaneSessionSpec,
   type ToolDecision,
+  type YourSessionServer,
 } from './types';
 
 type LaneOverrides = Partial<Omit<LaneSessionSpec, 'profile'>> & {
@@ -84,6 +85,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
       identity: 'builder@example.com',
     },
     projectMcpServers: {},
+    yourMcpServers: {},
     sandbox: null,
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -125,6 +127,7 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
     sandbox: null,
     projectMcpServers: {},
+    yourMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),
@@ -504,6 +507,167 @@ describe('buildQueryOptions', () => {
       }
     },
   );
+
+  describe("the builder's own MCP servers", () => {
+    function mine(): {
+      server: YourSessionServer['connect'];
+      cleanup: () => void;
+    } {
+      const dir = tempDir('your-mcp-session');
+      const launched = launchYourMcpServers({
+        home: dir.path,
+        filesRoot: dir.path,
+        laneWritable: [],
+        servers: {
+          mine: {
+            command: 'npx',
+            args: ['-y', 'pkg'],
+            cwd: null,
+            env: { PATH: '/usr/bin:/bin', TOKEN: 'sk-canary' },
+            declaredEnv: ['TOKEN'],
+          },
+        },
+      });
+      const server = launched.servers['mine'];
+      if (!server) throw new Error('the probe server was refused');
+      return {
+        server,
+        cleanup: () => {
+          launched.dispose();
+          dir.cleanup();
+        },
+      };
+    }
+    const noExtras = {
+      enabledTools: null,
+      disabledTools: [],
+      startupTimeoutSec: null,
+      toolTimeoutSec: null,
+    };
+
+    it('passes your stdio server as its launch, with no env block', () => {
+      const made = mine();
+      try {
+        const servers = buildMcpServers(
+          spec({ yourMcpServers: { mine: { connect: made.server, codex: noExtras } } }),
+        );
+        expect(servers['mine']).toEqual({
+          type: 'stdio',
+          command: '/usr/bin/env',
+          args: made.server instanceof YourMcpServer ? made.server.launch().args : [],
+        });
+        expect(JSON.stringify(servers['mine'])).not.toContain('sk-canary');
+      } finally {
+        made.cleanup();
+      }
+    });
+
+    it('passes your http server with its headers', () => {
+      const servers = buildMcpServers(
+        spec({
+          yourMcpServers: {
+            docs: {
+              connect: { type: 'http', url: 'https://docs.example/mcp', headers: { A: 'b' } },
+              codex: noExtras,
+            },
+          },
+        }),
+      );
+      expect(servers['docs']).toEqual({
+        type: 'http',
+        url: 'https://docs.example/mcp',
+        headers: { A: 'b' },
+      });
+    });
+
+    it('writes the project, then yours, then 10db last, so no server takes 10db’s name', () => {
+      const servers = buildMcpServers(
+        spec({
+          projectMcpServers: {
+            repo: { type: 'http', url: 'https://repo.example/mcp', headers: null },
+          },
+          yourMcpServers: {
+            mine: {
+              connect: { type: 'sse', url: 'https://mine.example/sse', headers: null },
+              codex: noExtras,
+            },
+            [CLAUDE_MCP_SERVER]: {
+              connect: { type: 'http', url: 'https://impostor.example/mcp', headers: null },
+              codex: noExtras,
+            },
+          },
+        }),
+      );
+      expect(Object.keys(servers)).toEqual(['repo', 'mine', CLAUDE_MCP_SERVER]);
+      expect(servers[CLAUDE_MCP_SERVER]).toMatchObject({ url: 'http://127.0.0.1:4317/mcp' });
+    });
+
+    it('allows no tool of your servers by rule', () => {
+      const options = buildQueryOptions(
+        spec({
+          yourMcpServers: {
+            mine: {
+              connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+              codex: noExtras,
+            },
+          },
+        }),
+        deps,
+      );
+      expect(options.allowedTools).toEqual(['Read', 'mcp__10db__*']);
+      expect(JSON.stringify(options.allowedTools)).not.toContain('mcp__mine');
+    });
+
+    async function noteFor(status: readonly McpServerStatus[], errors: Record<string, string>) {
+      const fake = fakeQuery({
+        messages: [initMessage()],
+        mcpSet: { added: [CLAUDE_MCP_SERVER], removed: [], errors },
+        mcpStatus: status,
+      });
+      const adapter = createClaudeAdapter({
+        claudePath: '/usr/local/bin/claude',
+        pluginDir: '/harness',
+        logger: silentLogger,
+        query: fake.query,
+        allowUnsandboxed: true,
+      });
+      await collect(
+        adapter.open(
+          spec({
+            projectMcpServers: {
+              repo: { type: 'http', url: 'https://repo.example/mcp', headers: null },
+            },
+            yourMcpServers: {
+              mine: {
+                connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+                codex: noExtras,
+              },
+              oauthy: {
+                connect: { type: 'http', url: 'https://oauthy.example/mcp', headers: null },
+                codex: noExtras,
+              },
+            },
+          }),
+        ).events,
+      );
+      return JSON.stringify(fake.record.inputs[0]?.message.content);
+    }
+
+    it("names a failed server of yours apart from the repo's", async () => {
+      const prompt = await noteFor([], { repo: 'x', mine: 'x' });
+      expect(prompt).toContain("these MCP servers from the repo's .mcp.json failed to connect");
+      expect(prompt).toMatch(/repo\. /);
+      expect(prompt).toContain(
+        'these of your own MCP servers failed to connect and are not in this session: mine.',
+      );
+    });
+
+    it('names your server that needs OAuth with the OAuth reason', async () => {
+      const prompt = await noteFor([{ name: 'oauthy', status: 'needs-auth' }], {});
+      expect(prompt).toContain("oauthy signs in with OAuth, which 10db doesn't support yet.");
+      expect(prompt).not.toContain('failed to connect');
+    });
+  });
 
   it.each<[string, LaneOverrides]>([
     ['an unsandboxed', {}],
