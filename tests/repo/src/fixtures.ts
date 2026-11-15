@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
@@ -27,9 +27,11 @@ const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 export const SANDBOXED = process.env['TENDB_SANDBOX'] === '1';
 
 export function fakeGithubToken(): { token: string; body: string } {
-  const body = [...randomBytes(36)]
-    .map((byte) => TOKEN_ALPHABET[byte % TOKEN_ALPHABET.length])
-    .join('');
+  // randomInt draws without modulo bias.
+  const body = Array.from(
+    { length: 36 },
+    () => TOKEN_ALPHABET[randomInt(TOKEN_ALPHABET.length)],
+  ).join('');
   return { token: `ghp_${body}`, body };
 }
 
