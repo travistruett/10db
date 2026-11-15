@@ -26,6 +26,8 @@ beforeAll(() => {
   mkdirSync(join(checkout, 'a', 'b'), { recursive: true });
   symlinkSync(join('a', 'b'), join(checkout, 'lnk'));
   writeFileSync(join(root, 'outside.txt'), 'private\n');
+  // A link inside the checkout that leads out of it.
+  symlinkSync(root, join(checkout, 'out'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
   // `data/` is ignored and `notes.md` untracked, and both were there before the session.
   ctx = {
@@ -52,6 +54,14 @@ describe('fastPathAllows', () => {
     ['a read through a link to .env', 'Read', { file_path: 'notes.txt' }, false],
     ['a read of secrets.yml', 'Read', { file_path: 'secrets.yml' }, false],
     ['a read of prod.tfvars', 'Read', { file_path: 'prod.tfvars' }, false],
+    ['a read outside the checkout', 'Read', { file_path: '<root>/outside.txt' }, false],
+    ['a read through a link out of the checkout', 'Read', { file_path: 'out/outside.txt' }, false],
+    ['LS outside the checkout', 'LS', { path: '<root>' }, false],
+    ['LS in the checkout', 'LS', { path: 'src' }, true],
+    ['Glob outside the checkout', 'Glob', { pattern: '*.txt', path: '<root>' }, false],
+    ['Glob with an absolute pattern', 'Glob', { pattern: '<root>/*.txt' }, false],
+    ['Glob with a parent segment', 'Glob', { pattern: '../*.txt' }, false],
+    ['Glob through a link out of the checkout', 'Glob', { pattern: '*.txt', path: 'out' }, false],
     ['Glob for TypeScript', 'Glob', { pattern: '**/*.ts' }, true],
     ['Glob for env files', 'Glob', { pattern: '**/.env*' }, false],
     ['Grep in one file', 'Grep', { pattern: 'TODO', path: 'src/a.ts' }, true],
@@ -143,6 +153,11 @@ describe('fastPathAllows', () => {
     ['a listing piped to wc', 'Bash', bash('ls | wc -l'), true],
     ['find in the checkout', 'Bash', bash('find src -name a.ts -type f'), true],
     ['find -L', 'Bash', bash('find -L src -name a.ts'), false],
+    ['ls -RL over a checkout holding a link out', 'Bash', bash('ls -RL .'), false],
+    ['ls -L over a checkout holding a link out', 'Bash', bash('ls -L .'), false],
+    ['ls -R over a checkout holding a link out', 'Bash', bash('ls -R .'), true],
+    ['stat -L on a file', 'Bash', bash('stat -L src/a.ts'), false],
+    ['stat in the checkout', 'Bash', bash('stat src/a.ts'), true],
     ['ls outside the checkout', 'Bash', bash('ls <root>'), false],
     ['a test run', 'Bash', bash('pnpm test'), false],
     ['a deploy', 'Bash', bash('vercel deploy --prod'), false],

@@ -115,6 +115,11 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
   return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
 }
 
+/** Whether a glob pattern matches only below the folder it is run in: not absolute, home-relative or climbing. */
+function patternStaysBelow(pattern: string): boolean {
+  return !isAbsolute(pattern) && !pattern.startsWith('~') && !pattern.split('/').includes('..');
+}
+
 /** Whether a read command may open or list `word`: an existing, non-secret file (or folder) inside. */
 function readTargetIsSafe(
   word: string,
@@ -216,22 +221,28 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
     case 'Read':
     case 'LS': {
       const path = field(fields, tool === 'Read' ? 'file_path' : 'path') ?? call.cwd;
-      return !namesSecret(from(call.cwd, path), ctx.secretFiles);
+      return !namesSecret(from(call.cwd, path), ctx.secretFiles) && staysIn(path, call.cwd, ctx);
     }
     case 'Glob': {
       const pattern = field(fields, 'pattern');
       const path = field(fields, 'path') ?? call.cwd;
       return (
         pattern !== null &&
+        patternStaysBelow(pattern) &&
         !pattern.split('/').some((segment) => nameIsSecret(segment)) &&
-        !namesSecret(from(call.cwd, path), ctx.secretFiles)
+        !namesSecret(from(call.cwd, path), ctx.secretFiles) &&
+        staysIn(path, call.cwd, ctx)
       );
     }
     case 'Grep': {
       const path = field(fields, 'path');
       if (path === null) return false;
       const target = from(call.cwd, path);
-      return isRegularFile(target) && !namesSecret(target, ctx.secretFiles);
+      return (
+        isRegularFile(target) &&
+        !namesSecret(target, ctx.secretFiles) &&
+        staysIn(path, call.cwd, ctx)
+      );
     }
     case 'Bash': {
       const command = field(fields, 'command');
