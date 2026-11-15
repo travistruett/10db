@@ -179,7 +179,9 @@ function isLoopback(url: string): boolean {
   }
   return (
     host === 'localhost' ||
+    host === 'localhost.' ||
     host.endsWith('.localhost') ||
+    host.endsWith('.localhost.') ||
     /^127\.\d+\.\d+\.\d+$/.test(host) ||
     host === '0.0.0.0' ||
     host === '[::1]' ||

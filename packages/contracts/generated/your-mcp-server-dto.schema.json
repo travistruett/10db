@@ -122,6 +122,25 @@
         "type": "string"
       }
     },
+    "enabledTools": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "disabledTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "sendsNoHeaders": {
       "type": "boolean"
     }
@@ -144,6 +163,8 @@
     "reason",
     "on",
     "codexOnly",
+    "enabledTools",
+    "disabledTools",
     "sendsNoHeaders"
   ],
   "additionalProperties": false

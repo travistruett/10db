@@ -50,6 +50,24 @@ describe('yourMcpConfigHash', () => {
       true,
     ],
     [
+      'a changed value of a name ending _KEY doesn’t change the hash',
+      { ...stdio, env: { ...stdio.env, STRIPE_KEY: 'a' } },
+      { ...stdio, env: { ...stdio.env, STRIPE_KEY: 'b' } },
+      true,
+    ],
+    [
+      'a changed value of a name holding AUTH doesn’t change the hash',
+      { ...stdio, env: { ...stdio.env, BASIC_AUTH: 'a' } },
+      { ...stdio, env: { ...stdio.env, BASIC_AUTH: 'b' } },
+      true,
+    ],
+    [
+      'a changed URL with userinfo doesn’t change the hash',
+      { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h/db' } },
+      { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:two@h/db' } },
+      true,
+    ],
+    [
       'a changed NODE_OPTIONS value does',
       stdio,
       { ...stdio, env: { ...stdio.env, NODE_OPTIONS: '--require x' } },

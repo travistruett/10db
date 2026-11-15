@@ -153,6 +153,22 @@ describe('prepareYourMcpRun', () => {
       }),
       `Its DYLD_INSERT_LIBRARIES points at a temp folder${SUFFIX}`,
     ],
+    ...[
+      'KUBECONFIG',
+      'AWS_CONFIG_FILE',
+      'DOCKER_CONFIG',
+      'XDG_CONFIG_HOME',
+      'PYTHONUSERBASE',
+      'PYTHONPYCACHEPREFIX',
+      'MISE_CONFIG_DIR',
+    ].map((name): [string, () => Partial<UnsandboxedStdioServer>, string] => [
+      `a declared ${name} into a checkout is refused`,
+      () => ({
+        env: { ...server().env, [name]: `${checkout}/x` },
+        declaredEnv: [name],
+      }),
+      `Its ${name} points at a project's folder${SUFFIX}`,
+    ]),
     [
       'a bare relative argument that climbs into a checkout is refused',
       () => ({ args: ['sub/../../checkout/server.js'] }),

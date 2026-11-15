@@ -2,7 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
 import { DeniedBy, Provider, providerOf, type ProjectDto } from '@10db/contracts';
-import { getProject, listPermissionRules } from '@10db/db';
+import { getProject, listPermissionRules, listProjects } from '@10db/db';
 import { allCheckouts } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
@@ -189,7 +189,7 @@ export function createShapePreparer(deps: {
       ],
       loginEnv: deps.projectEnv(),
       laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
-      localBinding: project.sandboxLoopback,
+      localBinding: listProjects(state.db).some((other) => other.sandboxLoopback),
       plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
       onInvalid: (stored) => {
         logger.warn({ stored }, 'a stored MCP approvals or switch value is not a shape 10db reads');

@@ -271,6 +271,7 @@ describe('planYourMcp', () => {
     ['http://127.0.0.2/mcp'],
     ['http://[::1]:8080/mcp'],
     ['http://0.0.0.0/mcp'],
+    ['http://localhost.:3000/mcp'],
   ])(
     'a loopback server %s with headers is left out while the project’s loopback is on, and kept while it is off',
     (url) => {

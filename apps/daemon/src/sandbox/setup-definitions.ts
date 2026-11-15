@@ -12,12 +12,15 @@ import { readFrontmatter, writeFrontmatter } from './frontmatter';
 
 /**
  * Frontmatter keys of a builder's or a plugin's skill, command or agent that 10db leaves out: an agent's
- * `mcpServers` would start a server 10db never launched, until Your MCP servers (T6) runs them. Every
+ * `mcpServers` would start a server 10db never launched. Every
  * other key, `hooks` and `allowed-tools` included, comes along as Claude Code reads it: the builder
  * installed these. Compared with case, `-` and `_` folded away.
  */
 const STRIPPED: ReadonlyMap<string, string> = new Map([
-  ['mcpservers', 'MCP servers arrive with Your MCP servers (T6)'],
+  [
+    'mcpservers',
+    'MCP servers in a definition are stripped; your own servers come from Settings › Trust',
+  ],
 ]);
 
 /** What a frontmatter 10db can't read might hide, in its raw text: a stripped key's name or an escape. */

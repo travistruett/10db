@@ -98,6 +98,8 @@ export function yourMcpServerDtos(args: {
       reason: refusal,
       on: state === YourMcpServerState.Approved && (switched ?? entry.enabledInSource),
       codexOnly: declared === null ? [] : codexOnlyKeys(entry, declared),
+      enabledTools: declared?.codex.enabledTools ? [...declared.codex.enabledTools] : null,
+      disabledTools: declared === null ? [] : [...declared.codex.disabledTools],
       sendsNoHeaders:
         remote !== null &&
         Object.keys(remote.headers).length === 0 &&

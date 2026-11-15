@@ -166,5 +166,6 @@ describe('yourMcpServerDtos', () => {
     const filtered = stdio({ codex: { ...NONE, enabledTools: ['a'], toolTimeoutSec: 5 } });
     const [dto] = dtos([entry('c', filtered, { source: YourMcpSource.CodexConfig })]);
     expect(dto?.codexOnly).toEqual(['enabled_tools', 'tool_timeout_sec']);
+    expect([dto?.enabledTools, dto?.disabledTools]).toEqual([['a'], []]);
   });
 });

@@ -35,6 +35,8 @@ function mcp(name: string, over: Partial<YourMcpServerDto> = {}): YourMcpServerD
     reason: null,
     on: false,
     codexOnly: [],
+    enabledTools: null,
+    disabledTools: [],
     sendsNoHeaders: false,
     ...over,
   };
@@ -146,6 +148,9 @@ describe("Settings › Trust: the builder's MCP servers", () => {
           source: YourMcpSource.CodexConfig,
           state: YourMcpServerState.Approved,
           codexOnly: ['enabled_tools'],
+          enabledTools: ['a'],
+          disabledTools: ['b'],
+          cwd: '/Users/me/work',
         }),
       ],
       'Your shell sets CLAUDE_CONFIG_DIR. 10db reads your servers from ~/.claude.json, not from there.',
@@ -154,5 +159,9 @@ describe("Settings › Trust: the builder's MCP servers", () => {
     expect(await screen.findByText(/Your shell sets CLAUDE_CONFIG_DIR/)).toBeTruthy();
     expect(screen.getByText('Comes with p@m')).toBeTruthy();
     expect(screen.getByText('Codex only: enabled_tools')).toBeTruthy();
+    // What the hash covers is shown, so a Changed badge has a visible cause.
+    expect(screen.getByText('Only tools: a')).toBeTruthy();
+    expect(screen.getByText('Without tools: b')).toBeTruthy();
+    expect(screen.getByText('Starts in /Users/me/work')).toBeTruthy();
   });
 });

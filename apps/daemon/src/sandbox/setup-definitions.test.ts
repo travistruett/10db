@@ -14,7 +14,9 @@ describe('withoutStrippedKeys', () => {
       '---\nname: s\nmcpServers: {}\nallowed-tools: Bash\nmodel: opus\n---\nBody !`ls`\n',
       {
         text: '---\nname: s\nallowed-tools: Bash\nmodel: opus\n---\nBody !`ls`\n',
-        notes: ['MCP servers arrive with Your MCP servers (T6)'],
+        notes: [
+          'MCP servers in a definition are stripped; your own servers come from Settings › Trust',
+        ],
       },
     ],
     [

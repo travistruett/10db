@@ -3,6 +3,13 @@ import type { McpConfigEntry, YourMcpSource } from '@10db/contracts';
 import { SENSITIVE_NAME } from '../sessions';
 import type { DeclaredYourServer } from './your-mcp-entry';
 
+/** A value that is a URL with a user and password in it. */
+const URL_WITH_USERINFO = /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]+@/i;
+
+/** Whether an env entry holds a secret: named like one, or a URL carrying userinfo. */
+const isSecret = (name: string, value: string): boolean =>
+  SENSITIVE_NAME.test(name) || URL_WITH_USERINFO.test(value);
+
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 const sortedEntries = (map: Readonly<Record<string, string>>): [string, string][] =>
   Object.entries(map).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -25,7 +32,7 @@ function normalized(source: YourMcpSource, server: DeclaredYourServer): unknown 
       args: server.args,
       cwd: server.cwd,
       env: sortedEntries(server.env).map(([name, value]) =>
-        SENSITIVE_NAME.test(name) ? [name] : [name, value],
+        isSecret(name, value) ? [name] : [name, value],
       ),
       envVars: sorted(server.envVars),
       ...filters,
@@ -52,6 +59,6 @@ export function yourMcpConfigHash(source: YourMcpSource, server: DeclaredYourSer
 export function shownEnvOf(server: DeclaredYourServer): McpConfigEntry[] {
   if (server.transport !== 'stdio') return [];
   return sortedEntries(server.env)
-    .filter(([name]) => !SENSITIVE_NAME.test(name))
+    .filter(([name, value]) => !isSecret(name, value))
     .map(([name, value]) => ({ name, value }));
 }

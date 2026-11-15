@@ -47,6 +47,21 @@ function ServerText({ server }: { readonly server: YourMcpServerDto }) {
           Sends headers {server.headerNames.join(', ')}
         </Text>
       )}
+      {server.cwd === null ? null : (
+        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+          Starts in {server.cwd}
+        </Text>
+      )}
+      {server.enabledTools === null ? null : (
+        <Text size="xs" c="dimmed">
+          Only tools: {server.enabledTools.join(', ')}
+        </Text>
+      )}
+      {server.disabledTools.length === 0 ? null : (
+        <Text size="xs" c="dimmed">
+          Without tools: {server.disabledTools.join(', ')}
+        </Text>
+      )}
       {server.codexOnly.length === 0 ? null : (
         <Text size="xs" c="dimmed">
           Codex only: {server.codexOnly.join(', ')}

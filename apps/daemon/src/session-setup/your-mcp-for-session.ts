@@ -20,7 +20,7 @@ export function yourMcpForSession(args: {
   readonly loginEnv: Readonly<Record<string, string>>;
   /** Every root a lane can write: the builder's files may not lead into one. */
   readonly laneWritable: readonly string[];
-  /** Whether the session's sandbox lets commands bind local ports: the project's loopback switch. */
+  /** Whether any project's lane may bind local ports (its loopback switch): its commands could listen where a lane of this session connects. */
   readonly localBinding: boolean;
   /** The plugins the session loads, so one switched off brings no servers. */
   readonly plugins: readonly { readonly id: string; readonly installPath: string }[];

@@ -48,6 +48,12 @@ const LOADS_CODE = new Set([
   'SSL_CERT_DIR',
   'CURL_CA_BUNDLE',
   'REQUESTS_CA_BUNDLE',
+  'KUBECONFIG',
+  'AWS_CONFIG_FILE',
+  'DOCKER_CONFIG',
+  'XDG_CONFIG_HOME',
+  'PYTHONUSERBASE',
+  'PYTHONPYCACHEPREFIX',
 ]);
 const LOADS_CODE_PREFIXES = [
   'DYLD_',
@@ -59,6 +65,7 @@ const LOADS_CODE_PREFIXES = [
   'UV_',
   'GEM_',
   'BUNDLE_',
+  'MISE_',
 ] as const;
 
 /** Whether a variable can make a program load code from a path in its value. */

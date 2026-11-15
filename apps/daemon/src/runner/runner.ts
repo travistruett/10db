@@ -103,6 +103,7 @@ import {
   getPersona,
   getProject,
   getSessionByProviderId,
+  listProjects,
   getTask,
   getPassTurn,
   getTaskMessageRow,
@@ -2463,7 +2464,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ],
       loginEnv: opts.launcher.projectEnv(),
       laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
-      localBinding: project.sandboxLoopback,
+      localBinding: listProjects(db).some((other) => other.sandboxLoopback),
       plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
       onInvalid: (stored) => {
         opts.logger.warn(

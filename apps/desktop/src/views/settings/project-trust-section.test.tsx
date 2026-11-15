@@ -183,6 +183,8 @@ describe('Settings › project Trust', () => {
       reason: null,
       on: true,
       codexOnly: [],
+      enabledTools: null,
+      disabledTools: [],
       sendsNoHeaders: false,
     };
     const { put } = serve(NOTHING, {}, [], [], [github]);

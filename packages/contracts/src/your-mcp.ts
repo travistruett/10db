@@ -64,6 +64,9 @@ export const YourMcpServerDto = z.strictObject({
   on: z.boolean(),
   /** The keys only Codex applies, such as its tool filters. */
   codexOnly: z.array(z.string()),
+  /** The tool filters an approval covers, as `config.toml` sets them: null where no allow list is set. */
+  enabledTools: z.array(z.string()).nullable(),
+  disabledTools: z.array(z.string()),
   /** A remote server with no header and no bearer token, which likely signs in with OAuth. */
   sendsNoHeaders: z.boolean(),
 });

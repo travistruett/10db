@@ -77,6 +77,24 @@ describe('underLaneWritable', () => {
       LaneWritableKind.Project,
     ],
     [
+      'a dangling link into a checkout is judged by its target',
+      () => {
+        symlinkSync(join(checkout, 'not-yet.js'), join(home, 'dangling'));
+        return join(home, 'dangling');
+      },
+      () => home,
+      LaneWritableKind.Project,
+    ],
+    [
+      'a dangling relative link into a checkout is judged by its target',
+      () => {
+        symlinkSync('../checkout/not-yet.js', join(home, 'dangling-relative'));
+        return join(home, 'dangling-relative');
+      },
+      () => home,
+      LaneWritableKind.Project,
+    ],
+    [
       'a relative path is judged against its base',
       () => 'dist/x.js',
       () => checkout,
