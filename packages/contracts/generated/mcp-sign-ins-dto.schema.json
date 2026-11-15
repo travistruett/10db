@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "accountLabel": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "signed_in",
+              "not_signed_in",
+              "signing_in",
+              "failed",
+              "unknown"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "accountLabel",
+          "key",
+          "name",
+          "state",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "accountLabel": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId",
+          "accountLabel",
+          "command"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "rows",
+    "terminal"
+  ],
+  "additionalProperties": false
+}

@@ -45,6 +45,8 @@ export interface YourStdioPlan {
 
 /** An http or sse server as one session connects to it, expanded. */
 export interface YourRemotePlan {
+  /** The declaration the server was planned from. */
+  readonly key: YourMcpServerKey;
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>> | null;
@@ -171,6 +173,7 @@ function remotePlan(
       headers[header] = expanded(value, loginEnv, `header ${header}`);
   }
   return {
+    key: entry.key,
     type: server.transport,
     url,
     headers: Object.keys(headers).length === 0 ? null : headers,

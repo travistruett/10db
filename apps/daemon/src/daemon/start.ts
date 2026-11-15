@@ -68,6 +68,7 @@ import {
   createAccountService,
   createModelListWait,
   createListRefresh,
+  createMcpSignIns,
   createMoveBack,
   MoveCause,
   moveOpenRouterKey,
@@ -2087,6 +2088,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
     },
   });
+  const { appMcpPlan, ...trust } = createTrustServices({
+    state,
+    builderHome,
+    laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+    worktreeBase: worktreeRoot,
+    login: {
+      configDir: () => launcher.loginConfigDir(),
+      codexHome: () => launcher.loginCodexHome(),
+    },
+    laneSandbox,
+    adapter,
+    judge,
+    log: logger.child({ component: 'trust' }),
+    loginEnv: () => launcher.projectEnv(),
+  });
+  const mcpSignIns = createMcpSignIns({
+    state,
+    adapter,
+    launcher,
+    clock,
+    plan: appMcpPlan,
+    logger: logger.child({ component: 'mcp-sign-ins' }),
+  });
   const services = createServices({
     state,
     github: {
@@ -2135,20 +2159,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
       return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
     },
-    trust: createTrustServices({
-      state,
-      builderHome,
-      laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
-      worktreeBase: worktreeRoot,
-      login: {
-        configDir: () => launcher.loginConfigDir(),
-        codexHome: () => launcher.loginCodexHome(),
-      },
-      laneSandbox,
-      adapter,
-      judge,
-      log: logger.child({ component: 'trust' }),
-    }),
+    trust,
+    mcpSignIns,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
@@ -2594,6 +2606,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       catalogue.stop();
       await listRefresh.stop();
       accountPauses.stop();
+      await mcpSignIns.stopAll().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not stop the mcp sign-ins');
+      });
       await adapter.stop?.().catch((error: unknown) => {
         logger.warn({ err: error }, 'could not stop the adapter');
       });

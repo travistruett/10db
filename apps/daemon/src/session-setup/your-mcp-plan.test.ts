@@ -239,6 +239,7 @@ describe('planYourMcp', () => {
     );
     expect(result.stdio['s']?.env).toMatchObject({ KEY: 'k-sk-1', D: 'dflt' });
     expect(result.remote['r']).toEqual({
+      key: entry('r', remote()).key,
       type: 'http',
       url: 'https://mcp.example/mcp',
       headers: { Authorization: 'Bearer sk-1' },

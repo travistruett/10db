@@ -130,6 +130,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/lane-permissions': 'No screen draws a setting.',
   '/settings/trust': 'No screen draws a setting.',
+  '/settings/trust/mcp-sign-ins': 'No screen draws a setting.',
   '/projects/:projectId/trust': 'No screen draws a setting.',
   '/projects/:projectId/live-systems': 'No screen draws a setting.',
   '/projects/:projectId/trust-grants': 'No screen draws a setting.',

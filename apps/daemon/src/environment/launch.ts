@@ -198,6 +198,11 @@ export function mcpSignInWhere(
   return McpSignInWhere.BuildersClaudeCode;
 }
 
+/** Starts the unmodified `claude` on an account's own folder, where `/mcp` signs its servers in; the path is one shell word even with spaces. */
+export function claudeMcpSignInCommand(configDir: string): string {
+  return `CLAUDE_CONFIG_DIR=${quoted(configDir)} claude`;
+}
+
 /** Signs a ChatGPT plan in with the unmodified `codex`; the path is one shell word even with spaces. */
 export function codexSignInCommand(home: string): string {
   return `CODEX_HOME=${quoted(home)} codex login`;

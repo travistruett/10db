@@ -10,6 +10,10 @@ import {
   HumanTouchDto,
   RigorFiguresDto,
   InvalidError,
+  McpSignInState,
+  McpSignInsDto,
+  yourMcpServerKey,
+  YourMcpSource,
   mintId,
   InboxAnswerRefused,
   NotFoundError,
@@ -2576,5 +2580,76 @@ describe('the chat routes', () => {
     const services = stubServices({ openChats: () => [] });
     expect(await (await app(services).request('/chats?open=1', auth)).json()).toEqual([]);
     expect((await app(services).request('/chats?open=0', auth)).status).toBe(400);
+  });
+
+  describe('the MCP sign-ins of Settings › Trust', () => {
+    const accountId = mintId('Account');
+    const key = yourMcpServerKey(YourMcpSource.ClaudeJson, 'linear');
+    const signIns: McpSignInsDto = {
+      rows: [
+        {
+          accountId,
+          accountLabel: 'ChatGPT plan',
+          key,
+          name: 'linear',
+          state: McpSignInState.NotSignedIn,
+          message: null,
+        },
+      ],
+      terminal: [{ accountId, accountLabel: 'Own plan', command: 'CLAUDE_CONFIG_DIR=/a claude' }],
+    };
+
+    it('GET answers the rows and the terminal entries as the contract says', async () => {
+      const res = await app(stubServices({ mcpSignIns: () => Promise.resolve(signIns) })).request(
+        '/settings/trust/mcp-sign-ins',
+        auth,
+      );
+      expect(res.status).toBe(200);
+      expect(McpSignInsDto.parse(await res.json())).toEqual(signIns);
+    });
+
+    it('POST hands the pair to the service and answers the rows', async () => {
+      const seen: unknown[] = [];
+      const services = stubServices({
+        startMcpSignIn: (input) => {
+          seen.push(input);
+          return Promise.resolve(signIns);
+        },
+      });
+      const res = await app(services).request('/settings/trust/mcp-sign-ins', {
+        method: 'POST',
+        ...json,
+        body: JSON.stringify({ accountId, key }),
+      });
+      expect(res.status).toBe(200);
+      expect(McpSignInsDto.parse(await res.json())).toEqual(signIns);
+      expect(seen).toEqual([{ accountId, key }]);
+    });
+
+    it.each([
+      {
+        name: 'an unknown account or server',
+        error: new NotFoundError('account', 'x'),
+        status: 404,
+      },
+      { name: 'an account that is not Codex', error: new ConflictError('not codex'), status: 409 },
+    ])('POST answers $status for $name', async ({ error, status }) => {
+      const services = stubServices({ startMcpSignIn: () => Promise.reject(error) });
+      const res = await app(services).request('/settings/trust/mcp-sign-ins', {
+        method: 'POST',
+        ...json,
+        body: JSON.stringify({ accountId, key }),
+      });
+      expect(res.status).toBe(status);
+    });
+
+    it('POST refuses a body that is not an account and a server key', async () => {
+      const res = await app().request('/settings/trust/mcp-sign-ins', {
+        method: 'POST',
+        ...json,
+        body: JSON.stringify({ accountId: 'nope', key }),
+      });
+      expect(res.status).toBe(400);
+    });
   });
 });

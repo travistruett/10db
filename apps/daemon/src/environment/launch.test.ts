@@ -6,6 +6,7 @@ import {
   AccountLaunchError,
   BILLING_SWITCH_VARS,
   createLauncher,
+  claudeMcpSignInCommand,
   codexSignInCommand,
   mcpSignInWhere,
   McpSignInWhere,
@@ -451,6 +452,19 @@ describe('signInCommand', () => {
     ["/tmp/o'brien/claude", "CLAUDE_CONFIG_DIR='/tmp/o'\\''brien/claude' claude /login"],
   ])('quotes %s as one shell word', (configDir, command) => {
     expect(signInCommand(configDir)).toBe(command);
+  });
+});
+
+describe('claudeMcpSignInCommand', () => {
+  it.each<[string, string]>([
+    ['/data/accounts/acc_1/claude', "CLAUDE_CONFIG_DIR='/data/accounts/acc_1/claude' claude"],
+    ["/tmp/o'brien/claude", "CLAUDE_CONFIG_DIR='/tmp/o'\\''brien/claude' claude"],
+    [
+      '/Users/b/Library/Application Support/10db/acc_1/claude',
+      "CLAUDE_CONFIG_DIR='/Users/b/Library/Application Support/10db/acc_1/claude' claude",
+    ],
+  ])('runs claude in %s as one shell word, with no login', (configDir, command) => {
+    expect(claudeMcpSignInCommand(configDir)).toBe(command);
   });
 });
 

@@ -1,6 +1,7 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
+export { McpAuthState } from './codex-mcp-auth';
 export { CODEX_COMMANDS } from './codex-commands';
 export { readCheckoutText } from './before-text';
 export { patchPaths } from './codex-guard';
@@ -18,6 +19,8 @@ export {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
+  McpSignInError,
+  McpSignInUnsupportedError,
   SessionEndReason,
 } from './types';
 export type {
@@ -33,6 +36,9 @@ export type {
   ExploreSessionSpec,
   LaneProfile,
   LaneSessionSpec,
+  McpAuthSpec,
+  McpSignIn,
+  McpSignInSpec,
   SessionEvent,
   ShapeAgentDefinition,
   SessionHandle,

@@ -4,6 +4,7 @@ import { createTestStore, seedAccount, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
+import { signInCandidates } from '../accounts';
 import { FakeAdapter } from '../sessions';
 import { createTrustServices } from './trust-services';
 
@@ -71,6 +72,7 @@ describe('the Comes along preview', () => {
         adapter: new FakeAdapter({}),
         judge: { ready: () => Promise.resolve(false) },
         log: { warn: () => undefined },
+        loginEnv: () => ({}),
       });
       expect((await trust.projectTrust(project.id)).preview.plugins).toEqual(plugins);
     } finally {
@@ -105,8 +107,51 @@ describe("the builder's MCP servers notice", () => {
         adapter: new FakeAdapter({}),
         judge: { ready: () => Promise.resolve(false) },
         log: { warn: () => undefined },
+        loginEnv: () => ({}),
       });
       expect((await trust.trustSettings()).mcpNotice).toBe(notice);
+    } finally {
+      test.close();
+    }
+  });
+});
+
+describe("the app-wide plan of the builder's servers", () => {
+  it('holds the approved servers only, and the sign-in candidates are those that send no headers', async () => {
+    writeFileSync(
+      join(home, '.claude.json'),
+      JSON.stringify({
+        mcpServers: {
+          linear: { type: 'http', url: 'https://linear.example/mcp' },
+          docs: { type: 'http', url: 'https://docs.example/mcp', headers: { 'X-Key': 'k' } },
+          pending: { type: 'http', url: 'https://pending.example/mcp' },
+        },
+      }),
+    );
+    const test = createTestStore();
+    try {
+      const trust = createTrustServices({
+        state: createStateStore(test.store, createEventBus()),
+        builderHome: home,
+        laneWritableRoots: [],
+        worktreeBase: join(root.path, 'worktrees'),
+        login: { configDir: () => null, codexHome: () => null },
+        laneSandbox: null,
+        adapter: new FakeAdapter({}),
+        judge: { ready: () => Promise.resolve(false) },
+        log: { warn: () => undefined },
+        loginEnv: () => ({}),
+      });
+      expect(Object.keys(trust.appMcpPlan().remote)).toEqual([]);
+      const listed = (await trust.trustSettings()).mcpServers;
+      for (const name of ['linear', 'docs']) {
+        const server = listed.find((candidate) => candidate.name === name);
+        if (server?.configHash == null) throw new Error(`${name} was not listed`);
+        await trust.approveYourMcpServer({ key: server.key, configHash: server.configHash });
+      }
+      const plan = trust.appMcpPlan();
+      expect(Object.keys(plan.remote).sort()).toEqual(['docs', 'linear']);
+      expect(signInCandidates(plan).map((candidate) => candidate.name)).toEqual(['linear']);
     } finally {
       test.close();
     }

@@ -14,6 +14,7 @@ export {
 export {
   ACCOUNT_NAMES_VERIFIED_ON,
   AccountLaunchError,
+  claudeMcpSignInCommand,
   codexSignInCommand,
   connectorProbeEnv,
   createLauncher,
