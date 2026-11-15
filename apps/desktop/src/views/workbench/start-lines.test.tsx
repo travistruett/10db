@@ -39,7 +39,7 @@ const settings: PickTicks = { pages: ['settings'], tasks: [] };
 const people: PickTicks = { pages: ['people'], tasks: [] };
 const none: PickTicks = { pages: [], tasks: [] };
 
-const DIRT = "settings: 3 files already changed in your folder will be part of this page's work.";
+const DIRT = "Settings: 3 files already changed in your folder will be part of this page's work.";
 const OTHER = '12 other changed files stay as they are.';
 const DOCKER = 'Docker is off: the gate needs it.';
 const AHEAD = 'build has 4 commits origin/main lacks: the pull request will carry them.';

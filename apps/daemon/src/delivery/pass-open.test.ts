@@ -237,6 +237,26 @@ describe('opening a pass', () => {
     expect(inPass.find((t) => t.id !== people.id)?.madeByPassId).toBe(opened.pass.id);
   });
 
+  it("names the task it makes for a new page by the page's label, else its capitalised name", async () => {
+    harness({
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', label: 'Preferences' },
+        { name: 'people', globs: ['src/people/**'], role: 'page' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
+
+    const opened = await open([], { pages: ['settings', 'people'] });
+
+    const titles = h.store.db
+      .select({ title: schema.tasks.title })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.passId, opened.pass.id))
+      .all()
+      .map((t) => t.title);
+    expect(titles.sort()).toEqual(['People: UI work', 'Preferences: UI work']);
+  });
+
   it('makes a page another task holds wait for it, naming the holder', async () => {
     harness();
     const holder = page('People: copy fix', ['people']);

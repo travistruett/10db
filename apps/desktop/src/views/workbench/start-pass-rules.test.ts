@@ -87,6 +87,16 @@ describe('joinableTasks', () => {
 });
 
 describe('blockedReason', () => {
+  it('names a ticked page by its label, which is not its name', () => {
+    const labelled: AreaDef[] = [
+      { name: 'shape', globs: ['src/shape/**'], role: 'page', label: 'Plan' },
+      { name: 'forms', globs: ['src/forms/**'], role: 'page' },
+    ];
+    expect(blockedReason({ pages: ['shape'] }, { pages: ['shape'], tasks: [] }, labelled)).toBe(
+      'Plan is ticked',
+    );
+  });
+
   const task = (pages: string[]) => ({ taskId: mintId('Task'), title: 'Tighten it', pages });
   const none: PickTicks = { pages: [], tasks: [] };
   it.each<{ name: string; row: { pages: string[] }; ticks: PickTicks; reason: string | null }>([
@@ -102,19 +112,19 @@ describe('blockedReason', () => {
       row: { pages: ['forms'] },
       ticks: { pages: ['settings'], tasks: [] },
       reason:
-        'settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
+        'Settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
     },
     {
       name: 'a page a ticked task holds',
       row: { pages: ['settings'] },
       ticks: { pages: [], tasks: [task(['settings'])] },
-      reason: 'Tighten it works on settings',
+      reason: 'Tighten it works on Settings',
     },
     {
       name: 'a task on a ticked page',
       row: { pages: ['people'] },
       ticks: { pages: ['people'], tasks: [] },
-      reason: 'people is ticked',
+      reason: 'People is ticked',
     },
   ])('$name', ({ row, ticks, reason }) => {
     expect(blockedReason(row, ticks, areas)).toBe(reason);
@@ -131,14 +141,14 @@ describe('blockedReason', () => {
       name: 'a page the pass holds',
       row: { pages: ['settings'] },
       inPass: ['settings'],
-      reason: 'settings is already open',
+      reason: 'Settings is already open',
     },
     {
       name: 'a page that can share a file with one the pass holds',
       row: { pages: ['forms'] },
       inPass: ['settings'],
       reason:
-        'settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
+        'Settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
     },
     {
       name: 'any page once the pass and the ticks fill it',
@@ -165,7 +175,7 @@ describe('blockedReason', () => {
 describe('passName', () => {
   it.each([
     [['settings'], 'settings'],
-    [['settings', 'people'], 'settings and people'],
+    [['Settings', 'People'], 'Settings and People'],
     [['settings', 'people', 'billing'], 'settings, people and billing'],
     [['settings', 'people', 'billing', 'home'], 'settings, people and 2 more'],
   ])('%j is %s', (pages, name) => {
@@ -191,21 +201,35 @@ describe('openRequest', () => {
       pages: ['settings'],
       tasks: [{ taskId, title: 'Tighten it', pages: ['people'] }],
     };
-    expect(openRequest(ticks, '  these feel cramped ', null)).toEqual({
-      name: 'settings and people',
+    expect(openRequest(ticks, '  these feel cramped ', null, [])).toEqual({
+      name: 'Settings and People',
       pages: ['settings'],
       taskIds: [taskId],
       pageCap: 4,
       firstMessage: 'these feel cramped',
     });
     const goalId = mintId('Goal');
-    expect(openRequest({ pages: ['settings'], tasks: [] }, ' ', goalId)).toEqual({
-      name: 'settings',
+    expect(openRequest({ pages: ['settings'], tasks: [] }, ' ', goalId, [])).toEqual({
+      name: 'Settings',
       pages: ['settings'],
       taskIds: [],
       pageCap: 4,
       goalId,
     });
+  });
+});
+
+describe('openRequest names the pass by labels', () => {
+  const labelled: AreaDef[] = [
+    { name: 'shape', globs: ['src/shape/**'], role: 'page', label: 'Plan' },
+    { name: 'people', globs: ['src/people/**'], role: 'page' },
+  ];
+  it("uses a page label for a ticked page and for a ticked task's first page, else the capitalised name", () => {
+    const ticks: PickTicks = {
+      pages: ['shape'],
+      tasks: [{ taskId: mintId('Task'), title: 'Tighten it', pages: ['people'] }],
+    };
+    expect(openRequest(ticks, '', null, labelled).name).toBe('Plan and People');
   });
 });
 

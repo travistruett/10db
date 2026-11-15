@@ -149,7 +149,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
         <TakeOutModal
           passId={view.pass.id}
           taskId={takingOutPage.taskId}
-          area={takingOutPage.area}
+          label={takingOutPage.label}
           onClose={() => {
             setTakingOut(null);
           }}

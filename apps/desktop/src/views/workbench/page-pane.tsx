@@ -105,11 +105,11 @@ export function PagePane(props: PagePaneProps) {
   return (
     <Box
       component="section"
-      aria-label={page.area}
+      aria-label={page.label}
       style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
       <Title order={2} size="h4" px="md" pt="sm">
-        {page.area}
+        {page.label}
       </Title>
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <PageThread
@@ -154,7 +154,7 @@ export function PagePane(props: PagePaneProps) {
       {page.turn === null ? null : (
         <TurnLogDrawer
           turnId={page.turn.id}
-          title={`${page.area} · Turn ${String(page.turn.seq)}`}
+          title={`${page.label} · Turn ${String(page.turn.seq)}`}
           opened={logTurn === page.turn.id}
           onClose={() => {
             setLogTurn(null);
@@ -176,7 +176,7 @@ export function PagePane(props: PagePaneProps) {
         />
       ) : null}
       <PageComposer
-        area={page.area}
+        label={page.label}
         status={status}
         firstMessage={!page.spokenTo}
         draft={draft}

@@ -4,8 +4,8 @@ import { PageStatus } from './page-status';
 
 const S = PageStatus;
 
-function page(taskId: string, area: string, status: PageStatus, line = ''): AnnouncedPage {
-  return { taskId, area, status, line };
+function page(taskId: string, label: string, status: PageStatus, line = ''): AnnouncedPage {
+  return { taskId, label, status, line };
 }
 
 describe('announcements', () => {

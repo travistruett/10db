@@ -91,6 +91,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     taskId: mintId('Task'),
     title: 'Settings: UI work',
     area: 'Settings',
+    label: 'Settings',
     route: '/settings',
     workstreamId: mintId('Workstream'),
     state: 'QUEUED',
@@ -123,10 +124,16 @@ export function turnActivity(overrides: Partial<PassTurnActivity> = {}): PassTur
  * that targets its run; the others need no Inbox item.
  */
 export function pagesByStatus() {
-  const notStarted = passPageDto({ title: 'Home: UI work', area: 'Home', route: '/' });
+  const notStarted = passPageDto({
+    title: 'Home: UI work',
+    area: 'Home',
+    label: 'Home',
+    route: '/',
+  });
   const working = passPageDto({
     title: 'Billing: UI work',
     area: 'Billing',
+    label: 'Billing',
     route: '/billing',
     state: 'RUNNING',
     spokenTo: true,
@@ -135,6 +142,7 @@ export function pagesByStatus() {
   const ready = passPageDto({
     title: 'Settings: UI work',
     area: 'Settings',
+    label: 'Settings',
     route: '/settings',
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
@@ -148,6 +156,7 @@ export function pagesByStatus() {
   const asks = passPageDto({
     title: 'People: UI work',
     area: 'People',
+    label: 'People',
     route: '/people',
     state: 'WAITING_HUMAN',
     nextActionKind: 'answer',
@@ -157,6 +166,7 @@ export function pagesByStatus() {
   const failed = passPageDto({
     title: 'Reports: UI work',
     area: 'Reports',
+    label: 'Reports',
     route: '/reports',
     state: 'WAITING_HUMAN',
     nextActionKind: 'pass_review',
@@ -167,6 +177,7 @@ export function pagesByStatus() {
   const paused = passPageDto({
     title: 'Team: UI work',
     area: 'Team',
+    label: 'Team',
     route: '/team',
     state: 'PAUSED_LIMIT',
     nextActionKind: 'resume',
@@ -298,6 +309,7 @@ export function passStartDto(overrides: Partial<PassStartDto> = {}): PassStartDt
     pages: [
       {
         area: 'Settings',
+        label: 'Settings',
         route: '/settings',
         lastChangedAt: minutesBeforeNow(60 * 24),
         uncommitted: 3,
@@ -305,12 +317,20 @@ export function passStartDto(overrides: Partial<PassStartDto> = {}): PassStartDt
       },
       {
         area: 'People',
+        label: 'People',
         route: '/people',
         lastChangedAt: minutesBeforeNow(60),
         uncommitted: 0,
         heldBy: null,
       },
-      { area: 'Billing', route: null, lastChangedAt: null, uncommitted: 0, heldBy: null },
+      {
+        area: 'Billing',
+        label: 'Billing',
+        route: null,
+        lastChangedAt: null,
+        uncommitted: 0,
+        heldBy: null,
+      },
     ],
     otherUncommitted: 12,
     lacks: [],

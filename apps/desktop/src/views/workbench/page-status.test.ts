@@ -13,7 +13,12 @@ import { clockTime, pageStatus, PageStatus } from './page-status';
 
 const pages = pagesByStatus();
 const now = Date.parse(PASS_NOW);
-const people = passPageDto({ title: 'People: UI work', area: 'People', route: '/people' });
+const people = passPageDto({
+  title: 'People: UI work',
+  area: 'People',
+  label: 'People',
+  route: '/people',
+});
 const inPass = [...Object.values(pages), people];
 
 describe('pageStatus', () => {

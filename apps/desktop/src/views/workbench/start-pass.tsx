@@ -94,7 +94,7 @@ export function StartPass(props: StartPassProps) {
           disabled={count === 0 || start.refusal !== null}
           loading={starting}
           onClick={() => {
-            onStart(openRequest(ticks, bothering, goalId));
+            onStart(openRequest(ticks, bothering, goalId, project.areas));
           }}
         >
           Start

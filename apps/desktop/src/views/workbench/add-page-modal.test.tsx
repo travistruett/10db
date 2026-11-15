@@ -58,9 +58,9 @@ describe('AddPageModal', () => {
   it('adds the ticked pages the pass lacks, with their first message', async () => {
     const { add, onClose, dialog } = await draw(1);
     const list = await openOptions(pagesIn(dialog));
-    expect(within(list).queryByRole('option', { name: /^settings/, hidden: true })).toBeNull();
-    fireEvent.click(optionIn(list, /^people/));
-    expect(within(dialog).getByText(/people: 2 files already changed/)).toBeTruthy();
+    expect(within(list).queryByRole('option', { name: /^settings/i, hidden: true })).toBeNull();
+    fireEvent.click(optionIn(list, /^people/i));
+    expect(within(dialog).getByText(/People: 2 files already changed/)).toBeTruthy();
     fireEvent.change(within(dialog).getByLabelText('First message'), {
       target: { value: 'the list is cramped' },
     });
@@ -77,8 +77,8 @@ describe('AddPageModal', () => {
 
   it('refuses a seventh page', async () => {
     const { dialog } = await draw(5);
-    await pickOption(pagesIn(dialog), /^reports/);
-    const forms = optionIn(await openOptions(pagesIn(dialog)), /^forms/);
+    await pickOption(pagesIn(dialog), /^reports/i);
+    const forms = optionIn(await openOptions(pagesIn(dialog)), /^forms/i);
     expect(forms.hasAttribute('data-combobox-disabled')).toBe(true);
     expect(forms.textContent).toContain('At most 6 pages can be open at once');
   });
@@ -88,7 +88,7 @@ describe('AddPageModal', () => {
       Promise.reject(new Error('people is held by "Fix the list"')),
     );
     const { onClose, dialog } = await draw(1, add);
-    await pickOption(pagesIn(dialog), /^people/);
+    await pickOption(pagesIn(dialog), /^people/i);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages' }));
     expect(await within(dialog).findByText('people is held by "Fix the list"')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();

@@ -147,7 +147,7 @@ describe('WorkbenchScreen', () => {
         abandon: () => Promise.resolve(),
       },
     });
-    await pickOption(await findPagesInput(), /^settings/);
+    await pickOption(await findPagesInput(), /^settings/i);
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByText('A lane is running in the folder')).toBeTruthy();
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ pages: ['settings'] }));
@@ -155,7 +155,7 @@ describe('WorkbenchScreen', () => {
 
   it("ticks the Board's tasks and the goal's pages a link names", async () => {
     await draw({ goalPages: ['settings'] });
-    expect(within(pillsOf(await findPagesInput())).getByText('settings')).toBeTruthy();
+    expect(within(pillsOf(await findPagesInput())).getByText('Settings')).toBeTruthy();
   });
 
   it('with a pass open, draws its header over its workspace, handing it the selection', async () => {

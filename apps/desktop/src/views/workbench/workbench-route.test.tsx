@@ -78,7 +78,8 @@ function open(
   return { opened, router, queryClient };
 }
 
-const pick = async (name: string) => pickOption(await findPagesInput(), new RegExp(`^${name}`));
+const pick = async (name: string) =>
+  pickOption(await findPagesInput(), new RegExp(`^${name}`, 'i'));
 const picked = async () => pillsOf(await findPagesInput());
 
 describe('WorkbenchView', () => {
@@ -109,7 +110,7 @@ describe('WorkbenchView', () => {
       goalPages: goalPassPagesDto({ pages: ['people'], fromTasks: [] }),
     });
     await waitFor(async () => {
-      expect(within(await picked()).getByText('people')).toBeTruthy();
+      expect(within(await picked()).getByText('People')).toBeTruthy();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
@@ -172,7 +173,7 @@ describe('WorkbenchView', () => {
       act: async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
         const dialog = await screen.findByRole('dialog', { name: 'Add Page' });
-        await pickOption(await findPagesInput(dialog), /^people/);
+        await pickOption(await findPagesInput(dialog), /^people/i);
         fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages' }));
       },
       sent: { method: 'POST', path: 'pages', body: { pages: ['people'], taskIds: [] } },

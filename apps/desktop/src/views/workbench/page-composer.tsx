@@ -22,7 +22,7 @@ const PAGE_IMAGES: ImageFormat[] = ['png', 'jpeg', 'webp'];
 
 export interface PageComposerProps {
   /** The page's name, for the placeholder and the input's name. */
-  readonly area: string;
+  readonly label: string;
   readonly status: PageStatus;
   /** Nothing has been said to the page yet. */
   readonly firstMessage: boolean;
@@ -43,7 +43,7 @@ export interface PageComposerProps {
  * table, Open Page on the left and Sign Off beside Send. Enter sends and Shift+Enter is a new line.
  */
 export function PageComposer({
-  area,
+  label,
   status,
   firstMessage,
   draft,
@@ -57,7 +57,7 @@ export function PageComposer({
   const [failure, setFailure] = useState<string | null>(null);
   const { phase, signOff } = pageComposerPhase(pagePhase(status), {
     hasContent: hasContent(draft),
-    area,
+    label,
     firstMessage,
   });
   const signOffNow = async (): Promise<void> => {
@@ -83,7 +83,7 @@ export function PageComposer({
       onSend={actions.send}
       onStop={actions.stop}
       onRedo={actions.redo}
-      label={`Message to ${area}`}
+      label={`Message to ${label}`}
       attachLabel="Add Picture"
       leading={openPage}
       actions={

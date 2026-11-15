@@ -40,8 +40,8 @@ export interface PageComposerPhase {
   readonly signOff: 'filled' | 'default' | null;
 }
 
-function placeholder(area: string, phase: PagePhase, firstMessage: boolean): string {
-  if (firstMessage) return `What should change on ${area}? Paste a screenshot…`;
+function placeholder(label: string, phase: PagePhase, firstMessage: boolean): string {
+  if (firstMessage) return `What should change on ${label}? Paste a screenshot…`;
   return phase === PagePhase.Working ? 'Add to this turn…' : 'Reply, or paste a screenshot…';
 }
 
@@ -51,9 +51,9 @@ function placeholder(area: string, phase: PagePhase, firstMessage: boolean): str
  */
 export function pageComposerPhase(
   phase: PagePhase,
-  input: { readonly hasContent: boolean; readonly area: string; readonly firstMessage: boolean },
+  input: { readonly hasContent: boolean; readonly label: string; readonly firstMessage: boolean },
 ): PageComposerPhase {
-  const base = { placeholder: placeholder(input.area, phase, input.firstMessage), hint: null };
+  const base = { placeholder: placeholder(input.label, phase, input.firstMessage), hint: null };
   const { hasContent } = input;
   switch (phase) {
     case PagePhase.Ready:

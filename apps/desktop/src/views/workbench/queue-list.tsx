@@ -38,7 +38,7 @@ export function QueueList({ rows, current, onSelect, onTakeOut }: QueueListProps
             menu={
               onTakeOut === null ? null : (
                 <RowMenu
-                  area={row.page.area}
+                  label={row.page.label}
                   onTakeOut={() => {
                     onTakeOut(row.page.taskId);
                   }}

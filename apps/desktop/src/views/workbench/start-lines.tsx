@@ -63,7 +63,7 @@ export function StartLines({ ticks, start, project }: StartLinesProps) {
     <Stack gap={4}>
       {dirty.map((page) => (
         <Line key={page.area}>
-          {`${page.area}: ${plural(page.uncommitted, 'file', 'files')} already changed in your folder will be part of this page's work.`}
+          {`${page.label}: ${plural(page.uncommitted, 'file', 'files')} already changed in your folder will be part of this page's work.`}
         </Line>
       ))}
       {start.otherUncommitted > 0 ? (

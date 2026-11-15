@@ -52,26 +52,26 @@ interface ListsProps {
 
 /** The close's lists: each section drawn only when it holds something. */
 function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps) {
-  const areaOf = (taskId: TaskId, title: string) =>
-    view.pages.find((page) => page.taskId === taskId)?.area ?? title;
+  const labelOf = (taskId: TaskId, title: string) =>
+    view.pages.find((page) => page.taskId === taskId)?.label ?? title;
   const landing = landingPages(preview, view.pages, choices);
   const fileChoices = [
     { value: LEAVE_OUT, label: 'Leave Out' },
-    ...landing.map((page) => ({ value: page.taskId, label: `Add to ${page.area}` })),
+    ...landing.map((page) => ({ value: page.taskId, label: `Add to ${page.label}` })),
   ];
   return (
     <Stack gap="lg">
       {preview.unfinished.length === 0 ? null : (
         <Section title="Not signed off">
           {preview.unfinished.map((page) => {
-            const area = areaOf(page.taskId, page.title);
+            const label = labelOf(page.taskId, page.title);
             const choice = pageChoice(choices, page.taskId);
             return (
-              <Box key={page.taskId} role="group" aria-label={area}>
+              <Box key={page.taskId} role="group" aria-label={label}>
                 <Stack gap={6}>
                   <Group gap="sm" wrap="nowrap" justify="space-between">
                     <Stack gap={0} style={{ minWidth: 0 }}>
-                      <Text size="sm">{area}</Text>
+                      <Text size="sm">{label}</Text>
                       {page.working ? (
                         <Text size="xs" c="dimmed">
                           Working · will be stopped
@@ -79,7 +79,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
                       ) : null}
                     </Stack>
                     <Select
-                      aria-label={`What happens to ${area}`}
+                      aria-label={`What happens to ${label}`}
                       size="xs"
                       w={150}
                       allowDeselect={false}

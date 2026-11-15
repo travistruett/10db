@@ -9,6 +9,7 @@ import {
   PASS_PAGE_CAP_DEFAULT,
   PASS_PAGE_CAP_MAX,
   PassPageCap,
+  pageLabel,
   passHeldAreas,
   passPagesProblem,
   PassState,
@@ -19,6 +20,7 @@ import {
   type BatchId,
   type GoalId,
   type Notice,
+  type AreaDef,
   type PassDirtEntry,
   type PassDto,
   type PassId,
@@ -374,9 +376,9 @@ export interface NewPageTask {
   readonly goalId: GoalId | null;
 }
 
-/** "Settings: UI work": the title of the task a pass makes for a page (spec §4.2). */
-function pageTaskTitle(area: string): string {
-  return `${area.charAt(0).toUpperCase()}${area.slice(1)}: UI work`;
+/** "Settings: UI work", from the page's label: the title of the task a pass makes for a page (spec §4.2). */
+function pageTaskTitle(area: AreaDef): string {
+  return `${pageLabel(area)}: UI work`;
 }
 
 /**
@@ -392,9 +394,9 @@ export function newPageTasks(
   if (goalId !== null && getGoal(db, goalId).projectId !== project.id)
     throw new InvalidError(`The goal belongs to another project than ${project.name}`);
   return pages.map((page) => {
-    if (!project.areas.some((a) => a.name === page && a.role === AreaRole.Page))
-      throw new InvalidError(`${page} is not a page area of ${project.name}`);
-    return { title: pageTaskTitle(page), areas: [page], goalId };
+    const area = project.areas.find((a) => a.name === page && a.role === AreaRole.Page);
+    if (!area) throw new InvalidError(`${page} is not a page area of ${project.name}`);
+    return { title: pageTaskTitle(area), areas: [page], goalId };
   });
 }
 
