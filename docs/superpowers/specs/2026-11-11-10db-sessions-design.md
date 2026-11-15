@@ -973,8 +973,8 @@ The design is the companion UI spec. This spec holds it to these rules:
   `newStart`, since `Diff` numbers every hunk from 1.
   - A subagent's calls nest under it.
   - A call the judge denied is a dim row naming the limit. In an attended session it offers **Allow This** (§6.6).
-- **The composer** (S11). ⌘↩ sends and Enter starts a new line, in Sessions, Plan and the Workbench alike. Before
-  Send, it states what ⌘↩ will do while a turn is running, from `steer`.
+- **The composer** (S11). Enter sends and Shift+Enter starts a new line, in Sessions, Plan and the Workbench alike. Before
+  Send, it states what Enter will do while a turn is running, from `steer`.
 - **The tabs** sit in the title bar (UI spec §5.1), which needs the Tauri title-bar check in §16.
 - **No label names a provider** except one that shows `capabilities.label`.
 - **Every state has its words and its look:**
@@ -1357,7 +1357,7 @@ Each call is marked **(call)** where it is made. Grouped by what the builder is 
 9. **The migration keeps ids** and orders by `seq` (§9.2).
 10. **Takeover** uses Terminal by default, with no history import on Hand Back (§7.5).
 11. **ACP gets its own spec** (§5.6).
-12. **The designer's calls** in the UI spec's own list (§19 there) are adopted unless they contradict this spec. Among them: tabs in the title bar; Do It opens a new tab; the agent writes the brief; ⌘↩ sends everywhere.
+12. **The designer's calls** in the UI spec's own list (§19 there) are adopted unless they contradict this spec. Among them: tabs in the title bar; Do It opens a new tab; the agent writes the brief; Enter sends everywhere.
 13. **The engine's profile keeps the code name `explore`,** though a chat on it writes (Words). Renaming it touches
     every plan from M2a on, for no behaviour.
 14. **A chat's hold lasts one turn, and its background jobs stop with it** (§7.3). Between turns a pass can take the folder, and the chat's next turn then

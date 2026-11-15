@@ -216,7 +216,25 @@ describe('ModelMenu', () => {
   it('is off while a turn runs, with the reason on hover', async () => {
     serveModels();
     renderWithDaemon(<Held picks={{ list: [] }} busy />);
-    expect(((await chip()) as HTMLButtonElement).disabled).toBe(true);
+    const button = (await chip()) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    // The disabled button hears no pointer; its wrapper does.
+    const wrapper = button.closest('span');
+    expect(wrapper).not.toBeNull();
+    fireEvent.mouseEnter(wrapper ?? button);
+    expect(await screen.findByText('Change the model between turns')).toBeTruthy();
+  });
+
+  it('keeps the stored effort across a model pick while the model list has not loaded', async () => {
+    server.use(
+      http.get(daemonUrl('/models'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    const picks: Picks = { list: [] };
+    renderWithDaemon(<Held picks={picks} start="high" />);
+    await openMenu();
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'gpt-5', hidden: true }));
+    expect(picks.list).toEqual([{ model: 'gpt-5', effort: 'high' }]);
   });
 
   it('shows the daemon’s refusal beside the chip', async () => {

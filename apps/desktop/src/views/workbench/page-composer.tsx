@@ -40,7 +40,7 @@ export interface PageComposerProps {
 
 /**
  * A page's composer (Workbench spec §4.3, design review D14): the kit's composer with the pass's phase
- * table, Open Page on the left and Sign Off beside Send. ⌘↩ sends.
+ * table, Open Page on the left and Sign Off beside Send. Enter sends and Shift+Enter is a new line.
  */
 export function PageComposer({
   area,

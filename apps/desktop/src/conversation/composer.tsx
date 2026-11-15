@@ -14,7 +14,7 @@ import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
 import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
-import { isSendKey } from './escape';
+import { isComposing, isSendKey } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
 
@@ -28,7 +28,7 @@ export interface ComposerProps {
   /** What the agent takes: Attach shows only with a picture format, `/` only with slash commands. */
   readonly capabilities: Pick<AgentCapabilitiesDto, 'images'> &
     Partial<Pick<AgentCapabilitiesDto, 'slashCommands'>>;
-  /** What `@` and `/` list; without it the input is plain text with ⌘↩, IME and pictures. */
+  /** What `@` and `/` list; without it the input is plain text with Enter to send, IME and pictures. */
   readonly mentions?: ComposerMentions;
   readonly phase: ComposerPhase;
   /** Why Send is off (reconnecting, a removed project); the input still takes text. */
@@ -239,10 +239,7 @@ export function Composer({
           inputRef={field}
           onPaste={onPaste}
           onKeyDown={(event) => {
-            // An IME's Enter picks a candidate; it is never a send. Safari ends a composition with a
-            // keydown whose `isComposing` is already false, and whose keyCode is 229.
-            // eslint-disable-next-line @typescript-eslint/no-deprecated -- keyCode 229 is the only signal.
-            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (isComposing(event)) return;
             if (!isSendKey(event)) return;
             // With a suggestion list open Enter belongs to the list, which picks the highlighted one.
             if (suggestionsOpen(event.currentTarget)) return;

@@ -25,6 +25,27 @@ export function nameOf(model: string, rows: ReadonlyMap<string, ModelRowDto>): s
   return row === undefined ? model : modelLabel(row);
 }
 
+/**
+ * The effort the model's next turn runs at: the stored one when the model offers it, else the nearest
+ * it offers, the higher on a tie, as the launch does. Null runs the model's own, and a model the list
+ * does not describe keeps what is stored.
+ */
+export function effortRun(
+  model: string | null,
+  effort: Effort | null,
+  rows: ReadonlyMap<string, ModelRowDto>,
+): Effort | null {
+  if (effort === null || model === null || !rows.has(model)) return effort;
+  const order = Object.values(Effort);
+  const level = (e: Effort): number => order.indexOf(e);
+  const nearest = effortsOf(model, rows).toSorted(
+    (a, b) =>
+      Math.abs(level(a) - level(effort)) - Math.abs(level(b) - level(effort)) ||
+      level(b) - level(a),
+  )[0];
+  return nearest ?? null;
+}
+
 /** The chip's words: "Opus 5.5 High", the model alone when it runs at its own effort. */
 export function chipLabel(
   model: string | null,
@@ -33,7 +54,8 @@ export function chipLabel(
 ): string {
   if (model === null) return 'Model';
   const name = nameOf(model, rows);
-  return effort === null ? name : `${name} ${effortLabel(effort)}`;
+  const run = effortRun(model, effort, rows);
+  return run === null ? name : `${name} ${effortLabel(run)}`;
 }
 
 /**

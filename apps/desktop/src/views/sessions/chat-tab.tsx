@@ -10,6 +10,7 @@ import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
 import { ModelMenu } from '../../conversation/model-menu';
+import { nameOf } from '../../conversation/model-menu-options';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
 import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
@@ -23,6 +24,7 @@ import {
   useStopConversation,
   useToolCallFull,
 } from '../../daemon/conversation-queries';
+import { useModels } from '../../daemon/model-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
 import dayjs from 'dayjs';
@@ -116,6 +118,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
+  const modelRows = useModels(null);
   const offered = models.data?.offered ?? [];
   const named = conversation.model ?? models.data?.default ?? null;
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
@@ -347,7 +350,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                   {caps.modelSwitch === 'none' || offered.length === 0 ? (
                     named === null ? null : (
                       <Text size="xs" c="dimmed">
-                        {named}
+                        {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
                       </Text>
                     )
                   ) : (

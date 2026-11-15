@@ -114,11 +114,7 @@ describe('mapCodexNotification', () => {
       tokenUsage({ last: 136_000, window: 272_000 }),
       [{ type: 'context', percentage: 50, totalTokens: 136_000, maxTokens: 272_000 }],
     ],
-    [
-      'token use with no window',
-      tokenUsage({ last: 10, window: null }),
-      [{ type: 'context', percentage: 0, totalTokens: 10, maxTokens: 0 }],
-    ],
+    ['token use with no window', tokenUsage({ last: 10, window: null }), []],
     [
       'compaction',
       itemCompleted({ type: 'contextCompaction', id: 'c1' }),

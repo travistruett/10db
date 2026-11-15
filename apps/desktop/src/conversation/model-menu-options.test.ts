@@ -38,6 +38,10 @@ describe('chipLabel', () => {
     { model: 'claude-opus-5-5', effort: null, want: 'Opus 5.5' },
     { model: 'not-listed-yet', effort: 'low' as const, want: 'not-listed-yet Low' },
     { model: null, effort: null, want: 'Model' },
+    { model: 'claude-opus-5-5', effort: 'xhigh' as const, want: 'Opus 5.5 Max' },
+    { model: 'claude-opus-5-5', effort: 'medium' as const, want: 'Opus 5.5 High' },
+    { model: 'gpt-5', effort: 'medium' as const, want: 'GPT-5 Low' },
+    { model: 'gpt-5', effort: 'high' as const, want: 'GPT-5 Xhigh' },
   ])('$want', ({ model, effort, want }) => {
     expect(chipLabel(model, effort, rows)).toBe(want);
   });

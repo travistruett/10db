@@ -120,20 +120,28 @@ describe('ChatTab: the session bar', () => {
   });
 
   it('with no capabilities beyond the floor: plain-text model, no Attach, no slash hint, no cost', async () => {
-    openChat({
-      conversation: {
-        capabilities: {
-          ...CLAUDE,
-          modelSwitch: 'none',
-          images: [],
-          slashCommands: false,
-          costUsd: false,
+    openChat(
+      {
+        conversation: {
+          capabilities: {
+            ...CLAUDE,
+            modelSwitch: 'none',
+            images: [],
+            slashCommands: false,
+            costUsd: false,
+          },
+          contextPct: 41,
+          costUsd: null,
         },
-        contextPct: 41,
-        costUsd: null,
       },
-    });
-    expect(await screen.findByText('claude-opus-5')).toBeTruthy();
+      () => [],
+      [
+        http.get(daemonUrl('/models'), () =>
+          HttpResponse.json([modelRowDto({ model: 'claude-opus-5', name: 'Opus 5' })]),
+        ),
+      ],
+    );
+    expect(await screen.findByText('Opus 5')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Model and effort' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();
     expect(screen.queryByText(/\/ commands/)).toBeNull();
