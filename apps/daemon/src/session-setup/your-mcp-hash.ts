@@ -5,10 +5,11 @@ import type { DeclaredYourServer } from './your-mcp-entry';
 
 /** A secret's name, in whole segments so `AUTHORITY_URL` is not one. */
 const SECRET_NAME =
-  /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|CREDENTIALS?|AUTH|DSN)(?:_|$)|_KEY$|_PAT$/i;
+  /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|KEY|CREDENTIALS?|AUTH|DSN)(?:_|$)|_PAT$/i;
 
-/** Names of destinations, programs, commands and sockets: a changed one is somewhere or something else, so an approval covers it. */
-const NEVER_SECRET = /_(?:URL|HOST|ENDPOINT|URI)$|ASKPASS|_CMD$|_COMMAND$|^SSH_AUTH_SOCK$/i;
+/** Names of destinations, files, programs, commands and sockets: a changed one is somewhere or something else, so an approval covers it. */
+const NEVER_SECRET =
+  /_(?:URL|HOST|ENDPOINT|URI|FILE|PATH|DIR)$|ASKPASS|_CMD$|_COMMAND$|^SSH_AUTH_SOCK$/i;
 
 /**
  * The value with a URL's userinfo taken out, so a rotated password doesn't ask again but a new host does. Only

@@ -81,22 +81,32 @@ describe('yourMcpConfigHash', () => {
       { ...stdio, env: { ...stdio.env, DB_URL: 'http://evil.example/' } },
       false,
     ],
-    ...['AUTHORITY_URL', 'PASS_THROUGH_HOST', 'AUTH_ENDPOINT', 'PASSWORD_URI'].map(
-      (name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
-        `a changed ${name} value does`,
-        { ...stdio, env: { ...stdio.env, [name]: 'https://one.example' } },
-        { ...stdio, env: { ...stdio.env, [name]: 'https://two.example' } },
-        false,
-      ],
-    ),
-    ...['DB_PASSWORD', 'AUTH_TOKEN', 'MY_AUTH', 'STRIPE_API_KEY', 'DEPLOY_PAT', 'SENTRY_DSN'].map(
-      (name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
-        `a changed ${name} value doesn’t change the hash`,
-        { ...stdio, env: { ...stdio.env, [name]: 'one' } },
-        { ...stdio, env: { ...stdio.env, [name]: 'two' } },
-        true,
-      ],
-    ),
+    ...[
+      'AUTHORITY_URL',
+      'PASS_THROUGH_HOST',
+      'AUTH_ENDPOINT',
+      'PASSWORD_URI',
+      'SIGNING_KEY_FILE',
+    ].map((name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
+      `a changed ${name} value does`,
+      { ...stdio, env: { ...stdio.env, [name]: 'https://one.example' } },
+      { ...stdio, env: { ...stdio.env, [name]: 'https://two.example' } },
+      false,
+    ]),
+    ...[
+      'DB_PASSWORD',
+      'AUTH_TOKEN',
+      'MY_AUTH',
+      'STRIPE_API_KEY',
+      'DEPLOY_PAT',
+      'SENTRY_DSN',
+      'AWS_ACCESS_KEY_ID',
+    ].map((name): [string, DeclaredYourServer, DeclaredYourServer, boolean] => [
+      `a changed ${name} value doesn’t change the hash`,
+      { ...stdio, env: { ...stdio.env, [name]: 'one' } },
+      { ...stdio, env: { ...stdio.env, [name]: 'two' } },
+      true,
+    ]),
     [
       'a changed host in a URL with userinfo does',
       { ...stdio, env: { ...stdio.env, DB_URL: 'postgres://u:one@h1/db' } },
