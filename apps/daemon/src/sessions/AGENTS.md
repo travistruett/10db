@@ -34,3 +34,11 @@
   for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP
   config itself (`strictMcpConfig: true`). A repo stdio server reaches Claude Code only as its launch under srt
   (above); never hand it the session environment.
+- `claude-connectors.ts` reads a plan account's claude.ai connectors with a probe of its own (`createConnectorDirectory`) and
+  `claude-session.ts` relays them as `claudeai-proxy` entries under `strictMcpConfig`, which stays on; the probe, its
+  refusals and the switch are `docs/architecture/decisions/2026-11-14-claude-ai-connectors-are-relayed-under-strict-mcp-config.md`.
+  A keyed Claude session deletes its account folder's `mcp-needs-auth-cache.json` unread before it registers servers,
+  and takes no connector. `codex-mcp-sign-in.ts` signs a server in with Codex's own login on an ephemeral thread and
+  reads `mcpAuthStatus` (`codex-mcp-auth.ts`) on the same home sessions use; it opens only plain https pages and keeps
+  no token (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`). A session that
+  finds a server signed out says where to sign in (`mcpSignInWhere`).

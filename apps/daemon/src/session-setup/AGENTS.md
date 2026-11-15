@@ -10,3 +10,7 @@
   URLs with userinfo are masked); `planYourMcp` and `yourMcpForSession` plan one session's servers from the
   switches, approvals and login env; `yourMcpServerDtos` is Settings' list. A server that would run lane-written
   code is left out with a reason (`sandbox/your-mcp-launch.ts`). No secret value leaves this folder for a DTO.
+- `planYourMcp` also says whether claude.ai connectors come along (`connectorsOn`): only while the Your MCP servers
+  switch is on. A server with an `oauth` block is passed on to Claude as the entry declares it
+  (`yourMcpForSession`); no token is read here or anywhere
+  (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`).

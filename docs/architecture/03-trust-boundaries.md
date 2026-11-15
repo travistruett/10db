@@ -698,6 +698,12 @@ they run as Claude Code and Codex run them.
   project's lanes may bind local ports, since a lane could listen first.
 - **The policy line:** the judge is told these tools act outside the sandbox with the builder's access, and
   weighs each call with it.
+- **OAuth sign-ins and connectors:** a server that signs in with OAuth uses the sign-in its own agent keeps, and
+  10db never touches a token (`decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`). A Claude plan
+  session also gets the account's claude.ai connectors through a probe under `strictMcpConfig`, which stays on
+  (`decisions/2026-11-14-claude-ai-connectors-are-relayed-under-strict-mcp-config.md`). Connector tools act with the
+  builder's access and take the same guard and judge path. Live rows check that no lane probe reaches the login
+  keychain, its Claude and Codex entries, or a token file.
 
 ### 4.7 The gate and the git hooks the daemon runs
 
