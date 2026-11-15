@@ -1,7 +1,7 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
-import { useStopConversation } from '../../daemon/conversation-queries';
+import { useConversation, useStopConversation } from '../../daemon/conversation-queries';
 import {
   useConvertShape,
   useDismissFinding,
@@ -74,6 +74,9 @@ export function ProposedPane({
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
   const rehearse = useRehearseShape(view?.shape.id ?? null);
+  // An agent without subagents can't run the rehearsal's implementer.
+  const rehearses =
+    useConversation(view?.conversationId ?? null).data?.capabilities.subagents ?? false;
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -182,8 +185,8 @@ export function ProposedPane({
               : `Proposed · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
-            {/* An imported Plan's tasks were planned elsewhere, and a rehearsal can't read them. */}
-            {view?.shape.importedAt == null ? (
+            {/* An imported Plan's tasks were planned elsewhere, and a rehearsal can't read them or run without subagents. */}
+            {view?.shape.importedAt == null && rehearses ? (
               <Button
                 variant="default"
                 size="xs"
@@ -323,6 +326,8 @@ function ConvertPanel({
   const convert = useConvertShape(view.shape.id);
   const stop = useStopConversation();
   const rehearse = useRehearseShape(view.shape.id);
+  // Until the conversation loads the agent is unknown, so no rehearsal starts yet.
+  const capabilities = useConversation(view.conversationId).data?.capabilities;
   const { mutate: startRehearsal } = rehearse;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const close = () => {
@@ -337,6 +342,8 @@ function ConvertPanel({
       rows={rows}
       view={view}
       answering={view.turn.running}
+      agentLabel={capabilities?.label ?? 'the agent'}
+      rehearses={capabilities?.subagents ?? false}
       pending={convert.isPending}
       refusals={refusals}
       failure={convert.error?.message ?? null}

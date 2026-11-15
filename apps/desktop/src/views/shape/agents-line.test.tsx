@@ -7,8 +7,7 @@ import { AgentsLine } from './agents-line';
 // Sessions UI spec §11, design spec S8: Plan on an agent with no subagents (Codex) says it runs without
 // its research and review agents.
 
-const WITHOUT =
-  'Research and review agents need a Claude account. This conversation runs without them.';
+const WITHOUT = 'Codex has no research or review agents here. This conversation runs without them.';
 
 describe('AgentsLine', () => {
   it.each([
@@ -18,7 +17,7 @@ describe('AgentsLine', () => {
     render(
       <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver}>
         <div data-testid="line">
-          <AgentsLine subagents={subagents} />
+          <AgentsLine subagents={subagents} agentLabel="Codex" />
         </div>
       </MantineProvider>,
     );

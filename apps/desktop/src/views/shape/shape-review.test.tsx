@@ -1,8 +1,9 @@
-import { mintId, type ShapeProposalDto, type ShapeViewDto } from '@10db/contracts';
+import { ConversationId, mintId, type ShapeProposalDto, type ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { conversationDto, CLAUDE_CAPABILITIES } from '../../test/conversation-fixtures';
 import { projectViewDto } from '../../test/fixtures';
 import {
   findingDto,
@@ -109,6 +110,35 @@ describe('Shape: the implementer rehearsal and Convert', () => {
     const dialog = await openConvert();
     expect(
       await within(dialog).findByText(/Imported tasks aren't rehearsed: 3 tasks/),
+    ).toBeTruthy();
+    expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
+    expect(posted).toHaveLength(0);
+  });
+
+  it('an agent without subagents starts no rehearsal, offers none and names its tasks once', async () => {
+    const goal = goalProposal('brainstorm', ['one', 'two']);
+    const view = proposed([goal], { rehearsals: marks(goal, false) });
+    const posted: unknown[] = [];
+    serve(
+      view,
+      http.get(daemonUrl('/conversations/:conversationId'), ({ params }) =>
+        HttpResponse.json(
+          conversationDto({
+            id: ConversationId.parse(params['conversationId']),
+            capabilities: { ...CLAUDE_CAPABILITIES, label: 'Codex', subagents: false },
+          }),
+        ),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ status: 'started', tasks: 2 });
+      }),
+    );
+    open(view);
+    const dialog = await openConvert();
+    expect(
+      await within(dialog).findByText(/Tasks on Codex aren't rehearsed: 2 tasks/),
     ).toBeTruthy();
     expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
     expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
