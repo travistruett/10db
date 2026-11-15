@@ -1,6 +1,7 @@
 import {
   AbandonStep,
   BatchState,
+  pageLabel,
   PassState,
   TakeOutStep,
   WorkstreamState,
@@ -41,11 +42,13 @@ import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
 import { dropShared } from './shared-drop';
 import { sharedRef } from './shared-hold';
+import { pageOf } from './view';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §5.4 (D23): Abandon Pass is the exit that always works. Each unsigned page's files go
-// back to their state before the pass, its work kept with its task, and the pass and its batch end
-// ABANDONED, step by recorded step (`passes.abandon_step`) so a restart goes on from the next.
+// back to their state before the pass and its changes are deleted, a task the pass made for it leaves
+// the Board, and the pass and its batch end ABANDONED, step by recorded step (`passes.abandon_step`)
+// so a restart goes on from the next.
 
 /**
  * What an Abandon needs: a take-out's, and the stop of what ships for the pass (its pull request's
@@ -127,9 +130,28 @@ async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
 }
 
 /**
- * Raises, or raises again, the one card an Abandon leaves: where the folder is, each file left as it
- * was with its page, and a pull request no longer watched. While the folder stays on the pass's
- * branch it offers the move back to the branch the pass came from.
+ * The confirm's own words for what an Abandon did to the pages, by label: those whose changes it
+ * deleted, then those signed off, which stay.
+ */
+function pagesLine(db: DbReader, pass: PassDto): string {
+  const { areas } = getProject(db, pass.projectId);
+  const label = (task: TaskDto): string =>
+    pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
+  const discards = takenOut(db, pass).reverted.map((id) => label(getTask(db, id)));
+  const stays = listPassTasks(db, pass.id).filter((task) => signedOff(db, task));
+  return [
+    discards.length > 0 ? `Discards: ${discards.join(', ')} (their changes are deleted).` : '',
+    stays.length > 0 ? `Stays: ${stays.map(label).join(', ')} (signed off).` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Raises, or raises again, the one card an Abandon leaves: where the folder is, the pages whose
+ * changes it deleted and those that stay, each file left as it was with its page, and a pull request
+ * no longer watched. While the folder stays on the pass's branch it offers the move back to the
+ * branch the pass came from.
  */
 export function raiseAbandonCard(
   deps: PassWorkDeps,
@@ -149,6 +171,8 @@ export function raiseAbandonCard(
       ? `Your folder stays on ${branch}, which holds what the pass landed. Merge it into ${pass.returnBranch} with \`git merge ${shellWord(branch)}\`, or move to ${pass.returnBranch}, which takes the landed pages off the screen and keeps them on ${branch}.`
       : `Your folder is on ${where}.`,
   ];
+  const pages = pagesLine(deps.state.db, pass);
+  if (pages !== '') parts.push(pages);
   if (input.left.length > 0)
     parts.push(
       `Left as they are, because they kept changing:\n${input.left.map((f) => `- ${f.path} (${f.page})`).join('\n')}`,
@@ -202,7 +226,8 @@ function beginAbandon(ctx: WriteContext, passId: PassId): void {
  * 2 a ship in flight is aborted (the pull request's checks, a close's job) and a shipping batch fails; 3 every session of the pass
  * is stopped, its last work kept; 4 each shared change not landed is dropped, newest first, its files
  * put back as its hold found them, with no refusal but the hash before each write; 5 each page still in the pass is taken out by the take-out's own steps, inside the
- * Abandon, so files that keep changing are left and named rather than stopping it; 6 signed-off pages
+ * Abandon, so files that keep changing are left and named rather than stopping it, its changes are
+ * deleted and a task the pass made for it is retired; 6 signed-off pages
  * stay as landed; 7 the pass and its batch are ABANDONED in one write; 8 where nothing landed, HEAD is
  * pointed back at the branch the pass came from, and the folder's own index is refreshed for the files
  * the take-outs wrote. A card says where the folder is when it stays, and names each file left.

@@ -270,7 +270,7 @@ export function useRenamePass() {
   });
 }
 
-/** Abandon Pass: every unsigned page goes back, its task keeping the work. */
+/** Abandon Pass: every unsigned page goes back and its changes are deleted. */
 export function useAbandonPass() {
   const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);

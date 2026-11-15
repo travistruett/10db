@@ -268,13 +268,13 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     said.filter((line) => !/^(Settings|People) (is ready|asks a question)$/.test(line)),
   ).toEqual([]);
 
-  // Abandon ends the pass: its confirm names the page that goes back and the one that stays. Later
-  // specs read Factory across projects, so nothing of this pass is left running.
+  // Abandon ends the pass: its confirm names, by label, the page whose changes it deletes and the one
+  // that stays. Later specs read Factory across projects, so nothing of this pass is left running.
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Abandon' }).click();
   const abandon = page.getByRole('dialog', { name: 'Abandon' });
-  await expect(abandon.getByRole('list', { name: 'Pages that go back' })).toHaveText('people');
-  await expect(abandon.getByRole('list', { name: 'Pages that stay' })).toHaveText('settings');
+  await expect(abandon.getByText('Discards: People (their changes are deleted).')).toBeVisible();
+  await expect(abandon.getByText('Stays: Settings (signed off).')).toBeVisible();
   await abandon.getByRole('button', { name: 'Abandon' }).click();
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
   await expect

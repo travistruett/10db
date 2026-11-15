@@ -571,6 +571,8 @@ describe('abandonPass', () => {
     const [card] = abandonCards();
     if (!card) throw new Error('no Abandon card');
     expect(card.body).toContain(`Your folder stays on ${w.branch}`);
+    // It names the pages whose changes it deleted, as its confirm did, by their labels.
+    expect(card.body).toContain('Discards: Settings, People (their changes are deleted).');
     expect(card.options.map((o) => o.label)).toEqual(['Move to main']);
 
     w.write('src/shared.ts', 'an uncommitted edit\n');
@@ -611,6 +613,7 @@ describe('abandonPass', () => {
     const [again] = abandonCards();
     expect(again?.body).toContain('10db could not move it');
     expect(again?.body).toContain(left);
+    expect(again?.body).toContain('Discards: Settings, People (their changes are deleted).');
   });
 
   it('finishes when a page keeps changing, leaving its files and naming them on the card with the page', async () => {

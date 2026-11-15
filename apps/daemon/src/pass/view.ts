@@ -45,7 +45,7 @@ import { signingOff } from './sign-off';
 // Workbench spec §4.3, §4.5, §6.1: what the Workbench reads of a pass, built from its rows alone.
 
 /** The page area a task works on: its first page, else the first area the pass holds for it. */
-function pageOf(areas: readonly AreaDef[], task: TaskDto): AreaDef | undefined {
+export function pageOf(areas: readonly AreaDef[], task: TaskDto): AreaDef | undefined {
   const named = (name: string | undefined) => areas.find((a) => a.name === name);
   const page = task.areas.find((name) => named(name)?.role === AreaRole.Page);
   return named(page ?? passHeldAreas(areas, task)[0]);

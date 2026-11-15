@@ -60,8 +60,8 @@ import {
 } from './kept-work';
 
 // Workbench spec §5.4: taking a task out of its pass, step by recorded step, so a restart goes on from
-// the step its `pass_take_outs` row reached. Its work is kept with the task, its page's files go back
-// to what they were without it, and it returns to the Board.
+// the step its `pass_take_outs` row reached. Its work is kept with the task, or deleted inside an
+// Abandon, its page's files go back to what they were without it, and it returns to the Board.
 
 /** What a take-out is part of: the builder's ask alone, or an Abandon or a close, which must finish. */
 export const TakeOutWithin = { Alone: 'alone', Abandon: 'abandon', Close: 'close' } as const;
