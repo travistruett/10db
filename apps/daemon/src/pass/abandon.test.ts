@@ -26,6 +26,7 @@ import {
   openHolds,
   schema,
   setAbandonStep,
+  setTaskKeptWork,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -188,7 +189,7 @@ describe('abandonPass', () => {
     expect(opened.pass.state).toBe(PassState.Open);
   });
 
-  it('retires a page the pass made before it had a run, and takes a Board task with none out open', async () => {
+  it('retires a page the pass made before it had a run, and takes a Board task with none out open, its saved work deleted', async () => {
     w = await openPassWorld();
     const pass = w.opened.pass.id;
     const { made, joined } = w.h.state.write((ctx) => {
@@ -202,16 +203,28 @@ describe('abandonPass', () => {
         acceptanceCriteria: ['ok'],
         areas: ['people'],
       });
+      // The Board task carries saved work from an earlier pass into this one.
+      setTaskKeptWork(ctx, board.id, {
+        keptSha: w.opened.pass.startSha,
+        keptBaseSha: w.opened.pass.startSha,
+      });
       joinPassRows(ctx, pass, [page.id, board.id]);
       markTasksMadeByPass(ctx, pass, [page.id]);
       return { made: page, joined: board };
     });
+    w.h.git$('update-ref', keptRef(joined.id), w.opened.pass.startSha);
 
     await abandonPass(deps(), pass);
 
     const db = w.h.store.db;
     expect(getTask(db, made.id)).toMatchObject({ passId: null, status: 'cancelled' });
     expect(getTask(db, joined.id)).toMatchObject({ passId: null, status: 'open' });
+    expectNoKeptWork(w, joined);
+    expect(
+      listTaskThreadRows(db, joined.id)
+        .filter((m) => m.kind === 'notice')
+        .map((m) => m.body),
+    ).toContain('Abandoned with Polish; its changes were deleted.');
     expect(listTasks(db, w.h.project.id).map((t) => t.id)).not.toContain(made.id);
   });
 

@@ -21,14 +21,11 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
-  leavePass,
   listPassTakeOuts,
   listPassTasks,
   listSharedChanges,
   listSignOffWaits,
-  madeByPass,
   openHolds,
-  retireTaskUnconditionally,
   setAbandonStep,
   transitionBatch,
   type DbReader,
@@ -43,7 +40,13 @@ import { keepOrLetGo } from './shared-chain';
 import { dropShared } from './shared-drop';
 import { sharedRef } from './shared-hold';
 import { pageOf } from './view';
-import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
+import {
+  deleteAbandonedWork,
+  leaveAbandonedPass,
+  takeOutSteps,
+  TakeOutWithin,
+  type TakeOutDeps,
+} from './take-out';
 
 // Workbench spec §5.4 (D23): Abandon Pass is the exit that always works. Each unsigned page's files go
 // back to their state before the pass and its changes are deleted, a task the pass made for it leaves
@@ -296,12 +299,14 @@ export async function abandonPassSteps(
   if (before(AbandonStep.PagesTakenOut)) {
     for (const task of listPassTasks(db, passId)) {
       if (signedOff(db, task)) continue;
-      if (task.workstreamId === null)
+      if (task.workstreamId === null) {
+        // A page with no run has no take-out: its work goes and it leaves the pass as one does.
+        const repo = getProject(db, getPass(db, passId).projectId).repoPath;
+        await deleteAbandonedWork(deps, { repo, taskId: task.id, passId });
         deps.state.write((ctx) => {
-          leavePass(ctx, task.id);
-          if (madeByPass(ctx.tx, passId, task.id)) retireTaskUnconditionally(ctx, task.id);
+          leaveAbandonedPass(ctx, { taskId: task.id, passId });
         });
-      else await takeOutSteps(deps, { taskId: task.id, within: TakeOutWithin.Abandon });
+      } else await takeOutSteps(deps, { taskId: task.id, within: TakeOutWithin.Abandon });
     }
     record(AbandonStep.PagesTakenOut);
   }

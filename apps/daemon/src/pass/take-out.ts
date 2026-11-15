@@ -128,26 +128,53 @@ export function leavePassForBoard(
   // No turn of the task is left for a later run of it to finish, nor a sign-off waiting for it.
   settleTurnsLeaving(ctx, input.taskId);
   deleteSignOffWait(ctx, input.taskId);
+  if (input.abandoned === true) {
+    leaveAbandonedPass(ctx, input);
+    advanceTakeOut(ctx, input, { step: TakeOutStep.Done, discarded: true });
+    return;
+  }
   leavePass(ctx, input.taskId);
   setTaskKeptWork(ctx, input.taskId, input.kept);
-  const abandoned = input.abandoned === true;
-  if (abandoned && madeByPass(ctx.tx, input.passId, input.taskId))
-    retireTaskUnconditionally(ctx, input.taskId);
-  else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
-  advanceTakeOut(
-    ctx,
-    { taskId: input.taskId, passId: input.passId },
-    { step: TakeOutStep.Done, ...(abandoned ? { discarded: true } : {}) },
-  );
+  if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
+  advanceTakeOut(ctx, input, { step: TakeOutStep.Done });
   insertSystemNotice(
     ctx,
     input.taskId,
-    abandoned
-      ? `Abandoned with ${pass.name}; its changes were deleted.`
-      : input.kept === null
-        ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
-        : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
+    input.kept === null
+      ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
+      : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
   );
+}
+
+/**
+ * Deletes a task's work as an Abandon does, before the write that forgets it: the pass's kept ref for
+ * its page, then any saved work it carried in. One already gone is no error, so a rerun deletes
+ * nothing more.
+ */
+export async function deleteAbandonedWork(
+  deps: PassWorkDeps,
+  input: { readonly repo: string; readonly taskId: TaskId; readonly passId: PassId },
+): Promise<void> {
+  await deps.git.deleteKeptRef(input.repo, passKeptRef(input.passId, input.taskId));
+  await deps.git.deleteKeptRef(input.repo, keptRef(input.taskId));
+}
+
+/**
+ * A task leaves an abandoned pass, in the caller's write, once `deleteAbandonedWork` has run: it keeps
+ * no work; a task the pass made for its page is retired, so it leaves the Board, and any other goes
+ * back to the Board open, its thread saying its changes were deleted.
+ */
+export function leaveAbandonedPass(
+  ctx: WriteContext,
+  input: { readonly taskId: TaskId; readonly passId: PassId },
+): void {
+  const task = getTask(ctx.tx, input.taskId);
+  const pass = getPass(ctx.tx, input.passId);
+  leavePass(ctx, input.taskId);
+  setTaskKeptWork(ctx, input.taskId, null);
+  if (madeByPass(ctx.tx, input.passId, input.taskId)) retireTaskUnconditionally(ctx, input.taskId);
+  else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
+  insertSystemNotice(ctx, input.taskId, `Abandoned with ${pass.name}; its changes were deleted.`);
 }
 
 /** The page files whose content on disk is not what `kept` holds: something wrote after the keep. */
@@ -390,8 +417,7 @@ export async function takeOutSteps(
     // An Abandon deletes the page's changes: the pass's kept ref and any saved work the task carried
     // in go before the row forgets them, so a restart between the two deletes nothing more and
     // writes the same row.
-    await git.deleteKeptRef(repo, passKeptRef(pass.id, task.id));
-    await git.deleteKeptRef(repo, keptRef(task.id));
+    await deleteAbandonedWork(deps, { repo, taskId: task.id, passId: pass.id });
     deps.state.write((ctx) => {
       leavePassForBoard(ctx, {
         taskId: task.id,
