@@ -73,7 +73,7 @@ export interface WorkbenchScreenProps {
   /** The new pages and settings the setup still has for a project with pages; 0 shows no count. */
   readonly setupCount: number;
   /** The pages the repository has that the project lacks and the builder has not left out. */
-  readonly newPages?: readonly PageRow[];
+  readonly newPages: readonly PageRow[];
   /** The pages a `goal` link's tasks committed in, which the picker starts ticked. */
   readonly goalPages: readonly string[];
   /** Now, in epoch milliseconds. */
@@ -105,8 +105,8 @@ function closeFinished(before: PassDto | null, after: PassDto | null): PassDto |
  * while no pass is open, else the pass's header over its workspace.
  */
 export function WorkbenchScreen(props: WorkbenchScreenProps) {
-  const { project, live, start, tasks, inbox, search, goalPages, now, setupCount } = props;
-  const { newPages = [] } = props;
+  const { project, live, start, tasks, inbox, search, goalPages, now, setupCount, newPages } =
+    props;
   const { onSelect, renderWorkspace, actions } = props;
   const [dialog, setDialog] = useState<Dialog>(null);
   // The live pass last read, and the one whose close finished while it was on screen, which the picker

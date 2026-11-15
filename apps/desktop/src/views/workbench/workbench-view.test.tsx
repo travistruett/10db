@@ -64,6 +64,7 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
     search: {},
     goalPages: [],
     setupCount: 0,
+    newPages: [],
     now: Date.parse(PASS_NOW),
     onSelect,
     renderWorkspace: (workspace) => <Workspace {...workspace} />,

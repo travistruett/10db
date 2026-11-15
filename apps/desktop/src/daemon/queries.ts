@@ -48,6 +48,8 @@ import { useDaemon } from './provider';
 /** Query keys; events invalidate by prefix (`['tasks']` covers every project's task list). */
 export const queryKeys = {
   projects: ['projects'],
+  /** The Workbench setup read for a project (`useWorkbenchSetup`). */
+  workbenchSetup: (projectId: ProjectId) => ['workbench-setup', projectId] as const,
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
   batches: (projectId: ProjectId) => ['batches', projectId] as const,
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
@@ -602,7 +604,12 @@ export function usePatchProject(projectId: ProjectId) {
         await client.projects[':projectId'].$patch({ param: { projectId }, json: patch }),
         ProjectDto,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    // A saved project makes the setup read of it stale: an Apply must not send an old proposal over it.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workbenchSetup(projectId) }),
+      ]),
   });
 }
 

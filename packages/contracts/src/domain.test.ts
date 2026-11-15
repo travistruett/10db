@@ -879,3 +879,18 @@ describe('the catch-all area', () => {
     expect(ProjectPatch.parse({ hazards: [hazard] }).hazards?.[0]).not.toHaveProperty('catchAll');
   });
 });
+
+describe('ProjectPatch.leftOutPages', () => {
+  it.each([
+    { name: 'area names', value: ['sessions', 'billing'], ok: true },
+    { name: 'none', value: [], ok: true },
+    { name: 'a blank name', value: [''], ok: false },
+    {
+      name: 'more than 200',
+      value: Array.from({ length: 201 }, (_, i) => `p${String(i)}`),
+      ok: false,
+    },
+  ])('takes $name: $ok', ({ value, ok }) => {
+    expect(ProjectPatch.safeParse({ leftOutPages: value }).success).toBe(ok);
+  });
+});

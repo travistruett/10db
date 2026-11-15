@@ -797,7 +797,7 @@ export const ProjectPatch = z
     previewCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
-    leftOutPages: z.array(z.string()),
+    leftOutPages: z.array(AreaName).max(200),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })

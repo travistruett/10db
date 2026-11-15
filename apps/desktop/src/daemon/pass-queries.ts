@@ -314,7 +314,7 @@ export function useTakeOutPage() {
 
 /** `POST /projects/:projectId/workbench-setup`: read again once Apply saves the project. */
 export const setupKeys = {
-  of: (projectId: ProjectId) => ['workbench-setup', projectId] as const,
+  of: queryKeys.workbenchSetup,
 };
 
 /**

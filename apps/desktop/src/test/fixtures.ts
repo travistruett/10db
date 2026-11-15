@@ -29,7 +29,6 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     areas: [{ name: 'src', globs: ['src/**'] }],
     leftOutPages: [],
     hazards: [],
-    leftOutPages: [],
     maxLanes: 2,
     provider: 'claude',
     accountId: DEFAULT_ACCOUNT.id,
