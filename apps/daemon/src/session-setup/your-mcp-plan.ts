@@ -192,6 +192,10 @@ function isLoopback(url: string): boolean {
 const PLAIN_SEGMENT = /^[A-Za-z0-9._-]{1,24}$/;
 const MAX_SEGMENTS = 4;
 
+/** A long segment mixing letters and digits reads as a token, not a word like `mcp` or `v1`. */
+const looksLikeToken = (segment: string): boolean =>
+  segment.length >= 12 && /[A-Za-z]/.test(segment) && /\d/.test(segment);
+
 /**
  * Whether a remote server sends something a lane could read off a port it listens on: headers, or a secret
  * in its URL: userinfo, a query, a fragment, a `${}` reference that expands into it, or a path that isn't a
@@ -212,7 +216,10 @@ function sendsCredentials(
     )
       return true;
     const segments = parsed.pathname.split('/').filter((segment) => segment !== '');
-    return segments.length > MAX_SEGMENTS || !segments.every((s) => PLAIN_SEGMENT.test(s));
+    return (
+      segments.length > MAX_SEGMENTS ||
+      !segments.every((s) => PLAIN_SEGMENT.test(s) && !looksLikeToken(s))
+    );
   } catch {
     return true;
   }
