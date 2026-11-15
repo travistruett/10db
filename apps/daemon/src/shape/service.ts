@@ -808,7 +808,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       }
       if (turnRuns(conversation)) {
         if (options?.interrupt !== true)
-          throw new ConflictError('Claude is still answering; Stop or wait');
+          throw new ConflictError('The agent is still answering; Stop or wait');
         engine.holdStarts(conversation);
         await engine.stop(conversation);
         await engine.settled(conversation);
