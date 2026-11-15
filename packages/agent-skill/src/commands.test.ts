@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { runCommand, TendbError, type CommandDeps } from './index';
 
 const tid = (n: number): string => `tsk_${String(n).padStart(8, '0')}-0000-7000-8000-000000000000`;
@@ -220,7 +221,7 @@ describe('context and project', () => {
   it('context prints the open tasks with their sizing and the versions', async () => {
     const h = harness();
     await h.run('context');
-    const out = JSON.parse(h.lines.join('\n')) as Record<string, unknown>;
+    const out = z.record(z.string(), z.unknown()).parse(JSON.parse(h.lines.join('\n')));
     expect(out).toMatchObject({
       cwd: '/repo',
       matched: 1,
@@ -277,7 +278,7 @@ describe('context and project', () => {
   it.each(rows)('project resolves by name with $name', async ({ patch, expected, note }) => {
     const h = harness({ 'GET /projects': [{ ...project, ...patch }] });
     await h.run('project', 'Acme');
-    const out = JSON.parse(h.lines.join('\n')) as Record<string, unknown>;
+    const out = z.record(z.string(), z.unknown()).parse(JSON.parse(h.lines.join('\n')));
     expect(out).toMatchObject({
       ...expected,
       account: { id: 'acc_1', label: 'Main', kind: 'claude_plan' },
@@ -311,7 +312,9 @@ describe('hazards', () => {
       additions([{ name: 'migrations', globs: ['apps/**'], commands: ['make migration'] }]),
     );
     await h.run('hazards', 'prj_1', '/a.json');
-    const body = h.posted()[0]?.body as { hazards: { name: string }[] };
+    const body = z
+      .object({ hazards: z.array(z.object({ name: z.string() })) })
+      .parse(h.posted()[0]?.body);
     expect(body.hazards.map((x) => x.name)).toEqual(['lockfiles', 'migrations']);
     expect(h.lines[0]).toContain('+ hazard migrations (scope project)');
     expect(h.lines.join('\n')).toContain('(1 tracked files)');
