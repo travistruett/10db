@@ -6,6 +6,7 @@ import { useModels } from '../daemon/model-queries';
 import {
   chipLabel,
   effortLabel,
+  effortRun,
   effortsOf,
   matching,
   nameOf,
@@ -54,6 +55,8 @@ export function ModelMenu({
   const rows = new Map((models.data ?? []).map((row) => [row.model, row]));
   const inUse = picked ?? defaultModel;
   const efforts = effortsOf(inUse, rows);
+  // The effort the next turn runs on, which the chip, the submenu's label and its radio all show.
+  const runs = effortRun(inUse, effort, rows);
   const { main, more } = splitModels(offered, inUse);
   const found = matching(more, query, rows);
   const off = busy || pending;
@@ -114,7 +117,7 @@ export function ModelMenu({
                     disabled={efforts.length === 0}
                     rightSection={
                       <Text size="xs" c="dimmed">
-                        {effort === null ? 'Automatic' : effortLabel(effort)}
+                        {runs === null ? 'Automatic' : effortLabel(runs)}
                       </Text>
                     }
                   >
@@ -122,7 +125,7 @@ export function ModelMenu({
                   </Menu.Sub.Item>
                 </Menu.Sub.Target>
                 <Menu.Sub.Dropdown>
-                  <Menu.RadioGroup value={effort ?? AUTOMATIC} onChange={pickEffort}>
+                  <Menu.RadioGroup value={runs ?? AUTOMATIC} onChange={pickEffort}>
                     <Menu.RadioItem value={AUTOMATIC}>Automatic</Menu.RadioItem>
                     {efforts.map((e) => (
                       <Menu.RadioItem key={e} value={e}>
