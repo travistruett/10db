@@ -14,6 +14,7 @@ import { GoalList } from './goal-list';
 import { HumanTouchPanel } from './human-touch-panel';
 import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
+import { AdmissionNote } from './admission-note';
 import { PassLine } from '../workbench/pass-line';
 
 /**
@@ -46,6 +47,7 @@ export function FactoryView() {
             <BenchmarkSyncNote />
           </Group>
           <UpdateDrainNote />
+          <AdmissionNote />
           <Text size="sm" c="dimmed">
             Goals 10db is pursuing, by project
           </Text>
