@@ -278,6 +278,27 @@ describe('planYourMcp', () => {
     },
   );
 
+  it.each([
+    ['a query', 'http://localhost:3000/mcp?key=abc'],
+    ['userinfo', 'http://user:pw@localhost:3000/mcp'],
+    ['a ${} reference in the path', 'http://localhost:3000/${TOKEN}/mcp'],
+    ['a ${} reference in the query', 'http://127.0.0.1:3000/mcp?k=${TOKEN}'],
+  ])('a loopback server whose url carries %s counts as one with headers', (_name, url) => {
+    const local = [entry('local', remote({ url }))];
+    const loginEnv = { ...LOGIN, TOKEN: 'sk-1' };
+    const on = plan(local, { localBinding: true, loginEnv });
+    expect(on.remote).toEqual({});
+    expect(on.leftOut[0]?.why).toBe(
+      "it sends its headers to this Mac, where this project's commands may listen; turn the project's loopback off to use it",
+    );
+    expect(Object.keys(plan(local, { localBinding: false, loginEnv }).remote)).toEqual(['local']);
+  });
+
+  it('a remote server on another host keeps its query and userinfo while the loopback is on', () => {
+    const far = [entry('far', remote({ url: 'https://user:pw@mcp.example/mcp?key=abc' }))];
+    expect(Object.keys(plan(far, { localBinding: true }).remote)).toEqual(['far']);
+  });
+
   it('a localhost server with no headers is kept either way', () => {
     const local = [entry('local', remote({ url: 'http://localhost:3000/mcp' }))];
     expect(plan(local, { localBinding: true }).remote['local']?.headers).toBeNull();

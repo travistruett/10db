@@ -190,6 +190,23 @@ function isLoopback(url: string): boolean {
 }
 
 /**
+ * Whether a remote server sends something a lane could read off a port it listens on: headers, or a secret
+ * in its URL (userinfo, a query, or a `${}` reference that expands into it).
+ */
+function sendsCredentials(
+  declaredUrl: string,
+  planned: { readonly url: string; readonly headers: object | null },
+): boolean {
+  if (planned.headers !== null || declaredUrl.includes('${')) return true;
+  try {
+    const parsed = new URL(planned.url);
+    return parsed.username !== '' || parsed.password !== '' || parsed.search !== '';
+  } catch {
+    return true;
+  }
+}
+
+/**
  * One session's servers from the builder's files and plugins, by the trust switches, the approvals and the
  * login environment. A session's set is fixed when it starts. The first rule that matches an entry decides it.
  */
@@ -244,7 +261,7 @@ export function planYourMcp(args: {
         stdio[entry.name] = stdioPlan(entry, declared, args.loginEnv);
       } else {
         const planned = remotePlan(entry, declared, args.loginEnv);
-        if (planned.headers !== null && args.localBinding && isLoopback(planned.url))
+        if (args.localBinding && isLoopback(planned.url) && sendsCredentials(declared.url, planned))
           return "it sends its headers to this Mac, where this project's commands may listen; turn the project's loopback off to use it";
         remote[entry.name] = planned;
       }
