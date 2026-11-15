@@ -4,9 +4,26 @@ import { join, resolve } from 'node:path';
 import { parse, stringify } from 'smol-toml';
 import { z } from 'zod';
 import { singleQuoted } from '../sandbox';
+import { McpSignInError } from './types';
 
 /** Above the longest wait for a card: `humanWaitMinutes` is at most 240, plus the 5 of the tool timeout. */
 export const CODEX_HOOK_TIMEOUT_SECONDS = 15_000;
+
+/**
+ * The account's `CODEX_HOME` and the empty folder every Codex process on it runs with as `HOME`: sessions,
+ * status reads and sign-ins share them, so each finds the same files. Throws an `McpSignInError` for an env
+ * with no `CODEX_HOME`, which would run in the shared home.
+ */
+export function codexChildHome(env: Readonly<Record<string, string>>): {
+  readonly codexHome: string;
+  readonly home: string;
+} {
+  const codexHome = env['CODEX_HOME'];
+  if (codexHome === undefined || codexHome === '')
+    throw new McpSignInError('The account has no Codex folder, so Codex would use the shared one.');
+  const path = resolve(codexHome);
+  return { codexHome: path, home: join(path, 'home') };
+}
 
 /** The event name `hooks/list` reports for the guard hook. */
 export const GUARD_HOOK_EVENT = 'preToolUse';
@@ -156,7 +173,7 @@ class FileCodexHome implements CodexHome {
 
   constructor(path: string) {
     this.path = path;
-    this.emptyHome = join(path, 'home');
+    this.emptyHome = codexChildHome({ CODEX_HOME: path }).home;
   }
 
   prepare(checkout: string): Promise<void> {

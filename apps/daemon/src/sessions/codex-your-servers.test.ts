@@ -80,6 +80,34 @@ describe('codexYourServers', () => {
     });
   });
 
+  it.each<{
+    name: string;
+    oauth: NonNullable<YourSessionServer['claudeOAuth']>;
+    expected: Record<string, unknown>;
+  }>([
+    {
+      name: 'client id, callback port and scopes map to Codex keys, and xaa is left out',
+      oauth: { clientId: 'x', callbackPort: 9000, scopes: 'read write', xaa: true },
+      expected: { oauth: { client_id: 'x', callback_port: 9000 }, scopes: ['read', 'write'] },
+    },
+    {
+      name: 'scopes alone give no oauth block, and authServerMetadataUrl is left out',
+      oauth: { scopes: ' read  write ', authServerMetadataUrl: 'https://idp.example/.well-known' },
+      expected: { scopes: ['read', 'write'] },
+    },
+  ])('an oauth block: $name', ({ oauth, expected }) => {
+    const server: YourSessionServer = {
+      connect: { type: 'http', url: 'https://o.example/mcp', headers: null },
+      claudeOAuth: oauth,
+      codex: NONE,
+    };
+    expect(codexYourServers({ yourMcpServers: { o: server } })['o']).toEqual({
+      url: 'https://o.example/mcp',
+      default_tools_approval_mode: 'approve',
+      ...expected,
+    });
+  });
+
   it('leaves out filters and timeouts that are not set, and headers that are null', () => {
     const plain: YourSessionServer = {
       connect: { type: 'sse', url: 'https://p.example/sse', headers: null },

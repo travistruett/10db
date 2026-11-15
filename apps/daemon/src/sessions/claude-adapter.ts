@@ -25,6 +25,7 @@ import {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
+  McpSignInUnsupportedError,
   type AccountProbeSpec,
   type CompletionSpec,
   type LanePermissionMode,
@@ -266,6 +267,14 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
           }),
       }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
+    // Claude Code has no public way to start an MCP sign-in, and no status read; Settings shows the command.
+    startMcpSignIn: () =>
+      Promise.reject(
+        new McpSignInUnsupportedError(
+          'Claude Code signs an MCP server in only in its own terminal.',
+        ),
+      ),
+    mcpAuthStatus: () => Promise.resolve({}),
     startLogin: (login) =>
       startClaudeLogin(login, {
         claudePath: opts.claudePath,

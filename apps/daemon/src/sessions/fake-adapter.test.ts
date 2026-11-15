@@ -4,6 +4,7 @@ import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir, testPolicy } from '../../test/fixtures';
 import { FakeSessionClashError } from './fake-session';
+import { McpAuthState } from './codex-mcp-auth';
 import {
   FakeAdapter,
   loadFakeScriptBook,
@@ -344,6 +345,42 @@ describe('FakeAdapter', () => {
       email: 'builder@example.com',
     });
     expect(adapter.probes).toEqual([{ kind: 'claude_subscription', cwd: '/d', env: {} }]);
+  });
+});
+
+describe("the fake adapter's mcp sign-ins", () => {
+  const server = {
+    connect: { type: 'http', url: 'https://l.example/mcp', headers: null },
+    claudeOAuth: null,
+    codex: { enabledTools: null, disabledTools: [], startupTimeoutSec: null, toolTimeoutSec: null },
+  } as const;
+  const signIn = { kind: 'codex_signin', env: {}, name: 'linear', server } as const;
+
+  it('reads a server as not signed in until its sign-in completes, and keeps the sign-in until then', async () => {
+    const adapter = new FakeAdapter({});
+    const auth = { kind: 'codex_signin', env: {}, servers: { linear: server } } as const;
+    await expect(adapter.mcpAuthStatus(auth)).resolves.toEqual({
+      linear: McpAuthState.NotSignedIn,
+    });
+    const started = await adapter.startMcpSignIn(signIn);
+    await started.reopen();
+    expect(adapter.mcpSignIns.map((s) => [s.spec.name, s.reopened])).toEqual([['linear', 1]]);
+    adapter.completeMcpSignIn('linear', true);
+    await expect(started.outcome).resolves.toEqual({ ok: true });
+    await expect(adapter.mcpAuthStatus(auth)).resolves.toEqual({ linear: McpAuthState.SignedIn });
+  });
+
+  it('ends a failed sign-in with a message, and a cancel as cancelled', async () => {
+    const adapter = new FakeAdapter({});
+    const failed = await adapter.startMcpSignIn(signIn);
+    adapter.completeMcpSignIn('linear', false);
+    await expect(failed.outcome).resolves.toMatchObject({ ok: false });
+    const cancelled = await adapter.startMcpSignIn(signIn);
+    await cancelled.cancel();
+    await expect(cancelled.outcome).resolves.toEqual({
+      ok: false,
+      message: 'The sign-in was cancelled.',
+    });
   });
 });
 

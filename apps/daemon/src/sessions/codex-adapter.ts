@@ -4,6 +4,7 @@ import type { SeenAccount } from './account-check';
 import { codexCapabilities } from './capabilities';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
+import { codexMcpAuthStatus, startCodexMcpSignIn } from './codex-mcp-sign-in';
 import { codexHomes } from './codex-home';
 import { InitializeResponse } from './codex-protocol';
 import {
@@ -91,6 +92,8 @@ export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
     capabilities: (account) => codexCapabilities(account.kind),
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
+    startMcpSignIn: (spec) => startCodexMcpSignIn(spec, { ...opts, homes }),
+    mcpAuthStatus: (spec) => codexMcpAuthStatus(spec, { ...opts, homes }),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
     // A lane and an explore conversation open the same session: the sandbox, the guard hook and the
     // judge come with the spec (sessions spec §5.5, the attended profile).

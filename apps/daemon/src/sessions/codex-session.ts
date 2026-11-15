@@ -17,7 +17,12 @@ import {
   type GuardSocket,
   type HookInput,
 } from './codex-guard';
-import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
+import {
+  CODEX_HOOK_TIMEOUT_SECONDS,
+  codexChildHome,
+  GUARD_HOOK_EVENT,
+  type CodexHome,
+} from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import { CODEX_MCP_STATUS_WAIT_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
 import { refusedToolCalls } from './codex-refused-calls';
@@ -972,7 +977,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
 
     const socketPath = await openGuard();
     homeEnv = {
-      HOME: home.emptyHome,
+      HOME: codexChildHome(spec.env).home,
       TENDB_MCP_TOKEN: spec.mcp.token,
       TENDB_GUARD_SOCKET: socketPath,
       // A card the hook raises waits on the builder, so the hook's own wait bounds it, not a tool's.
