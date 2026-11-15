@@ -724,17 +724,37 @@ function resolveDirectory(base, target) {
 /**
  * The directory a plain `cd` segment leaves the shell in, or null when it can't be read: a cd with
  * no operand, more than one, or a path `resolveDirectory` can't resolve. `-L` and `--` are the
- * only options read.
+ * only options read. zsh reads `+N` and `-N` as directory-stack entries, so neither is read.
  * @param {string[]} words the segment's words, the first being `cd`
  * @param {string | null} base the directory it runs in
  * @returns {string | null}
  */
 function cdDestination(words, base) {
+  const target = cdOperand(words);
+  if (target === null || /^[+-]\d+$/.test(target)) return null;
+  return resolveDirectory(base, target);
+}
+
+/**
+ * The one operand of a plain `cd` segment, past `-L` and `--`, or null when it has none or more.
+ * @param {string[]} words
+ * @returns {string | null}
+ */
+function cdOperand(words) {
   let i = 1;
   if (words[i] === '-L') i += 1;
   if (words[i] === '--') i += 1;
-  if (words.length !== i + 1) return null;
-  return resolveDirectory(base, words[i]);
+  return words.length === i + 1 ? words[i] : null;
+}
+
+/**
+ * True when the shell may look the cd's operand up in CDPATH first, so it may land somewhere other
+ * than the path read from here: a relative name that doesn't start with `./` or `../`.
+ * @param {string[]} words
+ */
+function cdMaySearch(words) {
+  const target = cdOperand(words);
+  return target !== null && !posix.isAbsolute(target) && !/^\.\.?(\/|$)/.test(target);
 }
 
 /**
@@ -1099,7 +1119,8 @@ const PUSH_FORCE_OPTIONS = [
 const SEVERITY = { warn: 1, ask: 2, deny: 3 };
 
 /**
- * @typedef {{ decision: 'deny' | 'ask' | 'warn', reason: string }} Verdict
+ * @typedef {{ decision: 'deny' | 'ask' | 'warn', reason: string, instead?: string }} Verdict
+ * `instead` names a way to reach the same end that needs no approval, for a subagent that can't ask.
  * @param {string} command
  * @param {string} cwd
  * @param {string} [whole] the command as the agent ran it, when `command` is a script nested in it
@@ -1129,6 +1150,10 @@ function judge(command, cwd, whole = command, startDir = cwd) {
   // closes, or a list goes to the background (bash runs a whole `a && b &` list in a subshell),
   // the shell may be back where it was, so the directory becomes unknown.
   let followedCd = false;
+  // Whether a cd CDPATH may redirect has run. `dir` still guides the index and path lookups, but
+  // the decisions that need to know where git runs (a bare push, the discard exception) treat the
+  // directory as unknown.
+  let searchedCd = false;
   /** @type {string | null | undefined} undefined until looked up; null when git can't say */
   let prefix;
   const repoPrefix = () => {
@@ -1156,6 +1181,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       const readable =
         plainCd && !grouped && inLine.includes(previous) && inLine.includes(seg.separator);
       const destination = readable ? cdDestination(seg.words, dir) : null;
+      if (destination !== null && cdMaySearch(seg.words)) searchedCd = true;
       if (destination !== null && !listCertain) uncertainAtListEnd = true;
       dir = destination;
       if (destination === null) listCertain = false;
@@ -1163,7 +1189,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
     } else listCertain = false;
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
-      const verdict = inner === null ? null : judge(inner, cwd, whole, dir);
+      const verdict = inner === null ? null : judge(inner, cwd, whole, searchedCd ? null : dir);
       if (verdict) verdicts.push(verdict);
     }
     if (seg.words.some((w) => HOOK_SKIP.test(w) && !HOOK_SKIP_HARMLESS.test(w))) {
@@ -1177,7 +1203,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       verdicts.push({
         decision: 'ask',
         reason:
-          'A wrapper option the guard does not know comes before the command, so it cannot tell which word runs. Run the command without the wrapper, or approve it.',
+          'A wrapper option the guard does not know comes before the command, so it cannot tell which word runs. Run the command without the wrapper.',
       });
     }
     const program = programAt(seg.words, start);
@@ -1330,7 +1356,10 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       const pushTargets = git.verb === 'push' ? a.filter((x) => !x.startsWith('-')).slice(1) : [];
       // A bare push sends the branch checked out where git runs: the directory the command line's
       // `cd` and `-C` lead to. Unknown (null) when a cd or retargeting can't be read, and then it asks.
-      let pushDir = dir;
+      // Where git runs, as far as the decisions that depend on it can trust: unknown after a cd
+      // CDPATH may redirect.
+      const gitDir = searchedCd ? null : dir;
+      let pushDir = gitDir;
       for (const target of git.dirs) pushDir = resolveDirectory(pushDir, target);
       if (git.retargeted || (touchedDirectory && GIT_REPOSITORY_VARIABLE.test(whole))) {
         pushDir = null;
@@ -1361,21 +1390,37 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       // The exception holds only for a command that is this one plain git call: no other segment,
       // wrapper, assignment, git option before the verb, substitution, heredoc or `$`, so nothing
       // the shell runs or expands first, and no config, can point git at another checkout.
-      const loneGitCall =
+      const filled = segs.filter((x) => x.words.length > 0);
+      const plainGitCall =
         whole === command &&
-        segs.filter((x) => x.words.length > 0).length === 1 &&
+        filled.at(-1) === seg &&
         seg.words[0] === 'git' &&
         seg.words[1] === git.verb &&
         git.config.length === 0 &&
         seg.substitutions.length === 0 &&
         seg.heredocs.length === 0 &&
         !/[$`]/.test(whole);
+      const loneGitCall = plainGitCall && filled.length === 1;
+      // A discard may also follow plain `cd <dir> &&` segments. `&&` stops the line at a failed cd,
+      // so git runs in `dir`, the directory those cds lead to, or not at all; `dir` is null when a
+      // cd can't be read. Only the git call itself is checked for retargeting, since `cd` is one.
+      const cdsThenGitCall =
+        plainGitCall &&
+        gitDir !== null &&
+        filled.slice(0, -1).every((x) => x.words[0] === 'cd' && x.separator === '&&') &&
+        !RETARGETS.test(seg.raw);
       const ownDiscard =
-        loneGitCall &&
+        gitDir !== null &&
+        (loneGitCall ? !RETARGETS.test(whole) : cdsThenGitCall) &&
         ['checkout', 'restore'].includes(git.verb) &&
-        isFileDiscard(git.verb, a, cwd) &&
-        !RETARGETS.test(whole) &&
-        inAgentWorktree(cwd);
+        isFileDiscard(git.verb, a, gitDir) &&
+        inAgentWorktree(gitDir);
+      // Whether git certainly runs in an agent worktree, for the hint shown to a subagent.
+      const inOwnWorktree = () =>
+        gitDir !== null &&
+        !RETARGETS.test(seg.raw) &&
+        !GIT_REPOSITORY_VARIABLE.test(whole) &&
+        inAgentWorktree(gitDir);
       // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
       // call, for the same reason as above; the cwd is the repository the branch names live in.
       // GitHub is asked only for a call that would ask otherwise (`&&` stops before the lookup).
@@ -1389,11 +1434,19 @@ function judge(command, cwd, whole = command, startDir = cwd) {
           deletesOnlyMergedBranches(a, cwd)
         )
       ) {
+        const unknownBranch = git.verb === 'push' && pushTargets.length === 0 && pushDir === null;
         verdicts.push({
           decision: 'ask',
-          reason: pushesMain
-            ? 'main changes only through a pull request.'
-            : `git ${git.verb} ${a.join(' ')} cannot be undone easily.`,
+          reason: unknownBranch
+            ? 'The guard cannot tell which directory this push runs in, so it cannot tell which branch a bare push sends; main changes only through a pull request.'
+            : pushesMain
+              ? 'main changes only through a pull request.'
+              : `git ${git.verb} ${a.join(' ')} cannot be undone easily.`,
+          instead: unknownBranch
+            ? 'Name the branch: git push origin <branch>.'
+            : pushesMain
+              ? 'Push your branch and open a pull request.'
+              : insteadOf(git.verb, rewritesRefs, inOwnWorktree),
         });
       }
     }
@@ -1413,7 +1466,60 @@ function judge(command, cwd, whole = command, startDir = cwd) {
   if (verdicts.length === 0) return null;
   const worst = Math.max(...verdicts.map((v) => SEVERITY[v.decision]));
   const top = verdicts.filter((v) => SEVERITY[v.decision] === worst);
-  return { decision: top[0].decision, reason: top.map((v) => v.reason).join(' ') };
+  const instead = [...new Set(top.flatMap((v) => (v.instead ? [v.instead] : [])))].join(' ');
+  return {
+    decision: top[0].decision,
+    reason: top.map((v) => v.reason).join(' '),
+    ...(instead ? { instead } : {}),
+  };
+}
+
+/**
+ * A way to the same end that needs no approval, for an irreversible git call made where nobody
+ * can approve it. Undefined when there is none to suggest.
+ * @param {string} verb
+ * @param {boolean} rewritesRefs a push that forces or deletes a remote ref
+ * @param {() => boolean} inOwnWorktree whether git runs in an agent worktree in `10db-worktrees/`
+ * @returns {string | undefined}
+ */
+function insteadOf(verb, rewritesRefs, inOwnWorktree) {
+  if (verb === 'push' && rewritesRefs) return 'Push the rewritten history to a new branch instead.';
+  if (verb === 'checkout' || verb === 'restore' || verb === 'reset') {
+    // Files outside the agent's own worktree may hold another session's uncommitted work.
+    const discard = inOwnWorktree()
+      ? 'To discard one file, write its committed copy over it: git show <ref>:./<path> > <path>.'
+      : 'Discard files only in your own worktree in 10db-worktrees/, never in a checkout another session may be using.';
+    return verb === 'reset' ? `${discard} To undo a commit, use git revert.` : discard;
+  }
+  if (verb === 'stash') {
+    return 'Commit the work to your branch, or save it as a patch with git diff > <file> in your scratchpad.';
+  }
+  if (verb === 'clean') return 'Remove the untracked files you made by name: rm <path>.';
+  if (verb === 'rebase') return 'Bring main in with git merge origin/main instead.';
+  if (verb === 'commit') return 'Make a new commit with the fix.';
+  if (verb === 'branch') return 'Leave the branch; it can be deleted once its pull request merges.';
+  return undefined;
+}
+
+/**
+ * The verdict for a subagent, which nobody watches: an ask would wait for hours, so it becomes a
+ * deny that keeps the rule's reason and says what to do instead.
+ * @param {Verdict} verdict
+ * @returns {Verdict}
+ */
+function unattended(verdict) {
+  if (verdict.decision !== 'ask') return verdict;
+  return {
+    decision: 'deny',
+    reason: [
+      'Nobody can approve a prompt inside a subagent, so this is denied instead of asked.',
+      verdict.reason,
+      verdict.instead,
+      'If no other way works, stop and report it as blocked, quoting the command.',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  };
 }
 
 function main() {
@@ -1421,8 +1527,11 @@ function main() {
   const input = JSON.parse(readFileSync(0, 'utf8'));
   if (input?.tool_name !== 'Bash' || typeof input?.tool_input?.command !== 'string') return;
   const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
-  const verdict = judge(input.tool_input.command, cwd);
-  if (!verdict) return;
+  const judged = judge(input.tool_input.command, cwd);
+  if (!judged) return;
+  // The hook input carries agent_id only inside a subagent (or an in-process teammate).
+  const inSubagent = typeof input.agent_id === 'string' && input.agent_id !== '';
+  const verdict = inSubagent ? unattended(judged) : judged;
   const hookSpecificOutput =
     verdict.decision === 'warn'
       ? { hookEventName: 'PreToolUse', additionalContext: verdict.reason }

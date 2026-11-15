@@ -108,9 +108,12 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - `commit --amend`, `stash`, `reset --hard/--keep/--merge`, rebases, `clean -f`, `checkout -- .`,
   `branch -D`, force pushes and pushes to `main` ask first. One exception, in the Claude guard
   and inside a worktree in `10db-worktrees/` only: discarding named tracked files
-  (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only when the command's
-  cwd is in that worktree; `git -C <worktree>`, a `cd` or any other way of pointing git elsewhere
-  turns it off. Directories, globs, `.`, untracked paths and every `stash` still ask.
+  (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only where git runs: the
+  command's cwd, or the directory that plain `cd <dir> &&` segments right before the git call lead
+  to. `git -C <worktree>`, a `cd` joined by `;` or `||`, a `cd` the guard can't read or that
+  CDPATH may redirect (a relative name without `./` or `../`), another command in the line, or any
+  other way of pointing git elsewhere turns it off. Directories, globs, `.`, untracked paths and
+  every `stash` still ask.
   A second exception, in the Claude guard, anywhere: a lone `git branch -D <branch>...` doesn't ask
   when each local branch's pull request has merged on GitHub (checked with `gh pr list`) and the
   branch tip is that pull request's head commit, so deleting it loses nothing. PRs are
@@ -122,9 +125,15 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   A bare `git push` is judged in the directory the command runs in: the Claude guard follows a
   `cd` (and `git -C`) earlier in the same command line, so `cd ../10db-worktrees/x && git push`
   on a feature branch doesn't ask, while a `cd` to a checkout on main, or to a path it can't read
-  (a variable, substitution, `~`, glob, `pushd`, `eval`, a subshell or a `cd` that may not run),
-  still asks, as does a push after a subshell, backtick substitution or `&` that follows a `cd`. This is separate from the discard exception above, which a `cd` or `-C` still turns
-  off.
+  (a variable, substitution, `~`, glob, `pushd`, `eval`, a subshell, a `cd` that may not run, a
+  relative name without `./` or `../`, which CDPATH may redirect, or zsh's stack entries `+N` and
+  `-N`),
+  still asks, as does a push after a subshell, backtick substitution or `&` that follows a `cd`. This
+  is separate from the discard exception above, which follows only `cd <dir> &&` and never `-C`.
+  Inside a subagent (the hook input carries `agent_id`), where nobody can answer, every ask in the
+  Claude guard is a deny instead. Its reason keeps the rule, names a way that needs no approval
+  where there is one, and otherwise says to stop and report the command as blocked; the main
+  session still asks. Codex's rules can't tell a subagent apart and keep prompting.
 - `.claude/hooks/git-guard.mjs` (Claude Code) and `.codex/rules/default.rules` (Codex) enforce
   these rules. The Claude guard fails open; only `TENDB_GIT_GUARD=off` in the environment
   Claude Code starts with disables it. It also asks before `gh pr merge --admin`, `gh api` writes
