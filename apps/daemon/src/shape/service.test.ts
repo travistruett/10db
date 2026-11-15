@@ -301,7 +301,7 @@ describe('a message', () => {
         createHash('sha256').update(started.mcp.token).digest('hex'),
       ),
     ).toBeUndefined();
-    expect(notices()).toEqual(['Claude could not start: Claude is not available']);
+    expect(notices()).toEqual(['The agent could not start: Claude is not available']);
   });
 
   it('goes to the same session, one turn at a time, in the order sent', async () => {
@@ -407,7 +407,7 @@ describe('Propose', () => {
     adapter.shapeBehaviour = () => Promise.resolve({ text: 'Let me think about it.' });
     service.propose(shapeId);
     await service.settled(shapeId);
-    expect(notices()).toEqual(["Claude didn't propose; Propose Again"]);
+    expect(notices()).toEqual(["The agent didn't propose; Propose Again"]);
   });
 
   it('shows the notice when every propose_plan of the turn was refused', async () => {
@@ -426,7 +426,7 @@ describe('Propose', () => {
     };
     service.propose(shapeId);
     await service.settled(shapeId);
-    expect(notices()).toEqual(["Claude didn't propose; Propose Again"]);
+    expect(notices()).toEqual(["The agent didn't propose; Propose Again"]);
     expect(listShapeProposals(c.store.db, shapeId)).toEqual([]);
   });
 
@@ -443,7 +443,7 @@ describe('Propose', () => {
     service.propose(shapeId);
     await service.settled(shapeId);
     expect(notices()).toEqual([
-      'The plan came back empty: nothing has been decided yet. Say what you want built, or answer Claude’s questions, then press Propose Again.',
+      'The plan came back empty: nothing has been decided yet. Say what you want built, or answer the questions, then press Propose Again.',
     ]);
   });
 
@@ -526,7 +526,7 @@ describe('Convert', () => {
     await tick();
     await expect(service.convert(shapeId, ids)).rejects.toThrow(ConflictError);
     await expect(service.convert(shapeId, ids)).rejects.toThrow(
-      'Claude is still answering; Stop or wait',
+      'The agent is still answering; Stop or wait',
     );
     expect(listShapeProposals(c.store.db, shapeId).every((r) => r.state === 'pending')).toBe(true);
     const outcome = await service.convert(shapeId, ids, { interrupt: true });
@@ -711,7 +711,7 @@ describe('a turn that fails', () => {
     adapter.shapeBehaviour = () => Promise.reject(new Error('boom'));
     service.send(shapeId, 'one');
     await service.settled(shapeId);
-    expect(notices()).toEqual(["Claude's turn failed; send the message again."]);
+    expect(notices()).toEqual(['The turn failed; send the message again.']);
     adapter.shapeBehaviour = () => Promise.resolve({ text: 'back' });
     service.send(shapeId, 'two');
     await service.settled(shapeId);

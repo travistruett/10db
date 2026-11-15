@@ -258,7 +258,11 @@ describe('the hook judge, attended', () => {
       'tendb',
       bash(DEPLOY, null),
       { choice: 'writes_live', p: 0.9 },
-      { decision: 'deny', reason: "10db's judge: Writing To Live Systems" },
+      {
+        decision: 'deny',
+        reason: "10db's judge: Writing To Live Systems",
+        judged: { limit: 'writes_live' },
+      },
       undefined,
     ],
   ])('%s', async (_name, now, req, answer, verdict, noted) => {
@@ -391,6 +395,7 @@ describe('the hook judge in a lane', () => {
       decision: 'deny',
       reason:
         'Skipped: this would write to a live system. Carry on without it and say in your handoff what you skipped.',
+      judged: { limit: 'writes_live' },
     });
     expect(listed()).toMatchObject([
       { source: 'tendb_judge', limit: 'writes_live', summary: DEPLOY, kind: 'classifier' },

@@ -209,15 +209,15 @@ Code research: for a question that spans the code (where something lives, how a 
   };
 }
 
-/** Codex has no Agent tool (sessions spec S8): Plan reads the code itself and says what waits on a Claude account. */
+/** Codex has no Agent tool (sessions spec S8): Plan reads the code itself and says what it lacks. */
 const WITHOUT_AGENTS: AgentParts = {
   web: 'You have no web tool here: when the plan hangs on a fact only the web has, say so and ask the builder.',
   reviews:
-    'For each: write the spec with write_spec (effortKey, markdown). The scope and engineering reviews run as agents, which need a Claude account: say so in one line, and ask the builder to review the spec. Answer a finding the builder raises by amending the plan with propose_plan.',
+    'For each: write the spec with write_spec (effortKey, markdown). The scope and engineering reviews run as agents, which this agent does not have here: say so in one line, and ask the builder to review the spec. Answer a finding the builder raises by amending the plan with propose_plan.',
   rehearsal:
-    'Rehearsal: rehearsing a task runs an agent, which needs a Claude account. When a note asks you to rehearse tasks, say so in one line and propose nothing in that turn.',
+    'Rehearsal: rehearsing a task runs an agent, which this agent does not have here. When a note asks you to rehearse tasks, say so in one line and propose nothing in that turn.',
   research:
-    'Research: you have no research agents here, which need a Claude account. For a question that spans the code, read and search it yourself, and answer with paths and lines.',
+    'Research: you have no research agents here. For a question that spans the code, read and search it yourself, and answer with paths and lines.',
   mcp: '',
 };
 

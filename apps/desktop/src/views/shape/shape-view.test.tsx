@@ -530,7 +530,7 @@ describe('Shape: the conversation', () => {
     await waitFor(() => {
       expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
     });
-    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+    expect(within(conversation).queryByText(/Couldn't reach/)).toBeNull();
   });
 
   it('puts the daemon’s words in the red alert above the input when Stop is refused', async () => {
@@ -589,7 +589,7 @@ describe('Shape: the conversation', () => {
     await waitFor(() => {
       expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
     });
-    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+    expect(within(conversation).queryByText(/Couldn't reach/)).toBeNull();
   });
 
   it('keeps a refused Stop in the alert while its turn is still running', async () => {
@@ -1551,7 +1551,7 @@ describe('Shape: Convert', () => {
     });
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Convert' });
-    expect(within(dialog).getByText(/Claude is still answering/)).toBeTruthy();
+    expect(within(dialog).getByText(/Agent is still answering/)).toBeTruthy();
     expect(disabled(within(dialog).getByRole('button', { name: 'Stop' }))).toBe(false);
     expect(disabled(within(dialog).getByRole('button', { name: 'Convert 3' }))).toBe(true);
   });

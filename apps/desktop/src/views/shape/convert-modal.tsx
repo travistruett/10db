@@ -29,8 +29,15 @@ export interface ConvertModalProps {
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
   readonly view: ShapeViewDto;
-  /** Claude is answering now: Convert waits, or the builder stops the turn. */
+  /** The agent is answering now: Convert waits, or the builder stops the turn. */
   readonly answering: boolean;
+  /** The agent's name as the UI shows it. */
+  readonly agentLabel: string;
+  /**
+   * The agent can run the rehearsal's implementer; without it no rehearsal starts and none is offered.
+   * Null while that is not known yet: nothing starts and Convert waits.
+   */
+  readonly rehearses: boolean | null;
   readonly pending: boolean;
   /** Every reason the last Convert was refused; nothing was written. */
   readonly refusals: readonly string[];
@@ -62,6 +69,8 @@ function ConvertForm({
   rows,
   view,
   answering,
+  agentLabel,
+  rehearses,
   pending,
   refusals,
   failure,
@@ -76,14 +85,17 @@ function ConvertForm({
   const rehearsingCount = chosen
     .flatMap((r) => rowReview(view, r).tasks)
     .filter((t) => t.state === 'rehearsing').length;
-  // An imported Plan's tasks were planned elsewhere: no rehearsal reads them, and they are named once.
+  // An imported Plan's tasks were planned elsewhere, and an agent without subagents can't run the
+  // rehearsal: no rehearsal reads them, and they are named once.
   const imported = view.shape.importedAt !== null;
-  const importedTasks = imported ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
+  const unrehearsed = imported || rehearses === false;
+  const unrehearsedTasks = unrehearsed ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
+  const unrehearsedWhy = imported ? 'Imported tasks' : `Tasks on ${agentLabel}`;
   const warnings = [
-    ...(importedTasks === 0
+    ...(unrehearsedTasks === 0
       ? []
       : [
-          `Imported tasks aren't rehearsed: ${String(importedTasks)} ${importedTasks === 1 ? 'task' : 'tasks'}`,
+          `${unrehearsedWhy} aren't rehearsed: ${String(unrehearsedTasks)} ${unrehearsedTasks === 1 ? 'task' : 'tasks'}`,
         ]),
     ...convertWarnings(view, chosen, rehearsing),
   ];
@@ -96,10 +108,11 @@ function ConvertForm({
       asked.current = false;
       return;
     }
-    if (imported || asked.current || rehearsing || unread.length === 0) return;
+    if (rehearses === null || unrehearsed || asked.current || rehearsing || unread.length === 0)
+      return;
     asked.current = true;
     onRehearse(unread);
-  }, [opened, imported, rehearsing, unread, onRehearse]);
+  }, [opened, rehearses, unrehearsed, rehearsing, unread, onRehearse]);
 
   const convert = async (interrupt: boolean): Promise<void> => {
     const ids = chosen.map((r) => r.id);
@@ -143,7 +156,7 @@ function ConvertForm({
           ) : null}
           <Button
             loading={pending}
-            disabled={chosen.length === 0 || answering}
+            disabled={chosen.length === 0 || answering || (rehearses === null && !imported)}
             onClick={() => {
               void convert(false);
             }}
@@ -162,7 +175,7 @@ function ConvertForm({
         ) : answering ? (
           <Group gap="sm" wrap="nowrap">
             <Text size="sm" c="dimmed">
-              Claude is still answering. Stop it, or wait for it to finish.
+              {`${agentLabel} is still answering. Stop it, or wait for it to finish.`}
             </Text>
             <Button variant="default" size="xs" onClick={onStop}>
               Stop
@@ -204,7 +217,7 @@ function ConvertForm({
                   description={destination(row)}
                 />
                 {row.kind === 'goal' || row.kind === 'task' ? (
-                  <ReviewLines review={rowReview(view, row)} showRehearsal={!imported} pl={28} />
+                  <ReviewLines review={rowReview(view, row)} showRehearsal={!unrehearsed} pl={28} />
                 ) : null}
               </div>
             ))}

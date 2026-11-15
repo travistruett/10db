@@ -1,0 +1,68 @@
+import type { ToolCallView } from '@10db/contracts';
+import type { ClaudeDenial } from './claude-tool-calls';
+import { guardCalls, type HookInput } from './codex-guard';
+import { codexToolCalls, withDenial } from './codex-tool-calls';
+import { PatchHunk } from '../trust';
+
+/**
+ * Codex reports no thread item for a call its hook refused, so the refusal has no call to carry it. This
+ * builds the call from the hook's own input, as a declined item would have read, with who refused it and
+ * why. It keeps the item's id, so an item Codex does report for the same call replaces it. A tool 10db
+ * does not read gives none.
+ */
+export function refusedToolCalls(
+  hook: HookInput,
+  denial: ClaudeDenial,
+  atMs: number,
+): readonly ToolCallView[] {
+  const id = hook.tool_use_id;
+  if (id === undefined || id === '') return [];
+  const times = { startedAtMs: atMs, completedAtMs: atMs };
+  const declined = { id, status: 'declined' };
+  const calls = guardCalls(hook);
+  if (calls === null) return [];
+  const first = calls[0];
+  if (hook.tool_name === 'Bash' && first !== undefined) {
+    const command = first.input['command'];
+    if (typeof command !== 'string') return [];
+    return codexToolCalls(
+      {
+        ...declined,
+        type: 'commandExecution',
+        command,
+        cwd: hook.cwd ?? null,
+        commandActions: [],
+        aggregatedOutput: '',
+        exitCode: null,
+      },
+      times,
+    ).map((call) => withDenial(call, denial));
+  }
+  if (hook.tool_name === 'apply_patch') {
+    const changes = calls.flatMap((call) => {
+      const path = call.input['file_path'];
+      if (typeof path !== 'string') return [];
+      const type =
+        call.hunk === PatchHunk.Add ? 'add' : call.hunk === PatchHunk.Delete ? 'delete' : 'update';
+      return [{ path, kind: { type }, diff: '' }];
+    });
+    return codexToolCalls({ ...declined, type: 'fileChange', changes }, times).map((call) =>
+      withDenial(call, denial),
+    );
+  }
+  if (hook.tool_name.startsWith('mcp__')) {
+    const [, server, ...tool] = hook.tool_name.split('__');
+    if (server === undefined || server === '' || tool.length === 0) return [];
+    return codexToolCalls(
+      {
+        ...declined,
+        type: 'mcpToolCall',
+        server,
+        tool: tool.join('__'),
+        arguments: first?.input ?? {},
+      },
+      times,
+    ).map((call) => withDenial(call, denial));
+  }
+  return [];
+}

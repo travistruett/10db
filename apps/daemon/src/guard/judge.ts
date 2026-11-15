@@ -7,6 +7,7 @@ import {
   type Delivery,
   type HazardDef,
   type JudgeKind,
+  type LimitName,
 } from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
@@ -133,7 +134,13 @@ export interface FileAccessJudge {
 export type GuardVerdict =
   | { readonly decision: 'allow'; readonly settled?: string }
   /** `rule` names a refusal an unattended lane lists as a skip (`answerUnattended`). */
-  | { readonly decision: 'deny'; readonly reason: string; readonly rule?: DenyRule }
+  | {
+      readonly decision: 'deny';
+      readonly reason: string;
+      readonly rule?: DenyRule;
+      /** Set when 10db's judge refused the call at a limit (null: it named none), not a rule. */
+      readonly judged?: { readonly limit: LimitName | null };
+    }
   /** `kind` says why, for an unattended lane's answer (`answerUnattended`); absent, it is skipped. */
   | { readonly decision: 'ask'; readonly reason: string; readonly kind?: AskKind };
 
