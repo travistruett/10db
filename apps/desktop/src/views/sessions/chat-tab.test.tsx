@@ -11,6 +11,7 @@ import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
+import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
 import { commandCall, mcpCall } from '../../test/tool-call-fixtures';
 
 // A chat's tab over the daemon: its bar, its builder-tool rows, its cards and its states.
@@ -369,6 +370,32 @@ describe('ChatTab: cards, held-back calls and states', () => {
       expect(served.patches).toEqual([
         { chatId: served.chats[0]?.id, body: { model: 'claude-sonnet-5-5', effort: null } },
       ]);
+    });
+  });
+
+  it('an effort picked on a chat with no warm session shows on the chip at once', async () => {
+    openChat({ conversation: { state: 'idle_cold' } }, () => [], [
+      http.get(daemonUrl('/models'), () =>
+        HttpResponse.json([
+          modelRowDto({
+            model: 'claude-opus-5',
+            name: 'Opus 5',
+            efforts: [modelEffortDto({ effort: 'high' }), modelEffortDto({ effort: 'low' })],
+          }),
+        ]),
+      ),
+    ]);
+    const chip = await screen.findByRole('button', { name: 'Model and effort' });
+    await waitFor(() => {
+      expect(chip.textContent).toContain('Opus 5');
+    });
+    fireEvent.click(chip);
+    fireEvent.keyDown(await screen.findByRole('menuitem', { name: /Effort/, hidden: true }), {
+      key: 'ArrowRight',
+    });
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Low', hidden: true }));
+    await waitFor(() => {
+      expect(chip.textContent).toBe('Opus 5 Low');
     });
   });
 });
