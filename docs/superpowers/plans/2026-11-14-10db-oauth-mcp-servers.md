@@ -758,6 +758,11 @@ An expired token that Codex can't refresh reads `notLoggedIn`. Every change of a
 
 **Rows.** They are manual and never run in CI. Each prints what it observed through `TENDB_LIVE_REPORT`.
 
+**Folders.** L1's data directory, and so its `<dataDir>/connector-probe`, sits outside any checkout and outside the
+OS temp dir, in a fresh `~/Library/Caches/10db-live-<id>` removed afterwards: the connector probe refuses to start
+under a `.mcp.json`, and the repo's own sits above `homeOutsideTemp`. The folder is checked for a `.mcp.json` above
+it. The parent `.mcp.json` row plants its file in that folder, between the data directory and home, never in home.
+
 - **L0 Probe lines mean something.** Run each new probe line once outside any sandbox, and see `ok` for the
   keychain lines and for a planted canary token file.
 - **L1 Claude plan, default folder** (`TENDB_LIVE_CLAUDE=1`).

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   lstatSync,
@@ -19,7 +20,14 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, type Readable } from 'node:stream';
-import { JudgeKind, mintId, Provider, type AccountId, type SessionId } from '@10db/contracts';
+import {
+  agentKind,
+  JudgeKind,
+  mintId,
+  Provider,
+  type AccountId,
+  type SessionId,
+} from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { parse } from 'smol-toml';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -67,6 +75,7 @@ import { noisePng } from './png';
 import {
   LANE_WROTE,
   laneProbeScript,
+  liveOAuthServer,
   PROBE_ARG,
   PROBE_TOKEN,
   PROBES_HELD,
@@ -74,7 +83,15 @@ import {
   YOUR_MCP_PROBE_SERVER,
 } from './your-mcp-probe';
 
-const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
+const liveEnv = loadEnv(process.env);
+const live = liveEnv.TENDB_LIVE_CODEX === '1';
+
+/** Prints a row's observation, and appends it to `TENDB_LIVE_REPORT` when set: vitest hides console output. */
+function liveNote(text: string): void {
+  console.info(text);
+  const file = liveEnv.TENDB_LIVE_REPORT;
+  if (file !== undefined) appendFileSync(file, `${text}\n`);
+}
 
 /**
  * Every directory a live test makes is one of these, in `~/.10db/`: under `/private/tmp` Codex's
@@ -665,6 +682,8 @@ function yourSessionServers(
 function yourProbeServer(world: World): {
   readonly yours: NonNullable<LaneSessionInput['yourMcpServers']>;
   readonly seen: { pid: number; args: string; env: string; file: string };
+  /** A token file in the server's folder, which no lane may read. */
+  readonly canary: string;
   readonly observe: () => void;
 } {
   const dir = join(world.root, 'your-server');
@@ -684,6 +703,7 @@ function yourProbeServer(world: World): {
       },
     },
     seen,
+    canary,
     observe: () => {
       const listing = execFileSync('/bin/ps', ['-Aww', '-o', 'pid=,command='], {
         encoding: 'utf8',
@@ -1106,7 +1126,9 @@ describe.skipIf(!live)(
           world,
           [
             codeMode('tools.mcp__probe__check({})'),
-            run(laneProbeScript(world.roots.files)),
+            run(
+              laneProbeScript(world.roots.files, { home: homedir(), tokenFiles: [server.canary] }),
+            ),
             { say: 'done' },
           ],
           { yours: server.yours },
@@ -1130,7 +1152,9 @@ describe.skipIf(!live)(
           world,
           [
             codeMode('tools.mcp__probe__check({})'),
-            run(laneProbeScript(world.roots.files)),
+            run(
+              laneProbeScript(world.roots.files, { home: homedir(), tokenFiles: [server.canary] }),
+            ),
             { say: 'done' },
           ],
           goAhead,
@@ -1144,6 +1168,81 @@ describe.skipIf(!live)(
       expect(server.seen.file).toContain(PROBE_TOKEN);
       expect(outputs[1]).toMatch(PS_RAN);
       for (const held of PROBES_HELD) expect.soft(outputs[1], held).toContain(held);
+    });
+
+    // Sign-in is Codex's own, in the account's own home: 10db opens the page and never sees a token.
+    it('L4: reads not_signed_in, starts a sign-in on the server host and closes codex on cancel; no lane probe reaches a token file', async () => {
+      const server = liveOAuthServer(liveEnv.TENDB_LIVE_OAUTH_SERVER);
+      const opened: string[] = [];
+      const children: { exit: Promise<void>; running: () => boolean }[] = [];
+      const signIns = createCodexAdapter({
+        codexPath,
+        logger: createLogger({ level: 'error', destination: { write: () => undefined } }),
+        spawn: (path, env) => {
+          const child = spawnAppServer(path, env);
+          let running = true;
+          const exit = new Promise<void>((done) => {
+            child.once('exit', () => {
+              running = false;
+              done();
+            });
+          });
+          children.push({ exit, running: () => running });
+          return child;
+        },
+        openPage: (url) => {
+          opened.push(url);
+          return Promise.resolve();
+        },
+      });
+      const launch = launcher.session(world.account, MODEL, []);
+      const remote = {
+        connect: { type: 'http' as const, url: server.url, headers: null },
+        claudeOAuth: null,
+        codex: {
+          enabledTools: null,
+          disabledTools: [],
+          startupTimeoutSec: null,
+          toolTimeoutSec: null,
+        },
+      };
+      const kind = agentKind(world.account.kind);
+      const status = await signIns.mcpAuthStatus({
+        kind,
+        env: launch.env,
+        servers: { [server.name]: remote },
+      });
+      liveNote(`L4 status: ${JSON.stringify(status)}`);
+      expect(status[server.name]).toBe('not_signed_in');
+      const signIn = await signIns.startMcpSignIn({
+        kind,
+        env: launch.env,
+        name: server.name,
+        server: remote,
+      });
+      expect(opened).toHaveLength(1);
+      expect(new URL(opened[0] ?? '').protocol).toBe('https:');
+      expect(new URL(opened[0] ?? '').hostname).toBe(new URL(server.url).hostname);
+      await signIn.cancel();
+      // Every codex this row started has exited once the sign-in is cancelled.
+      await Promise.all(children.map((child) => child.exit));
+      expect(children.every((child) => !child.running())).toBe(true);
+      liveNote(
+        `L4 sign-in: page on ${new URL(opened[0] ?? '').hostname}, ${String(children.length)} codex starts, all exited`,
+      );
+      expect(existsSync(join(world.codexHome, '.credentials.json'))).toBe(false);
+
+      // A canary where a token file would be: no lane probe reaches it, nor the keychain.
+      const credentials = join(world.codexHome, '.credentials.json');
+      plant(credentials);
+      const outputs = expectTurn(
+        await runSession(world, [
+          run(laneProbeScript(world.roots.files, { home: homedir(), tokenFiles: [credentials] })),
+          { say: 'done' },
+        ]),
+      );
+      expect(outputs[0]).toMatch(PS_RAN);
+      for (const held of PROBES_HELD) expect.soft(outputs[0], held).toContain(held);
     });
 
     it('refuses the call when the guard socket is gone', async () => {

@@ -34,6 +34,8 @@ export interface CodexAdapterOptions {
   readonly socketDir?: string;
   /** Asks whether the account a session runs on is signed in, when a start gets no account. */
   readonly signInCheck?: SignInCheck;
+  /** Opens an MCP sign-in page in the builder's browser; defaults to `/usr/bin/open`. Tests record. */
+  readonly openPage?: (url: string) => Promise<void>;
 }
 
 /** How long a probe waits for the app-server to say who the account is. */
