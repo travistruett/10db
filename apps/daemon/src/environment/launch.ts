@@ -110,6 +110,11 @@ export interface Launcher {
   ): SessionLaunch;
   /** The same environment, for reading who the account is without a prompt. */
   probe(account: AccountRow): ProbeLaunch;
+  /**
+   * The environment of a connector probe for a plan account on a fresh config folder (`connectorProbeEnv`
+   * over the account's own launch); null for every other kind, which has no claude.ai login to read.
+   */
+  connectorProbe(account: AccountRow, freshDir: string): Record<string, string> | null;
   /** Where the builder's own login lives when the login shell moves it: an absolute directory, or null for Claude Code's default. */
   loginConfigDir(): string | null;
   /** Why the login shell's directory was ignored (it is relative), naming the variable and never its value; null otherwise. */
@@ -155,6 +160,23 @@ export type McpSignInWhere = (typeof McpSignInWhere)[keyof typeof McpSignInWhere
 export function loginConfigDirOf(base: Readonly<Record<string, string>>): string | null {
   const dir = base['CLAUDE_CONFIG_DIR'];
   return dir !== undefined && isAbsolute(dir) ? dir : null;
+}
+
+/**
+ * A session's environment turned into a connector probe's: the same account and billing variables, on a
+ * fresh `CLAUDE_CONFIG_DIR`, with the keychain lookup pointed at the folder the session itself reads
+ * (the empty string for Claude Code's default). The probe then reads the account's own login and writes
+ * nothing of its own to the keychain.
+ */
+export function connectorProbeEnv(
+  sessionEnv: Readonly<Record<string, string>>,
+  freshDir: string,
+): Record<string, string> {
+  return {
+    ...sessionEnv,
+    CLAUDE_CONFIG_DIR: freshDir,
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: sessionEnv['CLAUDE_CONFIG_DIR'] ?? '',
+  };
 }
 
 /**
@@ -334,6 +356,11 @@ export function createLauncher(opts: {
     },
     probe(account) {
       return { env: build(account), expect: expectation(account) };
+    },
+    connectorProbe(account, freshDir) {
+      return agentKindOf(account) === AccountKind.ClaudeSubscription
+        ? connectorProbeEnv(build(account), freshDir)
+        : null;
     },
     loginConfigDir() {
       return loginConfigDirOf(opts.base);

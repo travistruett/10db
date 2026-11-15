@@ -77,5 +77,6 @@ export {
 export { streamEventLogFields } from './stream-log';
 export { describeIssuePaths } from './config-issues';
 export { ClaudeOAuth } from './claude-oauth';
+export { connectorProbeRoot, sweepConnectorProbeRoot } from './claude-connectors';
 export { McpServerName } from './mcp-server-name';
 export { toolCallActivity, type ToolTarget } from './tool-target';

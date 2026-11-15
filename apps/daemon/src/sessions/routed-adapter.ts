@@ -19,5 +19,10 @@ export function createRoutedAdapter(
     probeAccount: (probe) => by(probe).probeAccount(probe),
     startLogin: (login) => by(login).startLogin(login),
     readClientUuids: (spec) => by(spec.account).readClientUuids(spec),
+    stop: async () => {
+      await Promise.all(
+        Object.values(adapters).map((adapter) => adapter.stop?.() ?? Promise.resolve()),
+      );
+    },
   };
 }

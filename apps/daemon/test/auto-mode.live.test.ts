@@ -161,6 +161,7 @@ function policyFor(surface: TrustSurface, checkout: string): TrustPolicy {
     switches: TRUST_DEFAULTS,
     grants: [],
     yourMcpServers: [],
+    claudeConnectors: false,
   });
 }
 

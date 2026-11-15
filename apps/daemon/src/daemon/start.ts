@@ -330,7 +330,7 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import type { AgentAdapter } from '../sessions';
+import { connectorProbeRoot, sweepConnectorProbeRoot, type AgentAdapter } from '../sessions';
 import { conversationRun, planConversationModel, routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -611,6 +611,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   }
   const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
+  // A probe that a crash cut off leaves its scratch folders; none is ever reused.
+  await sweepConnectorProbeRoot(connectorProbeRoot(opts.dataDir)).catch((error: unknown) => {
+    logger.warn({ err: error }, 'could not empty the connector probe folder');
+  });
 
   const db = openDatabase(
     join(opts.dataDir, '10db.sqlite'),
@@ -2590,6 +2594,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       catalogue.stop();
       await listRefresh.stop();
       accountPauses.stop();
+      await adapter.stop?.().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not stop the adapter');
+      });
       moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();

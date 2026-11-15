@@ -506,3 +506,43 @@ describe('mcpSignInWhere', () => {
     expect(mcpSignInWhere(kind, env, LOGIN)).toBe(expected);
   });
 });
+
+describe('connectorProbe', () => {
+  const FRESH = '/data/connector-probe/probe-1/config';
+  it.each<{
+    name: string;
+    row: AccountRow;
+    base?: Readonly<Record<string, string>>;
+    lookup: string | null;
+  }>([
+    {
+      name: "the default account on Claude Code's default folder reads the default entry",
+      row: account({ configDir: null }),
+      lookup: '',
+    },
+    {
+      name: "the default account on the login shell's folder reads that folder's entry",
+      row: account({ configDir: '/h/b/.claude-other' }),
+      lookup: '/h/b/.claude-other',
+    },
+    { name: 'an own-folder subscription reads its folder', row: account({}), lookup: SUB_DIR },
+    {
+      name: 'an API key has no connectors to read',
+      row: keyed({ kind: 'anthropic_api_key' }),
+      lookup: null,
+    },
+  ])('$name', ({ row, base, lookup }) => {
+    const env = launcher(undefined, base).connectorProbe(row, FRESH);
+    if (lookup === null) {
+      expect(env).toBeNull();
+      return;
+    }
+    expect(env).toMatchObject({
+      CLAUDE_CONFIG_DIR: FRESH,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: lookup,
+      CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0',
+    });
+    for (const name of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'])
+      expect(env).not.toHaveProperty(name);
+  });
+});

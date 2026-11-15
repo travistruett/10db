@@ -12,7 +12,7 @@ import {
   Provider,
   providerOf,
   TrustSurface,
-  type AccountKind,
+  AccountKind,
   type Effort,
   type AgentAccountKind,
   type ProjectId,
@@ -240,6 +240,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...(ready?.commands === undefined ? {} : { commands: ready.commands }),
       };
       const switches = trustSwitchesFor(state.db, project.id, warnInvalidTrust(log));
+      const claudeConnectors =
+        (ready?.claudeConnectors ?? false) &&
+        launch.account.kind === AccountKind.ClaudeSubscription;
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
         projectName: project.name,
@@ -254,6 +257,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         switches,
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
+        claudeConnectors,
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
@@ -302,6 +306,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           yourMcpServers: ready?.yourMcpServers ?? {},
+          claudeConnectors,
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })

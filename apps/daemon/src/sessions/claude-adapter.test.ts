@@ -22,6 +22,11 @@ import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
 import { createClaudeAdapter } from './claude-adapter';
 import {
+  CONNECTOR_WAIT_MS,
+  type ClaudeConnector,
+  type ConnectorDirectory,
+} from './claude-connectors';
+import {
   buildMcpServers,
   buildQueryOptions,
   CLAUDE_MCP_SERVER,
@@ -86,6 +91,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
     },
     projectMcpServers: {},
     yourMcpServers: {},
+    claudeConnectors: false,
     sandbox: null,
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -128,6 +134,7 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     sandbox: null,
     projectMcpServers: {},
     yourMcpServers: {},
+    claudeConnectors: false,
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),
@@ -765,6 +772,158 @@ describe('buildQueryOptions', () => {
         expect(prompt).not.toContain('failed to connect');
       },
     );
+  });
+
+  describe('claude.ai connectors', () => {
+    const gmail: ClaudeConnector = {
+      name: 'claude.ai Gmail',
+      url: 'https://mcp.claude.ai/gmail',
+      id: 'conn_gmail',
+    };
+    const docs: ClaudeConnector = {
+      name: 'claude.ai Docs',
+      url: 'https://mcp.claude.ai/docs',
+      id: 'conn_docs',
+    };
+    const noExtras = {
+      enabledTools: null,
+      disabledTools: [],
+      startupTimeoutSec: null,
+      toolTimeoutSec: null,
+    };
+
+    function directory(answer: () => Promise<readonly ClaudeConnector[] | null>) {
+      const calls: { accountId: string; env: Readonly<Record<string, string>> }[] = [];
+      const connectors: ConnectorDirectory = {
+        list: (accountId, env) => {
+          calls.push({ accountId, env });
+          return answer();
+        },
+        stop: () => Promise.resolve(),
+      };
+      return { calls, connectors };
+    }
+
+    function open(
+      answer: () => Promise<readonly ClaudeConnector[] | null>,
+      over: LaneOverrides = {},
+      status: readonly McpServerStatus[] = [],
+      clock: Clock = systemClock,
+    ) {
+      const fake = fakeQuery({ messages: [initMessage()], mcpStatus: status });
+      const dir = directory(answer);
+      const adapter = createClaudeAdapter({
+        claudePath: '/usr/local/bin/claude',
+        pluginDir: '/harness',
+        logger: silentLogger,
+        query: fake.query,
+        allowUnsandboxed: true,
+        connectors: dir.connectors,
+        clock,
+      });
+      const done = collect(adapter.open(spec({ claudeConnectors: true, ...over })).events);
+      return { fake, dir, done };
+    }
+
+    it('passes each kept connector as a claudeai-proxy entry, after yours and before 10db', async () => {
+      const { fake, dir, done } = open(() => Promise.resolve([gmail, docs]), {
+        yourMcpServers: {
+          claude_ai_Docs: {
+            connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+            claudeOAuth: null,
+            codex: noExtras,
+          },
+        },
+      });
+      await done;
+      const servers = fake.record.mcpCalls[0]?.servers ?? {};
+      expect(Object.keys(servers)).toEqual([
+        'claude_ai_Docs',
+        'claude.ai Gmail',
+        CLAUDE_MCP_SERVER,
+      ]);
+      expect(servers['claude.ai Gmail']).toEqual({
+        type: 'claudeai-proxy',
+        url: gmail.url,
+        id: gmail.id,
+      });
+      expect(dir.calls).toHaveLength(1);
+      expect(dir.calls[0]?.env).toMatchObject({ PATH: '/usr/bin:/bin' });
+    });
+
+    it('never asks the directory with the switch off, or for a keyed account', async () => {
+      for (const over of [
+        { claudeConnectors: false },
+        {
+          claudeConnectors: false,
+          account: {
+            accountId: mintId('Account'),
+            label: 'Key',
+            kind: 'anthropic_api_key' as const,
+            identity: null,
+          },
+        },
+      ] satisfies LaneOverrides[]) {
+        const fake = fakeQuery({
+          messages: [initMessage(over.account === undefined ? 'none' : 'ANTHROPIC_API_KEY')],
+          ...(over.account === undefined
+            ? {}
+            : {
+                account: { apiProvider: 'firstParty' as const, apiKeySource: 'ANTHROPIC_API_KEY' },
+              }),
+        });
+        const dir = directory(() => Promise.resolve([gmail]));
+        const adapter = createClaudeAdapter({
+          claudePath: '/usr/local/bin/claude',
+          pluginDir: '/harness',
+          logger: silentLogger,
+          query: fake.query,
+          allowUnsandboxed: true,
+          connectors: dir.connectors,
+        });
+        await collect(adapter.open(spec(over)).events);
+        expect(dir.calls).toHaveLength(0);
+        expect(Object.keys(fake.record.mcpCalls[0]?.servers ?? {})).toEqual([CLAUDE_MCP_SERVER]);
+      }
+    });
+
+    it.each<[string, () => Promise<readonly ClaudeConnector[] | null>, boolean]>([
+      ['a failed read', () => Promise.resolve(null), true],
+      ['no connectors', () => Promise.resolve([]), false],
+    ])(
+      'says so when the connectors did not load, and not when there are none: %s',
+      async (_name, answer, noted) => {
+        const { fake, done } = open(answer);
+        await done;
+        const prompt = JSON.stringify(fake.record.inputs[0]?.message.content);
+        expect(prompt.includes("your claude.ai connectors didn't load in this session")).toBe(
+          noted,
+        );
+      },
+    );
+
+    it('says so when the directory does not answer within CONNECTOR_WAIT_MS', async () => {
+      const clock = new ManualClock();
+      const { fake, dir, done } = open(() => new Promise(() => undefined), {}, [], clock);
+      await vi.waitFor(() => {
+        expect(dir.calls).toHaveLength(1);
+      });
+      clock.advance(CONNECTOR_WAIT_MS);
+      await done;
+      expect(JSON.stringify(fake.record.inputs[0]?.message.content)).toContain(
+        "Note from 10db: your claude.ai connectors didn't load in this session.",
+      );
+    });
+
+    it('names a connector that needs a sign-in, and says to sign in on claude.ai', async () => {
+      const { fake, done } = open(() => Promise.resolve([gmail]), {}, [
+        { name: 'claude.ai Gmail', status: 'needs-auth' },
+      ]);
+      await done;
+      expect(JSON.stringify(fake.record.inputs[0]?.message.content)).toContain(
+        "claude.ai Gmail needs you to sign in to it on claude.ai. It is not in this session; don't look for its tools.",
+      );
+    });
   });
 
   describe('the needs-auth cache', () => {

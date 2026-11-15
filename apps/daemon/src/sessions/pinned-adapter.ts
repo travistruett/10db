@@ -30,5 +30,8 @@ export function createPinnedAdapter(
     probeAccount: (probe) => current().probeAccount(probe),
     startLogin: (login) => current().startLogin(login),
     readClientUuids: (spec) => current().readClientUuids(spec),
+    stop: async () => {
+      await built?.adapter.stop?.();
+    },
   };
 }

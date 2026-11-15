@@ -58,6 +58,8 @@ export interface YourMcpPlan {
   readonly stdio: Readonly<Record<string, YourStdioPlan>>;
   readonly remote: Readonly<Record<string, YourRemotePlan>>;
   readonly leftOut: readonly LeftOut[];
+  /** Whether the session takes the builder's claude.ai connectors: the same switch as the servers. */
+  readonly connectorsOn: boolean;
 }
 
 const SOURCE_ORDER: Readonly<Record<YourMcpSource, number>> = {
@@ -251,7 +253,7 @@ export function planYourMcp(args: {
   const stdio: Record<string, YourStdioPlan> = {};
   const remote: Record<string, YourRemotePlan> = {};
   const leftOut: LeftOut[] = [];
-  if (!args.switches.yourMcpServers) return { stdio, remote, leftOut };
+  if (!args.switches.yourMcpServers) return { stdio, remote, leftOut, connectorsOn: false };
   const taken = new Map<string, YourMcpEntry>();
   const project = new Set(args.projectServerNames);
   const ordered = [...args.entries].sort((a, b) => SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source]);
@@ -266,7 +268,7 @@ export function planYourMcp(args: {
     if (why !== undefined)
       leftOut.push({ what: `your MCP server ${entry.name} (${sourceLabel(entry)})`, why });
   }
-  return { stdio, remote, leftOut };
+  return { stdio, remote, leftOut, connectorsOn: true };
 
   /** Plans the entry and returns null, or returns why it is left out; null too for one switched off. */
   function decide(entry: YourMcpEntry): string | null {

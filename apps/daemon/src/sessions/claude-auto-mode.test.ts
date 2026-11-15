@@ -17,6 +17,7 @@ const policyOf = (
     switches: TRUST_DEFAULTS,
     grants,
     yourMcpServers: [],
+    claudeConnectors: false,
   });
 
 describe('renderClaudeAutoMode', () => {

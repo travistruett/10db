@@ -34,6 +34,12 @@ import {
 import { createChannel } from './channel';
 import { readCheckoutText } from './before-text';
 import { removeStaleNeedsAuthCache } from './claude-auth-cache';
+import {
+  CONNECTOR_WAIT_MS,
+  connectorsForSession,
+  type ClaudeConnector,
+  type ConnectorDirectory,
+} from './claude-connectors';
 import { createClaudeStreamState } from './claude-stream';
 import { createClaudeToolCalls, type ClaudeDenial } from './claude-tool-calls';
 import { judgeDenial } from './judge-denial';
@@ -203,11 +209,25 @@ function toYourSdkServer(server: YourSessionServer): McpServerConfig {
 }
 
 /**
- * The repo's approved servers, then the builder's own, then 10db's, keyed by name. 10db's is written last,
- * so it keeps its name.
+ * A claude.ai connector as the CLI takes it over `mcp_set_servers`. The SDK's `McpServerConfig` omits
+ * `McpClaudeAIProxyServerConfig`, but Claude Code 2.1.302 accepts it (verified); the value was parsed by
+ * `connectorsFromStatus`, so the cast only names the one shape the type lacks.
+ */
+function toSdkConnector(connector: ClaudeConnector): McpServerConfig {
+  return {
+    type: 'claudeai-proxy',
+    url: connector.url,
+    id: connector.id,
+  } as unknown as McpServerConfig;
+}
+
+/**
+ * The repo's approved servers, then the builder's own, then the claude.ai connectors, then 10db's, keyed by
+ * name. 10db's is written last, so it keeps its name. `connectors` is what `connectorsForSession` kept.
  */
 export function buildMcpServers(
   spec: Pick<AgentSessionCore, 'projectMcpServers' | 'yourMcpServers' | 'mcp'>,
+  connectors: readonly ClaudeConnector[] = [],
 ): Record<string, McpServerConfig> {
   return {
     ...Object.fromEntries(
@@ -218,6 +238,9 @@ export function buildMcpServers(
     ),
     ...Object.fromEntries(
       Object.entries(spec.yourMcpServers).map(([name, server]) => [name, toYourSdkServer(server)]),
+    ),
+    ...Object.fromEntries(
+      connectors.map((connector) => [connector.name, toSdkConnector(connector)]),
     ),
     [CLAUDE_MCP_SERVER]: {
       type: 'http',
@@ -424,6 +447,8 @@ export interface ClaudeSessionDeps {
   readonly clock?: Clock;
   /** The login shell's absolute `CLAUDE_CONFIG_DIR` (`Launcher.loginConfigDir`); null or absent for the default folder. */
   readonly loginConfigDir?: () => string | null;
+  /** Reads a plan account's claude.ai connectors; absent, a session takes none. */
+  readonly connectors?: ConnectorDirectory;
 }
 
 /** One Claude session and what it is for: a lane's task, or one turn of Plan's conversation. */
@@ -494,6 +519,16 @@ function signedOutText(name: string, where: McpSignInWhere): string {
     case McpSignInWhere.NotYet:
       return `${name} signs in with OAuth, which 10db doesn't run on a Gateway account yet.`;
   }
+}
+
+/** A line saying the claude.ai connectors didn't load, or naming those that need a sign-in on claude.ai. */
+function connectorsNote(missing: boolean, needAuth: readonly string[]): string {
+  return [
+    ...(missing ? ["Note from 10db: your claude.ai connectors didn't load in this session."] : []),
+    ...needAuth.map(
+      (name) => `Note from 10db: ${name} needs you to sign in to it on claude.ai. ${NOT_HERE}`,
+    ),
+  ].join('\n');
 }
 
 /** A line naming the builder's own servers that didn't start, apart from the repo's, so the agent doesn't hunt for them. */
@@ -936,9 +971,35 @@ function startSession(
         );
       }
     }
+    // A plan session's connectors are read (cached) by a probe of their own; a read that fails or runs long
+    // leaves them out and says so, never ending the session.
+    let connectors: readonly ClaudeConnector[] = [];
+    let connectorsMissing = false;
+    if (spec.claudeConnectors === true && opts.connectors !== undefined) {
+      const read = await settleWithin(
+        clock,
+        opts.connectors.list(spec.account.accountId, spec.env),
+        CONNECTOR_WAIT_MS,
+      );
+      if (read === undefined || read === null) {
+        connectorsMissing = true;
+        log.warn({}, 'claude.ai connectors were not read for this session');
+      } else {
+        connectors = connectorsForSession(read, [
+          ...Object.keys(spec.projectMcpServers),
+          ...Object.keys(spec.yourMcpServers),
+          CLAUDE_MCP_SERVER,
+        ]);
+      }
+      if (halted()) {
+        resolvePreflight(false);
+        return;
+      }
+    }
+    const connectorNames = connectors.map((connector) => connector.name);
     let leftOut: string[];
     try {
-      leftOut = Object.keys((await q.setMcpServers(buildMcpServers(spec))).errors);
+      leftOut = Object.keys((await q.setMcpServers(buildMcpServers(spec, connectors))).errors);
     } catch (error) {
       // The error can quote the rejected config, which holds credentials; only its class is logged.
       log.error(
@@ -954,14 +1015,20 @@ function startSession(
     }
     const yourNames = Object.keys(spec.yourMcpServers);
     const repoLeftOut = leftOut.filter(
-      (name) => name !== CLAUDE_MCP_SERVER && !yourNames.includes(name),
+      (name) =>
+        name !== CLAUDE_MCP_SERVER && !yourNames.includes(name) && !connectorNames.includes(name),
     );
     const yourFailed = yourNames.filter((name) => leftOut.includes(name));
     const yourNeedAuth: string[] = [];
-    if (yourNames.length > 0) {
+    const connectorsNeedAuth: string[] = [];
+    if (yourNames.length > 0 || connectorNames.length > 0) {
       // Startup doesn't block, so a server that signs in with OAuth shows as `needs-auth` here, once.
       const status = await settleWithin(clock, q.mcpServerStatus(), MCP_STATUS_WAIT_MS);
       for (const server of status ?? []) {
+        if (connectorNames.includes(server.name)) {
+          if (server.status === 'needs-auth') connectorsNeedAuth.push(server.name);
+          continue;
+        }
         if (!yourNames.includes(server.name) || yourFailed.includes(server.name)) continue;
         if (server.status === 'needs-auth') yourNeedAuth.push(server.name);
         else if (server.status === 'failed') yourFailed.push(server.name);
@@ -976,6 +1043,9 @@ function startSession(
     if (yourNeedAuth.length > 0) log.warn({ servers: yourNeedAuth }, 'your mcp servers need OAuth');
     const notes = [
       ...(repoLeftOut.length > 0 ? [rules.failedServersNote(repoLeftOut)] : []),
+      ...(connectorsMissing || connectorsNeedAuth.length > 0
+        ? [connectorsNote(connectorsMissing, connectorsNeedAuth)]
+        : []),
       ...(yourFailed.length + yourNeedAuth.length > 0
         ? [
             yourServersNote(

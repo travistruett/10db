@@ -173,6 +173,12 @@ export interface AgentSessionCore {
    */
   readonly yourMcpServers: Readonly<Record<string, YourSessionServer>>;
   /**
+   * Whether a Claude plan session takes the builder's claude.ai connectors: the Your MCP servers switch is
+   * on and the account is a plan; absent reads as off. They act outside the sandbox with the builder's access, so each call is
+   * judged like the builder's own servers'. Other agents and accounts ignore it.
+   */
+  readonly claudeConnectors?: boolean;
+  /**
    * Runs before every tool call, before permission rules. An explore session's call also names the
    * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.
    */
@@ -554,6 +560,8 @@ export class CompletionError extends Error {
 }
 
 export interface AgentAdapter {
+  /** Closes what the adapter started on its own, such as a connector probe in flight; the daemon calls it as it shuts down. */
+  stop?(): Promise<void>;
   /**
    * What this agent can do on the account, and for the model a session opens with (null: none yet).
    * Answers from a table, so it works while the agent's copy is still downloading.

@@ -11,6 +11,7 @@ const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => (
   switches: TRUST_DEFAULTS,
   grants: [],
   yourMcpServers: [],
+  claudeConnectors: false,
   ...overrides,
 });
 
@@ -36,6 +37,17 @@ describe('buildTrustPolicy', () => {
     expect(outside([])).toEqual([]);
     expect(outside(['github', 'plugin_x_y'])).toEqual([
       "Outside the sandbox: the MCP servers github, plugin_x_y are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.",
+    ]);
+  });
+
+  it("claude.ai connectors are named as the builder's own, outside the sandbox, with every call judged", () => {
+    const connectorLines = (claudeConnectors: boolean) =>
+      buildTrustPolicy(input({ claudeConnectors })).environment.filter((l) =>
+        l.startsWith('Outside the sandbox: the claude.ai connectors'),
+      );
+    expect(connectorLines(false)).toEqual([]);
+    expect(connectorLines(true)).toEqual([
+      "Outside the sandbox: the claude.ai connectors are the builder's own and run with the builder's access. They can read and send the builder's mail, documents and messages, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.",
     ]);
   });
 

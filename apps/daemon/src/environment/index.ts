@@ -15,6 +15,7 @@ export {
   ACCOUNT_NAMES_VERIFIED_ON,
   AccountLaunchError,
   codexSignInCommand,
+  connectorProbeEnv,
   createLauncher,
   loginConfigDirOf,
   mcpSignInWhere,

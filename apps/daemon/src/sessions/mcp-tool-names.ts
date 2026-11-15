@@ -7,6 +7,11 @@ interface McpStatus {
   readonly tools?: readonly { readonly name: string }[];
 }
 
+/** The part of a server's name that Claude Code puts between `mcp__` and the tool name. */
+export function mcpToolPrefix(name: string): string {
+  return name.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
 /**
  * The full tool names (`mcp__<server>__<tool>`) the connected MCP servers list in `mcpServerStatus()`.
  * A server that is not connected lists none, and a name already in full form is kept as it is.
@@ -18,7 +23,7 @@ export function mcpStatusToolNames(servers: readonly McpStatus[]): string[] {
       : (server.tools ?? []).map((tool) =>
           tool.name.startsWith('mcp__')
             ? tool.name
-            : `mcp__${server.name.replace(/[^A-Za-z0-9_-]/g, '_')}__${tool.name}`,
+            : `mcp__${mcpToolPrefix(server.name)}__${tool.name}`,
         ),
   );
 }

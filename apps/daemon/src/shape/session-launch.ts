@@ -63,6 +63,8 @@ export interface ShapePrepared {
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /** The builder's own approved MCP servers, planned as the session was prepared; each call is judged. */
   readonly yourMcpServers: Readonly<Record<string, YourSessionServer>>;
+  /** Whether the Your MCP servers switch is on, so a plan session may take the builder's claude.ai connectors. */
+  readonly claudeConnectors?: boolean;
   /** A line for the prompt naming what was left out (servers, the sandbox) and why, or null. */
   readonly note: string | null;
   /** When the first AWS credentials a server was given expire (ISO), or null: the session moves on before. */
