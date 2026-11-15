@@ -96,4 +96,4 @@ export const GRANTS_DESCRIPTION =
   "10db's judge reads a change from the next call; auto mode from the next session.";
 
 export const GRANTS_EMPTY =
-  'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched exactly by 10db, and no judge reads it.';
+  'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched only by 10db\'s own judge, never by Claude\'s auto mode.';
