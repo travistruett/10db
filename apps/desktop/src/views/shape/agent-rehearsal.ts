@@ -1,7 +1,7 @@
 /**
  * Whether the Plan's agent can run the rehearsal's implementer: null while its conversation loads, so
  * nothing starts or hides on a guess. A conversation that can't be read keeps what Claude has always
- * done (rehearse): the daemon still refuses a rehearsal an agent can't run.
+ * done (rehearse); on an agent without subagents that turn starts, and the agent says it can't rehearse.
  */
 export function agentRehearses(conversation: {
   readonly isError: boolean;

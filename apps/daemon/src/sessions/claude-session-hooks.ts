@@ -109,7 +109,6 @@ export function isClassifierEscalation(options: unknown): boolean {
   );
 }
 
-/** A refusal 10db made, as a tool call records who denied it. */
 /** A hook answer that is 10db's judge refusing the call at a limit (null: it named none), not a rule. */
 export interface JudgedHookAnswer {
   readonly output: HookJSONOutput;
@@ -119,6 +118,7 @@ export interface JudgedHookAnswer {
 const isJudgedAnswer = (answer: HookJSONOutput | JudgedHookAnswer): answer is JudgedHookAnswer =>
   'judged' in answer;
 
+/** A refusal 10db made, as a tool call records who denied it. */
 const tenDb = (reason: string): ClaudeDenial => ({
   by: DeniedBy.TenDb,
   reason,

@@ -55,7 +55,7 @@ const marks = (row: ShapeProposalDto, rehearsed: boolean): ShapeViewDto['rehears
     rehearsed,
   }));
 
-const disabled = (el: HTMLElement): boolean => (el as HTMLButtonElement).disabled;
+const disabled = (el: HTMLElement): boolean => el instanceof HTMLButtonElement && el.disabled;
 
 const open = (view: ShapeViewDto): void => {
   renderApp(`/shape/${view.shape.id}`);
