@@ -101,6 +101,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
   '/projects/:projectId/chat-models': 'Only Sessions draws it, in the 10db app.',
   '/settings/sessions': 'Only Settings draws it, in the 10db app.',
+  '/settings/capacity': 'Only Settings draws it, in the 10db app.',
+  '/admission': "The machine's load, free disk and lane count are for the 10db app.",
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

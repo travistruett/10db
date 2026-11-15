@@ -2228,6 +2228,7 @@ describe('the guard socket', () => {
   function post(
     spec: Pick<AgentSessionSpec, 'sessionId'>,
     command: string,
+    toolUseId?: string,
   ): Promise<{ status: number | undefined; body: string }> {
     return new Promise((done, fail) => {
       const req = request(
@@ -2247,7 +2248,13 @@ describe('the guard socket', () => {
         },
       );
       req.on('error', fail);
-      req.end(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }));
+      req.end(
+        JSON.stringify({
+          tool_name: 'Bash',
+          tool_input: { command },
+          ...(toolUseId === undefined ? {} : { tool_use_id: toolUseId }),
+        }),
+      );
     });
   }
 
@@ -2279,6 +2286,41 @@ describe('the guard socket', () => {
       expect(refused.body).toContain('"permissionDecision":"deny"');
       await handle.stop();
       await expect(post(spec, 'ls')).rejects.toThrow();
+    },
+  );
+
+  // Codex reports no item for a call its hook refused, so the thread shows it from the hook's own input.
+  it.skipIf(SANDBOXED)(
+    'shows a call the hook refused as a denied call, with who refused it and at which limit',
+    async () => {
+      const { handle, spec } = await running({
+        preToolUse: () => ({ decision: 'allow' }),
+        judgeCall: () =>
+          Promise.resolve({
+            decision: 'deny',
+            reason: 'Skipped: this would write to a live system.',
+            judged: { limit: 'writes_live' },
+          }),
+      });
+      await post(spec, 'vercel deploy --prod', 'exec-1');
+      const calls: unknown[] = [];
+      for await (const event of handle.events) {
+        if (event.type !== 'tool_call') continue;
+        calls.push(event.call);
+        break;
+      }
+      expect(calls).toMatchObject([
+        {
+          id: 'exec-1',
+          kind: 'command',
+          command: 'vercel deploy --prod',
+          status: 'denied',
+          deniedBy: 'judge',
+          limit: 'writes_live',
+          soft: false,
+        },
+      ]);
+      await handle.stop();
     },
   );
 

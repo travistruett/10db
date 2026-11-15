@@ -55,6 +55,7 @@ export * from './sign-in-url';
 export * from './skills';
 export { PROTOCOL_VERSION } from './protocol';
 export * from './self-update';
+export * from './admission';
 export * from './run-next';
 export * from './send-back';
 export * from './shape';

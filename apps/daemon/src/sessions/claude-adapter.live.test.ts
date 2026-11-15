@@ -370,7 +370,12 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     cleanup();
 
     // The call as first shown, the running view built when the frame was mapped.
-    expect(edits[0]).toMatchObject({ change: 'update', addedLines: 1, removedLines: 1 });
+    // The model sometimes ends the rewritten file with one more newline, which the diff rightly counts as a
+    // second added line; the whole file added would be 20.
+    expect(edits[0]).toMatchObject({ change: 'update', removedLines: 1 });
+    const added = edits[0]?.kind === 'edit' ? edits[0].addedLines : 0;
+    expect(added).toBeGreaterThanOrEqual(1);
+    expect(added).toBeLessThanOrEqual(2);
   }, 180_000);
 
   // The one Claude core runs Plan's preflight too: the account check, the MCP registration and the

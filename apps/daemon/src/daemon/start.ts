@@ -200,7 +200,14 @@ import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
-import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
+import {
+  capacitySettings,
+  createDiskHold,
+  createLaneTempDirs,
+  createLoadMonitor,
+  systemFreeBytes,
+  type LoadMonitorOptions,
+} from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler, createBuilderTools } from '../builder';
@@ -305,7 +312,7 @@ import {
   type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
-import { createScheduler, type Scheduler } from '../scheduler';
+import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
 import {
   createDrain,
   createScriptInstaller,
@@ -405,8 +412,17 @@ export interface DaemonOptions {
   readonly pictures?:
     | { readonly kind: 'pinned' }
     | { readonly kind: 'given'; readonly camera: PageCamera; readonly prepare: () => void };
-  /** Lane caps across all projects; each account has its own `laneCap`. */
+  /**
+   * Lane caps across all projects; each account has its own `laneCap`. Absent, the cap is the
+   * Capacity setting, read at each tick.
+   */
   readonly caps?: { readonly global: number };
+  /**
+   * Watch free disk and hold new lanes below the Capacity floor. Off unless given, so a test never
+   * reads the runner's disk; the entry point turns it on unless `TENDB_DISK=off`. `freeBytes`
+   * replaces the volume read (tests); absent, it reads the volume the worktree root is on.
+   */
+  readonly disk?: { readonly freeBytes?: () => number | null };
   /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
   readonly limits?: Partial<RunnerLimits>;
   /** How long a lane lease lasts before the scheduler renews it. */
@@ -530,7 +546,6 @@ const SHAPE_TOOL_TIMEOUT_MS = 60_000;
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
 
 const DEFAULTS = {
-  caps: { global: 4 },
   leaseMs: 60_000,
   tickMs: 2_000,
   defaultPauseMs: 30 * 60_000,
@@ -975,8 +990,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     ...opts.load,
   });
-  // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain.
+  // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain. Low disk
+  // holds only new lanes: a lane that has started finishes, and its ship frees the disk.
   const startHold = holdBoth([loadGuard, updateDrain]);
+  const diskHold = createDiskHold({
+    freeBytes: opts.disk ? (opts.disk.freeBytes ?? systemFreeBytes(worktreeRoot)) : () => null,
+    floorBytes: () => capacitySettings(state.db).diskFloorGb * 1_000_000_000,
+    db: state.db,
+    inbox,
+    logger: logger.child({ component: 'disk' }),
+  });
+  const laneCaps = opts.caps ?? {
+    get global() {
+      return capacitySettings(state.db).machineLaneCap;
+    },
+  };
+  // The one gate in front of new lanes: the load, free disk and the drain.
+  const admission = createAdmission({
+    load: loadGuard,
+    disk: diskHold,
+    drain: updateDrain,
+    laneCap: () => laneCaps.global,
+    db: state.db,
+  });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
@@ -1693,7 +1729,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     instanceId,
     logger,
-    caps: opts.caps ?? DEFAULTS.caps,
+    caps: laneCaps,
     leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
     tickMs: opts.tickMs ?? DEFAULTS.tickMs,
     branches: git,
@@ -1704,7 +1740,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       flagWorktreeMissing(inbox, batch, path);
     },
     awaitedHolders: () => claimWaits.awaitedHolders(),
-    held: () => loadGuard.overloaded || updateDrain.draining,
+    held: () => admission.held(),
   });
   scheduler = createdScheduler;
 
@@ -2062,6 +2098,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     moves,
     inbox,
     keepAwake,
+    admission,
     systemCheck: () =>
       opts.systemCheck
         ? opts.systemCheck({ git: gitBin, gh: ghBin }, () =>

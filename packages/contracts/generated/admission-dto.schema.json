@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "holds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "load",
+              "disk",
+              "lane_cap"
+            ]
+          },
+          "line": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "line"
+        ]
+      }
+    },
+    "freeBytes": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "diskFloorBytes": {
+      "type": "number",
+      "minimum": 0
+    },
+    "lanesRunning": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "machineLaneCap": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "holds",
+    "freeBytes",
+    "diskFloorBytes",
+    "lanesRunning",
+    "machineLaneCap"
+  ]
+}

@@ -113,7 +113,7 @@ describe('Settings › project Trust', () => {
     });
     expect(
       await within(region).findByText(
-        'Nothing yet. "Always in this project" on a card adds a line here, and every judge on the project reads it.',
+        'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched only by 10db\'s own judge, never by Claude\'s auto mode.',
       ),
     ).toBeTruthy();
   });

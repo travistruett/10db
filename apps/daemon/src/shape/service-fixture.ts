@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AccountKind, type DaemonEvent, type AgentAccountKind, type Effort } from '@10db/contracts';
 import { ManualClock } from '../clock';
 import { createExploreEngine, type ExploreEngine } from '../conversation';
+import type { Judge } from '../judge';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../events';
 import { mintSessionToken } from '../mcp';
 import { silentLogger } from '../log';
@@ -61,6 +62,8 @@ export function createServiceFixture(
     limitsFor?: (kind: AccountKind) => PictureLimits;
     /** The kind of the account the project launches on; a Claude plan by default. */
     accountKind?: AgentAccountKind;
+    /** 10db's judge for a Plan on an account auto mode doesn't judge; none by default. */
+    judge?: (state: StateStore) => Judge;
     /** Draws screens for `see_screen`; none by default. */
     screens?: Pick<ScreenService, 'see'>;
   } = {},
@@ -106,6 +109,7 @@ export function createServiceFixture(
       mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
       ...(opts.limitsFor === undefined ? {} : { limitsFor: opts.limitsFor }),
       ...(opts.screens === undefined ? {} : { screens: opts.screens }),
+      ...(opts.judge === undefined ? {} : { judge: opts.judge(state) }),
       launch: (_projectId, chosen, effort) => {
         opts.onLaunch?.(chosen, effort);
         return launchFor(chosen, effort);

@@ -1,5 +1,6 @@
 import {
   AccountId,
+  AdmissionDto,
   ConversationId,
   EventsHead,
   KeepAwakeStatus,
@@ -220,6 +221,17 @@ export function baseHandlers(
           drainingSince: null,
           midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
           blocker: null,
+        }),
+      ),
+    ),
+    http.get(daemonUrl('/admission', base), () =>
+      HttpResponse.json(
+        AdmissionDto.parse({
+          holds: [],
+          freeBytes: null,
+          diskFloorBytes: 20_000_000_000,
+          lanesRunning: 0,
+          machineLaneCap: 4,
         }),
       ),
     ),

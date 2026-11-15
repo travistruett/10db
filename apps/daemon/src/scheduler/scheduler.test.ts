@@ -304,6 +304,27 @@ describe('scheduler', () => {
     expect(launched).toHaveLength(2);
   });
 
+  it('holds lanes across projects to the machine cap, read again at each tick', async () => {
+    const AREAS = [
+      { name: 'a', globs: ['a/**'] },
+      { name: 'b', globs: ['b/**'] },
+    ];
+    const one = seedProject(store, { name: 'one', maxLanes: 2, areas: AREAS });
+    const two = seedProject(store, { name: 'two', maxLanes: 2, areas: AREAS });
+    for (const project of [one, two]) {
+      add(project, ['a']);
+      add(project, ['b']);
+    }
+    const caps = { global: 3 };
+    const daemon = scheduler(caps);
+    expect(await daemon.tick()).toBe(3);
+    expect(await daemon.tick()).toBe(0);
+    expect(launched).toHaveLength(3);
+    caps.global = 4;
+    expect(await daemon.tick()).toBe(1);
+    expect(launched).toHaveLength(4);
+  });
+
   describe('run next', () => {
     const press = (taskId: Parameters<typeof runNext>[1]) => {
       clock.advance(1_000);

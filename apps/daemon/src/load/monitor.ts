@@ -22,6 +22,7 @@ import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { OVERLOAD_FOLD_KEY, overloadCard } from './card';
+import { projectForMachineCard } from './card-project';
 import {
   findCulprits,
   systemProcessSnapshot,
@@ -153,15 +154,10 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
     }
   }
 
-  function projectForCard(): ProjectId | null {
-    const oldest = listWorkstreams(db, { states: ACTIVE_STATES })[0];
-    return oldest?.projectId ?? listProjects(db)[0]?.id ?? null;
-  }
-
   function raise(report: OverloadReport): void {
     const content = overloadCard(report);
     if (card?.body === content.body) return;
-    cardProject ??= projectForCard();
+    cardProject ??= projectForMachineCard(db);
     if (cardProject === null) return;
     const item = opts.inbox.flag({
       projectId: cardProject,

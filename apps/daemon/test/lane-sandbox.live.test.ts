@@ -1287,7 +1287,9 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       );
       const refused = listed?.decision === 'deny';
       expect.soft(listed === undefined || refused, 'a host list is refused').toBe(true);
-      const carded = cardSummaries(run, 'SandboxNetworkAccess').includes('example.net');
+      const carded = cardSummaries(run, 'SandboxNetworkAccess').some(
+        (summary) => summary === 'example.net',
+      );
       expect.soft(refused || carded, 'the host was refused or carded').toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });

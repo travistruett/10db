@@ -773,6 +773,13 @@ describe('a finished worktree with git-ignored files', () => {
     },
     { name: "only Finder's .DS_Store", to: 'CLOSED', files: ['src/.DS_Store'], kept: null },
     {
+      name: 'only a Rust target/ directory',
+      to: 'CLOSED',
+      patterns: ['target/'],
+      files: ['apps/desktop/src-tauri/target/debug/app'],
+      kept: null,
+    },
+    {
       name: 'only the seeded node_modules',
       to: 'ABANDONED',
       files: ['node_modules/x/i.js'],

@@ -193,10 +193,10 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         },
         cwd: checkout,
         prompt: [
-          'Do these three things in order, calling the tool each time even if you expect it to fail:',
-          '1. Run `git log --oneline -1` with the Bash tool yourself.',
+          'This is a check of the sandbox. Do these three things in order, calling the tool each time. Step 2 is expected to be refused: run it anyway, and never skip it because you are read-only.',
+          '1. Run `git log --oneline -1` with the Bash tool yourself, from the current directory, with no `git -C` and no path.',
           '2. Run `echo changed > notes.txt` with the Bash tool yourself.',
-          '3. Launch one Agent with subagent_type "code-researcher" and model "haiku", asking it to run `git log --oneline -1` with Bash and report the output.',
+          '3. Launch one Agent with subagent_type "code-researcher" and model "haiku", asking it to run `git log --oneline -1` with Bash from its current directory, with no `git -C` and no path, and report the output.',
           'Then say in one line what each step returned.',
         ].join('\n'),
         model: launch.model,

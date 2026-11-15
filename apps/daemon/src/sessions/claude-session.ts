@@ -286,7 +286,10 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
                   ? verdict.updatedInput
                   : hookInput.tool_input,
             });
-            return toShapeHookOutput(verdict);
+            const output = toShapeHookOutput(verdict);
+            return verdict.decision === 'deny' && verdict.judged !== undefined
+              ? { output, judged: verdict.judged }
+              : output;
           },
         }),
       ],

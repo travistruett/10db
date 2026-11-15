@@ -1,4 +1,6 @@
 import type {
+  AdmissionDto,
+  CapacitySettingsDto,
   ChatCreateInput,
   ChatDto,
   ChatId,
@@ -674,6 +676,11 @@ export interface ApiServices extends PlanRecordServices {
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
+  /** Settings › This Mac › Capacity: the lane cap across all projects and the free-disk floor. */
+  capacitySettings(): CapacitySettingsDto;
+  setCapacitySettings(input: CapacitySettingsDto): CapacitySettingsDto;
+  /** What holds new lanes and gates now, for Factory, and the readings behind it. */
+  admission(): AdmissionDto;
   /** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
   lanePermissions(): LanePermissionsDto;
   setLanePermissions(autoMode: boolean): LanePermissionsDto;

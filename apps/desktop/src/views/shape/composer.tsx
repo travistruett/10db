@@ -9,6 +9,8 @@ export interface ComposerProps {
   /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */
   readonly firstRun: boolean;
   readonly answering: boolean;
+  /** The agent's name as the UI shows it. */
+  readonly agentLabel: string;
   /** A Propose turn is queued or running; pressing again would be ignored. */
   readonly proposing: boolean;
   readonly proposeLabel: 'Propose' | 'Propose Again';
@@ -137,7 +139,7 @@ export function Composer(props: ComposerProps) {
       onDrop={onDrop}
     >
       {shown === null ? null : (
-        <Alert color="red" title="Couldn't reach Claude">
+        <Alert color="red" title={`Couldn't reach ${props.agentLabel}`}>
           {shown}
         </Alert>
       )}

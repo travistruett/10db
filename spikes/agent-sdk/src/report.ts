@@ -6,10 +6,13 @@ type Line = { level: 'PASS' | 'FAIL' | 'PARTIAL' | 'INFO'; name: string; detail:
 const lines: Line[] = [];
 const outDir = join(import.meta.dirname, '..', 'out');
 
+/** Long token-like runs are hidden on the console; the evidence file keeps the detail as given. */
+const redacted = (text: string): string => text.replace(/[A-Za-z0-9_-]{24,}/g, '[redacted]');
+
 function emit(line: Line): void {
   lines.push(line);
   const detail = typeof line.detail === 'string' ? line.detail : JSON.stringify(line.detail);
-  console.log(`${line.level} ${line.name}: ${detail}`);
+  console.log(`${line.level} ${line.name}: ${redacted(detail)}`);
 }
 
 export function check(name: string, ok: boolean, detail: string): void {

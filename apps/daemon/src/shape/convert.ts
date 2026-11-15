@@ -7,11 +7,13 @@ import {
   ShapeProposalBody,
   ShapeProposalState,
   ShapeState,
+  TaskStatus,
   topicKeyFrom,
   type DecisionId,
   type GoalBrief,
   type GoalId,
   type KnowledgeTarget,
+  type MilestoneCut,
   type PlanChange,
   type PlanGoal,
   type PlanPrincipleRecord,
@@ -59,6 +61,7 @@ import {
 } from '@10db/db';
 import { proposePlacement } from '../placement';
 import { appendRevision } from '../plan-record';
+import { judgeMilestones, type Milestone } from './milestone-cut';
 import { removedKeys } from './validate';
 import { buildPlanWorld, tasksInside } from './world';
 
@@ -130,6 +133,27 @@ function goalBrief(goal: PlanGoal): GoalBrief {
       depends_on: t.depends_on,
     })),
   };
+}
+
+/** The Plan's goals in the order it states them, superseded ones left out, with whether each has merged. */
+function milestonesOf(
+  db: DbReader,
+  shapeId: ShapeId,
+  rows: readonly ShapeProposalRow[],
+): Milestone[] {
+  const links = listShapeLinks(db, shapeId);
+  return rows
+    .filter((r) => r.kind === 'goal' && r.state !== ShapeProposalState.Superseded)
+    .map((r) => ({
+      id: r.id,
+      title: ShapeProposalBody.goal.parse(r.body).title,
+      state: r.state,
+      // A task that is done merged; a removed one needs nothing. A goal taken back has no links.
+      merged: links
+        .filter((l) => l.proposalId === r.id)
+        .flatMap((l) => (l.taskId === null ? [] : [l.taskId]))
+        .every((taskId) => getTask(db, taskId).status !== TaskStatus.Open),
+    }));
 }
 
 /** Why a stored row with this key cannot hold a question, as the end of a sentence. */
@@ -225,12 +249,18 @@ export function convertProposals(
   shapeId: ShapeId,
   proposalIds: readonly ShapeProposalId[],
   joiningProblem: JoiningProblem = () => null,
+  cut?: readonly MilestoneCut[],
 ): ConvertOutcome {
   const rows = listShapeProposals(ctx.tx, shapeId);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const errors: string[] = [];
   const selected: ShapeProposalRow[] = [];
-  for (const id of new Set(proposalIds)) {
+  // The builder's cut: milestones marked needed join the selection; those marked cut are dropped below.
+  const requested = new Set(proposalIds);
+  const judged = judgeMilestones(milestonesOf(ctx.tx, shapeId, rows), requested, cut);
+  errors.push(...judged.errors);
+  for (const id of judged.needed) requested.add(id);
+  for (const id of requested) {
     const row = byId.get(id);
     if (row === undefined) errors.push(`${id} is not a proposal of this conversation`);
     else if (row.state !== ShapeProposalState.Pending && row.state !== ShapeProposalState.Accepted)
@@ -665,6 +695,8 @@ export function convertProposals(
     made.set(row.id, { taskIds: [removal.taskId] });
   }
 
+  // A milestone cut stays on the Plan as a dropped row, with its outline.
+  for (const id of judged.cut) patchShapeProposal(ctx, id, { state: ShapeProposalState.Rejected });
   for (const row of pending)
     patchShapeProposal(ctx, row.id, { state: ShapeProposalState.Accepted });
   const left = listShapeProposals(ctx.tx, shapeId).some(

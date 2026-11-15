@@ -12,7 +12,7 @@ export interface RowEditorProps {
 }
 
 /**
- * Edits a row in place. Only what changed is sent, and the daemon pins it, so Claude's next round
+ * Edits a row in place. Only what changed is sent, and the daemon pins it, so the next round
  * leaves it alone. Esc cancels; Save is disabled until something changed.
  */
 export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
@@ -91,7 +91,7 @@ export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
         })}
         <Group justify="space-between" wrap="nowrap">
           <Text size="xs" c="dimmed">
-            An edited field is pinned: Claude’s next round leaves it as you set it.
+            An edited field is pinned: the next round leaves it as you set it.
           </Text>
           <Group gap="xs" wrap="nowrap">
             <Button variant="default" size="xs" onClick={onCancel} onKeyDown={onKeyDown}>

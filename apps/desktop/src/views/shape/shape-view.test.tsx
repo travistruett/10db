@@ -530,7 +530,7 @@ describe('Shape: the conversation', () => {
     await waitFor(() => {
       expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
     });
-    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+    expect(within(conversation).queryByText(/Couldn't reach/)).toBeNull();
   });
 
   it('puts the daemon’s words in the red alert above the input when Stop is refused', async () => {
@@ -589,7 +589,7 @@ describe('Shape: the conversation', () => {
     await waitFor(() => {
       expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
     });
-    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+    expect(within(conversation).queryByText(/Couldn't reach/)).toBeNull();
   });
 
   it('keeps a refused Stop in the alert while its turn is still running', async () => {
@@ -1551,9 +1551,70 @@ describe('Shape: Convert', () => {
     });
     fireEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Convert' });
-    expect(within(dialog).getByText(/Claude is still answering/)).toBeTruthy();
+    expect(within(dialog).getByText(/Agent is still answering/)).toBeTruthy();
     expect(disabled(within(dialog).getByRole('button', { name: 'Stop' }))).toBe(false);
     expect(disabled(within(dialog).getByRole('button', { name: 'Convert 3' }))).toBe(true);
+  });
+
+  it('shows the cut of a Plan with more than five milestones first, and converts only the needed ones', async () => {
+    const view = proposed([
+      ...['a', 'b', 'c', 'd', 'e', 'f'].map((key) => goalProposal(key, [`${key}-1`])),
+      decisionProposal('replaces-adopt'),
+    ]);
+    const posted: unknown[] = [];
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/convert'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ createdNow: 1, results: [] });
+      }),
+    );
+    open(view);
+    const button = await screen.findByRole('button', { name: 'Convert' });
+    await waitFor(() => {
+      expect(disabled(button)).toBe(false);
+    });
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Convert' });
+    const cut = within(dialog).getByRole('group', { name: 'Your cut' });
+    expect(within(cut).getByText(/This Plan has 6 milestones/)).toBeTruthy();
+    // The milestones are marked, not ticked; the decision still has its tick.
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(1);
+    const [decision] = within(dialog).getAllByRole('checkbox');
+    if (decision === undefined) throw new Error('no decision tick');
+    fireEvent.click(decision);
+    expect(disabled(within(dialog).getByRole('button', { name: 'Convert 0' }))).toBe(true);
+
+    const groups = within(cut).getAllByRole('radiogroup');
+    expect(groups).toHaveLength(6);
+    const marks = ['Needed For The Goal', 'Later', 'Later', 'Later', 'Cut'];
+    marks.forEach((name, i) => {
+      const group = groups[i];
+      if (group === undefined) throw new Error(`no milestone ${String(i + 1)}`);
+      fireEvent.click(within(group).getByRole('radio', { name }));
+    });
+    // One milestone is still unmarked, so nothing can convert yet.
+    expect(within(cut).getByText('1 not marked yet')).toBeTruthy();
+    const last = groups[5];
+    if (last === undefined) throw new Error('no sixth milestone');
+    fireEvent.click(within(last).getByRole('radio', { name: 'Cut' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Convert 1' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    const body = posted[0] as {
+      proposalIds: string[];
+      cut: { proposalId: string; mark: string }[];
+    };
+    expect(body.proposalIds).toEqual([view.proposals[0]?.id]);
+    expect(body.cut.map((c) => c.mark)).toEqual([
+      'needed',
+      'later',
+      'later',
+      'later',
+      'cut',
+      'cut',
+    ]);
   });
 });
 

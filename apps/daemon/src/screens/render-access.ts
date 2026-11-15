@@ -145,6 +145,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/chat-models': 'No screen draws the model list.',
   '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
   '/settings/sessions': 'No screen draws a setting.',
+  '/settings/capacity': 'No screen draws a setting.',
+  '/admission': 'No screen draws the machine-wide admission gate.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

@@ -1,4 +1,5 @@
 import {
+  DeniedBy,
   EditChange,
   OUTPUT_TAIL_CHARS,
   PREVIEW_CHARS,
@@ -6,6 +7,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { z } from 'zod';
+import type { ClaudeDenial } from './claude-tool-calls';
 import { hunksOfPatch, hunksOfTexts, type EditHunks } from './hunks';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep, type ToolCallFull } from './types';
@@ -157,7 +159,7 @@ function common(
     startedAt: new Date(times.startedAtMs).toISOString(),
     durationMs: measured === null ? null : Math.max(0, Math.round(measured)),
     parentId: null,
-    // Codex's item doesn't say whether the guard or the builder declined it (call 21).
+    // Codex's item doesn't say who declined it (call 21); `withDenial` adds what the hook knows.
     refusal: null,
     deniedBy: null,
     limit: null,
@@ -406,4 +408,21 @@ export function codexPlanSteps(
           ? PlanStepStatus.Completed
           : PlanStepStatus.Pending,
   }));
+}
+
+/**
+ * A declined call with who refused it and why, as the hook told it. The hook names the item by its own
+ * `tool_use_id`, which is the item's id; a patch's per-file calls carry it before their `:index`. A call
+ * that was not declined is as it was.
+ */
+export function withDenial(call: ToolCallView, denial: ClaudeDenial | undefined): ToolCallView {
+  if (denial === undefined || call.status !== ToolCallStatus.Denied) return call;
+  const judged = denial.by === DeniedBy.Judge;
+  return {
+    ...call,
+    refusal: denial.reason,
+    deniedBy: denial.by,
+    limit: judged ? denial.limit : null,
+    soft: judged ? denial.soft : null,
+  };
 }
