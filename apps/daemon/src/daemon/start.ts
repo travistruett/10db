@@ -199,6 +199,7 @@ import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
+import { guessPageLabelsOnce } from './page-label-guess';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import {
   capacitySettings,
@@ -1993,6 +1994,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.warn({ err: error }, 'tasks on retired landing branches not moved');
     },
   );
+  // Pages with no label take the one the app's nav shows, once per project. It reads git, so it
+  // runs beside the start and ends with it.
+  const pageLabelsAbort = new AbortController();
+  const pageLabels = guessPageLabelsOnce(
+    { state, git, logger: logger.child({ component: 'page-labels' }) },
+    pageLabelsAbort.signal,
+  ).catch((error: unknown) => {
+    if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
+  });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
@@ -2566,7 +2576,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await prWatch.stop();
       await Promise.all([replyWatch.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
-      await retiredLandings;
+      pageLabelsAbort.abort();
+      await Promise.all([retiredLandings, pageLabels]);
       systemTempAbort.abort();
       await systemTempSwept;
       backupsAbort.abort();
