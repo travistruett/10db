@@ -50,7 +50,7 @@ import {
   closeTask,
   isSpentTask,
   reopenTask,
-  retirePassMadeTask,
+  retireTaskUnconditionally,
   deleteBoardColumn,
   getGoal,
   getMcpApproval,
@@ -917,7 +917,7 @@ export function createServices(deps: {
     // is; any other goes through the never-started rule.
     removeTask: (id) =>
       deps.state.write((ctx) =>
-        isSpentTask(ctx.tx, id) ? retirePassMadeTask(ctx, id) : cancelTask(ctx, id),
+        isSpentTask(ctx.tx, id) ? retireTaskUnconditionally(ctx, id) : cancelTask(ctx, id),
       ),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),

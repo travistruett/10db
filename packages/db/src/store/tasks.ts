@@ -1091,7 +1091,7 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
  * work. Its dependency edges go both ways, so nothing waits on it and it waits on nothing. Retiring a
  * retired task answers it and emits nothing.
  */
-export function retirePassMadeTask(ctx: WriteContext, id: TaskId): TaskDto {
+export function retireTaskUnconditionally(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   ctx.tx
@@ -1102,7 +1102,7 @@ export function retirePassMadeTask(ctx: WriteContext, id: TaskId): TaskDto {
 }
 
 /**
- * Whether Remove retires the task by `retirePassMadeTask`: it has runs and every one is cancelled, it
+ * Whether Remove retires the task by `retireTaskUnconditionally`: it has runs and every one is cancelled, it
  * is in no pass and it has no saved work, so nothing of it is left to lose.
  */
 export function isSpentTask(db: DbReader, id: TaskId): boolean {

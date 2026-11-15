@@ -39,7 +39,7 @@ import {
   moveTask,
   patchTask,
   reopenTask,
-  retirePassMadeTask,
+  retireTaskUnconditionally,
   setTaskStatus,
 } from './tasks';
 import { insertSession } from './sessions';
@@ -271,7 +271,7 @@ describe('cancelTask', () => {
   });
 });
 
-describe('retirePassMadeTask', () => {
+describe('retireTaskUnconditionally', () => {
   it('retires the task whatever waits on it: cancelled, unparked, its questions detached, its edges gone both ways', () => {
     const project = seedProject(store);
     const base = seedTask(project.id, 'base');
@@ -283,7 +283,7 @@ describe('retirePassMadeTask', () => {
     store.write((ctx) => moveTask(ctx, made.id, { to: column.id, after: null, before: null }));
     const seeded = seedQuestionOf(project.id, made.id);
 
-    const { value } = store.write((ctx) => retirePassMadeTask(ctx, made.id));
+    const { value } = store.write((ctx) => retireTaskUnconditionally(ctx, made.id));
 
     expect(value).toMatchObject({ status: TaskStatus.Cancelled, boardColumnId: null });
     expect(listTasks(store.db, project.id).map((t) => t.title)).toEqual(['base', 'child']);
@@ -297,7 +297,7 @@ describe('retirePassMadeTask', () => {
     ).toEqual([]);
     expect(getTask(store.db, child.id)).toMatchObject({ status: TaskStatus.Open, dependsOn: [] });
     // A second retire answers the retired task and emits nothing.
-    expect(store.write((ctx) => retirePassMadeTask(ctx, made.id)).events).toEqual([]);
+    expect(store.write((ctx) => retireTaskUnconditionally(ctx, made.id)).events).toEqual([]);
   });
 });
 

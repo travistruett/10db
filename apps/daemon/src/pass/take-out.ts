@@ -31,7 +31,7 @@ import {
   openHolds,
   passHoldingTask,
   releaseClaims,
-  retirePassMadeTask,
+  retireTaskUnconditionally,
   setTaskKeptWork,
   setTaskStatus,
   settleTurnsLeaving,
@@ -132,7 +132,7 @@ export function leavePassForBoard(
   setTaskKeptWork(ctx, input.taskId, input.kept);
   const abandoned = input.abandoned === true;
   if (abandoned && madeByPass(ctx.tx, input.passId, input.taskId))
-    retirePassMadeTask(ctx, input.taskId);
+    retireTaskUnconditionally(ctx, input.taskId);
   else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   advanceTakeOut(ctx, { taskId: input.taskId, passId: input.passId }, { step: TakeOutStep.Done });
   insertSystemNotice(
