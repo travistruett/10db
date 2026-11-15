@@ -170,7 +170,11 @@ describe('leftOutAfter and what Apply sends of it', () => {
     expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, true, ['inbox'])).not.toHaveProperty(
       'leftOutPages',
     );
-    expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, false, [])).toBeNull();
+    // Leaving a page out never needs the rebuild: with it unticked only the list is sent.
+    expect(setupPatch(SETUP, CURRENT, ['inbox'], {}, false, [])).toEqual({
+      leftOutPages: ['inbox'],
+    });
+    expect(setupPatch(SETUP, CURRENT, [], {}, false, [])).toBeNull();
   });
 });
 
@@ -185,6 +189,16 @@ describe('a label difference', () => {
 });
 
 describe('areasSummary', () => {
+  it('says how many page labels the rebuild sets, whatever else it changes', () => {
+    const labelled = PROPOSED.map((a) => (a.role === AreaRole.Page ? { ...a, label: 'X' } : a));
+    expect(areasSummary(PROPOSED, labelled)).toBe(
+      '5 areas → 5: 2 pages, 1 shared, 2 other; repo, board, inbox and 2 more keep their names; 2 page labels set',
+    );
+    expect(areasSummary(PROPOSED, PROPOSED)).not.toContain('label');
+    const one = PROPOSED.map((a) => (a.name === 'board' ? { ...a, label: 'Work' } : a));
+    expect(areasSummary(PROPOSED, one)).toContain('; 1 page label set');
+  });
+
   it('says how many areas become how many, of which kind, and which names stay', () => {
     expect(areasSummary(CURRENT, PROPOSED)).toBe(
       '2 areas → 5: 2 pages, 1 shared, 2 other; repo and backend keep their names',

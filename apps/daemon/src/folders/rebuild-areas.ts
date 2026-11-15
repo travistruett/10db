@@ -202,15 +202,12 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       skipped: problem === null ? skipped : [...skipped, { name: 'areas', reason: problem }],
     };
 
-  // A page is new only when no page of the project has its name and route: a changed label or one
-  // more glob is no new page, so unticking a row never demotes a page the project already has.
+  // A page is new only when no page of the project has its name: a changed label, route or glob is
+  // part of the rebuild, so unticking a row never demotes a page the project already has.
   const newPages = proposed.filter(
     (a) =>
       a.role === AreaRole.Page &&
-      !input.existing.some(
-        (e) =>
-          e.role === AreaRole.Page && e.name === a.name && (e.route ?? null) === (a.route ?? null),
-      ),
+      !input.existing.some((e) => e.role === AreaRole.Page && e.name === a.name),
   );
   return {
     proposed,

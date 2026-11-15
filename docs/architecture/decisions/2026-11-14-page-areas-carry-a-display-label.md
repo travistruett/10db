@@ -15,7 +15,7 @@
   more source files an app has whose names say layout, nav, sidebar, menu or shell, and takes the `label` of an
   object literal that also holds the route as `to`, `path` or `href`, in one linear scan. A page named by its
   files is not guessed. A label the builder set beats the guess, and an existing page with none takes it.
-- **A label alone is never a new page.** `areas.pages` holds only pages whose name and route match no page area
+- **A label alone is never a new page.** `areas.pages` holds only pages whose name matches no page area
   of the project, so unticking a row can never demote a page the project has; a label difference is offered
   through the rebuild and both `sameArea` functions compare it.
 - **The picker notices new pages.** With page areas Set Up is always in the picker's header, badged with the new

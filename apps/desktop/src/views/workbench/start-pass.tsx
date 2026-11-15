@@ -44,9 +44,9 @@ export interface StartPassProps {
 
 /** "New page found: Sessions /sessions", or the count and the first few of several. */
 function newPagesLine(pages: readonly PageRow[]): ReactNode {
-  const shown = pages.slice(0, NEW_PAGES_SHOWN).map((page) => (
+  const shown = pages.slice(0, NEW_PAGES_SHOWN).map((page, i) => (
     <Fragment key={page.name}>
-      {' '}
+      {i === 0 ? ' ' : ', '}
       {pageLabel(page)}
       {page.route === undefined ? null : (
         <>

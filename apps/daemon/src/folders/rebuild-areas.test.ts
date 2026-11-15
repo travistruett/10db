@@ -123,6 +123,14 @@ describe('rebuildAreas', () => {
       expect(added.proposed).not.toEqual(existing());
     });
 
+    it('never offers a page the project has as a new page, even when its route changed', () => {
+      const result = rebuildAreas(
+        input({ existing: existing(), pages: [FRIDAY, { ...PEOPLE, route: '/team' }] }),
+      );
+      expect(result.pages).toEqual([]);
+      expect(result.proposed.find((a) => a.name === 'people')?.route).toBe('/team');
+    });
+
     it('gives a kept page area with no label the guess, and leaves a labelled one alone', () => {
       const kept = rebuildAreas(
         input({

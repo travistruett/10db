@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
-import { AreasSection } from './areas-section';
+import { AreasSection, PageRows } from './areas-section';
 import { BranchRow } from './branch-row';
 import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
@@ -174,7 +174,16 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
                 setTickEdits((edits) => ({ ...edits, [page]: ticked }));
               }}
             />
-          ) : null}
+          ) : (
+            // Leaving a page out needs no rebuild: the rows stand on their own and Apply remembers them.
+            <PageRows
+              pages={setup.areas.pages}
+              unticked={unticked}
+              onTick={(page, ticked) => {
+                setTickEdits((edits) => ({ ...edits, [page]: ticked }));
+              }}
+            />
+          )}
         </Stack>
       )}
       {drafts.length === 0 ? null : (

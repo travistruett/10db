@@ -60,7 +60,7 @@ export function leftOutAfter(
 /**
  * The one `PATCH /projects/:id` Apply sends: the rebuilt areas, when `rebuildAreas`, with each
  * unticked page folded back (left out when that is the list the project has), the pages left out
- * from now on (`leftOutAfter`, sent only with the areas and only when it changes), and the ticked
+ * from now on (`leftOutAfter`, sent on its own too, only when it changes), and the ticked
  * settings as edited (`settingsPatch`); null when it changes nothing.
  */
 export function setupPatch(
@@ -74,11 +74,9 @@ export function setupPatch(
   const patch: ProjectPatch = { ...settings };
   const areas = withoutPages(setup.areas.proposed, untickedPages, setup.areas.pages);
   if (rebuildAreas && areasChanged(areas, current)) patch.areas = areas;
-  if (rebuildAreas) {
-    const next = leftOutAfter(setup, leftOut, untickedPages);
-    if (next.length !== leftOut.length || next.some((name) => !leftOut.includes(name)))
-      patch.leftOutPages = next;
-  }
+  const next = leftOutAfter(setup, leftOut, untickedPages);
+  if (next.length !== leftOut.length || next.some((name) => !leftOut.includes(name)))
+    patch.leftOutPages = next;
   return Object.keys(patch).length === 0 ? null : patch;
 }
 
@@ -91,13 +89,21 @@ export function areasSummary(current: readonly AreaDef[], next: readonly AreaDef
   const head =
     `${plural(current.length, 'area', 'areas')} → ${String(next.length)}: ` +
     `${plural(pages, 'page', 'pages')}, ${String(shared)} shared, ${String(next.length - pages - shared)} other`;
+  const labelled = next.filter(
+    (a) =>
+      a.role === AreaRole.Page &&
+      a.label !== undefined &&
+      current.some((c) => c.name === a.name) &&
+      current.find((c) => c.name === a.name)?.label !== a.label,
+  ).length;
   const staying = current.map((a) => a.name).filter((name) => next.some((a) => a.name === name));
-  if (staying.length === 0) return head;
+  const labels = labelled === 0 ? '' : `; ${plural(labelled, 'page label', 'page labels')} set`;
+  if (staying.length === 0) return `${head}${labels}`;
   const named =
     staying.length <= 3
       ? staying.length === 1
         ? (staying[0] ?? '')
         : `${staying.slice(0, -1).join(', ')} and ${staying.at(-1) ?? ''}`
       : `${staying.slice(0, 3).join(', ')} and ${String(staying.length - 3)} more`;
-  return `${head}; ${named} ${staying.length === 1 ? 'keeps its name' : 'keep their names'}`;
+  return `${head}; ${named} ${staying.length === 1 ? 'keeps its name' : 'keep their names'}${labels}`;
 }

@@ -279,13 +279,13 @@ describe('StartPass', () => {
         { name: 'a', route: '/a', folders: ['a/'] },
         { name: 'b', route: '/b', folders: ['b/'] },
       ],
-      says: '2 new pages found: A /a B /b',
+      says: '2 new pages found: A /a, B /b',
     },
   ])('says the new page found: $name, with Set Up beside it', async ({ pages, says }) => {
     const onOpen = vi.fn();
     await draw({ setUp: { count: pages.length, newPages: pages, onOpen } });
     const line = screen.getByRole('status');
-    expect(line.textContent).toContain(says.replaceAll(' /', ' /'));
+    expect(line.textContent).toContain(says);
     fireEvent.click(within(line).getByRole('button', { name: 'Set Up' }));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });

@@ -164,7 +164,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await expect(
     page.getByRole('heading', { name: 'Set up workbench for the UI Workbench' }),
   ).toBeVisible();
-  const billing = page.getByRole('checkbox', { name: 'Make billing a page at /billing' });
+  const billing = page.getByRole('checkbox', { name: 'Make Billing (billing) a page at /billing' });
   await expect(billing).toBeChecked();
   await scan(page, 480, 'dark', 'setup');
   await scan(page, 1280, 'dark', 'setup');
