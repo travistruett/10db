@@ -297,7 +297,7 @@ A judged call's verdict shows in the transcript as a dim line when it denies, an
 - `docs/architecture/03-trust-boundaries.md` is updated in the same pull requests: the threat model's policy
   layer becomes the judge, and its boundaries are unchanged.
 - A judge's mistake is bounded by the sandbox: it can let through a call inside the line that it should have
-  stopped, but not a write outside the checkout, a read of a credential store or a connection the proxy refuses.
+  stopped, but not a write outside the checkout, a read of a credential store or a connection the proxy refuses, except for the builder's own MCP servers, whose tools act outside it with the builder's access (§6, call 16): a judge's mistake there is bounded only by what the server can do.
 
 ## 12. Milestones
 

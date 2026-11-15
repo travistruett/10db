@@ -230,7 +230,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
   });
 
   describe("the builder's own MCP servers", () => {
-    function approveYours(): void {
+    function approveYours(approve = true): void {
       mkdirSync(join(root, 'home'), { recursive: true });
       writeFileSync(
         join(root, 'home', '.claude.json'),
@@ -246,7 +246,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
         laneWritable: [],
         plugins: [],
       });
-      for (const entry of entries) {
+      for (const entry of approve ? entries : []) {
         const hash = entry.configHash;
         if (hash === null) throw new Error('unreadable probe entry');
         state.write((ctx) => {
@@ -270,6 +270,30 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
         expect(prepared.projectMcpServers).toEqual({});
       } finally {
         await prepared.release();
+      }
+    });
+
+    it('a conversation resumed after the approval plans your server again', async () => {
+      const owner = conversation({ mcpServers: {} });
+      approveYours(false);
+      const { prepare } = preparer();
+      const before = await prepare(inputFor(owner));
+      try {
+        expect(Object.keys(before.yourMcpServers)).toEqual([]);
+        expect(before.note).toContain('waiting for your approval');
+      } finally {
+        await before.release();
+      }
+      approveYours();
+      // The engine prepares the session anew on each resume, so the approval is read again.
+      const resumed = await prepare({
+        ...inputFor(owner),
+        resumeProviderSessionId: 'earlier-session',
+      });
+      try {
+        expect(Object.keys(resumed.yourMcpServers)).toContain('mine');
+      } finally {
+        await resumed.release();
       }
     });
 
