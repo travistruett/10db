@@ -60,6 +60,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/models/offers',
   '/models/status',
   '/settings/keep-awake',
+  '/settings/agent-skill',
+  '/agent-skill',
   '/settings/lane-permissions',
   '/settings/self-update',
   '/decisions/:id/provenance',
