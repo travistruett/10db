@@ -199,7 +199,7 @@ import { createGithubServices } from './github-services';
 import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
-import { guessPageLabelsOnce } from './page-label-guess';
+import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import {
   capacitySettings,
@@ -674,6 +674,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   // Specs and evals kept before revisions existed get their revision 1, before anything reads them.
   backfillAttachmentRevisions(state);
+  // The projects there are when page labels first ship wait for a label guess; later ones never do.
+  seedPendingPageLabels(state);
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
@@ -1994,10 +1996,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.warn({ err: error }, 'tasks on retired landing branches not moved');
     },
   );
-  // Pages with no label take the one the app's nav shows, once per project. It reads git, so it
-  // runs beside the start and ends with it.
+  // Pages of the projects listed at the first start take the labels the app's nav shows. It reads
+  // git, so it runs beside the start and ends with it.
   const pageLabelsAbort = new AbortController();
-  const pageLabels = guessPageLabelsOnce(
+  const pageLabels = guessPendingPageLabels(
     { state, git, logger: logger.child({ component: 'page-labels' }) },
     pageLabelsAbort.signal,
   ).catch((error: unknown) => {

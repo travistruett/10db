@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { AreaRole, type AreaDef } from '@10db/contracts';
+import { AreaRole, type AreaDef, type ProjectId } from '@10db/contracts';
 import {
   createTestStore,
   getAppSetting,
@@ -14,7 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { capturingLogger, createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { PAGE_LABELS_GUESSED_KEY, guessPageLabelsOnce } from './page-label-guess';
+import {
+  PAGE_LABELS_PENDING_KEY,
+  guessPendingPageLabels,
+  seedPendingPageLabels,
+  type PageLabelGuessDeps,
+} from './page-label-guess';
+import { createServices } from './services';
 
 /** A code-routed app whose nav calls `/shape` "Plan" and `/board` "Board". */
 const APP: Record<string, string> = {
@@ -74,38 +80,77 @@ afterEach(() => {
   repo.cleanup();
 });
 
-describe('guessPageLabelsOnce', () => {
-  it('labels an unlabelled page from the nav, keeps a label the builder set, and never guesses a project again', async () => {
-    const project = seedProject(store, { repoPath: repo.path, areas: [shape, board, rest] });
-    const logger = capturingLogger();
-    await guessPageLabelsOnce({ state, git: createGit(), logger });
+/** Only the project patch runs here, and it reads the state store, so that is the real one. */
+function builderServices() {
+  // A cast at a test boundary: saving a project's areas touches nothing else of the deps.
+  return createServices({ state, daemonPort: () => null } as unknown as Parameters<
+    typeof createServices
+  >[0]);
+}
 
-    const labels = () =>
-      Object.fromEntries(getProject(state.db, project.id).areas.map((a) => [a.name, a.label]));
-    expect(labels()).toEqual({ shape: 'Plan', board: 'Work', app: undefined });
-    expect(getAppSetting(state.db, PAGE_LABELS_GUESSED_KEY)).toEqual([project.id]);
+const labels = (id: ProjectId) =>
+  Object.fromEntries(getProject(state.db, id).areas.map((a) => [a.name, a.label]));
+
+describe('page label guesses', () => {
+  it('label an unlabelled page of a listed project from the nav, keep a label the builder set, and run once', async () => {
+    const project = seedProject(store, { repoPath: repo.path, areas: [shape, board, rest] });
+    seedPendingPageLabels(state);
+    const logger = capturingLogger();
+    await guessPendingPageLabels({ state, git: createGit(), logger });
+
+    expect(labels(project.id)).toEqual({ shape: 'Plan', board: 'Work', app: undefined });
+    expect(getAppSetting(state.db, PAGE_LABELS_PENDING_KEY)).toEqual([]);
 
     // The builder clears the label: a later start leaves it cleared.
     state.write((ctx) => {
       patchProject(ctx, project.id, { areas: [shape, board, rest] });
     });
-    await guessPageLabelsOnce({ state, git: createGit(), logger });
-    expect(labels()).toEqual({ shape: undefined, board: 'Work', app: undefined });
+    seedPendingPageLabels(state);
+    await guessPendingPageLabels({ state, git: createGit(), logger });
+    expect(labels(project.id)).toEqual({ shape: undefined, board: 'Work', app: undefined });
     expect(logger.lines()).toEqual([]);
   });
 
-  it('tries a project whose repository it cannot read again at the next start', async () => {
+  it('never label a project added after the list was made', async () => {
+    seedPendingPageLabels(state);
+    const project = seedProject(store, { repoPath: repo.path, areas: [shape, board, rest] });
+    seedPendingPageLabels(state);
+    await guessPendingPageLabels({ state, git: createGit(), logger: capturingLogger() });
+    expect(labels(project.id)).toEqual({ shape: undefined, board: 'Work', app: undefined });
+  });
+
+  it.each([
+    ['before the start reads git', false],
+    ['while the start reads git', true],
+  ])('leave areas the builder saved %s as saved', async (_name, midRead) => {
+    const project = seedProject(store, { repoPath: repo.path, areas: [shape, board, rest] });
+    seedPendingPageLabels(state);
+    const save = () => builderServices().patchProject(project.id, { areas: [shape, board, rest] });
+    const real = createGit();
+    const git: PageLabelGuessDeps['git'] = {
+      survey: async (...args) => {
+        if (midRead) await save();
+        return real.survey(...args);
+      },
+      surveyTexts: (...args) => real.surveyTexts(...args),
+    };
+    if (!midRead) await save();
+    await guessPendingPageLabels({ state, git, logger: capturingLogger() });
+    expect(labels(project.id)).toEqual({ shape: undefined, board: 'Work', app: undefined });
+    expect(getAppSetting(state.db, PAGE_LABELS_PENDING_KEY)).toEqual([]);
+  });
+
+  it('keep a project whose repository it cannot read for the next start', async () => {
     const project = seedProject(store, {
       repoPath: join(repo.path, 'missing'),
       areas: [shape, board, rest],
     });
+    seedPendingPageLabels(state);
     const logger = capturingLogger();
-    await guessPageLabelsOnce({ state, git: createGit(), logger });
+    await guessPendingPageLabels({ state, git: createGit(), logger });
 
-    expect(getProject(state.db, project.id).areas.find((a) => a.name === 'shape')?.label).toBe(
-      undefined,
-    );
-    expect(getAppSetting(state.db, PAGE_LABELS_GUESSED_KEY)).toBe(undefined);
+    expect(labels(project.id)['shape']).toBe(undefined);
+    expect(getAppSetting(state.db, PAGE_LABELS_PENDING_KEY)).toEqual([project.id]);
     expect(logger.lines().join('\n')).toContain('page labels not guessed');
   });
 });
