@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -67,12 +75,13 @@ function runHook(
   return { outcome: 'warn', reason: specific.additionalContext ?? '', exit: result.status };
 }
 
-const bash = (command: string, cwd: string): string =>
+const bash = (command: string, cwd: string, extra: Record<string, unknown> = {}): string =>
   JSON.stringify({
     hook_event_name: 'PreToolUse',
     tool_name: 'Bash',
     cwd,
     tool_input: { command },
+    ...extra,
   });
 
 describe('git guard decisions', () => {
@@ -538,6 +547,18 @@ describe("git guard with another session's work already staged", () => {
   it('names the staged path in the deny reason', () => {
     expect(runHook(bash("git add a.ts && git commit -m 'x'", dirty)).reason).toContain('other.ts');
   });
+
+  it('reads the index from where a relative cd leads, CDPATH or not', () => {
+    // A retry: src/c.ts is already staged, and the command adds it again from inside src/.
+    const retry = makeRepo(['src/c.ts']);
+    try {
+      expect(runHook(bash("cd src && git add c.ts && git commit -m 'x'", retry.dir)).outcome).toBe(
+        'allow',
+      );
+    } finally {
+      retry.remove();
+    }
+  });
 });
 
 // A checkout laid out as AGENTS.md says: the main checkout `10db/`, an agent's linked worktree in
@@ -563,6 +584,10 @@ describe('git guard in an agent worktree beside the checkout', () => {
     checkout.git('worktree', 'add', '-q', '-b', 'feat/elsewhere', elsewhere);
     // A tracked file deleted from disk is still one index entry.
     rmSync(join(agent, 'b.ts'));
+    // Names zsh reads as a directory-stack entry, or that CDPATH may send elsewhere, which lead to
+    // the agent worktree when read as plain paths.
+    symlinkSync(agent, join(checkout.dir, '+0'));
+    symlinkSync(agent, join(checkout.dir, 'agentlink'));
     // A worktree whose tracked directory src/ was replaced on disk by a file named src.
     replaced = join(layout, '10db-worktrees', 'replaced');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/replaced', replaced);
@@ -695,8 +720,105 @@ describe('git guard in an agent worktree beside the checkout', () => {
     },
   );
 
+  it.each<[string, string]>([
+    ['a cd the guard cannot read', 'cd ~/elsewhere && git restore a.ts'],
+    ['a cd CDPATH may redirect', 'cd agentlink && git checkout -- a.ts'],
+    ['git -C another checkout', 'git -C CHECKOUT checkout -- .'],
+  ])(
+    'never shows a subagent in its worktree how to overwrite files git may not run on: %s',
+    (_name, command) => {
+      const { outcome, reason } = runHook(
+        bash(command.replaceAll('CHECKOUT', checkout.dir), agent, { agent_id: 'a1' }),
+      );
+      expect(outcome).toBe('deny');
+      expect(reason).not.toContain('git show');
+    },
+  );
+
+  it('shows a subagent in its own worktree how to discard one file', () => {
+    const { outcome, reason } = runHook(bash('git checkout -- .', agent, { agent_id: 'a1' }));
+    expect(outcome).toBe('deny');
+    expect(reason).toContain('git show <ref>:./<path> > <path>');
+  });
+
   it('applies from a subdirectory of the agent worktree', () => {
     expect(inAgent('git restore c.ts', join(agent, 'src'))).toBe('allow');
+  });
+
+  // A cd the guard can read, joined by `&&` so a failed cd stops the line before git, is followed:
+  // the exception holds where git runs. AGENT stands for the agent worktree's path.
+  it.each<[string, string, 'checkout' | 'agent' | 'elsewhere', Outcome]>([
+    [
+      'cd to the agent worktree from the checkout',
+      'cd AGENT && git checkout -- a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'cd to the agent worktree from elsewhere',
+      'cd AGENT && git restore a.ts',
+      'elsewhere',
+      'allow',
+    ],
+    ['cd -- to the agent worktree', 'cd -- AGENT && git restore a.ts', 'checkout', 'allow'],
+    ['a ./ cd within the agent worktree', 'cd ./src && git restore c.ts', 'agent', 'allow'],
+    [
+      'a ../ cd into the agent worktree',
+      'cd ../10db-worktrees/agent && git restore a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'a bare relative cd, which CDPATH may send elsewhere',
+      'cd agentlink && git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['a bare relative cd within the agent worktree', 'cd src && git restore c.ts', 'agent', 'ask'],
+    ['zsh cd +N, a directory-stack entry', 'cd +0 && git restore a.ts', 'checkout', 'ask'],
+    ['zsh cd -- +N', 'cd -- +0 && git checkout -- a.ts', 'checkout', 'ask'],
+    [
+      'two cds ending in the agent worktree',
+      'cd CHECKOUT && cd AGENT && git restore a.ts',
+      'checkout',
+      'allow',
+    ],
+    [
+      'cd joined by ;, which runs git where a failed cd left it',
+      'cd AGENT; git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['cd joined by a newline', 'cd AGENT\ngit restore a.ts', 'checkout', 'ask'],
+    ['cd joined by ||', 'cd AGENT || git restore a.ts', 'checkout', 'ask'],
+    ['cds ending in the checkout', 'cd AGENT && cd CHECKOUT && git restore a.ts', 'agent', 'ask'],
+    ['cd in a subshell that ends before git', '(cd AGENT) && git restore a.ts', 'checkout', 'ask'],
+    ['cd to a path the shell expands', 'cd $HOME && git restore a.ts', 'agent', 'ask'],
+    [
+      'cd with an option the guard does not read',
+      'cd -P AGENT && git restore a.ts',
+      'checkout',
+      'ask',
+    ],
+    ['cd, then git -C the checkout', 'cd AGENT && git -C CHECKOUT restore a.ts', 'agent', 'ask'],
+    [
+      'cd, then a GIT_DIR prefix',
+      'cd AGENT && GIT_DIR=CHECKOUT/.git git restore a.ts',
+      'agent',
+      'ask',
+    ],
+    ['cd, then another command', 'cd AGENT && true && git restore a.ts', 'checkout', 'ask'],
+    ['cd, then an untracked path', 'cd AGENT && git restore gone.ts', 'checkout', 'ask'],
+    ['cd, then a whole-tree discard', 'cd AGENT && git checkout -- .', 'checkout', 'ask'],
+    [
+      'cd, then a discard and a force push',
+      'cd AGENT && git restore a.ts && git push --force',
+      'checkout',
+      'ask',
+    ],
+  ])('%s', (_name, command, from, expected) => {
+    const cwd = { checkout: checkout.dir, agent, elsewhere }[from];
+    expect(inAgent(command.replaceAll('AGENT', agent), cwd)).toBe(expected);
   });
 
   it.each<[string, string]>([
@@ -727,6 +849,23 @@ describe('git guard judging a push in the directory the command runs in', () => 
     checkout.git('worktree', 'add', '-q', '-b', 'feat/pr147', worktree);
     onMainSub = join(checkout.dir, 'sub');
     mkdirSync(onMainSub);
+    symlinkSync(worktree, join(checkout.dir, '+0'));
+    symlinkSync(worktree, join(checkout.dir, '-0'));
+    symlinkSync(worktree, join(checkout.dir, 'wtlink'));
+  });
+
+  it.each<[string, string]>([
+    ['zsh cd +N, a directory-stack entry', 'cd +0 && git push'],
+    ['zsh cd -N', 'cd -0 && git push'],
+    ['a bare relative cd, which CDPATH may send elsewhere', 'cd wtlink && git push'],
+  ])('asks for a push after a cd the shell may read otherwise: %s', (_name, command) => {
+    expect(run(command, checkout.dir)).toBe('ask');
+  });
+
+  it('a subagent pushing where the guard cannot tell the branch is told to name it', () => {
+    const { outcome, reason } = runHook(bash('cd $HOME && git push', worktree, { agent_id: 'a1' }));
+    expect(outcome).toBe('deny');
+    expect(reason).toContain('git push origin <branch>');
   });
 
   afterAll(() => {
@@ -1111,6 +1250,68 @@ describe('git guard deleting a branch whose pull request merged', () => {
       // The first lookup takes 1 s and confirms; the second gets the 0.5 s left, is cut off and asks.
       expect(slowOutcome('1500')).toBe('ask');
     });
+  });
+});
+
+// Nobody answers a prompt raised inside a subagent, so there every ask becomes a deny whose reason
+// names a way that needs no approval. The hook input carries agent_id only inside a subagent.
+describe('git guard inside a subagent', () => {
+  const asAgent = (command: string, agentId: unknown) =>
+    runHook(bash(command, clean, { agent_id: agentId }));
+
+  it.each<[string, string, Outcome, string]>([
+    [
+      'a whole-tree discard outside an agent worktree',
+      'git checkout -- .',
+      'deny',
+      'your own worktree',
+    ],
+    [
+      'a named-file discard outside an agent worktree',
+      'git restore a.ts',
+      'deny',
+      'your own worktree',
+    ],
+    ['a hard reset', 'git reset --hard HEAD', 'deny', 'git revert'],
+    ['a stash', 'git stash', 'deny', 'git diff > <file>'],
+    ['a clean', 'git clean -fd', 'deny', 'rm <path>'],
+    ['a rebase', 'git rebase main', 'deny', 'git merge origin/main'],
+    ['an amend', "git commit --amend -m 'x'", 'deny', 'new commit'],
+    ['a push to main', 'git push origin HEAD:main', 'deny', 'pull request'],
+    ['a force push', 'git push --force origin feat/x', 'deny', 'new branch'],
+    ['an admin merge', 'gh pr merge 1 --admin', 'deny', 'blocked'],
+    ['a deny stays a deny', 'git add -A', 'deny', 'Name each path'],
+    ['an allow stays an allow', "git add a.ts && git commit -m 'x'", 'allow', ''],
+    ['a warn stays a warn', 'pnpm vitest run | tail -5', 'warn', 'tail'],
+  ])('%s', (_name, command, expected, inReason) => {
+    const { outcome, reason } = asAgent(command, 'a1b2c3');
+    expect(outcome).toBe(expected);
+    expect(reason).toContain(inReason);
+  });
+
+  it('says why it denies and keeps the rule it would have asked about', () => {
+    const { reason } = asAgent('git rebase main', 'a1b2c3');
+    expect(reason).toContain('Nobody can approve a prompt inside a subagent');
+    expect(reason).toContain('cannot be undone easily');
+    expect(reason).toContain('report it as blocked');
+  });
+
+  it.each<[string, unknown]>([
+    ['no agent_id', undefined],
+    ['an empty agent_id', ''],
+    ['a non-string agent_id', 7],
+  ])('still asks in the main session: %s', (_name, agentId) => {
+    expect(asAgent('git rebase main', agentId).outcome).toBe('ask');
+  });
+
+  it('still asks in an --agent main session, which carries agent_type without agent_id', () => {
+    expect(runHook(bash('git rebase main', clean, { agent_type: 'implementer' })).outcome).toBe(
+      'ask',
+    );
+  });
+
+  it('never shows a subagent how to overwrite files outside its own worktree', () => {
+    expect(asAgent('git restore a.ts', 'a1').reason).not.toContain('git show');
   });
 });
 

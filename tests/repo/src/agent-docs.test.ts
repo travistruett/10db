@@ -74,6 +74,18 @@ describe('agent instruction files', () => {
         .reduce((sum, doc) => sum + Buffer.byteLength(readRepoFile(doc)), 0);
     expect(docs.filter((path) => chainBytes(path) > limit)).toEqual([]);
   });
+
+  // An agent reads every AGENTS.md on its path before it starts, so a long one costs every session
+  // in that directory. Rules stay here; catalogues and histories go to docs/architecture.
+  it('keeps every AGENTS.md within its word budget', () => {
+    const budget = 5000;
+    const words = (path: string): number => readRepoFile(path).split(/\s+/).filter(Boolean).length;
+    const over = repoFiles()
+      .filter((path) => basename(path) === 'AGENTS.md')
+      .filter((path) => words(path) > budget)
+      .map((path) => `${path}: ${String(words(path))} words`);
+    expect(over).toEqual([]);
+  });
 });
 
 describe('subagents', () => {

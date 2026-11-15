@@ -7,6 +7,8 @@
 - `decisions/`: one file per decision, `YYYY-MM-DD-<slug>.md`; its README gives the format.
   `decisions.md` is the numbered log, closed at 133: never edit or renumber a row, and cite one by
   number.
+- `db-storage.md`: what each table and migration in `packages/db` holds, by feature; the rules
+  for changing the schema stay in `packages/db/AGENTS.md`.
 - `open-questions.md`: questions with no answer yet, each with who or what can answer it.
 - `proposals/`: changes under discussion. `reviews/`: review reports. `research/`: spike results
   and vendor research, each claim marked VERIFIED (with a source) or UNKNOWN.

@@ -162,7 +162,8 @@ export function createHookJudge(
         const { at } = verdict;
         if (ctx.skips === null) {
           // Without an id no card can be tied to the call, so it is refused with its reason.
-          if (req.toolUseId === null) return { decision: 'deny', reason: at.reason };
+          if (req.toolUseId === null)
+            return { decision: 'deny', reason: at.reason, judged: { limit: at.limit } };
           ctx.limits.note(req.toolUseId, at);
           return { decision: 'ask', reason: `10db's judge asks the builder: ${at.reason}` };
         }
@@ -176,7 +177,11 @@ export function createHookJudge(
           reason: at.reason,
           source: SkipSource.TendbJudge,
         });
-        return { decision: 'deny', reason: skipMessage(at.limit, at.reason) };
+        return {
+          decision: 'deny',
+          reason: skipMessage(at.limit, at.reason),
+          judged: { limit: at.limit },
+        };
       }
     }
   };

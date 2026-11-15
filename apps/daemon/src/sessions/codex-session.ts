@@ -18,6 +18,7 @@ import {
 } from './codex-guard';
 import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
+import { refusedToolCalls } from './codex-refused-calls';
 import {
   createTurnState,
   hasKnownShape,
@@ -93,6 +94,9 @@ const NO_PROMPT = 'No prompt was sent.';
 
 /** How long `stop` waits for Codex to acknowledge `turn/interrupt` before it ends the process. */
 const STOP_GRACE_MS = 5_000;
+
+/** The refusals kept for items still to complete; a call the agent never reports is dropped oldest first. */
+const DENIALS_KEPT = 256;
 
 /** The most of the child's stderr an `ended` message carries when the process exits unasked. */
 const EXIT_STDERR_CHARS = 500;
@@ -850,7 +854,23 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   /** The guard hook's answer for one call; a throw here is a refusal, since the socket answers 500. */
   const judgeCall = async (hook: HookInput, signal: AbortSignal): Promise<GuardAnswer> => {
     try {
-      const answer = await judgeHookCall(spec, { ...hook, cwd: hook.cwd ?? spec.cwd }, signal);
+      const answer = await judgeHookCall(
+        spec,
+        { ...hook, cwd: hook.cwd ?? spec.cwd },
+        signal,
+        (toolUseId, denial, refused) => {
+          state.denials.set(toolUseId, denial);
+          // A refusal for an item the agent never reports is dropped, oldest first.
+          if (state.denials.size > DENIALS_KEPT) {
+            const [oldest] = state.denials.keys();
+            if (oldest !== undefined) state.denials.delete(oldest);
+          }
+          // Codex reports no item for a call its hook refused: the thread shows the call from the hook's input.
+          if (started)
+            for (const call of refusedToolCalls(refused, denial, clock.now().getTime()))
+              events.push({ type: 'tool_call', call });
+        },
+      );
       if (!answer.allow && answer.interrupt && threadId !== null && state.turnId !== null)
         void interruptTurn(threadId, state.turnId);
       return answer;

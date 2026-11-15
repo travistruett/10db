@@ -20,7 +20,7 @@
     }
   },
   "ignore": ["spikes/**", "apps/daemon/src/sessions/codex-generated/**"],
-  "ignoreBinaries": ["codex", "make", "mkfifo", "rustc"],
+  "ignoreBinaries": ["codex", "make", "mkfifo", "pdftoppm", "rustc"],
   "ignoreExportsUsedInFile": true,
   "lefthook": {
     "config": ["lefthook.yml"]

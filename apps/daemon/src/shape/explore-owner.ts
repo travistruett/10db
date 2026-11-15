@@ -66,6 +66,8 @@ import { expandHome } from '../sandbox';
 import type { ShapeImage, ShapeToolRequest, ShapeVerdict } from '../sessions';
 import {
   buildTrustPolicy,
+  FloorReason,
+  floorNoticeText,
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
@@ -107,7 +109,7 @@ const NOTHING_TO_ASK =
   'This planning session has no sandbox, so it runs no command and asks for nothing.';
 /** What the builder reads when a Propose turn's accepted plan has nothing in it. */
 const EMPTY_PLAN_NOTICE =
-  'The plan came back empty: nothing has been decided yet. Say what you want built, or answer Claude’s questions, then press Propose Again.';
+  'The plan came back empty: nothing has been decided yet. Say what you want built, or answer the questions, then press Propose Again.';
 /** What the builder reads past the context limit, as Plan always said it. */
 const FRESH_SESSION_WORDS = 'Continued in a fresh session; nothing is lost';
 
@@ -283,7 +285,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
         ctx,
         shapeId,
         `Left out of this message to keep the conversation within ${unreadable.limits.limitText}: ` +
-          `${leftOut.join(', ')}. Claude has ${leftOut.length === 1 ? 'its path' : 'their paths'} and can Read ${leftOut.length === 1 ? 'it' : 'them'}.`,
+          `${leftOut.join(', ')}. The agent has ${leftOut.length === 1 ? 'its path' : 'their paths'} and can Read ${leftOut.length === 1 ? 'it' : 'them'}.`,
       );
     if (unreadable.files.length > 0) {
       notice(
@@ -407,7 +409,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
     freshAtContextPct: deps.contextLimitPct,
     words: {
       freshSession: FRESH_SESSION_WORDS,
-      startFailed: (reason) => `Claude could not start: ${reason}`,
+      startFailed: (reason) => `The agent could not start: ${reason}`,
     },
     onParked: (conv) => {
       deps.announce(shapeOf(conv));
@@ -564,6 +566,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
       });
+      // The thread says once per session that 10db's judge stopped answering.
+      let saidUnavailable = false;
       return {
         spec: {
           sessionId: start.sessionId,
@@ -634,7 +638,17 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
                     },
                     skips: null,
                     limits: limitNotes,
-                    onFloor: () => undefined,
+                    onFloor: (detail) => {
+                      if (saidUnavailable) return;
+                      saidUnavailable = true;
+                      state.write((ctx) => {
+                        notice(
+                          ctx,
+                          shapeId,
+                          floorNoticeText(FloorReason.JudgeUnavailable, { attended: true, detail }),
+                        );
+                      });
+                    },
                     clock: deps.clock,
                   },
                 ),
@@ -764,12 +778,11 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const propose = presses.some((p) => p.kind === ShapeEventKind.Propose);
       const rehearsing = presses.flatMap((p) => p.rehearsing ?? []);
       state.write((ctx) => {
-        if (end.how === 'failed')
-          notice(ctx, shapeId, "Claude's turn failed; send the message again.");
+        if (end.how === 'failed') notice(ctx, shapeId, 'The turn failed; send the message again.');
         if (end.how !== 'complete') return;
         if (propose && !proposed) {
           log.info({ shapeId, refusedProposals: refused }, 'a propose turn proposed nothing');
-          notice(ctx, shapeId, "Claude didn't propose; Propose Again");
+          notice(ctx, shapeId, "The agent didn't propose; Propose Again");
         } else if (propose && emptyPlan) {
           log.info({ shapeId }, 'a propose turn ended with an empty plan');
           notice(ctx, shapeId, EMPTY_PLAN_NOTICE);

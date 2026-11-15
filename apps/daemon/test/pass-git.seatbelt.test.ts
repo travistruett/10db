@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -190,9 +198,7 @@ describe.skipIf(!SEATBELT)("a pass's approved commit under the sandbox (Seatbelt
         ])
           expect(existsSync(join(checkout, '.git', 'refs', ref)), ref).toBe(false);
         expect(git('config', '--local', '--list')).toBe(config);
-        expect(
-          execFileSync('cat', [join(checkout, 'hook-env.txt')], { encoding: 'utf8' }),
-        ).not.toContain(token);
+        expect(readFileSync(join(checkout, 'hook-env.txt'), 'utf8')).not.toContain(token);
       } finally {
         repo.cleanup();
       }

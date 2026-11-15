@@ -15,7 +15,14 @@ import {
   TurnStarted,
   type RateLimitSnapshot,
 } from './codex-protocol';
-import { codexFullOf, codexPlanSteps, codexToolCalls, withCommandOutput } from './codex-tool-calls';
+import type { ClaudeDenial } from './claude-tool-calls';
+import {
+  codexFullOf,
+  codexPlanSteps,
+  codexToolCalls,
+  withCommandOutput,
+  withDenial,
+} from './codex-tool-calls';
 import type { SessionEvent } from './types';
 
 export type RateLimitEvent = Extract<SessionEvent, { type: 'rate_limit' }>;
@@ -50,6 +57,11 @@ export interface CodexTurnState {
   reasoning: Map<string, { length: number; summaryIndex: number }>;
   /** The calls of each tool item that started, until it completes. */
   calls: Map<string, readonly ToolCallView[]>;
+  /**
+   * Who refused each call the guard hook refused, by the hook's `tool_use_id`, which names the call's
+   * item; read when the item completes declined.
+   */
+  denials: Map<string, ClaudeDenial>;
 }
 
 interface TokenCounts {
@@ -70,6 +82,7 @@ export function createTurnState(): CodexTurnState {
     texts: new Map(),
     reasoning: new Map(),
     calls: new Map(),
+    denials: new Map(),
   };
 }
 
@@ -151,11 +164,16 @@ function finalCalls(
   });
   const output = CommandOutput.safeParse(item);
   const keptNone = output.success && (output.data.aggregatedOutput ?? null) === null;
+  const denial = id === '' ? undefined : state.denials.get(id);
+  state.denials.delete(id);
   return finals.map((call, index) => {
     const streamed = seen?.[index];
-    return keptNone && call.kind === 'command' && streamed?.kind === 'command'
-      ? { ...call, outputTail: streamed.outputTail, outputBytes: streamed.outputBytes }
-      : call;
+    return withDenial(
+      keptNone && call.kind === 'command' && streamed?.kind === 'command'
+        ? { ...call, outputTail: streamed.outputTail, outputBytes: streamed.outputBytes }
+        : call,
+      denial,
+    );
   });
 }
 

@@ -1,4 +1,11 @@
-import { AccountKind, ChatToolName, JudgeKind } from '@10db/contracts';
+import {
+  AccountKind,
+  ChatToolName,
+  ConversationItemKind,
+  JudgeKind,
+  parseItemBody,
+} from '@10db/contracts';
+import { listItems } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { ManualClock } from '../clock';
@@ -217,5 +224,47 @@ describe("a chat's judge", () => {
       hunk: null,
     });
     expect(verdict.decision).toBe('ask');
+  });
+
+  it("says in the chat, once, that the judge didn't answer and the rules judge", async () => {
+    w = chatWorld({
+      prepare: prepared,
+      judge: JudgeKind.Tendb,
+      tendb: ({ store }) =>
+        createJudge({
+          state: createStateStore(store, createEventBus()),
+          clock: new ManualClock(),
+          fetch: () => Promise.resolve(new Response('down', { status: 500 })),
+          readKey: () => Promise.resolve('router-key-0123'),
+          decisionModelIds: () => new Set(['typesafe/jev-1.13']),
+          off: false,
+          logger: silentLogger,
+        }),
+    });
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    const judgeCall = w.adapter.shapeSessions[0]?.spec.judgeCall;
+    if (judgeCall === undefined) throw new Error('the chat has no session judge');
+    const call = {
+      toolName: 'Bash',
+      input: { command: 'vercel deploy --prod' },
+      cwd: '/repo',
+      toolUseId: 'toolu_1',
+      signal: new AbortController().signal,
+      hunk: null,
+    };
+    await judgeCall(call);
+    await judgeCall({ ...call, toolUseId: 'toolu_2' });
+    const notices = listItems(w.store.db, chat.conversationId).filter(
+      (item) => item.kind === ConversationItemKind.Notice,
+    );
+    expect(notices).toHaveLength(1);
+    const texts = notices.map((item) => {
+      const body = parseItemBody(item.kind, item.body);
+      return 'text' in body ? body.text : '';
+    });
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("10db's judge didn't answer");
   });
 });
