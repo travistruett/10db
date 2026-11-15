@@ -20,6 +20,7 @@ describe("the UI Workbench's start, join and rename", () => {
       pages: [
         {
           area: 'settings',
+          label: 'Settings',
           route: '/settings',
           lastChangedAt: AT,
           uncommitted: 3,
@@ -27,6 +28,7 @@ describe("the UI Workbench's start, join and rename", () => {
         },
         {
           area: 'people',
+          label: 'People',
           route: null,
           lastChangedAt: null,
           uncommitted: 0,
@@ -131,6 +133,7 @@ describe("a pass lane's activity and turns", () => {
           taskId: mintId('Task'),
           title: 'Settings: UI work',
           area: 'settings',
+          label: 'Settings',
           route: '/settings',
           workstreamId: mintId('Workstream'),
           state: 'RUNNING',

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase, type TendbDatabase } from '../database';
 import { lastConfigHead, lastListed, markListed, unlistedEndedRuns } from './skip-listings';
 import { recordSkip } from './skipped-actions';
-import { createStore, type Store } from './store';
+import type { Store } from './store';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream } from './workstreams';
@@ -138,6 +138,27 @@ function rawRunOf(db: TendbDatabase, projectId: ProjectId, state: WorkstreamStat
   return id;
 }
 
+/** A project in SQL with only the columns a database at the backfill has, as `rawRunOf` does for runs. */
+function rawProjectOf(db: TendbDatabase): ProjectId {
+  const at = new Date().toISOString();
+  const id = mintId('Project');
+  db.$client.pragma('foreign_keys = OFF');
+  db.$client
+    .prepare(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'gateway', 'gw', 'me', '{}', 2, ?, ?)`,
+    )
+    .run(at, at);
+  db.$client
+    .prepare(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES (?, 'demo', ?, 'true', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+    )
+    .run(id, `/tmp/${id}`, at, at);
+  return id;
+}
+
 describe('the listings backfill', () => {
   let dir: string;
   afterEach(() => {
@@ -157,8 +178,7 @@ describe('the listings backfill', () => {
     const db = openDatabase(join(dir, '10db.sqlite'));
     try {
       migrateDatabase(db, older);
-      const old = createStore(db);
-      const project = seedProject(old).id;
+      const project = rawProjectOf(db);
       rawRunOf(db, project, 'DONE');
       rawRunOf(db, project, 'FAILED');
       const running = rawRunOf(db, project, 'RUNNING');
