@@ -397,6 +397,12 @@ async function runLane(opts: {
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });
+  // Bedrock's credentials check compares only `apiProvider`; `expectedIdentity` is an organization name Claude
+  // Code reports for a first-party key. Reading none on Bedrock is normal, so the row asserts the provider.
+  if (keyed?.kind === 'bedrock' && seen.apiProvider !== 'bedrock')
+    throw new Error(
+      `the Bedrock account reads apiProvider ${String(seen.apiProvider)}, not bedrock`,
+    );
   const identity = keyed === undefined ? seen.email : seen.organization;
   const launch = launcher.session(
     { ...defaultAccount, expectedIdentity: identity ?? null },

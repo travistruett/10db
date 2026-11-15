@@ -792,13 +792,17 @@ describe('buildQueryOptions', () => {
       toolTimeoutSec: null,
     };
 
-    function directory(answer: () => Promise<readonly ClaudeConnector[] | null>) {
+    function directory(
+      answer: () => Promise<readonly ClaudeConnector[] | null>,
+      refused: string | null = null,
+    ) {
       const calls: { accountId: string; env: Readonly<Record<string, string>> }[] = [];
       const connectors: ConnectorDirectory = {
         list: (accountId, env) => {
           calls.push({ accountId, env });
           return answer();
         },
+        refusedPath: () => refused,
         stop: () => Promise.resolve(),
       };
       return { calls, connectors };
@@ -809,9 +813,10 @@ describe('buildQueryOptions', () => {
       over: LaneOverrides = {},
       status: readonly McpServerStatus[] = [],
       clock: Clock = systemClock,
+      refused: string | null = null,
     ) {
       const fake = fakeQuery({ messages: [initMessage()], mcpStatus: status });
-      const dir = directory(answer);
+      const dir = directory(answer, refused);
       const adapter = createClaudeAdapter({
         claudePath: '/usr/local/bin/claude',
         pluginDir: '/harness',
@@ -902,6 +907,22 @@ describe('buildQueryOptions', () => {
         );
       },
     );
+
+    it('names the MCP config that stopped the probe, and keeps the plain note for a failed read', async () => {
+      const { fake, done } = open(
+        () => Promise.resolve(null),
+        {},
+        [],
+        systemClock,
+        '/Users/me/work/.mcp.json',
+      );
+      await done;
+      const prompt = JSON.stringify(fake.record.inputs[0]?.message.content);
+      expect(prompt).toContain(
+        "your claude.ai connectors didn't load: /Users/me/work/.mcp.json is an MCP config 10db won't run beside your sign-in. Move it, and they come back.",
+      );
+      expect(prompt).not.toContain("didn't load in this session");
+    });
 
     it('says so when the directory does not answer within CONNECTOR_WAIT_MS', async () => {
       const clock = new ManualClock();

@@ -519,9 +519,17 @@ function signedOutText(name: string, where: McpSignInWhere): string {
 }
 
 /** A line saying the claude.ai connectors didn't load, or naming those that need a sign-in on claude.ai. */
-function connectorsNote(missing: boolean, needAuth: readonly string[]): string {
+function connectorsNote(
+  missing: boolean,
+  needAuth: readonly string[],
+  refusedPath: string | null,
+): string {
+  const missingLine =
+    refusedPath === null
+      ? "Note from 10db: your claude.ai connectors didn't load in this session."
+      : `Note from 10db: your claude.ai connectors didn't load: ${refusedPath} is an MCP config 10db won't run beside your sign-in. Move it, and they come back.`;
   return [
-    ...(missing ? ["Note from 10db: your claude.ai connectors didn't load in this session."] : []),
+    ...(missing ? [missingLine] : []),
     ...needAuth.map(
       (name) => `Note from 10db: ${name} needs you to sign in to it on claude.ai. ${NOT_HERE}`,
     ),
@@ -972,6 +980,7 @@ function startSession(
     // leaves them out and says so, never ending the session.
     let connectors: readonly ClaudeConnector[] = [];
     let connectorsMissing = false;
+    let connectorsRefusedPath: string | null = null;
     // Only a plan account has a claude.ai login; a keyed one never reads connectors, whatever the flag says.
     if (
       spec.claudeConnectors === true &&
@@ -985,6 +994,7 @@ function startSession(
       );
       if (read === undefined || read === null) {
         connectorsMissing = true;
+        connectorsRefusedPath = opts.connectors.refusedPath(spec.account.accountId);
         log.warn({}, 'claude.ai connectors were not read for this session');
       } else {
         connectors = connectorsForSession(read, [
@@ -1046,7 +1056,7 @@ function startSession(
     const notes = [
       ...(repoLeftOut.length > 0 ? [rules.failedServersNote(repoLeftOut)] : []),
       ...(connectorsMissing || connectorsNeedAuth.length > 0
-        ? [connectorsNote(connectorsMissing, connectorsNeedAuth)]
+        ? [connectorsNote(connectorsMissing, connectorsNeedAuth, connectorsRefusedPath)]
         : []),
       ...(yourFailed.length + yourNeedAuth.length > 0
         ? [

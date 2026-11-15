@@ -52,6 +52,7 @@ async function listStatuses(
 ): Promise<Map<string, McpAuthState | null>> {
   const found = new Map<string, McpAuthState | null>();
   let cursor: string | null = null;
+  const followed = new Set<string>();
   do {
     const page: z.infer<typeof ListMcpServerStatusResponse> = await call(
       'mcpServerStatus/list',
@@ -60,8 +61,10 @@ async function listStatuses(
     );
     for (const server of page.data) found.set(server.name, stateOf(server.authStatus));
     const next: string | null = page.nextCursor ?? null;
-    // A server that repeats a cursor would be followed forever.
-    cursor = next === cursor ? null : next;
+    // A server whose cursors loop would be followed forever: stop on any already followed.
+    if (next !== null && followed.has(next)) break;
+    if (next !== null) followed.add(next);
+    cursor = next;
   } while (cursor !== null);
   return found;
 }

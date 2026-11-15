@@ -286,6 +286,15 @@ describe('a folder above the probe that holds MCP servers', () => {
     expect(await directory.list(account, env)).toBeNull();
     expect(probes).toHaveLength(0);
   });
+
+  it.each(['.mcp.json', 'managed-mcp.json'])('names the config that refused it', async (file) => {
+    const managedMcpPath = join(root.path, 'managed-mcp.json');
+    writeFileSync(join(root.path, file), '{}');
+    const { directory } = setup([[proxy('a')]], false, { managedMcpPath });
+    expect(directory.refusedPath(account)).toBeNull();
+    await directory.list(account, env);
+    expect(directory.refusedPath(account)).toBe(join(root.path, file));
+  });
 });
 
 describe('the probe folder', () => {

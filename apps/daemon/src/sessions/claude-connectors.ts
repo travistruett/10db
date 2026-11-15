@@ -91,6 +91,8 @@ export interface ConnectorDirectory {
     accountId: AccountId,
     env: Readonly<Record<string, string>>,
   ): Promise<readonly ClaudeConnector[] | null>;
+  /** The MCP config that last refused this account's probe, or null when none did. */
+  refusedPath(accountId: AccountId): string | null;
   /** Closes a probe in flight and empties the probe folder. */
   stop(): Promise<void>;
 }
@@ -104,6 +106,12 @@ const MANAGED_MCP_PATH = '/Library/Application Support/ClaudeCode/managed-mcp.js
 /** The probe folder can't be used: it is a link, or a folder above it holds MCP servers a start would run. */
 export class ConnectorProbeRefusedError extends Error {
   override readonly name = 'ConnectorProbeRefusedError';
+  /** The MCP config that stopped the probe, or null when the folder was refused for another reason. */
+  readonly configPath: string | null;
+  constructor(message: string, configPath: string | null = null) {
+    super(message);
+    this.configPath = configPath;
+  }
 }
 
 const missing = (error: unknown): boolean =>
@@ -141,11 +149,17 @@ async function prepareProbeRoot(probeRoot: string, managedMcpPath: string): Prom
   await chmod(probeRoot, 0o700);
   for (let dir = probeRoot; ; dir = dirname(dir)) {
     if (await exists(join(dir, '.mcp.json')))
-      throw new ConnectorProbeRefusedError('A folder above the connector probe holds MCP servers.');
+      throw new ConnectorProbeRefusedError(
+        'A folder above the connector probe holds MCP servers.',
+        join(dir, '.mcp.json'),
+      );
     if (dirname(dir) === dir) break;
   }
   if (await exists(managedMcpPath))
-    throw new ConnectorProbeRefusedError('Managed MCP servers are set on this Mac.');
+    throw new ConnectorProbeRefusedError(
+      'Managed MCP servers are set on this Mac.',
+      managedMcpPath,
+    );
 }
 
 /** Empties `probeRoot`, which a probe that was cut off may have left folders in; a missing folder is already empty. */
@@ -164,6 +178,8 @@ export async function sweepConnectorProbeRoot(probeRoot: string): Promise<void> 
 interface Cached {
   readonly until: number;
   readonly connectors: readonly ClaudeConnector[] | null;
+  /** The MCP config that refused the probe, when one did. */
+  readonly refusedPath: string | null;
 }
 
 /**
@@ -291,10 +307,13 @@ export function createConnectorDirectory(deps: {
       if (cached !== undefined && cached.until > nowMs()) return Promise.resolve(cached.connectors);
       const running = inFlight.get(accountId);
       if (running !== undefined) return running;
+      let refusedPath: string | null = null;
       const started = probe(env)
         .catch((error: unknown): null => {
-          if (error instanceof ConnectorProbeRefusedError)
+          if (error instanceof ConnectorProbeRefusedError) {
+            refusedPath = error.configPath;
             deps.logger.warn({}, 'the connector probe was refused: it would start MCP servers');
+          }
           return null;
         })
         .then((connectors) => {
@@ -302,6 +321,7 @@ export function createConnectorDirectory(deps: {
             cache.set(accountId, {
               until: nowMs() + (connectors === null ? CONNECTOR_RETRY_MS : CONNECTOR_TTL_MS),
               connectors,
+              refusedPath,
             });
           deps.logger.info(
             { connectors: connectors === null ? 'failed' : connectors.length },
@@ -314,6 +334,9 @@ export function createConnectorDirectory(deps: {
         });
       inFlight.set(accountId, started);
       return started;
+    },
+    refusedPath(accountId) {
+      return cache.get(accountId)?.refusedPath ?? null;
     },
     async stop() {
       state.stopped = true;

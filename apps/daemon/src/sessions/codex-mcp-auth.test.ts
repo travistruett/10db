@@ -111,4 +111,23 @@ describe('readCodexMcpAuth', () => {
     expect(read).toEqual({ linear: McpAuthState.SignedIn });
     expect(asked).toBeLessThanOrEqual(3);
   });
+
+  it('stops on a cursor it has already followed, not only on a repeat of the last one', async () => {
+    const next: Record<string, string> = { '': 'A', A: 'B', B: 'A' };
+    let asked = 0;
+    const call: CodexCall = (_method, params, schema) => {
+      asked += 1;
+      if (asked > 20) return Promise.reject(new Error('followed a cycle'));
+      const cursor = (params as { cursor?: string }).cursor ?? '';
+      return Promise.resolve(
+        schema.parse({
+          data: [{ name: 'linear', authStatus: 'oAuth' }],
+          nextCursor: next[cursor] ?? null,
+        }),
+      );
+    };
+    const read = await readCodexMcpAuth(call, 'thr_1', ['linear'], new ManualClock());
+    expect(read).toEqual({ linear: McpAuthState.SignedIn });
+    expect(asked).toBe(3);
+  });
 });
