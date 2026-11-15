@@ -185,13 +185,12 @@ function ConvertForm({
           ) : null}
           <Button
             loading={pending}
-<<<<<<< 9390df062d387f4f7a717aec55afb3604b26740b
-            disabled={chosen.length === 0 || answering || unmarked.length > 0}
-||||||| b9a26609
-            disabled={chosen.length === 0 || answering}
-=======
-            disabled={chosen.length === 0 || answering || (rehearses === null && !imported)}
->>>>>>> eeb621f42ed6b2c03f9b9f0fc25d6bc28a62b934
+            disabled={
+              chosen.length === 0 ||
+              answering ||
+              unmarked.length > 0 ||
+              (rehearses === null && !imported)
+            }
             onClick={() => {
               void convert(false);
             }}
