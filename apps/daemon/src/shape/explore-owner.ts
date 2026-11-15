@@ -552,6 +552,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const skipped = ready?.note ?? null;
       const project = getProject(state.db, shape.projectId);
       // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next.
+      const switches = trustSwitchesFor(state.db, project.id, warnInvalidTrust(log));
       const policy = buildTrustPolicy({
         surface: TrustSurface.Plan,
         projectName: project.name,
@@ -563,7 +564,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
             'the stored live systems are not a list 10db reads, so it reads none',
           );
         }),
-        switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+        switches,
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
       });
@@ -596,6 +597,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           resumeProviderSessionId: resumeId,
           env: launch.env,
           account: launch.account,
+          // Codex's web search, under the Web switch as a lane's is; Claude's web is its hook's.
+          webSearch: switches.web ? 'live' : 'disabled',
           mcp: { url: deps.mcp.url, token: start.mcpToken, toolTimeoutMs: deps.mcp.toolTimeoutMs },
           // A card Plan's hook raises waits on the builder as a lane's question does.
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,

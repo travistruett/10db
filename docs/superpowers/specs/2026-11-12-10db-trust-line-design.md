@@ -209,7 +209,7 @@ and the `rules` floor. Its other refusals stop applying where a judge runs:
 | The project's `.claude/settings.json` hooks | Load only after the builder approves their hash, as `.mcp.json` servers do (built) | n/a | n/a (approval) |
 | The builder's MCP servers (`~/.claude.json`, `~/.codex/config.toml`) | Listed in Settings › Trust and passed to the session as Claude Code would run them; calls judged | `mcp_servers` entries | Your MCP servers (on), each switchable |
 | The project's MCP servers | As built, but one approval covers the server; calls are judged, not carded | As built | n/a |
-| Web | `WebSearch` and `WebFetch` allowed without a card; Plan's researcher remains as an option | `web_search: 'cached'`: answers from OpenAI's index and opens no page the agent names (T5) | Web (on) |
+| Web | `WebSearch` and `WebFetch` allowed without a card; Plan's researcher remains as an option | `web_search: 'live'`, on OpenAI's servers and unjudged (`decisions/2026-11-14-codex-searches-the-web-live-as-codex-and-claude-code-do.md`) | Web (on) |
 
 **Whose setup.** "Yours" is the builder's own home: `~/.claude`, `~/.agents`, `~/.codex`. It is not an account's
 config dir (`environment/launch.ts:149-209`), which stays closed whole **(call)**.
@@ -283,7 +283,7 @@ A judged call's verdict shows in the transcript as a dim line when it denies, an
 | --- | --- | --- | --- |
 | Judge | auto mode | 10db's judge | 10db's judge, through the hook (L1, L5) |
 | Unattended skip | auto mode's own; 10db records it | 10db's judge | 10db's judge |
-| Web | `WebSearch`, `WebFetch` | same | `web_search: 'cached'`: answers from OpenAI's index and opens no page the agent names |
+| Web | `WebSearch`, `WebFetch` | same | `web_search: 'live'`, on OpenAI's servers and unjudged |
 | Skills | plugins dir | plugins dir | `skills/extraRoots/set` (L4) |
 | Plugins | yes | yes | skills only; says so |
 | MCP | yes | yes | yes |

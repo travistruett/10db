@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
-  CODEX_WEB_WAITS,
   TrustSurface,
   ClaimKind,
   JudgeDecision,
@@ -3107,8 +3106,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         yourMcpServers: yourServers,
-        // Cached web search has had no live check that it opens no page, so no Codex session searches.
-        webSearch: 'disabled',
+        // Codex searches the web live, as Claude Code does, while the Web switch is on.
+        webSearch: switches.web ? 'live' : 'disabled',
         sandbox: laneSession?.spec ?? null,
         instructions: setupPlan.instructions.text,
         ...(laneSession
@@ -3409,7 +3408,6 @@ export function createRunner(opts: RunnerOptions): Runner {
                 insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
               }
               if (startFloor !== null) sayFloor(ctx, startFloor);
-              if (provider === Provider.Codex && switches.web) sayOnce(ctx, CODEX_WEB_WAITS);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')

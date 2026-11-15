@@ -199,9 +199,9 @@ Each is marked **(call)** where it is made.
     by the path as written and by its real path; a glob; a search or diff over a directory; `git show`, `git log -p`,
     `git diff`; `jq -n`, `env` or `$ENV`; a Codex delete or move.
 11. **An input longer than 12 000 characters is `unsure`.** The model never judges a call it can't read whole.
-12. **Codex's web search is `cached` in every session.** It answers from OpenAI's index and fetches no URL the agent
-    names, so a URL can't carry the project's data out. The query goes to OpenAI, which already holds the
-    conversation. `live` stays off; each search shows as its `webSearch` item.
+12. **Codex's web search is `live` with the Web switch on** (superseded: it was `cached` in every session; see
+    `decisions/2026-11-14-codex-searches-the-web-live-as-codex-and-claude-code-do.md`). It runs on OpenAI's servers,
+    so 10db's judge sees no search or page URL; each search shows as its `webSearch` item.
 13. **Auto mode's denials join the judge log** as `crosses_limit` rows with model `claude-code-auto-mode` (spec §9;
     T3 left it to T5). Fast-path allows are not logged.
 14. **`AskUserQuestion` passes the hook judge untouched,** so its question still reaches `canUseTool`.
@@ -1084,7 +1084,8 @@ for gateway and Codex. Grants apply to every account the project uses.
   and the Codex file with `TENDB_LIVE_CODEX=1`. Expected: PASS. Record each verdict, its confidence and its cost in
   the PR body and in the research notes' "Live checks" section (no AA numbers). A gateway account is still not on this
   Mac: say so. If row 5 shows a live fetch or a request at the catcher under `cached`, Codex's web search goes to
-  `disabled` in every session, attended ones included, before the PR, with its rows changed.
+  `disabled` in every session, attended ones included, before the PR, with its rows changed. (Superseded: Codex
+  searches `live` under the Web switch, `decisions/2026-11-14-codex-searches-the-web-live-as-codex-and-claude-code-do.md`.)
 - **Row 5, run by hand with `codex exec --json` 0.167.0 on a ChatGPT plan, no request catcher** (none reachable
   from this Mac): under `-c web_search="cached"` the agent's open-the-page request produced a `webSearch` item with
   action `open_page` for the probe URL, as it does under `live`; both returned the result `Internal Error`. The

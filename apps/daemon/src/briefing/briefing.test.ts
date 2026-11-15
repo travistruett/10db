@@ -1435,6 +1435,18 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(codex).not.toContain('Change files with the Edit or Write tool');
     });
 
+    it.each([
+      ['on', true],
+      ['off', false],
+    ])(
+      'tells a Codex lane its web search is live on OpenAI servers only with the Web switch %s',
+      (_name, on) => {
+        const prompt = buildSessionPrompt({ ...codexInput, judged: true, webJudged: on });
+        expect(prompt.includes('Your web search runs live on OpenAI')).toBe(on);
+        expect(prompt).not.toContain('WebSearch and WebFetch go to');
+      },
+    );
+
     it('puts a skill’s body under Skills to use for a Codex lane only', () => {
       const codex = buildSessionPrompt(codexInput);
       expect(codex).toContain(planningBody);

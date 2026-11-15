@@ -20,7 +20,8 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     description: `Lets sessions search and fetch the web. ${NEXT}`,
     providers:
       "On: Claude in auto mode judges each search and fetch, with no card; Claude through a gateway, or on a model auto mode doesn't run, is judged by 10db's judge. Off: no session searches or fetches without asking.",
-    whileOn: 'Web search on ChatGPT comes after a live check: Codex sessions search nothing yet.',
+    whileOn:
+      "Codex searches the web live on OpenAI's servers, so 10db's judge doesn't see a search or page URL before it is fetched.",
   },
   projectInstructions: {
     label: 'Project instructions',

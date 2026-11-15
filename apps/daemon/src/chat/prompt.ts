@@ -1,8 +1,8 @@
 // Sessions spec §7.1, §7.2: what a chat's agent is told about itself, after its agent's own prompt.
 
 /**
- * The chat's prompt. `web` is whether its agent searches the web: Codex's web search stays off until a live
- * check shows it fetches no page the agent names, so a chat there is never told it has the web.
+ * The chat's prompt. `web` is whether its agent searches the web in this session: an agent that can't, or a
+ * project whose Web switch is off, is never told it has the web.
  */
 export function chatSystemPrompt(web: boolean): string {
   return [

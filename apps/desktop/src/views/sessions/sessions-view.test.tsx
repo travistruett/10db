@@ -60,14 +60,9 @@ describe('Sessions: a fresh tab', () => {
     expect(screen.getByText('↵ sends · ⇧↵ new line · @ files')).toBeTruthy();
   });
 
-  it('on a ChatGPT-plan project says once that the chat searches nothing, and never that it does', async () => {
+  it('on an agent that cannot search the web never says the chat does', async () => {
     open('/sessions', { models: chatModelsDto({ webSearch: false }) });
-    expect(
-      await screen.findAllByText(
-        'Web search on ChatGPT comes after a live check, so this session searches nothing.',
-      ),
-    ).toHaveLength(1);
-    expect(screen.getByText(/A chat reads ampsio and runs commands\./)).toBeTruthy();
+    expect(await screen.findByText(/A chat reads ampsio and runs commands\./)).toBeTruthy();
     expect(screen.queryByText(/searches the web/)).toBeNull();
   });
 

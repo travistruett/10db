@@ -27,7 +27,7 @@ const CODEX = {
   label: 'Codex',
   readBack: true,
   subagents: false,
-  webSearch: false,
+  webSearch: true,
   costUsd: false,
 } as const;
 

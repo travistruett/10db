@@ -149,6 +149,8 @@ describe('a message', () => {
     const session = must(adapter.shapeSessions[0], 'a session');
     expect(session.spec.prompt).toBe(`[m:${sent.id}] Make the board denser.`);
     expect(session.spec.resumeProviderSessionId).toBeNull();
+    // The Web switch is on by default, so a Codex Plan thread searches live.
+    expect(session.spec.webSearch).toBe('live');
     const conversationId = shapeConversation(c.store.db, shapeId).id;
     expect(session.spec.conversationId).toBe(conversationId);
     expect(session.spec.profile.tools).toEqual([

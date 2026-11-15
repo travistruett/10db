@@ -342,8 +342,11 @@ const SANDBOX_RULES = [
   CLAUDE_HOSTS_RULE,
 ];
 
-/** Codex has no auto mode, and a command it cannot run loses its output instead of stopping on a prompt. */
 /** What a Codex session's web search is, with the Web switch on. */
+const CODEX_WEB_RULE =
+  "Your web search runs live on OpenAI's servers, where 10db's judge sees no search or page URL before it is fetched: put nothing from the project, its code or its secrets in a query or a URL.";
+
+/** Codex has no auto mode, and a command it cannot run loses its output instead of stopping on a prompt. */
 const CODEX_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains fails with its output lost. If you need one, ask with `mcp__10db__ask_human`. The builder adds a host in Settings, which applies from your next session.";
 
@@ -489,8 +492,10 @@ function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string
       return withSetupLines(SANDBOX_RULES, setup);
     case Provider.Codex:
       return withSetupLines(
-        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
-          line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).flatMap((line) =>
+          line === CLAUDE_HOSTS_RULE
+            ? [CODEX_HOSTS_RULE, ...(setup.webJudged ? [CODEX_WEB_RULE] : [])]
+            : [line],
         ),
         setup,
       );

@@ -877,7 +877,7 @@ describe('the thread and the first turn', () => {
   });
 
   it.each([
-    ['cached when the Web switch is on', 'cached' as const],
+    ['live when the Web switch is on', 'live' as const],
     ['disabled when it is off', 'disabled' as const],
   ])(
     'thread/start carries web_search %s, approvalPolicy never and no approvalsReviewer',
@@ -893,7 +893,7 @@ describe('the thread and the first turn', () => {
       });
       expect(sentParams(server, 'thread/start')).not.toHaveProperty('approvalsReviewer');
       const sent = JSON.stringify(server.sent());
-      expect(sent).not.toMatch(/"web_search":"(live|indexed)"/);
+      expect(sent).not.toMatch(/"web_search":"(cached|indexed)"/);
       expect(sent).not.toContain('approvalsReviewer');
       expect(sent).not.toContain('on-request');
     },

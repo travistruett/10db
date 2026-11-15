@@ -9,6 +9,8 @@ import {
   ConversationItemKind,
   DeniedBy,
   parseItemBody,
+  Provider,
+  providerOf,
   TrustSurface,
   type AccountKind,
   type Effort,
@@ -237,6 +239,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             }),
         ...(ready?.commands === undefined ? {} : { commands: ready.commands }),
       };
+      const switches = trustSwitchesFor(state.db, project.id, warnInvalidTrust(log));
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
         projectName: project.name,
@@ -248,7 +251,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             'the stored live systems are not a list 10db reads, so it reads none',
           );
         }),
-        switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
+        switches,
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
       });
@@ -269,7 +272,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           profile: {
             kind: 'explore',
             judge,
-            systemPrompt: chatSystemPrompt(deps.webSearchOf(launch.account.kind, launch.modelId)),
+            systemPrompt: chatSystemPrompt(
+              deps.webSearchOf(launch.account.kind, launch.modelId) &&
+                (providerOf(launch.account.kind) === Provider.Claude || switches.web),
+            ),
             ...chatProfile(ready?.commands !== undefined),
           },
           cwd: launch.cwd,
@@ -284,6 +290,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           resumeProviderSessionId: start.resume,
           env: launch.env,
           account: launch.account,
+          // Codex's web search, under the Web switch as a lane's is; Claude's web is its hook's.
+          webSearch: switches.web ? 'live' : 'disabled',
           // A tool that asks waits on the builder as long as a lane's question does.
           mcp: {
             url: deps.mcp.url,

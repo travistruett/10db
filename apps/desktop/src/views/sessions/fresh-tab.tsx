@@ -1,10 +1,4 @@
-import {
-  CODEX_WEB_WAITS,
-  type ChatDto,
-  type Effort,
-  type ProjectId,
-  type ProjectViewDto,
-} from '@10db/contracts';
+import type { ChatDto, Effort, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
@@ -56,10 +50,8 @@ export function FreshTab({
   const narrow = useMediaQuery(NARROW_QUERY);
   const [draft, setDraft] = useSessionDraft(draftKey.fresh(tab.id));
   const models = useChatModels(tab.projectId);
-  // Codex's web search stays off until a live check (`capabilities.webSearch`): a chat there is never said to
-  // search the web, and says once why it searches nothing.
+  // An agent that can't search the web (`capabilities.webSearch`) is never said to.
   const web = models.data?.webSearch === true;
-  const noWeb = models.data?.webSearch === false;
   const starts = useSessionStarts(tab.projectId);
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
@@ -145,11 +137,6 @@ export function FreshTab({
             ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
             : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
         </Text>
-        {noWeb ? (
-          <Text size="xs" c="dimmed" mb="sm">
-            {CODEX_WEB_WAITS}
-          </Text>
-        ) : null}
         <Box mx="calc(var(--mantine-spacing-md) * -1)">
           <Composer
             draft={draft}

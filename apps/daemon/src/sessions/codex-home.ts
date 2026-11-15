@@ -55,8 +55,9 @@ const MODE_SCRIPT = 0o755;
 const MODE_CONFIG = 0o600;
 
 /**
- * The home's config, with the hook trust Codex recorded (`state`). Every tool a lane has no use for
- * is off, as web search is: image generation, the browser, computer use and a skill's MCP server
+ * The home's config, with the hook trust Codex recorded (`state`). Web search starts `disabled` here and a
+ * thread turns it on (`codex-lane-config.ts`). Every tool a lane has no use for
+ * is off: image generation, the browser, computer use and a skill's MCP server
  * installs, each on by default in Codex, run where the guard can't see them.
  */
 function template(home: string, state: Record<string, unknown>): Record<string, unknown> {
