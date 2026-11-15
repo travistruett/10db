@@ -1,10 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import {
   cpSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
@@ -134,12 +137,41 @@ function linkPath(home: string, tool: AgentSkillTool, path: string): AgentSkillL
   return { tool, path, state: judged.state, target: judged.target };
 }
 
+const LEFTOVER_PREFIX = `.${SKILL_NAME}-`;
+
+function isWhole(dir: string, version: string): boolean {
+  return (
+    readSkillVersion(dir) === version &&
+    ['SKILL.md', 'tendb.mjs'].every((name) => kindOf(join(dir, name)).kind !== 'missing')
+  );
+}
+
+/** Removes what an interrupted install left beside the copy: its `-new-` and `-old-` folders. */
+function sweepLeftovers(skillsDir: string): void {
+  for (const name of readdirSync(skillsDir)) {
+    if (name.startsWith(LEFTOVER_PREFIX))
+      rmSync(join(skillsDir, name), { recursive: true, force: true });
+  }
+}
+
+/**
+ * `rename` onto a non-empty folder fails, so the new copy is written beside the old one, the old one is
+ * moved aside, the new one renamed in and the old one removed. A crash at any point leaves either a whole
+ * copy or none, plus folders the next start sweeps.
+ */
 function copySkill(home: string, shippedDir: string, version: string): void {
   const dest = installedSkillDir(home);
-  if (readSkillVersion(dest) === version) return;
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(dirname(dest), { recursive: true });
-  cpSync(shippedDir, dest, { recursive: true });
+  const skillsDir = dirname(dest);
+  mkdirSync(skillsDir, { recursive: true });
+  sweepLeftovers(skillsDir);
+  if (isWhole(dest, version)) return;
+  const tag = randomBytes(4).toString('hex');
+  const fresh = join(skillsDir, `${LEFTOVER_PREFIX}new-${tag}`);
+  const aside = join(skillsDir, `${LEFTOVER_PREFIX}old-${tag}`);
+  cpSync(shippedDir, fresh, { recursive: true });
+  if (kindOf(dest).kind !== 'missing') renameSync(dest, aside);
+  renameSync(fresh, dest);
+  rmSync(aside, { recursive: true, force: true });
 }
 
 /**

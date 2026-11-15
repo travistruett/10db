@@ -4,6 +4,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  statSync,
   readlinkSync,
   rmSync,
   symlinkSync,
@@ -194,5 +196,72 @@ describe('installAgentSkill links', () => {
       { tool: AgentSkillTool.ClaudeCode, path: claudePath() },
       { tool: AgentSkillTool.Codex, path: agentsPath() },
     ]);
+  });
+});
+
+const skillsDir = () => join(home, '.10db', 'skills');
+const copyFiles = () => readdirSync(ours()).sort();
+
+function writeCopy(dir: string, version: string | null, extra: readonly string[] = []): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'SKILL.md'), `old ${version ?? 'none'}`);
+  writeFileSync(join(dir, 'tendb.mjs'), `old ${version ?? 'none'}`);
+  if (version !== null) writeFileSync(join(dir, 'VERSION'), `${version}\n`);
+  for (const name of extra) writeFileSync(join(dir, name), 'stale');
+}
+
+describe('installAgentSkill copy', () => {
+  it('writes nothing when the installed version matches', () => {
+    installAgentSkill(home, shipped);
+    const before = statSync(join(ours(), 'SKILL.md')).mtimeMs;
+    const dirBefore = statSync(ours()).ino;
+    installAgentSkill(home, shipped);
+    expect(statSync(join(ours(), 'SKILL.md')).mtimeMs).toBe(before);
+    expect(statSync(ours()).ino).toBe(dirBefore);
+  });
+
+  it('replaces a copy of another version whole, dropping its stale files', () => {
+    writeCopy(ours(), 'aaaaaaaaaaaa', ['stale.txt']);
+    installAgentSkill(home, shipped);
+    expect(copyFiles()).toEqual(['SKILL.md', 'VERSION', 'tendb.mjs']);
+    expect(readFileSync(join(ours(), 'SKILL.md'), 'utf8')).toBe('skill 0123456789ab');
+    expect(readdirSync(skillsDir())).toEqual(['10db-task']);
+  });
+
+  it.each([
+    { name: 'half-written: no VERSION, leftover temp', version: null, leftovers: ['.10db-task-x'] },
+    {
+      name: 'new written, old still in',
+      version: 'aaaaaaaaaaaa',
+      leftovers: ['.10db-task-new-b'],
+    },
+    {
+      name: 'matching VERSION, tendb.mjs missing',
+      version: '0123456789ab',
+      leftovers: [],
+      remove: 'tendb.mjs',
+    },
+    {
+      name: 'matching VERSION, SKILL.md missing',
+      version: '0123456789ab',
+      leftovers: [],
+      remove: 'SKILL.md',
+    },
+  ])('$name ends whole and current', ({ version, leftovers, remove }) => {
+    writeCopy(ours(), version);
+    if (remove) rmSync(join(ours(), remove));
+    for (const name of leftovers) writeCopy(join(skillsDir(), name), 'bbbbbbbbbbbb');
+    installAgentSkill(home, shipped);
+    expect(copyFiles()).toEqual(['SKILL.md', 'VERSION', 'tendb.mjs']);
+    expect(readFileSync(join(ours(), 'tendb.mjs'), 'utf8')).toBe('cli 0123456789ab');
+    expect(readdirSync(skillsDir())).toEqual(['10db-task']);
+  });
+
+  it('old moved aside, new not in: no copy, an -old- and a -new- folder', () => {
+    writeCopy(join(skillsDir(), '.10db-task-old-a'), 'aaaaaaaaaaaa');
+    writeCopy(join(skillsDir(), '.10db-task-new-b'), null);
+    installAgentSkill(home, shipped);
+    expect(copyFiles()).toEqual(['SKILL.md', 'VERSION', 'tendb.mjs']);
+    expect(readdirSync(skillsDir())).toEqual(['10db-task']);
   });
 });
