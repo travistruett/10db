@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -41,6 +42,11 @@ beforeEach(() => {
   writeShipped('0123456789ab');
 });
 afterEach(() => {
+  try {
+    chmodSync(join(root, 'locked'), 0o700);
+  } catch {
+    // Only the unreadable-folder row made it.
+  }
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -128,6 +134,31 @@ const rows: readonly LinkRow[] = [
     state: AgentSkillLinkState.PointsElsewhere,
     linkText: () => join(root, 'mine'),
     target: () => join(root, 'mine'),
+  },
+  {
+    name: 'link into an unreadable folder',
+    arrange: () => {
+      mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
+      mkdirSync(join(root, 'locked', 'inner'), { recursive: true });
+      symlinkSync(join(root, 'locked', 'inner'), claudePath());
+      chmodSync(join(root, 'locked'), 0o000);
+    },
+    state: AgentSkillLinkState.PointsElsewhere,
+    linkText: () => join(root, 'locked', 'inner'),
+    target: () => join(root, 'locked', 'inner'),
+  },
+  {
+    name: 'relative link inside a symlinked skills folder',
+    arrange: () => {
+      mkdirSync(join(root, 'dotfiles', 'claude-skills'), { recursive: true });
+      mkdirSync(join(root, 'dotfiles', 'agent-skills', '10db-task'), { recursive: true });
+      mkdirSync(join(home, '.claude'));
+      symlinkSync(join(root, 'dotfiles', 'claude-skills'), join(home, '.claude', 'skills'));
+      symlinkSync('../agent-skills/10db-task', claudePath());
+    },
+    state: AgentSkillLinkState.PointsElsewhere,
+    linkText: () => '../agent-skills/10db-task',
+    target: () => '../agent-skills/10db-task',
   },
   {
     name: 'in the way folder',
@@ -300,6 +331,14 @@ describe('uninstallAgentSkill', () => {
     expect(readlinkSync(claudePath())).toBe(join(root, 'mine'));
     expect(readFileSync(join(agentsPath(), 'SKILL.md'), 'utf8')).toBe('builder');
     expect(existsSync(ours())).toBe(false);
+  });
+
+  it('removes a link to the copy after the copy was deleted by hand', () => {
+    installAgentSkill(home, shipped);
+    rmSync(ours(), { recursive: true });
+    uninstallAgentSkill(home);
+    expect(() => lstatSync(claudePath())).toThrow();
+    expect(() => lstatSync(agentsPath())).toThrow();
   });
 
   it('is a no-op the second time and on a home that never had it', () => {
