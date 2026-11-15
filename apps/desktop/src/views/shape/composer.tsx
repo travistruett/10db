@@ -11,7 +11,7 @@ import {
 import { DictationButton } from '../../conversation/dictation-button';
 import { FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
 import { keepBoth, withoutSent, type LateOutcome } from './late-outcome';
-import { isSendKey } from '../../conversation/escape';
+import { isComposing, isSendKey } from '../../conversation/escape';
 
 export interface ComposerProps {
   /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */
@@ -189,8 +189,7 @@ export function Composer(props: ComposerProps) {
           }}
           onPaste={onPaste}
           onKeyDown={(event) => {
-            // An IME's Enter picks a candidate; it is never a send.
-            if (event.nativeEvent.isComposing) return;
+            if (isComposing(event)) return;
             if (isSendKey(event)) {
               event.preventDefault();
               void send();

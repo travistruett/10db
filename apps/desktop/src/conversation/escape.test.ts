@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { escapeHasOwner, escapeIsTaken, isSendKey } from './escape';
+import { escapeHasOwner, escapeIsTaken, isComposing, isSendKey } from './escape';
 
 const esc = (target?: Element): KeyboardEvent => {
   const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -47,5 +47,20 @@ describe('isSendKey', () => {
     { name: '⌘⇧↩', key: 'Enter', metaKey: true, ctrlKey: false, shiftKey: true, want: false },
   ])('$name', ({ want, ...key }) => {
     expect(isSendKey(key)).toBe(want);
+  });
+});
+
+describe('isComposing', () => {
+  it.each([
+    { name: 'a plain key', keyCode: 13, isComposing: false, want: false },
+    { name: 'a keydown inside a composition', keyCode: 13, isComposing: true, want: true },
+    {
+      name: 'the Enter that ends a WebKit composition',
+      keyCode: 229,
+      isComposing: false,
+      want: true,
+    },
+  ])('$name', ({ want, keyCode, isComposing: composing }) => {
+    expect(isComposing({ keyCode, nativeEvent: { isComposing: composing } })).toBe(want);
   });
 });
