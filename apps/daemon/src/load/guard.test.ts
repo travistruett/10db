@@ -77,7 +77,7 @@ describe('noticing an overloaded Mac', () => {
     expect(guard.overloaded).toBe(false);
   });
 
-  it('is overloaded once the load stays far above the core count for five minutes', async () => {
+  it('is overloaded once the load stays far above 2x the cores for five minutes', async () => {
     load = 20 * CORES;
     await sampleFor(4 * MINUTE);
     expect(guard.overloaded).toBe(false);
@@ -85,6 +85,25 @@ describe('noticing an overloaded Mac', () => {
     expect(guard.overloaded).toBe(true);
     expect(reports).toHaveLength(1);
     expect(reports[0]).toMatchObject({ load: 20 * CORES, cores: CORES });
+  });
+
+  it('is overloaded once the load stays above 2x the cores for five minutes', async () => {
+    load = 2.5 * CORES;
+    await sampleFor(5 * MINUTE);
+    expect(guard.overloaded).toBe(true);
+  });
+
+  it('episode names the overload while it lasts, with the latest load, and is null after', async () => {
+    expect(guard.episode()).toBeNull();
+    load = 2.5 * CORES;
+    await sampleFor(5 * MINUTE);
+    const since = clock.now();
+    load = 3 * CORES;
+    await sampleFor(30_000);
+    expect(guard.episode()).toEqual({ since, load: 3 * CORES, cores: CORES });
+    load = 1;
+    await sampleFor(30_000);
+    expect(guard.episode()).toBeNull();
   });
 
   it('reports the top CPU users it found', async () => {
@@ -115,7 +134,7 @@ describe('noticing an overloaded Mac', () => {
     load = 20 * CORES;
     await sampleFor(5 * MINUTE);
     // Below the level that started it but not yet calm: holds.
-    load = 3 * CORES;
+    load = 1.8 * CORES;
     await sampleFor(5 * MINUTE);
     expect(guard.overloaded).toBe(true);
     load = CORES;

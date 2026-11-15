@@ -46,6 +46,13 @@ export interface OverloadNote {
   readonly cores: number;
 }
 
+/** The overload on now, as the admission gate words it. */
+export interface OverloadEpisode {
+  readonly since: Date;
+  readonly load: number;
+  readonly cores: number;
+}
+
 export interface LoadGuard {
   /** True from the moment an overload is declared until the load has fallen. */
   readonly overloaded: boolean;
@@ -56,6 +63,8 @@ export interface LoadGuard {
    * `signal` aborts first. Shutdown (`stop`) releases every waiter with true.
    */
   untilClear(signal?: AbortSignal): Promise<boolean>;
+  /** The overload on now, with the load its latest sample read, or null. */
+  episode(): OverloadEpisode | null;
   /** The overload that was on at any time since `since`, or null. */
   overloadedSince(since: Date): OverloadNote | null;
   /** Reads the load once and acts on it. The loop calls it; tests call it too. */
@@ -85,17 +94,19 @@ export interface LoadGuardOptions {
 }
 
 export const DEFAULT_SAMPLE_MS = 30_000;
-/** Well past what a full set of lanes and gates can ask of a Mac: the night's load was 15 to 20 times. */
-export const DEFAULT_OVERLOAD_FACTOR = 4;
+/** Twice the cores, held for minutes, is a Mac whose tests and gates already queue for the CPU. */
+export const DEFAULT_OVERLOAD_FACTOR = 2;
 export const DEFAULT_SUSTAINED_MS = 5 * 60_000;
 /** Lower than the level that starts an overload, so a load hovering at the edge doesn't flap. */
-export const DEFAULT_CLEAR_FACTOR = 2;
+export const DEFAULT_CLEAR_FACTOR = 1.5;
 
 interface Episode {
   readonly cores: number;
   peak: number;
   /** When it was declared, as the clock read. */
   readonly since: Date;
+  /** The load the latest sample read. */
+  latest: number;
   /** Null while it lasts. */
   ended: Date | null;
 }
@@ -140,7 +151,7 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
       }
       above = { at: above?.at ?? now.getTime(), peak: Math.max(above?.peak ?? 0, load) };
       if (now.getTime() - above.at < sustainedMs) return;
-      current = { cores, peak: above.peak, since: now, ended: null };
+      current = { cores, peak: above.peak, since: now, latest: load, ended: null };
       last = current;
       above = null;
       opts.logger.warn({ load, cores }, 'the Mac is overloaded: holding new lanes and gates');
@@ -154,6 +165,7 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
         return;
       }
       current.peak = Math.max(current.peak, load);
+      current.latest = load;
     }
     const episode = current;
     const culprits = await culpritsNow();
@@ -206,6 +218,10 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
         signal?.addEventListener('abort', onAbort, { once: true });
       });
     },
+    episode: () =>
+      current === null
+        ? null
+        : { since: current.since, load: current.latest, cores: current.cores },
     overloadedSince(since) {
       const episode = current ?? last;
       if (episode === null) return null;

@@ -53,7 +53,7 @@ export function overloadCard(report: OverloadReport): OverloadCard {
       : `Using the most CPU now:\n${report.culprits.map(line).join('\n')}\n\n${advice(report.culprits)}`;
   return {
     title: 'The Mac is overloaded: 10db is holding new lanes and gates',
-    body: `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed far above that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
+    body: `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
     foldKey: OVERLOAD_FOLD_KEY,
   };
 }
