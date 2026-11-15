@@ -121,8 +121,8 @@ const READ_RULES: Readonly<Record<string, ReadRule>> = {
     operands: Operands.Files,
     needsOperand: true,
   }),
-  ls: rule({ letters: '1aAdFghilLnoprRsStuU', operands: Operands.Listings }),
-  stat: rule({ letters: 'L', operands: Operands.Listings, needsOperand: true }),
+  ls: rule({ letters: '1aAdFghilnoprRsStuU', operands: Operands.Listings }),
+  stat: rule({ letters: '', operands: Operands.Listings, needsOperand: true }),
   find: rule({
     words: {
       '-name': Text,

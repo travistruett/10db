@@ -66,6 +66,8 @@ import { expandHome } from '../sandbox';
 import type { ShapeImage, ShapeToolRequest, ShapeVerdict } from '../sessions';
 import {
   buildTrustPolicy,
+  FloorReason,
+  floorNoticeText,
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
@@ -564,6 +566,8 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
       });
+      // The thread says once per session that 10db's judge stopped answering.
+      let saidUnavailable = false;
       return {
         spec: {
           sessionId: start.sessionId,
@@ -634,7 +638,17 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
                     },
                     skips: null,
                     limits: limitNotes,
-                    onFloor: () => undefined,
+                    onFloor: (detail) => {
+                      if (saidUnavailable) return;
+                      saidUnavailable = true;
+                      state.write((ctx) => {
+                        notice(
+                          ctx,
+                          shapeId,
+                          floorNoticeText(FloorReason.JudgeUnavailable, { attended: true, detail }),
+                        );
+                      });
+                    },
                     clock: deps.clock,
                   },
                 ),

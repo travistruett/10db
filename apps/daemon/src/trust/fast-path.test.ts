@@ -26,6 +26,14 @@ beforeAll(() => {
   mkdirSync(join(checkout, 'a', 'b'), { recursive: true });
   symlinkSync(join('a', 'b'), join(checkout, 'lnk'));
   writeFileSync(join(root, 'outside.txt'), 'private\n');
+  // A folder holding a link to a folder inside the checkout, and one holding a link out in node_modules.
+  mkdirSync(join(checkout, 'tree'));
+  symlinkSync(join('..', 'a'), join(checkout, 'tree', 'to-dir'));
+  mkdirSync(join(checkout, 'deps', 'node_modules'), { recursive: true });
+  writeFileSync(join(checkout, 'deps', 'x.ts'), 'x\n');
+  symlinkSync(root, join(checkout, 'deps', 'node_modules', 'escape'));
+  // A link inside the checkout that leads out of it.
+  symlinkSync(root, join(checkout, 'out'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
   // `data/` is ignored and `notes.md` untracked, and both were there before the session.
   ctx = {
@@ -52,7 +60,61 @@ describe('fastPathAllows', () => {
     ['a read through a link to .env', 'Read', { file_path: 'notes.txt' }, false],
     ['a read of secrets.yml', 'Read', { file_path: 'secrets.yml' }, false],
     ['a read of prod.tfvars', 'Read', { file_path: 'prod.tfvars' }, false],
-    ['Glob for TypeScript', 'Glob', { pattern: '**/*.ts' }, true],
+    ['a read outside the checkout', 'Read', { file_path: '<root>/outside.txt' }, false],
+    ['a read through a link out of the checkout', 'Read', { file_path: 'out/outside.txt' }, false],
+    ['a read of a home path', 'Read', { file_path: '~/.config/gh/hosts.yml' }, false],
+    ['a read of ~', 'Read', { file_path: '~' }, false],
+    ['a read with a leading space', 'Read', { file_path: ' <root>/outside.txt' }, false],
+    ['a read with a trailing space', 'Read', { file_path: 'src/a.ts ' }, false],
+    ['a read with a leading space on a relative path', 'Read', { file_path: ' src/a.ts' }, false],
+    ['LS of ~', 'LS', { path: '~' }, false],
+    ['LS of a home path', 'LS', { path: '~/.ssh' }, false],
+    ['LS with a trailing space', 'LS', { path: 'src ' }, false],
+    ['Glob in a home path', 'Glob', { pattern: '*.ts', path: '~/.ssh' }, false],
+    ['Glob with a leading space on its path', 'Glob', { pattern: '*.ts', path: ' src' }, false],
+    ['Grep in a home path', 'Grep', { pattern: 'x', path: '~/.aws/config' }, false],
+    ['Grep with a leading space on its path', 'Grep', { pattern: 'x', path: ' src/a.ts' }, false],
+    ['LS outside the checkout', 'LS', { path: '<root>' }, false],
+    ['LS in the checkout', 'LS', { path: 'src' }, true],
+    ['Glob outside the checkout', 'Glob', { pattern: '*.txt', path: '<root>' }, false],
+    ['Glob with an absolute pattern', 'Glob', { pattern: '<root>/*.txt' }, false],
+    ['Glob with a parent segment', 'Glob', { pattern: '../*.txt' }, false],
+    ['Glob through a link out of the checkout', 'Glob', { pattern: '*.txt', path: 'out' }, false],
+    // rg never follows a link inside the tree, so a link out of the checkout or in node_modules is not reached.
+    ['Glob with a literal prefix through a link out', 'Glob', { pattern: 'out/*.txt' }, false],
+    ['Glob over a root holding a link out', 'Glob', { pattern: '**/*.ts' }, true],
+    [
+      'Glob for TypeScript in a pnpm-style root',
+      'Glob',
+      { pattern: '**/*.ts', path: 'deps' },
+      true,
+    ],
+    [
+      'Glob over a folder holding a link to a folder',
+      'Glob',
+      { pattern: '**/*.ts', path: 'tree' },
+      true,
+    ],
+    ['Glob one level down past node_modules', 'Glob', { pattern: '*/*.ts', path: 'deps' }, true],
+    [
+      'an edit through a home path',
+      'Edit',
+      { file_path: '~/x', old_string: 'a', new_string: 'b' },
+      false,
+    ],
+    ['Glob with a leading space', 'Glob', { pattern: ' *.ts' }, false],
+    ['Glob with a trailing space', 'Glob', { pattern: '*.ts ' }, false],
+    ['Glob with a home pattern', 'Glob', { pattern: '~/*.ts' }, false],
+    ['Glob with a padded segment', 'Glob', { pattern: 'src/ ../*.ts' }, false],
+    ['Glob with a control character', 'Glob', { pattern: 'src/\u0001*.ts' }, false],
+    ['Glob with a literal link prefix', 'Glob', { pattern: 'lnk/*.ts' }, true],
+    ['Glob with a brace holding ..', 'Glob', { pattern: '{..,x}/*.txt' }, false],
+    ['Glob with an extglob holding ..', 'Glob', { pattern: '@(..)/*.txt' }, false],
+    ['Glob with a plus extglob', 'Glob', { pattern: '+(..)/*.txt' }, false],
+    ['Glob with a negated extglob', 'Glob', { pattern: '!(x)/*.txt' }, false],
+    ['Glob with a star extglob', 'Glob', { pattern: '*(..)/*.txt' }, false],
+    ['Glob with a question extglob', 'Glob', { pattern: '?(..)/*.txt' }, false],
+    ['Glob with an escape', 'Glob', { pattern: '\\..\\/x' }, false],
     ['Glob for env files', 'Glob', { pattern: '**/.env*' }, false],
     ['Grep in one file', 'Grep', { pattern: 'TODO', path: 'src/a.ts' }, true],
     ['Grep over the checkout', 'Grep', { pattern: 'TODO' }, false],
@@ -143,6 +205,11 @@ describe('fastPathAllows', () => {
     ['a listing piped to wc', 'Bash', bash('ls | wc -l'), true],
     ['find in the checkout', 'Bash', bash('find src -name a.ts -type f'), true],
     ['find -L', 'Bash', bash('find -L src -name a.ts'), false],
+    ['ls -RL over a checkout holding a link out', 'Bash', bash('ls -RL .'), false],
+    ['ls -L over a checkout holding a link out', 'Bash', bash('ls -L .'), false],
+    ['ls -R over a checkout holding a link out', 'Bash', bash('ls -R .'), true],
+    ['stat -L on a file', 'Bash', bash('stat -L src/a.ts'), false],
+    ['stat in the checkout', 'Bash', bash('stat src/a.ts'), true],
     ['ls outside the checkout', 'Bash', bash('ls <root>'), false],
     ['a test run', 'Bash', bash('pnpm test'), false],
     ['a deploy', 'Bash', bash('vercel deploy --prod'), false],
