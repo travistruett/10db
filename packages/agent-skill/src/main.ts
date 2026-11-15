@@ -4,20 +4,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appDirIn, connectionFrom, httpApi } from './connection';
 import { runCommand } from './commands';
+import { readSkillVersion } from './skill-version';
 import { TendbError, UnknownCommandError } from './errors';
-
-/** The skill's own version, written beside this file by the build; null when running from source. */
-function ownVersion(): string | null {
-  try {
-    return readFileSync(join(import.meta.dirname, 'VERSION'), 'utf8').trim() || null;
-  } catch {
-    return null;
-  }
-}
 
 try {
   const conn = () => connectionFrom(appDirIn(homedir()), (path) => readFileSync(path, 'utf8'));
-  const version = ownVersion();
+  const version = readSkillVersion(() =>
+    readFileSync(join(import.meta.dirname, 'VERSION'), 'utf8'),
+  );
   await runCommand(process.argv.slice(2), {
     // The connection is read per call, as the first call is the first need of it.
     api: (method, path, body) => httpApi(conn(), version)(method, path, body),
