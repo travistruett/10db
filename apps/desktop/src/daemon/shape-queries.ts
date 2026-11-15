@@ -11,6 +11,7 @@ import {
   type DecisionId,
   type PrincipleId,
   type GoalId,
+  type MilestoneCut,
   type ProjectId,
   type ShapeFindingId,
   type Effort,
@@ -234,12 +235,15 @@ export function useConvertShape(shapeId: ShapeId) {
     mutationFn: async (input: {
       readonly proposalIds: readonly ShapeProposalId[];
       readonly interrupt?: boolean;
+      /** The builder's cut of a Plan with many milestones. */
+      readonly cut?: readonly MilestoneCut[];
     }): Promise<ConvertShapeResult> => {
       const res = await client.shapes[':shapeId'].convert.$post({
         param: { shapeId },
         json: {
           proposalIds: [...input.proposalIds],
           ...(input.interrupt === true ? { interrupt: true } : {}),
+          ...(input.cut === undefined ? {} : { cut: [...input.cut] }),
         },
       });
       if (res.status === 400) {

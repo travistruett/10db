@@ -314,6 +314,65 @@ describe('mapCodexNotification', () => {
     ).toMatchObject([{ id: 'cmd_1', status: 'done' }]);
   });
 
+  it('gives a declined item the denial the hook told for its id, once', () => {
+    const state = createTurnState();
+    mapCodexNotification(turnStarted, state);
+    state.denials.set('cmd_1', {
+      by: 'judge',
+      reason: 'Skipped: this would read a secret.',
+      limit: 'writes_live',
+      soft: false,
+    });
+    expect(
+      callsIn(mapCodexNotification(itemCompleted(lsCommand({ status: 'declined' })), state)),
+    ).toMatchObject([
+      {
+        id: 'cmd_1',
+        status: 'denied',
+        deniedBy: 'judge',
+        limit: 'writes_live',
+        soft: false,
+        refusal: 'Skipped: this would read a secret.',
+      },
+    ]);
+    // A repeat of the item is not given the same refusal again.
+    expect(
+      callsIn(mapCodexNotification(itemCompleted(lsCommand({ status: 'declined' })), state)),
+    ).toMatchObject([{ status: 'denied', deniedBy: null }]);
+  });
+
+  it('gives each file of a declined patch the denial of its item', () => {
+    const state = createTurnState();
+    mapCodexNotification(turnStarted, state);
+    state.denials.set('patch_1', { by: '10db', reason: 'no', limit: null, soft: null });
+    const calls = callsIn(
+      mapCodexNotification(
+        itemCompleted({
+          type: 'fileChange',
+          id: 'patch_1',
+          status: 'declined',
+          changes: [
+            { path: 'a.ts', kind: { type: 'add' }, diff: 'x' },
+            { path: 'b.ts', kind: { type: 'add' }, diff: 'y' },
+          ],
+        }),
+        state,
+      ),
+    );
+    expect(calls).toMatchObject([{ deniedBy: '10db' }, { deniedBy: '10db' }]);
+  });
+
+  it('leaves a completed call alone, whatever the hook told', () => {
+    const state = createTurnState();
+    mapCodexNotification(turnStarted, state);
+    state.denials.set('cmd_1', { by: '10db', reason: 'no', limit: null, soft: null });
+    expect(
+      callsIn(
+        mapCodexNotification(itemCompleted(lsCommand({ status: 'completed', exitCode: 0 })), state),
+      ),
+    ).toMatchObject([{ status: 'done', deniedBy: null }]);
+  });
+
   it('gives nothing for output of an item it never saw', () => {
     const state = createTurnState();
     mapCodexNotification(turnStarted, state);

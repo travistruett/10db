@@ -1,4 +1,4 @@
-import { mintId, NotFoundError, ShapeOrigin, type ShapeDto } from '@10db/contracts';
+import { MilestoneMark, mintId, NotFoundError, ShapeOrigin, type ShapeDto } from '@10db/contracts';
 import { createTestStore, listJudgeCalls, seedProject } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
@@ -116,15 +116,17 @@ describe('convertShape', () => {
         },
       } as Pick<ShapeService, 'convert'> as ShapeService,
     });
+    const cut = [{ proposalId, mark: MilestoneMark.Later }];
     const outcome = await services.convertShape(shapeId, {
       proposalIds: [proposalId],
       interrupt: true,
+      cut,
     });
     expect(outcome).toEqual({
       kind: 'converted',
       result: { createdNow: 1, results: [{ key: 'a', kind: 'task', taskIds: [taskId] }] },
     });
-    expect(asked).toEqual([[[proposalId], { interrupt: true }]]);
+    expect(asked).toEqual([[[proposalId], { interrupt: true, cut }]]);
   });
 
   it('answers every refusal', async () => {

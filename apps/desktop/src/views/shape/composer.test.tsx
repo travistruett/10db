@@ -9,7 +9,10 @@ import type { LateOutcome } from './late-outcome';
 const LATE_FAILURE = 'The daemon is restarting';
 
 /** A composer whose parent can hand it a late outcome and settle the send it started. */
-function mount(failure: string = LATE_FAILURE): {
+function mount(
+  failure: string = LATE_FAILURE,
+  agentLabel = 'Claude Code',
+): {
   arrive: (draft: string) => void;
   settle: () => void;
 } {
@@ -24,6 +27,7 @@ function mount(failure: string = LATE_FAILURE): {
       <Composer
         firstRun={false}
         answering={false}
+        agentLabel={agentLabel}
         proposing={false}
         proposeLabel="Propose"
         canPropose={false}
@@ -110,18 +114,19 @@ describe('the composer’s input and a late failed text', () => {
 });
 
 describe('the composer’s alert', () => {
-  it.each([['a failure to reach Claude', LATE_FAILURE, "Couldn't reach Claude"]])(
-    'titles %s',
-    (_name, failure, title) => {
-      const { arrive } = mount(failure);
-      arrive('a message');
+  it.each([
+    ['a failure to reach Claude Code', 'Claude Code', "Couldn't reach Claude Code"],
+    ['a failure to reach Codex', 'Codex', "Couldn't reach Codex"],
+  ])('titles %s', (_name, agentLabel, title) => {
+    const failure = LATE_FAILURE;
+    const { arrive } = mount(failure, agentLabel);
+    arrive('a message');
 
-      const alert = screen.getByRole('alert');
-      expect(alert.textContent).toContain(title);
-      expect(alert.textContent).toContain(failure);
-      expect(screen.queryAllByRole('alert')).toHaveLength(1);
-    },
-  );
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(title);
+    expect(alert.textContent).toContain(failure);
+    expect(screen.queryAllByRole('alert')).toHaveLength(1);
+  });
 });
 
 describe('Enter in the input', () => {

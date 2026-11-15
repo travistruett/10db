@@ -108,11 +108,60 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/**
+ * Whether a tool's path is plain text: Claude Code trims it and expands a leading `~`, so a path 10db would read
+ * as a name inside the checkout can open another file. Such a path goes to the judge.
+ */
+const isPlainPath = (path: string): boolean => path === path.trim() && !path.startsWith('~');
+
 /** Whether every reading of a path, with its `..` kept as written, is inside the checkout or the temp dir. */
 function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
   // `..` is kept as written: after a link it means something else, and both readings must be inside.
   const written = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
   return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
+}
+
+/** Brace, extglob and escape syntax: each can spell a path no segment-by-segment check sees. */
+const GLOB_SYNTAX = /[{}\\]|[@!+*?]\(/;
+
+/** A pattern's wildcard characters, and the control characters no plain name holds. */
+const GLOB_MAGIC = /[*?[\]]/;
+// eslint-disable-next-line no-control-regex -- the point is to match them
+const CONTROL = /[\x00-\x1f\x7f]/;
+
+/** Whether a pattern segment is plain: no padding whitespace and no control character. */
+const isPlainSegment = (segment: string): boolean =>
+  segment === segment.trim() && !CONTROL.test(segment);
+
+/**
+ * Whether a glob pattern matches only below the folder it is run in: plain text and syntax, not absolute,
+ * home-relative or climbing.
+ */
+function patternStaysBelow(pattern: string): boolean {
+  const segments = pattern.split('/');
+  return (
+    isPlainPath(pattern) &&
+    !GLOB_SYNTAX.test(pattern) &&
+    !isAbsolute(pattern) &&
+    !segments.includes('..') &&
+    segments.every(isPlainSegment)
+  );
+}
+
+/**
+ * Whether a Glob may run with no model: a plain pattern, and a search folder and the pattern's literal prefix
+ * inside. The tool runs `rg --files --null --glob <pattern> --sort=modified --no-ignore --hidden` there, which
+ * follows no link inside the tree, so past the prefix the pattern can't reach outside the search folder.
+ */
+function globStaysIn(pattern: string, path: string, cwd: string, ctx: FastPathContext): boolean {
+  if (!patternStaysBelow(pattern) || !isPlainPath(path)) return false;
+  const segments = pattern.split('/');
+  if (segments.some((segment) => nameIsSecret(segment))) return false;
+  const at = segments.findIndex((segment) => GLOB_MAGIC.test(segment));
+  const prefix = (at === -1 ? segments : segments.slice(0, at)).join('/');
+  return [path, prefix === '' ? path : join(path, prefix)].every(
+    (reach) => !namesSecret(from(cwd, reach), ctx.secretFiles) && staysIn(reach, cwd, ctx),
+  );
 }
 
 /** Whether a read command may open or list `word`: an existing, non-secret file (or folder) inside. */
@@ -166,7 +215,7 @@ const EDIT_TOOLS: Readonly<Record<string, string>> = {
 };
 
 function editStaysIn(call: LimitCall, path: string | null, ctx: FastPathContext): boolean {
-  if (path === null || path === '') return false;
+  if (path === null || path === '' || !isPlainPath(path)) return false;
   if (call.hunk === PatchHunk.Delete || call.hunk === PatchHunk.Move) return false;
   const target = from(call.cwd, path);
   if (namesSecret(target, ctx.secretFiles)) return false;
@@ -216,22 +265,27 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
     case 'Read':
     case 'LS': {
       const path = field(fields, tool === 'Read' ? 'file_path' : 'path') ?? call.cwd;
-      return !namesSecret(from(call.cwd, path), ctx.secretFiles);
+      return (
+        isPlainPath(path) &&
+        !namesSecret(from(call.cwd, path), ctx.secretFiles) &&
+        staysIn(path, call.cwd, ctx)
+      );
     }
     case 'Glob': {
       const pattern = field(fields, 'pattern');
       const path = field(fields, 'path') ?? call.cwd;
-      return (
-        pattern !== null &&
-        !pattern.split('/').some((segment) => nameIsSecret(segment)) &&
-        !namesSecret(from(call.cwd, path), ctx.secretFiles)
-      );
+      return pattern !== null && globStaysIn(pattern, path, call.cwd, ctx);
     }
     case 'Grep': {
       const path = field(fields, 'path');
       if (path === null) return false;
       const target = from(call.cwd, path);
-      return isRegularFile(target) && !namesSecret(target, ctx.secretFiles);
+      return (
+        isPlainPath(path) &&
+        isRegularFile(target) &&
+        !namesSecret(target, ctx.secretFiles) &&
+        staysIn(path, call.cwd, ctx)
+      );
     }
     case 'Bash': {
       const command = field(fields, 'command');

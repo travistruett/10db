@@ -101,6 +101,8 @@ const EXEC_TOOLS: readonly string[] = [
 
 /** What the guard refuses, so a script can ask for a refusal by naming it. */
 const DENIED = 'DENYME';
+/** What 10db's judge refuses at a limit, so a script can ask for one by naming it. */
+const JUDGED = 'JUDGEME';
 const DENIAL_REASON = 'the live test refused this call';
 
 /** Removes a directory this file made, and only such a directory: never a link, never another path. */
@@ -376,6 +378,8 @@ function codexOnFakeModel(dir: string, codex: string, baseUrl: string): string {
 interface GuardCall {
   readonly toolName: string;
   readonly input: string;
+  /** The hook's `tool_use_id`: the id of the call's thread item. */
+  readonly toolUseId: string | null;
 }
 
 /** A `codex` the adapter started, and whether it still runs. */
@@ -681,13 +685,23 @@ async function runOnLane(
     setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
     mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
     preToolUse: (req) => {
-      const call = { toolName: req.toolName, input: JSON.stringify(req.input) };
+      const call = {
+        toolName: req.toolName,
+        input: JSON.stringify(req.input),
+        toolUseId: req.toolUseId ?? null,
+      };
       world.calls.push(call);
       world.onCall(call, spec);
       return call.input.includes(DENIED)
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
     },
+    judgeCall: (req) =>
+      Promise.resolve(
+        JSON.stringify(req.input).includes(JUDGED)
+          ? { decision: 'deny', reason: 'Skipped: a limit.', judged: { limit: 'writes_live' } }
+          : { decision: 'allow' },
+      ),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
@@ -751,7 +765,11 @@ async function runExplore(
       setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
       mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
       preToolUse: (req) => {
-        world.calls.push({ toolName: req.toolName, input: JSON.stringify(req.input) });
+        world.calls.push({
+          toolName: req.toolName,
+          input: JSON.stringify(req.input),
+          toolUseId: req.toolUseId ?? null,
+        });
         return { decision: 'allow' };
       },
       judgeCall: (req) =>
@@ -904,6 +922,7 @@ describe.skipIf(!live)(
           run(`echo ${DENIED} > bash-denied.txt`),
           patch(addFile(`${DENIED}-patch.txt`, 'denied')),
           commit(DENIED),
+          run(`echo ${JUDGED} > bash-judged.txt`),
           run('echo allowed > bash-allowed.txt'),
           patch(addFile('patch-allowed.txt', 'allowed')),
           commit('allowed'),
@@ -915,16 +934,60 @@ describe.skipIf(!live)(
         'Edit',
         'mcp__10db__commit',
         'Bash',
+        'Bash',
         'Edit',
         'mcp__10db__commit',
       ]);
       // Each refusal reached the model with the guard's reason, and nothing it asked for happened.
       for (const output of outputs.slice(0, 3)) expect(output).toContain(DENIAL_REASON);
+      expect(existsSync(join(world.checkout, 'bash-judged.txt'))).toBe(false);
       expect(existsSync(join(world.checkout, 'bash-denied.txt'))).toBe(false);
       expect(existsSync(join(world.checkout, `${DENIED}-patch.txt`))).toBe(false);
       expect(world.mcp.calls).toEqual([JSON.stringify({ message: 'allowed' })]);
       expect(readFileSync(join(world.checkout, 'bash-allowed.txt'), 'utf8')).toBe('allowed\n');
       expect(readFileSync(join(world.checkout, 'patch-allowed.txt'), 'utf8')).toBe('allowed\n');
+    });
+
+    // The hook's tool_use_id is the thread item's id (an allowed call's item has the id its hook call had). In code
+    // mode Codex reports no item for a call the hook refused, so the session shows that call from the hook's input,
+    // under the same id, with who refused it.
+    it('shows a refused call as denied, by whom, and names an allowed call by its hook id', async () => {
+      const run_ = await runSession(world, [
+        run(`echo ${DENIED} > bash-denied.txt`),
+        patch(addFile(`${DENIED}-patch.txt`, 'denied')),
+        run(`echo ${JUDGED} > bash-judged.txt`),
+        run('echo allowed > bash-allowed.txt'),
+        { say: 'done' },
+      ]);
+      expectTurn(run_);
+      const idOf = (needle: string): string => {
+        const id = world.calls.find((c) => c.input.includes(needle))?.toolUseId;
+        if (id === undefined || id === null) throw new Error(`no hook id for ${needle}`);
+        return id;
+      };
+      // The last event of each call is its final view; a patch's per-file call is `<item id>:<index>`.
+      const finalOf = (id: string) =>
+        run_.events
+          .flatMap((e) => (e.type === 'tool_call' ? [e.call] : []))
+          .filter((c) => c.id === id || c.id.startsWith(`${id}:`))
+          .at(-1);
+      expect(finalOf(idOf(`${DENIED} >`))).toMatchObject({
+        status: 'denied',
+        deniedBy: '10db',
+        refusal: DENIAL_REASON,
+      });
+      expect(finalOf(idOf(`${DENIED}-patch`))).toMatchObject({
+        status: 'denied',
+        deniedBy: '10db',
+      });
+      expect(finalOf(idOf(JUDGED))).toMatchObject({
+        status: 'denied',
+        deniedBy: 'judge',
+        limit: 'writes_live',
+        soft: false,
+        refusal: 'Skipped: a limit.',
+      });
+      expect(finalOf(idOf('bash-allowed'))).toMatchObject({ status: 'done', deniedBy: null });
     });
 
     // Sessions spec §5.5, §16 check 3, trust line L1: a chat's thread on Codex. The judge stops a call at a
@@ -1353,7 +1416,7 @@ describe.skipIf(!live)(
         ),
       );
       // So 10db sends Codex every picture as a local image, on every push.
-      expect(outputs[0]).toContain('does not allow the tool "view_image" in a lane');
+      expect(outputs[0]).toContain('does not allow the tool "view_image" in this session');
       expect(outputs[1]).toContain('operation not permitted');
       expect(outputs[1]).toContain('exit=1');
     });

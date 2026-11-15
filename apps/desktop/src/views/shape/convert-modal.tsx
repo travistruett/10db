@@ -1,5 +1,12 @@
-import type { ShapeProposalDto, ShapeProposalId, ShapeViewDto } from '@10db/contracts';
-import { Button, Checkbox, Group, ScrollArea, Stack, Text } from '@mantine/core';
+import {
+  MILESTONES_BEFORE_CUT,
+  MilestoneMark,
+  type MilestoneCut,
+  type ShapeProposalDto,
+  type ShapeProposalId,
+  type ShapeViewDto,
+} from '@10db/contracts';
+import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ConvertShapeResult } from '../../daemon/shape-queries';
@@ -8,6 +15,12 @@ import { destination, proposalTitle } from './proposal-text';
 import { isConverted } from './proposed-groups';
 import { ReviewLines } from './review-notes';
 import { convertWarnings, rowReview } from './review-lines';
+
+const MARKS = [
+  { value: MilestoneMark.Needed, label: 'Needed For The Goal' },
+  { value: MilestoneMark.Later, label: 'Later' },
+  { value: MilestoneMark.Cut, label: 'Cut' },
+] as const;
 
 /** The rows Convert can write now: the pending ones. */
 export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapeProposalDto[] {
@@ -29,8 +42,15 @@ export interface ConvertModalProps {
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
   readonly view: ShapeViewDto;
-  /** Claude is answering now: Convert waits, or the builder stops the turn. */
+  /** The agent is answering now: Convert waits, or the builder stops the turn. */
   readonly answering: boolean;
+  /** The agent's name as the UI shows it. */
+  readonly agentLabel: string;
+  /**
+   * The agent can run the rehearsal's implementer; without it no rehearsal starts and none is offered.
+   * Null while that is not known yet: nothing starts and Convert waits.
+   */
+  readonly rehearses: boolean | null;
   readonly pending: boolean;
   /** Every reason the last Convert was refused; nothing was written. */
   readonly refusals: readonly string[];
@@ -38,7 +58,7 @@ export interface ConvertModalProps {
   readonly failure: string | null;
   readonly onConvert: (
     ids: readonly ShapeProposalId[],
-    options?: { readonly interrupt: true },
+    options?: { readonly interrupt?: true; readonly cut?: readonly MilestoneCut[] },
   ) => Promise<ConvertShapeResult | undefined>;
   readonly onStop: () => void;
   /** Opening the modal with a task nobody has rehearsed asks for it (spec §7). */
@@ -62,6 +82,8 @@ function ConvertForm({
   rows,
   view,
   answering,
+  agentLabel,
+  rehearses,
   pending,
   refusals,
   failure,
@@ -70,20 +92,31 @@ function ConvertForm({
   onRehearse,
 }: ConvertModalProps) {
   const [unticked, setUnticked] = useState<ReadonlySet<ShapeProposalId>>(new Set());
-  const chosen = rows.filter((r) => !unticked.has(r.id));
+  const [marks, setMarks] = useState<ReadonlyMap<ShapeProposalId, MilestoneMark>>(new Map());
+  // A Plan with many milestones is cut first: each milestone's mark, not a tick, decides whether it converts.
+  const milestones = rows.filter((r) => r.kind === 'goal');
+  const cutting = milestones.length > MILESTONES_BEFORE_CUT;
+  const unmarked = cutting ? milestones.filter((m) => !marks.has(m.id)) : [];
+  const listed = cutting ? rows.filter((r) => r.kind !== 'goal') : rows;
+  const chosen = rows.filter((r) =>
+    cutting && r.kind === 'goal' ? marks.get(r.id) === MilestoneMark.Needed : !unticked.has(r.id),
+  );
   const beside = refusals.length > 0 ? refusals : failure === null ? [] : [failure];
   const rehearsing = view.turn.rehearsing;
   const rehearsingCount = chosen
     .flatMap((r) => rowReview(view, r).tasks)
     .filter((t) => t.state === 'rehearsing').length;
-  // An imported Plan's tasks were planned elsewhere: no rehearsal reads them, and they are named once.
+  // An imported Plan's tasks were planned elsewhere, and an agent without subagents can't run the
+  // rehearsal: no rehearsal reads them, and they are named once.
   const imported = view.shape.importedAt !== null;
-  const importedTasks = imported ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
+  const unrehearsed = imported || rehearses === false;
+  const unrehearsedTasks = unrehearsed ? chosen.flatMap((r) => rowReview(view, r).tasks).length : 0;
+  const unrehearsedWhy = imported ? 'Imported tasks' : `Tasks on ${agentLabel}`;
   const warnings = [
-    ...(importedTasks === 0
+    ...(unrehearsedTasks === 0
       ? []
       : [
-          `Imported tasks aren't rehearsed: ${String(importedTasks)} ${importedTasks === 1 ? 'task' : 'tasks'}`,
+          `${unrehearsedWhy} aren't rehearsed: ${String(unrehearsedTasks)} ${unrehearsedTasks === 1 ? 'task' : 'tasks'}`,
         ]),
     ...convertWarnings(view, chosen, rehearsing),
   ];
@@ -96,14 +129,23 @@ function ConvertForm({
       asked.current = false;
       return;
     }
-    if (imported || asked.current || rehearsing || unread.length === 0) return;
+    if (rehearses === null || unrehearsed || asked.current || rehearsing || unread.length === 0)
+      return;
     asked.current = true;
     onRehearse(unread);
-  }, [opened, imported, rehearsing, unread, onRehearse]);
+  }, [opened, rehearses, unrehearsed, rehearsing, unread, onRehearse]);
 
   const convert = async (interrupt: boolean): Promise<void> => {
     const ids = chosen.map((r) => r.id);
-    const result = await (interrupt ? onConvert(ids, { interrupt: true }) : onConvert(ids));
+    const cut = cutting
+      ? [...marks].map(([proposalId, mark]): MilestoneCut => ({ proposalId, mark }))
+      : undefined;
+    const result = await (!interrupt && cut === undefined
+      ? onConvert(ids)
+      : onConvert(ids, {
+          ...(interrupt ? { interrupt: true as const } : {}),
+          ...(cut === undefined ? {} : { cut }),
+        }));
     if (result?.kind === 'converted') onClose();
   };
 
@@ -133,7 +175,7 @@ function ConvertForm({
             <Button
               variant="default"
               loading={pending}
-              disabled={chosen.length === 0}
+              disabled={chosen.length === 0 || unmarked.length > 0}
               onClick={() => {
                 void convert(true);
               }}
@@ -143,7 +185,12 @@ function ConvertForm({
           ) : null}
           <Button
             loading={pending}
-            disabled={chosen.length === 0 || answering}
+            disabled={
+              chosen.length === 0 ||
+              answering ||
+              unmarked.length > 0 ||
+              (rehearses === null && !imported)
+            }
             onClick={() => {
               void convert(false);
             }}
@@ -162,7 +209,7 @@ function ConvertForm({
         ) : answering ? (
           <Group gap="sm" wrap="nowrap">
             <Text size="sm" c="dimmed">
-              Claude is still answering. Stop it, or wait for it to finish.
+              {`${agentLabel} is still answering. Stop it, or wait for it to finish.`}
             </Text>
             <Button variant="default" size="xs" onClick={onStop}>
               Stop
@@ -184,13 +231,43 @@ function ConvertForm({
             ))}
           </Stack>
         )}
+        {cutting ? (
+          <Stack gap="xs" role="group" aria-label="Your cut">
+            <Text size="sm">
+              {`This Plan has ${String(milestones.length)} milestones. Mark each one before any task is made. Only the needed ones become tasks; the rest keep their outline on the Plan.`}
+            </Text>
+            {milestones.map((row) => (
+              <Radio.Group
+                key={row.id}
+                label={proposalTitle(row)}
+                value={marks.get(row.id) ?? ''}
+                onChange={(value) => {
+                  const mark = MARKS.find((m) => m.value === value);
+                  if (mark === undefined) return;
+                  setMarks(new Map(marks).set(row.id, mark.value));
+                }}
+              >
+                <Group gap="md" mt={4}>
+                  {MARKS.map((mark) => (
+                    <Radio key={mark.value} value={mark.value} label={mark.label} />
+                  ))}
+                </Group>
+              </Radio.Group>
+            ))}
+            {unmarked.length === 0 ? null : (
+              <Text size="xs" c="dimmed">
+                {`${String(unmarked.length)} not marked yet`}
+              </Text>
+            )}
+          </Stack>
+        ) : null}
         {rows.length === 0 ? (
           <Text size="sm" c="dimmed">
             Nothing is waiting to be converted.
           </Text>
         ) : (
           <Stack gap="xs">
-            {rows.map((row) => (
+            {listed.map((row) => (
               <div key={row.id}>
                 <Checkbox
                   checked={!unticked.has(row.id)}
@@ -204,7 +281,7 @@ function ConvertForm({
                   description={destination(row)}
                 />
                 {row.kind === 'goal' || row.kind === 'task' ? (
-                  <ReviewLines review={rowReview(view, row)} showRehearsal={!imported} pl={28} />
+                  <ReviewLines review={rowReview(view, row)} showRehearsal={!unrehearsed} pl={28} />
                 ) : null}
               </div>
             ))}

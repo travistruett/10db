@@ -57,3 +57,38 @@ describe('preToolUseHook after a slow judge', () => {
     expect(decisionOf(output)).toBe('allow');
   });
 });
+
+describe('preToolUseHook tells who refused a call', () => {
+  const deny: HookJSONOutput = {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: 'no',
+    },
+  };
+  it.each([
+    ["a guard's deny is 10db's", deny, { by: '10db', reason: 'no', limit: null, soft: null }],
+    [
+      "a judge's limit is the judge's, final",
+      { output: deny, judged: { limit: 'writes_live' } },
+      { by: 'judge', reason: 'no', limit: 'writes_live', soft: false },
+    ],
+    [
+      'a judge that named no limit says so',
+      { output: deny, judged: { limit: null } },
+      { by: 'judge', reason: 'no', limit: null, soft: false },
+    ],
+  ] as const)('%s', async (_name, answered, expected) => {
+    const told: unknown[] = [];
+    const matcher = preToolUseHook({
+      gate: { verified: Promise.resolve(true), refused: () => false },
+      cwds: createHookCwds(),
+      judge: () => answered,
+      onDenied: (id, denial) => told.push([id, denial]),
+    });
+    const [hook] = matcher.hooks;
+    if (hook === undefined) throw new Error('no hook');
+    await hook(hookInput, 'tu-1', { signal: new AbortController().signal });
+    expect(told).toEqual([['tu-1', expected]]);
+  });
+});

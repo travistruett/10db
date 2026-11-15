@@ -12,7 +12,8 @@
   shape preparer, read tools, `Task` and `Agent`, the web where a judge sees each call, the builder's setup, no
   write tool and none of Plan's agents), the attended `TrustPolicy`, and every chat tool in `allowedTools`.
   `confinement.ts` is its PreToolUse hook. `live-sessions.ts` names each chat's open session, so a tool's card
-  is told to the engine and goes when the session ends.
+  is told to the engine and goes when the session ends. When 10db's judge stops answering mid-session, the hook judge's `onFloor` writes one notice in the
+  chat's thread (`floorNoticeText`); Plan's owner does the same in its own thread.
 - `tools.ts` holds the chat's tools on `/mcp` (`mcp/chat-tools.ts` is the server's side): each is the builder's
   tool (`builder/tools.ts`) held to the chat's project. `tool-policy.ts` is the table of what asks:
   `remove_task` on a task the chat did not file, and retire, withdraw and supersede every time, raise a

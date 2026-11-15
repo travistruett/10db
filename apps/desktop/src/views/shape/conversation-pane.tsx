@@ -290,7 +290,10 @@ export function ConversationPane({
       {conversation === undefined ? null : (
         <>
           <JudgeLine judge={conversation.capabilities.judge} />
-          <AgentsLine subagents={conversation.capabilities.subagents} />
+          <AgentsLine
+            subagents={conversation.capabilities.subagents}
+            agentLabel={conversation.capabilities.label}
+          />
         </>
       )}
       <Transcript
@@ -337,6 +340,7 @@ export function ConversationPane({
         }
         firstRun={!heardBuilder}
         answering={answering}
+        agentLabel={conversation?.capabilities.label ?? 'the agent'}
         proposing={(view?.turn.proposing ?? false) || propose.isPending}
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
