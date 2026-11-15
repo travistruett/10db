@@ -64,6 +64,9 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     systemCheck: none,
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
+    agentSkill: none,
+    setAgentSkill: none,
+    agentSkillInfo: none,
     capacitySettings: () => ({ machineLaneCap: 4, diskFloorGb: 20 }),
     setCapacitySettings: none,
     admission: () => ({

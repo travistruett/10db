@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "installable": {
+      "anyOf": [
+        {
+          "type": "boolean",
+          "const": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "from_source",
+                "other_data_dir"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      ]
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "installedVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "installedPath": {
+      "type": "string"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "claude_code",
+              "codex"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "linked",
+              "missing",
+              "points_elsewhere",
+              "in_the_way"
+            ]
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "tool",
+          "path",
+          "state",
+          "target"
+        ]
+      }
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "installable",
+    "version",
+    "installedVersion",
+    "installedPath",
+    "links",
+    "error"
+  ]
+}

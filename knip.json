@@ -11,6 +11,9 @@
     "apps/desktop": {
       "entry": ["scripts/*.ts", "e2e/*.spec.ts"]
     },
+    "packages/agent-skill": {
+      "entry": ["src/main.ts"]
+    },
     "packages/contracts": {
       "entry": ["scripts/*.ts"]
     },

@@ -77,6 +77,7 @@ import {
   TakeOutPreviewDto,
   TakeOutRequest,
 } from './pass-close';
+import { AgentSkillInfo, AgentSkillInput, AgentSkillStatus } from './agent-skill';
 import {
   PassClosedData,
   PassPageSignedOffData,
@@ -550,6 +551,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-pull-request-preview-dto': PassPullRequestPreviewDto,
   'pass-pull-request-dto': PassPullRequestDto,
   'take-out-preview-dto': TakeOutPreviewDto,
+  'agent-skill-status': AgentSkillStatus,
+  'agent-skill-input': AgentSkillInput,
+  'agent-skill-info': AgentSkillInfo,
   'take-out-request': TakeOutRequest,
   'pass-close-preview-dto': PassClosePreviewDto,
   'pass-close-request': PassCloseRequest,

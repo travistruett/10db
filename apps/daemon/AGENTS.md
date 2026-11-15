@@ -68,7 +68,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
+`clock`, `log`, `events`, `agent-skill`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
 `delivery`, `stakeholders`, `accounts` → `conversation` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `chat` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -81,6 +81,7 @@ Each module's notes are in its own `src/<module>/AGENTS.md`. Read the ones for t
 write a module's notes there, not here. This file keeps what crosses modules.
 
 - `accounts/`: account pauses, the monthly cap, readiness and staggered starts (`src/accounts/AGENTS.md`)
+- `agent-skill/`: installs the shipped 10db-task skill and links it for Claude Code and Codex (`src/agent-skill/AGENTS.md`)
 - `benchmarks/`: Artificial Analysis's model list and OpenRouter's scores and speeds, each synced with the builder's own key (`src/benchmarks/AGENTS.md`)
 - `catalogue/`: the model catalogue from models.dev and its four rungs (`src/catalogue/AGENTS.md`)
 - `chat/`: Sessions' chats: their attended sessions, their builder tools, `@` files and Start from (`src/chat/AGENTS.md`)

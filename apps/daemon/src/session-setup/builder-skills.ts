@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { installedSkillDir } from '../agent-skill';
 import { foldPathCase } from '../guard';
 import type { LeftOut } from './left-out';
 
@@ -49,6 +50,17 @@ function judgeEntry(path: string): Found {
   }
 }
 
+const OWN_SKILL_REASON =
+  "10db's own skill acts for you with the app's token, so it never comes along";
+
+function realPathOrNull(path: string): string | null {
+  try {
+    return foldPathCase(realpathSync.native(path));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The builder's skill folders under `~/.claude/skills` then `~/.agents/skills`, the first folder of a name
  * winning, names compared as the file system folds them. Real paths are not judged here: the lane sandbox judges each folder's and `SKILL.md`'s.
@@ -57,6 +69,7 @@ export function findBuilderSkills(home: string): { folders: SkillFolder[]; leftO
   const folders: SkillFolder[] = [];
   const leftOut: LeftOut[] = [];
   const firstFrom = new Map<string, string>();
+  const own = realPathOrNull(installedSkillDir(home));
   for (const [top, skills] of SKILL_DIRS) {
     for (const name of entries(join(home, top, skills))) {
       if (name.startsWith('.')) continue;
@@ -65,6 +78,10 @@ export function findBuilderSkills(home: string): { folders: SkillFolder[]; leftO
       const found = judgeEntry(path);
       if ('refused' in found) {
         leftOut.push({ what: shown, why: found.refused });
+        continue;
+      }
+      if (own !== null && realPathOrNull(path) === own) {
+        leftOut.push({ what: shown, why: OWN_SKILL_REASON });
         continue;
       }
       // Folded as the file system folds names: `Review` and `review` would be one link in the setup dir.

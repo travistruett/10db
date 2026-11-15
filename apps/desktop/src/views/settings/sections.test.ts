@@ -33,6 +33,7 @@ describe('settings sections', () => {
       ['app', 'Connections', 'people', 'People'],
       ['app', 'This Mac', 'updates', 'Updates'],
       ['app', 'This Mac', 'keep-awake', 'Keep-awake'],
+      ['app', 'This Mac', 'agent-skill', 'Agent skill'],
     ]);
     expect(new Set(SETTINGS_SECTIONS.map((s) => s.key)).size).toBe(
       Object.values(SettingsSectionKey).length,
@@ -60,6 +61,7 @@ describe('settings sections', () => {
     { key: 'network-hosts', planned: false },
     { key: 'billing', planned: false },
     { key: 'keep-awake', planned: false },
+    { key: 'agent-skill', planned: false },
     { key: 'updates', planned: false },
     { key: 'lane-permissions', planned: false },
     { key: 'trust', planned: false },
