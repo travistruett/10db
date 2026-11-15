@@ -25,6 +25,7 @@ const APP_LINKS = [
   'People',
   'Updates',
   'Keep-awake',
+  'Agent skill',
 ];
 
 function linkNames(nav: HTMLElement): string[] {
