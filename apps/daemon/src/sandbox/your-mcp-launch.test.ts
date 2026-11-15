@@ -154,6 +154,76 @@ describe('prepareYourMcpRun', () => {
       `Its DYLD_INSERT_LIBRARIES points at a temp folder${SUFFIX}`,
     ],
     [
+      'a bare relative argument that climbs into a checkout is refused',
+      () => ({ args: ['sub/../../checkout/server.js'] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a bare relative argument through a link in the home into a checkout is refused',
+      () => {
+        symlinkSync(checkout, join(home, 'linked-dir'));
+        return { args: ['linked-dir/server.js'] };
+      },
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a path after a semicolon inside an option is refused',
+      () => ({ args: [`--opt=a;${checkout}/b`] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a quoted path inside an option is refused',
+      () => ({ args: [`--opt="${checkout}/b"`] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a path glued to a flag letter is refused',
+      () => ({ args: [`-I${checkout}/include`] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a path glued to a long flag name is refused',
+      () => ({ args: [`--x${checkout}`] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a path in a list after a comma and a colon is refused',
+      () => ({ args: [`--paths=/usr/lib,/opt:${checkout}/b`] }),
+      `Its argument 1 points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a declared NODE_OPTIONS with a quoted checkout path is refused',
+      () => ({
+        env: { ...server().env, NODE_OPTIONS: `--require "${checkout}/x.js"` },
+        declaredEnv: ['NODE_OPTIONS'],
+      }),
+      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a declared NODE_OPTIONS with a path after a comma is refused',
+      () => ({
+        env: { ...server().env, NODE_OPTIONS: `--x=a,${checkout}/x.js` },
+        declaredEnv: ['NODE_OPTIONS'],
+      }),
+      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a declared NODE_OPTIONS with a path after a semicolon is refused',
+      () => ({
+        env: { ...server().env, NODE_OPTIONS: `--x=a;${checkout}/x.js` },
+        declaredEnv: ['NODE_OPTIONS'],
+      }),
+      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+    ],
+    [
+      'a declared NODE_OPTIONS with a path glued to a flag is refused',
+      () => ({
+        env: { ...server().env, NODE_OPTIONS: `-r${checkout}/x.js` },
+        declaredEnv: ['NODE_OPTIONS'],
+      }),
+      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+    ],
+    [
       'a declared variable with a newline refuses the server',
       () => ({ env: { ...server().env, CERT: 'a\nb' }, declaredEnv: ['CERT'] }),
       "Its env variable CERT can't be passed to it.",
@@ -161,6 +231,27 @@ describe('prepareYourMcpRun', () => {
   ])('%s', (_name, over, reason) => {
     expect(refusal(server(over()))).toBe(reason);
   });
+
+  it('a login NODE_OPTIONS with a quoted checkout path is dropped and named', () => {
+    const run = prepare(
+      server({ env: { ...server().env, NODE_OPTIONS: `--require "${checkout}/x.js"` } }),
+    );
+    expect(run.refusal).toBeNull();
+    expect(run.dropped).toEqual(['NODE_OPTIONS']);
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'a checkout path spelled in another case is refused where the file system folds case',
+    () => {
+      const shouted = join(checkout.toUpperCase(), 'server.js');
+      expect(refusal(server({ args: [shouted] }))).toBe(
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      );
+      expect(refusal(server({ args: [`--opt=a,${shouted}`] }))).toBe(
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      );
+    },
+  );
 
   it('a login PYTHONPATH into a checkout is dropped and named', () => {
     const run = prepare(server({ env: { ...server().env, PYTHONPATH: `${checkout}/src` } }));

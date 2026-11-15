@@ -1,6 +1,5 @@
 import { accessSync, constants } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { foldPathCase } from '../guard';
 import { shellAssignments } from './env-file';
 import { underLaneWritable, type LaneWritableRoot } from './lane-writable';
 import type { McpLaunch } from './mcp-sandbox';
@@ -70,22 +69,24 @@ export function loadsCode(name: string): boolean {
 const SUFFIX =
   ", which an agent can write. Run it from a project's .mcp.json instead, where 10db sandboxes it.";
 
-/** A path written as a path: absolute, from the home, or relative with `./` or `../`. */
-const looksLikePath = (text: string): boolean =>
-  isAbsolute(text) || text.startsWith('~/') || text.startsWith('./') || text.startsWith('../');
+/** Characters a path can be set off by inside an option, a list or a variable's value. */
+const SEPARATORS = /[=,:;"'`()[\]{}<>|&!\s]+/;
 
-/** Characters around a path held inside other text, such as `--opt=a,/path/b`. */
-const BEFORE = String.raw`(?:^|[=,:;"'\s(])`;
-const AFTER = String.raw`(?:$|[/,:;"'\s)])`;
-const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-function holdsRoot(text: string, roots: readonly LaneWritableRoot[]): LaneWritableRoot | null {
-  const folded = foldPathCase(text);
-  return (
-    roots.find((root) =>
-      new RegExp(`${BEFORE}${escaped(foldPathCase(root.path))}${AFTER}`).test(folded),
-    ) ?? null
-  );
+/**
+ * Every path `text` could name: each piece split on separators and quotes, as written (so a bare relative
+ * one is judged against the folder the server starts in), and from its first `/` or `~/` on, so a path
+ * glued to a flag (`-I/root`, `--x/root`) is read too.
+ */
+function pathPieces(text: string): string[] {
+  const pieces: string[] = [];
+  for (const piece of text.split(SEPARATORS)) {
+    if (piece === '') continue;
+    pieces.push(piece);
+    for (const start of [piece.indexOf('/'), piece.indexOf('~/')]) {
+      if (start > 0) pieces.push(piece.slice(start));
+    }
+  }
+  return pieces;
 }
 
 function isExecutable(path: string): boolean {
@@ -127,8 +128,7 @@ export function prepareYourMcpRun(
   const under = (path: string): string | null =>
     underLaneWritable(fromHome(path), laneWritable, cwd);
   const pointsInto = (value: string): string | null => {
-    for (const part of value.split(/[:\s=]+/)) {
-      if (part === '') continue;
+    for (const part of pathPieces(value)) {
       const kind = under(part);
       if (kind !== null) return kind;
     }
@@ -167,6 +167,11 @@ export function prepareYourMcpRun(
     dropped,
   });
 
+  if (server.cwd !== null) {
+    const kind = underLaneWritable(cwd, laneWritable, home);
+    if (kind !== null) return refuse('working folder', kind);
+  }
+
   const command = fromHome(server.command);
   let resolved: string | null;
   if (isAbsolute(command) || command.includes('/')) resolved = resolve(cwd, command);
@@ -183,19 +188,8 @@ export function prepareYourMcpRun(
 
   for (const [index, arg] of server.args.entries()) {
     const field = `argument ${String(index + 1)}`;
-    const after = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : null;
-    const candidates = [arg, ...(after === null ? [] : [after])].filter(looksLikePath);
-    for (const candidate of candidates) {
-      const kind = under(candidate);
-      if (kind !== null) return refuse(field, kind);
-    }
-    const held = holdsRoot(arg, laneWritable);
-    if (held !== null) return refuse(field, held.kind);
-  }
-
-  if (server.cwd !== null) {
-    const kind = underLaneWritable(cwd, laneWritable, home);
-    if (kind !== null) return refuse('working folder', kind);
+    const kind = pointsInto(arg);
+    if (kind !== null) return refuse(field, kind);
   }
 
   for (const name of server.declaredEnv) {
