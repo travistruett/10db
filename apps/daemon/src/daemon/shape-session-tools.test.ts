@@ -31,6 +31,8 @@ import { SECRET_VARIABLES } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService } from '../inbox';
+import { approveMcpServer } from '../permissions';
+import { readYourMcpConfig } from '../session-setup';
 import { silentLogger } from '../log';
 import { createLaneSandbox, SandboxedMcpServer, type LaneSandbox } from '../sandbox';
 import { readRepoMcp } from '../sessions';
@@ -225,6 +227,70 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
+  });
+
+  describe("the builder's own MCP servers", () => {
+    function approveYours(): void {
+      mkdirSync(join(root, 'home'), { recursive: true });
+      writeFileSync(
+        join(root, 'home', '.claude.json'),
+        JSON.stringify({
+          mcpServers: {
+            mine: { type: 'http', url: 'https://mine.example.com/mcp' },
+            local: { command: 'npx', args: ['-y', 'pkg'] },
+          },
+        }),
+      );
+      const { entries } = readYourMcpConfig({
+        home: join(root, 'home'),
+        laneWritable: [],
+        plugins: [],
+      });
+      for (const entry of entries) {
+        const hash = entry.configHash;
+        if (hash === null) throw new Error('unreadable probe entry');
+        state.write((ctx) => {
+          approveMcpServer(ctx, entry.key, hash);
+        });
+      }
+    }
+
+    it('a Plan session starts with your approved server, and the project’s are unchanged', async () => {
+      const owner = conversation({ mcpServers: {} });
+      approveYours();
+      const { prepare } = preparer();
+      const prepared = await prepare(inputFor(owner));
+      try {
+        expect(Object.keys(prepared.yourMcpServers)).toContain('mine');
+        expect(prepared.yourMcpServers['mine']?.connect).toEqual({
+          type: 'http',
+          url: 'https://mine.example.com/mcp',
+          headers: null,
+        });
+        expect(prepared.projectMcpServers).toEqual({});
+      } finally {
+        await prepared.release();
+      }
+    });
+
+    it('Codex Plan gets your remote server, and names the stdio one as waiting for the explore sandbox', async () => {
+      const owner = conversation({ mcpServers: {} });
+      approveYours();
+      // The real sandbox, with a Codex temp root it can make under the test's own root.
+      const real = realSandbox();
+      mkdirSync(join(root, 'codex-lanes'), { mode: 0o700 });
+      const { prepare } = preparer({
+        forSession: (given) => real.forSession({ ...given, tempRoot: join(root, 'codex-lanes') }),
+      });
+      const prepared = await prepare(inputFor(owner, AccountKind.CodexSignin));
+      try {
+        expect(Object.keys(prepared.yourMcpServers)).toEqual(['mine']);
+        expect(prepared.note).toContain('your MCP server local');
+        expect(prepared.note).toContain('Codex chats and Plan');
+      } finally {
+        await prepared.release();
+      }
+    });
   });
 
   it('gives a Plan command none of an account credential, though the session env holds them all', async () => {

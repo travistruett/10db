@@ -9,7 +9,7 @@ import type {
 import type { AccountExpectation } from '../environment';
 import type { LimitNotes, WaitObserver } from '../inbox';
 import type { LaneSandboxSpec, SessionSetup } from '../sandbox';
-import type { SessionMcpServer, ToolDecision, ToolRequest } from '../sessions';
+import type { SessionMcpServer, ToolDecision, ToolRequest, YourSessionServer } from '../sessions';
 import type { ShapeAccess } from './confinement';
 
 // What a Plan conversation's session is built from: the launch the project's account resolves, and
@@ -61,6 +61,8 @@ export interface ShapePrepared {
   /** How the PreToolUse hook judges the session's commands; present with the sandbox. */
   readonly commands?: NonNullable<ShapeAccess['commands']>;
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
+  /** The builder's own approved MCP servers, planned as the session was prepared; each call is judged. */
+  readonly yourMcpServers: Readonly<Record<string, YourSessionServer>>;
   /** A line for the prompt naming what was left out (servers, the sandbox) and why, or null. */
   readonly note: string | null;
   /** When the first AWS credentials a server was given expire (ISO), or null: the session moves on before. */

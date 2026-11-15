@@ -425,5 +425,6 @@ export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
     liveSystems: [],
     switches: TRUST_DEFAULTS,
     grants: [],
+    yourMcpServers: [],
   });
 }

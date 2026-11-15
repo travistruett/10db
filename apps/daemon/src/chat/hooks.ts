@@ -245,6 +245,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
+        yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
       });
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
       const parts = [
@@ -285,7 +286,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
-          yourMcpServers: {},
+          yourMcpServers: ready?.yourMcpServers ?? {},
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })

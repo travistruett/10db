@@ -49,6 +49,7 @@ const rendered = renderClaudeAutoMode(
     liveSystems: [],
     switches: TRUST_DEFAULTS,
     grants: [],
+    yourMcpServers: [],
   }),
 );
 

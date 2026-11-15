@@ -26,6 +26,8 @@ import {
   REVERT_COMMIT_LINE,
   ToolAccess,
   TRUST_DEFAULTS,
+  YourMcpSource,
+  yourMcpServerKey,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
   ReviewCardDetail,
@@ -116,10 +118,13 @@ import type {
 } from '../delivery';
 import {
   allowedToolsFor,
+  approveMcpServer,
   listNetworkHosts,
   setAppTrustSwitches,
   setLaneAutoMode,
+  setProjectTrustOverrides,
 } from '../permissions';
+import { readYourMcpConfig } from '../session-setup';
 import {
   createLaneSandbox,
   EMPTY_SETUP,
@@ -5369,6 +5374,105 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(first?.spec.prompt).toContain('- Loaded for you: 1 of your skills.');
       // The session ended, so its setup dir is gone with its sandbox.
       expect(readdirSync(probe.filesRoot)).toEqual([]);
+    });
+
+    describe("the builder's own MCP servers", () => {
+      const approve = (probe: SandboxProbe, ...names: string[]): void => {
+        const { entries } = readYourMcpConfig({ home: probe.home, laneWritable: [], plugins: [] });
+        for (const name of names) {
+          const entry = entries.find((e) => e.name === name);
+          const hash = entry?.configHash;
+          if (!entry || !hash) throw new Error(`no ${name} in the probe's config`);
+          engine.state.write((ctx) => {
+            approveMcpServer(ctx, entry.key, hash);
+          });
+        }
+      };
+      const writeClaudeJson = (home: string, servers: Record<string, unknown>): void => {
+        mkdirSync(home, { recursive: true });
+        writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: servers }));
+      };
+      const startOne = async (): Promise<LaneSessionSpec> => {
+        const seen: LaneSessionSpec[] = [];
+        engine.adapter.seen = (spec) => {
+          seen.push(spec);
+          return {};
+        };
+        const { workstream } = engine.addTask('Alpha');
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+        const spec = seen[0];
+        if (!spec) throw new Error('Alpha never started a session');
+        return spec;
+      };
+
+      it('starts a lane with your approved servers as launches or urls, and names the one waiting for approval', async () => {
+        const probe = sandboxProbe();
+        engine = await setupEngine(probe, { Alpha: [[turn]] });
+        writeClaudeJson(probe.home, {
+          mine: { command: 'npx', args: ['-y', 'pkg'], env: { TOKEN: 'sk-canary' } },
+          docs: { type: 'http', url: 'https://docs.example/mcp' },
+          later: { command: 'npx', args: ['-y', 'later'] },
+        });
+        approve(probe, 'mine', 'docs');
+        const spec = await startOne();
+        // The probe's home is under a temp root an agent can write, so a stdio server run from it is refused.
+        expect(Object.keys(spec.yourMcpServers)).toEqual(['docs']);
+        expect(spec.prompt).toContain(
+          'your MCP server mine: Its argument 1 points at a temp folder, which an agent can write.',
+        );
+        expect(spec.yourMcpServers['docs']?.connect).toEqual({
+          type: 'http',
+          url: 'https://docs.example/mcp',
+          headers: null,
+        });
+        expect(spec.prompt).toContain('later (~/.claude.json)');
+        expect(spec.prompt).toContain('waiting for your approval in Settings');
+      });
+
+      it("the lane's policy says the servers run outside the sandbox", async () => {
+        const probe = sandboxProbe();
+        engine = await setupEngine(probe, { Alpha: [[turn]] });
+        writeClaudeJson(probe.home, { docs: { type: 'http', url: 'https://docs.example/mcp' } });
+        approve(probe, 'docs');
+        const spec = await startOne();
+        expect(spec.policy.environment.join('\n')).toContain(
+          "Outside the sandbox: the MCP servers docs are the builder's own",
+        );
+      });
+
+      it('a project override off drops a server for that project only', async () => {
+        const probe = sandboxProbe();
+        engine = await setupEngine(probe, { Alpha: [[turn]] });
+        writeClaudeJson(probe.home, { docs: { type: 'http', url: 'https://docs.example/mcp' } });
+        approve(probe, 'docs');
+        const key = yourMcpServerKey(YourMcpSource.ClaudeJson, 'docs');
+        engine.state.write((ctx) => {
+          setProjectTrustOverrides(ctx, engine.project.id, { mcpServers: { [key]: false } });
+        });
+        const spec = await startOne();
+        expect(spec.yourMcpServers).toEqual({});
+        expect(spec.policy.environment.join('\n')).not.toContain('Outside the sandbox');
+      });
+
+      it('the prompt and the log of a session start hold no env value, argument or url text', async () => {
+        const probe = sandboxProbe();
+        const logs = captureLogs();
+        engine = await setupEngine(probe, { Alpha: [[turn]] }, logs.logger);
+        writeClaudeJson(probe.home, {
+          mine: { command: 'npx', args: ['--m=arg-canary'], env: { TOKEN: 'sk-canary' } },
+          broken: { type: 'http', url: 'https://x.example/url-canary?k=${NOPE_CANARY}' },
+          unsafe: { command: 'npx', args: [`${engine.repoPath}/x-canary`] },
+        });
+        approve(probe, 'mine', 'broken', 'unsafe');
+        const spec = await startOne();
+        expect(Object.keys(spec.yourMcpServers)).toEqual([]);
+        expect(spec.prompt).toContain('broken (~/.claude.json)');
+        expect(spec.prompt).toContain('your MCP server unsafe');
+        const everything = JSON.stringify([spec.prompt, logs.lines()]);
+        for (const canary of ['sk-canary', 'arg-canary', 'url-canary', 'x-canary'])
+          expect(everything).not.toContain(canary);
+      });
     });
 
     it("keeps the read-first rule when only the builder's own instructions loaded", async () => {

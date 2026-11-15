@@ -153,6 +153,7 @@ function hookJudge(
         liveSystems: [],
         switches: TRUST_DEFAULTS,
         grants: [],
+        yourMcpServers: [],
       }),
       allowLines: () => grants,
       judgeNow: () => opts.now ?? JudgeKind.Tendb,

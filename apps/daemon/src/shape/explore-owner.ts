@@ -563,6 +563,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
         }),
         switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(log)),
         grants: projectGrantLines(state.db, project.id),
+        yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
       });
       return {
         spec: {
@@ -596,7 +597,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
-          yourMcpServers: {},
+          yourMcpServers: ready?.yourMcpServers ?? {},
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })

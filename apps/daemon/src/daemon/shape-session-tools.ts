@@ -17,8 +17,13 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { EMPTY_SETUP, fileAccessJudge, type LaneSandbox, type LaneSession } from '../sandbox';
-import { leftOutNote, planSessionSetup } from '../session-setup';
-import { skippedServersNote, splitProjectMcp, type ProjectMcp } from '../sessions';
+import { leftOutNote, planSessionSetup, yourMcpForSession } from '../session-setup';
+import {
+  skippedServersNote,
+  splitProjectMcp,
+  type ProjectMcp,
+  type YourSessionServer,
+} from '../sessions';
 import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '../shape';
 
 /** What a Plan conversation's session is told when one of the project's servers is left out. */
@@ -171,6 +176,56 @@ export function createShapePreparer(deps: {
       laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
     });
     const instructions = setupPlan.instructions.text;
+    // The builder's own servers, planned as the session is prepared. A Codex chat or Plan gets the remote
+    // ones: an explore thread's read of a stdio server's files is not ruled out yet, so those wait.
+    const yours = yourMcpForSession({
+      db: state.db,
+      home: deps.builderHome,
+      projectId: project.id,
+      projectServerNames: [
+        ...Object.keys(projectMcp.servers),
+        ...projectMcp.pending.map((review) => review.name),
+        ...projectMcp.denied,
+        ...projectMcp.failures.map((failure) => failure.name),
+      ],
+      loginEnv: deps.projectEnv(),
+      laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
+      localBinding: project.sandboxLoopback,
+      plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
+      onInvalid: (stored) => {
+        logger.warn({ stored }, 'a stored MCP approvals or switch value is not a shape 10db reads');
+      },
+    });
+    const onCodex = providerOf(input.accountKind) === Provider.Codex;
+    const yourStdio = onCodex ? {} : yours.stdio;
+    const yourLeftOut = [
+      ...yours.leftOut,
+      ...(onCodex
+        ? Object.keys(yours.stdio).map((name) => ({
+            what: `your MCP server ${name}`,
+            why: 'it runs in Codex chats and Plan once 10db closes their sandbox’s read of its files',
+          }))
+        : []),
+    ];
+    const yourServers = (
+      launched: LaneSession['yourMcpServers'],
+    ): Record<string, YourSessionServer> => ({
+      ...Object.fromEntries(
+        Object.entries(launched ?? {}).flatMap(([name, connect]) => {
+          const planned = yours.stdio[name];
+          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+        }),
+      ),
+      ...Object.fromEntries(
+        Object.entries(yours.remote).map(([name, remote]) => [
+          name,
+          {
+            connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            codex: remote.codex,
+          },
+        ]),
+      ),
+    });
     let session: LaneSession;
     try {
       session = await deps.laneSandbox.forSession({
@@ -183,6 +238,7 @@ export function createShapePreparer(deps: {
         configDir: sessionConfigDir(input.accountKind, input.env, homedir()),
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
+        yourMcpServers: yourStdio,
         readOnly: true,
         // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
         provider: providerOf(input.accountKind),
@@ -198,7 +254,7 @@ export function createShapePreparer(deps: {
         yourMcpServers: {},
         note: [
           `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
-          leftOutNote(setupPlan.leftOut),
+          leftOutNote([...setupPlan.leftOut, ...yourLeftOut]),
         ]
           .filter((line) => line !== null)
           .join('\n\n'),
@@ -258,8 +314,18 @@ export function createShapePreparer(deps: {
           fileAccess: fileAccessJudge(sandboxed.fileAccess),
         },
         projectMcpServers: { ...remote, ...sandboxed.mcpServers },
+        yourMcpServers: yourServers(sandboxed.yourMcpServers),
         note:
-          [problem, skipped, leftOutNote([...setupPlan.leftOut, ...sandboxed.setup.leftOut])]
+          [
+            problem,
+            skipped,
+            leftOutNote([
+              ...setupPlan.leftOut,
+              ...sandboxed.setup.leftOut,
+              ...yourLeftOut,
+              ...(sandboxed.yourMcpLeftOut ?? []),
+            ]),
+          ]
             .filter((line) => line !== null)
             .join('\n\n') || null,
         credentialsExpireAt: earliestExpiry(projectMcp),

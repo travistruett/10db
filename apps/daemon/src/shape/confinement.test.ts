@@ -544,6 +544,10 @@ describe('judgeShapeCall in the read-only sandbox', () => {
       'a tool of a project MCP server',
       () => call('mcp__aws-billing__cost-explorer', { operation: 'getCostAndUsage' }),
     ],
+    [
+      "a tool of one of the builder's own MCP servers",
+      () => call('mcp__plugin_github_gh__create_issue', { title: 'x' }),
+    ],
     ['a read-only command chained to one that is not', () => bash('git status && pnpm install')],
     // Under srt a project server never reaches loopback, so 10db's own window is out of its reach.
     [
@@ -574,6 +578,10 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     [
       'a project MCP tool from a reviewer',
       () => call('mcp__aws-billing__cost-explorer', {}, { agentId: 'a', agentType: 'scope' }),
+    ],
+    [
+      "one of the builder's own MCP tools from a code researcher",
+      () => call('mcp__mine__ping', {}, researcher),
     ],
     ['an MCP resource read', () => call('ReadMcpResourceTool', { server: 'aws-billing' })],
     [

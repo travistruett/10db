@@ -16,6 +16,7 @@ const policyOf = (
     liveSystems,
     switches: TRUST_DEFAULTS,
     grants,
+    yourMcpServers: [],
   });
 
 describe('renderClaudeAutoMode', () => {

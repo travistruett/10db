@@ -160,6 +160,7 @@ function policyFor(surface: TrustSurface, checkout: string): TrustPolicy {
     liveSystems: [],
     switches: TRUST_DEFAULTS,
     grants: [],
+    yourMcpServers: [],
   });
 }
 

@@ -45,6 +45,7 @@ export type {
   ToolDecision,
   ToolRequest,
   TurnResult,
+  YourSessionServer,
 } from './types';
 export {
   EnvName,
