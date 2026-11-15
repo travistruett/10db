@@ -100,7 +100,7 @@ describe('noticing an overloaded Mac', () => {
     const since = clock.now();
     load = 3 * CORES;
     await sampleFor(30_000);
-    expect(guard.episode()).toEqual({ since, load: 3 * CORES, cores: CORES });
+    expect(guard.episode()).toEqual({ since, load: 3 * CORES, cores: CORES, factor: 2 });
     load = 1;
     await sampleFor(30_000);
     expect(guard.episode()).toBeNull();

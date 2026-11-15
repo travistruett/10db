@@ -77,6 +77,7 @@ describe('daemonOptionsFromEnv', () => {
       logLevel: 'warn',
       sandbox: {},
       slack: true,
+      disk: {},
       openRouterSync: true,
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
@@ -135,6 +136,18 @@ describe('openRouterSync', () => {
     ['both', { TENDB_JUDGE: 'off', TENDB_BENCHMARKS: 'off' }, false],
   ])('is %s -> %s', (_name, source, on) => {
     expect(daemonOptionsFromEnv(loadEnv(source)).openRouterSync).toBe(on);
+  });
+});
+
+describe('disk', () => {
+  it.each([
+    ['off', { TENDB_DISK: 'off' }, false],
+    ['on', { TENDB_DISK: 'on' }, true],
+    ['unset, the installed app', {}, true],
+  ])('watches free disk or not when TENDB_DISK is %s', (_name, source, on) => {
+    const options = daemonOptionsFromEnv(loadEnv(source));
+    if (on) expect(options.disk).toEqual({});
+    else expect(options).not.toHaveProperty('disk');
   });
 });
 

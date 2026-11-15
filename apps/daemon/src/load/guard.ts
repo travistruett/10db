@@ -51,6 +51,8 @@ export interface OverloadEpisode {
   readonly since: Date;
   readonly load: number;
   readonly cores: number;
+  /** The overload level, in multiples of the cores. */
+  readonly factor: number;
 }
 
 export interface LoadGuard {
@@ -221,7 +223,12 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
     episode: () =>
       current === null
         ? null
-        : { since: current.since, load: current.latest, cores: current.cores },
+        : {
+            since: current.since,
+            load: current.latest,
+            cores: current.cores,
+            factor: overloadFactor,
+          },
     overloadedSince(since) {
       const episode = current ?? last;
       if (episode === null) return null;

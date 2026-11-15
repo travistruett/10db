@@ -1,4 +1,5 @@
 import { statfsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { InboxItemId } from '@10db/contracts';
 import { findOpenByFoldKey, listProjects, type DbReader } from '@10db/db';
 import type { InboxService } from '../inbox';
@@ -31,14 +32,19 @@ export interface DiskHoldOptions {
   readonly logger: Logger;
 }
 
-/** The free bytes a process may use on the volume holding `path`; null when it cannot be read. */
+/**
+ * The free bytes a process may use on the volume holding `path`, read at its nearest existing
+ * ancestor since the worktree root is made only when the first worktree is cut; null when none reads.
+ */
 export function systemFreeBytes(path: string): () => number | null {
   return () => {
-    try {
-      const stats = statfsSync(path);
-      return stats.bavail * stats.bsize;
-    } catch {
-      return null;
+    for (let at = path; ; at = dirname(at)) {
+      try {
+        const stats = statfsSync(at);
+        return stats.bavail * stats.bsize;
+      } catch {
+        if (dirname(at) === at) return null;
+      }
     }
   };
 }

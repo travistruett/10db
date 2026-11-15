@@ -121,6 +121,38 @@ describe('API', () => {
     expect(modes).toEqual(['always']);
   });
 
+  it('serves and sets the capacity setting, and serves admission, behind the token', async () => {
+    const seen: unknown[] = [];
+    const services = stubServices({
+      setCapacitySettings: (input) => {
+        seen.push(input);
+        return input;
+      },
+    });
+    expect((await app(services).request('/settings/capacity')).status).toBe(401);
+    expect((await app(services).request('/admission')).status).toBe(401);
+    expect(await (await app(services).request('/settings/capacity', auth)).json()).toEqual({
+      machineLaneCap: 4,
+      diskFloorGb: 20,
+    });
+    expect(await (await app(services).request('/admission', auth)).json()).toMatchObject({
+      holds: [],
+      machineLaneCap: 4,
+    });
+    const put = (body: unknown) =>
+      app(services).request('/settings/capacity', {
+        method: 'PUT',
+        headers: { ...auth.headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect(await (await put({ machineLaneCap: 3, diskFloorGb: 40 })).json()).toEqual({
+      machineLaneCap: 3,
+      diskFloorGb: 40,
+    });
+    expect((await put({ machineLaneCap: 0, diskFloorGb: 40 })).status).toBe(400);
+    expect(seen).toEqual([{ machineLaneCap: 3, diskFloorGb: 40 }]);
+  });
+
   it('serves and sets the lane permission setting behind the token', async () => {
     const seen: boolean[] = [];
     const services = stubServices({

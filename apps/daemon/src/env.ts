@@ -58,6 +58,9 @@ const DaemonEnv = z.object({
   // and no reply is read. Set for every daemon that is not the installed app, as TENDB_JUDGE is, so a
   // throwaway daemon never messages a real person.
   TENDB_SLACK: z.enum(['on', 'off']).optional(),
+  // `off` keeps the daemon from reading free disk, so low disk on a CI runner or in a container never
+  // holds new lanes. The installed app reads it.
+  TENDB_DISK: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
   // Test only: with TENDB_LIVE_CLAUDE, runs auto-mode.live.test.ts's Bedrock rows too.
