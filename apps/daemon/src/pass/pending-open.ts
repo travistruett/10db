@@ -25,8 +25,8 @@ export interface PendingOpens {
   get(projectId: ProjectId): PendingOpen | null;
   /** Aborts the project's wait; whether there was one. */
   cancel(projectId: ProjectId): boolean;
-  /** Aborts every wait, so an update's drain never waits for one. */
-  cancelAll(): void;
+  /** Aborts every wait, so an update's drain never waits for one; answers each project's wait that was cancelled. */
+  cancelAll(): { readonly projectId: ProjectId; readonly name: string }[];
   /** Refuses with the wait named when the project has one: nothing queues behind an open that waits. */
   refuseWhilePending(projectId: ProjectId): void;
 }
@@ -66,10 +66,18 @@ export function createPendingOpens(deps: { readonly state: StateStore }): Pendin
       const wait = waits.get(projectId);
       if (!wait) return false;
       wait.controller.abort();
+      // Gone at once, not when its open notices: nothing then refuses a new open for a record that no longer waits.
+      waits.delete(projectId);
+      changed(projectId);
       return true;
     },
     cancelAll() {
-      for (const wait of waits.values()) wait.controller.abort();
+      const cancelled = [...waits].map(([projectId, wait]) => ({
+        projectId,
+        name: wait.open.name,
+      }));
+      for (const { projectId } of cancelled) this.cancel(projectId);
+      return cancelled;
     },
     refuseWhilePending(projectId) {
       const existing = get(projectId);

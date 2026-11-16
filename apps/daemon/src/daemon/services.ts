@@ -324,6 +324,8 @@ export function createServices(deps: {
   readonly openWhenBusy: OpenWhenBusyDeps;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
+  /** What the database alone refuses an open of these pages, thrown before a pass is answered as waiting. */
+  readonly checkPassOpen: (input: PassOpenInput) => void;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
@@ -526,6 +528,16 @@ export function createServices(deps: {
         name: input.name,
         chatId: null,
         whenBusy: input.whenBusy,
+        check: () => {
+          deps.checkPassOpen({
+            projectId,
+            name: input.name,
+            taskIds: input.taskIds,
+            ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+            ...(input.pages === undefined ? {} : { pages: input.pages }),
+            ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
+          });
+        },
         open: async (wait) => {
           let opened: PassOpened;
           try {

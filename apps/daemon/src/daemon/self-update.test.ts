@@ -915,6 +915,21 @@ describe('self-update in the daemon', () => {
 
     expect((await api.get(`/projects/${project.id}/folder`, FolderDto)).pendingOpen).toBeNull();
     expect((await selfUpdate(api)).midSession.jobs).toBe(0);
+    // The builder is told, and a wait begun during the drain is refused, not left to hold the update.
+    expect(
+      (await api.get('/inbox', z.array(inboxCard))).some((card) =>
+        card.title.includes('cancelled for 10db’s update'),
+      ),
+    ).toBe(true);
+    const during = await fetch(`${daemon?.url ?? ''}/projects/${project.id}/passes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${daemon?.token ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Again', taskIds: [task.id], whenBusy: 'wait' }),
+    });
+    expect(during.status).toBe(409);
     release();
   });
 

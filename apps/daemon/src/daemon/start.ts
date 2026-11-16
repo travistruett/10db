@@ -147,6 +147,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   moveRetiredLandings,
+  checkPassOpen,
   openPass,
   passBelow,
   passOpenProblem,
@@ -2181,6 +2182,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pendingOpens,
     stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
     logger: logger.child({ component: 'pass-open' }),
+    draining: () => updateDrain.draining,
+    notify: (projectId, title, body) => {
+      inbox.flag({ projectId, workstreamId: null, title, body });
+    },
   };
   const doItDeps: DoItDeps = {
     state,
@@ -2360,6 +2365,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
     openWhenBusy: openWhenBusyDeps,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
+    checkPassOpen: (input) => {
+      checkPassOpen(state.db, input);
+    },
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
     joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
@@ -2501,7 +2509,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           begin: (since) => {
             updateDrain.begin(since);
             // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
-            pendingOpens.cancelAll();
+            for (const { projectId, name } of pendingOpens.cancelAll())
+              inbox.flag({
+                projectId,
+                workstreamId: null,
+                title: `Pass ‘${name}’ was cancelled for 10db’s update`,
+                body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',
+              });
           },
           end: () => {
             updateDrain.end();

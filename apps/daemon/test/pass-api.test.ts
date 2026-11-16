@@ -1087,11 +1087,57 @@ describe('POST /projects/:projectId/passes while chats hold the folder', () => {
     });
     expect(res.status).toBe(200);
     expect(FolderDto.parse(await res.json()).pendingOpen).toBeNull();
+    // The record is gone at once, though the chat's turn still runs: a new wait is not refused for it.
+    const again = await api().post(
+      `/projects/${project.id}/passes`,
+      PassOpenResponse,
+      body([task], 'wait'),
+    );
+    expect(again).toEqual({ pending: true });
+    await fetch(`${daemon.url}/projects/${project.id}/pending-open`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
     release();
 
     await waitForAsync(async () => (await chatState(chat)) !== 'running');
     expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+  });
+
+  it.each([
+    { what: 'a page cap the tasks exceed', extra: { pageCap: 1 } },
+    { what: 'a page that is not a page area', extra: { pages: ['nope'] } },
+  ])('refuses a wait at once for $what, answering no pending open', async ({ extra }) => {
+    const project = await projectWith(PAGES);
+    const one = await taskOn(project, 'Settings: tidy', ['settings']);
+    const two = await taskOn(project, 'People: tidy', ['people']);
+    const { release } = await chatHolding(project);
+
+    const res = await post(`/projects/${project.id}/passes`, {
+      ...body([one, two], 'wait'),
+      ...extra,
+    });
+
+    release();
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect((await folderOf(project)).pendingOpen).toBeNull();
+  });
+
+  it('raises a card when a waiting open is refused once the turn ends', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { release } = await chatHolding(project);
+    await api().post(`/projects/${project.id}/passes`, PassOpenResponse, body([task], 'wait'));
+    daemon.state.db.update(schema.tasks).set({ status: 'cancelled' }).run();
+
+    release();
+
+    await waitFor(
+      () =>
+        listInbox(daemon.state.db, {}).find((i) => i.title.includes('did not open')) ?? undefined,
+    );
+    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
   });
 
   it("stops the chat's turn and opens with stop_turns", async () => {
