@@ -82,6 +82,10 @@ export interface ShapePrepared {
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Watches what runs under the session's Claude Code process, so its commands end with it. */
   trackProcesses(pid: number): void;
+  /** Remembers what the session runs now (its agent and servers), at its first command. */
+  markOwn(): void;
+  /** Stops the jobs its commands left running since the mark, with the session still open. */
+  endJobs(): Promise<void>;
   /** Stops what the session's commands left running, then removes the sandbox; once the session has ended. */
   release(): Promise<void>;
 }

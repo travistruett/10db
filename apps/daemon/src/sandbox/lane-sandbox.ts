@@ -145,6 +145,10 @@ export interface LaneSession {
    * machine's processes.
    */
   endProcesses(): Promise<void>;
+  /** Marks what the session runs now, so `endJobs` leaves it be; run it at its first command. */
+  markOwn(): void;
+  /** Stops the jobs its commands started since the mark and leaves the session running. */
+  endJobs(): Promise<void>;
   /** Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. */
   dispose(): void;
 }
@@ -591,6 +595,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
           trackProcesses: (root) => watch.track(root),
           endProcesses: () => watch.end(),
+          markOwn: () => {
+            watch.markOwn();
+          },
+          endJobs: () => watch.endJobs(),
           dispose() {
             if (disposed) return;
             disposed = true;

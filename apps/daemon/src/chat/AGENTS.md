@@ -28,3 +28,7 @@
   which reads the query as text. `session-starts.ts` and `start-facts.ts` build Start from's three rules from a
   failed task, the base's commits of the last day and the area of `HEAD`'s files; a fact that can't be read
   offers nothing. `settings.ts` is Settings › Sessions.
+- A chat's session stays warm after a turn that held Your folder, and its next turn that holds reuses it. Between
+  turns, and from any session but the one the chat's hold belongs to (`holdingSession` in `hooks.ts`), its guard
+  denies every call. At each turn's end `endJobs` stops what the session's commands left running, from the mark taken
+  at its first Bash call (`sandbox/lane-processes.ts`).

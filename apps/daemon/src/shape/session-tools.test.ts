@@ -102,6 +102,8 @@ function preparing(
       trackProcesses: (pid) => {
         tracked.push(pid);
       },
+      markOwn: () => undefined,
+      endJobs: () => Promise.resolve(),
       // Removing a sandbox takes a while: its processes are given time to end.
       release: async () => {
         await new Promise<void>((resolve) => setImmediate(resolve));

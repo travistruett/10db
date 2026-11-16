@@ -96,7 +96,7 @@ describe('a chat’s turn and Your folder', () => {
     w.adapter.shapeBehaviour = () => Promise.reject(new Error('the agent failed'));
     say(chat, 'fix it');
     await w.engine.settled(chat.conversationId);
-    expect(['ended_error', 'idle_cold']).toContain(stateOf(chat));
+    expect(['ended_error', 'idle_cold', 'idle_warm']).toContain(stateOf(chat));
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
     expect(w.folderHold.holders(w.project.id)).toEqual([]);
   });
@@ -247,7 +247,7 @@ describe('a message that waits for Your folder', () => {
     // The chat takes the next message as any other.
     say(chat, 'again');
     await w.engine.settled(chat.conversationId);
-    expect(stateOf(chat)).toBe(ConversationState.IdleCold);
+    expect(stateOf(chat)).toBe(ConversationState.IdleWarm);
   });
 
   it('is replaced by Redo, which carries its own choice', async () => {

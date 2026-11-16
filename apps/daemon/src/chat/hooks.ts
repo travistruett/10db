@@ -199,6 +199,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     ChatId,
     { readonly conversationId: ConversationId; readonly line: string }[]
   >();
+  // The open sessions' ways to stop what their commands left running, keyed by conversation: it stops when
+  // a turn ends and the folder goes back, so nothing a warm session started outlives its turn.
+  const sessionJobs = new Map<ConversationId, () => Promise<void>>();
+  // The session each chat's hold belongs to now: a session that is not it (an older one, closed, whose
+  // background agent is still calling) holds nothing even when the chat's next turn holds Your folder.
+  const holdingSession = new Map<ChatId, string>();
   const say = (conv: ConversationRow, lines: readonly string[]): void => {
     if (lines.length === 0) return;
     state.write((ctx) => {
@@ -263,6 +269,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
       deps.folderHold.releaseTurn(chat.id);
+      void sessionJobs
+        .get(conv.id)?.()
+        .catch((error: unknown) => {
+          log.warn({ err: error, conversationId: conv.id }, 'a chat’s jobs could not be stopped');
+        });
     },
 
     limits(conv) {
@@ -282,7 +293,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       );
       const writable = deps.folderHold.holdsTurn(chat.id);
       const folder: ChatFolder = {
-        holds: () => deps.folderHold.holdsTurn(chat.id),
+        holds: () =>
+          deps.folderHold.holdsTurn(chat.id) && holdingSession.get(chat.id) === start.sessionId,
         writable,
         heldBy: () =>
           deps.folderHold
@@ -313,10 +325,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         observer: start.observer,
         signal: ending.signal,
       });
+      holdingSession.set(chat.id, start.sessionId);
+      const endJobs = ready === null ? undefined : () => ready.endJobs();
+      if (endJobs !== undefined) sessionJobs.set(conv.id, endJobs);
+      let marked = false;
       let released: Promise<void> | null = null;
       const release = (): Promise<void> => {
         released ??= (async () => {
           ending.abort();
+          if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
+          if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
           deps.live.end(conv.id, start.sessionId);
           try {
             await ready?.release();
@@ -416,15 +434,21 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
               : ready.canUseTool(req),
           // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
-          preToolUse: (req) =>
-            judgeChatCall(
+          preToolUse: (req) => {
+            // The first command marks what the session runs, so the jobs its commands start can be told apart.
+            if (req.toolName === 'Bash' && !marked) {
+              marked = true;
+              ready?.markOwn();
+            }
+            return judgeChatCall(
               chatCallOf(req),
               {
                 ...access,
                 judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
               },
               folder,
-            ),
+            );
+          },
           ...(deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {

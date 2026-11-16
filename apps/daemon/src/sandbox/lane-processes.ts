@@ -120,6 +120,29 @@ export interface LaneProcessWatch {
   end(): Promise<void>;
   /** True while it remembers processes it has not stopped: tracked, and not ended successfully. */
   pending(): boolean;
+  /**
+   * Remembers what the session runs now (the agent and the servers it started), so `endJobs` leaves
+   * those alone. Run it at the session's first command; a later call keeps the first mark.
+   */
+  markOwn(): void;
+  /**
+   * Stops the jobs the session's commands started since `markOwn` (a dev server left running with
+   * `&`), and leaves the session running: the agent, its servers and anything it started outside a
+   * shell stay. A job is a process started after the mark that runs under a shell, or that lost its
+   * parent. Without `comm` in the table, everything started after the mark is a job. Resolves once
+   * they are stopped (SIGTERM, then SIGKILL after the grace, at most `MAX_ROUNDS` rounds). Rejects
+   * when the machine's processes cannot be read, having stopped nothing.
+   */
+  endJobs(): Promise<void>;
+}
+
+const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'tcsh']);
+
+/** Whether `ps`'s program name is a shell (`/bin/zsh`, `-bash` for a login shell). */
+function isShell(comm: string | undefined): boolean {
+  if (comm === undefined) return false;
+  const name = comm.slice(comm.lastIndexOf('/') + 1).replace(/^-/, '');
+  return SHELLS.has(name);
 }
 
 const DEFAULT_INTERVAL_MS = 1_000;
@@ -356,7 +379,9 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   let since = Number.NaN;
   /** Children of launchd whose open paths were read and found not to be the session's. */
   let judged = new Set<string>();
-  const rowKey = (row: ProcessRow): string => `${String(row.pid)}@${row.startedAt}`;
+  const rowKeyOf = (row: { readonly pid: number; readonly startedAt: string }): string =>
+    `${String(row.pid)}@${row.startedAt}`;
+  const rowKey = rowKeyOf;
 
   /**
    * Children of launchd that started since the session began and hold a path in its temp dir (their
@@ -464,7 +489,53 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     }, interval);
   }
 
+  /** Who the session ran when it was marked, by `rowKey`; null before `markOwn`. */
+  let marked: ReadonlySet<string> | null = null;
+
+  /** Whether `row` is, or runs under, a shell that was not there at the mark. */
+  function underNewShell(
+    row: ProcessRow,
+    byPid: ReadonlyMap<number, ProcessRow>,
+    before: ReadonlySet<string>,
+  ): boolean {
+    let at: ProcessRow | undefined = row;
+    for (let step = 0; at !== undefined && at.pid > 1 && step < 64; step += 1) {
+      if (isShell(at.comm) && !before.has(rowKey(at))) return true;
+      at = byPid.get(at.ppid);
+    }
+    return false;
+  }
+
   return {
+    markOwn() {
+      marked ??= new Set(known.map(rowKeyOf));
+    },
+    async endJobs() {
+      const before = marked;
+      if (before === null || unread !== null) return;
+      let rows: readonly ProcessRow[];
+      try {
+        rows = await deps.table();
+      } catch (error) {
+        report(LaneProcessFailure.Table, error);
+        throw error;
+      }
+      const byPid = new Map(rows.map((r) => [r.pid, r]));
+      const readable = rows.some((r) => r.comm !== undefined);
+      const fresh = (await membersIn(rows)).filter((m) => !before.has(rowKeyOf(m)));
+      const jobs = fresh.filter((m) => {
+        const row = byPid.get(m.pid);
+        if (row === undefined) return false;
+        return !readable || row.ppid === 1 || underNewShell(row, byPid, before);
+      });
+      if (jobs.length === 0) return;
+      // The agent's own group is never signalled: a job that shares it is stopped by pid.
+      const spared = rows.filter((r) => before.has(rowKey(r)) && r.pgid > 1).map((r) => r.pgid);
+      await terminateMembers(jobs, deps, spared);
+      const stopped = new Set(jobs.map(rowKeyOf));
+      known = known.filter((m) => !stopped.has(rowKeyOf(m)));
+      persist();
+    },
     async track(root) {
       watching.on = true;
       if (root.startedAt === null) {

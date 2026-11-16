@@ -41,6 +41,8 @@ function observing(): {
         setup: EMPTY_SETUP,
         canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no', by: 'builder' }),
         trackProcesses: () => undefined,
+        markOwn: () => undefined,
+        endJobs: () => Promise.resolve(),
         release: () => Promise.resolve(),
       });
     },

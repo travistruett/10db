@@ -9,6 +9,7 @@ import {
 import { listItems } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { createJudge, type Judge } from '../judge';
@@ -79,8 +80,18 @@ const prepared = (): Promise<ShapePrepared> =>
     setup: { ...EMPTY_SETUP, pluginDirs: ['/setup/yours', '/setup/project'] },
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no', by: 'builder' }),
     trackProcesses: () => undefined,
+    markOwn: () => {
+      jobs.marks += 1;
+    },
+    endJobs: () => {
+      jobs.ends += 1;
+      return Promise.resolve();
+    },
     release: () => Promise.resolve(),
   });
+
+/** What the session's preparation was told about its jobs. */
+const jobs = { marks: 0, ends: 0 };
 
 let w: ChatWorld;
 afterEach(async () => {
@@ -206,6 +217,73 @@ describe("a chat's session", () => {
     expect(
       spec.preToolUse({ toolName: 'mcp__10db__create_task', input: { title: 'x' } }).decision,
     ).toBe('allow');
+  });
+});
+
+describe("a chat's background jobs", () => {
+  it('marks what a session runs at its first command, once, and stops its jobs when the turn ends', async () => {
+    jobs.marks = 0;
+    jobs.ends = 0;
+    const spec = await firstSpec(JudgeKind.Native);
+    // The first turn has ended by now: a session stops what its commands left.
+    await waitFor(() => jobs.ends === 1);
+    expect(jobs.marks).toBe(0);
+    spec.preToolUse({ toolName: 'Bash', input: { command: 'pnpm dev &' } });
+    spec.preToolUse({ toolName: 'Bash', input: { command: 'ls' } });
+    spec.preToolUse({ toolName: 'Read', input: { file_path: '/repo/a.ts' } });
+    expect(jobs.marks).toBe(1);
+  });
+
+  it('stops the jobs of a session that held Your folder too, which stays warm', async () => {
+    jobs.ends = 0;
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'Fix login', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    await waitFor(() => (jobs.ends === 1 ? true : undefined));
+    expect(w.engine.view(chat.conversationId).state).toBe('idle_warm');
+  });
+});
+
+describe("a chat's older session", () => {
+  it('keeps no call of its own once a newer session of the chat holds Your folder', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    const edit = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
+    /** Sends a message and runs `during` while its turn is in progress. */
+    const turn = async (text: string, during: () => void) => {
+      let release: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => {
+        w.adapter.shapeBehaviour = async () => {
+          resolve();
+          await new Promise<void>((r) => {
+            release = r;
+          });
+          return { text: 'Done.' };
+        };
+      });
+      w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] });
+      await started;
+      during();
+      release();
+      await w.engine.settled(chat.conversationId);
+    };
+    let first: ExploreSessionSpec | undefined;
+    await turn('fix login', () => {
+      first = w.adapter.shapeSessions[0]?.spec;
+      expect(first?.preToolUse(edit)).toEqual({ decision: 'allow' });
+    });
+    // 10db's git work takes the folder, so the next turn reads only and opens a session of its own.
+    const reservation = w.folderHold.reserveGit(w.project.id, 'cutting a branch');
+    if (!reservation.reserved) throw new Error('the folder was not free');
+    await turn('look again', () => undefined);
+    w.folderHold.releaseGit(reservation.token);
+    await turn('now fix it', () => {
+      expect(w.adapter.shapeSessions).toHaveLength(3);
+      // The chat holds the folder again, in its third session; the first one's late call is still refused.
+      expect(w.adapter.shapeSessions[2]?.spec.preToolUse(edit)).toEqual({ decision: 'allow' });
+      expect(first?.preToolUse(edit).decision).toBe('deny');
+    });
   });
 });
 

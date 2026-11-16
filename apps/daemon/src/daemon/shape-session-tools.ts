@@ -261,6 +261,8 @@ export function createShapePreparer(deps: {
             by: DeniedBy.TenDb,
           }),
         trackProcesses: () => undefined,
+        markOwn: () => undefined,
+        endJobs: () => Promise.resolve(),
         release: () => Promise.resolve(),
       };
     }
@@ -329,6 +331,10 @@ export function createShapePreparer(deps: {
           tracked = true;
           void sandboxed.trackProcesses({ pid, startedAt: null });
         },
+        markOwn: () => {
+          sandboxed.markOwn();
+        },
+        endJobs: () => (tracked ? sandboxed.endJobs() : Promise.resolve()),
         release: async () => {
           try {
             // What its commands left running ends with the session, as a lane's does.

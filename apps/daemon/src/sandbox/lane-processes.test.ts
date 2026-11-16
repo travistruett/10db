@@ -37,14 +37,16 @@ class World {
   ];
   readonly signals: { target: number; sig: string }[] = [];
   readonly ignoresTerm = new Set<number>();
+  /** Processes no signal ends, as one stuck in the kernel is. */
+  readonly immortal = new Set<number>();
   /** Each process's working directory, as `lsof` would report it. */
   readonly cwd = new Map<number, string>();
   /** The files each process holds open, as `lsof` would report them. */
   readonly files = new Map<number, string[]>();
   pathReads = 0;
 
-  add(pid: number, ppid: number, pgid: number, startedAt = T1): void {
-    this.rows.push({ pid, ppid, pgid, startedAt });
+  add(pid: number, ppid: number, pgid: number, startedAt = T1, comm?: string): void {
+    this.rows.push({ pid, ppid, pgid, startedAt, ...(comm === undefined ? {} : { comm }) });
   }
   /** What the kernel does when a parent dies: its children go to launchd. */
   die(pid: number): void {
@@ -71,6 +73,7 @@ class World {
     if (hit.length === 0) return false;
     for (const r of hit) {
       if (sig === 'SIGTERM' && this.ignoresTerm.has(r.pid)) continue;
+      if (this.immortal.has(r.pid)) continue;
       this.die(r.pid);
     }
     return true;
@@ -560,6 +563,122 @@ describe('a lane process watch', () => {
     // The session's process is known by its start time, so the table is only needed later.
     await expect(watch.track(ROOT)).resolves.toBe(true);
     await expect(watch.end()).rejects.toThrow('ps failed');
+  });
+});
+
+describe('the jobs a session leaves at the end of a turn', () => {
+  /** claude with a server it started through a shell, marked at its first command. */
+  function session(): ReturnType<typeof createLaneProcessWatch> {
+    world.add(200, DAEMON, 200, T1, '/usr/local/bin/claude');
+    world.add(250, 200, 250, T1, '/bin/sh');
+    world.add(251, 250, 250, T1, '/usr/local/bin/node');
+    return createLaneProcessWatch({ ...deps(), ledger: null });
+  }
+  /** What a command starts: its shell, and a dev server that outlives it with the shell gone. */
+  function command(): void {
+    world.add(300, 200, 300, T1, '/bin/zsh');
+    world.add(400, 300, 300, T1, '/usr/bin/node');
+    world.add(401, 400, 300, T1, '/usr/bin/node');
+  }
+
+  it('stops what a command started, and leaves the agent, its servers and a late server running', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    world.add(600, 200, 600, T1, '/usr/local/bin/node'); // a server started later, outside a shell
+    await watch.endJobs();
+    for (const pid of [300, 400, 401]) expect(world.has(pid)).toBe(false);
+    for (const pid of [200, 250, 251, 600]) expect(world.has(pid)).toBe(true);
+  });
+
+  it('stops a job whose shell is gone, found by the group it was started in', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    // The shell is known from a sample, then exits; the job goes to launchd and keeps the shell's group.
+    await watch.endJobs();
+    world.add(300, 200, 300, T1, '/bin/zsh');
+    world.add(402, 300, 300, T1, '/usr/bin/node');
+    world.add(403, 1, 300, T1, '/usr/bin/node');
+    await watch.endJobs();
+    expect(world.has(402)).toBe(false);
+    expect(world.has(403)).toBe(false);
+    expect(world.has(200)).toBe(true);
+  });
+
+  it('never signals the agent’s process group, even where a job shares it', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    world.add(300, 200, 200, T1, '/bin/zsh'); // no job control: the shell stays in claude's group
+    world.add(400, 300, 200, T1, '/usr/bin/node');
+    await watch.endJobs();
+    expect(world.has(400)).toBe(false);
+    expect(world.has(200)).toBe(true);
+    expect(world.signals.some((s) => s.target === -200)).toBe(false);
+  });
+
+  it('leaves alone a process that took a job’s pid after the job ended', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    world.die(400);
+    world.add(400, 1, 400, 'Thu Oct 30 13:00:00 2026', '/usr/bin/vim');
+    await watch.endJobs();
+    expect(world.has(400)).toBe(true);
+  });
+
+  it('gives up on a process no signal ends, within its rounds', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    world.immortal.add(400);
+    await watch.endJobs();
+    expect(world.has(400)).toBe(true);
+    // Four rounds of SIGTERM and SIGKILL, never more.
+    expect(world.signals.filter((s) => s.target === 400).length).toBeLessThanOrEqual(2 * 2 * 4);
+  });
+
+  it('stops everything started after the mark when the table names no programs', async () => {
+    world.add(200, DAEMON, 200);
+    const watch = createLaneProcessWatch({ ...deps(), ledger: null });
+    await watch.track(ROOT);
+    watch.markOwn();
+    world.add(600, 200, 600);
+    await watch.endJobs();
+    expect(world.has(600)).toBe(false);
+    expect(world.has(200)).toBe(true);
+  });
+
+  it('does nothing before a mark, and rejects with nothing stopped when the table cannot be read', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    command();
+    await watch.endJobs();
+    expect(world.has(400)).toBe(true);
+    const broken = createLaneProcessWatch({
+      ...deps({ table: () => Promise.reject(new Error('ps failed')) }),
+      ledger: null,
+    });
+    broken.markOwn();
+    await expect(broken.endJobs()).rejects.toThrow('ps failed');
+    expect(world.signals).toEqual([]);
+  });
+
+  it('can end the session afterwards: nothing it stopped is left to stop twice', async () => {
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    await watch.endJobs();
+    world.signals.length = 0;
+    await watch.end();
+    expect(world.has(200)).toBe(false);
+    expect(world.signals.every((s) => s.target !== 400)).toBe(true);
   });
 });
 
