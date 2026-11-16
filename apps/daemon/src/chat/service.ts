@@ -60,6 +60,7 @@ import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
 import type { FolderHold, ServeResult } from '../folder-hold';
+import type { PendingOpens } from '../pass';
 import { briefFromChat, briefRequestText, briefTitle } from './brief';
 import type { Briefs } from './briefs';
 import { chatFolder } from './hooks';
@@ -77,6 +78,8 @@ export const CHAT_ARCHIVED = 'This session is archived.';
 export const DO_IT_UNDER_WAY = 'Do It is already under way for this chat';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
+/** What Do It and archive are refused with while a pass waits to open for the chat. */
+export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; Cancel it first';
 /** What archive is refused with while the task a chat was handed to is unfinished. */
 export const HANDED_TASK_RUNNING = 'The task this session was handed to is still running';
 /** What a model change while a turn runs is refused with. */
@@ -162,6 +165,8 @@ export interface ChatServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly folderHold: FolderHold;
+  /** A pass waiting to open names the chat that asked, and the chat can't be archived meanwhile. */
+  readonly pendingOpens: Pick<PendingOpens, 'get'>;
   readonly briefs: Briefs;
   readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
@@ -281,6 +286,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (chat.archivedAt !== null) return dtoOf(id);
       refuseWhileDoing(id);
       refuseWhileHandedTaskRuns(chat);
+      if (deps.pendingOpens.get(chat.projectId)?.chatId === id)
+        throw new ConflictError(PENDING_OPEN_FOR_CHAT);
       // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
       // does lands after the chat is archived; then the folder made only from its id goes.
       deps.folderHold.cancelWait(id);

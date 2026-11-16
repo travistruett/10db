@@ -61,7 +61,6 @@ import {
   getWorkstream,
   holdTask,
   insertBoardColumn,
-  insertBuilderMessage,
   insertPerson,
   insertPersona,
   insertProject,
@@ -94,7 +93,6 @@ import {
   listSkipsForWorkstream,
   listWorkstreams,
   moveTask,
-  listPassTasks,
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
@@ -146,7 +144,7 @@ import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
-import { GitError, type Git } from '../git';
+import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
 import {
@@ -154,7 +152,9 @@ import {
   goalPassPages,
   livePassViews,
   openTurn,
+  openFailure,
   openWhenBusy,
+  postFirstMessages,
   passStartPreview,
   passView,
   sharedUnlanded,
@@ -539,20 +539,9 @@ export function createServices(deps: {
               ...(wait === undefined ? {} : { wait }),
             });
           } catch (error) {
-            if (error instanceof GitError)
-              throw new ConflictError(
-                `Your folder could not be opened for a pass: ${error.message}`,
-              );
-            throw error;
+            throw openFailure(error);
           }
-          // Each page's first turn starts from a message: the builder's, else the task's description. A
-          // page the open made a task for has none, so it waits for the builder's first word.
-          deps.state.write((ctx) => {
-            for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
-              const body = input.firstMessage ?? task.description;
-              if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
-            }
-          });
+          postFirstMessages(deps.state, opened.pass.id, input.firstMessage);
           deps.scheduler.requestTick();
           return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
         },

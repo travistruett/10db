@@ -54,19 +54,23 @@ export async function openWhenBusy<T>(
   const { projectId, whenBusy } = request;
   deps.pendingOpens.refuseWhilePending(projectId);
   const blockers = deps.folderHold.blockers(projectId, { kind: FolderAsker.GitWork });
-  const chats = blockers.flatMap((b) =>
+  const allChats = blockers.flatMap((b) =>
     b.holder.kind === FolderHolderKind.ChatTurn && b.holder.chatId !== null
       ? [b.holder.chatId]
       : [],
   );
-  const onlyChats = blockers.length > 0 && chats.length === blockers.length;
-  const onlyOwn = request.chatId !== null && chats.every((id) => id === request.chatId);
-  if (whenBusy === undefined || !onlyChats || onlyOwn) return request.open();
+  const onlyChats = blockers.length > 0 && allChats.length === blockers.length;
+  // The requesting chat's own turn is already stopped by the caller, so it is neither stopped again nor waited on.
+  const chats = allChats.filter((id) => id !== request.chatId);
+  if (whenBusy === undefined || !onlyChats || chats.length === 0) return request.open();
 
   if (whenBusy === PassWhenBusy.Wait) {
     const signal = deps.pendingOpens.begin(projectId, {
       name: request.name,
-      waitsFor: blockers.map((b) => holderWords(b.holder)).join(' and '),
+      waitsFor: blockers
+        .filter((b) => b.holder.chatId !== request.chatId)
+        .map((b) => holderWords(b.holder))
+        .join(' and '),
       chatId: request.chatId,
     });
     request.open({ signal }).then(

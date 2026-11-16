@@ -21,6 +21,7 @@ import {
   type ChatService,
 } from '../src/chat';
 import { createFolderHold, type FolderHold } from '../src/folder-hold';
+import { createPendingOpens } from '../src/pass';
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
 import { createInboxService, type InboxService } from '../src/inbox';
@@ -167,6 +168,7 @@ export function chatWorld(
     state,
     engine,
     folderHold,
+    pendingOpens: createPendingOpens({ state }),
     briefs,
     clock,
     dataDir: dir.path,

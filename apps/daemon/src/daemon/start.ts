@@ -8,7 +8,6 @@ import {
   AccountKind,
   ConversationOwnerKind,
   EventType,
-  ConflictError,
   InvalidError,
   InboxItemId,
   JUDGE_TIMEOUT_MS,
@@ -230,6 +229,7 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  doItHere,
   doItInCopy,
   finishSeals,
   previewDoIt,
@@ -255,6 +255,9 @@ import {
   createPassCloses,
   discardKeptWork,
   createPendingOpens,
+  openFailure,
+  postFirstMessages,
+  type OpenWhenBusyDeps,
   joinPass,
   putBackKeptWork,
   resumePassWork,
@@ -1659,6 +1662,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     engine: exploreEngine,
     folderHold,
+    pendingOpens,
     briefs: chatBriefs,
     clock,
     dataDir: opts.dataDir,
@@ -2172,6 +2176,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const openWhenBusyDeps: OpenWhenBusyDeps = {
+    folderHold,
+    pendingOpens,
+    stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
+    logger: logger.child({ component: 'pass-open' }),
+  };
   const doItDeps: DoItDeps = {
     state,
     engine: exploreEngine,
@@ -2276,7 +2286,41 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
         input.place === 'here'
-          ? Promise.reject(new ConflictError('Do It in Your folder is not available yet'))
+          ? doItHere(
+              {
+                ...doItDeps,
+                openWhenBusy: openWhenBusyDeps,
+                openWholeProject: async ({ signal, ...whole }) => {
+                  try {
+                    await openPass(
+                      delivery,
+                      {
+                        projectId: whole.projectId,
+                        name: whole.title,
+                        taskIds: [],
+                        wholeProject: {
+                          title: whole.title,
+                          brief: whole.brief,
+                          chatId: whole.chatId,
+                          ...(whole.acceptanceCriteria === undefined
+                            ? {}
+                            : { acceptanceCriteria: whole.acceptanceCriteria }),
+                        },
+                        wait: { signal },
+                      },
+                      passOpenDeps,
+                    ).then((opened) => {
+                      postFirstMessages(state, opened.pass.id, undefined);
+                    });
+                  } catch (error) {
+                    throw openFailure(error);
+                  }
+                  createdScheduler.requestTick();
+                },
+              },
+              chatId,
+              input,
+            )
           : doItInCopy(
               {
                 ...doItDeps,
@@ -2314,12 +2358,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     sizing,
     sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
-    openWhenBusy: {
-      folderHold,
-      pendingOpens,
-      stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
-      logger: logger.child({ component: 'pass-open' }),
-    },
+    openWhenBusy: openWhenBusyDeps,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
