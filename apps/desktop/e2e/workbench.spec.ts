@@ -108,7 +108,7 @@ async function queueOrder(page: Page): Promise<string[]> {
 
 /**
  * At `width`, the pass header's line reads whole, its ⋯ menu (Close Pass, Abandon) is on screen and
- * nothing scrolls sideways; the project has no origin, so Open Pull Request says why beside it.
+ * nothing scrolls sideways; the project has no origin, so Open Draft PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -281,8 +281,9 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   expect(seen.rowLines.some((line) => line.includes('Signing off…'))).toBe(true);
   announced.push(...seen.announced);
 
-  // With a page signed off the header holds Open Pull Request too; it fits at every width.
-  await expect(page.getByRole('button', { name: 'Open Pull Request' })).toBeVisible();
+  // With a page signed off the header holds Open Draft PR too, and so does the foot of the signed-off
+  // page, where the builder is; the header fits at every width.
+  await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(2);
   for (const width of [1280, 800, 480, 420]) await headerFits(page, width);
   await page.setViewportSize({ width: 1280, height: 900 });
 

@@ -4,8 +4,8 @@ import {
   type PassTurnId,
   type ToolCallView,
 } from '@10db/contracts';
-import { Anchor, Box, Text, Title } from '@mantine/core';
-import { useEffect, useRef, useState } from 'react';
+import { Anchor, Box, Group, Text, Title } from '@mantine/core';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toolDoing, WorkingLine } from '../../conversation';
 import type { Draft } from '../../conversation/drafts';
 import { streamingOf } from '../../conversation/live-items';
@@ -40,6 +40,8 @@ export interface PagePaneProps {
   readonly composerFocus: number;
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
+  /** The pass's pull request control, shown under a signed-off page as its next step. */
+  readonly pullRequest?: ReactNode;
 }
 
 /**
@@ -47,7 +49,8 @@ export interface PagePaneProps {
  * composer fixed at the foot. What the page's session streams reaches it live.
  */
 export function PagePane(props: PagePaneProps) {
-  const { passId, appUrl, row, passOpen, openedAt, composerFocus, draft, onDraft } = props;
+  const { passId, appUrl, row, passOpen, openedAt, composerFocus, draft, onDraft, pullRequest } =
+    props;
   const { page, status } = row;
   const actions = usePageActions(passId, page.taskId, page.conversationId);
   const turns = useTurns(page.taskId).data ?? [];
@@ -174,6 +177,15 @@ export function PagePane(props: PagePaneProps) {
           line={row.state.line}
           waiting={passOpen && status === PageStatus.Waiting}
         />
+      ) : null}
+      {passOpen && status === PageStatus.SignedOff && pullRequest !== undefined ? (
+        // The next step sits where the builder signed off, not only in the header above the thread.
+        <Group px="md" py="xs" gap="sm" justify="space-between" wrap="wrap">
+          <Text size="sm" c="dimmed">
+            Signed off. CI checks it once it is in the pull request.
+          </Text>
+          {pullRequest}
+        </Group>
       ) : null}
       <PageComposer
         label={page.label}

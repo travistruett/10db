@@ -8,6 +8,7 @@ import { Announcer } from './announcer';
 import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
+import { PrButton } from './pr-button';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
@@ -143,6 +144,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
             const taskId = shown.page.taskId;
             setDrafts((held) => new Map(held).set(taskId, draft));
           }}
+          pullRequest={<PrButton view={view} />}
         />
       )}
       {takingOutPage === null ? null : (
