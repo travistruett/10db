@@ -488,7 +488,7 @@ describe('ChatTab: background tasks', () => {
     expect(document.querySelector('[data-background-tasks]')).toBeNull();
   });
 
-  it('says what an agent that reports none lacks, and draws no empty panel for one that does', async () => {
+  it('says what an agent that reports no background tasks lacks', async () => {
     openChat({
       conversation: { capabilities: { ...CLAUDE, backgroundTasks: false, label: 'Codex' } },
     });

@@ -43,9 +43,9 @@ function StepIcon({ status }: { readonly status: Shown }) {
   }
 }
 
-/** What identifies a list, so a new one starts open again whatever the builder did to the last. */
+/** What identifies a list: its steps' texts, so a status change keeps the builder's fold and a new list does not. */
 function signature(steps: readonly TodoStep[]): string {
-  return JSON.stringify(steps);
+  return JSON.stringify(steps.map((s) => s.text));
 }
 
 export interface TodoListProps {

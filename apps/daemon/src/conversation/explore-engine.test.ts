@@ -375,6 +375,41 @@ describe('Stop', () => {
     expect(w.adapter.shapeSessions[0]?.sent).toEqual(['two']);
   });
 
+  it('lists a background report that arrives after a Stop settled and before the turn’s own end', async () => {
+    w = exploreWorld();
+    const late = gate();
+    const began = gate();
+    w.adapter.shapeBehaviour = async (turn) => {
+      if (turn.number > 1) return { text: 'Understood.' };
+      began.release();
+      await new Promise<void>((resolve) => {
+        turn.signal.addEventListener('abort', () => {
+          resolve();
+        });
+      });
+      await late.promise;
+      turn.emit({
+        type: 'background_tasks',
+        tasks: [{ id: 't1', description: 'npm run build', kind: 'local_bash' }],
+      });
+      return {};
+    };
+    w.adapter.shapeInterruptReceipt = (queued) => Promise.resolve({ stillQueued: [...queued] });
+    w.send('one');
+    await began.promise;
+    await waitFor(() => w.stateOf() === 'running');
+    // A second message keeps the session open through the Stop, as it does in the real engine.
+    w.send('two');
+    await w.engine.stop(w.conv.id);
+    expect(w.engine.view(w.conv.id).backgroundTasks).toEqual([]);
+    late.release();
+    await waitFor(() => w.engine.view(w.conv.id).backgroundTasks.length === 1);
+    expect(w.engine.view(w.conv.id).backgroundTasks[0]).toMatchObject({
+      description: 'npm run build',
+      kind: 'shell',
+    });
+  });
+
   it('stops the session when neither a receipt nor the turn’s end comes within the grace, and hands back what it held', async () => {
     w = exploreWorld();
     const gates = gatedTurns(w);

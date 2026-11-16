@@ -573,7 +573,8 @@ cap, so the transcript and the composer keep their room. The transcript gets one
 any waiting card: "Running in the background · 2", then a row per command, monitor or subagent with its kind, a
 subagent's type and what it does. The heading folds the list, and the list scrolls inside a height cap. With none
 running nothing is drawn; an agent whose capability is off says so in one dim line ("Codex doesn't report
-background tasks.").
+background tasks."). While a card waits on the builder, the plan and the background list start folded to
+their headings, so the question and the composer keep the room; the builder can open either.
 
 ### 7.6 Thinking
 

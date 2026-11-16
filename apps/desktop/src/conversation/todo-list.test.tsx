@@ -21,6 +21,13 @@ function Rewriting() {
       >
         Next list
       </button>
+      <button
+        onClick={() => {
+          setSteps(LIST.map((step) => ({ ...step, status: 'pending' as const })));
+        }}
+      >
+        Reset statuses
+      </button>
       <TodoList steps={steps} working />
     </>
   );
@@ -43,5 +50,15 @@ describe('TodoList', () => {
     expect(fold.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps the builder’s fold through a status change', () => {
+    renderWithTheme(<Rewriting />);
+    const fold = screen.getByRole('button', { name: /^Plan/ });
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset statuses' }));
+    expect(screen.getByRole('button', { name: /^Plan/ }).getAttribute('aria-expanded')).toBe(
+      'false',
+    );
   });
 });
