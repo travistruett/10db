@@ -135,8 +135,10 @@ function refuseSecrets(secrets: readonly string[]): void {
 const LITERAL = { GIT_LITERAL_PATHSPECS: '1' } as const;
 const NO_SUBMODULES = ['-c', 'submodule.recurse=false'] as const;
 /**
- * A nested repository's own state is never read: its status would run in a git dir the agent can write. A
- * moved gitlink still shows; only what is dirty inside it is left unread.
+ * Keeps a nested repository's dirtiness out of the diff a call reads, so a gitlink that moved still shows. A
+ * `.gitmodules` that says `ignore = none` outranks this, so git may still run a status in the nested repository;
+ * what that status can run is held off by the daemon's own pins (no fsmonitor, no hooks, no attributes), which
+ * reach a nested git through the environment and outrank its config.
  */
 const NO_NESTED_STATUS = ['-c', 'diff.ignoreSubmodules=dirty', ...NO_SUBMODULES] as const;
 

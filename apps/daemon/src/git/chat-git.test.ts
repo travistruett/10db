@@ -220,40 +220,71 @@ describe('commitInFolder', () => {
 });
 
 // A repository the agent made inside the folder is its own: its config is the agent's to write, so no call here
-// may run a git in it.
+// may run a git in it, whatever `.gitmodules` says about ignoring it.
 describe('a nested repository the agent controls', () => {
-  /** A committed gitlink whose own config runs a marker program on any status, and a change inside it. */
-  function plantNested(): string {
-    const marker = join(scratch.path, 'fsmonitor-ran');
-    const program = join(scratch.path, 'monitor.sh');
-    writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\n`);
-    chmodSync(program, 0o755);
-    mkdirSync(join(repo, 'sub'));
-    raw(join(repo, 'sub'), 'init', '-q');
-    raw(join(repo, 'sub'), 'config', 'user.email', 'a@b.invalid');
-    raw(join(repo, 'sub'), 'config', 'user.name', 'a');
-    raw(join(repo, 'sub'), 'config', 'commit.gpgsign', 'false');
-    write('f.txt', 'one\n', join(repo, 'sub'));
-    raw(join(repo, 'sub'), 'add', '-A');
-    raw(join(repo, 'sub'), 'commit', '-q', '-m', 'one');
-    rg('add', 'sub');
+  const MARKERS = ['fsmonitor', 'hook', 'filter'] as const;
+
+  /**
+   * A committed gitlink whose `.gitmodules` says `ignore = none`, and whose own config runs a marker program as
+   * an fsmonitor, as a `post-index-change` hook and as a clean filter on every file, with a change inside it.
+   */
+  function plantNested(): Record<(typeof MARKERS)[number], string> {
+    const marker = (name: string) => join(scratch.path, `${name}-ran`);
+    const sub = join(repo, 'sub');
+    mkdirSync(sub);
+    raw(sub, 'init', '-q');
+    raw(sub, 'config', 'user.email', 'a@b.invalid');
+    raw(sub, 'config', 'user.name', 'a');
+    raw(sub, 'config', 'commit.gpgsign', 'false');
+    write('f.txt', 'one\n', sub);
+    raw(sub, 'add', '-A');
+    raw(sub, 'commit', '-q', '-m', 'one');
+    write('.gitmodules', '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n\tignore = none\n');
+    rg('add', 'sub', '.gitmodules');
     rg('commit', '-q', '-m', 'Add the gitlink');
-    raw(join(repo, 'sub'), 'config', 'core.fsmonitor', program);
-    // A clean filter its own attributes select, which a status of it would run on the changed file.
-    raw(join(repo, 'sub'), 'config', 'filter.mark.clean', `${program} %f; cat`);
-    write('.gitattributes', '*.txt filter=mark\n', join(repo, 'sub'));
-    write('f.txt', 'two\n', join(repo, 'sub'));
-    return marker;
+    const script = (name: string, body: string) => {
+      const file = join(scratch.path, `${name}.sh`);
+      writeFileSync(file, `#!/bin/sh\ntouch '${marker(name)}'\n${body}`);
+      chmodSync(file, 0o755);
+      return file;
+    };
+    raw(sub, 'config', 'core.fsmonitor', script('fsmonitor', ''));
+    const hooks = join(scratch.path, 'hooks');
+    mkdirSync(hooks);
+    const hook = script('hook', '');
+    writeFileSync(join(hooks, 'post-index-change'), readFileSync(hook));
+    chmodSync(join(hooks, 'post-index-change'), 0o755);
+    raw(sub, 'config', 'core.hooksPath', hooks);
+    raw(sub, 'config', 'filter.x.clean', script('filter', 'cat\n'));
+    write('.gitattributes', '* filter=x\n', sub);
+    write('f.txt', 'two\n', sub);
+    return { fsmonitor: marker('fsmonitor'), hook: marker('hook'), filter: marker('filter') };
   }
 
+  // The control: plain git, as the builder's own would run it, does run the planted programs, so the row below
+  // would catch a call that reached the nested repository.
+  it('is read by an unpinned git status, which is what the fixture is for', () => {
+    const markers = plantNested();
+    rg('status', '--porcelain');
+    expect(MARKERS.some((name) => existsSync(markers[name]))).toBe(true);
+  });
+
   it('is never asked for its status by a commit, a switch or a branch', async () => {
-    const marker = plantNested();
+    const markers = plantNested();
     rg('branch', 'other');
     write('mine.txt', 'mine\n');
     await git.commitInFolder(repo, { message: 'Mine' });
     await git.switchBranch(repo, 'other');
     await git.makeBranchHere(repo, 'topic');
-    expect(existsSync(marker)).toBe(false);
+    for (const name of MARKERS) expect(existsSync(markers[name])).toBe(false);
+  });
+
+  // Naming the gitlink as a path is how an add reaches it: git then reads its status to stage it.
+  it('is never asked for its status when the commit names it', async () => {
+    const markers = plantNested();
+    write('mine.txt', 'mine\n');
+    await git.commitInFolder(repo, { message: 'Mine', paths: ['sub', 'mine.txt'] });
+    for (const name of MARKERS) expect(existsSync(markers[name])).toBe(false);
   });
 });
 
