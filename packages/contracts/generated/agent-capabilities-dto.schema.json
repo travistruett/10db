@@ -49,6 +49,9 @@
     "subagents": {
       "type": "boolean"
     },
+    "backgroundTasks": {
+      "type": "boolean"
+    },
     "webSearch": {
       "type": "boolean"
     },
@@ -85,6 +88,7 @@
     "plan",
     "reasoning",
     "subagents",
+    "backgroundTasks",
     "webSearch",
     "modelSwitch",
     "takeover",

@@ -140,6 +140,8 @@ describe('a chat view: background tasks', () => {
                 'tsc --watch',
               ],
             },
+            { do: 'await_signal', name: 'finished' },
+            { do: 'background', tasks: [] },
             { do: 'await_signal', name: 'hold' },
             { do: 'turn_complete' },
           ],
@@ -161,6 +163,10 @@ describe('a chat view: background tasks', () => {
     expect(w.events.some((e) => e.type === 'conversation.state' && e.data['backgroundTasks'])).toBe(
       true,
     );
+    // An empty report replaces the list, and the session stays open.
+    w.adapter.signal('finished');
+    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 0);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
     w.adapter.signal('hold');
     await w.engine.retire(chat.conversationId);
     expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);

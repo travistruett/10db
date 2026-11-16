@@ -362,6 +362,14 @@ describe('mapSdkMessage', () => {
     ]);
   });
 
+  it('maps a background report or a command list of a shape it does not read to nothing', () => {
+    const malformed = { ...backgroundTasksChanged([]), tasks: [{ task_id: 7 }] };
+    expect(mapSdkMessage(malformed as never, ctx)).toEqual([]);
+    expect(mapSdkMessage({ type: 'system', subtype: 'commands_changed' } as never, ctx)).toEqual(
+      [],
+    );
+  });
+
   it('maps an empty set of background tasks, which is how the lane learns they finished', () => {
     expect(mapSdkMessage(backgroundTasksChanged([]), ctx)).toEqual([
       { type: 'background_tasks', tasks: [] },

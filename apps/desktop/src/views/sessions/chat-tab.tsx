@@ -308,14 +308,20 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
       }
       footer={
         <>
+          {caps.plan ? (
+            <TodoList steps={latestTodos(items)} working={working} cardWaiting={open.length > 0} />
+          ) : null}
           <WorkingLine
             conversation={conversation}
             streaming={streaming}
             {...(tool === undefined ? {} : { tool })}
           />
           <PermissionRequest items={open} />
-          <TodoList steps={latestTodos(items)} />
-          <BackgroundTasks capabilities={caps} tasks={conversation.backgroundTasks} />
+          <BackgroundTasks
+            capabilities={caps}
+            tasks={conversation.backgroundTasks}
+            cardWaiting={open.length > 0}
+          />
           {removed ? (
             <Text size="sm" c="dimmed" px="md" py="md">
               This project was removed from 10db.

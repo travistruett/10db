@@ -39,7 +39,8 @@ transcript. Both only read what the daemon already receives.
   serves them as `ConversationDto.backgroundTasks` (`id`, `description`, `kind`, `agent`), and each report emits a
   `conversation.state` event so the screen reads the view again. `kind` is `shell`, `monitor`, `agent` or `other`,
   read from Claude Code's task type; ambient watchers are left out by the Claude mapping.
-- Both panels sit in the chat tab's footer above the composer.
+- The todo list sits just above the working line and the background panel above the composer, both in the chat
+  tab's footer, each capped in height and scrolling inside; the todo list is hidden without `capabilities.plan`.
 
 ## Tasks
 

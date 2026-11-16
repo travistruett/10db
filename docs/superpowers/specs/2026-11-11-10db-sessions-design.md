@@ -330,6 +330,7 @@ interface AgentCapabilities {
   plan: boolean;
   reasoning: boolean;
   subagents: boolean;                     // Plan's researchers and reviewers
+  backgroundTasks: boolean;               // reports the commands and subagents a session runs in the background
   modelSwitch: 'next_turn' | 'none';
   takeover: boolean;
   costUsd: boolean;
