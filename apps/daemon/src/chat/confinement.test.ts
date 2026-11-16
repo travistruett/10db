@@ -23,6 +23,11 @@ beforeAll(() => {
   writeFileSync(join(checkout, '.git', 'config'), '[core]\n');
   mkdirSync(join(dir.path, 'outside'));
   symlinkSync(join(dir.path, 'outside'), join(checkout, 'link'));
+  // A link whose target does not exist yet: a write through it creates the target.
+  symlinkSync(join(dir.path, 'outside', 'not-yet'), join(checkout, 'dangling'));
+  mkdirSync(join(checkout, '.claude'));
+  writeFileSync(join(checkout, '.claude', 'settings.json'), '{}\n');
+  mkdirSync(join(dir.path, 'home'));
   const base = {
     checkout,
     home: join(dir.path, 'home'),
@@ -79,6 +84,7 @@ describe('a chat’s edits', () => {
     ['a file outside the checkout', join('..', 'outside', 'x')],
     ['a file reached through a link out of the checkout', join('link', 'x')],
     ['a relative path that climbs out', join('src', '..', '..', 'x')],
+    ['a Claude Code configuration path', join('.claude', 'settings.json')],
   ])('refuses %s while its turn holds the folder', (_name, rel) => {
     const verdict = judgeChatCall(edit('Edit', join(checkout, rel)), access, holding);
     expect(verdict.decision).toBe('deny');

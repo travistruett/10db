@@ -75,7 +75,10 @@ function judgeEdit(
     if (real !== checkout && !real.startsWith(checkout + sep))
       return deny(`${path} is outside Your folder.`);
     const verdict = judge.write(path);
-    return verdict === 'ok' ? ALLOW : deny(verdict.refuse);
+    if (verdict !== 'ok') return deny(verdict.refuse);
+    // A chat has no card for an edit the lane's guard would ask about (a Claude Code configuration path).
+    const asked = judge.writeAsk(path);
+    return asked === null ? ALLOW : deny(`${asked} A chat never edits it.`);
   } catch {
     return deny(`${path} could not be resolved to one real path; 10db refuses it.`);
   }
