@@ -19,12 +19,9 @@ export { createRoutedAdapter } from './routed-adapter';
 export {
   isArgFromFile,
   TakeoverRefusedError,
-  type ArgFromFile,
-  type CodexTakeoverServer,
   type TakeoverArg,
   type TakeoverCommand,
   type TakeoverSpec,
-  validSessionId,
 } from './takeover-command';
 export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
