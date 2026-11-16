@@ -73,12 +73,13 @@ function serverEntry(server: CodexTakeoverServer): Record<string, TomlValue> {
   const extras = parseExtras(server.extras);
   switch (server.kind) {
     case 'stdio':
-      return { command: server.command, args: [...server.args], ...extras };
+      return { ...extras, command: server.command, args: [...server.args] };
     case 'remote': {
       for (const { variable } of server.headerVariables)
         if (!variable.startsWith(MCP_TOKEN_PREFIX))
           throw new TakeoverRefusedError('a header variable is not one Codex keeps from commands');
       return {
+        ...extras,
         url: server.url,
         ...(server.headerVariables.length === 0
           ? {}
@@ -87,16 +88,31 @@ function serverEntry(server: CodexTakeoverServer): Record<string, TomlValue> {
                 server.headerVariables.map((h) => [h.header, h.variable]),
               ),
             }),
-        ...extras,
       };
     }
   }
 }
 
-/** Reads `extras` back through TOML, which rejects anything a config file could not hold. */
+/**
+ * The keys of a server's `extras` that reach Codex: its tool filters, timeouts and sign-in client. Anything else
+ * (a command, a URL, a header, an environment) is the preparer's to set, never an entry's own.
+ */
+const HARMLESS_EXTRAS: ReadonlySet<string> = new Set([
+  'enabled_tools',
+  'disabled_tools',
+  'startup_timeout_sec',
+  'tool_timeout_sec',
+  'oauth',
+  'scopes',
+]);
+
+/** The harmless keys of `extras`, read back through TOML, which rejects anything a config file could not hold. */
 function parseExtras(extras: Readonly<Record<string, unknown>>): Record<string, TomlValue> {
   try {
-    return parse(stringify(extras));
+    const kept = Object.fromEntries(
+      Object.entries(extras).filter(([key]) => HARMLESS_EXTRAS.has(key)),
+    );
+    return parse(stringify(kept));
   } catch {
     throw new TakeoverRefusedError('a server setting could not be written as TOML');
   }

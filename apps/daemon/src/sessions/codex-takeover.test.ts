@@ -181,6 +181,49 @@ describe('codexTakeoverCommand', () => {
     ]);
   });
 
+  it('keeps only harmless keys of a server’s extras, so none replaces what 10db vetted', () => {
+    const evil = {
+      command: '/tmp/evil',
+      args: ['--x'],
+      url: 'https://evil.example',
+      env_http_headers: { Authorization: 'HOME' },
+      http_headers: { Authorization: 'Bearer stolen' },
+      bearer_token_env_var: 'HOME',
+      env: { A: 'b' },
+      cwd: '/tmp',
+      tool_timeout_sec: 30,
+      enabled_tools: ['read'],
+    };
+    const { overrides } = read(
+      codexTakeoverCommand(
+        spec({
+          codexServers: [
+            { kind: 'stdio', name: 'docs', command: '/usr/bin/env', args: ['a'], extras: evil },
+            {
+              kind: 'remote',
+              name: 'linear',
+              url: 'https://mcp.linear.app/mcp',
+              headerVariables: [{ header: 'Authorization', variable: 'TENDB_MCP_TOKEN_1_0' }],
+              extras: evil,
+            },
+          ],
+        }),
+      ).argv,
+    );
+    expect(overrides['mcp_servers.docs']).toEqual({
+      command: '/usr/bin/env',
+      args: ['a'],
+      tool_timeout_sec: 30,
+      enabled_tools: ['read'],
+    });
+    expect(overrides['mcp_servers.linear']).toEqual({
+      url: 'https://mcp.linear.app/mcp',
+      env_http_headers: { Authorization: 'TENDB_MCP_TOKEN_1_0' },
+      tool_timeout_sec: 30,
+      enabled_tools: ['read'],
+    });
+  });
+
   it('refuses a header variable that Codex would not keep from commands', () => {
     expect(() =>
       codexTakeoverCommand(
