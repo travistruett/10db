@@ -1330,3 +1330,53 @@ describe('the owner’s turn hooks', () => {
     expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).not.toBeNull();
   });
 });
+
+describe('sealing a conversation (Do It)', () => {
+  const sessionRow = (world: ExploreWorld) => {
+    const id = world.adapter.shapeSessions[0]?.spec.sessionId;
+    return id === undefined ? undefined : getSession(world.state.db, id);
+  };
+
+  it('closes a warm session and ends its row, and the owner hears sealed once', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    w.hookLog.length = 0;
+
+    await w.engine.seal(w.conv.id);
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(sessionRow(w)?.endedAt).not.toBeNull();
+    expect(w.hookLog.filter((line) => line === 'state:sealed')).toHaveLength(1);
+  });
+
+  it('stops a running turn and keeps its partial text', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+
+    await w.engine.seal(w.conv.id);
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(sessionRow(w)?.endedAt).not.toBeNull();
+    expect(w.engine.view(w.conv.id).state).toBe('sealed');
+  });
+
+  it('seals a conversation with no session as it is', async () => {
+    w = exploreWorld();
+    await w.engine.seal(w.conv.id);
+    expect(w.stateOf()).toBe('sealed');
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+  });
+
+  it('starts no turn for a message sent to a sealed conversation', async () => {
+    w = exploreWorld();
+    await w.engine.seal(w.conv.id);
+    w.send('later');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('sealed');
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+  });
+});
