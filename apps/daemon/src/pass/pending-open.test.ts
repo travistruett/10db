@@ -33,4 +33,18 @@ describe('a pending open', () => {
     expect(second.aborted).toBe(true);
     expect(pending.cancel(mintId('Project'))).toBe(false);
   });
+
+  it('is not ended by the job of a wait that was cancelled before it', () => {
+    const pending = opens();
+    const old = pending.begin(projectId, open);
+    pending.cancel(projectId);
+    const fresh = pending.begin(projectId, { ...open, name: 'Second' });
+
+    // The first wait's job is still queued behind other work, and ends when it gets its turn.
+    pending.end(projectId, old);
+
+    expect(pending.view(projectId)?.name).toBe('Second');
+    pending.end(projectId, fresh);
+    expect(pending.view(projectId)).toBeNull();
+  });
 });

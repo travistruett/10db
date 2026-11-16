@@ -86,10 +86,10 @@ export async function openWhenBusy<T>(
     });
     request.open({ signal }).then(
       () => {
-        deps.pendingOpens.end(projectId);
+        deps.pendingOpens.end(projectId, signal);
       },
       (error: unknown) => {
-        deps.pendingOpens.end(projectId);
+        deps.pendingOpens.end(projectId, signal);
         // A cancelled wait is the builder's or an update's doing; any other refusal has no one waiting on it.
         if (!(error instanceof FolderWaitCancelledError)) {
           const why = error instanceof Error ? error.message : String(error);
