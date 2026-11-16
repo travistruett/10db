@@ -14,6 +14,7 @@ import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } f
 import { BRANCH_PREFIX, InvalidError } from '@10db/contracts';
 import { z } from 'zod';
 import { realPathOf, resolveInRepo } from '../guard';
+import { createChatGit, type ChatGit } from './chat-git';
 import { bookkeepingEntryAt, leftOutOfCommits } from './claude-code-bookkeeping';
 import {
   memoryPinStore,
@@ -552,7 +553,7 @@ export type SwitchBack =
   /** Ignored files or directories (ending in `/`) where the switch would write. */
   | { readonly kind: 'ignored'; readonly paths: readonly string[] };
 
-export interface Git {
+export interface Git extends ChatGit {
   /**
    * Runs `fn` as one operation: the calls it makes (through this `Git`, however deep) ask git for
    * each checkout's git dirs once, at the first call, and read origin's URL once per direction,
@@ -1810,7 +1811,7 @@ export function createGit(opts: GitOptions = {}): Git {
    */
   async function filteredPaths(
     c: Pinned,
-    index: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    index: Readonly<Record<string, string>>,
     paths: readonly string[],
   ): Promise<{ path: string; filter: string }[]> {
     if (paths.length === 0) return [];
@@ -4567,6 +4568,26 @@ export function createGit(opts: GitOptions = {}): Git {
       const [, mode = '', type, oid = ''] = entry;
       return type === 'blob' && REGULAR_FILE_MODES.includes(mode) ? oid : null;
     },
+    ...createChatGit({
+      pinned,
+      lock: (repo, fn) => withRepoLock(realpathSync(repo), fn),
+      git,
+      gitDir: (c) => c.dirs.gitDir,
+      revParse,
+      currentBranch,
+      changes,
+      treeFilters: filters,
+      worktreeFilters: (c, paths) => filteredPaths(c, {}, paths),
+      signing: async (c) => signing(c, await configEntries(c)),
+      // A branch's upstream is a name the checkout's own config holds (10db's push writes it); it is
+      // never a program or a path, and the fetch that follows goes to origin's pinned URL alone.
+      configValue: async (c, key) =>
+        (await configEntries(c)).filter((entry) => entry.name === key).at(-1)?.value ?? null,
+      isAncestor,
+      fetch: (repo, branch, net) =>
+        serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net)),
+      moveCheckedOutBranch,
+    }),
     addWorktree,
     fastForwardBranch,
     rewindBranch,
