@@ -15,7 +15,7 @@ let seq = 0;
 const row = (
   kind: ConversationItemKind,
   author: ConversationItemAuthor,
-  body: Record<string, unknown>,
+  body: Record<string, string>,
 ): ConversationItemRow => ({
   id: mintId('ConversationItem'),
   conversationId,
