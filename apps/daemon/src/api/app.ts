@@ -706,6 +706,26 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .post('/conversations/:conversationId/takeover', async (c) =>
+      c.json(await deps.services.openTakeover(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .post('/conversations/:conversationId/takeover/command', async (c) =>
+      c.json(
+        await deps.services.takeoverCommand(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .get('/conversations/:conversationId/takeover/preview', async (c) =>
+      c.json(
+        await deps.services.takeoverPreview(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .get('/conversations/:conversationId/takeover', (c) =>
+      c.json(deps.services.takeoverOf(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .post('/conversations/:conversationId/hand-back', async (c) => {
+      await deps.services.handBack(ConversationId.parse(c.req.param('conversationId')));
+      return c.body(null, 204);
+    })
     .get('/conversations/:conversationId/live', (c) =>
       c.json(deps.services.conversationLive(ConversationId.parse(c.req.param('conversationId')))),
     )
