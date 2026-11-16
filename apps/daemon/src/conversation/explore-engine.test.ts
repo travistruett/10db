@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { idUuid, type ToolCallView } from '@10db/contracts';
+import { ConversationState, idUuid, type ToolCallView } from '@10db/contracts';
 import {
   getConversation,
   getSession,
   insertInboxItem,
   listAccountModels,
+  patchConversation,
   replaceAccountModels,
   updateSessionUsage,
 } from '@10db/db';
@@ -1369,6 +1370,21 @@ describe('sealing a conversation (Do It)', () => {
     await w.engine.seal(w.conv.id);
     expect(w.stateOf()).toBe('sealed');
     expect(w.adapter.shapeSessions).toHaveLength(0);
+  });
+
+  it('refuses a taken-over conversation and leaves what was parked as it was', async () => {
+    w = exploreWorld();
+    w.state.write((ctx) => {
+      patchConversation(ctx, w.conv.id, { state: ConversationState.TakenOver });
+    });
+    w.engine.holdStarts(w.conv.id);
+    w.send('parked');
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+
+    await expect(w.engine.seal(w.conv.id)).rejects.toThrow(/Hand back first/);
+
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+    expect(w.stateOf()).toBe('taken_over');
   });
 
   it('starts no turn for a message sent to a sealed conversation', async () => {

@@ -763,6 +763,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
     async seal(id) {
       const rt = runtimeOf(id);
+      // Refused before anything is touched: a taken-over conversation keeps what waits in it.
+      const would = reduceExplore(rt.state, { type: 'do_it' }, factsOf(rt, { type: 'do_it' }));
+      if ('refused' in would) throw new ConflictError(would.refused);
       rt.parked = false;
       reduce(rt, { type: 'do_it' });
       await settled(id);
