@@ -256,6 +256,16 @@ export function madeByPass(db: DbReader, passId: PassId, taskId: TaskId): boolea
   return row?.madeByPassId === passId;
 }
 
+/** The pass that made the task for one of its pages, even after the task left it; null when none did. */
+export function passThatMadeTask(db: DbReader, taskId: TaskId): PassId | null {
+  const row = db
+    .select({ madeByPassId: schema.tasks.madeByPassId })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.madeByPassId ?? null;
+}
+
 /** The tasks in the pass now, oldest first: a task that left it is not one. */
 export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
   const rows = db
