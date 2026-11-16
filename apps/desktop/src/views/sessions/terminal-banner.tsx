@@ -1,4 +1,4 @@
-import { Box, Button, Group, List, Popover, Stack, Text } from '@mantine/core';
+import { Box, Button, Code, Group, List, Popover, Stack, Text } from '@mantine/core';
 import { IconTerminal2 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
@@ -18,6 +18,8 @@ export interface TerminalBannerProps {
   /** The Copy Command button says "Copied" for a moment. */
   readonly copied: boolean;
   readonly error: string | null;
+  /** The command, when the clipboard refused it, so it can be copied by hand. */
+  readonly line: string | null;
 }
 
 export function TerminalBanner({
@@ -29,6 +31,7 @@ export function TerminalBanner({
   onCopyCommand,
   copied,
   error,
+  line,
 }: TerminalBannerProps) {
   const [asking, setAsking] = useState(false);
   const handBack = useRef<HTMLButtonElement>(null);
@@ -78,6 +81,16 @@ export function TerminalBanner({
             <Text size="sm" c="red" role="alert">
               {error}
             </Text>
+          )}
+          {line === null ? null : (
+            <Stack gap={2}>
+              <Text size="xs" c="dimmed">
+                Your clipboard didn&apos;t take it. Copy the command by hand:
+              </Text>
+              <Code block style={{ userSelect: 'all', whiteSpace: 'pre-wrap' }}>
+                {line}
+              </Code>
+            </Stack>
           )}
           <Group gap="xs" pt={4}>
             <Popover

@@ -21,6 +21,8 @@ export interface TakeoverServerOptions {
   readonly app?: TerminalApp;
   /** The command Copy the Command gives. */
   readonly line?: string;
+  /** The notes the open leaves for the banner, beside the folder note. */
+  readonly openNotes?: readonly string[];
   /** Opening answers 502 with these words. */
   readonly openFails?: string;
 }
@@ -41,6 +43,8 @@ export function takeoverServer(
   const app = opts.app ?? 'terminal';
   const line = opts.line ?? "/bin/sh -c 'exec ~/.10db/takeover/run'";
   const notes = ['Your folder is held until you hand back.'];
+  // What the daemon keeps of the open, for the banner's read.
+  let taken: string[] = notes;
   const server: TakeoverServer = {
     handlers: [],
     opened: [],
@@ -68,12 +72,13 @@ export function takeoverServer(
         return HttpResponse.json({ error: 'upstream', message: opts.openFails }, { status: 502 });
       const id = move(String(params['conversationId']), 'taken_over');
       if (id !== null) server.opened.push(id);
+      taken = [...notes, ...(opts.openNotes ?? [])];
       return HttpResponse.json(
-        TakeoverDto.parse({ since: SINCE, app, notes, line: app === 'copy' ? line : null }),
+        TakeoverDto.parse({ since: SINCE, app, notes: taken, line: app === 'copy' ? line : null }),
       );
     }),
     http.get(daemonUrl('/conversations/:conversationId/takeover'), () =>
-      HttpResponse.json(TakeoverDto.parse({ since: SINCE, app, notes, line: null })),
+      HttpResponse.json(TakeoverDto.parse({ since: SINCE, app, notes: taken, line: null })),
     ),
     http.post(daemonUrl('/conversations/:conversationId/takeover/command'), ({ params }) => {
       const chat = byConversation(String(params['conversationId']));

@@ -127,6 +127,15 @@ describe('Open in Terminal', () => {
     expect(writeText).toHaveBeenCalledWith(LINE);
   });
 
+  it('a clipboard that refuses leaves the command in the banner to copy by hand', async () => {
+    writeText.mockRejectedValue(new Error('denied'));
+    openChat({}, { app: 'copy', line: LINE });
+    const popover = await openPopover();
+    fireEvent.click(await within(popover).findByRole('button', { name: 'Copy the Command' }));
+    const banner = await screen.findByRole('region', { name: 'In your terminal' });
+    await within(banner).findByText(LINE);
+  });
+
   it('a window that would not open says so and leaves the chat where it was', async () => {
     const words = "Terminal isn't installed or didn't open. Choose another in Settings > Sessions.";
     const { taken } = openChat({}, { openFails: words });
@@ -181,6 +190,23 @@ describe('a chat in the builder’s terminal', () => {
     });
     expect(taken.commands).toHaveLength(1);
     await screen.findByRole('button', { name: 'Copied' });
+  });
+
+  it('Copy Command with a clipboard that refuses shows the command to copy by hand', async () => {
+    writeText.mockRejectedValue(new Error('denied'));
+    inTerminal();
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy Command' }));
+    const banner = await screen.findByRole('region', { name: 'In your terminal' });
+    await within(banner).findByText(LINE);
+  });
+
+  it('shows the notes the open made, left-out servers among them', async () => {
+    const notes = ['Left out of your terminal, as the agent can’t take them: docs.'];
+    openChat({}, { openNotes: notes });
+    const popover = await openPopover();
+    fireEvent.click(await within(popover).findByRole('button', { name: 'Open in Terminal' }));
+    const banner = await screen.findByRole('region', { name: 'In your terminal' });
+    await within(banner).findByText(notes[0] ?? '');
   });
 
   it('focus is on Hand Back, and a message waits: the composer says so and the message holds', async () => {

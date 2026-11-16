@@ -118,6 +118,9 @@ export function ChatTab({
   const handBack = useHandBack();
   const takeoverCommand = useTakeoverCommand();
   const clipboard = useClipboard({ timeout: 1500 });
+  // A command the clipboard refused, which the banner shows to copy by hand: the open's, or Copy Command's.
+  const [uncopied, setUncopied] = useState<string | null>(null);
+  const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
@@ -328,6 +331,7 @@ export function ChatTab({
           terminalSince={takeover.data?.since ?? null}
           {...(openingTerminal === undefined ? {} : { openingTerminal })}
           {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+          onTerminalUncopied={setUncopied}
           loading={loading}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
@@ -362,17 +366,21 @@ export function ChatTab({
               since={takeover.data?.since ?? null}
               notes={takeover.data?.notes ?? []}
               onHandBack={() => {
+                setUncopied(null);
+                setLastCommand(null);
                 handBack.mutate(chat.conversationId);
               }}
               handingBack={handBack.isPending}
               onCopyCommand={() => {
                 takeoverCommand.mutate(chat.conversationId, {
                   onSuccess: ({ line }) => {
+                    setLastCommand(line);
                     clipboard.copy(line);
                   },
                 });
               }}
               copied={clipboard.copied}
+              line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
               error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
             />
           ) : null}

@@ -12,6 +12,20 @@ export interface TerminalButtonProps {
   readonly path: string;
   readonly opened: boolean;
   readonly onOpened: (opened: boolean) => void;
+  /** The command, when the clipboard refused it: the banner then shows it to copy by hand. */
+  readonly onUncopied: (line: string) => void;
+}
+
+/** Writes `line` to the clipboard; when that is refused, `onUncopied` gets it to show. */
+function copyOrShow(line: string, onUncopied: (line: string) => void): void {
+  try {
+    navigator.clipboard.writeText(line).catch(() => {
+      onUncopied(line);
+    });
+  } catch {
+    // No clipboard at all, or one that throws at once.
+    onUncopied(line);
+  }
 }
 
 /**
@@ -25,6 +39,7 @@ export function TerminalButton({
   path,
   opened,
   onOpened,
+  onUncopied,
 }: TerminalButtonProps) {
   const settings = useSessionsSettings();
   const preview = useTakeoverPreview(chat.conversationId, opened);
@@ -48,9 +63,8 @@ export function TerminalButton({
       onConfirm={() => {
         open.mutate(chat.conversationId, {
           onSuccess: (taken) => {
-            // The banner offers the command again if the browser refuses the copy.
-            if (taken.line !== null)
-              void navigator.clipboard.writeText(taken.line).catch(() => undefined);
+            const { line } = taken;
+            if (line !== null) copyOrShow(line, onUncopied);
             close();
           },
         });

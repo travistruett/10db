@@ -48,6 +48,8 @@ export interface SessionBarProps {
   /** The builder asked to open the chat in a terminal from the strip. */
   readonly openingTerminal?: boolean;
   readonly onTerminalAsked?: () => void;
+  /** The clipboard refused the open's command; the banner shows it. */
+  readonly onTerminalUncopied?: (line: string) => void;
 }
 
 /** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
@@ -134,6 +136,7 @@ export function SessionBar({
   terminalSince = null,
   openingTerminal = false,
   onTerminalAsked,
+  onTerminalUncopied,
 }: SessionBarProps) {
   const [typing, setEditing] = useState(false);
   const [askedHere, setAskedHere] = useState(false);
@@ -188,6 +191,7 @@ export function SessionBar({
                 setAskedHere(opened);
                 if (!opened) onTerminalAsked?.();
               }}
+              onUncopied={(line) => onTerminalUncopied?.(line)}
             />
           ) : null}
           <Menu position="bottom-end" withinPortal>
