@@ -75,6 +75,22 @@ describe('markOnboarded', () => {
     expect(statSync(file).mtime.getTime()).toBe(long.getTime());
   });
 
+  it('keeps what another process wrote while the marks were being made, as valid JSON', async () => {
+    const { configDir, cwd, file } = world();
+    writeFileSync(file, JSON.stringify({ userID: 'u1', padding: 'x'.repeat(2000) }));
+    await markOnboarded(configDir, cwd, {
+      afterFirstRead: () => {
+        writeFileSync(file, JSON.stringify({ userID: 'u2', added: true }));
+      },
+    });
+    expect(read(file)).toEqual({
+      userID: 'u2',
+      added: true,
+      hasCompletedOnboarding: true,
+      projects: { [cwd]: { hasTrustDialogAccepted: true } },
+    });
+  });
+
   it('refuses a link in the file’s place, leaving its target', async () => {
     const { configDir, cwd, file } = world();
     const target = join(home.path, 'target.json');
