@@ -587,6 +587,11 @@ describe('ChatTab: the composer and Your folder', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Send Now Reading Only' }));
       expect(await screen.findByText('The daemon is busy.')).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+      // The next thing the builder types is a new attempt: the old refusal does not stick.
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'again' },
+      });
+      expect(screen.queryByText('The daemon is busy.')).toBeNull();
     });
 
     it('sends File as Tasks with wait, so it does not cancel the wait', async () => {

@@ -379,6 +379,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               draft={draft}
               onDraft={(next) => {
                 setSendError(null);
+                stopWaiting.reset();
                 setDraft(next);
               }}
               capabilities={caps}
