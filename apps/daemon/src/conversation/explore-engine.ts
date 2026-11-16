@@ -250,8 +250,40 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       });
   };
 
-  /** Reduces `event` and applies what it says; answers the outcome. */
+  /**
+   * Reduces `event` and applies what it says; answers the outcome. A builder message from outside a turn asks
+   * its owner to take what the turn needs first, closing a warm session opened for the other kind of turn so
+   * this one starts cold on the right profile; the owner is told the state after every reduce, so what the
+   * take held goes back when no turn began. The close and the reduce that follow run in one synchronous
+   * sequence with one state report at its end, so the close cannot release what was just taken.
+   */
   const reduce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
+    const conv = conversation(rt.id);
+    const hooks = hooksOf(conv);
+    if (
+      event.type === 'builder_message' &&
+      !BUSY.has(rt.state) &&
+      !rt.retired &&
+      factsOf(rt, event).queued > 0 &&
+      hooks.turnStarting !== undefined
+    ) {
+      const { writes } = hooks.turnStarting(conv);
+      const open = rt.session?.open;
+      if (
+        rt.state === S.IdleWarm &&
+        open !== undefined &&
+        (open.launch.writes ?? false) !== writes
+      ) {
+        rt.closeReason = 'the folder changed hands';
+        reduceOnce(rt, { type: 'idle_close' });
+      }
+    }
+    const outcome = reduceOnce(rt, event);
+    hooks.onState?.(conversation(rt.id), rt.state);
+    return outcome;
+  };
+
+  const reduceOnce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
     const queued = queuedNow(rt);
     const facts = factsOf(rt, event, queued);
     const outcome = reduceExplore(rt.state, event, facts);

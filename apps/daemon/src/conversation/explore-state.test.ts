@@ -7,6 +7,7 @@ import {
   type ExploreFacts,
   type ExploreOutcome,
 } from './explore-state';
+import { BUSY } from './explore-runtime';
 
 // Sessions spec §6.7: one row per cell of the explore conversation's state × event table, read by
 // the plan's "Reading the cells", then the rows beyond it, named by their section.
@@ -646,5 +647,31 @@ describe('reduceExplore', () => {
       const out = reduceExplore(state, eventOf(event, extra), { ...BASE_FACTS, ...rest });
       if ('effects' in out) expect(new Set(out.effects).size).toBe(out.effects.length);
     }
+  });
+
+  // The owner takes Your folder before a builder message and gives it back once a state outside a turn is
+  // reported, so an outcome that begins a turn must land in one.
+  it('lands every outcome that begins a turn in a state a turn runs in', () => {
+    const begins: ExploreEffect[] = ['start', 'push', 'next_turn', 'start_fresh_from_digest'];
+    const outside = Object.values(ConversationState).filter((state) => !BUSY.has(state));
+    const events = new Set(CELLS.map(([event]) => event));
+    const landings: string[] = [];
+    for (const state of Object.values(ConversationState))
+      for (const event of events)
+        for (const facts of [
+          { ...BASE_FACTS, queued: 0 },
+          { ...BASE_FACTS, queued: 2, providerSessionId: true },
+          { ...BASE_FACTS, queued: 2, resuming: true },
+        ])
+          for (const extra of [undefined, ended('error'), ended('paused'), ended('unasked')]) {
+            const out = reduceExplore(state, eventOf(event, extra?.event), facts);
+            if (
+              'effects' in out &&
+              out.effects.some((e) => begins.includes(e)) &&
+              outside.includes(out.next)
+            )
+              landings.push(`${event} in ${state} lands in ${out.next}`);
+          }
+    expect(landings).toEqual([]);
   });
 });

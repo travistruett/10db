@@ -86,6 +86,10 @@ export interface ExploreWorld extends EngineInstance {
   overrides: Partial<Pick<ExploreOwnerHooks, 'digest' | 'outgoing' | 'spec'>>;
   /** How often a launch was released. */
   released: number;
+  /** What the owner was told, in order: `starting` before a turn's take, `state:<state>` after each reduce. */
+  readonly hookLog: string[];
+  /** What the owner answers `turnStarting`, and so what a session it opens afterwards is marked as. */
+  writes: boolean;
   /** Stores a builder message and tells the engine, as an owner does (rule 1). */
   send(text: string): ConversationItemRow;
   /** Stores a builder message only, as a Redo's `post` does. */
@@ -153,6 +157,8 @@ export function exploreWorld(
     specGate: null,
     overrides: {},
     released: 0,
+    hookLog: [],
+    writes: false,
     ...build({}),
     send(text) {
       const item = world.keep(text);
@@ -241,6 +247,7 @@ export function exploreWorld(
             canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no', by: '10db' }),
           },
           limits: pictureLimitsFor(accountKind),
+          writes: world.writes,
           expiresAt: null,
           accountId: project.accountId,
           model: 'claude-opus-5-5',
@@ -264,6 +271,13 @@ export function exploreWorld(
           blocks: [],
           sent: () => undefined,
         },
+      turnStarting: () => {
+        world.hookLog.push('starting');
+        return { writes: world.writes };
+      },
+      onState: (_c, to) => {
+        world.hookLog.push(`state:${to}`);
+      },
       onTurnEnded: (_c, end) => {
         ends.push(end);
         return Promise.resolve();

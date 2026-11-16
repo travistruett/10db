@@ -1180,3 +1180,79 @@ describe('the commands a session offers', () => {
     ]);
   });
 });
+
+// Sessions spec §7.3: the owner takes what a turn needs just before a message reduces from outside a turn, and is
+// told the state after every reduce, so what it took goes back when no turn began.
+describe('the owner’s turn hooks', () => {
+  const takes = (world: ExploreWorld) =>
+    world.hookLog.filter((entry) => entry === 'starting').length;
+  const BUSY_STATES = ['starting', 'running', 'waiting_card', 'stopping'];
+  /** Whether the log ends with a state report outside a turn, which is when an owner gives back its take. */
+  const endsOutsideATurn = (world: ExploreWorld) =>
+    !BUSY_STATES.includes(world.hookLog.at(-1)?.replace('state:', '') ?? '');
+
+  it('takes once for a start from idle_cold and reports a state outside a turn at its end', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(takes(w)).toBe(1);
+    expect(w.hookLog[0]).toBe('starting');
+    expect(w.hookLog.at(-1)).toBe('state:idle_warm');
+  });
+
+  it('takes once for a chained turn', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    w.send('two');
+    gates[0]?.release();
+    await waitFor(() => gates.length === 2);
+    gates[1]?.release();
+    await w.engine.settled(w.conv.id);
+    expect(takes(w)).toBe(1);
+    expect(endsOutsideATurn(w)).toBe(true);
+  });
+
+  it('takes nothing more when a turn ends in error with starters queued, and reports the state', async () => {
+    w = exploreWorld();
+    const held = gate();
+    endingTurn(w, 'error', { before: held.promise });
+    w.send('one');
+    await waitFor(() => w.engine.live(w.conv.id).items.length === 1);
+    w.send('two');
+    held.release();
+    await w.engine.settled(w.conv.id);
+    // What waits goes under Send now; no second turn began, so no second take.
+    expect(w.stateOf()).toBe('ended_error');
+    expect(takes(w)).toBe(1);
+    expect(w.hookLog.at(-1)).toBe('state:ended_error');
+  });
+
+  it('takes nothing for a reduce with nothing queued, and nothing on archive', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.hookLog.length = 0;
+    await w.engine.retire(w.conv.id);
+    expect(takes(w)).toBe(0);
+    expect(endsOutsideATurn(w)).toBe(true);
+  });
+
+  it('closes a warm session opened for the other kind of turn, and keeps the take it just made', async () => {
+    w = exploreWorld();
+    w.writes = false;
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    w.hookLog.length = 0;
+    w.writes = true;
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    // One take, and no state report between it and the new turn: the close did not release it.
+    expect(w.hookLog.slice(0, 2)).toEqual(['starting', 'state:starting']);
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    // The new session resumes the agent session the old one had.
+    expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).not.toBeNull();
+  });
+});
