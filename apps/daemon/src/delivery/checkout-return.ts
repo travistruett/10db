@@ -1,3 +1,4 @@
+import { reserveGitNaming } from './folder-wait';
 import { BatchState, type BatchId } from '@10db/contracts';
 import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import type { StateStore } from '../events';
@@ -70,10 +71,11 @@ export async function returnCheckout(
   const running = lanesInProjectCheckout(db, project);
   if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
   // The switch moves Your folder's branch: it waits for a chat's turn, and holds the folder meanwhile.
-  const token = await deps.folderHold.reserveGitWhenFree(
-    project.id,
-    `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`,
-  );
+  const token = await reserveGitNaming(deps, {
+    projectId: project.id,
+    batchId,
+    what: `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`,
+  });
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {

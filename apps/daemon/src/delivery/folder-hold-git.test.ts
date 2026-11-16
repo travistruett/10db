@@ -7,7 +7,7 @@ import {
   type ChatId,
   type ProjectInput,
 } from '@10db/contracts';
-import { getBatch, getChat, insertChat, insertConversation, schema } from '@10db/db';
+import { getBatch, getBatchRow, getChat, insertChat, insertConversation, schema } from '@10db/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -69,6 +69,10 @@ function setConversationState(chatId: ChatId, to: ConversationState): void {
     });
   });
 }
+
+/** What the batch says about waiting for Your folder, if it says anything. */
+const waitLine = (batchId: Parameters<typeof getBatchRow>[1]): string | null =>
+  getBatchRow(h.store.db, batchId).notices.find((n) => n.key === 'folder-hold')?.line ?? null;
 
 const openInput = (extra: Partial<PassOpenInput> = {}): PassOpenInput => ({
   projectId: h.project.id,
@@ -148,8 +152,12 @@ describe('a batch’s cut and its switch back', () => {
     await yieldToJobs();
     expect(calls).toEqual([]);
     expect(getBatch(h.store.db, started.id).state).toBe('CUTTING');
+    expect(waitLine(started.id)).toBe(
+      'Waits for the chat ‘Retry login’ to finish with Your folder',
+    );
     h.ctx.folderHold.releaseTurn(holder.id);
     await h.jobs.idle();
+    expect(waitLine(started.id)).toBeNull();
     expect(calls).toEqual([{ call: 'cut', chatHolds: false }]);
     expect(getBatch(h.store.db, started.id).state).toBe('OPEN');
     expect(h.ctx.folderHold.holders(h.project.id).map((x) => x.kind)).toEqual(['lane']);
@@ -162,8 +170,12 @@ describe('a batch’s cut and its switch back', () => {
     h.shipper.abandon(started.id);
     await yieldToJobs();
     expect(calls).toHaveLength(1);
+    expect(waitLine(started.id)).toBe(
+      'Waits for the chat ‘In terminal’ in your terminal to finish with Your folder',
+    );
     setConversationState(terminal, ConversationState.IdleCold);
     await h.jobs.idle();
+    expect(waitLine(started.id)).toBeNull();
     expect(calls).toEqual([
       { call: 'cut', chatHolds: false },
       { call: 'switch back', chatHolds: false },

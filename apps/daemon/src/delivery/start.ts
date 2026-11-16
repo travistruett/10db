@@ -1,3 +1,4 @@
+import { reserveGitNaming } from './folder-wait';
 import {
   ACTIVE_STATES,
   kindsOfTask,
@@ -689,11 +690,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const project = getProject(db, getBatch(db, batchId).projectId);
     let token: symbol;
     try {
-      token = await ctx.folderHold.reserveGitWhenFree(
-        project.id,
-        `cutting a branch in Your folder`,
+      token = await reserveGitNaming(ctx, {
+        projectId: project.id,
+        batchId,
+        what: 'cutting a branch in Your folder',
         signal,
-      );
+      });
     } catch {
       // Stopped while waiting: the CUTTING row stays and startup cuts it again.
       return;

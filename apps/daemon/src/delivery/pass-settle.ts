@@ -1,3 +1,4 @@
+import { reserveGitNaming } from './folder-wait';
 import {
   Delivery,
   EventType,
@@ -325,11 +326,12 @@ export function queuePassSettle(
       // The settle moves the return branch, so it waits for a chat's turn, which may be editing there.
       let token: symbol | null = null;
       try {
-        token = await ctx.folderHold.reserveGitWhenFree(
-          pass.projectId,
-          'moving your branch for a pass',
+        token = await reserveGitNaming(ctx, {
+          projectId: pass.projectId,
+          batchId: pass.batchId,
+          what: 'moving your branch for a pass',
           signal,
-        );
+        });
         await step(ctx, passId, signal);
       } catch (error) {
         ctx.logger.warn(

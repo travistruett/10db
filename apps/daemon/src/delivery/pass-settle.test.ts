@@ -2,6 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   AbandonStep,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  mintId,
   PASS_MOVE_CHOICE,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
@@ -15,6 +19,9 @@ import {
   closePass,
   findOpenByFoldKey,
   getBatch,
+  getBatchRow,
+  insertChat,
+  insertConversation,
   getPass,
   getPassProgress,
   getTask,
@@ -145,7 +152,47 @@ function answerMove(card: InboxItemDto): Promise<void> {
   return h.jobs.idle();
 }
 
+/** A chat of the project, as a turn takes the folder for it. */
+function chatOf(title: string) {
+  return h.state.write((ctx) => {
+    const id = mintId('Chat');
+    const conv = insertConversation(ctx, {
+      projectId: h.project.id,
+      owner: { kind: ConversationOwnerKind.Chat, id },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.IdleCold,
+    });
+    return insertChat(ctx, {
+      id,
+      projectId: h.project.id,
+      conversationId: conv.id,
+      title,
+      tabPosition: 0,
+    }).id;
+  });
+}
+
 describe('a closed pass', () => {
+  it('waits for a chat’s turn before Move moves the branch, naming the chat on its batch', async () => {
+    const { passId } = await closedPass();
+    const me = chatOf('Retry login');
+    h.ctx.folderHold.takeTurn(h.project.id, me);
+    const before = h.git$('rev-parse', 'refs/heads/main');
+    answerPassMoveCard(h.ctx, h.only(moveCards(passId)), { choice: PASS_MOVE_CHOICE });
+    for (let i = 0; i < 40; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+    const batchId = getPass(h.store.db, passId).batchId;
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(before);
+    expect(
+      getBatchRow(h.store.db, batchId).notices.find((n) => n.key === 'folder-hold')?.line,
+    ).toBe('Waits for the chat ‘Retry login’ to finish with Your folder');
+    h.ctx.folderHold.releaseTurn(me);
+    await h.jobs.idle();
+    expect(getPass(h.store.db, passId).state).toBe(PassState.Settled);
+    expect(getBatchRow(h.store.db, batchId).notices.some((n) => n.key === 'folder-hold')).toBe(
+      false,
+    );
+  });
+
   it('offers Move as it closes, and Move before the merge puts the folder on the base and settles it', async () => {
     const { passId } = await closedPass();
     const card = h.only(moveCards(passId));
