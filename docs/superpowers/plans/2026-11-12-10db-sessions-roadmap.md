@@ -40,7 +40,7 @@ M1 → T2 → M2a → M2b → T3 → M2c → M3 and M4a (in parallel) → M4b �
 | M5b | Codex conversations on the attended profile, and Plan without subagents | outlined below | M5a | `feat/sessions-m5b` |
 | T6 | Your MCP servers in Settings, approved once, run as Claude Code runs them, calls judged | `2026-11-12-10db-trust-t6-your-mcp-servers.md` | M5b | `feat/trust-t6` |
 | M6a | The folder hold; a chat writes in Your folder through daemon git | `2026-11-15-10db-sessions-m6.md` | T6 | `feat/sessions-m6` |
-| M6b | Do it: a separate copy, or a pass of one; Changes; the tab handover | planned once M6a merges | M6a | — |
+| M6b | Do it: a separate copy, or a pass of one; Changes; the tab handover | `2026-11-16-10db-sessions-m6b.md` | M6a | `feat/sessions-m6b` |
 | M7 | Open in Terminal, Hand Back | outlined below | M6a | `feat/sessions-m7` |
 | M8 | Spotlight | outlined below | M5b | `feat/sessions-m8` |
 | — | ACP spec, then OpenCode | a spec first (§5.6) | M5a soaked | — |
@@ -182,7 +182,8 @@ per behaviour.
   - No claims, hazards, 10db commit or gate for a chat. Installs run in place.
   - `CHAT_SYSTEM_PROMPT` (M5a) changes: the chat edits files in Your folder, and commits, branches and opens pull
     requests with the git tools.
-- `POST /chats/:id/do-it {place}`:
+- `POST /chats/:id/do-it {place}` (built in M6b, `2026-11-16-10db-sessions-m6b.md`; its decision is
+  `decisions/2026-11-16-do-it-hands-a-chat-to-a-task-or-a-pass-of-one.md`):
   - **Worktree** (the separate copy): it seals the chat (state `sealed`), creates an ordinary task with worktree
     placement and starts it. The task takes the chat's tab.
   - **Here** (optional): it opens a pass of one, with a synthetic "Whole project" page over

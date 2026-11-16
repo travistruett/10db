@@ -62,3 +62,12 @@
   through `openWhenBusy`, with `whenBusy` for other chats' turns. While a pass waits to open for a chat, Do It
   and archive are refused for it; a chat sealed into a copy can't be archived while the copy's task is unfinished.
   `task-session.ts` is `GET /tasks/:taskId/session`; the Changes scope is `workstream-changes.ts`'s.
+- The brief (sessions spec §7.3). `briefs.ts` keeps one per chat in memory (`BRIEF_WAIT_MS` 60 s, `BRIEF_KEEP_MS`
+  30 minutes; a restart drops them) and `write_brief` fills it, refused from any session that is not the chat's open
+  one. `ChatService.askBrief` sends the request only between turns, read only, as a message with `purpose: 'brief'`;
+  otherwise the brief is `briefFromChat` (`brief.ts`) at once. The brief turn is tracked in `briefTurns`, so a send
+  stops it first and Cancel (`DELETE /chats/:chatId/brief`) stops only it. `chatDigest` and `briefFromChat` leave out
+  every `purpose: 'brief'` message and the reply it began. A resumed agent session keeps the request in its own
+  transcript, which no digest can edit; that is accepted.
+- Do It's tasks get a `chat_tasks` row on purpose (Recent counts them as filed, `edit_task` reaches them,
+  `remove_task` on one doesn't ask, `chatMadeTask` in `tools.ts`). A copy's areas come from `chat-areas.ts`.

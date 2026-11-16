@@ -873,7 +873,22 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
 **Do it.** The Do It sheet (UI spec §8.1) hands bigger work to a task. It offers two places.
 
+**Order and guard** (`chat/do-it.ts`). A chat that is `taken_over` ("Hand back first"), `sealed` or archived is
+refused, and a per-chat in-flight guard refuses a second Do It (a double submit, another window). While Do It runs,
+Stop answers and changes nothing, Redo and archive are refused, and a send is refused for a separate copy but queues
+(held, reading only after the open) for Your folder. A pending Open When It Ends that names the chat refuses Do It
+and archive for it until it is cancelled.
+
 **In a separate copy** (S16): an ordinary task in a worktree.
+
+- **Refused on a `local` project**, which has no copies: the sheet says so and picks Your folder.
+- **The copy's areas** are the brief's (each a project area), else what the chat changed (its edits and the
+  uncommitted files, by area), else the catch-all area. **Its criteria** are the brief's, else "Does what the brief
+  asks, and the project's checks pass." The lane asks for more with `request_claim`, as any lane does.
+- **The base** is the project's base branch; the commits HEAD has that it lacks stay out, and the sheet says how
+  many. The task starts first and the seal (`engine.seal`) is the last step, so a failed start leaves the chat as it
+  was. Recovery (`finishSeals`) finishes a cut-short seal.
+- The task gets a `chat_tasks` row, so Recent counts it as filed and the chat's `edit_task` reaches it.
 
 - Do it first seals the chat (§6.7). The task starts a new agent session from a brief, on Claude and on Codex
   alike. The chat's agent writes the brief when the Do It sheet opens: a short turn that calls `write_brief` on the
@@ -882,11 +897,17 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
   resumes the chat's agent session, so one agent session never has two writers, and the picture budget starts clean
   **(call: the digest carries the context; resuming would need a fork and a copied picture budget for little
   gain)**.
+- **The brief is asked only between turns** (`idle_cold`, `idle_warm`, `ended_error`, no folder wait), on the
+  read-only profile, so it never runs on a writable hold and never stops the builder's turn. While a turn runs or
+  waits (on a card, on the folder) or the account is paused, the brief is the chat read back at once. A send or
+  Cancel during the brief turn stops it first. A late `write_brief` never replaces text the builder typed. The brief
+  lives in memory, 30 minutes, and a restart drops it. A resumed session keeps the brief request in its own
+  transcript; the digests and briefs leave it out.
 - The task starts as any worktree task starts. Changes the chat left uncommitted in Your folder stay there (§7.4).
 - The Task takes the Chat's place in the tab strip. The sealed Chat closes, and stays reachable from the Task's
   "From chat" link, ⌘⇧T and ⌘K. Its read-only line offers **New Chat From This**, which starts a fresh chat seeded
   from its digest, with no resume **(call: the design review's; the strip doesn't fill twice as fast, and the
-  builder can keep talking)**.
+  builder can keep talking)**. New Chat From This is deferred: the sealed chat offers Open Task.
 - The tab shows the task's thread, where messages reach the running lane, and the task's live line.
 - It lands by the project's delivery. Its card on the Board is the usual one.
 - It does not stay warm between turns, which waits for M9. When it finishes, the tab says so and offers the Board
@@ -907,7 +928,17 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
   A running chat turn is stopped first, so its hold is given back.
 - The brief is written as for a separate copy. The task starts a new agent session from it, and never resumes the
-  chat's.
+  chat's. The page receives it as its first builder message.
+- **Stacking.** When a closed pass is waiting for its pull request, the pass of one stacks on it, as Start Pass does.
+- **A chat's own turn** is stopped first and the open waits for its release, with the chat's starts held so nothing
+  takes the folder in between. When other chats' turns are the only holders, the sheet (and Start Pass) offers
+  **Stop the Turn and Open** and **Open When It Ends**: one pending open per project, cancelled by the update drain
+  and lost at a restart.
+- **A page key.** The task names the synthetic page (`10db-whole-project`, which `AreaName` cannot spell), so a pass
+  is "of one" by its task, not by `chats.pass_id`.
+- **Hazards and the watcher.** `passAreasOf` gives every reader of a pass's areas (judge, claims, kept work, the
+  watcher, reviews) the whole-project page, so its writes raise no stray-write cards; a write outside every claim
+  (a hazard file with no claim) is still carded. No Move card is made.
 - **The chat is not sealed** (trust line §13). The pass opens in its own tab beside the chat. The chat stays open,
   and its turns write nothing while the pass holds the folder.
 - The page is synthetic: a page named "Whole project" over `WHOLE_REPOSITORY_GLOBS` (`@10db/contracts`), made for
@@ -926,7 +957,7 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 - **The Inbox.** A pass of one's Ready and question cards open its Sessions tab, not the Workbench.
 
 **The Changes panel** (UI spec §9) reads `GET /workstreams/:id/changes`, the route the builder's check card already
-uses. Before M4c, a Task's tool rows show only once the runner stores `tool_call` items (M4c).
+uses, with a `scope` (all kept turns, or the last) for a pass of one's task. Before M4c, a Task's tool rows show only once the runner stores `tool_call` items (M4c).
 
 **Per provider.** A chat's writes, and both Do it places, run on Claude and on Codex. Passes and worktree tasks
 already do (research T1), and the attended profile writes the checkout on both (§5.5).
