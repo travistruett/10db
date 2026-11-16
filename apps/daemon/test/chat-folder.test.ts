@@ -125,6 +125,7 @@ describe('a chat’s turn and Your folder', () => {
     await w.engine.settled(first.conversationId);
     await w.engine.settled(second.conversationId);
     expect(notices(second)).toEqual(['Your folder is also in use by the chat ‘one’.']);
+    expect(notices(first)).toEqual(['Your folder is also in use by the chat ‘two’.']);
     expect(w.folderHold.holders(w.project.id)).toEqual([]);
   });
 });

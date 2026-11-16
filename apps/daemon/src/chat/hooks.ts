@@ -5,7 +5,9 @@ import {
   FolderAsker,
   JudgeDecision,
   JudgeKind,
+  CHAT_DEFAULT_TITLE,
   ConversationId,
+  FolderHolderKind,
   ConversationItemAuthor,
   ConversationItemKind,
   DeniedBy,
@@ -21,6 +23,8 @@ import {
 } from '@10db/contracts';
 import {
   chatOfConversation,
+  getChat,
+  getConversation,
   getProject,
   insertItem,
   listFiles,
@@ -190,6 +194,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   // What the thread says once the turn that took the folder has begun, keyed by chat: the take is made before
   // anyone knows a turn will start, so nothing is written until the state says it did.
   const notices = new Map<ChatId, string[]>();
+  // What the chats already in the folder are told once the joining chat's turn has begun.
+  const toldOthers = new Map<
+    ChatId,
+    { readonly conversationId: ConversationId; readonly line: string }[]
+  >();
   const say = (conv: ConversationRow, lines: readonly string[]): void => {
     if (lines.length === 0) return;
     state.write((ctx) => {
@@ -213,6 +222,26 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         return { writes: false };
       }
       const others = taken.sharedWith.map((h) => holderWords(h));
+      const joined = holderWords({
+        kind: FolderHolderKind.ChatTurn,
+        name: chat.title ?? CHAT_DEFAULT_TITLE,
+        more: 0,
+        chatId: chat.id,
+        what: null,
+      });
+      toldOthers.set(
+        chat.id,
+        taken.sharedWith.flatMap((h) =>
+          h.kind === FolderHolderKind.ChatTurn && h.chatId !== null
+            ? [
+                {
+                  conversationId: getChat(state.db, h.chatId).conversationId,
+                  line: `Your folder is also in use by ${joined}.`,
+                },
+              ]
+            : [],
+        ),
+      );
       notices.set(
         chat.id,
         others.length === 0 ? [] : [`Your folder is also in use by ${others.join(' and ')}.`],
@@ -226,9 +255,13 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         const lines = notices.get(chat.id) ?? [];
         notices.delete(chat.id);
         say(conv, lines);
+        for (const other of toldOthers.get(chat.id) ?? [])
+          say(getConversation(state.db, other.conversationId), [other.line]);
+        toldOthers.delete(chat.id);
         return;
       }
       notices.delete(chat.id);
+      toldOthers.delete(chat.id);
       deps.folderHold.releaseTurn(chat.id);
     },
 
