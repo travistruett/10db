@@ -113,11 +113,15 @@ function secretsAmong(
   paths: readonly string[],
   secretFiles: readonly string[],
 ): string[] {
-  const listed = new Set(secretFiles.map(foldPathCase));
+  const listed = secretFiles.map(foldPathCase);
   return paths.filter(
     (path) =>
       isSecretFileName(basename(path)) ||
-      roots.some((root) => listed.has(foldPathCase(join(root, path)))),
+      roots.some((root) => {
+        const folded = foldPathCase(join(root, path));
+        // A listed folder holds everything under it, as the sandbox's read rule for it does.
+        return listed.some((secret) => folded === secret || folded.startsWith(`${secret}/`));
+      }),
   );
 }
 
@@ -237,9 +241,15 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         refuseFilters(await ctx.worktreeFilters(c, changed));
         const sign = await ctx.signing(c);
         const flags = sign.flags.length > 0 ? sign.flags : ['--no-gpg-sign'];
-        if (named === undefined) await said(() => ctx.git(c, ['add', '-A']), 'git add failed');
-        else
-          await said(() => ctx.git(c, ['add', '--', ...named], { env: LITERAL }), 'git add failed');
+        // Exactly the paths checked above are staged, never a sweep: a file that appeared since is left out.
+        await said(
+          () =>
+            ctx.git(c, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], {
+              input: changed.map((path) => `${path}\0`).join(''),
+              env: LITERAL,
+            }),
+          'git add failed',
+        );
         const staged = (
           await ctx.git(
             c,

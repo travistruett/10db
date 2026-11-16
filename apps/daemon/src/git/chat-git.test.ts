@@ -144,8 +144,9 @@ describe('commitInFolder', () => {
   describe('with files the session may not read', () => {
     it.each([
       ['an env file the folder does not ignore', '.env.local', undefined],
-      ['an env file in a folder, in capitals', 'app/.ENV.prod', undefined],
+      ['an env file in a folder', 'app/.env.prod', undefined],
       ['a file the session lists as secret', 'config/prod.txt', ['config/prod.txt']],
+      ['a file under a folder the session lists as secret', 'vault/deep/a.txt', ['vault']],
     ])('refuses %s, names it and commits nothing', async (_what, secret, listed) => {
       write(secret, 'TOKEN=1\n');
       write('README.md', '# edited\n');
@@ -158,6 +159,17 @@ describe('commitInFolder', () => {
       await expect(git.commitInFolder(repo, { ...input, paths: [secret] })).rejects.toThrow(secret);
       expect(rg('rev-parse', 'HEAD')).toBe(before);
       expect(rg('diff', '--cached', '--name-only')).toBe('');
+    });
+
+    // The refusal comes before anything is staged: a staged file is an object in .git, which the session reads.
+    it('leaves no object for a refused secret, with a path named or not', async () => {
+      write('.env.local', 'TOKEN=only-here-4f2a\n');
+      const oid = rg('hash-object', '.env.local');
+      await expect(git.commitInFolder(repo, { message: 'x' })).rejects.toThrow('.env.local');
+      await expect(
+        git.commitInFolder(repo, { message: 'x', paths: ['.env.local'] }),
+      ).rejects.toThrow('.env.local');
+      expect(() => rg('cat-file', '-e', oid)).toThrow();
     });
 
     it('commits the named files that are not secret even when a secret sits beside them', async () => {
