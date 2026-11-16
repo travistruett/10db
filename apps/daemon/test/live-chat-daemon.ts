@@ -199,8 +199,8 @@ export async function startLiveDaemon(
           throw new Error(
             `${init.method ?? 'GET'} ${path} answered ${String(res.status)}: ${await res.text()}`,
           );
-        // The daemon's own answer, checked by the contract's schema.
-        return schema.parse(await res.json());
+        // The daemon's own answer, checked by the contract's schema; a 204 has no body.
+        return schema.parse(res.status === 204 ? undefined : await res.json());
       },
     };
   } catch (error) {
