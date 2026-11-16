@@ -31,16 +31,20 @@
 - A chat's session stays warm after a turn that held Your folder, and its next turn that holds reuses it. Between
   turns, and from any session but the one the chat's hold belongs to (`holdingSession` in `hooks.ts`), its guard
   denies every call. At each turn's end `endJobs` stops what the session's commands left running, from the mark taken
-  at its first Bash call (`sandbox/lane-processes.ts`).
+  at its first Bash call (`sandbox/lane-processes.ts`). Only once they have stopped does `onState` give the folder back
+  (`pendingReleases` in `hooks.ts`): the chat's next turn cancels that release, and a stop that fails closes the warm
+  session first.
 - `git-tools.ts` holds the chat's tools that change git in Your folder (`make_branch`, `switch_branch`, `pull`, `commit_changes`;
-  Git's side is `git/chat-git.ts`). Each runs only from the chat's open session while its turn holds the folder, refuses while a closed
+  Git's side is `git/chat-git.ts`; a call's `beforeWrite` repeats the hold check under the repo lock, `commit_changes` refuses a
+  `.env*` file or one of the checkout's `secretFilesIn` files (a listed folder holds all under it) and stages only the paths it
+  checked). Each runs only from the chat's open session while its turn holds the folder, refuses while a closed
   pass waits for its pull request and while HEAD or the named branch is under `10db/` (`git-names.ts`), and answers a warning naming
   the other chat when it commits everything in a shared folder. The shell's own git writes are refused with `CHAT_GIT_REFUSAL`
   (`git-rule.ts`), which names these tools.
 - `push_branch`, `open_pull_request` and `merge_pull_request` (also `git-tools.ts`) reach GitHub through the daemon's pinned push
   and `gh -R` on the pinned repository: the push names one qualified ref and never forces, a pull request opens only for a branch
   pushed at its commit with its body in a file under the chat's folder that is removed after, and a merge builds its address from
-  the pinned repository and the number and refuses a pull request whose head is under `10db/`. They are out of `allowedTools` so
-  the session's judge sees each call (`JUDGED_CHAT_TOOLS` in `git-rule.ts`); the hook answers a bare allow where a judge runs and
+  the pinned repository and the number and refuses a pull request whose head or base is under `10db/`. They are out of `allowedTools` so
+  the session's judge sees each call (`JUDGED_OWN_TOOLS` in `trust/fast-path.ts`, which the fast path never settles; `JUDGED_CHAT_TOOLS` in `git-rule.ts`); the hook answers a bare allow where a judge runs and
   asks on the rules floor, and the chat's trust policy tells the judge a push and a pull request send data out and a merge writes
   to a live system.
