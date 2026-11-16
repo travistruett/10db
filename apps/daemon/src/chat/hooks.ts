@@ -16,6 +16,7 @@ import {
   type Effort,
   type AgentAccountKind,
   type ProjectId,
+  type ChatId,
 } from '@10db/contracts';
 import {
   chatOfConversation,
@@ -29,6 +30,7 @@ import {
   type ConversationRow,
 } from '@10db/db';
 import {
+  BUSY,
   heldInlineBytes,
   outgoingMessage,
   type DeliverableMessage,
@@ -38,6 +40,7 @@ import {
 import { storedModelNames } from '../catalogue';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
 import { createHookJudge, createLimitNotes } from '../inbox';
 import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
@@ -103,6 +106,8 @@ export function chatFolder(dataDir: string, conversationId: ConversationId): str
 
 export interface ChatHooksDeps {
   readonly state: StateStore;
+  /** Who holds Your folder: a chat's turn takes it, and writes only while it holds it. */
+  readonly folderHold: FolderHold;
   readonly log: Logger;
   readonly dataDir: string;
   readonly now: () => Date;
@@ -142,6 +147,11 @@ function deliverable(state: StateStore, item: ConversationItemRow): DeliverableM
   };
 }
 
+/** The thread's line for a turn that can only read: who has Your folder. */
+function readOnlyNotice(blockers: readonly FolderBlocker[]): string {
+  return `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
+}
+
 /** A call as the chat's confinement reads it. */
 const chatCallOf = (req: Omit<ShapeToolRequest, 'toolUseId'>) => ({
   toolName: req.toolName,
@@ -169,15 +179,57 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     };
   };
 
+  // What the thread says once the turn that took the folder has begun, keyed by chat: the take is made before
+  // anyone knows a turn will start, so nothing is written until the state says it did.
+  const notices = new Map<ChatId, string[]>();
+  const say = (conv: ConversationRow, lines: readonly string[]): void => {
+    if (lines.length === 0) return;
+    state.write((ctx) => {
+      for (const text of lines)
+        insertItem(ctx, conv.id, {
+          author: ConversationItemAuthor.System,
+          kind: ConversationItemKind.Notice,
+          body: { text },
+        });
+    });
+  };
+
   return {
     freshAtContextPct: CHAT_FRESH_AT_CONTEXT_PCT,
+
+    turnStarting(conv) {
+      const chat = chatOf(conv);
+      const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
+      if (!taken.taken) {
+        notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
+        return { writes: false };
+      }
+      const others = taken.sharedWith.map((h) => holderWords(h));
+      notices.set(
+        chat.id,
+        others.length === 0 ? [] : [`Your folder is also in use by ${others.join(' and ')}.`],
+      );
+      return { writes: true };
+    },
+
+    onState(conv, to) {
+      const chat = chatOf(conv);
+      if (BUSY.has(to)) {
+        const lines = notices.get(chat.id) ?? [];
+        notices.delete(chat.id);
+        say(conv, lines);
+        return;
+      }
+      notices.delete(chat.id);
+      deps.folderHold.releaseTurn(chat.id);
+    },
 
     limits(conv) {
       return deps.limitsFor(deps.launch(conv.projectId, conv.model, conv.effort).account.kind);
     },
 
     async spec(conv, start) {
-      chatOf(conv);
+      const chat = chatOf(conv);
       const launch = deps.launch(conv.projectId, conv.model, conv.effort);
       const limits = deps.limitsFor(launch.account.kind);
       // A chat asks for its agent's judge, as Plan does; 10db's judge where it is the account's and ready.
@@ -370,6 +422,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               }),
         },
         limits,
+        writes: deps.folderHold.holdsTurn(chat.id),
         expiresAt: ready?.credentialsExpireAt ?? null,
         accountId: launch.account.accountId,
         model: launch.modelId,

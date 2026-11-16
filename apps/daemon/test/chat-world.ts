@@ -16,6 +16,7 @@ import {
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
+import { createFolderHold, type FolderHold } from '../src/folder-hold';
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
 import { createInboxService, type InboxService } from '../src/inbox';
@@ -37,6 +38,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly folderHold: FolderHold;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
   readonly dataDir: string;
@@ -62,6 +64,7 @@ export function chatWorld(
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
   const state = createStateStore(store, bus);
+  const folderHold = createFolderHold({ state, bus });
   const adapter = new FakeAdapter({});
   const clock = new ManualClock();
   const dir = tempDir('chat');
@@ -102,6 +105,7 @@ export function chatWorld(
     chatHooks({
       live: createChatLiveSessions(),
       state,
+      folderHold,
       log: silentLogger,
       dataDir: dir.path,
       now: () => clock.now(),
@@ -136,6 +140,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    folderHold,
     inbox,
     project,
     dataDir: dir.path,

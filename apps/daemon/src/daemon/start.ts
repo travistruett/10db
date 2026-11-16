@@ -1657,6 +1657,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chatHooks({
       live: chatLive,
       state,
+      folderHold,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
       now: () => clock.now(),
