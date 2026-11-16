@@ -39,6 +39,10 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
 export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
+  '/conversations/:conversationId/takeover':
+    "A chat's takeover is read from its folder of files, which the builder's terminal agent can write.",
+  '/conversations/:conversationId/takeover/preview':
+    "The takeover preview reads Your folder's changes with git.",
   '/goals/:goalId/digest':
     "Reading a goal's digest moves the goal's last-opened mark, which is a write.",
   '/accounts/:accountId/identity':
