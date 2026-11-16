@@ -599,6 +599,7 @@ describe("a pass's turns and view", () => {
       checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
       closeStep: null,
       stackedOn: null,
+      wholeProject: false,
       notices: [],
     };
     expect(PassViewDto.parse(view)).toEqual(view);
@@ -693,6 +694,7 @@ describe("a pass's turns and view", () => {
       },
       closeStep: 3,
       stackedOn: mintId('Pass'),
+      wholeProject: false,
       notices: [
         { id: 'checks', kind: 'checks', text: 'build fails', sendable: true, cardId: null, at },
       ],
