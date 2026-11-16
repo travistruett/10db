@@ -326,7 +326,7 @@ test('a chat writes in Your folder: an edit and a commit, a task that waits for 
       .flatMap((w) => (w.notice?.key === 'folder-hold' ? [w.notice.line] : []));
   await expect.poll(notices).toEqual([expect.stringContaining('Fix the notes')]);
 
-  // The turn ends; the task takes the folder and asks its question, so the chat reads only.
+  // The turn ends; the task takes the folder and keeps it, so the chat reads only.
   await composer.click();
   await composer.pressSequentially('wrap up');
   await composer.press('Enter');
