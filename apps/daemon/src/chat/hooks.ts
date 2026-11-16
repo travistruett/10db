@@ -72,6 +72,31 @@ import { chatSystemPrompt } from './prompt';
 // web where a judge sees each call, Claude Code's own subagents, the builder's setup, and 10db's own
 // server with every builder tool. It edits the checkout only while its turn holds Your folder.
 
+/**
+ * How long a turn's jobs get to stop before the session is closed instead: a process table that cannot be read
+ * must not keep Your folder from the builder.
+ */
+export const JOBS_STOP_DEADLINE_MS = 30_000;
+
+/** `work`, or a rejection once `ms` pass on `clock`; the timer is cleared when `work` settles first. */
+function withDeadline<T>(work: Promise<T>, clock: Clock, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = clock.setTimeout(() => {
+      reject(new Error('stopping the jobs took too long'));
+    }, ms);
+    work.then(
+      (value) => {
+        timer.cancel();
+        resolve(value);
+      },
+      (error: unknown) => {
+        timer.cancel();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 /** The share of the context window past which a chat moves to a fresh session. */
 export const CHAT_FRESH_AT_CONTEXT_PCT = 70;
 
@@ -288,6 +313,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
+      // A release already waits for this chat's jobs: a later change outside a turn (an idle close) joins it, so the
+      // chat's next turn has one release to cancel and no earlier one outlives the cancel.
+      if (pendingReleases.has(chat.id)) return;
       const endJobs = sessionJobs.get(conv.id);
       if (endJobs === undefined) {
         deps.folderHold.releaseTurn(chat.id);
@@ -298,7 +326,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       pendingReleases.set(chat.id, release);
       void (async () => {
         try {
-          await endJobs();
+          await withDeadline(endJobs(), deps.clock, JOBS_STOP_DEADLINE_MS);
         } catch (error) {
           log.warn(
             { err: error, conversationId: conv.id },

@@ -18,7 +18,7 @@ import { silentLogger } from '../log';
 import { EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { ExploreSessionSpec } from '../sessions';
 import type { ShapePrepared } from '../shape';
-import { chatProfile } from './hooks';
+import { chatProfile, JOBS_STOP_DEADLINE_MS } from './hooks';
 
 // Sessions spec §7.1, trust line §5: a chat's session is the attended explore profile: the builder's
 // setup, the web, Claude Code's own agents, every chat tool on 10db's server, and nothing that writes.
@@ -312,6 +312,45 @@ describe("a chat's hold while its jobs stop", () => {
     expect(free()).toBe(false);
     finish();
     await w.engine.settled(chat.conversationId);
+  });
+
+  it("is kept by the chat's next turn when the session was closed idle before the jobs stopped", async () => {
+    let stopped: () => void = () => undefined;
+    const chat = await endedTurn(
+      new Promise<void>((resolve) => {
+        stopped = resolve;
+      }),
+    );
+    // A second state change outside a turn (the idle close) lands before the first stop settles.
+    w.clock.advance(24 * 60 * 60 * 1000);
+    await waitFor(() =>
+      w.engine.view(chat.conversationId).state === 'idle_cold' ? true : undefined,
+    );
+    let finish: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          finish = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    w.chat.send(chat.conversationId, { text: 'and again', mentions: [], pictures: [] });
+    await started;
+    stopped();
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(free()).toBe(false);
+    finish();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('is given back after the warm session is closed when the jobs never stop', async () => {
+    await endedTurn(new Promise<void>(() => undefined));
+    expect(free()).toBe(false);
+    w.clock.advance(JOBS_STOP_DEADLINE_MS);
+    await waitFor(() => (free() ? true : undefined));
+    expect(jobs.releases).toBe(1);
   });
 
   it('is given back after the warm session is closed when the jobs cannot be stopped', async () => {

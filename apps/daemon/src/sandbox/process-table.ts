@@ -18,6 +18,12 @@ export type ProcessTable = () => Promise<readonly ProcessRow[]>;
 
 const run = promisify(execFile);
 
+/**
+ * How long a reading may take before it is killed and fails: `lsof` can block on a network mount nothing
+ * answers, and a caller waiting on it would never give anything back.
+ */
+const READ_TIMEOUT_MS = 15_000;
+
 const ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S.*?)\s*$/;
 // `lstart` is five words (`Thu Oct 30 12:00:00 2026`), so a program name that follows it can hold spaces.
 const START_THEN_COMM = /^(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})(?:\s+(\S.*))?$/;
@@ -50,6 +56,8 @@ export const systemProcessTable: ProcessTable = async () => {
   const { stdout } = await run('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,lstart=,comm='], {
     env: { LC_ALL: 'C' },
     maxBuffer: 64 * 1024 * 1024,
+    timeout: READ_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   });
   return parseProcessTable(stdout);
 };
@@ -80,11 +88,14 @@ export function parseOpenPaths(output: string): Map<number, string[]> {
 /** Open paths by `lsof`. Throws when `lsof` cannot run; a pid it could not list is left out. */
 export const systemOpenPaths: OpenPathReader = async (pids) => {
   if (pids.length === 0) return new Map();
-  const args = ['-w', '-n', '-P', '-Fn', '-p', pids.join(',')];
+  // `-b` keeps it from calling into the kernel where that could block on an unreachable mount.
+  const args = ['-w', '-b', '-n', '-P', '-Fn', '-p', pids.join(',')];
   try {
     const { stdout } = await run('/usr/sbin/lsof', args, {
       env: { LC_ALL: 'C' },
       maxBuffer: 16 * 1024 * 1024,
+      timeout: READ_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
     return parseOpenPaths(stdout);
   } catch (error) {
