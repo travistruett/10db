@@ -15,6 +15,21 @@ describe('tabState', () => {
       want: TabState.NeedsYou,
     },
     {
+      name: 'taken_over is in your terminal',
+      input: { ...base, state: 'taken_over' },
+      want: TabState.InTerminal,
+    },
+    {
+      name: 'a card wins over taken_over',
+      input: { ...base, state: 'taken_over', openCards: 1 },
+      want: TabState.NeedsYou,
+    },
+    {
+      name: 'taken_over wins over a reply not yet seen',
+      input: { ...base, state: 'taken_over', lastReplyAt: '2026-11-14T10:00:00.000Z' },
+      want: TabState.InTerminal,
+    },
+    {
       name: 'a card wins over running',
       input: { ...base, state: 'running', openCards: 1 },
       want: TabState.NeedsYou,
@@ -89,6 +104,7 @@ describe('tabWords', () => {
         mark: 'dot_yellow',
         ring: 'yellow',
         bold: false,
+        dim: false,
       },
     },
     {
@@ -98,6 +114,7 @@ describe('tabWords', () => {
         mark: 'alert_red',
         ring: 'red',
         bold: false,
+        dim: false,
       },
     },
     {
@@ -108,17 +125,28 @@ describe('tabWords', () => {
         mark: 'pause_orange',
         ring: null,
         bold: false,
+        dim: false,
       },
     },
     {
       state: TabState.Working,
-      want: { spoken: 'working', mark: 'dot_blue', ring: null, bold: false },
+      want: { spoken: 'working', mark: 'dot_blue', ring: null, bold: false, dim: false },
+    },
+    {
+      state: TabState.InTerminal,
+      want: {
+        spoken: 'in your terminal',
+        mark: 'terminal_dim',
+        ring: null,
+        bold: false,
+        dim: true,
+      },
     },
     {
       state: TabState.NewReply,
-      want: { spoken: 'new reply', mark: null, ring: null, bold: true },
+      want: { spoken: 'new reply', mark: null, ring: null, bold: true, dim: false },
     },
-    { state: TabState.Idle, want: { spoken: '', mark: null, ring: null, bold: false } },
+    { state: TabState.Idle, want: { spoken: '', mark: null, ring: null, bold: false, dim: false } },
   ];
   it.each(rows)('$state', ({ state, detail, want }) => {
     expect(tabWords(state, detail)).toEqual(want);

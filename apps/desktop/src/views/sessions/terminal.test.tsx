@@ -182,6 +182,13 @@ describe('a chat in the builder’s terminal', () => {
     expect(taken.handedBack).toHaveLength(1);
   });
 
+  it('the tab says in your terminal', async () => {
+    inTerminal();
+    const tab = await screen.findByRole('tab');
+    expect(tab.getAttribute('aria-label')).toMatch(/, in your terminal$/);
+    expect(tab.getAttribute('data-state')).toBe('in_terminal');
+  });
+
   it('Copy Command asks the daemon for the command and copies it', async () => {
     const { taken } = inTerminal();
     fireEvent.click(await screen.findByRole('button', { name: 'Copy Command' }));
