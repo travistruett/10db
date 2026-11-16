@@ -2512,7 +2512,7 @@ describe('the guard socket', () => {
       }
       expect(calls).toMatchObject([
         {
-          id: 'exec-1',
+          parentId: 'exec-1',
           kind: 'command',
           command: 'vercel deploy --prod',
           status: 'denied',

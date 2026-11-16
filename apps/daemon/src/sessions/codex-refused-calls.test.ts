@@ -51,6 +51,30 @@ describe('refusedToolCalls', () => {
     );
   });
 
+  it('shows each refused call of a code-mode script as its own call, part of that script', () => {
+    const hooks = ['vercel deploy --prod', 'vercel deploy --prod --force'].map((command) => ({
+      tool_name: 'Bash',
+      tool_input: { command },
+      tool_use_id: 'exec-7',
+      cwd: '/w',
+    }));
+    const calls = hooks.flatMap((hook) => refusedToolCalls(hook, judged, AT));
+    expect(calls).toHaveLength(2);
+    expect(new Set(calls.map((call) => call.id)).size).toBe(2);
+    for (const call of calls) {
+      expect(call.id.startsWith('exec-7')).toBe(true);
+      expect(call).toMatchObject({
+        parentId: 'exec-7',
+        status: 'denied',
+        deniedBy: 'judge',
+        limit: 'writes_live',
+      });
+      expect(call.title).toMatch(/^In a code-mode script: /);
+      expect(call.refusal).toContain('inside a code-mode script');
+      expect(call.refusal).toContain(judged.reason);
+    }
+  });
+
   it.each([
     ['a call with no id', { tool_name: 'Bash', tool_input: { command: 'ls' } }],
     ['a tool 10db does not read', { tool_name: 'view_image', tool_input: {}, tool_use_id: 'i' }],

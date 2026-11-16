@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ToolCallView } from '@10db/contracts';
 import type { ClaudeDenial } from './claude-tool-calls';
 import { guardCalls, type HookInput } from './codex-guard';
@@ -11,6 +12,33 @@ import { PatchHunk } from '../trust';
  * does not read gives none.
  */
 export function refusedToolCalls(
+  hook: HookInput,
+  denial: ClaudeDenial,
+  atMs: number,
+): readonly ToolCallView[] {
+  const calls = refusedCallsOf(hook, denial, atMs);
+  const id = hook.tool_use_id;
+  if (!id?.startsWith(CODE_MODE_ITEM)) return calls;
+  const key = createHash('sha256')
+    .update(JSON.stringify([hook.tool_name, hook.tool_input]))
+    .digest('hex')
+    .slice(0, 8);
+  return calls.map((call) => ({
+    ...call,
+    id: `${call.id}#${key}`,
+    parentId: id,
+    title: `${IN_SCRIPT}: ${call.title}`.slice(0, TITLE_MAX),
+    refusal: call.refusal === null ? null : `Refused inside a code-mode script. ${call.refusal}`,
+  }));
+}
+
+/** The prefix of the item id Codex gives a code-mode script, whose nested calls all carry it. */
+const CODE_MODE_ITEM = 'exec-';
+const IN_SCRIPT = 'In a code-mode script';
+/** The longest title a view keeps. */
+const TITLE_MAX = 120;
+
+function refusedCallsOf(
   hook: HookInput,
   denial: ClaudeDenial,
   atMs: number,
