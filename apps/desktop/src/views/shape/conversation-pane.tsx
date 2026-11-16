@@ -31,7 +31,7 @@ import {
 } from '../../daemon/shape-queries';
 import { formatTokens } from '../factory/format-tokens';
 import { AgentsLine } from './agents-line';
-import { Composer } from './composer';
+import { PlanComposer } from './plan-composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { PlanModelMenu } from './plan-model-menu';
@@ -329,7 +329,7 @@ export function ConversationPane({
           quits, this runs.
         </Text>
       ) : null}
-      <Composer
+      <PlanComposer
         modelControl={
           view === undefined ? null : (
             <>

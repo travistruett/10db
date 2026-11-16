@@ -26,18 +26,6 @@ export function keepBoth(typed: string, failed: string): string {
   return `${failed}\n\n${typed}`;
 }
 
-/**
- * What the input holds once the send of `sent` succeeds: nothing when it is just that text, and
- * otherwise the text with the sent part taken off the end, where `keepBoth` puts what was typed
- * during the send. An input edited into something else stays as it stands.
- */
-export function withoutSent(typed: string, sent: string): string {
-  const text = typed.trim();
-  if (text === sent) return '';
-  const tail = `\n\n${sent}`;
-  return text.endsWith(tail) ? text.slice(0, -tail.length) : typed;
-}
-
 const waiting = new Map<ShapeId, LateOutcome>();
 const listeners = new Set<() => void>();
 

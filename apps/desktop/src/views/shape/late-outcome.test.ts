@@ -1,7 +1,7 @@
 import { mintId } from '@10db/contracts';
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { leaveLate, takeLate, useLate, withoutSent } from './late-outcome';
+import { leaveLate, takeLate, useLate } from './late-outcome';
 
 describe('what waits for a conversation’s input', () => {
   it.each([
@@ -28,18 +28,6 @@ describe('what waits for a conversation’s input', () => {
     expect(result.current?.draft).toBe(want);
     expect(result.current?.failure).toBe('The daemon is restarting');
     takeLate(id);
-  });
-
-  it.each([
-    { name: 'only the sent text', typed: ' sent ', want: '' },
-    { name: 'a restored text ahead of the sent text', typed: 'failed\n\nsent', want: 'failed' },
-    {
-      name: 'an edit that no longer holds the sent text',
-      typed: 'sent, then more',
-      want: 'sent, then more',
-    },
-  ])('leaves $name once a send succeeds', ({ typed, want }) => {
-    expect(withoutSent(typed, 'sent')).toBe(want);
   });
 
   it('keeps a waiting draft when what comes next has none', () => {

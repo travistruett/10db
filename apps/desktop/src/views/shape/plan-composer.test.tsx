@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { cssVariablesResolver, theme } from '../../theme';
-import { Composer } from './composer';
+import { PlanComposer } from './plan-composer';
 import type { LateOutcome } from './late-outcome';
 
 const LATE_FAILURE = 'The daemon is restarting';
@@ -24,7 +24,7 @@ function mount(
       setLate({ refused: [], failure, draft });
     };
     return (
-      <Composer
+      <PlanComposer
         firstRun={false}
         answering={false}
         agentLabel={agentLabel}
