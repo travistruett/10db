@@ -4487,7 +4487,7 @@ describe('permission broker in a pass', () => {
   });
 
   /** A pass's broker over a real repository, running what the builder allows as the runner does. */
-  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string) {
+  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string, limits?: LimitNotes) {
     const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' };
     const home = join(roots, 'home');
     const gitDirs = createGit();
@@ -4514,6 +4514,7 @@ describe('permission broker in a pass', () => {
         sessionId: mintId('Session'),
         signal,
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        ...(limits === undefined ? {} : { limits }),
         passGit: {
           baseBranch: 'main',
           run: async (call) =>
@@ -4578,6 +4579,25 @@ describe('permission broker in a pass', () => {
       expect(execFileSync('/bin/sh', ['-c', result], { encoding: 'utf8' })).toContain(
         'Add the page',
       );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("a pass-git run 10db's judge noted at a limit gets the one pass-git card and no second", async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const limits = createLimitNotes();
+      limits.note('t1', { limit: 'writes_live', reason: "10db's judge: Writing To Live Systems" });
+      const { decide } = passBroker(ws, repo.path, limits);
+      const decision = decide(bash('git commit --allow-empty -m x'));
+      const item = card();
+      expect(item.title).toBe('Allow git commit?');
+      inbox.answer(item.id, { choice: 'allow_once' });
+      await decision;
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      expect(limits.take('t1')).toBeUndefined();
     } finally {
       repo.cleanup();
     }
