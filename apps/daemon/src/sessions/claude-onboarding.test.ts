@@ -1,5 +1,5 @@
 import {
-  existsSync,
+  readdirSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -59,6 +59,16 @@ describe('markOnboarded', () => {
     });
   });
 
+  it('keeps a folder the builder declined declined, and marks onboarding', async () => {
+    const { configDir, cwd, file } = world();
+    writeFileSync(file, JSON.stringify({ projects: { [cwd]: { hasTrustDialogAccepted: false } } }));
+    await markOnboarded(configDir, cwd);
+    expect(read(file)).toEqual({
+      hasCompletedOnboarding: true,
+      projects: { [cwd]: { hasTrustDialogAccepted: false } },
+    });
+  });
+
   it('creates a missing file with mode 600', async () => {
     const { configDir, cwd, file } = world();
     await markOnboarded(configDir, cwd);
@@ -98,7 +108,7 @@ describe('markOnboarded', () => {
     symlinkSync(target, file);
     await expect(markOnboarded(configDir, cwd)).rejects.toBeInstanceOf(TakeoverRefusedError);
     expect(readFileSync(target, 'utf8')).toBe('{"keep":true}');
-    expect(existsSync(`${file}.tmp`)).toBe(false);
+    expect(readdirSync(configDir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('refuses a file that is not JSON, leaving it as it is', async () => {

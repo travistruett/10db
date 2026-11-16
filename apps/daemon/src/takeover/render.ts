@@ -17,7 +17,10 @@ const HAND_BACK_REMINDER = 'Back in 10db, click Hand Back.';
 export interface RenderedTakeover {
   /** A script that deletes itself first, for Terminal and iTerm to open. */
   readonly script: string;
-  /** The same commands as one line a shell runs, leaving nothing exported in the builder's shell. */
+  /**
+   * The same commands as one line for zsh or bash, leaving nothing exported in the builder's shell. Not for fish,
+   * which reads a backslash inside single quotes differently from a value that holds a quote.
+   */
   readonly line: string;
 }
 

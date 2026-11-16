@@ -669,6 +669,10 @@ describe('a takeover launch', () => {
     for (const name of SECRET_VARIABLES) expect(launch.set).not.toHaveProperty(name);
     const owned = [...Object.keys(launch.set), ...launch.keychain.map((k) => k.variable)];
     for (const name of owned) expect(launch.unset).not.toContain(name);
+    // Every billing switch the account doesn't own is dropped from the builder's shell.
+    expect(launch.unset).toEqual(
+      expect.arrayContaining(BILLING_SWITCH_VARS.filter((name) => !owned.includes(name))),
+    );
     expect(JSON.stringify(launch)).not.toContain(SECRET);
   });
 

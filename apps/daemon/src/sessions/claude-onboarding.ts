@@ -38,16 +38,21 @@ function parse(text: string | null): ClaudeConfig {
   }
 }
 
+/** Whether the builder has already answered Claude Code's trust question for the folder, either way. */
+const answered = (config: ClaudeConfig, folder: string): boolean =>
+  config.projects?.[folder]?.hasTrustDialogAccepted !== undefined;
+
 /** Whether Claude Code needs nothing more recorded for these folders. */
 const marked = (config: ClaudeConfig, folders: readonly string[]): boolean =>
-  config.hasCompletedOnboarding === true &&
-  folders.every((folder) => config.projects?.[folder]?.hasTrustDialogAccepted === true);
+  config.hasCompletedOnboarding === true && folders.every((folder) => answered(config, folder));
 
 /** `config` with onboarding done and each folder trusted, every other key kept. */
 function withMarks(config: ClaudeConfig, folders: readonly string[]): ClaudeConfig {
   const projects = { ...config.projects };
+  // A folder the builder declined stays declined: the terminal asks them again.
   for (const folder of folders)
-    projects[folder] = { ...projects[folder], hasTrustDialogAccepted: true };
+    if (!answered(config, folder))
+      projects[folder] = { ...projects[folder], hasTrustDialogAccepted: true };
   return { ...config, hasCompletedOnboarding: true, projects };
 }
 

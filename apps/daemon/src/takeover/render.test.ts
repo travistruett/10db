@@ -188,6 +188,7 @@ describe('run under /bin/sh', () => {
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'm',
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'm',
           TENDB_DATA_DIR: '/d',
+          TENDB_MCP_TOKEN_0_0: 'tok-canary',
           EDITOR_CHOICE: 'vim',
         },
       );
@@ -199,6 +200,7 @@ describe('run under /bin/sh', () => {
         'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'TENDB_DATA_DIR',
+        'TENDB_MCP_TOKEN_0_0',
       ])
         expect(names).not.toContain(gone);
       expect(names).toContain('EDITOR_CHOICE');
