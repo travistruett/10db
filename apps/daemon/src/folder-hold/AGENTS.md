@@ -12,3 +12,8 @@ lane's start can't interleave.
   `takeTurn` shares with other chats and takeovers and returns the limits a closed pass puts on the folder git tools;
   `reserveGit` is what 10db's own git work takes before it moves HEAD.
 - Every change of the memory entries emits `FolderHoldChanged` for the project.
+- `reserveGitWhenFree` is a handover: the wake (`flushFree`) reserves the git token for the oldest waiting entry
+  that nothing keeps out and resolves with it, so no take or start runs between the wake and the reservation. Every
+  wait takes its delivery job's signal. A token handed over in the same tick as an abort is released before the
+  call rejects, so an abort leaves no git holder. A caller wraps everything it does after the await, its re-checks
+  included, in `try { … } finally { releaseGit(token) }`, so a throw never leaves an unowned `git_work` entry.
