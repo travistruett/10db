@@ -1895,7 +1895,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   answerPassCards = (item, answer) => {
-    answerPassCard(passWork, item, answer);
+    answerPassCard({ ...passWork, folderHold }, item, answer);
     answerPassMoveCard(delivery, item, answer);
     void answerMoveToCopy(passMoves, item, answer);
   };

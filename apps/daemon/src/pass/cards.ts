@@ -1,7 +1,14 @@
-import { passHoldsFolder, PassId, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
+import {
+  passHoldsFolder,
+  PassId,
+  type InboxAnswer,
+  type PassDto,
+  type InboxItemDto,
+} from '@10db/contracts';
 import { findPass, getBatch, getPass, getProject } from '@10db/db';
 import { z } from 'zod';
-import { jobKey, JobQueue } from '../delivery';
+import { jobKey, JobQueue, reserveGitNaming } from '../delivery';
+import type { FolderHold } from '../folder-hold';
 import { GitError, type SwitchBack } from '../git';
 import {
   PASS_CARD_DETAIL,
@@ -14,6 +21,9 @@ import {
 } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
 import { abandonLeftFiles, moveToLabel, raiseAbandonCard, withdrawAbandonCard } from './abandon';
+
+/** What a pass card's answer needs: its work's deps, and the hold its switch of Your folder's branch reserves. */
+export type PassCardDeps = PassWorkDeps & { readonly folderHold: FolderHold };
 
 const PassCardKindSchema = z.enum(PassCardKind);
 
@@ -36,7 +46,7 @@ function refusal(outcome: Exclude<SwitchBack, { kind: 'switched' }>): string {
 }
 
 /** The folder card's answer: the built switch back to the pass's branch. */
-async function switchToPass(deps: PassWorkDeps, passId: PassId, choice: string): Promise<void> {
+async function switchToPass(deps: PassCardDeps, passId: PassId, choice: string): Promise<void> {
   const db = deps.state.db;
   const pass = getPass(db, passId);
   if (!passHoldsFolder(pass.state)) {
@@ -52,7 +62,7 @@ async function switchToPass(deps: PassWorkDeps, passId: PassId, choice: string):
     return;
   }
   if (on !== branch) {
-    const why = await switchFolder(deps, repo, on, branch, refusal({ kind: 'gone' }));
+    const why = await switchFolder(deps, pass, repo, on, branch, refusal({ kind: 'gone' }));
     if (why !== null) {
       raiseFolderCard(deps, pass, on, why);
       return;
@@ -62,7 +72,7 @@ async function switchToPass(deps: PassWorkDeps, passId: PassId, choice: string):
 }
 
 /** The Abandon card's answer: the built switch from the pass's branch to the one it came from. */
-async function moveHome(deps: PassWorkDeps, passId: PassId, choice: string): Promise<void> {
+async function moveHome(deps: PassCardDeps, passId: PassId, choice: string): Promise<void> {
   const db = deps.state.db;
   const pass = getPass(db, passId);
   if (choice !== moveToLabel(pass.returnBranch)) return;
@@ -79,6 +89,7 @@ async function moveHome(deps: PassWorkDeps, passId: PassId, choice: string): Pro
   if (on !== pass.returnBranch) {
     const why = await switchFolder(
       deps,
+      pass,
       repo,
       on,
       pass.returnBranch,
@@ -97,7 +108,8 @@ async function moveHome(deps: PassWorkDeps, passId: PassId, choice: string): Pro
  * says why when the branch cannot be read.
  */
 async function switchFolder(
-  deps: PassWorkDeps,
+  deps: PassCardDeps,
+  pass: PassDto,
   repo: string,
   from: string,
   branch: string,
@@ -108,8 +120,18 @@ async function switchFolder(
     throw error;
   });
   if (sha === null) return gone;
-  const outcome = await deps.git.switchBack(repo, from, { branch, sha }, { keepChanges: true });
-  return outcome.kind === 'switched' ? null : refusal(outcome);
+  // The switch moves Your folder's branch, so it waits for a chat's turn, which may be editing there.
+  const token = await reserveGitNaming(deps, {
+    projectId: pass.projectId,
+    batchId: pass.batchId,
+    what: `moving Your folder to \`${branch}\``,
+  });
+  try {
+    const outcome = await deps.git.switchBack(repo, from, { branch, sha }, { keepChanges: true });
+    return outcome.kind === 'switched' ? null : refusal(outcome);
+  } finally {
+    deps.folderHold.releaseGit(token);
+  }
 }
 
 /**
@@ -119,7 +141,7 @@ async function switchFolder(
  * the built switch, keeping uncommitted changes it does not write; a refusal, or a branch that cannot
  * be read, raises the card again with the reason.
  */
-export function answerPassCard(deps: PassWorkDeps, item: InboxItemDto, answer: InboxAnswer): void {
+export function answerPassCard(deps: PassCardDeps, item: InboxItemDto, answer: InboxAnswer): void {
   // The detail is JSON read back from the database: a boundary, so parse it.
   const passId = PassId.safeParse(item.detail?.[PASS_CARD_DETAIL]);
   const kind = PassCardKindSchema.safeParse(item.detail?.[PASS_CARD_KIND]);
