@@ -13,6 +13,8 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  FolderAsker,
+  FolderHolderKind,
   mintId,
   WHOLE_PROJECT_PAGE,
   Rigor,
@@ -45,10 +47,12 @@ import {
 } from '@10db/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { waitFor } from '../../test/fixtures';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { silentLogger } from '../log';
 import { PASS_HOLDS_FOLDER_REASON } from '../placement';
 import { systemProcesses } from '../recovery';
+import { FolderWaitCancelledError } from '../folder-hold';
 import {
   openPass,
   passBranchName,
@@ -761,26 +765,27 @@ describe('other work in Your folder while a pass is open (W9)', () => {
   });
 });
 
+/** A chat of the project with a conversation, as Do It reads it. */
+function chat() {
+  return h.store.write((ctx) => {
+    const id = mintId('Chat');
+    const conv = insertConversation(ctx, {
+      projectId: h.project.id,
+      owner: { kind: ConversationOwnerKind.Chat, id },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.IdleCold,
+    });
+    return insertChat(ctx, {
+      id,
+      projectId: h.project.id,
+      conversationId: conv.id,
+      title: 'A chat',
+      tabPosition: 0,
+    });
+  }).value;
+}
+
 describe('a pass of one', () => {
-  /** A chat of the project with a conversation, as Do It reads it. */
-  function chat() {
-    return h.store.write((ctx) => {
-      const id = mintId('Chat');
-      const conv = insertConversation(ctx, {
-        projectId: h.project.id,
-        owner: { kind: ConversationOwnerKind.Chat, id },
-        profile: ConversationProfile.Explore,
-        state: ConversationState.IdleCold,
-      });
-      return insertChat(ctx, {
-        id,
-        projectId: h.project.id,
-        conversationId: conv.id,
-        title: 'A chat',
-        tabPosition: 0,
-      });
-    }).value;
-  }
   const wholeOf = (chatId: ReturnType<typeof chat>['id']) => ({
     projectId: h.project.id,
     name: 'Knock it out',
@@ -866,5 +871,91 @@ describe('a pass of one', () => {
     await expect(open([people])).rejects.toThrow(/middle of/);
 
     expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
+  });
+});
+
+describe('a pass that waits to open', () => {
+  const people = (): TaskDto => page('People: UI work', ['people']);
+  /** A chat's turn holds Your folder, as an attended turn does. */
+  function turnHolds(): { release: () => void } {
+    const chatId = chat().id;
+    expect(h.ctx.folderHold.takeTurn(h.project.id, chatId).taken).toBe(true);
+    return {
+      release: () => {
+        h.ctx.folderHold.releaseTurn(chatId);
+      },
+    };
+  }
+  /** The open's job has reached the folder and waits for it. */
+  const waitingToOpen = () => waitFor(() => h.ctx.folderHold.opening(h.project.id) !== null);
+  /** What a lane's first start waits for: the open's own entry is among it. */
+  const laneWaitsForOpen = () =>
+    h.ctx.folderHold
+      .blockers(h.project.id, { kind: FolderAsker.LaneStart })
+      .some((b) => b.holder.kind === FolderHolderKind.GitWork);
+
+  it('opens once the chat turn that held the folder ends, and a lane that starts meanwhile waits for it', async () => {
+    harness();
+    const turn = turnHolds();
+    const controller = new AbortController();
+    const opened = open([people()], { wait: { signal: controller.signal } });
+    let settled = false;
+    void opened.then(() => (settled = true));
+    await waitingToOpen();
+    expect(settled).toBe(false);
+    expect(h.ctx.folderHold.opening(h.project.id)).toBe('Polish pages');
+    expect(laneWaitsForOpen()).toBe(true);
+
+    turn.release();
+    const result = await opened;
+
+    expect(result.pass).toMatchObject({ state: 'OPEN' });
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(
+      passBranchName('Polish pages', result.pass.id),
+    );
+  });
+
+  it.each(['Cancel', 'the job stopping'] as const)(
+    'rejects on %s and leaves no branch and no git holder',
+    async (cause) => {
+      harness();
+      const turn = turnHolds();
+      const controller = new AbortController();
+      const refs = tenDbRefs();
+      const opened = open([people()], { wait: { signal: controller.signal } });
+      const rejected = expect(opened).rejects.toBeInstanceOf(FolderWaitCancelledError);
+      await waitingToOpen();
+
+      if (cause === 'Cancel') controller.abort();
+      else await h.jobs.stop();
+      await rejected;
+      turn.release();
+
+      expect(tenDbRefs()).toBe(refs);
+      expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
+      expect(h.ctx.folderHold.opening(h.project.id)).toBeNull();
+      const again = h.ctx.folderHold.reserveGit(h.project.id, 'after');
+      expect(again.reserved).toBe(true);
+    },
+  );
+
+  it('refuses after its wait when a start took the queue meanwhile, and gives its token back', async () => {
+    harness();
+    const turn = turnHolds();
+    const controller = new AbortController();
+    const task = people();
+    const opened = open([task], { wait: { signal: controller.signal } });
+    const rejected = expect(opened).rejects.toThrow(/still cutting/);
+    await waitingToOpen();
+    // An ordinary start writes its batch while the open waits.
+    h.starter.startTask(h.addTask('Ordinary', { areas: ['src'] }).id);
+
+    turn.release();
+    await rejected;
+    await h.jobs.idle();
+
+    expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
+    const again = h.ctx.folderHold.reserveGit(h.project.id, 'after');
+    expect(again.reserved).toBe(true);
   });
 });

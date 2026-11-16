@@ -5,6 +5,7 @@ import {
   ClaimKind,
   ConflictError,
   FolderAsker,
+  FolderHolderKind,
   InvalidError,
   mintId,
   PASS_PAGE_CAP_DEFAULT,
@@ -88,6 +89,12 @@ export interface PassOpenInput {
     readonly chatId: ChatId;
     readonly acceptanceCriteria?: readonly string[];
   };
+  /**
+   * Waits for chats' turns to end instead of refusing while they hold Your folder, until `signal` aborts.
+   * Lanes' first starts wait for the open meanwhile, so it can't be starved. Anything else that holds the
+   * folder still refuses at once.
+   */
+  readonly wait?: { readonly signal: AbortSignal };
 }
 
 /** What a put-back of a task's saved work did: the files it wrote, and those it left and named. */
@@ -259,31 +266,60 @@ export async function openPass(
   // The chat that asks to open is stopped before the open, so its own turn and wait are not in the way.
   const inUse = ctx.folderHold
     .blockers(project.id, { kind: FolderAsker.GitWork })
-    .filter((b) => b.holder.chatId !== whole?.chatId);
+    .filter((b) => b.holder.chatId !== whole?.chatId)
+    .filter((b) => input.wait === undefined || b.holder.kind !== FolderHolderKind.ChatTurn);
   if (inUse.length > 0) throw new ConflictError(folderInUse(inUse));
   const id = mintId('Pass');
   const branch = passBranchName(input.name, id);
   const dirtRef = passDirtRef(id);
   return new Promise<PassOpened>((resolve, reject) => {
-    ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
-      // 10db never moves Your folder's branch under a chat's turn: the open's git calls hold the folder.
-      const reserved = ctx.folderHold.reserveGit(project.id, 'opening a pass in Your folder');
-      if (!reserved.reserved) {
-        reject(new ConflictError(folderInUse(reserved.blockers)));
-        return;
-      }
-      let opened: PassOpened;
-      try {
-        opened = await ctx.git.operation(() => open());
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error(String(error)));
-        return;
-      } finally {
-        ctx.folderHold.releaseGit(reserved.token);
-      }
-      for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
-      resolve(opened);
-    });
+    ctx.jobs.run(
+      jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut),
+      async (jobSignal) => {
+        // 10db never moves Your folder's branch under a chat's turn: the open's git calls hold the folder.
+        const what = 'opening a pass in Your folder';
+        let token: symbol;
+        if (input.wait) {
+          try {
+            token = await ctx.folderHold.reserveGitWhenFree(project.id, what, {
+              signal: AbortSignal.any([jobSignal, input.wait.signal]),
+              lanesWait: { passName: input.name },
+            });
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+        } else {
+          const reserved = ctx.folderHold.reserveGit(project.id, what);
+          if (!reserved.reserved) {
+            reject(new ConflictError(folderInUse(reserved.blockers)));
+            return;
+          }
+          token = reserved.token;
+        }
+        let opened: PassOpened;
+        try {
+          // What held at the call may not hold after the wait: a start, a batch or a pass slipped in.
+          if (input.wait)
+            refuseOpen(
+              db,
+              getProject(db, input.projectId),
+              input.taskIds.map((id) => getTask(db, id)),
+              pageCap,
+              newPages,
+              whole !== undefined,
+            );
+          opened = await ctx.git.operation(() => open());
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        } finally {
+          ctx.folderHold.releaseGit(token);
+        }
+        for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
+        resolve(opened);
+      },
+    );
   });
 
   async function open(): Promise<PassOpened> {
