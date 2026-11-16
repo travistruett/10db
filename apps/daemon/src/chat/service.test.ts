@@ -2,6 +2,7 @@ import { AccountKind, ConflictError, ConversationState, InvalidError } from '@10
 import { getConversation, listItems, patchConversation } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { waitFor } from '../../test/fixtures';
 import { firstMessageTitle } from './service';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon, on a real store and the explore engine.
@@ -120,5 +121,36 @@ describe('the chat service', () => {
     },
   ])('titles "$text" as "$title"', ({ text, title }) => {
     expect(firstMessageTitle(text)).toBe(title);
+  });
+});
+
+describe('a chat view: background tasks', () => {
+  it('lists what the open session runs in the background, and nothing once it is stopped', async () => {
+    w = chatWorld({
+      book: {
+        'Chat: build it': [
+          [
+            { do: 'consume' },
+            { do: 'background', tasks: ['npm run build', 'tsc --watch'] },
+            { do: 'await_signal', name: 'hold' },
+            { do: 'turn_complete' },
+          ],
+        ],
+      },
+    });
+    const chat = w.open();
+    expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
+    w.chat.send(chat.conversationId, { text: 'build it', mentions: [], pictures: [] });
+    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 2);
+    expect(w.chat.get(chat.id).conversation.backgroundTasks.map((t) => t.description)).toEqual([
+      'npm run build',
+      'tsc --watch',
+    ]);
+    expect(w.events.some((e) => e.type === 'conversation.state' && e.data['backgroundTasks'])).toBe(
+      true,
+    );
+    w.adapter.signal('hold');
+    await w.engine.retire(chat.conversationId);
+    expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
   });
 });

@@ -8,7 +8,12 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
-import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
+import {
+  builderItem,
+  CLAUDE_CAPABILITIES,
+  systemItem,
+  toolItem,
+} from '../../test/conversation-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
 import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
@@ -405,5 +410,63 @@ describe('ChatTab: cards, held-back calls and states', () => {
     await waitFor(() => {
       expect(chip.textContent).toBe('Opus 5 Low');
     });
+  });
+});
+
+describe('ChatTab: the todo list', () => {
+  it('shows the latest list with each step and its status, and folds once every step is done', async () => {
+    openChat({}, (chat) => [
+      systemItem(chat.conversationId, {
+        kind: 'plan',
+        steps: [{ text: 'Old step', status: 'pending' }],
+      }),
+      systemItem(chat.conversationId, {
+        kind: 'plan',
+        steps: [
+          { text: 'Read the login code', status: 'completed' },
+          { text: 'Write the fix', status: 'in_progress' },
+          { text: 'Run the tests', status: 'pending' },
+        ],
+      }),
+    ]);
+    expect(await screen.findByText('Todos · 1 of 3 done')).toBeTruthy();
+    expect(screen.getByLabelText('Read the login code, completed')).toBeTruthy();
+    expect(screen.getByLabelText('Write the fix, in progress')).toBeTruthy();
+    expect(screen.getByLabelText('Run the tests, pending')).toBeTruthy();
+    expect(screen.queryByText('Old step')).toBeNull();
+  });
+
+  it('keeps a finished list folded to its heading', async () => {
+    openChat({}, (chat) => [
+      systemItem(chat.conversationId, {
+        kind: 'plan',
+        steps: [{ text: 'Ship it', status: 'completed' }],
+      }),
+    ]);
+    const heading = await screen.findByText('Todos · 1 of 1 done');
+    expect(heading.closest('button')?.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('ChatTab: background tasks', () => {
+  it('lists what the session runs in the background', async () => {
+    openChat({
+      conversation: {
+        backgroundTasks: [
+          { id: 'a', description: 'npm run build' },
+          { id: 'b', description: 'tsc --watch' },
+        ],
+      },
+    });
+    expect(await screen.findByText('Running in the background · 2')).toBeTruthy();
+    expect(screen.getByText('npm run build')).toBeTruthy();
+    expect(screen.getByText('tsc --watch')).toBeTruthy();
+  });
+
+  it('says what an agent that reports none lacks, and draws no empty panel for one that does', async () => {
+    openChat({
+      conversation: { capabilities: { ...CLAUDE, backgroundTasks: false, label: 'Codex' } },
+    });
+    expect(await screen.findByText('Codex doesn’t report background tasks.')).toBeTruthy();
   });
 });

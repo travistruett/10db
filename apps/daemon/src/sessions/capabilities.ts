@@ -36,6 +36,7 @@ export function claudeCapabilities(
     plan: true,
     reasoning: true,
     subagents: true,
+    backgroundTasks: true,
     webSearch: true,
     modelSwitch: ModelSwitch.NextTurn,
     takeover: true,
@@ -59,6 +60,8 @@ export const codexCapabilities: (kind: AgentAccountKind) => AgentCapabilities = 
   plan: true,
   reasoning: true,
   subagents: false,
+  // app-server reports no background commands for a thread, so a Codex chat has none to list.
+  backgroundTasks: false,
   // Live search runs on OpenAI's servers, so 10db's judge never sees a search or page URL before it is fetched.
   webSearch: true,
   modelSwitch: ModelSwitch.NextTurn,

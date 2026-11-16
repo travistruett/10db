@@ -21,6 +21,7 @@ export const CLAUDE_CAPABILITIES: AgentCapabilitiesDto = {
   plan: false,
   reasoning: true,
   subagents: true,
+  backgroundTasks: true,
   webSearch: true,
   modelSwitch: 'next_turn',
   takeover: true,
@@ -45,6 +46,7 @@ export function conversationDto(
     sendNow: false,
     pausedUntil: null,
     commands: null,
+    backgroundTasks: [],
     ...overrides,
   });
 }
