@@ -1,4 +1,5 @@
-export type GitVerdict = { readonly deny: string } | null;
+/** A refusal; `write` marks a git command that changes the repository, a branch or a remote. */
+export type GitVerdict = { readonly deny: string; readonly write?: true } | null;
 
 /** Verbs that only read. Everything not listed here (and not `branch`) is refused. */
 const READ_ONLY_GIT = new Set([
@@ -68,15 +69,21 @@ export function gitVerdict(words: readonly string[]): GitVerdict {
   if (verb === 'commit') {
     return {
       deny: 'Direct git commit is not allowed. Use the 10db commit tool with explicit paths.',
+      write: true,
     };
   }
   if (verb === 'branch') {
     return args.every((a) => BRANCH_LISTING.has(a))
       ? null
-      : { deny: 'Creating or deleting branches is not allowed in the shared checkout.' };
+      : {
+          deny: 'Creating or deleting branches is not allowed in the shared checkout.',
+          write: true,
+        };
   }
-  if (verb === 'push') return { deny: 'Lanes never push; 10db pushes the work when it ships.' };
+  if (verb === 'push')
+    return { deny: 'Lanes never push; 10db pushes the work when it ships.', write: true };
   return {
     deny: `git ${verb} is not allowed. Only read-only git is allowed; commit through the 10db commit tool.`,
+    write: true,
   };
 }

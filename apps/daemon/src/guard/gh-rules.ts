@@ -1,4 +1,5 @@
-export type GhVerdict = { readonly deny: string } | null;
+/** A refusal; `write` marks a gh command that changes GitHub or gh's own config. */
+export type GhVerdict = { readonly deny: string; readonly write?: true } | null;
 
 /** gh flags that take a value and may come before the command group. */
 const LEADING_VALUE_FLAGS = new Set(['-R', '--repo', '--hostname']);
@@ -94,6 +95,7 @@ export function ghVerdict(words: readonly string[]): GhVerdict {
       ? null
       : {
           deny: `gh api ${method} requests are not allowed; only GET is. A request with -f, -F, --field or --input is a POST unless it says -X GET.`,
+          write: true,
         };
   }
   const reads = READS.get(group);
@@ -108,5 +110,6 @@ export function ghVerdict(words: readonly string[]): GhVerdict {
   const what = reads === undefined ? `gh ${group}` : `gh ${group} ${verb ?? ''}`.trim();
   return {
     deny: `${what} is not allowed in a managed session: 10db opens the pull request when the batch ships, merging stays with the builder, and agents change nothing on GitHub or in gh's config. ${ALLOWED}`,
+    write: true,
   };
 }

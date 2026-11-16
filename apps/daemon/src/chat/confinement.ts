@@ -4,6 +4,7 @@ import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { expandHome } from '../sandbox';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { CHAT_GIT_REFUSAL } from './git-rule';
 
 // Sessions spec §7.1, trust line §5: what a chat's PreToolUse hook settles before the judge sees a
 // call. A chat reads the project and its pictures, runs commands in its read-only sandbox, searches the
@@ -29,7 +30,7 @@ export const CHAT_NO_WEB =
 
 /** What a chat's guard reads of the folder hold at each call: a turn's hold can change between calls. */
 export interface ChatFolder {
-  /** Whether the chat's turn holds Your folder now. */
+  /** Whether the chat's turn holds Your folder now, for this session: an older session of the chat never does. */
   holds(): boolean;
   /** Whether this session was opened able to write Your folder. */
   readonly writable: boolean;
@@ -37,7 +38,7 @@ export interface ChatFolder {
   heldBy(): string;
 }
 
-/** What a chat's agent reads when it calls a tool after its turn gave Your folder back. */
+/** What a chat's agent reads when it calls a tool after its turn gave Your folder back, or from another session. */
 export const CHAT_TURN_ENDED =
   'This turn has ended and given Your folder back, so nothing it started may act.';
 
@@ -104,12 +105,13 @@ export function judgeChatCall(
     toolInput: call.input,
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
-  // A session that can write keeps no call once its turn has given the folder back (a background agent's
-  // or a job's); its turn's end closes it, and this holds until that close lands.
+  // A session that can write keeps no call while its turn doesn't hold the folder (a background agent's
+  // or a job's), however long it stays warm, and none from a session the chat has since replaced.
   if (folder?.writable === true && !folder.holds()) return deny(CHAT_TURN_ENDED);
   if (EDIT_TOOLS.has(call.toolName)) return judgeEdit(call, access, folder);
-  if (READ_TOOLS.has(call.toolName) || call.toolName === 'Bash')
-    return judgeShapeCall(asSession, access);
+  if (READ_TOOLS.has(call.toolName)) return judgeShapeCall(asSession, access);
+  if (call.toolName === 'Bash')
+    return judgeShapeCall(asSession, { ...access, gitWriteRefusal: CHAT_GIT_REFUSAL });
   if (WEB_TOOLS.has(call.toolName))
     return access.judge === JudgeKind.Native
       ? judgeShapeCall(asSession, access)

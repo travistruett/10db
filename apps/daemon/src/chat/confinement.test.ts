@@ -4,7 +4,8 @@ import { JudgeKind } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { fileAccessJudge } from '../sandbox';
-import type { ShapeAccess } from '../shape';
+import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { CHAT_GIT_REFUSAL } from './git-rule';
 import { CHAT_TURN_ENDED, chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
 
 // Sessions spec §7.3: a chat edits only while its turn holds Your folder, on the real path of each file, and
@@ -199,5 +200,74 @@ describe('a chat’s edits', () => {
     expect(judgeChatCall(call, access, folder).decision).toBe('allow');
     held = false;
     expect(judgeChatCall(call, access, folder).decision).toBe('deny');
+  });
+});
+
+// Sessions spec §7.3: a chat's shell never writes git or GitHub; the way is its tools.
+describe("a chat's shell and git", () => {
+  const verdictOf = (command: string) =>
+    judgeChatCall({ toolName: 'Bash', input: { command }, cwd: checkout }, access, holding);
+
+  it.each([
+    'git commit -m x',
+    'git commit --amend --no-edit',
+    'git push origin HEAD',
+    'git push --force',
+    'git -C . push',
+    'git branch topic',
+    'git switch main',
+    'git checkout -b topic',
+    'git merge topic',
+    'git reset --hard',
+    'git add .',
+    'git stash',
+    'git pull',
+    'git tag v1',
+    'git rebase main',
+    'env git push',
+    'command git commit -m x',
+    'sh -c "git commit -am x"',
+    'bash -lc "cd . && git push"',
+    'git status && git commit -m x',
+    'gh pr create --title x --body y',
+    'gh pr merge 12 --squash',
+    'gh api -X POST repos/o/r/issues',
+    'gh api repos/o/r/issues -f title=x',
+    'gh release create v1',
+  ])('refuses %s and names the chat’s tools', (command) => {
+    expect(verdictOf(command)).toEqual({ decision: 'deny', reason: CHAT_GIT_REFUSAL });
+  });
+
+  it.each([
+    'git status',
+    'git diff HEAD~1',
+    'git log --oneline -5',
+    'git show HEAD:src/a.ts',
+    'git branch --show-current',
+    'git status && git diff',
+    'gh pr view 12',
+    'gh api repos/o/r/pulls',
+  ])('lets the read %s run', (command) => {
+    expect(verdictOf(command).decision).toBe('allow');
+  });
+
+  it.each([
+    'git -c core.pager=sh status',
+    'git --git-dir=/x status',
+    'git diff --output=out.txt',
+    'git grep -O sh foo',
+    'gh auth status --show-token',
+  ])('keeps its own words for %s, which is about running a program or a secret', (command) => {
+    const verdict = verdictOf(command);
+    expect(verdict.decision).toBe('deny');
+    expect('reason' in verdict && verdict.reason).not.toBe(CHAT_GIT_REFUSAL);
+  });
+
+  it('leaves Plan’s words alone: only a chat names its tools', () => {
+    const verdict = judgeShapeCall(
+      { toolName: 'Bash', toolInput: { command: 'git commit -m x' } },
+      access,
+    );
+    expect('reason' in verdict && verdict.reason).not.toContain('make_branch');
   });
 });

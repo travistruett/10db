@@ -56,6 +56,8 @@ export interface GuardInput {
    * (tests), meaning `repoPath`.
    */
   readonly cwd?: string;
+  /** What a git or gh command that writes is refused with, in place of the lane's words; a chat's names its tools. */
+  readonly gitWriteRefusal?: string;
   readonly areas: readonly AreaDef[];
   readonly hazards: readonly HazardDef[];
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
@@ -523,11 +525,12 @@ export function redirectionReadings(words: readonly string[]): string[][] {
 }
 
 /** What the git and gh rules refuse about a command line that starts with either program. */
-function wrappedVerdict(line: readonly string[]): string | null {
+function wrappedVerdict(line: readonly string[], writeWords?: string): string | null {
   const [program = ''] = line;
-  if (program === 'git') return gitVerdict(line)?.deny ?? null;
-  if (program === 'gh') return ghVerdict(line)?.deny ?? null;
-  return null;
+  const verdict = program === 'git' ? gitVerdict(line) : program === 'gh' ? ghVerdict(line) : null;
+  if (verdict === null) return null;
+  // A session whose writes go through tools says so in its own words; a refusal about running a program keeps its own.
+  return verdict.write === true && writeWords !== undefined ? writeWords : verdict.deny;
 }
 
 /**
@@ -734,7 +737,7 @@ function judgeShell(
       if (changesDirectory(parseShell(script).segments)) afterCd = true;
     }
     for (const line of [words, ...executableTails(words)]) {
-      const verdict = wrappedVerdict(line);
+      const verdict = wrappedVerdict(line, input.gitWriteRefusal);
       if (verdict) return deny(verdict);
     }
     const refused = fedRefusal(leadingWords(segment.words).command);

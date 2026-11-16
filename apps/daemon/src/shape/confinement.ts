@@ -47,6 +47,8 @@ export const RESEARCH_URL_LIMIT = 2_000;
 
 /** Where a Shape session may read. */
 export interface ShapeAccess {
+  /** What a shell command that writes git or GitHub is refused with, when the session has tools for that. */
+  readonly gitWriteRefusal?: string;
   /** The project's checkout. */
   readonly checkout: string;
   readonly home: string;
@@ -172,6 +174,7 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     hazards: [],
     claims: [],
     readOnly: false,
+    ...(access.gitWriteRefusal === undefined ? {} : { gitWriteRefusal: access.gitWriteRefusal }),
     protectedPaths: commands.protectedPaths,
     fileAccess: commands.fileAccess,
   });
