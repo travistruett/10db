@@ -2,7 +2,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestStore, seedAccount, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { homeOutsideTemp, tempDir, type TempDir } from '../../test/fixtures';
+import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
 import { signInCandidates } from '../accounts';
 import { FakeAdapter } from '../sessions';
@@ -12,7 +12,7 @@ let root: TempDir;
 let home: string;
 
 beforeEach(() => {
-  root = tempDir('trust-services');
+  root = homeOutsideTemp('trust-services');
   home = join(root.path, 'home');
   const plugin = join(home, '.claude/plugins/cache/m/p/1');
   mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
