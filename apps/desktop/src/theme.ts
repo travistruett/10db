@@ -117,8 +117,11 @@ export const theme = createTheme({
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
     NavLink: NavLink.extend({
+      // A row is one line: a label that wrapped beside a count would double the row's height.
+      defaultProps: { noWrap: true },
       styles: (_theme, props) => ({
-        root: { borderRadius: 'var(--mantine-radius-md)' },
+        // Dense rows, as a sidebar of a dozen links reads at a glance.
+        root: { borderRadius: 'var(--mantine-radius-md)', paddingBlock: 5, paddingInline: 10 },
         label: props.active ? { fontWeight: 600 } : {},
       }),
     }),

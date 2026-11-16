@@ -270,7 +270,7 @@ function FullLayout() {
                     />
                   ))}
                 </Stack>
-                <Stack gap={2} mt="lg">
+                <Stack gap={2} mt="md">
                   <Text size="xs" fw={600} c="dimmed" px="sm" pb={4}>
                     Project
                   </Text>
