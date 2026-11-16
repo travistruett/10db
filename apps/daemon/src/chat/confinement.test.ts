@@ -91,6 +91,53 @@ describe('a chat’s edits', () => {
     expect(verdict.decision).toBe('deny');
   });
 
+  it.each([
+    ['MultiEdit', 'file_path'],
+    ['NotebookEdit', 'notebook_path'],
+  ])(
+    'judges %s on its own path field, even when the other field names a safe file',
+    (tool, field) => {
+      const inside = join(checkout, 'src', 'a.ts');
+      const git = join(checkout, '.git', 'config');
+      expect(
+        judgeChatCall({ toolName: tool, input: { [field]: inside } }, access, holding),
+      ).toEqual({
+        decision: 'allow',
+      });
+      const other = field === 'file_path' ? 'notebook_path' : 'file_path';
+      const crafted = { [field]: git, [other]: inside };
+      expect(judgeChatCall({ toolName: tool, input: crafted }, access, holding).decision).toBe(
+        'deny',
+      );
+    },
+  );
+
+  it('names a tool it does not know as none of this chat’s, not as a read-only chat', () => {
+    const verdict = judgeChatCall({ toolName: 'Teleport', input: {} }, access, holding);
+    expect(verdict.decision).toBe('deny');
+    expect(JSON.stringify(verdict)).not.toContain('changes nothing');
+  });
+
+  describe.runIf(process.platform === 'darwin')(
+    'on a file system that folds case and Unicode',
+    () => {
+      it('refuses git state however its name is spelled', () => {
+        for (const rel of [join('.GIT', 'config'), join('.Git', 'hooks', 'pre-commit')])
+          expect(judgeChatCall(edit('Edit', join(checkout, rel)), access, holding).decision).toBe(
+            'deny',
+          );
+      });
+
+      it('allows a file inside the checkout spelled in another case or normalisation', () => {
+        writeFileSync(join(checkout, 'src', 'é.ts'), 'e\n');
+        for (const rel of [join('SRC', 'a.ts'), join('src', 'e\u0301.ts')])
+          expect(judgeChatCall(edit('Edit', join(checkout, rel)), access, holding)).toEqual({
+            decision: 'allow',
+          });
+      });
+    },
+  );
+
   it('reads a home-relative name as Claude Code does, outside the checkout', () => {
     expect(judgeChatCall(edit('Write', '~/x'), access, holding).decision).toBe('deny');
     expect(judgeChatCall(edit('Write', '~'), access, holding).decision).toBe('deny');

@@ -12,7 +12,7 @@ import { judgeShapeCall, type ShapeAccess } from '../shape';
 
 const READ_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob']);
 const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
-const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'NotebookEdit']);
+const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const AGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task']);
 const OWN_PREFIX = 'mcp__10db__';
 const CHAT_TOOLS: ReadonlySet<string> = new Set(Object.values(ChatToolName));
@@ -41,8 +41,11 @@ export const chatFolderInUse = (holder: string): string => `Your folder is in us
 /** The path a file tool names, with `~` read as the home folder and the rest resolved from the call's directory. */
 function editedPath(call: ChatCall, access: ShapeAccess): string | null {
   if (typeof call.input !== 'object' || call.input === null) return null;
-  const named =
-    stringField(call.input, 'file_path') ?? stringField(call.input, 'notebook_path') ?? null;
+  // The field is the tool's own: another field in the same input is never read, as Claude Code reads it.
+  const named = stringField(
+    call.input,
+    call.toolName === 'NotebookEdit' ? 'notebook_path' : 'file_path',
+  );
   if (named === null || named === '') return null;
   return resolve(call.cwd ?? access.checkout, expandHome(named, access.home));
 }
@@ -117,5 +120,5 @@ export function judgeChatCall(
       : deny(`${call.toolName} is not one of this chat's tools.`);
   // A tool of one of the project's approved servers is judged as Plan's are.
   if (call.toolName.startsWith('mcp__')) return judgeShapeCall(asSession, access);
-  return deny(CHAT_WRITES_LATER);
+  return deny(`${call.toolName} is not a tool this chat uses.`);
 }
