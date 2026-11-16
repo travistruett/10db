@@ -1,6 +1,7 @@
 export { exclusion, holderWords, limitsOf } from './exclusion';
 export {
   createFolderHold,
+  FolderWaitCancelledError,
   type FolderAskerInput,
   type FolderBlocker,
   type FolderHold,

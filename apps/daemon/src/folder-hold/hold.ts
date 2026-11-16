@@ -14,6 +14,14 @@ import { folderLanes, getChat, passHoldingFolder, takenOverChats } from '@10db/d
 import type { EventBus, StateStore } from '../events';
 import { exclusion, limitsOf } from './exclusion';
 
+/** What `reserveGitWhenFree` rejects with when its wait is cancelled. */
+export class FolderWaitCancelledError extends Error {
+  override readonly name = 'FolderWaitCancelledError';
+  constructor() {
+    super('the wait for Your folder was cancelled');
+  }
+}
+
 /** Who is asking: a lane's first start, 10db's own git work, or an attended chat's turn or takeover. */
 export type FolderAskerInput =
   | { readonly kind: typeof FolderAsker.LaneStart }
@@ -306,21 +314,24 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     waiting: (chatId) => waiters.some((w) => w.chatId === chatId),
     async reserveGitWhenFree(projectId, what, signal) {
       for (;;) {
-        if (signal?.aborted === true) throw new Error('the wait for Your folder was cancelled');
+        if (signal?.aborted === true) throw new FolderWaitCancelledError();
         const reserved = reserveGit(projectId, what);
         if (reserved.reserved) return reserved.token;
         await new Promise<void>((resolve, reject) => {
-          const entry = { projectId, wake: resolve };
-          freeing.push(entry);
-          signal?.addEventListener(
-            'abort',
-            () => {
-              const at = freeing.indexOf(entry);
-              if (at >= 0) freeing.splice(at, 1);
-              reject(new Error('the wait for Your folder was cancelled'));
+          const onAbort = (): void => {
+            const at = freeing.indexOf(entry);
+            if (at >= 0) freeing.splice(at, 1);
+            reject(new FolderWaitCancelledError());
+          };
+          const entry = {
+            projectId,
+            wake: () => {
+              signal?.removeEventListener('abort', onAbort);
+              resolve();
             },
-            { once: true },
-          );
+          };
+          freeing.push(entry);
+          signal?.addEventListener('abort', onAbort, { once: true });
         });
       }
     },

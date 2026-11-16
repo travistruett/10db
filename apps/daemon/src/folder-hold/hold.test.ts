@@ -23,11 +23,17 @@ import {
   seedProject,
   type Store,
 } from '@10db/db';
+import { getEventListeners } from 'node:events';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../events';
 import { holderWords } from './exclusion';
-import { createFolderHold, type FolderAskerInput, type FolderHold } from './hold';
+import {
+  createFolderHold,
+  FolderWaitCancelledError,
+  type FolderAskerInput,
+  type FolderHold,
+} from './hold';
 
 // Sessions spec §7.3: one answer to who has Your folder, from rows for a lane, a pass and a takeover and from
 // memory for a chat's turn and 10db's git work, on a real store and bus.
@@ -386,5 +392,33 @@ describe('waiting', () => {
     hold.cancelWait(b);
     expect(hold.holdsTurn(b)).toBe(false);
     hold.cancelWait(b);
+  });
+});
+
+describe('10db’s git work waiting for the folder', () => {
+  it('rejects with a typed error when its signal aborts, before or during the wait', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const during = new AbortController();
+    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', during.signal);
+    during.abort();
+    await expect(waiting).rejects.toMatchObject({ name: 'FolderWaitCancelledError' });
+    const before = AbortSignal.abort();
+    await expect(
+      hold.reserveGitWhenFree(project.id, 'cutting a branch', before),
+    ).rejects.toBeInstanceOf(FolderWaitCancelledError);
+  });
+
+  it('leaves no abort listener on a signal once it has the folder', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const signal = new AbortController().signal;
+    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch', signal);
+    expect(getEventListeners(signal, 'abort')).toHaveLength(1);
+    hold.releaseTurn(a);
+    await reserved;
+    expect(getEventListeners(signal, 'abort')).toHaveLength(0);
   });
 });
