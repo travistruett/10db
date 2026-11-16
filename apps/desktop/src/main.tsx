@@ -5,6 +5,9 @@ import { App } from './app';
 import { resolveConnection } from './daemon/connection';
 import { createAppRouter } from './router';
 import { Root } from './root';
+import { guardFileDrops } from './shell/file-drop-guard';
+
+guardFileDrops(window);
 
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html is missing #root');

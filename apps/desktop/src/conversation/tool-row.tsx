@@ -95,7 +95,14 @@ export function ToolRow({
         )}
         {target === null && <Box style={{ flex: 1 }} />}
         {meta !== null && (
-          <Text size="xs" c={color} style={{ flex: 'none' }}>
+          // A refusal can run long: the meta gives up width after the target has, and ends in an ellipsis.
+          <Text
+            size="xs"
+            c={color}
+            truncate="end"
+            title={meta}
+            style={{ flex: '0 1 auto', minWidth: 0 }}
+          >
             {meta}
           </Text>
         )}

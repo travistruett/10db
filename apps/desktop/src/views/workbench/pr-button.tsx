@@ -4,15 +4,16 @@ import {
   type PassPullRequestPreviewDto,
   type PassViewDto,
 } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Badge, Button, Group, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useOpenPullRequest, usePullRequestPreview } from '../../daemon/pass-close-queries';
+import { ExternalLink } from '../board/pull-request-link';
 import { FormModal } from '../../shell/form-modal';
-import { PullRequestLink } from '../board/pull-request-link';
 
-// Workbench spec §5.1, §8.3, W6: Open Pull Request pushes the pass's signed-off pages and opens a
-// draft. It reads what it would do first: not offered, it is disabled with the daemon's reason; offered,
-// its confirm says the commits from before the pass the pull request will list and where the gate runs.
+// Workbench spec §5.1, §8.3, W6: Open Draft PR pushes the pass's signed-off pages and opens a draft;
+// once the pull request exists the same button reads Push to PR. It reads what it would do first: not
+// offered, it is disabled with the daemon's reason. Pushing is easy to undo, so it asks nothing first,
+// except when the branch carries commits from before the pass, which the pull request would list too.
 
 /** Where the gate runs, in words. */
 function gateLine(gate: PassPullRequestGate): string {
@@ -48,7 +49,7 @@ function OpenPullRequestConfirm({ view, preview, onClose, onOpened }: ConfirmPro
     <FormModal
       opened
       onClose={onClose}
-      title="Open Pull Request"
+      title={preview.existing === null ? 'Open Draft PR' : 'Push to PR'}
       size="md"
       error={opening.error?.message ?? null}
       actions={
@@ -72,7 +73,7 @@ function OpenPullRequestConfirm({ view, preview, onClose, onOpened }: ConfirmPro
                 });
             }}
           >
-            Open Pull Request
+            {preview.existing === null ? 'Open Draft PR' : 'Push to PR'}
           </Button>
         </>
       }
@@ -121,27 +122,84 @@ export function PrReason({ view }: { readonly view: PassViewDto }) {
   );
 }
 
-/** Open Pull Request in the pass's header, with the pull request's link once it has one. */
+/** "PR #633"; the address itself when it names no number. */
+function prName(url: string): string {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  return number === undefined ? 'Pull request' : `PR #${number}`;
+}
+
+/** The gate on the pushed tip, in a word or two; null before anything was pushed. */
+function gateWord(view: PassViewDto): { readonly text: string; readonly color: string } | null {
+  switch (view.checks.gate.state) {
+    case 'running':
+      return { text: 'Checks running', color: 'blue' };
+    case 'passed':
+      return { text: 'Checks passed', color: 'green' };
+    case 'failed':
+      return { text: 'Checks failed', color: 'red' };
+    case 'not_run':
+      return null;
+  }
+}
+
+/**
+ * The pass's pull request in its header: Open Draft PR until there is one, then its name, whether it is
+ * a draft, where its checks are, and Push to PR for what was signed off since.
+ */
 export function PrButton({ view }: { readonly view: PassViewDto }) {
   const { preview, why } = usePullRequestRefusal(view);
+  const opening = useOpenPullRequest();
   const [confirming, setConfirming] = useState(false);
   const [posted, setPosted] = useState<string | null>(null);
   const shown = preview.data;
   const url = view.pullRequest?.url ?? posted ?? shown?.existing?.url ?? null;
+  const draft = view.pullRequest?.draft ?? shown?.existing?.draft ?? null;
+  const gate = url === null ? null : gateWord(view);
+  const push = () => {
+    opening
+      .mutateAsync(view.pass.id)
+      .then((opened) => {
+        setPosted(opened.url);
+      })
+      .catch(() => {
+        // The failure is said from `opening.error`.
+      });
+  };
   return (
     <Group gap="xs" wrap="nowrap">
-      {url === null ? null : <PullRequestLink url={url} />}
+      {url === null ? null : (
+        <Group gap={6} wrap="nowrap">
+          <ExternalLink url={url} label={prName(url)} />
+          {draft === true ? (
+            <Badge size="sm" variant="light" color="gray">
+              Draft
+            </Badge>
+          ) : null}
+          {gate === null ? null : (
+            <Badge size="sm" variant="light" color={gate.color}>
+              {gate.text}
+            </Badge>
+          )}
+        </Group>
+      )}
+      {opening.error === null ? null : (
+        <Text size="xs" c="red" role="alert">
+          {opening.error.message}
+        </Text>
+      )}
       <Button
         {...(why === null ? {} : { 'aria-describedby': reasonId(view) })}
-        variant="default"
+        variant={url === null ? 'filled' : 'default'}
         size="xs"
-        loading={preview.isLoading}
+        loading={preview.isLoading || opening.isPending}
         disabled={view.pass.state !== PassState.Open || shown?.offered !== true}
         onClick={() => {
-          setConfirming(true);
+          if (shown?.offered !== true) return;
+          if (aheadLine(view.pass.returnBranch, shown) === null) push();
+          else setConfirming(true);
         }}
       >
-        Open Pull Request
+        {url === null ? 'Open Draft PR' : 'Push to PR'}
       </Button>
       {confirming && shown?.offered === true ? (
         <OpenPullRequestConfirm

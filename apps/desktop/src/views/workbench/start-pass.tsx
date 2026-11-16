@@ -106,12 +106,10 @@ export function StartPass(props: StartPassProps) {
         now={now}
       />
       {setUp == null || setUp.newPages.length === 0 ? null : (
-        <Group gap="sm" wrap="nowrap" justify="space-between" role="status">
-          <Text size="sm">{newPagesLine(setUp.newPages)}</Text>
-          <Button variant="default" size="xs" onClick={setUp.onOpen}>
-            Set Up
-          </Button>
-        </Group>
+        // The header's Set Up opens the setup; this line only says why it has a count.
+        <Text size="sm" role="status">
+          {newPagesLine(setUp.newPages)}
+        </Text>
       )}
       <Textarea
         label="What's bothering you?"

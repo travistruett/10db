@@ -41,7 +41,7 @@ describe('HeaderNotices', () => {
     renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
     const shown = await screen.findByRole('listitem');
     expect(within(shown).getByText(notice.text)).toBeTruthy();
-    fireEvent.click(within(shown).getByRole('button', { name: 'Send to Agent' }));
+    fireEvent.click(within(shown).getByRole('button', { name: 'Ask Agent to Fix' }));
     const billing = await screen.findByRole('menuitem', { name: 'Billing', hidden: true });
     // Showing it, and asking which page, sends nothing.
     expect(sent).toEqual([]);
@@ -51,7 +51,7 @@ describe('HeaderNotices', () => {
     });
     expect(await within(shown).findByText('Sent to Billing')).toBeTruthy();
     // Sent once, it is not offered to send again.
-    expect(within(shown).getByRole('button', { name: 'Send to Agent' })).toHaveProperty(
+    expect(within(shown).getByRole('button', { name: 'Ask Agent to Fix' })).toHaveProperty(
       'disabled',
       true,
     );
@@ -70,7 +70,7 @@ describe('HeaderNotices', () => {
     const { ready } = pagesByStatus();
     const view = passViewDto({ pages: [ready], rest: { notices: [passNotice()] } });
     renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Send to Agent' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Agent to Fix' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Settings', hidden: true }));
     expect(
       await within(await screen.findByRole('alert')).findByText(
@@ -86,7 +86,7 @@ describe('HeaderNotices', () => {
       <HeaderNotices view={passViewDto({ rest: { notices: [notice] } })} inbox={[]} />,
     );
     const shown = await screen.findByRole('listitem');
-    expect(within(shown).queryByRole('button', { name: 'Send to Agent' })).toBeNull();
+    expect(within(shown).queryByRole('button', { name: 'Ask Agent to Fix' })).toBeNull();
   });
 
   it("answers a stacked pass's Retarget card from its notice, naming the base", async () => {
@@ -137,11 +137,12 @@ describe('HeaderNotices', () => {
         passNotice({ id: 'stack', kind: 'stack_unmerged', sendable: false, cardId: card.id }),
       ];
       renderWithDaemon(<HeaderNotices view={{ ...view, notices }} inbox={[card]} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Show All' }));
       expect(await screen.findByRole('button', { name: 'Retarget to main' })).toHaveProperty(
         'disabled',
         !retarget,
       );
-      const sendButton = screen.queryByRole('button', { name: 'Send to Agent' });
+      const sendButton = screen.queryByRole('button', { name: 'Ask Agent to Fix' });
       if (send === 'hidden') expect(sendButton).toBeNull();
       else expect(sendButton).toHaveProperty('disabled', false);
     },
@@ -171,6 +172,26 @@ describe('HeaderNotices', () => {
     expect(rest.style.whiteSpace).toBe('pre-wrap');
     fireEvent.click(within(shown).getByRole('button', { name: 'Show Less' }));
     expect(within(shown).queryByText(/expected 2 to be 3/)).toBeNull();
+  });
+
+  it('folds two or more notices into one line that names the count and opens the list', async () => {
+    record();
+    const notices = [
+      passNotice({ id: 'check', kind: 'turn_check', text: 'Checks failed after the last turn' }),
+      passNotice({ id: 'finding', kind: 'finding', text: 'Review finding: a row stays open' }),
+    ];
+    renderWithDaemon(<HeaderNotices view={passViewDto({ rest: { notices } })} inbox={[]} />);
+    const toggle = await screen.findByRole('button', { name: 'Show All' });
+    expect(screen.getByText('2 issues')).toBeTruthy();
+    expect(screen.getByText(/Checks failed after the last turn/)).toBeTruthy();
+    expect(screen.queryByRole('listitem')).toBeNull();
+    fireEvent.click(toggle);
+    expect(await screen.findAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('Review finding: a row stays open')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('listitem')).toBeNull();
+    });
   });
 
   it('offers no Show More on a notice of one line', async () => {

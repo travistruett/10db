@@ -8,6 +8,7 @@ import { Announcer } from './announcer';
 import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
+import { PrButton } from './pr-button';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
@@ -17,7 +18,7 @@ import { nextWaiting, stepIndex, WorkbenchKey } from './workbench-keys';
 import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
 
 /** The queue's width beside the thread in the wide layout. */
-const QUEUE_WIDTH_PX = 280;
+const QUEUE_WIDTH_PX = 220;
 
 /** A working line's minutes move once a minute; half that keeps them on time. */
 const CLOCK_TICK_MS = 30_000;
@@ -143,6 +144,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
             const taskId = shown.page.taskId;
             setDrafts((held) => new Map(held).set(taskId, draft));
           }}
+          pullRequest={<PrButton view={view} />}
         />
       )}
       {takingOutPage === null ? null : (

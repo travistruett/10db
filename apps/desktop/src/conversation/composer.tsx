@@ -1,5 +1,14 @@
 import type { AgentCapabilitiesDto } from '@10db/contracts';
-import { ActionIcon, Box, CloseButton, Group, Stack, Text, VisuallyHidden } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Center,
+  CloseButton,
+  Group,
+  Stack,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
 import { IconCornerDownLeft, IconPaperclip, IconPlayerStopFilled } from '@tabler/icons-react';
 import {
   useEffect,
@@ -70,26 +79,31 @@ function outgoing(draft: Draft): Draft {
 
 /** A 56 px thumbnail of a picture waiting to be sent. */
 function Thumbnail({ file, onRemove }: { readonly file: File; readonly onRemove: () => void }) {
-  const image = useRef<HTMLImageElement>(null);
-  // The address is made and released with the element, so it never outlives the picture's chip.
+  // A data address, since the window's policy lets an image load from `data:` and not from `blob:`.
+  const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
-    const el = image.current;
-    if (el === null || typeof URL.createObjectURL !== 'function') return;
-    const url = URL.createObjectURL(file);
-    el.src = url;
+    let current = true;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (current && typeof reader.result === 'string') setSrc(reader.result);
+    };
+    try {
+      reader.readAsDataURL(file);
+    } catch {
+      // A file this window's reader refuses keeps the empty tile; it is still sent as it is.
+    }
     return () => {
-      URL.revokeObjectURL(url);
+      current = false;
     };
   }, [file]);
+  const look = { borderRadius: 'var(--mantine-radius-sm)', display: 'block' } as const;
   return (
     <Box component="li" pos="relative" style={{ listStyle: 'none' }}>
-      <img
-        ref={image}
-        alt=""
-        width={56}
-        height={56}
-        style={{ objectFit: 'cover', borderRadius: 'var(--mantine-radius-sm)', display: 'block' }}
-      />
+      {src === null ? (
+        <Box w={56} h={56} bg="var(--mantine-color-default-hover)" style={look} />
+      ) : (
+        <img src={src} alt="" width={56} height={56} style={{ objectFit: 'cover', ...look }} />
+      )}
       {/* The name is the item's words; the thumbnail only shows it. */}
       <VisuallyHidden>{file.name}</VisuallyHidden>
       <CloseButton
@@ -127,6 +141,7 @@ export function Composer({
   const [failure, setFailure] = useState<string | null>(null);
   const [refused, setRefused] = useState<readonly string[]>([]);
   const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
   const ownInput = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const field = inputRef ?? ownInput;
@@ -181,16 +196,23 @@ export function Composer({
       pb="md"
       pt="xs"
       style={{ flex: 'none' }}
-      onDragOver={(event: DragEvent) => {
+      onDragEnter={(event: DragEvent) => {
         if (!hasFiles(event)) return;
-        // Without this the browser opens the file instead of handing it over.
-        event.preventDefault();
+        // Every child the drag crosses enters and leaves, so the frame counts them.
+        dragDepth.current += 1;
         setDragging(true);
       }}
-      onDragLeave={() => {
-        setDragging(false);
+      onDragOver={(event: DragEvent) => {
+        // Without this the browser opens the file instead of handing it over.
+        if (hasFiles(event)) event.preventDefault();
+      }}
+      onDragLeave={(event: DragEvent) => {
+        if (!hasFiles(event)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDragging(false);
       }}
       onDrop={(event: DragEvent) => {
+        dragDepth.current = 0;
         setDragging(false);
         if (!hasFiles(event)) return;
         event.preventDefault();
@@ -219,12 +241,27 @@ export function Composer({
         data-composer-frame
         bg="var(--tendb-color-panel)"
         p="xs"
-        style={{
-          borderRadius: 'var(--mantine-radius-md)',
-          outline: dragging ? '1px dashed var(--mantine-color-dimmed)' : undefined,
-          outlineOffset: 2,
-        }}
+        pos="relative"
+        style={{ borderRadius: 'var(--mantine-radius-md)' }}
       >
+        {dragging && canAttach && !locked ? (
+          // The frame turns into the drop target while files are over it, as the chat apps do.
+          <Center
+            pos="absolute"
+            inset={0}
+            style={{
+              zIndex: 1,
+              pointerEvents: 'none',
+              borderRadius: 'var(--mantine-radius-md)',
+              border: '2px dashed var(--mantine-color-dimmed)',
+              background: 'var(--tendb-color-panel)',
+            }}
+          >
+            <Text size="sm" c="dimmed">
+              Drop Pictures to Attach
+            </Text>
+          </Center>
+        ) : null}
         <ComposerInput
           value={draft.text}
           onValue={(text) => {

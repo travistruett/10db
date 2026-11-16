@@ -150,18 +150,23 @@ describe('PageThread', () => {
       `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`,
     );
     expect(pictureAsked).toBe(`${picture.id} Bearer test-token`);
+    // A sent picture is a thumbnail in a row, never drawn at the width of the thread.
+    expect(image.style.height).toBe('96px');
+    expect(image.style.maxWidth).toBe('160px');
     const files = screen.getByRole('list', { name: 'Files this turn changed' });
     expect(files.textContent).toBe('src/settings/page.tsx+4 −1');
     expect(screen.getByText(NOTICE).style.color).toBe('var(--mantine-color-dimmed)');
   });
 
-  it('shows a call the turn made as a tool row, and what streams before it is stored', async () => {
+  it('shows a call the turn made in its Worked row, and what streams before it is stored', async () => {
     serve(
       [message, commandItem({})],
       [{ itemId: mintId('ConversationItem'), kind: 'agent_message', text: 'Now the header' }],
     );
     renderWithDaemon(<Thread />);
     expect(await screen.findByText('Now the header')).toBeTruthy();
+    expect(messages().textContent).not.toContain('pnpm test');
+    fireEvent.click(screen.getByRole('button', { name: 'Worked · 1 Step' }));
     expect(messages().textContent).toContain('pnpm test');
   });
 
@@ -300,7 +305,7 @@ describe('PageThread', () => {
     serve([reply, finding]);
     renderWithDaemon(<Thread canSend={canSend} />);
     await screen.findByText('Review: src/settings/form.tsx:12 drops the error state.');
-    const send = screen.queryByRole('button', { name: 'Send to Agent' });
+    const send = screen.queryByRole('button', { name: 'Ask Agent to Fix' });
     expect(send !== null).toBe(offer && canSend);
     if (send === null) return;
     fireEvent.click(send);
@@ -309,7 +314,10 @@ describe('PageThread', () => {
     });
     expect(await screen.findByText('Sent to the agent')).toBeTruthy();
     // Sent once, it is not offered to send again.
-    expect(screen.getByRole('button', { name: 'Send to Agent' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Ask Agent to Fix' })).toHaveProperty(
+      'disabled',
+      true,
+    );
   });
 
   it('a notice that offers Allow this shows it and sends it', async () => {
@@ -332,7 +340,7 @@ describe('PageThread', () => {
     serve([reply, denied]);
     renderWithDaemon(<Thread />);
     const allow = await screen.findByRole('button', { name: 'Allow this' });
-    expect(screen.queryByRole('button', { name: 'Send to Agent' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ask Agent to Fix' })).toBeNull();
     fireEvent.click(allow);
     await waitFor(() => {
       expect(posted).toEqual([denied.id]);

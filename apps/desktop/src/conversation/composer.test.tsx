@@ -91,6 +91,46 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Remove shot.png' })).toBeTruthy();
   });
 
+  it('draws a waiting picture from a data address, the only kind the window’s policy lets an image load from', async () => {
+    renderWithTheme(<Held />);
+    const png = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' });
+    fireEvent.paste(input(), { clipboardData: { files: [png], getData: () => '' } });
+    const list = screen.getByRole('list', { name: 'Pictures to send' });
+    await waitFor(() => {
+      expect(list.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    });
+  });
+
+  it('shows where to drop while files are dragged over the input, and takes them on drop', () => {
+    renderWithTheme(<Held />);
+    const frame = input().closest('[data-composer-frame]');
+    if (frame === null) throw new Error('the composer has no frame');
+    const png = new File(['x'], 'dropped.png', { type: 'image/png' });
+    expect(screen.queryByText('Drop Pictures to Attach')).toBeNull();
+    // A drag that carries no file (selected text) shows nothing.
+    fireEvent.dragEnter(frame, { dataTransfer: { types: ['text/plain'] } });
+    expect(screen.queryByText('Drop Pictures to Attach')).toBeNull();
+    fireEvent.dragEnter(frame, { dataTransfer: { types: ['Files'] } });
+    expect(screen.getByText('Drop Pictures to Attach')).toBeTruthy();
+    fireEvent.drop(frame, { dataTransfer: { types: ['Files'], files: [png] } });
+    expect(screen.queryByText('Drop Pictures to Attach')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove dropped.png' })).toBeTruthy();
+  });
+
+  it('hides the drop target when the drag leaves the input', () => {
+    renderWithTheme(<Held />);
+    const frame = input().closest('[data-composer-frame]');
+    if (frame === null) throw new Error('the composer has no frame');
+    const files = { dataTransfer: { types: ['Files'] } };
+    fireEvent.dragEnter(frame, files);
+    // Moving onto a child of the frame enters the child and leaves the frame: still over the input.
+    fireEvent.dragEnter(input(), files);
+    fireEvent.dragLeave(frame, files);
+    expect(screen.getByText('Drop Pictures to Attach')).toBeTruthy();
+    fireEvent.dragLeave(input(), files);
+    expect(screen.queryByText('Drop Pictures to Attach')).toBeNull();
+  });
+
   it('hides Attach when the agent takes no images', () => {
     renderWithTheme(<Held capabilities={{ ...CLAUDE_CAPABILITIES, images: [] }} />);
     expect(screen.queryByRole('button', { name: 'Attach' })).toBeNull();

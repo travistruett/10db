@@ -218,8 +218,8 @@ describe('the check after each turn', () => {
     expect(lines('runs')).toEqual(['run', 'run']);
     // Each run names Settings' file, and the newer offer replaces the older one.
     expect(checkNotices(w.settings).map((m) => [m.body, m.sendable])).toEqual([
-      ['Check failed: names `src/settings/page.tsx`', false],
-      ['Check failed: names `src/settings/page.tsx`', true],
+      ['Check failed in `src/settings/page.tsx`', false],
+      ['Check failed in `src/settings/page.tsx`', true],
     ]);
     for (const other of [w.people, billing, admin]) expect(checkNotices(other)).toEqual([]);
     expect(header()).toMatchObject([{ kind: PassNoticeKind.TurnCheck, sendable: true }]);

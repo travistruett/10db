@@ -1,4 +1,5 @@
 import { createServer } from 'node:net';
+import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
@@ -34,6 +35,9 @@ const APP: Readonly<Record<string, string>> = {
 };
 
 const Live = z.array(z.looseObject({ pass: z.looseObject({ projectId: z.string() }) }));
+
+/** Where the thread checks save a screenshot per width, when set. */
+const SHOTS = process.env['E2E_SCREENSHOT_DIR'];
 
 /** A real 1×1 PNG, as a screenshot pasted into the composer would be. */
 const PICTURE = Buffer.from(
@@ -104,7 +108,7 @@ async function queueOrder(page: Page): Promise<string[]> {
 
 /**
  * At `width`, the pass header's line reads whole, its ⋯ menu (Close Pass, Abandon) is on screen and
- * nothing scrolls sideways; the project has no origin, so Open Pull Request says why beside it.
+ * nothing scrolls sideways; the project has no origin, so Open Draft PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -124,6 +128,36 @@ async function headerFits(page: Page, width: number) {
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );
   expect(sideways, `the page scrolls sideways at ${String(width)}`).toBe(false);
+}
+
+/**
+ * In a window shorter than the page's thread, the window itself never scrolls: the thread scrolls
+ * inside the page, so the sidebar, the pass header and the queue stay put and the composer stays at
+ * the window's foot.
+ */
+async function threadScrollsInside(page: Page, region: Locator, label: string, width: number) {
+  await page.setViewportSize({ width, height: 420 });
+  const scrolls = await page.evaluate(() => {
+    const root = document.documentElement;
+    return root.scrollHeight > root.clientHeight + 1 || root.scrollWidth > root.clientWidth + 1;
+  });
+  expect(scrolls, `the window scrolls at ${String(width)}x420`).toBe(false);
+  // A thread read at its end stays at its end as the window shrinks, as a chat does.
+  const messages = region.getByRole('group', { name: 'Messages' });
+  await expect
+    .poll(() => messages.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+      message: `the thread keeps its newest message in view at ${String(width)}x420`,
+    })
+    .toBeLessThanOrEqual(2);
+  const box = await region.getByRole('textbox', { name: `Message to ${label}` }).boundingBox();
+  expect(box, `the composer is drawn at ${String(width)}x420`).not.toBeNull();
+  if (box !== null)
+    expect(
+      box.y + box.height,
+      `the composer is on screen at ${String(width)}x420`,
+    ).toBeLessThanOrEqual(420);
+  if (SHOTS !== undefined)
+    await page.screenshot({ path: join(SHOTS, `e2e-workbench-thread-${String(width)}.png`) });
 }
 
 async function scan(page: Page, width: number, scheme: 'dark' | 'light', what: string) {
@@ -239,6 +273,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     settings.getByRole('list', { name: 'Files this turn changed' }).last(),
   ).toContainText('src/views/settings/page.tsx');
 
+  // Two turns outgrow a short window: the thread scrolls inside the page, never the window.
+  for (const width of [1280, 480]) await threadScrollsInside(page, settings, 'Settings', width);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // Sign Off: "Signing off…", then green "Signed off".
   await settings.getByRole('button', { name: 'Sign Off' }).click();
   await expect(row(page, 'Settings')).toContainText('Signed off');
@@ -250,8 +288,9 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   expect(seen.rowLines.some((line) => line.includes('Signing off…'))).toBe(true);
   announced.push(...seen.announced);
 
-  // With a page signed off the header holds Open Pull Request too; it fits at every width.
-  await expect(page.getByRole('button', { name: 'Open Pull Request' })).toBeVisible();
+  // With a page signed off the header holds Open Draft PR too, and so does the foot of the signed-off
+  // page, where the builder is; the header fits at every width.
+  await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(2);
   for (const width of [1280, 800, 480, 420]) await headerFits(page, width);
   await page.setViewportSize({ width: 1280, height: 900 });
 

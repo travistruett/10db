@@ -105,8 +105,8 @@ const LINE_MAX = 1000;
 export function checkNoticeLine(paths: readonly string[]): string {
   const line =
     paths.length === 0
-      ? `${CHECK_FAILED} after a turn: it names no changed file`
-      : `${CHECK_FAILED}: names ${paths.map((path) => `\`${path}\``).join(', ')}`;
+      ? `${CHECK_FAILED} after the last turn, outside the files it changed`
+      : `${CHECK_FAILED} in ${paths.map((path) => `\`${path}\``).join(', ')}`;
   return line.length <= LINE_MAX ? line : `${line.slice(0, LINE_MAX - 1)}…`;
 }
 

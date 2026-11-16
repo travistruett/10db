@@ -281,6 +281,33 @@ describe('PassWorkspace working line', () => {
   });
 });
 
+describe('PassWorkspace sign-off', () => {
+  it('offers the pull request under a signed-off page, where the builder signed off', async () => {
+    const pages = pagesByStatus();
+    const signed = { ...pages.ready, signOff: 'done' as const };
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: [signed, pages.working] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={signed.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const page = await screen.findByRole('region', { name: 'Settings' });
+    expect(
+      within(page).getByText('Signed off. CI checks it once it is in the pull request.'),
+    ).toBeTruthy();
+    expect(await within(page).findByRole('button', { name: 'Open Draft PR' })).toBeTruthy();
+  });
+
+  it('offers no pull request under a page not signed off', async () => {
+    await renderWorkspace((p) => p.ready.taskId);
+    const page = await screen.findByRole('region', { name: 'Settings' });
+    expect(within(page).queryByRole('button', { name: 'Open Draft PR' })).toBeNull();
+  });
+});
+
 describe('PassWorkspace composer', () => {
   it('sends the shown page’s draft, words and picture, to that page’s conversation', async () => {
     const NodeFile = await useNodeMultipart();

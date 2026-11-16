@@ -38,6 +38,10 @@ export interface PageThreadProps {
   readonly onAllow: (call: ToolCallView) => void;
 }
 
+/** A sent picture shows as a thumbnail in a row, not at the size it was taken. */
+const THUMBNAIL_HEIGHT = 96;
+const THUMBNAIL_MAX_WIDTH = 160;
+
 /** A picture the builder sent, read with the UI token; its alt text is its file name. */
 function MessagePicture({
   conversationId,
@@ -63,10 +67,13 @@ function MessagePicture({
     <img
       src={image.data}
       alt={file.name}
+      height={THUMBNAIL_HEIGHT}
       style={{
         display: 'block',
-        maxWidth: '100%',
-        height: 'auto',
+        height: THUMBNAIL_HEIGHT,
+        width: 'auto',
+        maxWidth: THUMBNAIL_MAX_WIDTH,
+        objectFit: 'cover',
         border: '1px solid var(--mantine-color-default-border)',
         borderRadius: 'var(--mantine-radius-sm)',
       }}
@@ -75,7 +82,7 @@ function MessagePicture({
 }
 
 /**
- * A notice, dimmed. One the daemon offers with Send to Agent (D19: a review finding or a failed check)
+ * A notice, dimmed. One the daemon offers with Ask Agent to Fix (D19: a review finding or a failed check)
  * has the button, which sends its text to this page as the builder's own message; nothing sends it by
  * itself. The button of a denied call reads Allow this: its text is the builder's go-ahead. That it was
  * sent is the list's row state, so a row drawn again never offers a second send.
@@ -100,7 +107,7 @@ function PageNotice({
       <CodeSpans text={text} />
     </Text>
   );
-  // A page takes a message only while its pass is open, so Send to Agent is offered only then.
+  // A page takes a message only while its pass is open, so Ask Agent to Fix is offered only then.
   if (offer === null || !canSend) return <Group>{words}</Group>;
   return (
     <Group gap="xs" wrap="nowrap" align="center">
@@ -126,7 +133,7 @@ function PageNotice({
           send.mutate({ taskId, noticeId: id }, { onSuccess: markSent });
         }}
       >
-        {offer === 'allow_this' ? 'Allow this' : 'Send to Agent'}
+        {offer === 'allow_this' ? 'Allow this' : 'Ask Agent to Fix'}
       </Button>
     </Group>
   );
@@ -177,11 +184,11 @@ export function PageThread({ page, turns, live, busy, canSend, onAllow }: PageTh
     ),
     pictures: (files) =>
       conversationId === null ? null : (
-        <Stack gap="xs" pt="xs">
+        <Group gap="xs" pt="xs" align="flex-start">
           {files.map((file) => (
             <MessagePicture key={file.id} conversationId={conversationId} file={file} />
           ))}
-        </Stack>
+        </Group>
       ),
     notice: (id, text, offer) => (
       <PageNotice id={id} taskId={page.taskId} text={text} offer={offer} canSend={canSend} />

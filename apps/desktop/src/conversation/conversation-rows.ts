@@ -8,7 +8,15 @@ export type ConversationRow =
   | { readonly kind: 'entry'; readonly entry: ConversationEntry }
   | { readonly kind: 'tool'; readonly entry: ToolEntry; readonly nested: readonly ToolEntry[] }
   | { readonly kind: 'tool_group'; readonly id: string; readonly entries: readonly ToolEntry[] }
-  | { readonly kind: 'edit_group'; readonly id: string; readonly entries: readonly ToolEntry[] };
+  | { readonly kind: 'edit_group'; readonly id: string; readonly entries: readonly ToolEntry[] }
+  /** A run of the agent's settled work, closed until the builder opens it (see `collapseWork`). */
+  | {
+      readonly kind: 'work';
+      readonly id: string;
+      readonly rows: readonly ConversationRow[];
+      /** The tool calls inside, counting a subagent's. */
+      readonly steps: number;
+    };
 
 type Fold = 'tool_group' | 'edit_group';
 
@@ -98,6 +106,79 @@ export function conversationRows(
   return rows;
 }
 
+/** A call 10db itself records (`10db.<name>`, such as Plan's lines) is an outcome, never work. */
+const TENDB_RECORD = '10db.';
+
+/** A call that ended well and that the agent made. */
+function settled(entry: ToolEntry): boolean {
+  return entry.call.status === 'done' && !entry.call.harnessTool.startsWith(TENDB_RECORD);
+}
+
+/**
+ * Whether the row is the agent's settled work: reasoning, and a finished call. A running call stays
+ * out of the fold, so what the agent is doing now is always in view.
+ */
+function isWork(row: ConversationRow): boolean {
+  switch (row.kind) {
+    case 'entry':
+      return row.entry.kind === 'reasoning';
+    case 'tool':
+      return settled(row.entry) && row.nested.every(settled);
+    case 'tool_group':
+    case 'edit_group':
+      return row.entries.every(settled);
+    case 'work':
+      return false;
+  }
+}
+
+function stepsOf(row: ConversationRow): number {
+  switch (row.kind) {
+    case 'entry':
+      return 0;
+    case 'tool':
+      return 1 + row.nested.length;
+    case 'tool_group':
+    case 'edit_group':
+      return row.entries.length;
+    case 'work':
+      return row.steps;
+  }
+}
+
+/**
+ * Each run of consecutive work rows becomes one closed row, so the replies and what needs the builder
+ * (a call that failed or was denied, a notice, a screen's own row) stay in view among them. Every
+ * screen that draws a conversation gets it, so a long turn reads as the messages between builder and
+ * agent with the work behind a click.
+ */
+export function collapseWork(rows: readonly ConversationRow[]): readonly ConversationRow[] {
+  const out: ConversationRow[] = [];
+  let run: ConversationRow[] = [];
+  const close = () => {
+    const [first] = run;
+    if (first !== undefined)
+      out.push({
+        kind: 'work',
+        // Named after its first row, so its state follows it, but never that row's own id: the two
+        // keep separate open states, and opening the row inside must not close the run around it.
+        id: `work:${rowId(first)}`,
+        rows: run,
+        steps: run.reduce((sum, row) => sum + stepsOf(row), 0),
+      });
+    run = [];
+  };
+  for (const row of rows) {
+    if (isWork(row)) run.push(row);
+    else {
+      close();
+      out.push(row);
+    }
+  }
+  close();
+  return out;
+}
+
 /**
  * The most rows one article draws. A longer turn is windowed in parts, each a virtual item of its own,
  * so a turn of thousands of rows never mounts whole.
@@ -122,6 +203,7 @@ export function rowId(row: ConversationRow): string {
       return row.entry.id;
     case 'tool_group':
     case 'edit_group':
+    case 'work':
       return row.id;
   }
 }

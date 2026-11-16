@@ -324,8 +324,13 @@ function FullLayout() {
           )}
         </AppShell.Navbar>
         {/* A column, so a view can take the height the reconnecting banner leaves rather than assume it.
-          Nothing else goes above a view: what needs the builder is a card in the Inbox. */}
-        <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
+          Nothing else goes above a view: what needs the builder is a card in the Inbox. The main area is
+          exactly the window's height and scrolls inside itself, so the window never scrolls: the header
+          and sidebar stay put, and a view that holds its own scroll area (a conversation with its
+          composer at the foot) is bounded by the window instead of growing past it. */}
+        <AppShell.Main
+          style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflowY: 'auto' }}
+        >
           {status.kind === 'connected' && <ScreenRenderHost />}
           {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
           <Outlet />

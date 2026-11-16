@@ -36,7 +36,7 @@ function serve(preview: Partial<PassPullRequestPreviewDto>, url: string | null =
   return opened;
 }
 
-const button = () => screen.findByRole('button', { name: 'Open Pull Request' });
+const button = () => screen.findByRole('button', { name: 'Open Draft PR' });
 
 describe('PrButton', () => {
   it('is disabled with its reason under it, which describes it, when the daemon does not offer it', async () => {
@@ -65,7 +65,27 @@ describe('PrButton', () => {
     expect(opened).toEqual([]);
   });
 
-  it('says the commits origin lacks and where the gate runs, then opens it for this pass', async () => {
+  it('opens the draft for this pass at once, then names it and its draft state', async () => {
+    const opened = serve({}, 'https://github.com/acme/ampsio/pull/7');
+    const view = passViewDto();
+    renderWithDaemon(<PrButton view={view} />);
+    const open = await button();
+    await waitFor(() => {
+      expect(open).toHaveProperty('disabled', false);
+    });
+    fireEvent.click(open);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => {
+      expect(opened).toEqual([view.pass.id]);
+    });
+    expect(await screen.findByRole('link', { name: 'PR #7' })).toHaveProperty(
+      'href',
+      'https://github.com/acme/ampsio/pull/7',
+    );
+    expect(await screen.findByRole('button', { name: 'Push to PR' })).toBeTruthy();
+  });
+
+  it('asks first when the pull request would list commits from before the pass', async () => {
     const opened = serve({ aheadOfBase: 4 }, 'https://github.com/acme/ampsio/pull/7');
     const view = passViewDto({ pass: { returnBranch: 'build' } });
     renderWithDaemon(<PrButton view={view} />);
@@ -74,7 +94,7 @@ describe('PrButton', () => {
       expect(open).toHaveProperty('disabled', false);
     });
     fireEvent.click(open);
-    const dialog = await screen.findByRole('dialog', { name: 'Open Pull Request' });
+    const dialog = await screen.findByRole('dialog', { name: 'Open Draft PR' });
     expect(
       within(dialog).getByText(
         'build has 4 commits origin/main lacks from before you started; the pull request lists them too.',
@@ -87,11 +107,11 @@ describe('PrButton', () => {
     ).toBeTruthy();
     // Opening the confirm sends nothing.
     expect(opened).toEqual([]);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Open Pull Request' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open Draft PR' }));
     await waitFor(() => {
       expect(opened).toEqual([view.pass.id]);
     });
-    expect(await screen.findByRole('link', { name: 'Pull request' })).toHaveProperty(
+    expect(await screen.findByRole('link', { name: 'PR #7' })).toHaveProperty(
       'href',
       'https://github.com/acme/ampsio/pull/7',
     );
@@ -124,7 +144,7 @@ describe('PrButton', () => {
           PassPullRequestPreviewDto.parse({
             offered: true,
             reason: null,
-            aheadOfBase: 0,
+            aheadOfBase: 2,
             base: 'main',
             existing: null,
             gate: 'scratch',
@@ -166,7 +186,7 @@ describe('PrButton', () => {
           PassPullRequestPreviewDto.parse({
             offered: true,
             reason: null,
-            aheadOfBase: 0,
+            aheadOfBase: 2,
             base: 'main',
             existing: null,
             gate: 'scratch',
@@ -182,7 +202,7 @@ describe('PrButton', () => {
       expect(open).toHaveProperty('disabled', false);
     });
     fireEvent.click(open);
-    await screen.findByRole('dialog', { name: 'Open Pull Request' });
+    await screen.findByRole('dialog', { name: 'Open Draft PR' });
     rerender(
       <PrButton
         view={{ ...view, pages: [view.pages[0] ?? ready, { ...working, signOff: 'done' }] }}
@@ -191,11 +211,11 @@ describe('PrButton', () => {
     await waitFor(() => {
       expect(reads).toBe(2);
     });
-    expect(screen.getByRole('dialog', { name: 'Open Pull Request' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Open Draft PR' })).toBeTruthy();
     release();
   });
 
-  it("links the pass's pull request once the view has one", async () => {
+  it("names the pass's pull request, its draft state and its checks, and offers Push to PR", async () => {
     serve({});
     const view = passViewDto({
       rest: {
@@ -207,7 +227,14 @@ describe('PrButton', () => {
         },
       },
     });
-    renderWithDaemon(<PrButton view={view} />);
-    expect(await screen.findByRole('link', { name: 'Pull request' })).toBeTruthy();
+    renderWithDaemon(
+      <PrButton
+        view={{ ...view, checks: { ...view.checks, gate: { state: 'running', logPath: null } } }}
+      />,
+    );
+    expect(await screen.findByRole('link', { name: 'PR #7' })).toBeTruthy();
+    expect(screen.getByText('Draft')).toBeTruthy();
+    expect(screen.getByText('Checks running')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Push to PR' })).toBeTruthy();
   });
 });
