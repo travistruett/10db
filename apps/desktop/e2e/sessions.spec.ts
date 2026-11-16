@@ -112,6 +112,12 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     .filter({ has: page.getByRole('heading', { name: 'Claude Code' }) });
   await expect(reply.getByRole('heading', { name: 'What I found' })).toBeVisible();
   await expect(reply.getByText('const retry = once;')).toBeVisible();
+  // The agent's todo list and what it left running sit above the composer.
+  await expect(page.getByText('Plan · 1 of 3 done')).toBeVisible();
+  await expect(page.getByLabel('Find why the retry is skipped, interrupted')).toBeVisible();
+  await expect(page.getByText('Running in the background · 2')).toBeVisible();
+  await expect(page.getByText('Subagent · Explore')).toBeVisible();
+  await expect(page.getByText('pnpm exec vitest run login.test.ts')).toBeVisible();
   await expect(page.getByText(/Read 1 file/)).toHaveCount(0);
   await reply
     .getByRole('button', { name: /^Worked/ })
@@ -140,6 +146,20 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     'yellow',
   );
   await expect(sessionsBadge(page)).toContainText('1 session needs you');
+  // With a card waiting, the plan and the background tasks fold to their headings, so on a short narrow
+  // window the composer stays on screen.
+  await page.setViewportSize({ width: 480, height: 600 });
+  // The narrow layout settles after the resize, so the composer is read until it is in view: the
+  // whole box, from the textbox down to the controls under it.
+  const composerBottom = async (): Promise<number> =>
+    page.getByRole('textbox', { name: 'Message' }).evaluate((field) => {
+      const whole = field.closest('[data-composer-frame]')?.parentElement ?? field;
+      return whole.getBoundingClientRect().bottom;
+    });
+  await expect
+    .poll(composerBottom, { message: 'the composer’s bottom edge' })
+    .toBeLessThanOrEqual(600);
+  await page.setViewportSize({ width: 1280, height: 900 });
   await scan(page, [1280, 480], 'a waiting card');
 
   // ⌘J from a second tab selects the tab that needs the builder; the Inbox lists the card too.

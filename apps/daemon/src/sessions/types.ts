@@ -415,7 +415,14 @@ export type SessionEvent =
        * last report (an empty list: none is). A watcher the session did not start is left out.
        */
       readonly type: 'background_tasks';
-      readonly tasks: readonly { readonly id: string; readonly description: string }[];
+      readonly tasks: readonly {
+        readonly id: string;
+        readonly description: string;
+        /** What Claude Code calls the task's type (`local_bash`, `local_agent`, a monitor, a workflow). */
+        readonly kind?: string;
+        /** A subagent's type, such as `general-purpose` or a custom agent's name. */
+        readonly agent?: string;
+      }[];
     }
   | {
       readonly type: 'ended';

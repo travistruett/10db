@@ -338,14 +338,36 @@ describe('mapSdkMessage', () => {
   it('maps the live background tasks to the commands the lane is waiting on, leaving out ambient ones', () => {
     const msg = backgroundTasksChanged([
       { task_id: 'b1', task_type: 'local_bash', description: 'pnpm exec vitest run a.test.ts' },
+      {
+        task_id: 'a1',
+        task_type: 'local_agent',
+        subagent_type: 'general-purpose',
+        description: 'Find the failing test',
+      },
       { task_id: 'w1', task_type: 'watcher', description: 'a live-update watcher', ambient: true },
     ]);
     expect(mapSdkMessage(msg, ctx)).toEqual([
       {
         type: 'background_tasks',
-        tasks: [{ id: 'b1', description: 'pnpm exec vitest run a.test.ts' }],
+        tasks: [
+          { id: 'b1', description: 'pnpm exec vitest run a.test.ts', kind: 'local_bash' },
+          {
+            id: 'a1',
+            description: 'Find the failing test',
+            kind: 'local_agent',
+            agent: 'general-purpose',
+          },
+        ],
       },
     ]);
+  });
+
+  it('maps a background report or a command list of a shape it does not read to nothing', () => {
+    const malformed = { ...backgroundTasksChanged([]), tasks: [{ task_id: 7 }] };
+    expect(mapSdkMessage(malformed as never, ctx)).toEqual([]);
+    expect(mapSdkMessage({ type: 'system', subtype: 'commands_changed' } as never, ctx)).toEqual(
+      [],
+    );
   });
 
   it('maps an empty set of background tasks, which is how the lane learns they finished', () => {

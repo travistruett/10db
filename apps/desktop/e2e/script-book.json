@@ -188,6 +188,25 @@
         }
       },
       {
+        "do": "plan",
+        "steps": [
+          { "text": "Read the login code", "status": "completed" },
+          { "text": "Find why the retry is skipped", "status": "in_progress" },
+          { "text": "Write the fix", "status": "pending" }
+        ]
+      },
+      {
+        "do": "background",
+        "tasks": [
+          { "description": "pnpm exec vitest run login.test.ts", "kind": "local_bash" },
+          {
+            "description": "Find where the token expires",
+            "kind": "local_agent",
+            "agent": "Explore"
+          }
+        ]
+      },
+      {
         "do": "say",
         "text": "## What I found\n\n- Login skips its retry after the Mac sleeps\n- The token has expired by then\n\n```ts\nconst retry = once;\n```\n\nSee [the retry notes](https://example.com/retry)."
       },

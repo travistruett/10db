@@ -1,9 +1,11 @@
 import {
   EventType,
+  type BackgroundTaskDto,
   type ConversationId,
   type ConversationItemId,
   type SessionId,
 } from '@10db/contracts';
+import { taskKind } from './background-task-kind';
 import { markSessionStarted, patchConversation, updateSessionUsage } from '@10db/db';
 import type { Clock } from '../clock';
 import type { LiveFrames, StateStore } from '../events';
@@ -38,6 +40,8 @@ export interface OpenSession {
   readonly fresh: boolean;
   /** The slash commands the session offers, for the composer. */
   readonly commands: () => readonly AgentCommand[];
+  /** The background commands and subagents the session reports as running. */
+  readonly backgroundTasks: () => readonly BackgroundTaskDto[];
   /** Reads no more events but `ended`. */
   detach(): void;
   /**
@@ -81,9 +85,28 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
   /** Turns whose remaining events are dropped, oldest first: each ends with its `turn_complete`. */
   let skipping = 0;
   let commands: readonly AgentCommand[] = [];
+  let backgroundTasks: readonly BackgroundTaskDto[] = [];
 
   const onEvent = (event: SessionEvent): void => {
     if (detached && event.type !== 'ended') return;
+    if (event.type === 'background_tasks') {
+      backgroundTasks = event.tasks.map((t) => ({
+        id: t.id,
+        description: t.description,
+        kind: taskKind(t.kind),
+        agent: t.agent ?? null,
+      }));
+      // Not stored: the view reads it from the open session, and this tells the screen to read the view.
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.ConversationState,
+          entityType: 'conversation',
+          entityId: conversationId,
+          data: { backgroundTasks: true },
+        });
+      });
+      return;
+    }
     if (skipping > 0 && event.type !== 'ended') {
       if (event.type === 'turn_complete') skipping -= 1;
       return;
@@ -153,10 +176,9 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
       case 'ended':
         sink.ended(event);
         return;
-      // A turn's text is in its `message` events; the rest is for the lanes.
+      // A turn's text is in its `message` events; a conversation keeps none of these.
       case 'activity':
       case 'compacted':
-      case 'background_tasks':
       case 'judge_denied':
         return;
     }
@@ -185,6 +207,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
     buffers: items.buffers,
     fresh: deps.fresh,
     commands: () => commands,
+    backgroundTasks: () => backgroundTasks,
     detach() {
       detached = true;
     },

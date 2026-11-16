@@ -22,7 +22,7 @@ import { createInboxService, type InboxService } from '../src/inbox';
 import type { Judge } from '../src/judge';
 import { silentLogger } from '../src/log';
 import { mintSessionToken } from '../src/mcp';
-import { FakeAdapter } from '../src/sessions';
+import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import type { ShapeLaunch } from '../src/shape';
 import { shapeAgentModels } from '../src/shape';
 import { tempDir } from './fixtures';
@@ -51,6 +51,8 @@ export interface ChatWorld {
 export function chatWorld(
   opts: {
     readonly prepare?: ChatHooksDeps['prepare'];
+    /** The fake adapter's scripts, by `Chat: <first message>`. */
+    readonly book?: FakeScriptBook;
     readonly judge?: JudgeKind;
     /** 10db's judge, made over the world's store; absent, a `tendb` chat is on the rules. */
     readonly tendb?: (world: { readonly store: Store }) => Judge;
@@ -62,7 +64,7 @@ export function chatWorld(
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
   const state = createStateStore(store, bus);
-  const adapter = new FakeAdapter({});
+  const adapter = new FakeAdapter(opts.book ?? {});
   const clock = new ManualClock();
   const dir = tempDir('chat');
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
