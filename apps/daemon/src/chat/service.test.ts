@@ -2,6 +2,7 @@ import { AccountKind, ConflictError, ConversationState, InvalidError } from '@10
 import { getConversation, listItems, patchConversation } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { waitFor } from '../../test/fixtures';
 import { firstMessageTitle } from './service';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon, on a real store and the explore engine.
@@ -120,5 +121,54 @@ describe('the chat service', () => {
     },
   ])('titles "$text" as "$title"', ({ text, title }) => {
     expect(firstMessageTitle(text)).toBe(title);
+  });
+});
+
+describe('a chat view: background tasks', () => {
+  it('lists what the open session runs in the background, and nothing once it is stopped', async () => {
+    w = chatWorld({
+      book: {
+        'Chat: build it': [
+          [
+            { do: 'consume' },
+            {
+              do: 'background',
+              tasks: [
+                { description: 'npm run build', kind: 'local_bash' },
+                { description: 'Find the failing test', kind: 'local_agent', agent: 'Explore' },
+                { description: 'tail the server log', kind: 'monitor_mcp' },
+                'tsc --watch',
+              ],
+            },
+            { do: 'await_signal', name: 'finished' },
+            { do: 'background', tasks: [] },
+            { do: 'await_signal', name: 'hold' },
+            { do: 'turn_complete' },
+          ],
+        ],
+      },
+    });
+    const chat = w.open();
+    expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
+    w.chat.send(chat.conversationId, { text: 'build it', mentions: [], pictures: [] });
+    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 4);
+    expect(
+      w.chat.get(chat.id).conversation.backgroundTasks.map((t) => [t.kind, t.agent, t.description]),
+    ).toEqual([
+      ['shell', null, 'npm run build'],
+      ['agent', 'Explore', 'Find the failing test'],
+      ['monitor', null, 'tail the server log'],
+      ['other', null, 'tsc --watch'],
+    ]);
+    expect(w.events.some((e) => e.type === 'conversation.state' && e.data['backgroundTasks'])).toBe(
+      true,
+    );
+    // An empty report replaces the list, and the session stays open.
+    w.adapter.signal('finished');
+    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 0);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+    w.adapter.signal('hold');
+    await w.engine.retire(chat.conversationId);
+    expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
   });
 });

@@ -26,7 +26,13 @@ import { judgePreToolUse, type GuardVerdict } from '../guard';
 import { createJudge } from '../judge';
 import { silentLogger } from '../log';
 import type { JudgedCallRequest } from '../sessions';
-import { buildTrustPolicy, createSkipRecorder, type SkipRecorder } from '../trust';
+import {
+  buildTrustPolicy,
+  createSkipRecorder,
+  grantCallSummary,
+  grantTargetOf,
+  type SkipRecorder,
+} from '../trust';
 import { createHookJudge, createLimitNotes, type LimitNotes } from './hook-judge';
 
 const json = (body: unknown): Response =>
@@ -281,7 +287,7 @@ describe('the hook judge, attended', () => {
       insertTrustGrant(ctx, {
         projectId: seeded,
         limit: 'writes_live',
-        target: `the call ${JSON.stringify(DEPLOY)}`,
+        target: `the Bash call ${JSON.stringify(DEPLOY)}`,
         sourceInboxId: null,
       }),
     );
@@ -292,6 +298,100 @@ describe('the hook judge, attended', () => {
     expect(sent).toEqual([]);
     expect((await run(judgeCall, bash(`${DEPLOY} --force`))).decision).toBe('ask');
     expect(sent).toHaveLength(1);
+  });
+
+  it.each<[string, JudgedCallRequest, boolean]>([
+    ['the very call', bash(DEPLOY), true],
+    ['an extra argument', bash(`${DEPLOY} --force`), false],
+    ['a `;` tail', bash(`${DEPLOY}; rm -rf x`), false],
+    ['a `&&` tail', bash(`${DEPLOY} && true`), false],
+    ['a trailing space', bash(`${DEPLOY} `), false],
+    ['a leading space', bash(` ${DEPLOY}`), false],
+    ['a tab for a space', bash('vercel\tdeploy --prod'), false],
+    ['a newline tail', bash(`${DEPLOY}\ntrue`), false],
+    ['a quoted argument', bash('vercel deploy "--prod"'), false],
+    ['another case', bash('Vercel deploy --prod'), false],
+    ['a Cyrillic look-alike', bash('vеrcel deploy --prod'), false],
+    ['a non-breaking space', bash('vercel deploy --prod'), false],
+    ['a full-width hyphen', bash('vercel deploy －－prod'), false],
+    ['a zero-width joiner', bash('vercel deploy --pr‍od'), false],
+    [
+      'the sandbox switched off for the call',
+      request('Bash', { command: DEPLOY, dangerouslyDisableSandbox: true }),
+      false,
+    ],
+    [
+      'a wider domain list for the call',
+      request('Bash', { command: DEPLOY, allowed_domains: ['example.com'] }),
+      false,
+    ],
+    [
+      'a label alone changes nothing',
+      request('Bash', { command: DEPLOY, description: 'ship' }),
+      true,
+    ],
+  ])(
+    'on a native session a quoted grant meets %s: settled only for the very call, before the classifier',
+    async (_name, req, settled) => {
+      model = null;
+      const judgeCall = hookJudge({ now: JudgeKind.Native });
+      store.write((ctx) =>
+        insertTrustGrant(ctx, {
+          projectId: seeded,
+          limit: 'writes_live',
+          target: `the Bash call ${JSON.stringify(DEPLOY)}`,
+          sourceInboxId: null,
+        }),
+      );
+      expect(await run(judgeCall, req)).toEqual(
+        settled
+          ? { decision: 'allow', settled: 'The builder allowed this very call in this project.' }
+          : { decision: 'allow' },
+      );
+      expect(sent).toEqual([]);
+    },
+  );
+
+  it.each<[string, JudgedCallRequest]>([
+    ['an Edit of the file the command names', request('Edit', { file_path: DEPLOY })],
+    ['a Write of the same input', request('Write', { file_path: DEPLOY })],
+  ])('a Bash grant of a command settles no %s', async (_name, req) => {
+    model = null;
+    const judgeCall = hookJudge({ now: JudgeKind.Native });
+    store.write((ctx) =>
+      insertTrustGrant(ctx, {
+        projectId: seeded,
+        limit: 'writes_live',
+        target: `the Bash call ${JSON.stringify(DEPLOY)}`,
+        sourceInboxId: null,
+      }),
+    );
+    expect(await run(judgeCall, req)).toEqual({ decision: 'allow' });
+  });
+
+  it('an Edit grant settles that Edit and not a Bash call whose command is the path', async () => {
+    model = null;
+    const judgeCall = hookJudge({ now: JudgeKind.Native });
+    const edit = request('Edit', { file_path: '/w/release.sh' });
+    store.write((ctx) =>
+      insertTrustGrant(ctx, {
+        projectId: seeded,
+        limit: 'writes_live',
+        target:
+          grantTargetOf(null, grantCallSummary('Edit', { file_path: '/w/release.sh' }), 'Edit') ??
+          '',
+        sourceInboxId: null,
+      }),
+    );
+    expect(await run(judgeCall, edit)).toEqual({
+      decision: 'allow',
+      settled: 'The builder allowed this very call in this project.',
+    });
+    expect(await run(judgeCall, bash('/w/release.sh'))).toEqual({ decision: 'allow' });
+    // Two tools that share one input never share a grant.
+    expect(await run(judgeCall, request('Write', { file_path: '/w/release.sh' }))).toEqual({
+      decision: 'allow',
+    });
   });
 
   it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {

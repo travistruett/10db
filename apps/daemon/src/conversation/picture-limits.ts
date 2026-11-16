@@ -16,7 +16,7 @@ import { AccountKind } from '@10db/contracts';
 
 const MIB = 1024 * 1024;
 
-export type PicturePlatform = 'claude' | 'bedrock' | 'gateway';
+export type PicturePlatform = 'claude' | 'bedrock' | 'gateway' | 'other';
 
 export interface PictureLimits {
   readonly platform: PicturePlatform;
@@ -89,8 +89,15 @@ const GATEWAY_LIMITS: PictureLimits = {
     'the 20 MB request limit 10db assumes for a gateway (the smallest of the platforms it knows)',
 };
 
-/** What an account of a kind 10db can't place is held to: the smallest limits there are. */
-export const STRICTEST_LIMITS: PictureLimits = BEDROCK_LIMITS;
+/**
+ * What an account of a kind 10db can't place is held to: the smallest request limit of the platforms it knows,
+ * worded for an account that is on none of them, so a Codex conversation never names Bedrock.
+ */
+export const STRICTEST_LIMITS: PictureLimits = {
+  ...BEDROCK_LIMITS,
+  platform: 'other',
+  limitText: 'the 20 MB request limit 10db assumes for this account (the smallest it knows)',
+};
 
 /** The limits of the account a session runs on. */
 export function pictureLimitsFor(kind: AccountKind): PictureLimits {

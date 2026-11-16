@@ -10,7 +10,12 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { FILE_AS_TASKS_MESSAGE } from './chat-tab';
-import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
+import {
+  builderItem,
+  CLAUDE_CAPABILITIES,
+  systemItem,
+  toolItem,
+} from '../../test/conversation-fixtures';
 import { FOLDER_REFRESH_MS, folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { folderDto, folderHolder } from '../../test/folder-fixtures';
@@ -21,7 +26,7 @@ import { commandCall, mcpCall } from '../../test/tool-call-fixtures';
 // A chat's tab over the daemon: its bar, its builder-tool rows, its cards and its states.
 
 const project = projectViewDto({ name: 'ampsio' });
-const CLAUDE = { ...CLAUDE_CAPABILITIES, label: 'Claude Code' };
+const CLAUDE = { ...CLAUDE_CAPABILITIES, label: 'Claude Code', plan: true };
 
 afterEach(() => {
   localStorage.clear();
@@ -602,5 +607,88 @@ describe('ChatTab: the composer and Your folder', () => {
         expect(bodies(served)).toEqual([{ text: FILE_AS_TASKS_MESSAGE, folder: 'wait' }]);
       });
     });
+  });
+});
+
+describe('ChatTab: the todo list', () => {
+  const planItems = (chat: ChatDto) => [
+    systemItem(chat.conversationId, {
+      kind: 'plan',
+      steps: [{ text: 'Old step', status: 'pending' }],
+    }),
+    systemItem(chat.conversationId, {
+      kind: 'plan',
+      steps: [
+        { text: 'Read the login code', status: 'completed' },
+        { text: 'Write the fix', status: 'in_progress' },
+        { text: 'Run the tests', status: 'pending' },
+      ],
+    }),
+  ];
+
+  it('shows the latest list open while a turn runs, with the step it is on', async () => {
+    openChat({ conversation: { state: 'running' } }, planItems);
+    expect(await screen.findByText('Plan · 1 of 3 done · Now: Write the fix')).toBeTruthy();
+    expect(screen.getByLabelText('Read the login code, completed')).toBeTruthy();
+    expect(screen.getByLabelText('Write the fix, in progress')).toBeTruthy();
+    expect(screen.getByLabelText('Run the tests, pending')).toBeTruthy();
+    expect(screen.queryByText('Old step')).toBeNull();
+  });
+
+  it('shows a list the turn left unfinished as interrupted, not in progress', async () => {
+    openChat({}, planItems);
+    expect(await screen.findByText('Plan · 1 of 3 done')).toBeTruthy();
+    expect(screen.getByLabelText('Write the fix, interrupted')).toBeTruthy();
+    expect(screen.queryByLabelText('Write the fix, in progress')).toBeNull();
+  });
+
+  it('keeps a finished list folded to its heading', async () => {
+    openChat({}, (chat) => [
+      systemItem(chat.conversationId, {
+        kind: 'plan',
+        steps: [{ text: 'Ship it', status: 'completed' }],
+      }),
+    ]);
+    const heading = await screen.findByText('Plan · 1 of 1 done');
+    expect(heading.closest('button')?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('draws no list for an agent without a plan', async () => {
+    openChat({ conversation: { capabilities: { ...CLAUDE, plan: false } } }, planItems);
+    await screen.findByText('Claude Code');
+    expect(document.querySelector('[data-todo-list]')).toBeNull();
+  });
+});
+
+describe('ChatTab: background tasks', () => {
+  it('lists what the session runs in the background', async () => {
+    openChat({
+      conversation: {
+        backgroundTasks: [
+          { id: 'a', description: 'npm run build', kind: 'shell', agent: null },
+          { id: 'b', description: 'Find the failing test', kind: 'agent', agent: 'Explore' },
+          { id: 'c', description: 'tail the server log', kind: 'monitor', agent: null },
+        ],
+      },
+    });
+    expect(await screen.findByText('Running in the background · 3')).toBeTruthy();
+    expect(screen.getByText('npm run build')).toBeTruthy();
+    expect(screen.getByText('Command')).toBeTruthy();
+    expect(screen.getByText('Subagent · Explore')).toBeTruthy();
+    expect(screen.getByText('Find the failing test')).toBeTruthy();
+    expect(screen.getByText('Monitor')).toBeTruthy();
+  });
+
+  it('draws no panel for an agent that reports tasks and has none running', async () => {
+    openChat();
+    await screen.findByText('Claude Code');
+    expect(document.querySelector('[data-background-tasks]')).toBeNull();
+  });
+
+  it('says what an agent that reports no background tasks lacks', async () => {
+    openChat({
+      conversation: { capabilities: { ...CLAUDE, backgroundTasks: false, label: 'Codex' } },
+    });
+    expect(await screen.findByText('Codex doesn’t report background tasks.')).toBeTruthy();
   });
 });

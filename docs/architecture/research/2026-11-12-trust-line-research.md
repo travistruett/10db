@@ -599,3 +599,21 @@ template, `default_permissions = "lane"`) with no model turn: `initialize`, `thr
 
 Meaning for the plan: Task 5 maps `needs-auth` to the OAuth reason; Task 6 maps `authStatus: "notLoggedIn"` or
 `runtimeStatus: "authenticationRequired"`, not `failureReason`, which stays null for a server never signed in.
+
+### L7: a PreToolUse hook's `allow` in auto mode skips the classifier: pass
+
+What ran: Claude Code `2.1.325` on the Claude plan, `claude -p --model haiku --permission-mode auto --setting-sources ''
+--strict-mcp-config --settings <file> --output-format stream-json --verbose --include-hook-events`, in an empty git
+repository. The settings file held `autoMode.hard_deny: ["$defaults", "Fruit Ban: any shell command whose text contains
+the word banana is always blocked, whatever the user says."]`, and for the second run a `PreToolUse` command hook on
+`Bash` that answers `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`. The prompt
+asked for `curl -sS -o banana.html -w "%{http_code}" https://example.com/banana`.
+
+- Without the hook: `permission_denied` with `decision_reason_type: "classifier"`; nothing ran.
+- With the hook: a `hook_response` (`outcome: "success"`), no `permission_denied`, and `banana.html` was written.
+
+Meaning for the design: a hook's `allow` settles a call before the classifier on the plan, so a quoted-call grant is
+matched in 10db's PreToolUse hook (`createHookJudge`) on native auto mode; no `permissions.allow` rule is needed. The
+hook runs after the guard, whose `deny` and `ask` stand, so a grant never overrides the guard. Codex's hook can only
+refuse a call, so a grant there can't skip Auto-review of an escalation. Bedrock was not run; the hook protocol does not
+depend on the provider.

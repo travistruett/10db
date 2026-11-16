@@ -20,6 +20,8 @@ import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
 import { ModelMenu } from '../../conversation/model-menu';
 import { nameOf } from '../../conversation/model-menu-options';
+import { BackgroundTasks } from '../../conversation/background-tasks';
+import { latestTodos, TodoList } from '../../conversation/todo-list';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
 import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
@@ -312,12 +314,20 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
       }
       footer={
         <>
+          {caps.plan ? (
+            <TodoList steps={latestTodos(items)} working={working} cardWaiting={open.length > 0} />
+          ) : null}
           <WorkingLine
             conversation={conversation}
             streaming={streaming}
             {...(tool === undefined ? {} : { tool })}
           />
           <PermissionRequest items={open} />
+          <BackgroundTasks
+            capabilities={caps}
+            tasks={conversation.backgroundTasks}
+            cardWaiting={open.length > 0}
+          />
           {waiting ? (
             <FolderWait
               holders={keeping}

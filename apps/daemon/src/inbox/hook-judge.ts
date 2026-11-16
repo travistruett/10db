@@ -18,7 +18,7 @@ import {
   callKey,
   callSummary,
   crossesLimit,
-  grantCallSummary,
+  isGrantedCall,
   projectGrantedCalls,
   skipMessage,
   type FastPathContext,
@@ -118,15 +118,18 @@ export function createHookJudge(
   };
 
   return async (req) => {
-    if (ctx.judgeNow(req) !== JudgeKind.Tendb) return { decision: 'allow' };
+    const judging = ctx.judgeNow(req);
+    if (judging === JudgeKind.Rules) return { decision: 'allow' };
     // A question is the builder's to answer, whatever any judge thinks of it.
     if (req.toolName === 'AskUserQuestion') return { decision: 'allow' };
-    if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
     const input = InputRecord.safeParse(req.input).data ?? {};
-    if (
-      projectGrantedCalls(deps.state.db, ctx.projectId).has(grantCallSummary(req.toolName, input))
-    )
+    // The builder's Always in this project on this very call settles it in the hook, ahead of Claude's auto
+    // mode classifier as well as 10db's judge: the hook's allow ends the check, as Claude Code's own "don't ask
+    // again" does. No judge reads the call, since it is the agent's text.
+    if (isGrantedCall(projectGrantedCalls(deps.state.db, ctx.projectId), req.toolName, input))
       return { decision: 'allow', settled: GRANT_SETTLED };
+    if (judging !== JudgeKind.Tendb) return { decision: 'allow' };
+    if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
     const now = ctx.clock.now().getTime();
     if (downAt !== null && now - downAt.ms < FLOOR_BACKOFF_MS) return floor(req, downAt.detail);
     const verdict = await crossesLimit(

@@ -565,9 +565,19 @@ line, made shared: a static blue dot, then what the turn is doing.
 
 It is not a live region and is never announced as it ticks (Workbench spec §4.6).
 
-**The agent's plan** (capability `plan`; the `plan_update` event) sits in one collapsed row just above the working
-line: "Plan · 3 of 7 done · Now: update the tests". Opened, it is a checklist. The transcript gets one row the first
-time a plan appears ("Made a plan · 7 steps"), not one per update **(call)**.
+**The agent's plan** (capability `plan`; the `plan_update` event) sits in one row just above the working line:
+"Plan · 3 of 7 done · Now: update the tests". It is open, as a checklist, while work remains, as Claude Code's list
+is, and folds to its row once every step is done; a new list opens again. "Now:" names the step in progress while a
+turn runs, and a step in progress of a turn that is over reads "interrupted". The checklist scrolls inside a height
+cap, so the transcript and the composer keep their room. The transcript gets one row the first time a plan appears
+("Made a plan · 7 steps"), not one per update **(call)**.
+
+**Background tasks** (capability `backgroundTasks`; the `background_tasks` event) sit above the composer, under
+any waiting card: "Running in the background · 2", then a row per command, monitor or subagent with its kind, a
+subagent's type and what it does. The heading folds the list, and the list scrolls inside a height cap. With none
+running nothing is drawn; an agent whose capability is off says so in one dim line ("Codex doesn't report
+background tasks."). While a card waits on the builder, the plan and the background list start folded to
+their headings, so the question and the composer keep the room; the builder can open either.
 
 ### 7.6 Thinking
 
@@ -970,6 +980,7 @@ and `conversation/` forbids comparing a harness id.
 | `images` | Attach, paste and drop of the listed types | Attach hidden; a pasted picture is refused in words |
 | `slashCommands` | the `/` menu from the `commands` event | `/` types a slash |
 | `plan` | the plan row above the working line | hidden |
+| `backgroundTasks` | the background tasks list above the composer | one dim line: "{label} doesn't report background tasks." |
 | `reasoning` | "Thought for 12 s" rows; "Thinking…" | neither |
 | `subagents` | nested subagent rows; in Plan, the researchers and reviewers | flat rows; Plan's header notice (below) |
 | `modelSwitch: 'next_turn'` | the model picker, between turns | `'none'`: the model as plain text |
