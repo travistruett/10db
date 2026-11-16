@@ -121,3 +121,22 @@ export function lanePermissions(sandbox: LaneSandboxSpec): Record<string, unknow
     },
   };
 }
+
+/**
+ * The profile of an explore conversation that has no lane sandbox: the checkout read and nothing written, and
+ * every host blocked. Its guard hook refuses every command such a session asks for, so Codex only reads.
+ */
+export function readOnlyPermissions(checkout: string): Record<string, unknown> {
+  return {
+    lane: {
+      filesystem: { [MINIMAL]: 'read', [realOrSelf(checkout)]: 'read' },
+      network: {
+        enabled: true,
+        mode: 'full',
+        domains: {},
+        allow_local_binding: false,
+        unix_sockets: {},
+      },
+    },
+  };
+}

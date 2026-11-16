@@ -955,7 +955,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   };
 
   const run = async (): Promise<void> => {
-    if ((spec.sandbox ?? null) === null)
+    // A conversation with no lane sandbox runs read-only (`readOnlyPermissions`); a lane never starts without one.
+    if ((spec.sandbox ?? null) === null && spec.profile.kind !== 'explore')
       throw sandboxRefused('10db refused to start Codex without the lane sandbox.');
     const codexHome = spec.env['CODEX_HOME'];
     if (codexHome === undefined || codexHome === '')

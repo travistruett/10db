@@ -1,5 +1,5 @@
 import { SandboxedMcpServer } from '../sandbox';
-import { lanePermissions } from './codex-lane-permissions';
+import { lanePermissions, readOnlyPermissions } from './codex-lane-permissions';
 import { codexYourServers } from './codex-your-servers';
 import type { AgentSessionSpec, SessionMcpServer } from './types';
 
@@ -45,7 +45,8 @@ export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknow
   );
   const yours = codexYourServers(spec);
   const { sandbox } = spec;
-  if (sandbox === null) {
+  // A conversation with no lane sandbox reads the checkout and runs no command; a lane never starts without one.
+  if (sandbox === null && spec.profile.kind !== 'explore') {
     throw new CodexLaneConfigError('a Codex session needs the lane sandbox');
   }
   // With the setup's skill roots listed, Codex tells the model of its skills; every other thread keeps
@@ -53,10 +54,10 @@ export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknow
   const skills = (spec.setup?.skillRoots ?? []).length > 0;
   return {
     ...(skills ? { skills: { include_instructions: true } } : {}),
-    permissions: lanePermissions(sandbox),
+    permissions: sandbox === null ? readOnlyPermissions(spec.cwd) : lanePermissions(sandbox),
     // The thread's own setting over the home's `disabled`.
     web_search: spec.webSearch ?? 'disabled',
-    shell_environment_policy: { inherit: 'none', set: { ...sandbox.shellEnv } },
+    shell_environment_policy: { inherit: 'none', set: { ...sandbox?.shellEnv } },
     mcp_servers: {
       ...projects,
       ...yours,
