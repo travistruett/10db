@@ -1295,3 +1295,28 @@ remains as written in T3 §3.
 
 The Codex threads these checks started (L1, S3) remain in the ChatGPT-plan account's `CODEX_HOME/sessions`,
 with the runtime files Codex creates there on first use. Nothing was written to 10db's database or settings.
+
+## M6a live checks (2026-11-16)
+
+Run on the builder's Mac against the real daemon (`apps/daemon/test/live-chat-daemon.ts`: `tsx src/main.ts` on a
+scratch data dir, driven over HTTP) with the Claude Code that `claude` resolves to on `PATH` (`2.1.325`, not the
+pin, so nothing is fetched into the app's tools folder), the signed-in Claude plan and ChatGPT plan, and a real git
+repository under `apps/daemon/node_modules/.cache/10db-test-homes/` (outside every temp root). The daemon's
+environment drops `GIT_*`, `ANTHROPIC_*`, `AWS_*` and `CLAUDE_CODE_*`. Nothing was read from or written to the app's
+own data dir. Manual, never CI: `TENDB_LIVE_CLAUDE=1` and `TENDB_LIVE_CODEX=1`.
+
+### LC1: a chat edits and commits as the builder: pass
+
+What ran: `chat-write.live.test.ts`. A chat on the Claude plan, folder free, asked to create `notes.txt` with its
+edit tool and commit it with `commit_changes`. The repository has a `.git/hooks/pre-commit` that writes a marker
+file and no `user.*` of its own.
+
+- The file holds `marker`, and `git log -1` shows the subject `add notes`.
+- The commit's author name and email equal the builder's global git identity (compared, not printed).
+- The marker file does not exist: the repository's hook did not run, as `commit_changes` promises.
+- The chat's MCP calls were `commit_changes` and `set_title`, both done.
+
+Meaning: a Claude-plan chat reaches the write profile, the folder hold and the commit tool end to end, and a commit
+takes the builder's identity because the daemon's git reads the builder's own global config. A test run that leaves
+its isolation variables (`GIT_CONFIG_GLOBAL=/dev/null`) in the daemon's environment commits as `user@host`
+instead, so the harness drops `GIT_*`.
