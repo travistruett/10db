@@ -206,19 +206,28 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await billing.uncheck();
   await page.getByRole('button', { name: 'Apply' }).click();
 
-  // The picker, narrow and dark, with its options open.
-  const pages = page.getByLabel('Pages', { exact: true }).and(page.locator('input'));
+  // The start page's list of pages, narrow and dark, then wide.
   await page.setViewportSize({ width: 480, height: 900 });
-  await pages.click();
-  await expect(page.getByRole('option', { name: /^Settings/ })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Settings', exact: true })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('option', { name: /^Settings/ }).click();
-  await page.getByRole('option', { name: /^People/ }).click();
-  await pages.press('Escape');
-  await page.getByRole('textbox', { name: "What's bothering you?" }).fill('these feel cramped');
-  await page.getByRole('button', { name: 'Start' }).click();
+  await page.getByRole('checkbox', { name: 'Settings', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'People', exact: true }).check();
+  await page.getByRole('button', { name: 'Start Pass', exact: true }).click();
+
+  // The pages open waiting on the builder; each is sent its first message on its own page.
+  for (const area of ['Settings', 'People']) {
+    await expect(row(page, area)).toContainText('Your turn');
+    await row(page, area)
+      .getByRole('button', { name: new RegExp(`^${area}`) })
+      .click();
+    const first = page
+      .getByRole('region', { name: area })
+      .getByRole('textbox', { name: `Message to ${area}` });
+    await first.fill('these feel cramped');
+    await first.press('Meta+Enter');
+  }
 
   // People asks, so it rises to the top of the queue; it is answered on the page.
   await expect(row(page, 'People')).toContainText('Asks a question');
@@ -227,7 +236,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     .getByRole('button', { name: /^People/ })
     .click();
   const people = page.getByRole('region', { name: 'People' });
-  await expect(people.getByText('Which spacing?')).toBeVisible();
+  await expect(people.getByText('Which spacing?', { exact: true })).toBeVisible();
   await people.getByRole('radio', { name: /Roomy/ }).check();
   await people.getByRole('button', { name: 'Send answer' }).click();
   await expect(row(page, 'People')).toContainText('Ready');
@@ -317,7 +326,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await expect(abandon.getByText('Discards: People (their changes are deleted).')).toBeVisible();
   await expect(abandon.getByText('Stays: Settings (signed off).')).toBeVisible();
   await abandon.getByRole('button', { name: 'Abandon' }).click();
-  await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start Pass', exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });

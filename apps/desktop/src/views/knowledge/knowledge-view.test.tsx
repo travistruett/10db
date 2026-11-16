@@ -209,7 +209,6 @@ describe('KnowledgeView', () => {
       expect(calls).toBeGreaterThan(1);
     });
     expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
-    expect(screen.queryByLabelText('Loading principles')).toBeNull();
     release();
     await waitFor(() => {
       expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();

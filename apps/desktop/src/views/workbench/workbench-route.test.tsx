@@ -7,7 +7,7 @@ import {
   type AreaDef,
 } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { findPagesInput, pickOption, pillsOf } from '../../test/combobox';
+import { findPagesInput, pickOption } from '../../test/combobox';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
@@ -78,15 +78,16 @@ function open(
   return { opened, router, queryClient };
 }
 
-const pick = async (name: string) =>
-  pickOption(await findPagesInput(), new RegExp(`^${name}`, 'i'));
-const picked = async () => pillsOf(await findPagesInput());
+const box = (name: string) => screen.findByRole('checkbox', { name });
+const pick = async (name: string) => {
+  fireEvent.click(await box(name));
+};
 
 describe('WorkbenchView', () => {
   it("with no pass open, is the picker over the project's pages, and Start Pass opens one there", async () => {
     const { opened } = open('/workbench');
-    await pick('settings');
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await pick('Settings');
+    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
     await waitFor(() => {
       expect(opened).toHaveLength(1);
     });
@@ -97,8 +98,8 @@ describe('WorkbenchView', () => {
   it("ticks the Board's tasks a link names", async () => {
     const task = taskDto({ projectId: project.id, title: 'People list', areas: ['people'] });
     const { opened } = open(`/workbench?tasks=${JSON.stringify([task.id])}`, {}, { tasks: [task] });
-    expect(within(await picked()).getByText('People list')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(((await box('People list')) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
     await waitFor(() => {
       expect(opened[0]?.body).toMatchObject({ taskIds: [task.id], pages: [] });
     });
@@ -110,9 +111,9 @@ describe('WorkbenchView', () => {
       goalPages: goalPassPagesDto({ pages: ['people'], fromTasks: [] }),
     });
     await waitFor(async () => {
-      expect(within(await picked()).getByText('People')).toBeTruthy();
+      expect(((await box('People')) as HTMLInputElement).checked).toBe(true);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
     await waitFor(() => {
       expect(opened[0]?.body).toMatchObject({ pages: ['people'], goalId: goal });
     });
@@ -136,7 +137,7 @@ describe('WorkbenchView', () => {
     });
   });
 
-  it('says a page the repository has that the project lacks, from the setup it reads, with a count on Set Up', async () => {
+  it('says a page the repository has that the project lacks, from the setup it reads, with a count on Workbench Settings', async () => {
     open(
       '/workbench',
       {},
@@ -160,14 +161,14 @@ describe('WorkbenchView', () => {
         ],
       },
     );
-    expect((await screen.findByText(/New page found:/)).textContent).toBe(
-      'New page found: Chats /sessions',
+    expect((await screen.findByText(/found in code/)).textContent).toContain(
+      'Chats /sessions found in code',
     );
-    const setUp = screen.getAllByRole('button', { name: /^Set Up/ })[0];
-    expect(within(setUp ?? document.body).getByText('1')).toBeTruthy();
+    const settings = await screen.findByRole('button', { name: /^Workbench Settings/ });
+    expect(within(settings).getByText('1')).toBeTruthy();
   });
 
-  it('reads the setup for Set Up only while no pass is open', async () => {
+  it('reads the setup for Workbench Settings only while no pass is open', async () => {
     let asked = 0;
     const { ready } = pagesByStatus();
     const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready] });

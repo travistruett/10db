@@ -68,6 +68,10 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 ### Across views
 
+- `src/shell/page-header.tsx` is the header Inbox, Factory, Knowledge, Board and the Workbench start page share (title
+  and actions, an optional byline, an optional toolbar of tabs and filters); workspaces keep compact headers.
+  `src/shell/page-loading.tsx` is what a page shows while it loads (after 300 ms, placeholder rows; never a lone spinner).
+  `src/shell/count-badge.tsx` is every count: muted, or `tone` attention when it needs the builder.
 - Factory and preview: the installed release app is the factory; it manages the 10db repo and runs its tasks.
   `pnpm dev` (its own `.dev/data`) with `dev:shell` or http://localhost:1420 is the preview: it renders the
   checkout with live reload and never runs tasks. While a task holds the checkout (Your folder / shared mode),

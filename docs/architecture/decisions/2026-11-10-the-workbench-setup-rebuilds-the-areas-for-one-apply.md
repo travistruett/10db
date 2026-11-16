@@ -8,7 +8,7 @@
 ## Decision
 
 Opening the Workbench on a project with no page area shows the setup in place of the picker; a project
-with page areas reaches it from the picker's Set Up (n), which counts the setup's settings and branch
+with page areas reaches it from Workbench Settings (n; called Set Up when this was decided), which counts the setup's settings and branch
 note only, so a page the builder left out is not asked for again. Propose Page
 Areas, its dialog and `POST /projects/:projectId/propose-page-areas` are gone: there is one path.
 

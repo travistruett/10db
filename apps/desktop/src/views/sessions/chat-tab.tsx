@@ -2,6 +2,7 @@ import type { ChatDto, Effort, ProjectViewDto, ToolCallView } from '@10db/contra
 import { Box, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
 import { ConversationLayout } from '../../conversation/conversation-layout';
@@ -42,9 +43,6 @@ const NARROW_QUERY = '(max-width: 639px)';
 /** The message File as Tasks sends, as the builder's own turn (sessions design spec §7.2). */
 export const FILE_AS_TASKS_MESSAGE = 'File the work we agreed on as tasks on the Board.';
 
-/** After this long without the transcript, three static dim lines say it is on its way. */
-const LOADING_LINES_AFTER_MS = 300;
-
 /** A turn is under way in these states. */
 const WORKING_STATES: ReadonlySet<string> = new Set([
   'starting',
@@ -52,35 +50,6 @@ const WORKING_STATES: ReadonlySet<string> = new Set([
   'waiting_card',
   'stopping',
 ]);
-
-/** Three static dim lines, with no shimmer: what the column shows while a long transcript loads. */
-function LoadingLines({ loading }: { readonly loading: boolean }) {
-  const [late, setLate] = useState(false);
-  useEffect(() => {
-    if (!loading) return;
-    const timer = setTimeout(() => {
-      setLate(true);
-    }, LOADING_LINES_AFTER_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [loading]);
-  if (!loading || !late) return null;
-  return (
-    <Box px="md" pt="md" aria-hidden="true" data-loading-lines>
-      {[0.9, 0.7, 0.8].map((width) => (
-        <Box
-          key={width}
-          h={12}
-          mb={10}
-          w={`${String(width * 100)}%`}
-          bg="var(--mantine-color-default-hover)"
-          style={{ borderRadius: 'var(--mantine-radius-sm)' }}
-        />
-      ))}
-    </Box>
-  );
-}
 
 export interface ChatTabProps {
   readonly chat: ChatDto;
@@ -374,7 +343,11 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
         </>
       }
     >
-      <LoadingLines loading={loading} />
+      {loading ? (
+        <Box px="md" pt="md">
+          <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+        </Box>
+      ) : null}
       <ConversationList
         entries={shown}
         highlight={null}

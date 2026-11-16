@@ -7,7 +7,6 @@ import {
 } from '@10db/contracts';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { openOptions, optionIn, pickOption, pillsOf } from '../../test/combobox';
 import { minutesBeforeNow, PASS_NOW, passStartDto } from '../../test/pass-fixtures';
 import { projectViewDto, taskDto } from '../../test/fixtures';
 import { renderWithRouter } from '../../test/theme';
@@ -83,41 +82,34 @@ async function draw(overrides: Partial<StartPassProps> = {}) {
   return { onStart };
 }
 
-const pagesInput = () => screen.getByLabelText('Pages', { selector: 'input' });
-const pick = (name: RegExp) => pickOption(pagesInput(), name);
-/** Types into the Pages search as the builder would: focused first, as Mantine reads typing. */
-function search(text: string) {
-  pagesInput().focus();
-  fireEvent.change(pagesInput(), { target: { value: text } });
-}
-const startButton = () => screen.getByRole('button', { name: /^Start/ });
-const picked = () => pillsOf(pagesInput());
+const startButton = () => screen.getByRole('button', { name: 'Start Pass' });
+const box = (name: RegExp | string) => screen.getByRole('checkbox', { name });
+const ticked = (name: RegExp | string) => (box(name) as HTMLInputElement).checked;
+const disabled = (name: RegExp | string) => (box(name) as HTMLInputElement).disabled;
 
 describe('StartPass', () => {
-  it('offers every page with its route and last change, then the open UI tasks, in one search', async () => {
+  it('lists every page with its route and last change, then the open UI tasks', async () => {
     await draw();
-    expect(screen.getByText('Work through pages with the agents, live.')).toBeTruthy();
-    const list = await openOptions(pagesInput());
-    expect(optionIn(list, /^settings/i).textContent).toContain('/settings');
-    expect(optionIn(list, /^settings/i).textContent).toContain('changed 1d ago');
-    expect(optionIn(list, /^billing/i).textContent).toContain('No route');
-    expect(optionIn(list, /^billing/i).textContent).toContain('no changes yet');
-    expect(within(list).getByText('Open UI tasks')).toBeTruthy();
-    expect(optionIn(list, /^The people list breathes/).textContent).toContain('people');
+    const pages = screen.getByRole('group', { name: 'Pages' });
+    expect(within(pages).getAllByRole('checkbox')).toHaveLength(4);
+    expect(pages.textContent).toContain('/settings');
+    expect(pages.textContent).toContain('changed 1d ago');
+    expect(pages.textContent).toContain('No route');
+    expect(pages.textContent).toContain('no changes yet');
+    const tasks = screen.getByRole('group', { name: 'Open UI tasks' });
+    expect(within(tasks).getByRole('checkbox', { name: 'The people list breathes' })).toBeTruthy();
+    expect(tasks.textContent).toContain('People');
+    expect(screen.queryByLabelText("What's bothering you?")).toBeNull();
     expect(startButton()).toHaveProperty('disabled', true);
   });
 
-  it('starts the picked page and task with the message, with no count on the button', async () => {
+  it('starts the ticked page and task, says them in words beside the button, and sends no message', async () => {
     const { onStart } = await draw();
-    await pick(/^settings/i);
-    await pick(/^The people list breathes/);
-    expect(within(picked()).getByText('Settings')).toBeTruthy();
-    expect(within(picked()).getByText('/settings')).toBeTruthy();
-    expect(within(picked()).getByText('The people list breathes')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("What's bothering you?"), {
-      target: { value: 'these feel cramped' },
-    });
-    expect(startButton().textContent).toBe('Start');
+    fireEvent.click(box('Settings'));
+    expect(screen.getByText('1 page')).toBeTruthy();
+    fireEvent.click(box('The people list breathes'));
+    expect(screen.getByText('1 page \u00b7 1 task')).toBeTruthy();
+    expect(startButton().textContent).toBe('Start Pass');
     fireEvent.click(startButton());
     expect(onStart).toHaveBeenCalledTimes(1);
     const sent = PassOpenRequest.parse(onStart.mock.calls[0]?.[0]);
@@ -126,48 +118,27 @@ describe('StartPass', () => {
       pages: ['settings'],
       taskIds: [peopleTask.id],
       pageCap: 4,
-      firstMessage: 'these feel cramped',
     });
   });
 
-  it('marks a picked option with a check on the right, as every multi-select does', async () => {
+  it('disables a row another ticked row holds or can share a file with, saying why', async () => {
     await draw();
-    await pick(/^settings/i);
-    const list = await openOptions(pagesInput());
-    expect(within(optionIn(list, /^settings/i)).queryByLabelText('Picked')).not.toBeNull();
-    expect(within(optionIn(list, /^people/i)).queryByLabelText('Picked')).toBeNull();
+    fireEvent.click(box('Settings'));
+    expect(disabled('Forms')).toBe(true);
+    expect(
+      screen.getByText(
+        'Settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
+      ),
+    ).toBeTruthy();
+    expect(disabled('Settings')).toBe(false);
+    fireEvent.click(box('The people list breathes'));
+    expect(disabled('People')).toBe(true);
+    expect(screen.getByText('The people list breathes works on People')).toBeTruthy();
+    fireEvent.click(box('The people list breathes'));
+    expect(disabled('People')).toBe(false);
   });
 
-  it('disables a page another picked row holds or can share a file with, saying why', async () => {
-    await draw();
-    await pick(/^settings/i);
-    let list = await openOptions(pagesInput());
-    const forms = optionIn(list, /^forms/i);
-    expect(forms.hasAttribute('data-combobox-disabled')).toBe(true);
-    expect(forms.textContent).toContain(
-      'Settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
-    );
-    fireEvent.click(optionIn(list, /^The people list breathes/));
-    list = await openOptions(pagesInput());
-    const people = optionIn(list, /^people/i);
-    expect(people.hasAttribute('data-combobox-disabled')).toBe(true);
-    expect(people.textContent).toContain('The people list breathes works on People');
-  });
-
-  it('finds a page by its route and a task by the pages it works on', async () => {
-    await draw();
-    search('peo');
-    let list = await openOptions(pagesInput());
-    expect(within(list).queryByRole('option', { name: /^settings/i, hidden: true })).toBeNull();
-    expect(optionIn(list, /^people/i)).toBeTruthy();
-    expect(optionIn(list, /^The people list breathes/)).toBeTruthy();
-    search('/sett');
-    list = await openOptions(pagesInput());
-    expect(optionIn(list, /^settings/i)).toBeTruthy();
-    expect(within(list).queryByRole('option', { name: /^people/i, hidden: true })).toBeNull();
-  });
-
-  it('shows a page by its label, and finds it by the label as well as the name', async () => {
+  it('shows a page by its label', async () => {
     const labelled = passStartDto({
       pages: start.pages.map((page) =>
         page.area === 'forms' ? { ...page, label: 'Sign-up form' } : page,
@@ -180,26 +151,19 @@ describe('StartPass', () => {
         areas: areas.map((a) => (a.name === 'forms' ? { ...a, label: 'Sign-up form' } : a)),
       },
     });
-    search('sign-up');
-    let list = await openOptions(pagesInput());
-    expect(optionIn(list, /^sign-up form/i).textContent).toContain('/forms');
-    expect(within(list).queryByRole('option', { name: /^settings/i, hidden: true })).toBeNull();
-    search('forms');
-    list = await openOptions(pagesInput());
-    expect(optionIn(list, /^sign-up form/i)).toBeTruthy();
-    await pick(/^sign-up form/i);
+    fireEvent.click(box('Sign-up form'));
     fireEvent.click(startButton());
     expect(onStart.mock.calls[0]?.[0]).toMatchObject({ name: 'Sign-up form', pages: ['forms'] });
   });
 
-  it('starts with the pages and tasks a link names picked, and the goal it came from', async () => {
+  it('starts with the pages and tasks a link names ticked, and the goal it came from', async () => {
     const goalId = mintId('Goal');
     const { onStart } = await draw({
       initial: { pages: ['billing'], taskIds: [peopleTask.id] },
       goalId,
     });
-    expect(within(picked()).getByText('Billing')).toBeTruthy();
-    expect(within(picked()).getByText('The people list breathes')).toBeTruthy();
+    expect(ticked('Billing')).toBe(true);
+    expect(ticked('The people list breathes')).toBe(true);
     fireEvent.click(startButton());
     expect(onStart.mock.calls[0]?.[0]).toMatchObject({
       pages: ['billing'],
@@ -208,11 +172,25 @@ describe('StartPass', () => {
     });
   });
 
-  it('takes a page back out from its pill', async () => {
+  it('takes a page back out when unticked', async () => {
     await draw({ initial: { pages: ['billing', 'people'], taskIds: [] } });
-    fireEvent.click(within(picked()).getByLabelText('Remove Billing'));
-    expect(within(picked()).queryByText('billing')).toBeNull();
-    expect(within(picked()).getByText('People')).toBeTruthy();
+    fireEvent.click(box('Billing'));
+    expect(ticked('Billing')).toBe(false);
+    expect(ticked('People')).toBe(true);
+    expect(screen.getByText('1 page')).toBeTruthy();
+  });
+
+  it('says which task holds a page that is held', async () => {
+    await draw({
+      start: passStartDto({
+        pages: start.pages.map((page) =>
+          page.area === 'people'
+            ? { ...page, heldBy: { taskId: mintId('Task'), title: 'Fix the roster' } }
+            : page,
+        ),
+      }),
+    });
+    expect(screen.getByText('Waits for Fix the roster')).toBeTruthy();
   });
 
   it("says the daemon's refusal beside Start Pass", async () => {
@@ -231,65 +209,54 @@ describe('StartPass', () => {
         },
       },
     });
-    await pick(/^settings/i);
+    fireEvent.click(box('Settings'));
     expect(screen.getByText('The folder is on no branch: check one out first.')).toBeTruthy();
     expect(startButton()).toHaveProperty('disabled', true);
   });
 
-  it('says what the picked pages take in beside the button, and nothing about shared areas', async () => {
+  it('says what the ticked pages take in beside the button, and nothing about shared areas', async () => {
     await draw();
     expect(screen.queryByText(/Settings: 3 files already changed/)).toBeNull();
-    await pick(/^settings/i);
+    fireEvent.click(box('Settings'));
     const line = screen.getByText(/Settings: 3 files already changed/);
     expect(line.closest('[data-start-bar]')?.contains(startButton())).toBe(true);
     expect(screen.queryByText(/count as/)).toBeNull();
   });
 
-  it("shows Set Up's count as a badge, not in the label", async () => {
-    const onOpen = vi.fn();
-    await draw({ setUp: { count: 2, newPages: [], onOpen } });
-    const setUp = screen.getByRole('button', { name: /^Set Up/ });
-    expect(setUp.textContent).not.toContain('(');
-    expect(within(setUp).getByText('2')).toBeTruthy();
-    fireEvent.click(setUp);
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers Set Up with no count when nothing is counted, and no new-page line', async () => {
-    await draw({ setUp: { count: 0, newPages: [], onOpen: vi.fn() } });
-    const setUp = screen.getByRole('button', { name: 'Set Up' });
-    expect(setUp.querySelector('.mantine-Badge-root')).toBeNull();
-    expect(screen.queryByText(/new pages? found/)).toBeNull();
+  it('says no found page when none was found', async () => {
+    await draw({ setUp: { newPages: [], onOpen: vi.fn() } });
+    expect(screen.queryByText(/found in code/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
   });
 
   it.each([
     {
       name: 'one page, by its label and route',
       pages: [{ name: 'sessions', label: 'Chats', route: '/sessions', folders: ['src/sessions/'] }],
-      says: 'New page found: Chats /sessions',
+      says: 'Chats /sessions found in code',
     },
     {
       name: 'a page with no label, by its capitalised name, and none with no route',
       pages: [{ name: 'billing', folders: ['src/billing/'] }],
-      says: 'New page found: Billing',
+      says: 'Billing found in code',
     },
     {
-      name: 'several, counted',
-      pages: [
-        { name: 'a', route: '/a', folders: ['a/'] },
-        { name: 'b', route: '/b', folders: ['b/'] },
-      ],
-      says: '2 new pages found: A /a, B /b',
+      name: 'several, the first few named and the rest counted',
+      pages: ['a', 'b', 'c', 'd'].map((name) => ({
+        name,
+        route: `/${name}`,
+        folders: [`${name}/`],
+      })),
+      says: 'A /a, B /b, C /c and 1 more found in code',
     },
   ])(
-    'says the new page found: $name, and the header holds the only Set Up',
+    'says the found pages as one quiet line: $name, with Review opening the setup',
     async ({ pages, says }) => {
       const onOpen = vi.fn();
-      await draw({ setUp: { count: pages.length, newPages: pages, onOpen } });
+      await draw({ setUp: { newPages: pages, onOpen } });
       const line = screen.getByRole('status');
       expect(line.textContent).toContain(says);
-      expect(within(line).queryByRole('button')).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: /^Set Up/ }));
+      fireEvent.click(within(line).getByRole('button', { name: 'Review' }));
       expect(onOpen).toHaveBeenCalledTimes(1);
     },
   );
