@@ -11,8 +11,7 @@ import {
   type BatchId,
   type ProjectId,
 } from '@10db/contracts';
-import { getBatchRow, getChat, insertChat, insertConversation, patchBatch, schema } from '@10db/db';
-import { eq } from 'drizzle-orm';
+import { getBatchRow, getChat, insertChat, insertConversation, patchBatch } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -90,28 +89,6 @@ async function boot(): Promise<RunningDaemon> {
 const waitLine = (running: RunningDaemon, batchId: BatchId): string | null =>
   getBatchRow(running.state.db, batchId).notices.find((n) => n.key === 'folder-hold')?.line ?? null;
 
-/** Sets a chat's conversation state, as the engine's transition does. */
-function setState(
-  running: RunningDaemon,
-  chatId: Parameters<typeof getChat>[1],
-  to: ConversationState,
-): void {
-  running.state.write((ctx) => {
-    const row = getChat(ctx.tx, chatId);
-    ctx.tx
-      .update(schema.conversations)
-      .set({ state: to })
-      .where(eq(schema.conversations.id, row.conversationId))
-      .run();
-    ctx.emit({
-      type: 'conversation.state',
-      entityType: 'conversation',
-      entityId: row.conversationId,
-      data: { state: to },
-    });
-  });
-}
-
 function takenOverChat(running: RunningDaemon, projectId: ProjectId, title: string) {
   return running.state.write((ctx) => {
     const id = mintId('Chat');
@@ -186,7 +163,12 @@ describe('a restart with a chat in your terminal', () => {
     const third = await boot();
     await waitForAsync(() => Promise.resolve(waitLine(third, batchId) ?? undefined), 30_000);
     expect(getBatchRow(third.state.db, batchId).returnSha).toBe(home);
-    setState(third, terminal, ConversationState.IdleCold);
+    // Hand Back through the route: the folder is given back and 10db's waiting switch back runs.
+    const handBack = await fetch(
+      `${third.url}/conversations/${getChat(third.state.db, terminal).conversationId}/hand-back`,
+      { method: 'POST', headers: { Authorization: `Bearer ${third.token}` } },
+    );
+    expect(handBack.status).toBe(204);
     await waitForAsync(
       () => Promise.resolve(git('branch', '--show-current') === 'main' ? true : undefined),
       30_000,
