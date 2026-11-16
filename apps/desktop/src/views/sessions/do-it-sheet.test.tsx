@@ -298,6 +298,35 @@ describe('the Do It sheet', () => {
   });
 });
 
+describe('Do It Here when only chats’ turns hold the folder', () => {
+  const busy = {
+    offered: false,
+    refusal: {
+      code: 'folder_in_use',
+      message: 'Your folder is in use by the chat ‘Docs’.',
+      link: null,
+    },
+    whenBusy: true,
+  };
+
+  it.each([
+    { button: 'Stop the Turn and Open', whenBusy: 'stop_turns' },
+    { button: 'Open When It Ends', whenBusy: 'wait' },
+  ])('$button sends whenBusy $whenBusy', async ({ button, whenBusy }) => {
+    const { doIt } = openChat(doItPreviewDto({ here: busy }), {
+      chat: { conversation: { state: 'idle_warm' } },
+    });
+    const sheet = await openSheet();
+    await within(sheet).findByDisplayValue('Retry login once on a 401');
+    fireEvent.click(within(sheet).getByRole('radio', { name: /Your folder, as a pass/ }));
+    expect(within(sheet).queryByRole('button', { name: 'Do It' })).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: button }));
+    await waitFor(() => {
+      expect(doIt.requests.map((r) => [r.place, r.whenBusy])).toEqual([['here', whenBusy]]);
+    });
+  });
+});
+
 describe('the fourth choice', () => {
   it('a message sent while the folder is held offers Do It in a Separate Copy, which opens the sheet with the draft', async () => {
     const { doIt } = openChat(doItPreviewDto(), {

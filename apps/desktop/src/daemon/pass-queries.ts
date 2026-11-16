@@ -4,7 +4,7 @@ import {
   PassAbandonedDto,
   PassDto,
   passHoldsTasks,
-  PassOpenedDto,
+  PassOpenResponse,
   PassStartDto,
   PassTurnWithFilesDto,
   PassViewDto,
@@ -231,7 +231,7 @@ export function useOpenPass(projectId: ProjectId) {
     mutationFn: async (request: PassOpenRequest) =>
       readJson(
         await client.projects[':projectId'].passes.$post({ param: { projectId }, json: request }),
-        PassOpenedDto,
+        PassOpenResponse,
       ),
     onSuccess: refetch,
   });

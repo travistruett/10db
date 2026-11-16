@@ -3,6 +3,7 @@ import {
   DoItPlace,
   type ChatDto,
   type DoItOfferDto,
+  PassWhenBusy,
   type DoItResult,
   type ProjectViewDto,
 } from '@10db/contracts';
@@ -128,8 +129,10 @@ export function DoItSheet({
   const brief = data?.brief;
   const title = typedTitle ?? brief?.title ?? '';
   const text = typedBrief ?? brief?.text ?? '';
+  // A place offered, or Your folder refused only because chats' turns hold it (B10: stop them, or wait).
   const offers = (p: DoItPlace): boolean =>
-    data === undefined || (p === DoItPlace.Here ? data.here : data.worktree).offered;
+    data === undefined ||
+    (p === DoItPlace.Here ? data.here.offered || data.here.whenBusy : data.worktree.offered);
   // A place that is refused is never the one in force: the sheet falls to the other when only it is offered.
   const effective: DoItPlace =
     picked !== null && offers(picked)
@@ -141,15 +144,17 @@ export function DoItSheet({
           : DoItPlace.Worktree;
   const offer =
     data === undefined ? null : effective === DoItPlace.Here ? data.here : data.worktree;
+  const busy = effective === DoItPlace.Here && data?.here.whenBusy === true;
   const canSubmit =
     data !== undefined &&
-    offer?.offered === true &&
+    (offer?.offered === true || busy) &&
     title.trim() !== '' &&
     text.trim() !== '' &&
     !doIt.isPending;
 
-  const submit = (): void => {
+  const submit = (whenBusy?: PassWhenBusy): void => {
     if (!canSubmit || brief === undefined) return;
+    if (busy && whenBusy === undefined) return;
     setError(null);
     doIt.mutate(
       {
@@ -158,6 +163,7 @@ export function DoItSheet({
           place: effective,
           title: title.trim(),
           brief: text,
+          ...(whenBusy === undefined ? {} : { whenBusy }),
           ...(brief.areas.length === 0 ? {} : { areas: brief.areas }),
           ...(brief.criteria.length === 0 ? {} : { acceptanceCriteria: brief.criteria }),
         },
@@ -199,9 +205,38 @@ export function DoItSheet({
           <Button variant="default" onClick={close}>
             Cancel
           </Button>
-          <Button disabled={!canSubmit} loading={doIt.isPending} onClick={submit}>
-            Do It
-          </Button>
+          {busy ? (
+            <>
+              <Button
+                variant="default"
+                disabled={!canSubmit}
+                onClick={() => {
+                  submit(PassWhenBusy.Wait);
+                }}
+              >
+                Open When It Ends
+              </Button>
+              <Button
+                disabled={!canSubmit}
+                loading={doIt.isPending}
+                onClick={() => {
+                  submit(PassWhenBusy.StopTurns);
+                }}
+              >
+                Stop the Turn and Open
+              </Button>
+            </>
+          ) : (
+            <Button
+              disabled={!canSubmit}
+              loading={doIt.isPending}
+              onClick={() => {
+                submit();
+              }}
+            >
+              Do It
+            </Button>
+          )}
         </>
       }
     >
@@ -210,7 +245,7 @@ export function DoItSheet({
         onKeyDown={(event) => {
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
-            submit();
+            if (!busy) submit();
           }
         }}
       >
@@ -271,8 +306,7 @@ export function DoItSheet({
               data={Object.values(DoItPlace).map((p) => ({
                 value: p,
                 label: placeLabel(p),
-                disabled:
-                  data !== undefined && !(p === DoItPlace.Here ? data.here : data.worktree).offered,
+                disabled: !offers(p),
               }))}
               onChange={(value) => {
                 const next = Object.values(DoItPlace).find((p) => p === value);

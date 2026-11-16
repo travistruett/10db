@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { JudgeLine } from '../../conversation';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
+import { PendingOpenLine } from './pending-open-line';
 import { SplitButton } from '../../shell/split-button';
 import { kindLine } from './kind-line';
 import { TabMenuItems, type TabActions } from './tab-menu';
@@ -183,6 +184,7 @@ export function SessionBar({
           </Menu>
         </Group>
       </Group>
+      <PendingOpenLine folder={folder} />
       <JudgeLine judge={capabilities.judge} />
     </Box>
   );

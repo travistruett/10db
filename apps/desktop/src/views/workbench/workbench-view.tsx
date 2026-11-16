@@ -28,6 +28,7 @@ import {
   useWorkbenchSetup,
   useRenamePass,
 } from '../../daemon/pass-queries';
+import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
 import { CountBadge } from '../../shell/count-badge';
 import { PageHeader } from '../../shell/page-header';
@@ -153,6 +154,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const closeDialog = () => {
     setDialog(null);
   };
+  const folder = useProjectFolder(project.id);
   const opening = useMutation({
     mutationFn: (request: PassOpenRequest) => actions.start(request),
   });
@@ -201,6 +203,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             tasks={tasks}
             initial={{ pages: goalPages, taskIds: search.tasks ?? [] }}
             goalId={search.goal ?? null}
+            folder={folder}
             now={now}
             onStart={(request) => {
               opening.mutate(request);
