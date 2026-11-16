@@ -37,7 +37,7 @@ describe('refusedToolCalls', () => {
       [{ kind: 'mcp', server: '10db', tool: 'commit' }],
     ],
   ])('shows %s as denied, by whom and at which limit', (_name, hook, expected) => {
-    const calls = refusedToolCalls({ ...hook, tool_use_id: 'item-1' }, judged, AT);
+    const calls = refusedToolCalls({ ...hook, tool_use_id: 'item-1' }, judged, AT, 0);
     expect(calls).toMatchObject(
       expected.map((e) => ({
         id: 'item-1',
@@ -51,14 +51,14 @@ describe('refusedToolCalls', () => {
     );
   });
 
-  it('shows each refused call of a code-mode script as its own call, part of that script', () => {
-    const hooks = ['vercel deploy --prod', 'vercel deploy --prod --force'].map((command) => ({
+  it('shows each refused call of a code-mode script as its own call, part of that script, even a repeat', () => {
+    const hook = {
       tool_name: 'Bash',
-      tool_input: { command },
+      tool_input: { command: 'vercel deploy --prod' },
       tool_use_id: 'exec-7',
       cwd: '/w',
-    }));
-    const calls = hooks.flatMap((hook) => refusedToolCalls(hook, judged, AT));
+    };
+    const calls = [0, 1].flatMap((seq) => refusedToolCalls(hook, judged, AT, seq));
     expect(calls).toHaveLength(2);
     expect(new Set(calls.map((call) => call.id)).size).toBe(2);
     for (const call of calls) {
@@ -80,6 +80,6 @@ describe('refusedToolCalls', () => {
     ['a tool 10db does not read', { tool_name: 'view_image', tool_input: {}, tool_use_id: 'i' }],
     ['a command that is no string', { tool_name: 'Bash', tool_input: {}, tool_use_id: 'i' }],
   ])('shows nothing for %s', (_name, hook) => {
-    expect(refusedToolCalls(hook, judged, AT)).toEqual([]);
+    expect(refusedToolCalls(hook, judged, AT, 0)).toEqual([]);
   });
 });

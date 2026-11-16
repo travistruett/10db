@@ -223,6 +223,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   let rpc: CodexRpc | null = null;
   let done = false;
   let started = false;
+  /** Refused calls shown so far, so two refused calls of one script keep distinct ids. */
+  let refusals = 0;
   /** `stop` was called: the process is expected to end, and what it says no longer matters. */
   let stopRequested = false;
   /** The session is ending (a stop, or a failed turn that ends it), so notifications are no longer read. */
@@ -911,7 +913,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           }
           // Codex reports no item for a call its hook refused: the thread shows the call from the hook's input.
           if (started)
-            for (const call of refusedToolCalls(refused, denial, clock.now().getTime()))
+            for (const call of refusedToolCalls(refused, denial, clock.now().getTime(), refusals++))
               events.push({ type: 'tool_call', call });
         },
       );
