@@ -15,6 +15,8 @@ export {
   type ArgFromFile,
   type TakeoverArg,
   type TakeoverCommand,
+  type TakeoverSpec,
+  validSessionId,
 } from './takeover-command';
 export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';

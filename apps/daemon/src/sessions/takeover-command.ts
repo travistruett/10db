@@ -1,3 +1,6 @@
+import type { Effort } from '@10db/contracts';
+import type { TakeoverLaunch } from '../environment';
+
 // What the builder's own terminal runs to continue a chat in the agent's TUI: a description a pure renderer turns
 // into a script and a one-line command. It holds no secret value; a key is read from the Keychain when it runs.
 
@@ -29,4 +32,38 @@ export interface TakeoverCommand {
   readonly sources: readonly string[];
   /** The binary, then its arguments. */
   readonly argv: readonly TakeoverArg[];
+}
+
+/**
+ * What a chat's session had, rebuilt for the builder's terminal: the pinned binary, the folder, the agent session
+ * to resume, and the setup the chat ran with. Files are the takeover folder's own; nothing here is a secret.
+ */
+export interface TakeoverSpec {
+  /** The pinned agent binary. */
+  readonly binary: string;
+  readonly cwd: string;
+  /** The agent's own session id; checked with `validSessionId` before it reaches a command. */
+  readonly providerSessionId: string;
+  /** What the agent is launched with for the chat's model. */
+  readonly model: string;
+  readonly effort: Effort;
+  readonly launch: TakeoverLaunch;
+  /** The setup's plugin directories, in order. */
+  readonly pluginDirs: readonly string[];
+  /** The setup's instructions, as a file; null when the chat has none. */
+  readonly instructionsFile: string | null;
+  /** Claude's MCP config file; null when the chat has no servers. */
+  readonly mcpConfigFile: string | null;
+  /** Whether the project's Web switch is on. */
+  readonly web: boolean;
+}
+
+// No leading hyphen, so an id can never read as an option.
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
+
+/** The id of an agent session, or `TakeoverRefusedError`: it is the one agent text that reaches a command's options. */
+export function validSessionId(id: string): string {
+  if (!SESSION_ID.test(id))
+    throw new TakeoverRefusedError('the chat’s agent session id is not usable');
+  return id;
 }
