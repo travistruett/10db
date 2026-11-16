@@ -208,7 +208,7 @@ export const MentionPath = z
 export const PostConversationMessage = z.object({
   text: z.string(),
   mentions: z.array(MentionPath).default([]),
-  /** What a chat's send does when Your folder is held: absent reads only. */
+  /** What a chat's send does when Your folder is held: absent takes it when free, and reads only otherwise; read_only never takes it. */
   folder: FolderWhileHeldInput.optional(),
 });
 export type PostConversationMessage = z.infer<typeof PostConversationMessage>;

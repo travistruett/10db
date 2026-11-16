@@ -110,7 +110,7 @@ export interface ChatService {
   stop(conversationId: ConversationId): Promise<void>;
   /** Runs what waits for Your folder now, reading only. Refused with the engine's words when nothing waits. */
   sendNow(conversationId: ConversationId): void;
-  /** Stops waiting for Your folder: the queue runs reading only. */
+  /** Stops waiting for Your folder: the queue runs reading only. A chat that waits for nothing is left as it is. */
   stopWaiting(chatId: ChatId): void;
   /** Whether the conversation's message waits for Your folder. */
   waiting(conversationId: ConversationId): boolean;
@@ -245,20 +245,22 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       return dtoOf(id);
     },
 
-    send(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
+    send(conversationId, input, folder) {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
       const waiting = deps.folderHold.waiting(chat.id);
       const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
+      // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
+      if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
+      // A running turn's chained successor inherits its profile and starts without asking the folder, so a
+      // choice made then would wait for some later turn.
+      if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
+        deps.folderHold.chooseReadOnly(chat.id);
       // Starts are held before the queue is asked, so the message parks.
       if (parks) engine.holdStarts(conversationId);
       engine.queued(conversationId);
       if (parks) watchFolder(chat);
-      else if (waiting) {
-        // A read-only send applies to everything queued.
-        deps.folderHold.cancelWait(chat.id);
-        engine.releaseStarts(conversationId);
-      }
+      else if (waiting) engine.releaseStarts(conversationId);
       return item;
     },
 
@@ -282,14 +284,17 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     waiting: (conversationId) => deps.folderHold.waiting(requireChat(conversationId).id),
 
     stopWaiting: (chatId) => {
-      stopWaiting(getChat(state.db, chatId));
+      const chat = getChat(state.db, chatId);
+      // The wait may have ended since the builder saw it: there is then nothing to run or to refuse.
+      if (deps.folderHold.waiting(chat.id)) stopWaiting(chat);
     },
 
-    async redo(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
+    async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
+      if (folder === FolderWhileHeld.ReadOnly) deps.folderHold.chooseReadOnly(chat.id);
       const wait = folder === FolderWhileHeld.Wait && mustWait(chat);
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));

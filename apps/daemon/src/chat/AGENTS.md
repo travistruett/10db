@@ -52,4 +52,6 @@
   `folder-hold/view.ts` with each holder's words and whether it keeps a chat out; the branch is `symbolic-ref`, null
   when detached or unreadable), `folder` (`wait` | `read_only`) in the message and redo bodies (JSON and multipart),
   and `POST /chats/:chatId/stop-waiting`. `conversationLive` carries `waitingForFolder` for a chat; the desktop reads
-  a chat's wait from the folder's `waiting_chat` holder instead.
+  a chat's wait from the folder's `waiting_chat` holder instead. A send with `folder: read_only` (Send Reading Only,
+  or a Redo carrying it) runs its turn reading only even if the folder has freed (`FolderHold.chooseReadOnly`); a send
+  with no `folder` takes the folder when it is free.

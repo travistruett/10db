@@ -55,9 +55,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
-  // Your folder's holders change with a hold event, which is the project's.
-  // A chat's wait for it shows on its stream.
-  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all, liveKeys.all],
+  // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
+  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
@@ -76,7 +75,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
-  conversation: [conversationKeys.all, chatKeys.all, folderKeys.all],
+  conversation: [conversationKeys.all, chatKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
   chat: [chatKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes

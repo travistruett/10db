@@ -23,7 +23,8 @@
   writable with `.git` denied (Edit, Write and NotebookEdit judged per call on real paths; MultiEdit and unknown
   edit tools refused). Not holding: Plan's read-only profile with judged commands. A warm session opened with the
   other profile is closed first and resumes the same agent session (Claude `resume`, Codex `thread/resume`). A
-  writable session closes when its hold is released, and the guard refuses every call from a session that is not
+  writable session stays warm after its turn and closes only when the next turn needs the other profile (the
+  folder was taken or lost in between), and the guard refuses every call from a session that is not
   the one the chat's hold now belongs to, so a background agent cannot write after its turn.
 - **A held send asks first.** The composer offers Wait for It (the message runs once the folder frees, ahead of
   any task that has not started), Send Reading Only, and File as Tasks. The latest send's choice applies to the

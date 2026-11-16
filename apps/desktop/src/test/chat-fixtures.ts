@@ -6,7 +6,6 @@ import {
   mintId,
   ProjectId,
   type ChatCreateInput,
-  type FolderDto,
   type ConversationId,
   type ProjectFileMatchDto,
   type SessionStartDto,
@@ -82,8 +81,6 @@ export interface ChatServerOptions {
   readonly createRefusal?: string;
   /** The status the message route answers; 202 by default. */
   readonly messageStatus?: number;
-  /** Who holds Your folder; free, on `main`, by default. Read on every request, so a test may change it. */
-  readonly folder?: () => FolderDto;
 }
 
 export interface ChatServer {
@@ -181,9 +178,7 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       return HttpResponse.json(changed);
     }),
     http.get(daemonUrl('/projects/:projectId/folder'), ({ params }) =>
-      HttpResponse.json(
-        opts.folder?.() ?? folderDto({ projectId: ProjectId.parse(params['projectId']) }),
-      ),
+      HttpResponse.json(folderDto({ projectId: ProjectId.parse(params['projectId']) })),
     ),
     http.post(daemonUrl('/chats/:chatId/stop-waiting'), ({ params }) => {
       const chat = byId(String(params['chatId']));

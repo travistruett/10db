@@ -231,6 +231,19 @@ describe('the folder and a chat that meets it held', () => {
     expect((await send(chat.conversationId, { folder: 'now' })).status).toBe(400);
   });
 
+  it('answers stop-waiting for a chat that waits for nothing with the chat, and starts nothing', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const stopped = await appOf(w).request(`/chats/${chat.id}/stop-waiting`, {
+      method: 'POST',
+      headers,
+    });
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toMatchObject({ id: chat.id });
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+    expect(w.folderHold.holders(w.project.id)).toEqual([]);
+  });
+
   it('runs what waits reading only on stop-waiting, and the edited message of a redo carries its own choice', async () => {
     w = chatWorld();
     runningTask('Bump vite');

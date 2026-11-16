@@ -5,12 +5,13 @@ import {
   type ChatToolResult,
   type ConversationItemDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
+import { FILE_AS_TASKS_MESSAGE } from './chat-tab';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
-import { folderKeys } from '../../daemon/project-folder-queries';
+import { FOLDER_REFRESH_MS, folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
@@ -434,6 +435,29 @@ describe('ChatTab: the session bar and Your folder', () => {
   });
 });
 
+describe('ChatTab: the branch on the bar', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('follows a branch switched in a terminal without an event', async () => {
+    let branch = 'main';
+    // Only the interval is faked, so the poll is stepped by hand and everything else runs for real.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    openChat({}, () => [], [
+      http.get(daemonUrl('/projects/:projectId/folder'), () =>
+        HttpResponse.json(folderDto({ projectId: project.id, branch })),
+      ),
+    ]);
+    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
+    branch = 'fix/login';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOLDER_REFRESH_MS);
+    });
+    expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
+  });
+});
+
 describe('ChatTab: the composer and Your folder', () => {
   const lane = () =>
     folderDto({
@@ -478,6 +502,39 @@ describe('ChatTab: the composer and Your folder', () => {
     },
   );
 
+  it('Allow This with the folder held puts "Go ahead" in the composer, so it asks before it runs', async () => {
+    const { served } = openChat(
+      {},
+      (chat) => [
+        builderItem(chat.conversationId, 'Fetch it'),
+        toolItem(
+          chat.conversationId,
+          commandCall({
+            id: 'held',
+            title: 'curl example.com',
+            command: 'curl example.com',
+            status: 'denied',
+            deniedBy: 'judge',
+            limit: 'sends_data_out',
+            soft: true,
+            refusal: null,
+          }),
+        ),
+      ],
+      [http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane()))],
+    );
+    await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’');
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow This' }));
+    const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+    expect(field.value).toBe('Go ahead: curl example.com');
+    expect(served.messages).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Wait for It' }));
+    await waitFor(() => {
+      expect(bodies(served)).toEqual([{ text: 'Go ahead: curl example.com', folder: 'wait' }]);
+    });
+  });
+
   it('shows the waiting row for a message that waits, and Send Now Reading Only runs it', async () => {
     const chat = chatDto({ projectId: project.id });
     const waiting = folderDto({
@@ -496,6 +553,54 @@ describe('ChatTab: the composer and Your folder', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Now Reading Only' }));
     await waitFor(() => {
       expect(served.stoppedWaiting).toEqual([chat.id]);
+    });
+  });
+
+  describe('a message parked for Your folder with nothing keeping the chat out', () => {
+    const parked = (chat: ChatDto) =>
+      folderDto({
+        projectId: project.id,
+        holders: [folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id })],
+      });
+    const openParked = () => {
+      const chat = chatDto({ projectId: project.id });
+      const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
+      ]);
+      return { chat, served };
+    };
+
+    it('keeps the waiting row and its Stop', async () => {
+      openParked();
+      expect(await screen.findByText(/^Waits for Your folder/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    });
+
+    it('shows why Send Now Reading Only failed and keeps the row', async () => {
+      const chat = chatDto({ projectId: project.id });
+      openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+        http.post(daemonUrl('/chats/:chatId/stop-waiting'), () =>
+          HttpResponse.json({ error: 'conflict', message: 'The daemon is busy.' }, { status: 409 }),
+        ),
+        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
+      ]);
+      fireEvent.click(await screen.findByRole('button', { name: 'Send Now Reading Only' }));
+      expect(await screen.findByText('The daemon is busy.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+      // The next thing the builder types is a new attempt: the old refusal does not stick.
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: 'again' },
+      });
+      expect(screen.queryByText('The daemon is busy.')).toBeNull();
+    });
+
+    it('sends File as Tasks with wait, so it does not cancel the wait', async () => {
+      const { served } = openParked();
+      await screen.findByText(/^Waits for Your folder/);
+      fireEvent.click(screen.getByRole('button', { name: 'File as Tasks' }));
+      await waitFor(() => {
+        expect(bodies(served)).toEqual([{ text: FILE_AS_TASKS_MESSAGE, folder: 'wait' }]);
+      });
     });
   });
 });

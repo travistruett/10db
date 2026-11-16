@@ -4,6 +4,7 @@ import {
   EventType,
   FolderWhileHeld,
   parseItemBody,
+  PassState,
   WorkstreamState,
   mintId,
   type ChatDto,
@@ -227,6 +228,46 @@ describe('a message that waits for Your folder', () => {
     ]);
   });
 
+  it('runs a message sent reading only without the folder even when it has freed since the choice', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    sayWith(chat, 'look', FolderWhileHeld.ReadOnly);
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    await w.engine.settled(chat.conversationId);
+    expect(notices(chat)).toEqual([]);
+    // The choice was for that message alone: the next one takes the folder as it always does.
+    say(chat, 'now edit it');
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('does not carry a reading-only choice made during a running turn into a later send', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
+        return { text: 'Understood.' };
+      };
+    });
+    say(chat, 'look');
+    await started;
+    // The chained turn inherits the running turn's profile, so the choice is never taken by a turn start.
+    sayWith(chat, 'look again', FolderWhileHeld.ReadOnly);
+    laneEnds();
+    release();
+    await w.engine.settled(chat.conversationId);
+    say(chat, 'now edit it');
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
+    await w.engine.settled(chat.conversationId);
+  });
+
   it('runs reading only under Send Now', async () => {
     w = chatWorld();
     runningTask('Bump vite');
@@ -378,6 +419,32 @@ describe('what lands in a real repository', () => {
     },
     { name: 'a task waits between its steps', holder: taskBetweenSteps, lands: false },
     { name: 'a pass is open', holder: openPass, lands: false },
+    {
+      name: 'a pass is closed and waits for its pull request',
+      holder: () => {
+        openPass();
+        w.state.write((ctx) => {
+          ctx.tx.update(schema.passes).set({ state: PassState.Closed }).run();
+        });
+      },
+      lands: true,
+    },
+    {
+      name: '10db is doing git work in it',
+      holder: () => {
+        const git = w.folderHold.reserveGit(w.project.id, 'switching Your folder back to `main`');
+        if (!git.reserved) throw new Error('git work was refused');
+      },
+      lands: false,
+    },
+    {
+      name: 'another chat’s turn holds it',
+      holder: () => {
+        const other = w.open();
+        expect(w.folderHold.takeTurn(w.project.id, other.id).taken).toBe(true);
+      },
+      lands: true,
+    },
   ];
 
   it.each(rows)('edits notes.md only when it can: $name', async ({ holder, lands }) => {

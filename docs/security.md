@@ -128,10 +128,6 @@ Being honest about the edges is part of the design:
   code runs. Review and CI before merge are that boundary.
 - **New and unaudited.** This is young software built by one person with AI help, without an outside audit.
 
-## Reporting a problem
-
-If you find a way out, please report it privately as described in [SECURITY.md](../SECURITY.md).
-
 ## A chat that writes in Your folder
 
 A chat edits Your folder only while its turn holds it. 10db's writers (a task, a pass, its own git work) keep the
@@ -144,3 +140,7 @@ push from the shell has nothing to sign in with. A background agent or job from 
 the folder back. Not covered: the builder's own MCP servers run outside the sandbox, so a write through one is judged,
 not held (`docs/superpowers/specs/2026-11-11-10db-sessions-design.md` §7.3). The decision is
 `architecture/decisions/2026-11-15-a-chat-writes-under-the-folder-hold-and-10dbs-writers-keep-it-alone.md`.
+
+## Reporting a problem
+
+If you find a way out, please report it privately as described in [SECURITY.md](../SECURITY.md).

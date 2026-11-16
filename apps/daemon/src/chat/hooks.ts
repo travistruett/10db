@@ -229,6 +229,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   // What the thread says once the turn that took the folder has begun, keyed by chat: the take is made before
   // anyone knows a turn will start, so nothing is written until the state says it did.
   const notices = new Map<ChatId, string[]>();
+  /** Chats whose turn is under way, so the end of one is told from an idle report of a parked start. */
+  const running = new Set<ChatId>();
   // What the chats already in the folder are told once the joining chat's turn has begun.
   const toldOthers = new Map<
     ChatId,
@@ -267,6 +269,15 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         waiting.cancelled = true;
         pendingReleases.delete(chat.id);
       }
+      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
+        // The builder chose reading only: the turn reads even when the folder has freed, and says who held it.
+        const blockers = deps.folderHold.blockers(conv.projectId, {
+          kind: FolderAsker.ChatTurn,
+          chatId: chat.id,
+        });
+        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
+        return { writes: false };
+      }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
@@ -303,6 +314,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     onState(conv, to) {
       const chat = chatOf(conv);
       if (BUSY.has(to)) {
+        running.add(chat.id);
         const lines = notices.get(chat.id) ?? [];
         notices.delete(chat.id);
         say(conv, lines);
@@ -313,6 +325,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
+      // A reading-only choice no turn start took (a chained turn starts without one) ends with the turn.
+      if (running.delete(chat.id)) deps.folderHold.takeReadOnlyChoice(chat.id);
       // A release already waits for this chat's jobs: a later change outside a turn (an idle close) joins it, so the
       // chat's next turn has one release to cancel and no earlier one outlives the cancel.
       if (pendingReleases.has(chat.id)) return;
