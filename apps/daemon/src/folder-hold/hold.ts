@@ -212,13 +212,29 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     return out;
   };
 
-  const blockers = (projectId: ProjectId, asker: FolderAskerInput): FolderBlocker[] =>
-    holders(projectId, 'chatId' in asker ? asker.chatId : undefined).flatMap((holder) => {
+  /** The callers of `reserveGitWhenFree` still waiting. */
+  const freeing: { projectId: ProjectId; what: string; wake: () => void }[] = [];
+
+  const blockers = (projectId: ProjectId, asker: FolderAskerInput): FolderBlocker[] => {
+    const held = holders(projectId, 'chatId' in asker ? asker.chatId : undefined);
+    // 10db's git work that waits for the folder keeps a new chat turn out, so chats that share the folder
+    // can't hold it from that work for ever. Other git work counts only once it holds.
+    if ('chatId' in asker)
+      for (const entry of freeing)
+        if (entry.projectId === projectId)
+          held.push({
+            kind: FolderHolderKind.GitWork,
+            name: '',
+            more: 0,
+            chatId: null,
+            what: entry.what,
+          });
+    return held.flatMap((holder) => {
       const outcome = exclusion(holder.kind, asker.kind);
       return outcome === FolderOutcome.Shares ? [] : [{ holder, outcome }];
     });
+  };
 
-  const freeing: { projectId: ProjectId; wake: () => void }[] = [];
   /** Wakes each caller of `reserveGitWhenFree` that nothing now keeps out. */
   const flushFree = (): void => {
     for (const entry of [...freeing]) {
@@ -258,6 +274,8 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
               .length > 0
           )
             continue;
+          // A chat in the middle of its turn is served when that turn ends, not over it.
+          if (turns.get(waiter.chatId)?.reserved === false) continue;
           turns.set(waiter.chatId, {
             projectId: waiter.projectId,
             chatId: waiter.chatId,
@@ -274,7 +292,8 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
               const at = waiters.indexOf(waiter);
               if (at >= 0) waiters.splice(at, 1);
             }
-            changed(waiter.projectId);
+            // A waiter that stays kept has changed nothing anyone can see.
+            if (served.result !== 'kept') changed(waiter.projectId);
           }
         }
       } while (askedAgain());
@@ -325,6 +344,7 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
           };
           const entry = {
             projectId,
+            what,
             wake: () => {
               signal?.removeEventListener('abort', onAbort);
               resolve();

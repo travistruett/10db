@@ -367,6 +367,29 @@ describe('waiting', () => {
     expect(hold.waiting(a)).toBe(false);
   });
 
+  it('never takes a turn already running from a chat that also waits', () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    hold.wait(project.id, a, () => 'dropped');
+    hold.serveWaiters();
+    expect(hold.holdsTurn(a)).toBe(true);
+    // The wait is served once that turn ends.
+    hold.releaseTurn(a);
+    expect(hold.waiting(a)).toBe(false);
+  });
+
+  it('says nothing more while a waiter that cannot start stays kept', () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.wait(project.id, a, () => 'kept');
+    const changes = () => events.filter((e) => e.type === EventType.FolderHoldChanged).length;
+    const before = changes();
+    for (let i = 0; i < 3; i += 1) laneEnds();
+    expect(hold.waiting(a)).toBe(true);
+    expect(changes()).toBe(before);
+  });
+
   it('serves at once a waiter that only chats are in front of', () => {
     const hold = newHold();
     const a = chat('A');
@@ -396,6 +419,22 @@ describe('waiting', () => {
 });
 
 describe('10db’s git work waiting for the folder', () => {
+  it('keeps a new chat turn out while it waits, so chats sharing the folder cannot starve it', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    const b = chat('B');
+    hold.takeTurn(project.id, a);
+    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch');
+    const turn = hold.takeTurn(project.id, b);
+    expect(turn.taken).toBe(false);
+    expect(turn.taken ? [] : turn.blockers.map((x) => holderWords(x.holder))).toEqual([
+      '10db cutting a branch',
+    ]);
+    hold.releaseTurn(a);
+    hold.releaseGit(await reserved);
+    expect(hold.takeTurn(project.id, b).taken).toBe(true);
+  });
+
   it('rejects with a typed error when its signal aborts, before or during the wait', async () => {
     const hold = newHold();
     const a = chat('A');
