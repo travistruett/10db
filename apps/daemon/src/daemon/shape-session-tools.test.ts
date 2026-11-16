@@ -89,10 +89,17 @@ const realSandbox = (): LaneSandbox =>
 /** A project at the temp repo with `mcp` as its `.mcp.json`, every server but `unapproved` approved. */
 function conversation(
   mcp: unknown,
-  opts: { unapproved?: readonly string[]; variables?: Readonly<Record<string, string[]>> } = {},
+  opts: {
+    unapproved?: readonly string[];
+    variables?: Readonly<Record<string, string[]>>;
+    docker?: boolean;
+  } = {},
 ): { projectId: ProjectId; shapeId: ShapeId } {
   writeFileSync(join(checkout, '.mcp.json'), typeof mcp === 'string' ? mcp : JSON.stringify(mcp));
-  const project = seedProject(base, { repoPath: checkout });
+  const project = seedProject(base, {
+    repoPath: checkout,
+    ...(opts.docker === true ? { sandboxDocker: true } : {}),
+  });
   const shape = base.write((ctx) =>
     insertShape(ctx, project.id, { title: 'Audit', origin: ShapeOrigin.App }),
   ).value;
@@ -247,6 +254,21 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await writing.release();
       await reading.release();
     }
+  });
+
+  it('opens the Docker socket only for a writing turn, on a project whose Docker switch is on', async () => {
+    const owner = conversation({}, { docker: true });
+    const { prepare } = preparer();
+    const sockets = async (writes: boolean): Promise<readonly string[]> => {
+      const prepared = await prepare({ ...inputFor(owner), writes });
+      try {
+        return prepared.sandbox?.settings.network.allowUnixSockets ?? [];
+      } finally {
+        await prepared.release();
+      }
+    };
+    expect(await sockets(true)).toContain('/var/run/docker.sock');
+    expect(await sockets(false)).not.toContain('/var/run/docker.sock');
   });
 
   describe("the builder's own MCP servers", () => {

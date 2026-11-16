@@ -90,6 +90,39 @@ describe('a chat’s turn and Your folder', () => {
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
   });
 
+  it('gives the folder back when the turn ends in error', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    w.adapter.shapeBehaviour = () => Promise.reject(new Error('the agent failed'));
+    say(chat, 'fix it');
+    await w.engine.settled(chat.conversationId);
+    expect(['ended_error', 'idle_cold']).toContain(stateOf(chat));
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    expect(w.folderHold.holders(w.project.id)).toEqual([]);
+  });
+
+  it('gives the folder back when the chat is archived in the middle of its turn', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    say(chat, 'fix it');
+    await started;
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
+    const archived = w.chat.archive(chat.id);
+    release();
+    await archived;
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+  });
+
   it('runs read-only behind a task, with a notice naming it, and still gives nothing back later', async () => {
     w = chatWorld();
     runningTask('Bump vite');
