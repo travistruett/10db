@@ -1,6 +1,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ACTIVE_STATES,
   BriefReason,
   BriefSource,
   CHAT_DEFAULT_TITLE,
@@ -42,6 +43,7 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  latestWorkstreamOf,
   listQueuedTurnStarters,
   listItems,
   moveChatTab,
@@ -75,6 +77,8 @@ export const CHAT_ARCHIVED = 'This session is archived.';
 export const DO_IT_UNDER_WAY = 'Do It is already under way for this chat';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
+/** What archive is refused with while the task a chat was handed to is unfinished. */
+export const HANDED_TASK_RUNNING = 'The task this session was handed to is still running';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
@@ -188,6 +192,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     if (stoppedForOpen.has(chatId)) throw new ConflictError(DO_IT_UNDER_WAY);
   };
 
+  // A chat sealed into a task of its own has nothing left to archive until that task ends: the tab it
+  // closed is the builder's only link to it.
+  const refuseWhileHandedTaskRuns = (chat: ChatRow): void => {
+    if (chat.taskId === null || chat.passId !== null) return;
+    const run = latestWorkstreamOf(state.db, chat.taskId);
+    if (run === undefined || ACTIVE_STATES.includes(run.state))
+      throw new ConflictError(HANDED_TASK_RUNNING);
+  };
+
   return {
     create(input) {
       getProject(state.db, input.projectId);
@@ -267,6 +280,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const chat = getChat(state.db, id);
       if (chat.archivedAt !== null) return dtoOf(id);
       refuseWhileDoing(id);
+      refuseWhileHandedTaskRuns(chat);
       // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
       // does lands after the chat is archived; then the folder made only from its id goes.
       deps.folderHold.cancelWait(id);
