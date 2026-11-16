@@ -137,6 +137,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         worktreeRoot: join(dataDir, 'worktrees'),
       }),
       protectedPaths: guarded,
+      worktreeBase: join(dataDir, 'worktrees'),
       projectEnv: () => launcher.projectEnv(),
       exportAwsCredentials: () => Promise.reject(new Error('no AWS in this test')),
       builderHome: homedir(),

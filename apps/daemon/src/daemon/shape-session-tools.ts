@@ -16,7 +16,14 @@ import {
   type InboxService,
 } from '../inbox';
 import type { Logger } from '../log';
-import { EMPTY_SETUP, fileAccessJudge, type LaneSandbox, type LaneSession } from '../sandbox';
+import {
+  EMPTY_SETUP,
+  fileAccessJudge,
+  laneWritableRoots,
+  SYSTEM_TEMP_ROOTS,
+  type LaneSandbox,
+  type LaneSession,
+} from '../sandbox';
 import { leftOutNote, planSessionSetup, yourMcpForSession } from '../session-setup';
 import {
   skippedServersNote,
@@ -112,6 +119,8 @@ export function createShapePreparer(deps: {
   readonly builderHome: string;
   /** The roots lanes write outside the registered checkouts: no setup comes along from them. */
   readonly laneWritableRoots: readonly string[];
+  /** The folder every worktree is made under, which a lane writes. */
+  readonly worktreeBase: string;
   /** Where a ChatGPT session's temp dir is made, apart from Claude sessions', as a ChatGPT lane's is. */
   readonly codexLaneTempRoot: string;
 }): (input: ShapePrepareInput) => Promise<ShapePrepared> {
@@ -168,12 +177,19 @@ export function createShapePreparer(deps: {
     );
     const remote = Object.fromEntries(publicRemote.filter((entry) => entry !== null));
     const offMac = Object.keys(servers.remote).filter((name) => !(name in remote));
+    // The roots the launch judges a builder's file and server against, so the readers of the builder's config do too.
+    const writableRoots = laneWritableRoots({
+      checkouts: allCheckouts(state.db),
+      worktreeBase: deps.worktreeBase,
+      sandboxTempRoots: deps.laneWritableRoots,
+      systemTempRoots: SYSTEM_TEMP_ROOTS,
+    }).map((root) => root.path);
     // Read when each session is prepared: a switch flipped meanwhile applies from the next one.
     const setupPlan = planSessionSetup({
       home: deps.builderHome,
       checkout: project.repoPath,
       switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(logger)),
-      laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
+      laneWritable: writableRoots,
     });
     const instructions = setupPlan.instructions.text;
     // The builder's own servers, planned as the session is prepared; Claude and Codex chats and Plan get the same.
@@ -188,7 +204,7 @@ export function createShapePreparer(deps: {
         ...projectMcp.failures.map((failure) => failure.name),
       ],
       loginEnv: deps.projectEnv(),
-      laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
+      laneWritable: writableRoots,
       localBinding: listProjects(state.db).some((other) => other.sandboxLoopback),
       plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
       onInvalid: (stored) => {
