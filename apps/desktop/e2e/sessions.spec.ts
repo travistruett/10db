@@ -1,8 +1,12 @@
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
+import { E2E_DIR } from './paths';
 import { auth, createProject } from './shape-project';
 
 // Runs after see-screen.spec.ts and before shape.spec.ts (files run in name order with one worker). It
@@ -247,4 +251,106 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   ).filter((w) => w.projectId === projectId);
   for (const stream of streams)
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+});
+
+const WorkstreamNotices = z.array(
+  z.looseObject({
+    id: z.string(),
+    projectId: z.string(),
+    notice: z.looseObject({ key: z.string(), line: z.string() }).nullable().optional(),
+  }),
+);
+
+test('a chat writes in Your folder: an edit and a commit, a task that waits for it, and a message that waits for the task', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  const projectId = await createProject(
+    request,
+    'sessions-folder',
+    [{ name: 'repo', globs: ['**'] }],
+    {
+      'src/login.ts': 'export const login = () => null;\n',
+    },
+  );
+  // The e2e daemon runs no sandbox, so a chat cannot write a file here: the edit is the builder's, left
+  // uncommitted in Your folder, and the chat's tool commits it through the daemon's git.
+  const repo = join(E2E_DIR, 'sessions-folder-repo');
+  writeFileSync(join(repo, 'notes.md'), '# Notes\n\nEdited by a chat.\n');
+  await claudeIsInstalled(page);
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+    if (window.localStorage.getItem('mantine-color-scheme-value') === null)
+      window.localStorage.setItem('mantine-color-scheme-value', 'dark');
+  }, projectId);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/board');
+  await expect(page.getByRole('button', { name: /^Project: sessions-folder/ })).toBeVisible();
+  await page.keyboard.press('Meta+t');
+  await expect(page).toHaveURL(/\/sessions\?fresh=/);
+
+  // The edit and the commit: the agent's rows show, and the bar says the chat is in Your folder.
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await composer.click();
+  await composer.pressSequentially('Fix the notes');
+  await composer.press('Enter');
+  await expect(page.getByText('Committed the notes.')).toBeVisible();
+  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
+  const lastCommit = execFileSync('git', ['log', '-1', '--format=%s|%an'], {
+    cwd: repo,
+    encoding: 'utf8',
+    env: {
+      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+    },
+  }).trim();
+  expect(lastCommit).toBe('Add the notes|10db e2e');
+
+  // A task started while the turn holds the folder waits, naming the chat.
+  const made = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: auth,
+    data: { title: 'Hold the folder', acceptanceCriteria: ['It holds'], areas: ['repo'] },
+  });
+  expect(made.ok()).toBe(true);
+  const taskId = z.looseObject({ id: z.string() }).parse(await made.json()).id;
+  expect((await request.post(`${daemonUrl}/tasks/${taskId}/start`, { headers: auth })).ok()).toBe(
+    true,
+  );
+  const notices = async (): Promise<string[]> =>
+    WorkstreamNotices.parse(
+      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+    )
+      .filter((w) => w.projectId === projectId)
+      .flatMap((w) => (w.notice?.key === 'folder-hold' ? [w.notice.line] : []));
+  await expect.poll(notices).toEqual([expect.stringContaining('Fix the notes')]);
+
+  // The turn ends; the task takes the folder and asks its question, so the chat reads only.
+  await composer.click();
+  await composer.pressSequentially('wrap up');
+  await composer.press('Enter');
+  await expect(page.getByRole('article').getByText('Wrapped up.')).toBeVisible();
+  await expect(
+    page.getByText('Chat · reads only: Your folder is in use by the task ‘Hold the folder’'),
+  ).toBeVisible();
+
+  // A message now asks first; Wait for It parks it, and it runs once the task ends.
+  await composer.click();
+  await composer.pressSequentially('Fix the notes again');
+  await composer.press('Enter');
+  const choices = page.getByRole('group', { name: 'Your folder is in use' });
+  await expect(choices).toBeVisible();
+  await scan(page, [1280], 'the held-folder choices');
+  await choices.getByRole('button', { name: 'Wait for It' }).click();
+  await expect(
+    page.getByText('Waits for Your folder: in use by the task ‘Hold the folder’'),
+  ).toBeVisible();
+  const streams = Workstreams.parse(
+    await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+  ).filter((w) => w.projectId === projectId);
+  for (const stream of streams)
+    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+  await expect(page.getByRole('article').getByText('Looked again.')).toBeVisible();
+  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
 });
