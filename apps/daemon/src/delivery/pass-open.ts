@@ -213,6 +213,17 @@ function refuseOpen(
     );
 }
 
+/** Why a pass of one can't open in the project now, in words, or null; reads the database only. */
+export function passOpenProblem(db: DbReader, project: ProjectDto): string | null {
+  try {
+    refuseOpen(db, project, [], PASS_PAGE_CAP_DEFAULT, [], true);
+    return null;
+  } catch (error) {
+    if (error instanceof ConflictError) return error.message;
+    throw error;
+  }
+}
+
 /**
  * Why the branch HEAD names can't be the pass's return branch, in words, or null. A close
  * fast-forwards that branch to the pass's tip, so it must be the builder's own: not a batch's branch

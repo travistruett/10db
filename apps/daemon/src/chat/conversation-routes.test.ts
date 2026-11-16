@@ -44,6 +44,7 @@ function appOf(world: ChatWorld) {
         chat: world.chat,
         folderHold: world.folderHold,
         pendingOpens: createPendingOpens({ state: world.state }),
+        doItPreview: () => Promise.reject(new Error('not read here')),
         // The world's checkout is no repository: its branch can't be read.
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),

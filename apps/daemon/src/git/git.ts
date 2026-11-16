@@ -625,6 +625,14 @@ export interface Git extends ChatGit {
    */
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
   /**
+   * What `changedPaths` lists, each with how it differs from HEAD (`M` changed, `D` deleted, `?` untracked),
+   * sorted by path and cut at `max`; `more` counts the rest. Read against a private index, as it is.
+   */
+  changedEntries(
+    repo: string,
+    max: number,
+  ): Promise<{ entries: { path: string; status: 'M' | 'D' | '?' }[]; more: number }>;
+  /**
    * The untracked and ignored entries of the checkout, as `git status` lists them (an ignored folder once,
    * ending in `/`), in its order, at most `max`. Read against a private index, as `changedPaths` is.
    */
@@ -4273,6 +4281,37 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async changedPaths(repo, only) {
       return changes(await pinned(repo), only);
+    },
+    async changedEntries(repo, max) {
+      const c = await pinned(repo);
+      const tip = await revParse(c, 'HEAD^{commit}');
+      const out = await withPrivateIndex(c, tip, (env) =>
+        git(
+          c,
+          [
+            'status',
+            '--porcelain=v1',
+            '-z',
+            '--untracked-files=all',
+            '--ignore-submodules=all',
+            '--no-renames',
+          ],
+          { env },
+        ),
+      );
+      const all = out
+        .split('\0')
+        .filter(Boolean)
+        .map((entry) => ({
+          path: entry.slice(3),
+          status: entry.startsWith('??')
+            ? ('?' as const)
+            : entry[1] === 'D'
+              ? ('D' as const)
+              : ('M' as const),
+        }))
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return { entries: all.slice(0, max), more: Math.max(0, all.length - max) };
     },
     async untrackedAndIgnored(repo, max) {
       const c = await pinned(repo);

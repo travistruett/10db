@@ -1,3 +1,4 @@
+import type { ChatId, DoItPreviewDto } from '@10db/contracts';
 import { getProject } from '@10db/db';
 import type { ApiServices } from '../api';
 import {
@@ -26,6 +27,7 @@ export type ChatApiServices = Pick<
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
+  | 'doItPreview'
   | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
@@ -39,6 +41,8 @@ export function createChatApiServices(deps: {
   readonly folderHold: FolderHold;
   readonly pendingOpens: Pick<PendingOpens, 'view'>;
   readonly git: StartGit;
+  /** What the Do It sheet shows for a chat. */
+  readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
   readonly now: () => Date;
   readonly log: Logger;
 }): ChatApiServices {
@@ -62,6 +66,7 @@ export function createChatApiServices(deps: {
       await chat.cancelBrief(id);
       return chat.briefOf(id);
     },
+    doItPreview: deps.doItPreview,
     async projectFolder(projectId) {
       const project = getProject(state.db, projectId);
       let branch: string | null = null;

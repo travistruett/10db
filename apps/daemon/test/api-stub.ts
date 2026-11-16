@@ -60,6 +60,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     stopChatWaiting: none,
     askChatBrief: none,
     cancelChatBrief: none,
+    doItPreview: none,
     projectFolder: none,
     chatModels: none,
     sessionStarts: () => Promise.resolve([]),

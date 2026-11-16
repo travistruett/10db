@@ -779,6 +779,9 @@ export function createApp(deps: ApiDeps) {
     .delete('/chats/:chatId/brief', async (c) =>
       c.json(await deps.services.cancelChatBrief(ChatId.parse(c.req.param('chatId')))),
     )
+    .get('/chats/:chatId/do-it', async (c) =>
+      c.json(await deps.services.doItPreview(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
     )

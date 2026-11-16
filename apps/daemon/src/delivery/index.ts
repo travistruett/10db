@@ -25,6 +25,7 @@ export {
   openPass,
   passBranchName,
   passDirtRef,
+  passOpenProblem,
   refusePassTask,
   returnBranchProblem,
   startPassTasks,
@@ -88,3 +89,4 @@ export {
   sweepUnlistedRuns,
 } from './skipped-card';
 export { skipFollowUpStarter } from './skip-follow-up';
+export { passBelow } from './pass-stack';

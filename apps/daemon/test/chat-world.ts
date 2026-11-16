@@ -6,6 +6,7 @@ import {
   type DaemonEvent,
   type Effort,
   type ProjectDto,
+  type ProjectInput,
 } from '@10db/contracts';
 import { join } from 'node:path';
 import { createTestStore, seedProject, type Store } from '@10db/db';
@@ -67,13 +68,15 @@ export function chatWorld(
     readonly over?: ChatWorld;
     /** The project's checkout the session works in: a real repository, where a test reads what landed. */
     readonly checkout?: string;
+    /** The project's own fields, such as the real `repoPath` a git-reading test needs. */
+    readonly project?: Partial<ProjectInput>;
   } = {},
 ): ChatWorld {
   const { store, close } =
     opts.over === undefined
       ? createTestStore()
       : { store: opts.over.store, close: () => undefined };
-  const project = opts.over?.project ?? seedProject(store, { name: 'alpha' });
+  const project = opts.over?.project ?? seedProject(store, { name: 'alpha', ...opts.project });
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
