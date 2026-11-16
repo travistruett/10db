@@ -11,6 +11,8 @@ import type {
   ChatPatchInput,
   DoItBriefDto,
   DoItPreviewDto,
+  DoItRequest,
+  DoItResult,
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
@@ -674,6 +676,8 @@ export interface ApiServices extends PlanRecordServices {
   cancelChatBrief(id: ChatId): Promise<DoItBriefDto>;
   /** What the Do It sheet shows: the brief, the uncommitted files, and each place with its refusal. */
   doItPreview(id: ChatId): Promise<DoItPreviewDto>;
+  /** Hands the chat's work to a task in a separate copy, or to a pass of one in Your folder. */
+  doIt(id: ChatId, input: DoItRequest): Promise<DoItResult>;
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;

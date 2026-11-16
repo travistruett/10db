@@ -1,4 +1,4 @@
-import type { ChatId, DoItPreviewDto } from '@10db/contracts';
+import type { ChatId, DoItPreviewDto, DoItRequest, DoItResult } from '@10db/contracts';
 import { getProject } from '@10db/db';
 import type { ApiServices } from '../api';
 import {
@@ -28,6 +28,7 @@ export type ChatApiServices = Pick<
   | 'askChatBrief'
   | 'cancelChatBrief'
   | 'doItPreview'
+  | 'doIt'
   | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
@@ -43,6 +44,8 @@ export function createChatApiServices(deps: {
   readonly git: StartGit;
   /** What the Do It sheet shows for a chat. */
   readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
+  /** Hands the chat's work on, in the place the request names. */
+  readonly doIt: (chatId: ChatId, input: DoItRequest) => Promise<DoItResult>;
   readonly now: () => Date;
   readonly log: Logger;
 }): ChatApiServices {
@@ -67,6 +70,7 @@ export function createChatApiServices(deps: {
       return chat.briefOf(id);
     },
     doItPreview: deps.doItPreview,
+    doIt: deps.doIt,
     async projectFolder(projectId) {
       const project = getProject(state.db, projectId);
       let branch: string | null = null;

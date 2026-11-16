@@ -13,4 +13,12 @@ export { sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';
 export { areasOfChat, editedPathsOf } from './chat-areas';
-export { previewDoIt, type DoItDeps } from './do-it';
+export {
+  doItInCopy,
+  finishSeals,
+  previewDoIt,
+  type DoItCopyDeps,
+  type DoItDeps,
+  type DoItTasks,
+  type FinishSealsDeps,
+} from './do-it';

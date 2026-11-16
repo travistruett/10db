@@ -11,6 +11,7 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  DoItPlace,
   cutTitle,
   FolderAsker,
   FolderWhileHeld,
@@ -72,6 +73,8 @@ const FIRST_LINE_TITLE_MAX = 40;
 export const CHAT_ARCHIVED = 'This session is archived.';
 /** What Redo and archive are refused with while Do It, or an open that stopped the chat's turn, is under way. */
 export const DO_IT_UNDER_WAY = 'Do It is already under way for this chat';
+/** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
+export const HANDING_OFF = 'This chat is handing its work to a task';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
@@ -146,7 +149,9 @@ export interface ChatService {
    * held, its Stop answers at once and changes nothing, and Redo and archive are refused until the returned
    * `release` runs, which lets what is queued run. Refused when the chat is already stopped for one.
    */
-  stopForOpen(chatId: ChatId): Promise<() => void>;
+  stopForOpen(chatId: ChatId, place?: DoItPlace): Promise<() => void>;
+  /** Seals the chat once Do It has handed its work to a task: its session ends and its brief is forgotten. */
+  seal(chatId: ChatId): Promise<void>;
 }
 
 export interface ChatServiceDeps {
@@ -176,7 +181,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   };
 
   // Chats a pass's open has stopped, until it is done: Stop must not give back the starts it holds.
-  const stoppedForOpen = new Set<ChatId>();
+  const stoppedForOpen = new Map<ChatId, DoItPlace>();
   // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
   const briefTurns = new Set<ChatId>();
   const refuseWhileDoing = (chatId: ChatId): void => {
@@ -282,6 +287,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     send(conversationId, input, folder) {
+      // A chat handing its work to a task is sealed in a moment: nothing is left parked in it.
+      const doing = chatOfConversation(state.db, conversationId);
+      if (doing !== null && stoppedForOpen.get(doing.id) === DoItPlace.Worktree)
+        throw new ConflictError(HANDING_OFF);
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
       // A message from the builder replaces a brief request. A brief turn still running reads only, so it is
@@ -345,10 +354,17 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     post: (conversationId, input) => post(conversationId, input),
 
-    async stopForOpen(chatId) {
+    async seal(chatId) {
+      const chat = getChat(state.db, chatId);
+      await engine.seal(chat.conversationId);
+      deps.briefs.forget(chatId);
+      briefTurns.delete(chatId);
+    },
+
+    async stopForOpen(chatId, place = DoItPlace.Here) {
       const chat = getChat(state.db, chatId);
       refuseWhileDoing(chatId);
-      stoppedForOpen.add(chatId);
+      stoppedForOpen.set(chatId, place);
       // Starts are held first, so a chained or queued message parks instead of beginning a turn.
       engine.holdStarts(chat.conversationId);
       try {

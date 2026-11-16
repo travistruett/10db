@@ -306,6 +306,21 @@ export function storeHandedTo(
   changed(ctx, row);
 }
 
+/** Chats whose work Do It handed to a task in a separate copy: linked to a task with no pass of their own. */
+export function chatsHandedToCopies(db: DbReader): ChatRow[] {
+  return db
+    .select()
+    .from(schema.chats)
+    .where(
+      and(
+        eq(schema.chats.mode, ChatMode.HandsOn),
+        isNull(schema.chats.passId),
+        isNotNull(schema.chats.taskId),
+      ),
+    )
+    .all();
+}
+
 export function chatMadeTask(db: DbReader, chatId: ChatId, taskId: TaskId): boolean {
   return (
     db

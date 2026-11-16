@@ -8,6 +8,7 @@ import {
   AccountKind,
   ConversationOwnerKind,
   EventType,
+  ConflictError,
   InvalidError,
   InboxItemId,
   JUDGE_TIMEOUT_MS,
@@ -229,7 +230,10 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  doItInCopy,
+  finishSeals,
   previewDoIt,
+  type DoItDeps,
   createBriefs,
   createChatTools,
   createConversationFiles,
@@ -2168,6 +2172,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const doItDeps: DoItDeps = {
+    state,
+    engine: exploreEngine,
+    folderHold,
+    pendingOpens,
+    git: delivery.git,
+    chat,
+    openProblem: passOpenProblem,
+    returnBranchProblem,
+    stacksOn: (readDb, project) => passBelow(readDb, project.id)?.name ?? null,
+  };
   const services = createServices({
     state,
     github: {
@@ -2258,21 +2273,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       chat,
       folderHold,
       pendingOpens,
-      doItPreview: (chatId) =>
-        previewDoIt(
-          {
-            state,
-            engine: exploreEngine,
-            folderHold,
-            pendingOpens,
-            git: delivery.git,
-            chat,
-            openProblem: passOpenProblem,
-            returnBranchProblem,
-            stacksOn: (readDb, project) => passBelow(readDb, project.id)?.name ?? null,
-          },
-          chatId,
-        ),
+      doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
+      doIt: (chatId, input) =>
+        input.place === 'here'
+          ? Promise.reject(new ConflictError('Do It in Your folder is not available yet'))
+          : doItInCopy(
+              {
+                ...doItDeps,
+                tasks: {
+                  create: async (projectId, task) => {
+                    const made = await services.createTask(projectId, task);
+                    return made;
+                  },
+                  settleSizing: (taskIds) => services.settleSizing(taskIds),
+                  start: (taskId) => services.startTask(taskId),
+                  remove: (taskId) => services.removeTask(taskId),
+                },
+              },
+              chatId,
+              input,
+            ),
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2584,6 +2604,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // What a restart found of each explore conversation is settled before the API serves it.
   await exploreEngine.recover();
+  await finishSeals({
+    state,
+    engine: exploreEngine,
+    chat,
+    tasks: { start: (taskId) => services.startTask(taskId) },
+    logger: logger.child({ component: 'do-it' }),
+  });
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
     fetch: app.fetch,
