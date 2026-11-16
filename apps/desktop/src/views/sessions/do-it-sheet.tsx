@@ -2,6 +2,7 @@ import {
   Delivery,
   DoItPlace,
   type ChatDto,
+  type ChatId,
   type DoItOfferDto,
   type ProjectId,
   PassWhenBusy,
@@ -26,6 +27,7 @@ import { useAskBrief, useCancelBrief, useDoIt, useDoItPreview } from '../../daem
 import { CodeSpans } from '../../shell/code-spans';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
+import { useOpenSession } from './open-session';
 import {
   briefSourceLine,
   changedHeading,
@@ -62,9 +64,11 @@ export interface DoItSheetProps {
 function Refusal({
   offer,
   onNavigate,
+  onOpenSession,
 }: {
   readonly offer: DoItOfferDto;
   readonly onNavigate: (projectId: ProjectId) => void;
+  readonly onOpenSession: (chatId: ChatId) => void;
 }) {
   if (offer.refusal === null) return null;
   const link = parseRefusalLink(offer.refusal.link);
@@ -73,7 +77,19 @@ function Refusal({
       <Text size="sm" c="dimmed" role="status">
         <CodeSpans text={offer.refusal.message} />
       </Text>
-      {link === null || link.kind === 'session' ? null : (
+      {link === null ? null : link.kind === 'session' ? (
+        <Anchor
+          component="button"
+          type="button"
+          size="sm"
+          style={{ flex: 'none' }}
+          onClick={() => {
+            onOpenSession(link.chatId);
+          }}
+        >
+          {linkLabel(link)}
+        </Anchor>
+      ) : (
         <Anchor
           size="sm"
           style={{ flex: 'none' }}
@@ -109,6 +125,7 @@ export function DoItSheet({
     onDone(result, request.title);
   });
   const { select } = useSelectedProject();
+  const openSession = useOpenSession();
   // What the builder typed; null while the field still takes the daemon's brief. Typing stops the brief
   // being taken, not the agent writing it.
   const [typedTitle, setTypedTitle] = useState<string | null>(null);
@@ -319,7 +336,16 @@ export function DoItSheet({
               <>
                 {(['worktree', 'here'] as const).map((p) => {
                   const o = p === DoItPlace.Here ? data.here : data.worktree;
-                  return o.offered ? null : <Refusal key={p} offer={o} onNavigate={select} />;
+                  return o.offered ? null : (
+                    <Refusal
+                      key={p}
+                      offer={o}
+                      onNavigate={select}
+                      onOpenSession={(chatId) => {
+                        void openSession(chatId, project.id);
+                      }}
+                    />
+                  );
                 })}
                 {offer?.offered === true ? (
                   <>

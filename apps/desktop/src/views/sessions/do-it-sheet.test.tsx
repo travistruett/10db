@@ -149,6 +149,46 @@ describe('the Do It sheet', () => {
     );
   });
 
+  it('a refusal that names a chat offers Open Session, which opens that chat’s tab', async () => {
+    const other = chatDto({
+      projectId: project.id,
+      title: 'Docs',
+      tabPosition: 1,
+      conversation: { capabilities: CLAUDE },
+    });
+    const chat = chatDto({
+      projectId: project.id,
+      tabPosition: 0,
+      conversation: { capabilities: CLAUDE, model: 'claude-opus-5' },
+    });
+    const served = chatServer({ chats: [chat, other] });
+    const doIt = doItServer({
+      preview: doItPreviewDto({
+        here: {
+          offered: false,
+          refusal: {
+            code: 'folder_in_use',
+            message: 'Your folder is in use by the chat ‘Docs’.',
+            link: `session:${other.id}`,
+          },
+          whenBusy: false,
+        },
+      }),
+    });
+    server.use(
+      ...doIt.handlers,
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      ...served.handlers,
+      ...baseHandlers(),
+    );
+    renderApp(`/sessions?chat=${chat.id}`);
+    const sheet = await openSheet();
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Open Session' }));
+    expect((await screen.findByRole('tab', { name: /Docs/ })).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+  });
+
   it('on a project with no separate copies, Your folder is the one picked and the reason is said', async () => {
     openChat(
       doItPreviewDto({
