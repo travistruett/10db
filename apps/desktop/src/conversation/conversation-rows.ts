@@ -106,16 +106,27 @@ export function conversationRows(
   return rows;
 }
 
-/** Whether the row is the agent's work: reasoning, and a call that is running or done. */
+/** A call 10db itself records (`10db.<name>`, such as Plan's lines) is an outcome, never work. */
+const TENDB_RECORD = '10db.';
+
+/** A call that ended well and that the agent made. */
+function settled(entry: ToolEntry): boolean {
+  return entry.call.status === 'done' && !entry.call.harnessTool.startsWith(TENDB_RECORD);
+}
+
+/**
+ * Whether the row is the agent's settled work: reasoning, and a finished call. A running call stays
+ * out of the fold, so what the agent is doing now is always in view.
+ */
 function isWork(row: ConversationRow): boolean {
   switch (row.kind) {
     case 'entry':
       return row.entry.kind === 'reasoning';
     case 'tool':
-      return row.entry.call.status === 'done' || row.entry.call.status === 'running';
+      return settled(row.entry) && row.nested.every(settled);
     case 'tool_group':
     case 'edit_group':
-      return true;
+      return row.entries.every(settled);
     case 'work':
       return false;
   }
@@ -149,7 +160,9 @@ export function collapseWork(rows: readonly ConversationRow[]): readonly Convers
     if (first !== undefined)
       out.push({
         kind: 'work',
-        id: rowId(first),
+        // Named after its first row, so its state follows it, but never that row's own id: the two
+        // keep separate open states, and opening the row inside must not close the run around it.
+        id: `work:${rowId(first)}`,
         rows: run,
         steps: run.reduce((sum, row) => sum + stepsOf(row), 0),
       });

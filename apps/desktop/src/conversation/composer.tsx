@@ -87,7 +87,11 @@ function Thumbnail({ file, onRemove }: { readonly file: File; readonly onRemove:
     reader.onload = () => {
       if (current && typeof reader.result === 'string') setSrc(reader.result);
     };
-    reader.readAsDataURL(file);
+    try {
+      reader.readAsDataURL(file);
+    } catch {
+      // A file this window's reader refuses keeps the empty tile; it is still sent as it is.
+    }
     return () => {
       current = false;
     };

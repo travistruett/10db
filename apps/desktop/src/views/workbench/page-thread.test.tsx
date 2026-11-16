@@ -158,13 +158,15 @@ describe('PageThread', () => {
     expect(screen.getByText(NOTICE).style.color).toBe('var(--mantine-color-dimmed)');
   });
 
-  it('shows a call the turn made as a tool row, and what streams before it is stored', async () => {
+  it('shows a call the turn made in its Worked row, and what streams before it is stored', async () => {
     serve(
       [message, commandItem({})],
       [{ itemId: mintId('ConversationItem'), kind: 'agent_message', text: 'Now the header' }],
     );
     renderWithDaemon(<Thread />);
     expect(await screen.findByText('Now the header')).toBeTruthy();
+    expect(messages().textContent).not.toContain('pnpm test');
+    fireEvent.click(screen.getByRole('button', { name: 'Worked · 1 Step' }));
     expect(messages().textContent).toContain('pnpm test');
   });
 

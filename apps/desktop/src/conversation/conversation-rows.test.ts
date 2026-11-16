@@ -158,18 +158,32 @@ describe('collapseWork', () => {
       ['work(3) [tool a1 [k1 k2]]'],
     ],
     [
-      'a running call is work too',
-      [toolEntry(commandCall({ id: 'c1', status: 'running' }))],
-      ['work(1) [tool c1]'],
+      'a running call stays in view and splits the run',
+      [command('c0'), toolEntry(commandCall({ id: 'c1', status: 'running' }))],
+      ['work(1) [tool c0]', 'tool c1'],
+    ],
+    [
+      'a group still reading stays in view',
+      [read('r1'), toolEntry(readCall({ id: 'r2', status: 'running' }))],
+      ['group r1 r2'],
+    ],
+    [
+      'a line 10db records is an outcome and stays in view',
+      [
+        command('c1'),
+        toolEntry(commandCall({ id: 'p1', harnessTool: '10db.plan' })),
+        command('c2'),
+      ],
+      ['work(1) [tool c1]', 'tool p1', 'work(1) [tool c2]'],
     ],
     ['no work, no work row', [reply('t1'), builder('b1')], ['entry t1', 'entry b1']],
   ])('%s', (_name, entries, expected) => {
     expect(shape(collapseWork(conversationRows(entries)))).toEqual(expected);
   });
 
-  it('keeps the first row’s id for the run, so its state follows it', () => {
+  it('names the run after its first row, never with that row’s own id', () => {
     const [row] = collapseWork(conversationRows([read('first'), read('second'), edit('e1')]));
-    expect(row?.kind === 'work' ? row.id : null).toBe('first');
+    expect(row?.kind === 'work' ? row.id : null).toBe('work:first');
   });
 });
 
