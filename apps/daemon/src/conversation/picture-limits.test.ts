@@ -92,10 +92,15 @@ describe('the picture limits of an account', () => {
     for (const text of texts) expect(text).not.toMatch(/32 ?M/);
   });
 
-  it('answers the strictest limits for an account kind it does not know', () => {
-    expect(pictureLimitsFor(AccountKind.OpenaiApiKey)).toBe(STRICTEST_LIMITS);
-    expect(poolBytes(STRICTEST_LIMITS)).toBe(poolBytes(pictureLimitsFor(AccountKind.Bedrock)));
-  });
+  it.each([AccountKind.OpenaiApiKey, AccountKind.CodexSignin, AccountKind.OpenRouter])(
+    'answers the strictest limits for %s, and its text names no Claude platform',
+    (kind) => {
+      expect(pictureLimitsFor(kind)).toBe(STRICTEST_LIMITS);
+      expect(poolBytes(STRICTEST_LIMITS)).toBe(poolBytes(pictureLimitsFor(AccountKind.Bedrock)));
+      expect(STRICTEST_LIMITS.limitText).toContain('20 MB');
+      expect(STRICTEST_LIMITS.limitText).not.toMatch(/Bedrock|Claude|Anthropic/);
+    },
+  );
 
   it('keeps every figure whole bytes', () => {
     const limits: PictureLimits = pictureLimitsFor(AccountKind.Bedrock);

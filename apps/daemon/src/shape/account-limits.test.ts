@@ -238,6 +238,27 @@ describe('the budget on a Bedrock account', () => {
   });
 });
 
+describe('the text of a conversation on a Codex plan', () => {
+  beforeEach(() => {
+    f = createServiceFixture({ accountKind: AccountKind.CodexSignin });
+  });
+
+  it('names no Claude platform where it tells a picture was left out or a Read was refused', async () => {
+    for (let i = 0; i < 2; i += 1) drop(`a${String(i)}.png`, wholePng(3 * MIB));
+    expect((await nextTurn('One')).images).toHaveLength(2);
+    for (let i = 0; i < 2; i += 1) drop(`b${String(i)}.png`, wholePng(3 * MIB));
+    const turn = await nextTurn('Two');
+    const big = drop('big.png', retina());
+    await nextTurn('Hello');
+    for (let i = 0; i < 11; i += 1) read(big.storedPath);
+    const refused = reasonOf(read(big.storedPath));
+    expect(refused).toContain('20 MB request limit');
+    const texts = [turn.message, refused, ...notices()];
+    expect(notices().some((body) => body.includes('20 MB request limit'))).toBe(true);
+    for (const text of texts) expect(text).not.toMatch(/Bedrock|Claude|Anthropic/);
+  });
+});
+
 describe('when the account changes between turns', () => {
   const resumed = (n: number): boolean =>
     must(f.adapter.shapeSessions[n], `session ${String(n)}`).spec.resumeProviderSessionId !== null;
