@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
   ChatToolName,
+  FolderAsker,
   JudgeDecision,
   JudgeKind,
   ConversationId,
@@ -57,14 +58,14 @@ import {
   projectLiveSystems,
   startingJudge,
 } from '../trust';
-import { judgeChatCall } from './confinement';
+import { judgeChatCall, type ChatFolder } from './confinement';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
 // explore profile as the attended one: Plan's read-only sandbox and read tools, commands judged, the
 // web where a judge sees each call, Claude Code's own subagents, the builder's setup, and 10db's own
-// server with every builder tool. It writes nothing in the checkout until M6.
+// server with every builder tool. It edits the checkout only while its turn holds Your folder.
 
 /** The share of the context window past which a chat moves to a fresh session. */
 export const CHAT_FRESH_AT_CONTEXT_PCT = 70;
@@ -75,8 +76,10 @@ const NOTHING_TO_ASK = 'This chat has no sandbox, so it runs no command and asks
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Skill'] as const;
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] as const;
 const AGENT_TOOLS = ['Task', 'Agent'] as const;
-/** Named so that a built-in that writes, or watches without end, never reaches a chat. */
-const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Monitor'] as const;
+/** The file tools a chat edits with, judged on each call by whether its turn holds Your folder. */
+const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'] as const;
+/** Named so that a built-in that watches without end never reaches a chat. */
+const WATCH_TOOLS = ['Monitor'] as const;
 
 /** Every chat tool as the session names it on 10db's own server. */
 export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map(
@@ -92,9 +95,14 @@ export function chatProfile(
   sandboxed: boolean,
 ): Omit<ExploreProfile, 'kind' | 'systemPrompt' | 'judge'> {
   return {
-    tools: [...READ_TOOLS, ...WEB_TOOLS, ...AGENT_TOOLS, ...(sandboxed ? ['Bash'] : [])],
+    tools: [
+      ...READ_TOOLS,
+      ...WEB_TOOLS,
+      ...AGENT_TOOLS,
+      ...(sandboxed ? ['Bash', ...EDIT_TOOLS] : []),
+    ],
     allowedTools: ['Read', 'Grep', 'Glob', 'Skill', ...CHAT_MCP_TOOLS],
-    disallowedTools: [...WRITE_TOOLS, ...(sandboxed ? [] : ['Bash'])],
+    disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
   };
 }
@@ -239,6 +247,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         true,
         tendbReady,
       );
+      const folder: ChatFolder = {
+        holds: () => deps.folderHold.holdsTurn(chat.id),
+        heldBy: () =>
+          deps.folderHold
+            .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
+            .map((b) => holderWords(b.holder))
+            .join(' and ') || 'something else',
+      };
       const limitNotes = createLimitNotes();
       const project = getProject(state.db, conv.projectId);
       const ending = new AbortController();
@@ -366,10 +382,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               : ready.canUseTool(req),
           // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
           preToolUse: (req) =>
-            judgeChatCall(chatCallOf(req), {
-              ...access,
-              judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
-            }),
+            judgeChatCall(
+              chatCallOf(req),
+              {
+                ...access,
+                judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+              },
+              folder,
+            ),
           ...(deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {
@@ -379,7 +399,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     projectId: project.id,
                     workstreamId: null,
                     taskId: null,
-                    // A chat writes nothing, so its edits never reach the fast path's write rule.
+                    // The fast path's write rule is a lane's; a chat's edits are judged by `folder` above it.
                     fastPath: {
                       checkout: launch.cwd,
                       tmpDir: launch.cwd,
@@ -392,10 +412,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     // A chat's allow list holds none of the project's allowed commands.
                     coveredByBuilderRule: () => false,
                     floorVerdict: (req) => {
-                      const floor = judgeChatCall(chatCallOf(req), {
-                        ...access,
-                        judge: JudgeKind.Rules,
-                      });
+                      const floor = judgeChatCall(
+                        chatCallOf(req),
+                        { ...access, judge: JudgeKind.Rules },
+                        folder,
+                      );
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;
                     },

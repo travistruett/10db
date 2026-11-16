@@ -112,10 +112,13 @@ describe("a chat's session", () => {
       expect(profile.tools).toContain(tool);
       expect(profile.disallowedTools).not.toContain(tool);
     }
-    for (const tool of ['Edit', 'Write']) {
-      expect(profile.tools).not.toContain(tool);
-      expect(profile.disallowedTools).toContain(tool);
+    // The file tools are on offer in a sandboxed chat, judged at each call by whether its turn holds the folder,
+    // and never on an allow rule, which would approve them before the judge sees them.
+    for (const tool of ['Edit', 'Write', 'NotebookEdit']) {
+      expect(profile.tools).toContain(tool);
+      expect(profile.allowedTools).not.toContain(tool);
     }
+    expect(profile.disallowedTools).toEqual(['Monitor']);
     expect(profile.agents).toEqual({});
     expect(Object.keys(spec.projectMcpServers)).toEqual(['docs']);
     expect(Object.keys(spec.yourMcpServers)).toEqual(['mine']);
@@ -188,7 +191,8 @@ describe("a chat's session", () => {
   it('keeps Bash out with no sandbox', () => {
     const profile = chatProfile(false);
     expect(profile.tools).not.toContain('Bash');
-    expect(profile.disallowedTools).toContain('Bash');
+    expect(profile.disallowedTools).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write']));
+    expect(profile.tools).not.toContain('Edit');
   });
 
   it('refuses a write and the web with no judge, and lets a read through', async () => {
