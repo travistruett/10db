@@ -4,6 +4,7 @@ import {
   EventType,
   FolderWhileHeld,
   parseItemBody,
+  PassState,
   WorkstreamState,
   mintId,
   type ChatDto,
@@ -391,6 +392,32 @@ describe('what lands in a real repository', () => {
     },
     { name: 'a task waits between its steps', holder: taskBetweenSteps, lands: false },
     { name: 'a pass is open', holder: openPass, lands: false },
+    {
+      name: 'a pass is closed and waits for its pull request',
+      holder: () => {
+        openPass();
+        w.state.write((ctx) => {
+          ctx.tx.update(schema.passes).set({ state: PassState.Closed }).run();
+        });
+      },
+      lands: true,
+    },
+    {
+      name: '10db is doing git work in it',
+      holder: () => {
+        const git = w.folderHold.reserveGit(w.project.id, 'switching Your folder back to `main`');
+        if (!git.reserved) throw new Error('git work was refused');
+      },
+      lands: false,
+    },
+    {
+      name: 'another chat’s turn holds it',
+      holder: () => {
+        const other = w.open();
+        expect(w.folderHold.takeTurn(w.project.id, other.id).taken).toBe(true);
+      },
+      lands: true,
+    },
   ];
 
   it.each(rows)('edits notes.md only when it can: $name', async ({ holder, lands }) => {
