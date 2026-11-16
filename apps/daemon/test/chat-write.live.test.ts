@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   appendFileSync,
   chmodSync,
@@ -136,4 +137,80 @@ describe.skipIf(!live)('a chat that writes in Your folder, live, Claude plan', (
       await daemon.stop();
     }
   }, 420_000);
+
+  it('reopens a warm session on the read-only profile and resumes the conversation', async () => {
+    const daemon = await startLiveDaemon('lc4', { claudePath: localClaude() });
+    try {
+      const project = await addProject(daemon, null);
+      const chat = await openChat(daemon, project.id, null);
+      const word = 'quokka-lc4';
+      const first = await sendAndWait(
+        daemon,
+        chat.conversationId,
+        `Remember this word: ${word}. Create the file lc4.txt containing ok with your edit tool, then reply done.`,
+        'wait',
+      );
+      expect(existsSync(join(daemon.repo, 'lc4.txt'))).toBe(true);
+      note(`LC4 turn 1 items: ${String(first.length)}`);
+      // A task that waits on the builder keeps the folder, so the next turn cannot write.
+      const task = await daemon.api(
+        z.looseObject({ id: z.string() }),
+        `/projects/${project.id}/tasks`,
+        {
+          method: 'POST',
+          body: {
+            title: 'Wait for an answer',
+            description:
+              'Ask the builder with your question tool which colour to use, and do nothing until it is answered.',
+            acceptanceCriteria: ['the builder answered'],
+            areas: ['repo'],
+            workspaceMode: 'shared',
+          },
+        },
+      );
+      await daemon.api(z.looseObject({}), `/tasks/${task.id}/start`, { method: 'POST', body: {} });
+      const folder = await until('the task to hold the folder', 120_000, async () => {
+        const view = await daemon.api(
+          z.looseObject({ holders: z.array(z.looseObject({ kind: z.string() })) }),
+          `/projects/${project.id}/folder`,
+        );
+        return view.holders.some((h) => h.kind === 'lane') ? view : null;
+      });
+      note(`LC4 holders: ${JSON.stringify(folder.holders.map((h) => h.kind))}`);
+      const second = await sendAndWait(
+        daemon,
+        chat.conversationId,
+        'What was the word I asked you to remember? Reply with the word only.',
+        'read_only',
+      );
+      const reply = second.flatMap((i) => (i.kind === 'agent_message' ? [i.text] : [])).join(' ');
+      note(`LC4 turn 2 reply: ${reply}`);
+      note(
+        `LC4 notices: ${JSON.stringify(second.flatMap((i) => (i.kind === 'notice' ? [i.text] : [])))}`,
+      );
+      // The conversation's sessions as the daemon's own scratch database keeps them: one agent session id on both.
+      const sessions = execFileSync(
+        'sqlite3',
+        [
+          '-readonly',
+          '-separator',
+          ' ',
+          join(daemon.work.path, 'data', '10db.sqlite'),
+          `select provider_session_id, exit_reason from sessions where conversation_id = '${chat.conversationId}' order by sequence`,
+        ],
+        { encoding: 'utf8' },
+      )
+        .trim()
+        .split('\n');
+      note(`LC4 sessions: ${JSON.stringify(sessions)}`);
+      // The first session ended because the folder changed hands; the second runs the same agent session.
+      expect(sessions).toHaveLength(2);
+      const [firstId, secondId] = sessions.map((row) => row.split(' ')[0]);
+      expect(firstId).toBe(secondId);
+      expect(sessions[0]).toContain('the folder changed hands');
+      expect(reply).toContain(word);
+    } finally {
+      await daemon.stop();
+    }
+  }, 600_000);
 });

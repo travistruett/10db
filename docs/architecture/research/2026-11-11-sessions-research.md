@@ -1343,3 +1343,16 @@ request and merge, where it could have run those the classifier judged harmless.
 Side finding: a failed push reaches the agent only as "The push_branch call failed inside 10db and was not
 completed", because `GitNetworkError` is not a `DomainError` (`mcp/server.ts` `errorText`). The agent could not tell
 a missing remote from a bug.
+
+### LC4: a warm session reopened on the other profile resumes: pass
+
+What ran: `chat-write.live.test.ts`. Turn 1 on the Claude plan, folder free: "remember the word quokka-lc4" and create
+`lc4.txt` with the edit tool (the write profile; the session stays warm). A Your-folder task that asks the builder
+a question was then started, so a lane held the folder. Turn 2, sent with `folder: read_only`: "what was the word?".
+
+- The chat said, in its thread, "Your folder is in use by the task 'Wait for an answer', so this turn reads only."
+- The reply was the word. The daemon's scratch database holds two sessions for the conversation with the same
+  agent session id; the first ended with "the folder changed hands", the second resumed it.
+
+Meaning: between turns the session closes and reopens on the other profile, and the conversation carries over. The
+timing was not measured.
