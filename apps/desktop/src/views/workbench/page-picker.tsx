@@ -12,8 +12,14 @@ import {
   type OptionsFilter,
 } from '@mantine/core';
 import { IconCheck, IconSubtask } from '@tabler/icons-react';
-import { shortAgo } from '../factory/short-ago';
-import { blockedReason, pageLabelIn, type JoinableTask, type PickTicks } from './start-pass-rules';
+import {
+  blockedReason,
+  changedLine,
+  othersOf,
+  pageLabelIn,
+  type JoinableTask,
+  type PickTicks,
+} from './start-pass-rules';
 
 export interface PagePickerProps {
   readonly pages: readonly PassStartPageDto[];
@@ -42,21 +48,6 @@ interface Choice {
 const PAGE = 'page:';
 const pageValue = (area: string) => `${PAGE}${area}`;
 const taskValue = (taskId: TaskId) => `task:${taskId}`;
-
-function without<T>(list: readonly T[], drop: (item: T) => boolean): T[] {
-  return list.filter((item) => !drop(item));
-}
-
-/** The picked rows with one row taken out, so a row is never blocked by itself. */
-function othersOf(ticks: PickTicks, row: { page?: string; taskId?: TaskId }): PickTicks {
-  return {
-    pages: without(ticks.pages, (page) => page === row.page),
-    tasks: without(ticks.tasks, (task) => task.taskId === row.taskId),
-  };
-}
-
-const changedLine = (page: PassStartPageDto, now: number) =>
-  page.lastChangedAt === null ? 'no changes yet' : `changed ${shortAgo(page.lastChangedAt, now)}`;
 
 /** Keeps the options whose name, route or pages hold the search, inside their groups. */
 function filterBy(choices: ReadonlyMap<string, Choice>): OptionsFilter {

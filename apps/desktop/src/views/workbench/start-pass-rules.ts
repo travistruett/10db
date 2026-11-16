@@ -11,9 +11,11 @@ import {
   type AreaDef,
   type GoalId,
   type PassOpenRequest,
+  type PassStartPageDto,
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
+import { shortAgo } from '../factory/short-ago';
 
 // Workbench spec §4.2: what the picker offers and what Start Pass sends. A row is a page area, or an
 // open task that works on one; two ticked rows may not hold the same file.
@@ -124,6 +126,22 @@ export function blockedReason(
   return null;
 }
 
+function without<T>(list: readonly T[], drop: (item: T) => boolean): T[] {
+  return list.filter((item) => !drop(item));
+}
+
+/** The picked rows with one row taken out, so a row is never blocked by itself. */
+export function othersOf(ticks: PickTicks, row: { page?: string; taskId?: TaskId }): PickTicks {
+  return {
+    pages: without(ticks.pages, (page) => page === row.page),
+    tasks: without(ticks.tasks, (task) => task.taskId === row.taskId),
+  };
+}
+
+/** When a page's files last changed, in words. */
+export const changedLine = (page: PassStartPageDto, now: number): string =>
+  page.lastChangedAt === null ? 'no changes yet' : `changed ${shortAgo(page.lastChangedAt, now)}`;
+
 /** How many pages a pass's name lists before "n more" stands for the rest. */
 const NAMED_PAGES = 3;
 
@@ -143,14 +161,12 @@ export function pageCap(ticked: number): number {
   return Math.max(PASS_PAGE_CAP_DEFAULT, ticked);
 }
 
-/** Start Pass's request: the ticked pages and tasks, the message only when one is written. */
+/** Start Pass's request: the ticked pages and tasks; each page waits for the builder's first message. */
 export function openRequest(
   ticks: PickTicks,
-  bothering: string,
   goalId: GoalId | null,
   areas: readonly AreaDef[],
 ): PassOpenRequest {
-  const firstMessage = bothering.trim();
   const labels = [
     ...ticks.pages.map((name) => pageLabelIn(areas, name)),
     ...ticks.tasks.map((task) => {
@@ -163,9 +179,17 @@ export function openRequest(
     pages: [...ticks.pages],
     taskIds: ticks.tasks.map((task) => task.taskId),
     pageCap: pageCap(labels.length),
-    ...(firstMessage === '' ? {} : { firstMessage }),
     ...(goalId === null ? {} : { goalId }),
   };
+}
+
+/** What is ticked in words for beside Start Pass: "2 pages · 1 task"; empty when nothing is. */
+export function tickedWords(ticks: PickTicks): string {
+  const count = (n: number, one: string) => `${String(n)} ${one}${n === 1 ? '' : 's'}`;
+  return [
+    ...(ticks.pages.length === 0 ? [] : [count(ticks.pages.length, 'page')]),
+    ...(ticks.tasks.length === 0 ? [] : [count(ticks.tasks.length, 'task')]),
+  ].join(' \u00b7 ');
 }
 
 /** Every page the ticks hold: the ticked pages, then each ticked task's. */

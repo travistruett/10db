@@ -14,7 +14,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -29,6 +29,8 @@ import {
   useRenamePass,
 } from '../../daemon/pass-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
+import { CountBadge } from '../../shell/count-badge';
+import { PageHeader } from '../../shell/page-header';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
@@ -138,7 +140,21 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <PageHeader
+          title="UI Workbench"
+          description="Work through pages with the agents, live."
+          actions={
+            <Button
+              variant="default"
+              rightSection={setupCount === 0 ? null : <CountBadge count={setupCount} />}
+              onClick={() => {
+                setDialog('setup');
+              }}
+            >
+              Workbench Settings
+            </Button>
+          }
+        />
         {closed === null ? null : (
           <Text size="sm" role="status">
             {`${closed.name} finished; its work is on ${closed.returnBranch}.`}
@@ -168,7 +184,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             starting={opening.isPending}
             error={opening.error?.message ?? null}
             setUp={{
-              count: setupCount,
               newPages,
               onOpen: () => {
                 setDialog('setup');
@@ -252,7 +267,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
   const now = useNow(CLOCK_TICK_MS);
   const opening = useOpenPass(project.id);
-  // Set Up shows only above the picker, so the setup is read only while no pass is open.
+  // Workbench Settings shows only above the list, so the setup is read only while no pass is open.
   const noPassOpen =
     live.data === null || (live.data !== undefined && !passHoldsTasks(live.data.pass.state));
   const setup = useWorkbenchSetup(project.id, hasPages && noPassOpen);

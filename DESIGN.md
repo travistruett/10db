@@ -167,9 +167,12 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   view's actions at the right end; row 2 is an optional one-line dimmed byline; row 3 is an optional toolbar,
   tabs left and filters right. A row that is absent takes no space. Workspaces, where the content is the
   work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
-- **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
+- **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
+  rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
+  (`views/workbench/page-list.tsx`).
+- **Picking several from a list that grows without bound** is one searchable `MultiSelect`: each option shows what tells
   it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
-  the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate
+  the reason under it, and the pills show what is picked. A list that grows never gets a column of checkboxes under a separate
   filter box.
 - **Checks** mark the chosen row on the right, in `Select`, `MultiSelect`, `Combobox` and `Menu` alike.
 - **Forms:** textareas autosize and start small (one or two rows). The actions sit `xl` below the last
