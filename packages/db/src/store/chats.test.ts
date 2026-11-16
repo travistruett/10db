@@ -11,16 +11,19 @@ import {
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   archiveChat,
   chatMadeTask,
   chatView,
+  getChat,
   insertChat,
   moveChatTab,
   openChats,
   recentChats,
   recordChatTask,
+  takenOverChats,
   setChatTitle,
   touchChat,
   unarchiveChat,
@@ -28,6 +31,7 @@ import {
 import { insertItem } from './conversation-items';
 import { insertConversation } from './conversations';
 import { listEventsAfter, latestEventSeq } from './events';
+import * as schema from '../schema';
 import type { Store } from './store';
 import { insertTask, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
@@ -103,6 +107,25 @@ describe('the strip', () => {
       moveChatTab(ctx, b, 99);
     });
     expect(strip()).toEqual([d, a, c, b]);
+  });
+});
+
+describe('takenOverChats', () => {
+  it('lists a taken-over chat, and not one that is archived', () => {
+    const open = newChat(0, 'In terminal');
+    const archived = newChat(1, 'Archived in terminal');
+    store.write((ctx) => {
+      for (const id of [open, archived]) {
+        const row = getChat(ctx.tx, id);
+        ctx.tx
+          .update(schema.conversations)
+          .set({ state: ConversationState.TakenOver })
+          .where(eq(schema.conversations.id, row.conversationId))
+          .run();
+      }
+      archiveChat(ctx, archived, '2026-11-13T13:00:00.000Z');
+    });
+    expect(takenOverChats(store.db, projectId).map((c) => c.id)).toEqual([open]);
   });
 });
 
