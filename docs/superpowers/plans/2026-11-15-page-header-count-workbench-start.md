@@ -23,6 +23,9 @@
 - Board, Sessions, Plan and an open Workbench pass keep their compact headers: there the content is the work.
 - The Add Page dialog inside an open pass keeps its search picker; only the start page becomes a list.
 
+- A page that loads shows its header at once and, after 300 ms, quiet placeholder rows in the shape of what
+  is coming, instead of a lone spinner under the title. The Workbench start page should also open faster.
+
 **Needed from you:** nothing. Adding found pages on their own is the next PR (it rebuilds page areas, which
 decide what an agent may write, so it gets a decision record first).
 
@@ -92,9 +95,34 @@ Provider parity: UI only; every account sees the same header, count and list.
   its reason; ticking a page and a task; the footer's words); `e2e/workbench.spec.ts` drives the start page by
   role and must follow the new controls (Start Pass, checkboxes by page name). Red first for each new row.
 
+## Task 4: one loading state for a page
+
+- New `apps/desktop/src/shell/page-loading.tsx`: `PageLoading({ shape: 'list' | 'cards', rows?, label })`.
+  It renders nothing for its first 300 ms (a fast load never flashes), then Mantine `Skeleton` rows in the
+  shape of the page's content (list: a checkbox-and-two-lines row; cards: a card outline), static, no shimmer
+  under `prefers-reduced-motion`, with `role="status"` and `aria-label={label}` ("Loading the pages").
+  Generalise Sessions' `LoadingLines` in `views/sessions/chat-tab.tsx` (same 300 ms rule) into it.
+- The `PageHeader` renders while the page loads: the title and description are known before the data.
+- Use it in the Workbench (`workbench-view.tsx:130` today is a lone `Loader`), and wherever a top-level view
+  shows a bare `Loader` as its whole content (grep `views/*/` for `<Loader`).
+- `DESIGN.md`: a "Loading" rule: header first, placeholder rows after 300 ms, never a lone spinner for a page.
+- Test: one render test with an injected clock (nothing before 300 ms, rows after).
+
+## Task 5: why the Workbench start takes 3-4 s
+
+- The start page waits on `GET /passes?live=true` and `GET /projects/:id/pass-start`
+  (`apps/daemon/src/pass/start-preview.ts`), which asks git per page for its last commit (`Git.lastChangedAt`),
+  the folder's changed files and the holder. Measure each read on the real project first (time the routes
+  with the dev daemon, `pnpm dev`), name the slow step in the PR, then cut it, for example one
+  `git log --name-only` walk for every page's last change instead of one call per page.
+- Keep the answer identical: `start-preview` tests assert the DTO; add a row only if the batched read can
+  differ (a page with no commits).
+- If the slow read is the setup proposal (`POST /projects/:id/workbench-setup`), it no longer blocks the
+  start page in Task 3's design: the found-pages line appears when it arrives.
+
 ## Order and checks
 
-Tasks 1, 2, 3 in order, one commit each (Conventional Commits, scope `desktop`, value card per new
+Tasks 1-5 in order, one commit each (Conventional Commits, scope `desktop`, value card per new
 behaviour). After each: `pnpm exec vitest related <files>`, typecheck, lint. Before the PR: the Inbox,
 Factory, Knowledge, Board and Workbench e2e specs in WebKit (Settings needs a spec that adds a project before
 it), screenshots at 1280 in dark and light, then `make check-changed`. Code review by `code-reviewer`
