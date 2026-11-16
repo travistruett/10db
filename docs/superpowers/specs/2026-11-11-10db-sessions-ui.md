@@ -155,7 +155,7 @@ kind line never competes with the buttons for width. It shows:
   - "Chat · reads only: Your folder is in use by the pass ‘Settings pass’" (a task, a pass or 10db's git work holds
     the folder; a turn sent now reads only, or waits, design spec §7.3)
   - "Chat · Your folder · on `main` · also in use by the chat ‘Retry login’" (another chat shares the folder)
-  - "Chat · Your folder · on `main` · commits wait until the pass ‘Settings pass’'s pull request merges" (a closed
+  - "Chat · Your folder · on `main` · commits, branch moves and pulls wait until the pass ‘Settings pass’'s pull request merges" (a closed
     pass waits for its merge)
   - "Chat · read-only: its work moved to a task"
   - "Chat · in your terminal since 12:04"

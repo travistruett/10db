@@ -7,7 +7,13 @@
 - Keys are a pure judge (`session-keys.ts`) heard by `useSessionKeys` on Sessions and, for ⌘T alone, by the shell's `useNewSessionKey`; Esc stays the chat tab's own stop. Closing patches `tabPosition: null` and pushes the tab, its place and its title onto the closed stack (`closed-tabs.ts`, five, `localStorage`); ⌘⇧T, All Tabs' Recently Closed and Open Session take from it (`use-tab-closing.ts`), and an archived chat is unarchived first. A chat's draft text and mentions persist in `tendb.sessions.drafts` (pictures do not). A fresh tab the shell wrote for ⌘T is read in when the address names it, except one this screen has just dropped.
 - Notifications are `desktop/notify-chat.ts`: "{title} replied" (a chat going from working to idle, when Settings › Sessions allows it) and "{title} needs you" for a chat's card, each only while the window is not focused, and a click opens the tab. The announcer's words are `session-announcements.ts`.
 - Your folder (sessions spec §7.3): `useProjectFolder` reads `GET /projects/:id/folder`, refetched on `project`,
-  `workstream`, `pass` and `conversation` events. `kind-line.ts` words the bar from it (`keepingWords` is the holders
-  that keep this chat out, which also drive the composer's choices and `folder-wait.tsx`, the row for a message that
-  waits, whose Send Now Reading Only is `POST /chats/:id/stop-waiting`). Before the folder is read the line is
-  "Chat · reads {project}".
+  `workstream` and `pass` events and every 15 s (a terminal's branch switch sends no event; `conversation` events do
+  not refetch it, since each read runs git). `kind-line.ts` words the bar from it (`keepingWords` is the holders that
+  keep this chat out, which also drive the composer's choices; the daemon's backticks are stripped). Every send that
+  can run while the folder is held asks first: a chat's Send, a fresh tab's first message (the choice travels in the
+  send request to the chat made from it; File as Tasks is offered only where a conversation exists) and Allow This
+  (which puts "Go ahead" in the composer). `folder-wait.tsx` is the row for a message that waits; it follows the
+  chat's own `waiting_chat` holder, so it stays while the message is parked even when nothing still keeps the chat
+  out. While the chat waits, a send that names no folder passes `wait`, since it would cancel the wait. Send Now
+  Reading Only is `POST /chats/:id/stop-waiting`, harmless when nothing waits any more. Before the folder is read the
+  line is "Chat · reads {project}".

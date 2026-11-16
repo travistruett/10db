@@ -862,7 +862,7 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 | a turn starts and a task, a pass or git work holds | not taken; the builder picked Wait for It (parked) or Send Reading Only (read-only profile, with a notice naming the holder) |
 | the holder leaves while the turn runs | not taken mid-turn; the next turn takes it |
 | `turn_complete` with messages queued (a chained turn) | kept for the next turn |
-| `turn_complete` with nothing queued | released; the writable session closes, so the next turn starts cold and resumes |
+| `turn_complete` with nothing queued | released; the session stays warm, and closes at the next turn only if that turn needs the other profile, resuming the same agent session |
 | any other exit from `BUSY`: error end, rate limit, the stop grace's `stop()`, archive, Do it (`sealed`) | released, after the session's jobs stop |
 | Do it in Your folder | the running turn is stopped, and the pass opens only once the stop has settled and released the hold |
 | Open in Terminal, the folder free or held by this chat | taken, as `takeover` |
