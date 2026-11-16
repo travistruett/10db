@@ -1,4 +1,4 @@
-import { ChatId } from '@10db/contracts';
+import { ChatId, TaskId } from '@10db/contracts';
 
 /**
  * Sessions' address: `chat` selects an open session, `fresh` a tab not yet made into one. Each is kept
@@ -6,6 +6,8 @@ import { ChatId } from '@10db/contracts';
  */
 export interface SessionsSearch {
   readonly chat?: ChatId;
+  /** A task's tab. */
+  readonly task?: TaskId;
   readonly fresh?: string;
 }
 
@@ -14,9 +16,11 @@ const FRESH_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
 export function sessionsSearch(search: Record<string, unknown>): SessionsSearch {
   const chat = ChatId.safeParse(search['chat']);
+  const task = TaskId.safeParse(search['task']);
   const fresh = typeof search['fresh'] === 'string' && FRESH_ID.test(search['fresh']);
   return {
     ...(chat.success ? { chat: chat.data } : {}),
-    ...(!chat.success && fresh ? { fresh: String(search['fresh']) } : {}),
+    ...(!chat.success && task.success ? { task: task.data } : {}),
+    ...(!chat.success && !task.success && fresh ? { fresh: String(search['fresh']) } : {}),
   };
 }

@@ -4,6 +4,7 @@ import {
   PermissionChoice,
   type ConversationItemDto,
   type InboxItemDto,
+  type TaskId,
   type ToolCallView,
 } from '@10db/contracts';
 import { createElement } from 'react';
@@ -27,6 +28,12 @@ export interface ItemEntryOptions {
   readonly working: boolean;
   /** The Inbox cards the conversation has asked, open or answered: an answered one leaves a history line. */
   readonly cards: readonly InboxItemDto[];
+  /** Opens the task Do It made, from the row that says the chat handed its work to it; without it the row has no Open. */
+  readonly openTask?: (task: {
+    readonly taskId: TaskId;
+    readonly title: string;
+    readonly place: 'worktree' | 'here';
+  }) => void;
 }
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
@@ -83,6 +90,27 @@ export function itemEntry(
     case 'tool_call':
       return { kind: 'tool', id, call: item.call };
     case 'notice':
+      if (item.handedTo !== undefined) {
+        const { taskId, title, place } = item.handedTo;
+        const { openTask } = opts;
+        return {
+          kind: 'divider',
+          id,
+          text:
+            place === 'here'
+              ? `Started a pass: ${title} · Your folder`
+              : `Started a task: ${title} · Separate copy`,
+          action:
+            openTask === undefined
+              ? null
+              : {
+                  label: 'Open',
+                  onClick: () => {
+                    openTask({ taskId, title, place });
+                  },
+                },
+        };
+      }
       return item.change === undefined
         ? { kind: 'notice', id, text: item.text, tone: 'info' }
         : {

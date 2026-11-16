@@ -1,4 +1,4 @@
-import { Box, Group, Modal, Text, type MantineSize } from '@mantine/core';
+import { Box, Group, Modal, Text, type ModalRootProps } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useHiddenEdges } from './use-hidden-edges';
@@ -16,7 +16,7 @@ export interface FormModalProps {
   readonly opened: boolean;
   readonly onClose: () => void;
   readonly title: string;
-  readonly size?: MantineSize;
+  readonly size?: ModalRootProps['size'];
   /** The actions, right-aligned in a footer that never scrolls away. */
   readonly actions: ReactNode;
   /**

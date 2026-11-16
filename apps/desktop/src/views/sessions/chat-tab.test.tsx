@@ -106,7 +106,8 @@ describe('ChatTab: the session bar', () => {
 
   it('File as Tasks sends the fixed message as the builder’s turn', async () => {
     const { served } = openChat();
-    fireEvent.click(await screen.findByRole('button', { name: 'File as Tasks' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More ways to hand off' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'File as Tasks' }));
     await waitFor(() => {
       expect(served.messages).toHaveLength(1);
     });
@@ -602,7 +603,8 @@ describe('ChatTab: the composer and Your folder', () => {
     it('sends File as Tasks with wait, so it does not cancel the wait', async () => {
       const { served } = openParked();
       await screen.findByText(/^Waits for Your folder/);
-      fireEvent.click(screen.getByRole('button', { name: 'File as Tasks' }));
+      fireEvent.click(screen.getByRole('button', { name: 'More ways to hand off' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'File as Tasks' }));
       await waitFor(() => {
         expect(bodies(served)).toEqual([{ text: FILE_AS_TASKS_MESSAGE, folder: 'wait' }]);
       });

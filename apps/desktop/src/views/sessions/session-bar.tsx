@@ -1,21 +1,11 @@
 import type { ChatDto, ConversationDto, FolderDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Group,
-  Loader,
-  Menu,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
+import { ActionIcon, Box, Group, Loader, Menu, Stack, Text, TextInput } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { JudgeLine } from '../../conversation';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
+import { SplitButton } from '../../shell/split-button';
 import { kindLine } from './kind-line';
 import { TabMenuItems, type TabActions } from './tab-menu';
 
@@ -34,6 +24,9 @@ export interface SessionBarProps {
   /** File as Tasks, disabled with this reason when it cannot be sent. */
   readonly fileDisabledReason: string | null;
   readonly onFileAsTasks: () => void;
+  /** Do It…, disabled with this reason (Hand back first); a sealed chat has no Do It. */
+  readonly doItDisabledReason: string | null;
+  readonly onDoIt: () => void;
   /** What the ⋯ menu does for the tab; Rename edits the title in place. */
   readonly actions?: Omit<TabActions, 'onRename'>;
   /** The builder asked to rename from the strip. */
@@ -118,6 +111,8 @@ export function SessionBar({
   loading,
   fileDisabledReason,
   onFileAsTasks,
+  doItDisabledReason,
+  onDoIt,
   actions,
   renaming = false,
   onRenamed,
@@ -151,16 +146,21 @@ export function SessionBar({
           <Text size="xs" c="dimmed">
             {capabilities.label}
           </Text>
-          <Tooltip label={fileDisabledReason ?? ''} disabled={fileDisabledReason === null}>
-            <Button
-              variant="default"
+          {conversation.state === 'sealed' ? null : (
+            <SplitButton
               size="xs"
-              disabled={fileDisabledReason !== null}
-              onClick={onFileAsTasks}
+              disabledReason={doItDisabledReason}
+              menuLabel="More ways to hand off"
+              onClick={onDoIt}
+              menu={
+                <Menu.Item disabled={fileDisabledReason !== null} onClick={onFileAsTasks}>
+                  File as Tasks
+                </Menu.Item>
+              }
             >
-              File as Tasks
-            </Button>
-          </Tooltip>
+              Do It…
+            </SplitButton>
+          )}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="subtle" aria-label="More session actions">

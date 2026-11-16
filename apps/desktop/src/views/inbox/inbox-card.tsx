@@ -43,7 +43,13 @@ import { RecordDecision } from './record-decision';
 import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
 import { SettingsSectionKey } from '../settings/sections';
 import { usePeople } from '../../daemon/people';
-import { OpenSessionLink, SessionBadge, useSessionOfCard } from './session-card-link';
+import { OpenTaskLink } from '../sessions/open-task-link';
+import {
+  OpenSessionLink,
+  SessionBadge,
+  useSessionOfCard,
+  useTaskOfCard,
+} from './session-card-link';
 import { SlackPreview } from './slack-preview';
 import {
   AskSomeoneFooter,
@@ -158,6 +164,7 @@ export function InboxCard({
   const principle = usePrincipleOf(item, selected);
   const dismissable = isDismissable(item);
   const session = useSessionOfCard(item);
+  const taskOfCard = useTaskOfCard(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
     <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
@@ -319,6 +326,9 @@ export function InboxCard({
           </Text>
         </Group>
         {session === null ? null : <OpenSessionLink chat={session} />}
+        {taskOfCard === null ? null : (
+          <OpenTaskLink taskId={taskOfCard} projectId={item.projectId} />
+        )}
         {identical === null ? null : (
           <Text size="sm" c="dimmed">
             {identical} are open. Dismiss All closes all {count}.

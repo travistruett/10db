@@ -47,6 +47,11 @@ export interface ComposerHeld {
   ) => Promise<void> | void;
   /** File as Tasks: the standing request goes, and the draft stays; a tab with no conversation has none. */
   readonly onFileAsTasks?: () => Promise<void> | void;
+  /**
+   * Do It in a Separate Copy: the draft is not sent; the screen opens the Do It sheet on that place with it.
+   * A tab with no chat to hand over has none.
+   */
+  readonly onDoItSeparately?: (draft: Draft) => void;
 }
 
 /**
@@ -494,6 +499,18 @@ export function Composer({
                   }}
                 >
                   File as Tasks
+                </Button>
+              )}
+              {held.onDoItSeparately === undefined ? null : (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  onClick={() => {
+                    setChoosing(null);
+                    if (held.onDoItSeparately !== undefined) held.onDoItSeparately(outgoing(draft));
+                  }}
+                >
+                  Do It in a Separate Copy
                 </Button>
               )}
             </Group>

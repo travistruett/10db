@@ -9,6 +9,7 @@ export type SessionKey =
   | { readonly kind: 'prev' }
   | { readonly kind: 'next' }
   | { readonly kind: 'next_needing' }
+  | { readonly kind: 'do_it' }
   | { readonly kind: 'stop' };
 
 export interface Press {
@@ -36,6 +37,7 @@ export function sessionKey(press: Press, place: Place): SessionKey | null {
     if (press.shift) {
       if (key === '[' || key === '{') return onSessions(place, { kind: 'prev' });
       if (key === ']' || key === '}') return onSessions(place, { kind: 'next' });
+      if (key === 'Enter') return onSessions(place, { kind: 'do_it' });
       return null;
     }
     if (key === 'w') return onSessions(place, { kind: 'close' });
@@ -73,6 +75,7 @@ export function targetIndex(key: SessionKey, selected: number, count: number): n
     case 'close':
     case 'reopen':
     case 'next_needing':
+    case 'do_it':
     case 'stop':
       return null;
   }

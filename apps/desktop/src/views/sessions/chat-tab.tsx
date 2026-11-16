@@ -1,12 +1,14 @@
 import {
+  DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
   type ChatDto,
+  type DoItResult,
   type Effort,
   type ProjectViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { Box, Group, Text } from '@mantine/core';
+import { Box, Button, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -43,6 +45,11 @@ import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
 import { keepingWords } from './kind-line';
+import { DoItSheet } from './do-it-sheet';
+import { useOpenTask } from './open-session';
+import { TaskTabPlace } from './task-tabs';
+import { useTaskSession } from '../../daemon/task-session-queries';
+import { useSessionKeys } from './use-session-keys';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
@@ -73,13 +80,77 @@ export interface ChatTabProps {
   readonly actions?: Omit<TabActions, 'onRename'>;
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
+  /** Do It was accepted; the screen puts the task's tab where it belongs. */
+  readonly onHandedOff?: (result: DoItResult, title: string) => void;
+}
+
+/** What stands where a sealed chat's composer was: its work moved to a task, which the line opens. */
+function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
+  const session = useTaskSession(chat.taskId).data;
+  const openTask = useOpenTask();
+  return (
+    <Group
+      mx="md"
+      my="sm"
+      px="sm"
+      py="xs"
+      gap="sm"
+      wrap="nowrap"
+      justify="space-between"
+      style={{
+        border: '1px solid var(--mantine-color-default-border)',
+        borderRadius: 'var(--mantine-radius-md)',
+      }}
+    >
+      <Text size="sm" role="status">
+        This chat handed its work to <b>{session?.title ?? 'a task'}</b>. It&apos;s read-only now.
+      </Text>
+      {session === undefined ? null : (
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => {
+            void openTask({
+              taskId: session.taskId,
+              projectId: chat.projectId,
+              title: session.title,
+              place: session.place === 'pass' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
+            });
+          }}
+        >
+          Open Task
+        </Button>
+      )}
+    </Group>
+  );
+}
+
+/** Why Do It… is off for the chat, or null when it is on. */
+function doItOff(
+  chat: ChatDto,
+  state: string,
+  removed: boolean,
+  reason: string | null,
+): string | null {
+  if (state === 'taken_over') return 'Hand back first';
+  if (removed) return 'This project was removed from 10db.';
+  if (chat.archivedAt !== null) return 'This session is archived.';
+  return reason;
 }
 
 /**
  * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
  * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
-export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRenamed }: ChatTabProps) {
+export function ChatTab({
+  chat,
+  project,
+  onAnnounce,
+  actions,
+  renaming,
+  onRenamed,
+  onHandedOff,
+}: ChatTabProps) {
   const conversationQuery = useConversation(chat.conversationId);
   const conversation = conversationQuery.data ?? chat.conversation;
   const { items, loading } = useConversationItemsState(chat.conversationId);
@@ -96,6 +167,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const sendNow = useSendNow();
   const patch = usePatchChat();
   const resolved = useResolvedInbox();
+  const openTask = useOpenTask();
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
@@ -117,6 +189,15 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
+  // The Do It sheet, when open: the place it opens on and the unsent words that go with it.
+  const [doIt, setDoIt] = useState<{ place?: DoItPlace; draft?: string } | null>(null);
+  const doItReason = doItOff(chat, conversation.state, removed, null);
+  useSessionKeys((key) => {
+    if (key.kind !== 'do_it' || doItReason !== null || conversation.state === 'sealed')
+      return false;
+    setDoIt({});
+    return true;
+  });
 
   const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
     const chosen = folderChoice ?? whileWaiting;
@@ -239,6 +320,14 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
       receipts: caps.receipts,
       working,
       cards: [...(resolved.data ?? []), ...open],
+      openTask: (task) => {
+        void openTask({
+          taskId: task.taskId,
+          projectId: chat.projectId,
+          title: task.title,
+          place: task.place === 'here' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
+        });
+      },
     }),
     { chatId: chat.id, projectId: chat.projectId },
   );
@@ -305,6 +394,10 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           {...(actions === undefined ? {} : { actions })}
           {...(renaming === undefined ? {} : { renaming })}
           {...(onRenamed === undefined ? {} : { onRenamed })}
+          doItDisabledReason={doItReason}
+          onDoIt={() => {
+            setDoIt({});
+          }}
           onFileAsTasks={() => {
             void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
               setSendError(error instanceof Error ? error.message : String(error));
@@ -337,7 +430,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               onStop={stopNow}
             />
           ) : null}
-          {removed ? (
+          {conversation.state === 'sealed' ? (
+            <HandedOffLine chat={chat} />
+          ) : removed ? (
             <Text size="sm" c="dimmed" px="md" py="md">
               This project was removed from 10db.
             </Text>
@@ -407,6 +502,13 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                       onFileAsTasks: async () => {
                         await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
                       },
+                      ...(doItReason === null
+                        ? {
+                            onDoItSeparately: (d: Draft) => {
+                              setDoIt({ place: DoItPlace.Worktree, draft: d.text });
+                            },
+                          }
+                        : {}),
                     },
                   })}
               onSend={post}
@@ -432,6 +534,23 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
         agentLabel={caps.label}
         busy={streaming !== null}
       />
+      {doIt === null || project === undefined ? null : (
+        <DoItSheet
+          chat={chat}
+          project={project}
+          agentLabel={caps.label}
+          model={conversation.model}
+          {...(doIt.place === undefined ? {} : { place: doIt.place })}
+          {...(doIt.draft === undefined ? {} : { draft: doIt.draft })}
+          onClose={() => {
+            setDoIt(null);
+          }}
+          onDone={(result, title) => {
+            setDoIt(null);
+            onHandedOff?.(result, title);
+          }}
+        />
+      )}
     </ConversationLayout>
   );
 }

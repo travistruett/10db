@@ -1,4 +1,11 @@
-import type { ChatDto, ProjectId } from '@10db/contracts';
+import {
+  DoItPlace,
+  type ChatDto,
+  type DoItResult,
+  type ProjectId,
+  type TaskId,
+  type TaskSessionDto,
+} from '@10db/contracts';
 import { Box, Button, Group, Paper, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
@@ -7,6 +14,9 @@ import { Announcer } from '../../conversation/announcer';
 import { HeaderSlot } from '../../shell/header-slot';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ChatTab } from './chat-tab';
+import { TaskTab as TaskTabView } from './task-tab';
+import { taskTabKey, taskTabs, TaskTabPlace, useTaskTabs, type TaskTab } from './task-tabs';
+import { useTaskSessions } from '../../daemon/task-session-queries';
 import { FreshTab } from './fresh-tab';
 import {
   openFreshTab,
@@ -36,8 +46,23 @@ export interface SessionsViewProps {
 }
 
 /** The strip's order: by place, a fresh tab before the chat that waits to move after it. */
-function stripOf(chats: readonly ChatDto[], fresh: readonly FreshTabState[]): readonly StripTab[] {
+function stripOf(
+  chats: readonly ChatDto[],
+  fresh: readonly FreshTabState[],
+  tasks: readonly TaskTab[],
+  sessions: ReadonlyMap<TaskId, TaskSessionDto>,
+): readonly StripTab[] {
   const tabs: StripTab[] = [
+    ...tasks.map((task): StripTab => {
+      const session = sessions.get(task.taskId);
+      return {
+        kind: 'task',
+        key: taskTabKey(task.taskId),
+        task: session === undefined ? task : { ...task, title: session.title },
+        board: session?.board ?? null,
+        position: task.position,
+      };
+    }),
     ...chats.map((chat): StripTab => ({
       kind: 'chat',
       key: draftKey.chat(chat.id),
@@ -92,7 +117,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   const list = projects.data ?? [];
   const chats = open.data ?? [];
-  const tabs = stripOf(chats, fresh);
+  const taskList = useTaskTabs();
+  const sessions = useTaskSessions(taskList.map((t) => t.taskId));
+  const tabs = stripOf(chats, fresh, taskList, sessions);
   const loaded = open.isSuccess && projects.isSuccess;
 
   // The screen is never blank: with nothing open, a fresh tab opens (UI spec §12, "No tabs").
@@ -104,9 +131,11 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const wanted =
     search.chat !== undefined
       ? draftKey.chat(search.chat)
-      : search.fresh !== undefined
-        ? draftKey.fresh(search.fresh)
-        : null;
+      : search.task !== undefined
+        ? taskTabKey(search.task)
+        : search.fresh !== undefined
+          ? draftKey.fresh(search.fresh)
+          : null;
   const selected = tabs.find((t) => t.key === wanted) ?? tabs[0] ?? null;
 
   // A tab is seen while it is selected and the window has focus.
@@ -131,6 +160,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     if (tab.kind === 'chat') {
       onSearch({ chat: tab.chat.id }, false);
       select(tab.chat.projectId);
+    } else if (tab.kind === 'task') {
+      onSearch({ task: tab.task.taskId }, false);
+      select(tab.task.projectId);
     } else {
       onSearch({ fresh: tab.tab.id }, false);
       select(tab.tab.projectId);
@@ -148,6 +180,10 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     },
     removeFresh: (id) => {
       dropFresh(id);
+    },
+    onOpenTask: (taskId, projectId) => {
+      onSearch({ task: taskId }, false);
+      select(projectId);
     },
   });
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -177,6 +213,23 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     dropFresh(tab.id);
     onSearch({ chat: chat.id }, true);
     select(chat.projectId);
+  };
+
+  /**
+   * Do It was accepted: a separate copy's task takes the chat's place in the strip, and a pass of one opens
+   * to the chat's right. A pass that waits for the folder has no task yet.
+   */
+  const handedOff = (chat: ChatDto, result: DoItResult, title: string): void => {
+    if ('pending' in result) return;
+    const here = result.place === DoItPlace.Here;
+    taskTabs.open({
+      taskId: result.taskId,
+      projectId: chat.projectId,
+      title,
+      place: here ? TaskTabPlace.Pass : TaskTabPlace.Copy,
+      position: (chat.tabPosition ?? 0) + (here ? 1 : 0),
+    });
+    onSearch({ task: result.taskId }, false);
   };
 
   const changeProject = (tab: FreshTabState, projectId: ProjectId): void => {
@@ -239,6 +292,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         if (tab !== undefined) select_(tab);
         return true;
       }
+      // The selected chat tab hears this one.
+      case 'do_it':
       case 'stop':
         return false;
     }
@@ -313,12 +368,21 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
                 void openRecent(selected.tab, chat);
               }}
             />
+          ) : selected.kind === 'task' ? (
+            <TaskTabView
+              key={selected.task.taskId}
+              tab={selected.task}
+              project={list.find((p) => p.id === selected.task.projectId)}
+            />
           ) : projects.isSuccess ? (
             <ChatTab
               key={selected.chat.id}
               chat={selected.chat}
               project={list.find((p) => p.id === selected.chat.projectId)}
               onAnnounce={setAnnouncement}
+              onHandedOff={(result, title) => {
+                handedOff(selected.chat, result, title);
+              }}
               actions={{
                 onArchive: () => {
                   closing.archiveTab(selected);

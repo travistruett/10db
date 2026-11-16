@@ -2,7 +2,7 @@ import { Box, Group, Menu, Text, UnstyledButton, VisuallyHidden } from '@mantine
 import { IconChevronDown } from '@tabler/icons-react';
 import { CountBadge, CountTone } from '../../shell/count-badge';
 import { ProjectTile } from '../../shell/project-tile';
-import type { ClosedTab } from './closed-tabs';
+import { closedId, type ClosedTab } from './closed-tabs';
 import { tabName, type TabInfo } from './tab-info';
 import { Mark } from './session-tab';
 import { tabTitle, type StripTab } from './strip-tabs';
@@ -119,12 +119,14 @@ export function AllTabsMenu({
               </Text>
               {closed.map((entry) => (
                 <Menu.Item
-                  key={entry.chatId}
+                  key={closedId(entry)}
                   aria-label={`Reopen ${entry.title}`}
                   leftSection={<ProjectTile name={projectNameOf(entry.projectId)} size={16} />}
                   rightSection={
                     <Text size="xs" c="dimmed">
-                      {entry.archived === true ? 'Archived · Reopen' : 'Reopen'}
+                      {'archived' in entry && entry.archived === true
+                        ? 'Archived · Reopen'
+                        : 'Reopen'}
                     </Text>
                   }
                   onClick={() => {
@@ -135,7 +137,7 @@ export function AllTabsMenu({
                     <Text
                       size="sm"
                       lineClamp={1}
-                      {...(entry.archived === true ? { c: 'dimmed' } : {})}
+                      {...('archived' in entry && entry.archived === true ? { c: 'dimmed' } : {})}
                     >
                       {entry.title}
                     </Text>
