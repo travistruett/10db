@@ -215,6 +215,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   // The session each chat's hold belongs to now: a session that is not it (an older one, closed, whose
   // background agent is still calling) holds nothing even when the chat's next turn holds Your folder.
   const holdingSession = new Map<ChatId, string>();
+  // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
+  // hold stays with the chat, and what is stopped meanwhile is the turn's before.
+  const pendingReleases = new Map<ChatId, { cancelled: boolean }>();
+  // How each conversation's open session is closed, for a job that would not stop.
+  const sessionClosers = new Map<ConversationId, () => Promise<void>>();
   const say = (conv: ConversationRow, lines: readonly string[]): void => {
     if (lines.length === 0) return;
     state.write((ctx) => {
@@ -232,6 +237,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
 
     turnStarting(conv) {
       const chat = chatOf(conv);
+      const waiting = pendingReleases.get(chat.id);
+      if (waiting !== undefined) {
+        waiting.cancelled = true;
+        pendingReleases.delete(chat.id);
+      }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
@@ -278,12 +288,30 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
-      deps.folderHold.releaseTurn(chat.id);
-      void sessionJobs
-        .get(conv.id)?.()
-        .catch((error: unknown) => {
-          log.warn({ err: error, conversationId: conv.id }, 'a chat’s jobs could not be stopped');
-        });
+      const endJobs = sessionJobs.get(conv.id);
+      if (endJobs === undefined) {
+        deps.folderHold.releaseTurn(chat.id);
+        return;
+      }
+      // The folder goes back once nothing the turn left running can write to it.
+      const release = { cancelled: false };
+      pendingReleases.set(chat.id, release);
+      void (async () => {
+        try {
+          await endJobs();
+        } catch (error) {
+          log.warn(
+            { err: error, conversationId: conv.id },
+            'a chat’s jobs could not be stopped, so its session is closed',
+          );
+          // A job that could not be stopped runs inside this session's sandbox: closing it ends them. A next turn
+          // that already began is using the session, so it is left to that turn's own end.
+          if (!release.cancelled) await sessionClosers.get(conv.id)?.();
+        }
+        if (release.cancelled) return;
+        if (pendingReleases.get(chat.id) === release) pendingReleases.delete(chat.id);
+        deps.folderHold.releaseTurn(chat.id);
+      })();
     },
 
     limits(conv) {
@@ -344,6 +372,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         released ??= (async () => {
           ending.abort();
           if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
+          if (sessionClosers.get(conv.id) === release) sessionClosers.delete(conv.id);
           if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
           deps.live.end(conv.id, start.sessionId);
           try {
@@ -357,6 +386,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         })();
         return released;
       };
+      sessionClosers.set(conv.id, release);
       const setup = ready?.setup ?? null;
       const access: ShapeAccess = {
         ...launch.access,
