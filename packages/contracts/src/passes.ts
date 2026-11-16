@@ -15,6 +15,7 @@ import {
   TaskMessageId,
   WorkstreamId,
 } from './ids';
+import { PassWhenBusy } from './folder-hold';
 import { PassTurnActivity } from './pass-activity';
 import { GitObjectName } from './git-names';
 import { PassHoldDto, PassSharedChangeDto } from './pass-shared';
@@ -430,6 +431,8 @@ export const PassViewDto = z.object({
   checks: PassChecksView,
   closeStep: z.enum(CloseStep).nullable(),
   stackedOn: PassId.nullable(),
+  /** A pass of one: its one page is the whole project. */
+  wholeProject: z.boolean(),
   notices: z.array(PassNotice),
 });
 export type PassViewDto = z.infer<typeof PassViewDto>;
@@ -447,6 +450,8 @@ export const PassOpenRequest = z
     /** The goal the new tasks join (Work on This in Factory). */
     goalId: GoalId.nullable().optional(),
     pageCap: PassPageCap.optional(),
+    /** Chats' turns are the only holders: stop them and open, or open once they end. */
+    whenBusy: z.enum(PassWhenBusy).optional(),
     /** Sent to every page as its first message; without it a task with a description starts from that. */
     firstMessage: z.string().min(1).max(TASK_MESSAGE_MAX_CHARS).optional(),
   })

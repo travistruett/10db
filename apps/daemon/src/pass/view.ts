@@ -183,6 +183,7 @@ export function passView(db: DbReader, passId: PassId): PassViewDto {
     signOffWaits: waits,
     pullRequest: getPassPullRequest(db, passId),
     checks: getPassChecks(db, passId),
+    wholeProject: false,
     closeStep: progress.closeStep,
     stackedOn: progress.stackedOn,
     notices: [...progress.notices],

@@ -22,3 +22,7 @@ export const WorkstreamChangesDto = z.object({
   files: z.array(ChangedFileDto),
 });
 export type WorkstreamChangesDto = z.infer<typeof WorkstreamChangesDto>;
+
+/** What a task's Changes shows: every turn the pass kept, or its last. A copy's two are the same. */
+export const ChangesScope = { All: 'all', Last: 'last' } as const;
+export type ChangesScope = (typeof ChangesScope)[keyof typeof ChangesScope];

@@ -4,6 +4,7 @@ import {
   FolderOutcome,
   type FolderDto,
   type FolderHolderDto,
+  type PendingOpenDto,
   type ProjectId,
 } from '@10db/contracts';
 import { exclusion, holderWords, limitsOf } from './exclusion';
@@ -16,6 +17,7 @@ export function folderView(
   projectId: ProjectId,
   branch: string | null,
   holders: readonly FolderHolderDto[],
+  pendingOpen: PendingOpenDto | null = null,
 ): FolderDto {
   const limits = [...new Set(holders.flatMap((holder) => limitsOf(holder.kind)))];
   return {
@@ -28,5 +30,6 @@ export function folderView(
     })),
     limits,
     limitPass: holders.find((holder) => holder.kind === FolderHolderKind.PassClosed)?.name ?? null,
+    pendingOpen,
   };
 }

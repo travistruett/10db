@@ -5,6 +5,11 @@ import {
   ChatPatchInput,
   ChatToolInputs,
   ChatToolResult,
+  AreaName,
+  areaLabel,
+  DoItRequest,
+  WHOLE_PROJECT_PAGE,
+  noticeText,
   ConversationFilesQuery,
   ConversationItemBody,
   cutTitle,
@@ -146,6 +151,26 @@ describe('chat contracts', () => {
       value: { kind: 'model_change' },
     },
     {
+      name: 'a Do It request with nine areas',
+      schema: DoItRequest,
+      value: {
+        place: 'here',
+        title: 'T',
+        brief: 'b',
+        areas: Array.from({ length: 9 }, (_, n) => `a${String(n)}`),
+      },
+    },
+    {
+      name: 'a Do It brief over the cap',
+      schema: DoItRequest,
+      value: { place: 'worktree', title: 'T', brief: 'x'.repeat(20_001) },
+    },
+    {
+      name: 'the whole-project page name as an area name',
+      schema: AreaName,
+      value: WHOLE_PROJECT_PAGE.name,
+    },
+    {
       name: 'a files query with a root',
       schema: ConversationFilesQuery,
       value: { q: 'a', root: '/x' },
@@ -153,6 +178,24 @@ describe('chat contracts', () => {
     { name: 'a chat whose id is not a chat id', schema: ChatDto, value: { ...chat, id: 'shp_x' } },
   ])('$name is refused', ({ schema, value }) => {
     expect(schema.safeParse(value).success).toBe(false);
+  });
+
+  it('a Do It request without whenBusy parses', () => {
+    expect(DoItRequest.safeParse({ place: 'worktree', title: 'T', brief: 'b' }).success).toBe(true);
+  });
+
+  it('the whole-project page reads as "Whole project", and an old notice still parses', () => {
+    expect(areaLabel(WHOLE_PROJECT_PAGE.name, [{ name: 'api' }])).toBe('Whole project');
+    expect(areaLabel('api', [{ name: 'api', label: 'API' }])).toBe('API');
+    const old = ConversationItemBody.notice.parse({ kind: 'model_change', label: 'L', model: 'm' });
+    expect(noticeText(old)).toBe('Now on L · m');
+    const handed = ConversationItemBody.notice.parse({
+      kind: 'handed_to',
+      taskId: mintId('Task'),
+      title: 'Fix it',
+      place: 'worktree',
+    });
+    expect(noticeText(handed)).toContain('Fix it');
   });
 
   it('a message with no mentions reads as none', () => {

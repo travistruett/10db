@@ -856,6 +856,9 @@
         }
       ]
     },
+    "wholeProject": {
+      "type": "boolean"
+    },
     "notices": {
       "type": "array",
       "items": {
@@ -931,6 +934,7 @@
     "checks",
     "closeStep",
     "stackedOn",
+    "wholeProject",
     "notices"
   ]
 }

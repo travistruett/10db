@@ -6,9 +6,14 @@ import {
   TaskScreenDto,
   TaskScreensDto,
 } from './task-screens';
+import { TaskSessionDto } from './task-session';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
+  BriefRequest,
   ChatCreateInput,
+  DoItPreviewDto,
+  DoItRequest,
+  DoItResult,
   ChatDto,
   ChatModelsDto,
   ChatPatchInput,
@@ -326,6 +331,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'agent-command-dto': AgentCommandDto,
   'chat-create-input': ChatCreateInput,
   'chat-dto': ChatDto,
+  'do-it-request': DoItRequest,
+  'do-it-preview-dto': DoItPreviewDto,
+  'do-it-result': DoItResult,
+  'brief-request': BriefRequest,
+  'task-session-dto': TaskSessionDto,
   'chat-models-dto': ChatModelsDto,
   'chat-patch-input': ChatPatchInput,
   'chat-tool-result': ChatToolResult,

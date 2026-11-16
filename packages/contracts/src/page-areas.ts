@@ -160,3 +160,43 @@ export function passPagesProblem(
   }
   return null;
 }
+
+/**
+ * The globs of one area that holds every file of a repository, for a project nothing was proposed
+ * for. Node's glob matcher, which 10db matches paths with, lets no `*` or `**` match a name that
+ * starts with a dot, so dotfiles and the files below a dot folder have globs of their own. A file
+ * below a second dot name, such as a dotfile in a dot folder, is still left out.
+ */
+export const WHOLE_REPOSITORY_GLOBS: readonly string[] = ['**', '**/.*', '**/.*/**'];
+
+/**
+ * The one page of a pass of one: the whole repository. Its name can't be spelled as an `AreaName` (it starts
+ * with a digit), so no project area or hazard shares it, and it is never saved in `projects.areas`.
+ */
+export const WHOLE_PROJECT_PAGE: {
+  readonly name: string;
+  readonly globs: string[];
+  readonly role: typeof AreaRole.Page;
+  readonly label: string;
+} = {
+  name: '10db-whole-project',
+  globs: [...WHOLE_REPOSITORY_GLOBS],
+  role: AreaRole.Page,
+  label: 'Whole project',
+};
+
+/** What `areaLabel` reads of an area. */
+interface LabelledArea {
+  readonly name: string;
+  readonly label?: string | undefined;
+}
+
+/**
+ * What an area or page is called where the builder reads it: the whole-project page's label, else the
+ * area's own (`pageLabel`). A name no area has reads as it is spelled.
+ */
+export function areaLabel(name: string, areas: readonly LabelledArea[]): string {
+  if (name === WHOLE_PROJECT_PAGE.name) return WHOLE_PROJECT_PAGE.label;
+  const area = areas.find((a) => a.name === name);
+  return area === undefined ? name : pageLabel(area);
+}

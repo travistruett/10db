@@ -59,7 +59,12 @@ export function itemDtoOf(
         ...common,
         kind: row.kind,
         text: noticeText(body),
-        ...('kind' in body ? { change: { label: body.label, model: body.model } } : {}),
+        ...('kind' in body && body.kind === 'model_change'
+          ? { change: { label: body.label, model: body.model } }
+          : {}),
+        ...('kind' in body && body.kind === 'handed_to'
+          ? { handedTo: { taskId: body.taskId, title: body.title, place: body.place } }
+          : {}),
         ...(extras.offer === null ? {} : { offer: extras.offer }),
       });
     }

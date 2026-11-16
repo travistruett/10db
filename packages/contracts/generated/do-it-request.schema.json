@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "place": {
+      "type": "string",
+      "enum": [
+        "worktree",
+        "here"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "brief": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "areas": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "acceptanceCriteria": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    },
+    "whenBusy": {
+      "type": "string",
+      "enum": [
+        "stop_turns",
+        "wait"
+      ]
+    }
+  },
+  "required": [
+    "place",
+    "title",
+    "brief"
+  ],
+  "additionalProperties": false
+}
