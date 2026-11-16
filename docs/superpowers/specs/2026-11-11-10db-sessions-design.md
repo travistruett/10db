@@ -858,7 +858,7 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
 | Event | The hold |
 | --- | --- |
-| a turn starts and nothing of 10db's holds | taken, as `chat_turn`, on the write profile |
+| a turn starts and nothing of 10db's holds | taken, as `chat_turn`, on the write profile, unless the send chose Send Reading Only, which never takes it (a send naming no folder takes it) |
 | a turn starts and a task, a pass or git work holds | not taken; the builder picked Wait for It (parked) or Send Reading Only (read-only profile, with a notice naming the holder) |
 | the holder leaves while the turn runs | not taken mid-turn; the next turn takes it |
 | `turn_complete` with messages queued (a chained turn) | kept for the next turn |

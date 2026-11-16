@@ -639,7 +639,7 @@ export interface ApiServices extends PlanRecordServices {
       readonly text: string;
       readonly mentions: readonly string[];
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
-      /** A chat's choice when Your folder is held; absent reads only. */
+      /** A chat's choice when Your folder is held; absent takes it when free, and reads only otherwise. */
       readonly folder?: FolderWhileHeld;
     },
   ): Promise<ConversationItemDto>;
