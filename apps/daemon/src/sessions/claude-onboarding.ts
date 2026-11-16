@@ -58,27 +58,18 @@ function withMarks(config: ClaudeConfig, folders: readonly string[]): ClaudeConf
 
 /**
  * Records the first-run and folder-trust marks in the account directory's `.claude.json`, for `cwd` and its real
- * path. A directory already marked is not rewritten. The file is replaced through a temp file, read once more
- * right before the rename so a write another process made meanwhile keeps its keys; a write that lands between
- * that read and the rename can still be lost, which only costs a Claude Code setting it rewrites on its next start.
+ * path. A directory already marked is not rewritten. The file is read once and replaced through a temp file, so
+ * a write another process makes between the read and the rename can be lost; that costs only a Claude Code
+ * setting it rewrites on its next start.
  */
-export async function markOnboarded(
-  configDir: string,
-  cwd: string,
-  /** Runs between the file's first read and the one the write is made from, where another process may write. */
-  hooks: { readonly afterFirstRead?: () => void | Promise<void> } = {},
-): Promise<void> {
+export async function markOnboarded(configDir: string, cwd: string): Promise<void> {
   const file = join(configDir, CONFIG_FILE);
   const folders = [...new Set([cwd, await realpath(cwd)])];
-  const first = await readConfigText(file);
-  if (marked(parse(first), folders)) return;
-  await hooks.afterFirstRead?.();
-  // The write is made from this read, in one piece, so a change since the first read keeps its keys.
-  const before = await readConfigText(file);
-  if (marked(parse(before), folders)) return;
+  const config = parse(await readConfigText(file));
+  if (marked(config, folders)) return;
   const temp = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temp, `${JSON.stringify(withMarks(parse(before), folders), null, 2)}\n`, {
+    await writeFile(temp, `${JSON.stringify(withMarks(config, folders), null, 2)}\n`, {
       flag: 'wx',
       mode: 0o600,
     });
