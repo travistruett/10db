@@ -33,9 +33,19 @@ export async function reserveGitNaming(
     line: `Waits for ${holders} to finish with Your folder`,
     body: `10db moves Your folder's branch (${wait.what}) once it is done. Other delivery work for this project waits behind it.`,
   });
+  let token: symbol;
   try {
-    return await ctx.folderHold.reserveGitWhenFree(wait.projectId, wait.what, wait.signal);
-  } finally {
+    token = await ctx.folderHold.reserveGitWhenFree(wait.projectId, wait.what, wait.signal);
+  } catch (error) {
     hideNotices(ctx.state, wait.batchId, [FOLDER_HOLD_WAIT_NOTICE_KEY]);
+    throw error;
   }
+  // The folder is the caller's once it is handed over; if the notice can't come off, it goes back.
+  try {
+    hideNotices(ctx.state, wait.batchId, [FOLDER_HOLD_WAIT_NOTICE_KEY]);
+  } catch (error) {
+    ctx.folderHold.releaseGit(token);
+    throw error;
+  }
+  return token;
 }
