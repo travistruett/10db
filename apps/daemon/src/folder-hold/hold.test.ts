@@ -460,4 +460,50 @@ describe('10db’s git work waiting for the folder', () => {
     await reserved;
     expect(getEventListeners(signal, 'abort')).toHaveLength(0);
   });
+
+  it('hands the reservation over inside the wake, so a take in the same tick is refused', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    const b = chat('B');
+    hold.takeTurn(project.id, a);
+    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch');
+    hold.releaseTurn(a);
+    // Same tick as the release: no await has run, so the waiter has not resumed yet.
+    expect(hold.holders(project.id).map((h) => h.what)).toEqual(['cutting a branch']);
+    expect(hold.takeTurn(project.id, b).taken).toBe(false);
+    hold.releaseGit(await reserved);
+    expect(hold.takeTurn(project.id, b).taken).toBe(true);
+  });
+
+  it('releases a handed-over reservation whose signal aborted in the same tick', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const abort = new AbortController();
+    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', abort.signal);
+    hold.releaseTurn(a);
+    abort.abort();
+    await expect(waiting).rejects.toBeInstanceOf(FolderWaitCancelledError);
+    expect(hold.holders(project.id)).toEqual([]);
+    expect(hold.reserveGit(project.id, 'next').reserved).toBe(true);
+  });
+
+  it('serves waiting git work oldest first', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const order: string[] = [];
+    const first = hold.reserveGitWhenFree(project.id, 'first').then((t) => {
+      order.push('first');
+      return t;
+    });
+    const second = hold.reserveGitWhenFree(project.id, 'second').then((t) => {
+      order.push('second');
+      return t;
+    });
+    hold.releaseTurn(a);
+    hold.releaseGit(await first);
+    hold.releaseGit(await second);
+    expect(order).toEqual(['first', 'second']);
+  });
 });

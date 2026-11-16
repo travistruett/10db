@@ -106,8 +106,10 @@ export interface FolderHold {
   reserveGit(projectId: ProjectId, what: string): GitReservation;
   releaseGit(token: symbol): void;
   /**
-   * Reserves the folder for 10db's git work, waiting for a chat's turn or a takeover to end first. It rejects
-   * when `signal` aborts.
+   * Reserves the folder for 10db's git work, waiting for a chat's turn or a takeover to end first. The wake
+   * hands over the reservation itself, so nothing takes the folder in between. It rejects when `signal`
+   * aborts, and a reservation handed over in the same tick as the abort is released first. The caller
+   * releases the token in a `finally` that covers everything it does after the await.
    */
   reserveGitWhenFree(projectId: ProjectId, what: string, signal?: AbortSignal): Promise<symbol>;
   /**
@@ -218,7 +220,11 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
   };
 
   /** The callers of `reserveGitWhenFree` still waiting. */
-  const freeing: { projectId: ProjectId; what: string; wake: () => void }[] = [];
+  const freeing: {
+    projectId: ProjectId;
+    what: string;
+    wake: (token: symbol) => void;
+  }[] = [];
 
   const blockers = (projectId: ProjectId, asker: FolderAskerInput): FolderBlocker[] => {
     const held = holders(projectId, 'chatId' in asker ? asker.chatId : undefined);
@@ -240,15 +246,6 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     });
   };
 
-  /** Wakes each caller of `reserveGitWhenFree` that nothing now keeps out. */
-  const flushFree = (): void => {
-    for (const entry of [...freeing]) {
-      if (blockers(entry.projectId, { kind: FolderAsker.GitWork }).length > 0) continue;
-      freeing.splice(freeing.indexOf(entry), 1);
-      entry.wake();
-    }
-  };
-
   const reserveGit = (projectId: ProjectId, what: string): GitReservation => {
     const blocked = blockers(projectId, { kind: FolderAsker.GitWork });
     if (blocked.length > 0) return { reserved: false, blockers: blocked };
@@ -256,6 +253,27 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     gits.set(token, { projectId, what });
     changed(projectId);
     return { reserved: true, token };
+  };
+
+  /**
+   * Hands the folder to each caller of `reserveGitWhenFree` that nothing now keeps out, oldest first. The
+   * reservation is made here, in the same call as the wake, so no take or start runs between the two.
+   */
+  const flushFree = (): void => {
+    for (const entry of [...freeing]) {
+      const reserved = reserveGit(entry.projectId, entry.what);
+      if (!reserved.reserved) continue;
+      freeing.splice(freeing.indexOf(entry), 1);
+      entry.wake(reserved.token);
+    }
+  };
+
+  const releaseGit = (token: symbol): void => {
+    const mine = gits.get(token);
+    if (!mine) return;
+    gits.delete(token);
+    changed(mine.projectId);
+    serveWaiters();
   };
 
   let serving = false;
@@ -342,28 +360,33 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     },
     waiting: (chatId) => waiters.some((w) => w.chatId === chatId),
     async reserveGitWhenFree(projectId, what, signal) {
-      for (;;) {
-        if (signal?.aborted === true) throw new FolderWaitCancelledError();
-        const reserved = reserveGit(projectId, what);
-        if (reserved.reserved) return reserved.token;
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = (): void => {
-            const at = freeing.indexOf(entry);
-            if (at >= 0) freeing.splice(at, 1);
-            reject(new FolderWaitCancelledError());
-          };
-          const entry = {
-            projectId,
-            what,
-            wake: () => {
-              signal?.removeEventListener('abort', onAbort);
-              resolve();
-            },
-          };
-          freeing.push(entry);
-          signal?.addEventListener('abort', onAbort, { once: true });
-        });
+      // Read through a function: the signal may abort while the wait is suspended.
+      const aborted = (): boolean => signal?.aborted === true;
+      if (aborted()) throw new FolderWaitCancelledError();
+      const reserved = reserveGit(projectId, what);
+      if (reserved.reserved) return reserved.token;
+      const token = await new Promise<symbol>((resolve, reject) => {
+        const onAbort = (): void => {
+          const at = freeing.indexOf(entry);
+          if (at >= 0) freeing.splice(at, 1);
+          reject(new FolderWaitCancelledError());
+        };
+        const entry = {
+          projectId,
+          what,
+          wake: (handed: symbol) => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve(handed);
+          },
+        };
+        freeing.push(entry);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+      if (aborted()) {
+        releaseGit(token);
+        throw new FolderWaitCancelledError();
       }
+      return token;
     },
     takeTurn(projectId, chatId) {
       const mine = turns.get(chatId);
@@ -407,12 +430,6 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
     },
     holdsTurn: (chatId) => turns.has(chatId),
     reserveGit,
-    releaseGit(token) {
-      const mine = gits.get(token);
-      if (!mine) return;
-      gits.delete(token);
-      changed(mine.projectId);
-      serveWaiters();
-    },
+    releaseGit,
   };
 }
