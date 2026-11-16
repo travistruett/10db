@@ -79,6 +79,10 @@ already under way for this chat"), from a double submit or another window. While
 - **Redo and archive** are refused with the guard's words.
 - **A send** to a chat doing a separate copy is refused ("This chat is handing its work to a task"), so nothing is
   left parked in a sealed chat. During Do It Here it queues, held, and runs reading only after the open.
+- **The guard ends when the route answers.** It also covers each chat Stop the Turn and Open stopped, until the open
+  is done, so their Stop can't release their starts before the open's `freeing` entry exists.
+- **A pending Open When It Ends names its chat.** While it does, Do It in either place and archive are refused for
+  that chat ("A pass is waiting to open for this chat; Cancel it first"); Stop and sends are normal.
 
 **Separate copy (`place: worktree`):**
 1. **Refused on a `local` project** ("This project lands locally, so it has no separate copies").
@@ -91,15 +95,17 @@ already under way for this chat"), from a double submit or another window. While
      for more with `request_claim`, as any lane does.
    - **criteria:** the brief's, else "Does what the brief asks, and the project's checks pass."
    - the brief as `description`, `workspaceMode: worktree`, a `chat_tasks` row. Then `services.settleSizing`.
-4. **In one synchronous run:** a write sets the chat's `mode: hands_on`, `task_id`, `tab_position: null`; then
-   `services.startTask(taskId)`; then a write stores the `handed_to` notice. If the start throws, the first write is
-   undone, the task removed (`removeTask`) and `releaseStarts` runs; the refusal reaches the sheet.
+4. **In one synchronous run:** a write sets the chat's `mode: hands_on` and `task_id`; then
+   `services.startTask(taskId)`; then a write stores the `handed_to` notice and sets `tab_position: null`, so the
+   sheet stays mounted for a refused start. If the start throws, the first write is undone, the task removed
+   (`removeTask`) and `releaseStarts` runs; the refusal reaches the sheet.
 5. **The seal:** `engine.seal(conv)` reduces `do_it`, closes the session and ends its row, so its token reaches
    nothing. `onState(sealed)` gives the hold back (M6a).
 6. **The answer** is `{ taskId, place }`; the desktop puts a Task tab where the chat's was.
 
 `finishSeals` (after `engine.recover()` in `daemon/start.ts`) seals any `hands_on` chat whose conversation is not
-`sealed`, and starts its task if it has no run; a refused start shows as the tab's Board state.
+`sealed`, starts its task if it has no run (a refused start shows as the tab's Board state), and stores a missing
+`handed_to` notice with `tab_position: null`.
 
 **Here (`place: here`):**
 1. **Refusals, named, each with a link,** before anything stops:
@@ -138,11 +144,15 @@ turn; Start Pass (`POST /projects/:projectId/passes`) takes it too.
 - **`lanesWait`.** A `freeing` entry so marked counts for `LaneStart` too, since the pass is about to hold; the
   scheduler's `waitForFolder` shows its notice ("Waits for the pass ‘X’, opening") instead of returning early
   because every blocker is git work.
-- **The rule:** every wait on the folder takes its delivery job's signal.
+- **The rules:** every wait on the folder takes its delivery job's signal. A handed-over token whose signal has
+  aborted by the time the caller resumes is released before `reserveGitWhenFree` rejects, so an abort in the same
+  tick as the handover (Cancel, the deadline, `jobs.stop()`, the update drain) leaves no git holder. Every caller
+  wraps everything after the await, its re-checks included (the open's `refuseOpen`), in
+  `try { … } finally { releaseGit(token) }`, so a throw never leaves an unowned `git_work` entry.
 
 **The brief.** `POST /chats/:chatId/brief {draft?}`:
-- **Between turns only** (`idle_cold`, `idle_warm`, `ended_error`, with no folder wait): it records the conversation's
-  last item id, then sends, with `folder: read_only`, "Write the brief for a task that does the work we agreed on,
+- **Between turns only** (`idle_cold`, `idle_warm`, `ended_error`, with no folder wait): it sends, with
+  `folder: read_only`, a message whose body carries `purpose: 'brief'`: "Write the brief for a task that does the work we agreed on,
   with its title, areas and acceptance criteria, and call write_brief. Change nothing." (and "Include this request:
   {draft}" when set). Being idle, `chooseReadOnly` applies, so the turn never runs on a writable hold.
 - **Otherwise** (starting, running, waiting on a card, stopping, waiting for the folder, `paused_account`): no send;
@@ -150,11 +160,14 @@ turn; Start Pass (`POST /projects/:projectId/passes`) takes it too.
 - **`write_brief {title, brief, areas?, acceptanceCriteria?}`** (`brief` capped at `TASK_MESSAGE_MAX_CHARS`, at most
   8 areas and 8 criteria) keeps it in memory (`chat/briefs.ts`) and emits `ChatChanged`. A call from a session that
   is not the chat's open one, or after the seal, is refused.
-- **After 60 s** on the injected clock with no call, the brief is `briefFromChat` (`chat/brief.ts`): the items before
-  the recorded id (so neither the brief's prompt nor its reply), cut as `chatDigest` cuts (12,000 characters), then
-  "The builder's last message: …" from the same items, cut so the whole fits `TASK_MESSAGE_MAX_CHARS`.
-- **Lifetime:** kept per chat until Do It succeeds or 30 minutes pass; a restart drops it. Cancel leaves the
-  read-only brief turn to finish; the sheet reopened within 30 minutes reuses its brief.
+- **After 60 s** on the injected clock with no call, the brief is `briefFromChat` (`chat/brief.ts`): the chat's
+  messages and replies, cut as `chatDigest` cuts (12,000 characters), then "The builder's last message: …", cut so
+  the whole fits `TASK_MESSAGE_MAX_CHARS`. Both, and `chatDigest`, leave out every `purpose: 'brief'` message and the
+  agent's items of the turn it began, so no earlier request (cancelled, expired or before a restart) leaks "Change
+  nothing" into a brief or a fresh session.
+- **A brief turn never chains.** Cancel posts `DELETE /chats/:chatId/brief`, which stops the turn if it is still the
+  brief's; a builder send while one runs stops it first, then runs as its own turn, taking the folder if free.
+- **Lifetime:** kept per chat until Do It succeeds or 30 minutes pass; a restart drops it.
 - **The sheet** stops taking the daemon's brief once the builder types in the field; typing stops nothing.
 
 **The preview.** `GET /chats/:chatId/do-it` → `DoItPreviewDto`: the brief (`{ title, text, areas, criteria,
@@ -177,7 +190,8 @@ origin's base lacks ("Starts from `main`. The 2 commits on `feature` that `main`
   - kept work (`pass/kept-work.ts` `pageClaims`, `pageMatcher`), `pass/shared-hold.ts`
   - the watcher, which classifies by `project.areas` today, so every page write would be a stray: `watcher/strays.ts`
     (`findStrays`, `findClaimed`, `findForeignClaimWrites`), `watcher/pass-writes.ts`, `watcher/watcher.ts`'s
-    classifications, and `runner/runner.ts` `claimedChanges` read `passAreasOf` while a pass holds the folder
+    classifications, and `runner/runner.ts` `claimedChanges` read `passAreasOf` for writes under Your folder's root
+    while a pass holds it; a copy's root keeps `project.areas`, so a copy's writes are judged as today
   - review and checks (`delivery/pass-review.ts`, `runner/turn-checks.ts`, `runner/check-targets.ts`)
   - labels (`pass/view.ts`, `pass/abandon.ts`); Add Page (`pass/join.ts`) refuses: "A pass of one holds the whole
     project"
@@ -204,6 +218,11 @@ Columns: this chat's state, then the folder's other holders. "Rel." is M6a's rel
 | Redo or archive, during Do It | refused: "Do It is already under way" | | | | | | |
 | A send, during Do It | copy: refused; Here: queued, held, read only after the open | | | | | | |
 | A second Do It (double submit, two windows) | refused by the in-flight guard; one task | | | | | | |
+| Do It or archive while Open When It Ends names this chat | refused: "A pass is waiting to open for this chat; Cancel it first" | | | | | | |
+| Stop on a chat that Stop the Turn and Open stopped | answered; its starts stay held until the open is done | | | | | | |
+| Abort in the tick of the handover, or a re-check throws after it | the token is released; no `git_work` holder is left | | | | | | |
+| A builder send while the brief turn runs, or Cancel | the brief turn stops; the send runs as its own turn | | | | | | |
+| A copy's write in its worktree while a pass of one is open | judged against `project.areas`, as today | | | | | | |
 | Stop the Turn and Open | n/a | n/a | n/a | n/a | n/a | each holder held and stopped; the open waits for every rel. | n/a |
 | Open When It Ends | n/a | n/a | n/a | n/a | n/a | pending; new chat turns read only, first starts wait; opens at the last rel. | n/a |
 | Start Pass or Do It Here while an open is pending | refused up front, naming it | | | | | | |
@@ -260,7 +279,8 @@ the pass's branch; 14 is unchanged.
 | 20 | Abandon of a pass of one loses earlier uncommitted work | the Abandon puts dirt back (decision 2026-11-14) | `test/do-it-here.test.ts` |
 | 21 | The file list or the brief floods the daemon or UI | 200 entries; the caps | `chat/do-it.test.ts` |
 | 22 | A pass of one's writes hide among stray-write cards, or a stray hides in the whole page | the watcher reads `passAreasOf`; a write outside every claim is still carded | `watcher/strays.test.ts`, `watcher/pass-writes.test.ts` |
-| 23 | The brief turn runs on a writable hold | sent only between turns, `read_only`; mid-turn falls back | `test/chat-world.ts` row (Task 8) |
+| 23 | The brief turn runs on a writable hold, or a builder message chains onto it | sent only between turns, `read_only`; a send or Cancel stops it first | `test/chat-world.ts` rows (Task 8) |
+| 24 | An abort or a throw after the handover leaves an unowned `git_work` entry (every chat read only, every start waiting) | the release-before-reject rule and the callers' `finally` | `hold.test.ts`, `pass-open.test.ts` rows |
 
 ### Migrations, contracts and the decision
 
@@ -271,7 +291,9 @@ the pass's branch; 14 is unchanged.
 - **Decision record** (Task 21): `2026-11-16-do-it-hands-a-chat-to-a-task-or-a-pass-of-one.md` in
   `docs/architecture/decisions/`, amending M6's record: the order and the guard, the copy's areas and criteria, the
   whole-project page and its hazards, stacking, no copy on `local`, the brief, Task tabs in the window, B10, and the
-  hold's handover and signal rule.
+  hold's handover and its rules. It also says Do It's tasks get a `chat_tasks` row on purpose: Recent counts them as
+  filed, the chat's `edit_task` reaches them, and `remove_task` on one no longer asks (`chatMadeTask` in
+  `chat/tools.ts`), which is safe because Remove refuses a started task.
 
 ## Tasks
 
@@ -290,7 +312,8 @@ Each commit adding a tested behavior carries its value card.
 
 **Files:** `packages/contracts/src/page-areas.ts` (`WHOLE_PROJECT_PAGE`, `areaLabel`); `chat-tools.ts`
 (`WriteBrief`); `chat.ts` (`DoItRequest`, `DoItPreviewDto`, `DoItResult`, `BriefRequest`); `conversation.ts` (the
-`HandedToNotice {kind: 'handed_to', taskId, title, place}` member of `notice`); `folder-hold.ts`
+`HandedToNotice {kind: 'handed_to', taskId, title, place}` member of `notice`; `purpose?: 'brief'` on the message
+body); `folder-hold.ts`
 (`FolderDto.pendingOpen`); `passes.ts` (`PassOpenRequest.whenBusy`, `PassViewDto.wholeProject`); `task-session.ts`
 (`TaskSessionDto`: the task, its place, branch and Board state, `conversationId | null`, `fromChat | null`, `passId`,
 `workstreamId`, the pull request); `workstream-changes.ts` (`ChangesScope`); regenerate.
@@ -326,7 +349,8 @@ an ordinary pass the synthetic one; why_new=`passPageAreas` reads project areas 
   unchanged.
 - rung 1, `watcher/strays.test.ts`: with the whole-page claim, `src/a.ts` is no stray; an unclaimed hazard's file is.
 - rung 4, `pass/kept-work.test.ts`: a pass of one's turn keeps `src/a.ts` and leaves an unheld hazard's lockfile out.
-- through the wiring, `watcher/pass-writes.test.ts`: a pass of one's page write raises no card.
+- through the wiring, `watcher/watcher.test.ts`: a pass of one's page write in Your folder raises no card, while a
+  copy's write in its worktree is still judged against `project.areas`.
 - rung 2, extend `mcp/pass-move-copy.test.ts`: a whole-project pass asking for `deps` on a PR project gets no Move
   card and the in-place line.
 
@@ -371,15 +395,18 @@ drain cancels), `folder-hold/view.ts` (`pendingOpen`), routes (`whenBusy` on Sta
 
 **Test:**
 - rung 2, `hold.test.ts`: when a chat's turn releases, the waiting git entry holds the token before the release
-  returns, and a take attempted in the same tick is refused (handover); two waiters are served oldest first; with a
+  returns, and a take attempted in the same tick is refused (handover); an abort in the same tick as the handover
+  leaves no git holder and the next take succeeds (row 24); two waiters are served oldest first; with a
   `lanesWait` entry, `blockers(LaneStart)` names it and a chat's take is refused (follow-up 4's row); without it,
   lanes are unchanged.
 - rung 2, `scheduler.test.ts`: a queued first start shows "Waits for the pass ‘X’, opening".
 - rung 4, `delivery/pass-open.test.ts`: a waiting open opens after the release; Cancel, and the job's own abort
-  (`jobs.stop()`), each reject and leave no branch; a lane that starts while the open is queued behind another job
+  (`jobs.stop()`), each reject and leave no branch; the open's after-wait `refuseOpen` refusal releases its token; a lane that starts while the open is queued behind another job
   makes it refuse after its wait.
 - rung 3, `app.request`: `whenBusy: wait` answers `pending` and the folder route shows it; a second Start Pass is
-  refused up front; the update drain cancels it and `jobs.pending()` drops to 0; `stop_turns` stops and opens.
+  refused up front; Do It in either place and archive of the chat it names are refused until Cancel; the update
+  drain cancels it and `jobs.pending()` drops to 0; `stop_turns` stops and opens, and a Stop on a stopped chat
+  meanwhile leaves its starts held.
 
 Value: protects=a pass open waits for chats instead of failing, nothing slips into the gap, and nothing hangs a
 shutdown; fails_when=a lane or chat takes the folder between wake and reservation, a pending open hangs an update,
@@ -405,12 +432,13 @@ token alive; why_new=the reducer's `do_it` has no caller; no_claim=Do It's order
 /chats/:chatId/brief`, tests.
 
 **Test:**
-- rung 1, `brief.test.ts`: `briefFromChat` from items before the mark leaves out the brief's prompt and a reply to
-  it; the last message is the builder's before the mark; a 12,000-character digest plus a long last message stays
+- rung 1, `brief.test.ts`: `briefFromChat` and `chatDigest` leave out every `purpose: 'brief'` message and its
+  turn's reply, including a second request after an earlier brief; the last message is the builder's own; a 12,000-character digest plus a long last message stays
   under `TASK_MESSAGE_MAX_CHARS`.
 - rung 2, `test/chat-world.ts`: a fake idle turn calls `write_brief` and the preview has the agent's brief, areas and
   criteria; after 60 s on `ManualClock`, the chat's; asked while `running`, `waiting_card` or parked, no message is
-  posted and the chat's brief is there at once, the turn untouched (row 23); the send takes no hold; a call from an
+  posted and the chat's brief is there at once, the turn untouched (row 23); the send takes no hold; Cancel stops
+  the brief turn, and a builder send during it stops it and runs as its own turn, taking the folder; a call from an
   older session is refused; 30 minutes on, the brief is gone.
 
 Value: protects=the sheet gets a brief within 60 s, never stops or rides the builder's turn, and leaves out its own
@@ -447,8 +475,8 @@ harness).
 - the chat is `sealed`, `hands_on`, tab closed, with `task_id`, a `chat_tasks` row and the notice.
 - a running turn is stopped first, its partial kept; Stop pressed meanwhile leaves the starts held; a send meanwhile
   is refused; a double submit makes one task.
-- a refused start leaves the chat as it was, removes the task, runs the queue.
-- a restart after the chat row's write: `finishSeals` seals it and starts the task.
+- a refused start leaves the chat as it was (its tab still open), removes the task, runs the queue.
+- a restart after the chat row's write: `finishSeals` seals it, starts the task, stores the notice, closes the tab.
 - row 17: the old token's `/mcp` call, `write_brief` and `commit_changes` are refused after the seal.
 - archive is refused while the task runs.
 
@@ -514,7 +542,7 @@ submit refusal in red beside Do It; typing in the field stops taking the daemon'
 the chat's tab with a Task tab, and Here opens one to its right.
 
 **Test (rung 3, `renderWithDaemon`):** each place's words; Show N More; a refused Here; the fallback line; a late
-brief doesn't replace typed text; ⌘↩ submits; the fourth choice sends the draft; axe passes. Then click the sheet
+brief doesn't replace typed text; Cancel posts the brief's delete; ⌘↩ submits; the fourth choice sends the draft; axe passes. Then click the sheet
 once against the real daemon (`/browse`) before Task 14, so the DTOs match.
 
 Value: protects=the builder sees place, files and fate before Do It; fails_when=a refused place can be picked, a
@@ -612,7 +640,7 @@ why_new=no e2e hands a chat to a task; no_claim=Claude or Codex themselves.
 
 ### Task 19: Adversarial review
 
-Dispatch `code-reviewer` (opus) on Tasks 1–12 with M6's security table and rows 15–23: the whole-project page
+Dispatch `code-reviewer` (opus) on Tasks 1–12 with M6's security table and rows 15–24: the whole-project page
 (hazards, `.git`, agent config, kept work, the watcher), the sealed chat's late calls, the brief and its turn, Do It's
 guard and races, the hold's handover, and that the chat's dirt doesn't travel to the copy. Blocking findings get at
 most two fix rounds.
@@ -637,7 +665,7 @@ outside every temp root.
   This deferred), §9 (`scope`, a gone copy)
 - roadmap: M6b's row; `AGENTS.md` notes of `chat/`, `conversation/`, `folder-hold/` (the handover and the signal
   rule), `pass/`, `delivery/`, `watcher/`, desktop `sessions/`, `workbench/`
-- `docs/security.md`: rows 15–23
+- `docs/security.md`: rows 15–24
 
 ## Follow-up tasks to file
 
