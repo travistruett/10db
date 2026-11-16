@@ -20,8 +20,9 @@ import { useRestartPreview } from '../../daemon/preview-queries';
 import { CodeSpans } from '../../shell/code-spans';
 
 // Workbench spec §5.3, §5.5, §8.3, D19, D24: what the pass's header says about its pull request and
-// checks. Nothing here reaches an agent by itself: Send to Agent sends a notice only to the page the
-// builder picks, and Retarget answers its card only when clicked.
+// checks. Nothing here reaches an agent by itself: Ask Agent to Fix sends a notice only to the page the
+// builder picks, and Retarget answers its card only when clicked. One notice is one line; two or more
+// fold into one line that names how many, so the header stays one glance tall until it is opened.
 
 /** A failure is red; what only needs the builder's eye is yellow. */
 const COLOR: Readonly<Record<PassNoticeKind, 'red' | 'yellow' | 'blue'>> = {
@@ -55,7 +56,7 @@ interface NoticeRowProps {
   readonly notice: PassNotice;
   readonly pages: PassViewDto['pages'];
   readonly inbox: readonly InboxItemDto[];
-  /** A page takes a message only while the pass is open, so Send to Agent is offered only then. */
+  /** A page takes a message only while the pass is open, so Ask Agent to Fix is offered only then. */
   readonly canSend: boolean;
   /** A Retarget card is answered while the pass is open or closed, never mid-close or mid-abandon. */
   readonly canRetarget: boolean;
@@ -66,6 +67,9 @@ interface NoticeRowProps {
 }
 
 /** A notice's first line, and the lines after it (a failed gate's log tail) or null for one line. */
+/** A first line longer than this is clamped to one line, its whole text behind Show More. */
+const LONG_LINE = 120;
+
 function noticeLines(text: string): { readonly first: string; readonly rest: string | null } {
   const end = text.indexOf('\n');
   if (end === -1) return { first: text, rest: null };
@@ -93,6 +97,7 @@ function NoticeRow(props: NoticeRowProps) {
     null;
   const { first, rest } = noticeLines(notice.text);
   const [more, setMore] = useState(false);
+  const expandable = rest !== null || first.length > LONG_LINE;
   const restId = useId();
   return (
     <Stack component="li" gap={4}>
@@ -104,10 +109,10 @@ function NoticeRow(props: NoticeRowProps) {
           style={{ flex: 'none' }}
           aria-hidden
         />
-        <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
+        <Text size="sm" {...(more ? {} : { lineClamp: 1 })} style={{ flex: 1, minWidth: 0 }}>
           <CodeSpans text={first} />
         </Text>
-        {rest === null ? null : (
+        {!expandable ? null : (
           <Button
             variant="subtle"
             size="xs"
@@ -182,11 +187,11 @@ function NoticeRow(props: NoticeRowProps) {
                 disabled={send.isSuccess}
                 style={{ flex: 'none' }}
               >
-                Send to Agent
+                Ask Agent to Fix
               </Button>
             </Menu.Target>
             <Menu.Dropdown>
-              <Menu.Label>Send to which page?</Menu.Label>
+              <Menu.Label>Which page's agent?</Menu.Label>
               {pages.map((page) => (
                 <Menu.Item
                   key={page.taskId}
@@ -228,12 +233,30 @@ export interface HeaderNoticesProps {
   readonly inbox: readonly InboxItemDto[];
 }
 
+/** The color of the worst notice: red before yellow before blue. */
+function worstColor(notices: readonly PassNotice[]): 'red' | 'yellow' | 'blue' {
+  const colors = notices.map((notice) => COLOR[notice.kind]);
+  if (colors.includes('red')) return 'red';
+  return colors.includes('yellow') ? 'yellow' : 'blue';
+}
+
 /** The pass's header notices, oldest first; nothing while it has none. */
 export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
-  if (view.notices.length === 0) return null;
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const [head] = view.notices;
+  if (head === undefined) return null;
   const state = view.pass.state;
-  return (
-    <Stack component="ul" gap={4} m={0} p={0} aria-label="Notices" style={{ listStyle: 'none' }}>
+  const list = (
+    <Stack
+      component="ul"
+      id={listId}
+      gap={4}
+      m={0}
+      p={0}
+      aria-label="Notices"
+      style={{ listStyle: 'none' }}
+    >
       {view.notices.map((notice) => (
         <NoticeRow
           key={notice.id}
@@ -247,6 +270,46 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
           canRetarget={state === PassState.Open || state === PassState.Closed}
         />
       ))}
+    </Stack>
+  );
+  if (view.notices.length === 1) return list;
+  const color = worstColor(view.notices);
+  const Icon = color === 'red' ? IconAlertTriangle : IconInfoCircle;
+  return (
+    <Stack gap={4}>
+      <Group gap="xs" wrap="nowrap" align="center">
+        <Icon
+          size={16}
+          stroke={1.5}
+          color={`var(--mantine-color-${color}-filled)`}
+          style={{ flex: 'none' }}
+          aria-hidden
+        />
+        <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+          <Text span fw={600} inherit>
+            {`${String(view.notices.length)} issues`}
+          </Text>
+          {open ? null : (
+            <>
+              {' · '}
+              <CodeSpans text={noticeLines(head.text).first} />
+            </>
+          )}
+        </Text>
+        <Button
+          variant="subtle"
+          size="xs"
+          style={{ flex: 'none' }}
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => {
+            setOpen((shown) => !shown);
+          }}
+        >
+          {open ? 'Hide' : 'Show All'}
+        </Button>
+      </Group>
+      {open ? list : null}
     </Stack>
   );
 }

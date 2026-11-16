@@ -305,7 +305,7 @@ describe('PageThread', () => {
     serve([reply, finding]);
     renderWithDaemon(<Thread canSend={canSend} />);
     await screen.findByText('Review: src/settings/form.tsx:12 drops the error state.');
-    const send = screen.queryByRole('button', { name: 'Send to Agent' });
+    const send = screen.queryByRole('button', { name: 'Ask Agent to Fix' });
     expect(send !== null).toBe(offer && canSend);
     if (send === null) return;
     fireEvent.click(send);
@@ -314,7 +314,10 @@ describe('PageThread', () => {
     });
     expect(await screen.findByText('Sent to the agent')).toBeTruthy();
     // Sent once, it is not offered to send again.
-    expect(screen.getByRole('button', { name: 'Send to Agent' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Ask Agent to Fix' })).toHaveProperty(
+      'disabled',
+      true,
+    );
   });
 
   it('a notice that offers Allow this shows it and sends it', async () => {
@@ -337,7 +340,7 @@ describe('PageThread', () => {
     serve([reply, denied]);
     renderWithDaemon(<Thread />);
     const allow = await screen.findByRole('button', { name: 'Allow this' });
-    expect(screen.queryByRole('button', { name: 'Send to Agent' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ask Agent to Fix' })).toBeNull();
     fireEvent.click(allow);
     await waitFor(() => {
       expect(posted).toEqual([denied.id]);

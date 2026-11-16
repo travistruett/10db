@@ -130,33 +130,35 @@ describe('where a failed check goes', () => {
 describe("a failed check's words", () => {
   it('names the paths on one line, or says it names none', () => {
     expect(checkNoticeLine(['src/settings/page.tsx', 'src/shared.ts'])).toBe(
-      'Check failed: names `src/settings/page.tsx`, `src/shared.ts`',
+      'Check failed in `src/settings/page.tsx`, `src/shared.ts`',
     );
-    expect(checkNoticeLine([])).toBe('Check failed after a turn: it names no changed file');
+    expect(checkNoticeLine([])).toBe(
+      'Check failed after the last turn, outside the files it changed',
+    );
   });
 
   it("offers the command, its exit and the output's end, cut to what one message holds", () => {
     const tail = `${'early line\n'.repeat(4000)}the last error\n`;
     const offer = checkOffer({
-      line: 'Check failed: names `src/settings/page.tsx`',
+      line: 'Check failed in `src/settings/page.tsx`',
       command: 'make check-changed',
       exitCode: 2,
       output: tail,
     });
     const short = checkOffer({
-      line: 'Check failed after a turn: it names no changed file',
+      line: 'Check failed after the last turn, outside the files it changed',
       command: 'make check-changed',
       exitCode: 1,
       output: 'stuck\n',
     });
 
     expect(offer.length).toBeLessThanOrEqual(TASK_MESSAGE_MAX_CHARS);
-    expect(offer.startsWith('Check failed: names `src/settings/page.tsx`\n\n')).toBe(true);
+    expect(offer.startsWith('Check failed in `src/settings/page.tsx`\n\n')).toBe(true);
     expect(offer).toContain('`make check-changed` exited 2.');
     expect(offer.endsWith('the last error\n```')).toBe(true);
     expect(short).toBe(
       [
-        'Check failed after a turn: it names no changed file',
+        'Check failed after the last turn, outside the files it changed',
         '',
         '`make check-changed` exited 1.',
         '',
