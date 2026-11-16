@@ -225,12 +225,12 @@ describe.skipIf(!bedrockLive)('a chat that writes in Your folder, live, Bedrock'
     if (profile === undefined) throw new Error('LC5 needs AWS_PROFILE set to a signed-in profile');
     const daemon = await startLiveDaemon('lc5', { claudePath: localClaude() });
     try {
-      const accountId = await addAccount(daemon, {
+      const account = await addAccount(daemon, {
         kind: 'bedrock',
         label: 'Bedrock live check',
         settings: { region, awsProfile: profile },
       });
-      const project = await addProject(daemon, accountId);
+      const project = await addProject(daemon, account.id);
       const chat = await openChat(daemon, project.id, null);
       const items = await sendAndWait(
         daemon,

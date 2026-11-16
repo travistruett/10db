@@ -1,5 +1,13 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { createWriteStream, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -219,16 +227,19 @@ export async function addProject(
   });
 }
 
-export async function addAccount(daemon: LiveDaemon, input: AccountInput): Promise<string> {
+export async function addAccount(
+  daemon: LiveDaemon,
+  input: AccountInput,
+): Promise<{ id: string; configDir: string | null }> {
   const created = await daemon.api(
-    z.object({ account: z.looseObject({ id: z.string() }) }),
+    z.object({ account: z.looseObject({ id: z.string(), configDir: z.string().nullable() }) }),
     '/accounts',
     {
       method: 'POST',
       body: input,
     },
   );
-  return created.account.id;
+  return created.account;
 }
 
 export async function openChat(
@@ -262,13 +273,41 @@ export async function sendAndWait(
     method: 'POST',
     body: { text, ...(folder === null ? {} : { folder }) },
   });
-  await until('the turn to start and end', timeoutMs, async () => {
+  try {
+    await until('the turn to start and end', timeoutMs, async () => {
+      const state = (await daemon.api(ConversationDto, `/conversations/${conversationId}`)).state;
+      const items = await itemsOf(daemon, conversationId);
+      const answered = items.slice(before).some((i) => i.kind === 'agent_message');
+      const settled = state === ConversationState.IdleWarm || state === ConversationState.IdleCold;
+      return settled && answered ? true : null;
+    });
+  } catch (error) {
+    // A turn that never ends: say where it stands, so the cause is visible without a rerun.
     const state = (await daemon.api(ConversationDto, `/conversations/${conversationId}`)).state;
     const items = await itemsOf(daemon, conversationId);
-    const answered = items.slice(before).some((i) => i.kind === 'agent_message');
-    const settled = state === ConversationState.IdleWarm || state === ConversationState.IdleCold;
-    return settled && answered ? true : null;
-  });
+    const cards = await openCards(daemon);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; state ${state}; items ${JSON.stringify(
+        items
+          .slice(before)
+          .map((i) => [
+            i.kind,
+            'text' in i
+              ? i.text.slice(0, 200)
+              : i.kind === 'tool_call'
+                ? `${i.call.kind} ${i.call.status}`
+                : '',
+          ]),
+      )}; cards ${JSON.stringify(cards.map((c) => [c.kind, c.title]))}; errors ${daemon
+        .output()
+        .split('\n')
+        .filter((line) => /error|warn/i.test(line))
+        .slice(-5)
+        .join(' | ')
+        .slice(0, 1500)}`,
+      { cause: error },
+    );
+  }
   return (await itemsOf(daemon, conversationId)).slice(before);
 }
 
@@ -302,4 +341,17 @@ export function localClaude(): string {
   if (set !== undefined && set !== '') return set;
   const found = execFileSync('/bin/sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim();
   return realpathSync(found);
+}
+
+/**
+ * Waits for the daemon to finish fetching and checking its pinned Codex into the scratch data dir: a session that
+ * starts first ends with "still being downloaded" and is not retried.
+ */
+export async function waitForPinnedCodex(daemon: LiveDaemon): Promise<void> {
+  const tools = join(daemon.work.path, 'data', 'tools');
+  await until('the pinned Codex to be installed', 300_000, () => {
+    if (!existsSync(tools)) return null;
+    const dir = readdirSync(tools).find((name) => name.startsWith('codex-'));
+    return dir !== undefined && existsSync(join(tools, dir, '.pin.json')) ? true : null;
+  });
 }

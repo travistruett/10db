@@ -1368,3 +1368,17 @@ credential) and `us-east-1`, and puts the project on it. A chat was asked to cre
 
 Meaning: the write profile, the hold and the edit tool work on Bedrock as on the plan. An API-key account was not
 run (none is stored for unattended use here); it takes the same Claude adapter path as Bedrock.
+
+### LC3: Codex `apply_patch`, `commit_changes` and a refused `git commit`: not run, needs a sign-in
+
+`chat-write-codex.live.test.ts` is written and typechecks, but it has not passed. A Codex account keeps its login in a
+folder of its own (`<dataDir>/accounts/<id>/codex`), so the scratch daemon's new Codex account is signed out, and a
+message to it ends with "Codex is not signed in for account ... No prompt was sent." Reusing the builder's login
+would mean copying a credential out of the app's data dir, which these runs never do. The first two attempts also
+showed that a message sent before the daemon has fetched its pinned Codex ends with "still being downloaded" and is
+not retried, so the test waits for the install (`waitForPinnedCodex`).
+
+To run it: `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/chat-write-codex.live.test.ts`, then
+open the sign-in address the run prints (`TENDB_LIVE_REPORT=<file>` collects it) and finish the ChatGPT sign-in in the
+browser within 10 minutes. It then asks for a patch, a commit and a shell `git commit`, and expects the file, the
+`lc3` commit, a done `commit_changes` call, no `shell` commit and a refusal that names `commit_changes`.
