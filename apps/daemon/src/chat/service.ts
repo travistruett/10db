@@ -19,6 +19,7 @@ import {
   InvalidError,
   mintId,
   TASK_MESSAGE_MAX_CHARS,
+  TaskStatus,
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   type ChatCreateInput,
@@ -36,6 +37,7 @@ import {
   chatOfConversation,
   chatView,
   getChat,
+  getTask,
   getConversation,
   getProject,
   hasItemOfKind,
@@ -206,6 +208,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   // closed is the builder's only link to it.
   const refuseWhileHandedTaskRuns = (chat: ChatRow): void => {
     if (chat.taskId === null || chat.passId !== null) return;
+    // A task the builder removed or finished is over, whatever its last run reads.
+    if (getTask(state.db, chat.taskId).status !== TaskStatus.Open) return;
     const run = latestWorkstreamOf(state.db, chat.taskId);
     if (run === undefined || ACTIVE_STATES.includes(run.state))
       throw new ConflictError(HANDED_TASK_RUNNING);
