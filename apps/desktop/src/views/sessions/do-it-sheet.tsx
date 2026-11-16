@@ -3,6 +3,7 @@ import {
   DoItPlace,
   type ChatDto,
   type DoItOfferDto,
+  type ProjectId,
   PassWhenBusy,
   type DoItResult,
   type ProjectViewDto,
@@ -63,7 +64,7 @@ function Refusal({
   onNavigate,
 }: {
   readonly offer: DoItOfferDto;
-  readonly onNavigate: (projectId: string) => void;
+  readonly onNavigate: (projectId: ProjectId) => void;
 }) {
   if (offer.refusal === null) return null;
   const link = parseRefusalLink(offer.refusal.link);
@@ -318,15 +319,7 @@ export function DoItSheet({
               <>
                 {(['worktree', 'here'] as const).map((p) => {
                   const o = p === DoItPlace.Here ? data.here : data.worktree;
-                  return o.offered ? null : (
-                    <Refusal
-                      key={p}
-                      offer={o}
-                      onNavigate={(id) => {
-                        select(id as ProjectViewDto['id']);
-                      }}
-                    />
-                  );
+                  return o.offered ? null : <Refusal key={p} offer={o} onNavigate={select} />;
                 })}
                 {offer?.offered === true ? (
                   <>

@@ -1,4 +1,10 @@
-import { DoItPlace, type ChangedEntryDto, type DoItPreviewDto } from '@10db/contracts';
+import {
+  ChatId,
+  DoItPlace,
+  ProjectId,
+  type ChangedEntryDto,
+  type DoItPreviewDto,
+} from '@10db/contracts';
 
 // Sessions UI §8.1: the words the Do It sheet says for each place, before the builder presses it.
 
@@ -91,9 +97,9 @@ export function briefSourceLine(brief: DoItPreviewDto['brief'], label: string): 
 
 /** Where a refusal's link goes. */
 export type RefusalLink =
-  | { readonly kind: 'workbench'; readonly projectId: string }
-  | { readonly kind: 'board'; readonly projectId: string }
-  | { readonly kind: 'session'; readonly chatId: string };
+  | { readonly kind: 'workbench'; readonly projectId: ProjectId }
+  | { readonly kind: 'board'; readonly projectId: ProjectId }
+  | { readonly kind: 'session'; readonly chatId: ChatId };
 
 const LINK = /^(workbench|board|session):(.+)$/;
 
@@ -104,9 +110,14 @@ export function parseRefusalLink(link: string | null): RefusalLink | null {
   const kind = match?.[1];
   const id = match?.[2];
   if (id === undefined) return null;
-  if (kind === 'workbench') return { kind, projectId: id };
-  if (kind === 'board') return { kind, projectId: id };
-  if (kind === 'session') return { kind, chatId: id };
+  if (kind === 'workbench' || kind === 'board') {
+    const projectId = ProjectId.safeParse(id);
+    return projectId.success ? { kind, projectId: projectId.data } : null;
+  }
+  if (kind === 'session') {
+    const chatId = ChatId.safeParse(id);
+    return chatId.success ? { kind, chatId: chatId.data } : null;
+  }
   return null;
 }
 
