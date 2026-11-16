@@ -61,8 +61,7 @@ export {
   openWhenBusy,
   refuseWaitWhileDraining,
   STOPPED_TURNS_DEADLINE_MS,
-  type OpenPending,
   type OpenWhenBusyDeps,
 } from './open-when-busy';
-export { createPendingOpens, type PendingOpen, type PendingOpens } from './pending-open';
+export { createPendingOpens, type PendingOpens } from './pending-open';
 export { openFailure, postFirstMessages } from './first-messages';
