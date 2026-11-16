@@ -227,6 +227,11 @@ export interface ExploreProfile {
   readonly allowedTools: readonly string[];
   readonly disallowedTools: readonly string[];
   readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
+  /**
+   * Whether the agent keeps each file's earlier versions so the builder can rewind it: a session that edits
+   * files (a chat) turns it on; Plan, which edits none, leaves it off. Claude only; Codex keeps none.
+   */
+  readonly fileCheckpointing?: boolean;
 }
 
 /** Everything an adapter needs to open a session: the core every session shares, and what it is for. */

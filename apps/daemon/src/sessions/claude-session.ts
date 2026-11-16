@@ -366,6 +366,9 @@ function exploreQueryOptions(
       allowedTools: spec.profile.allowedTools,
       disallowedTools: spec.profile.disallowedTools,
       agents: spec.profile.agents,
+      ...(spec.profile.fileCheckpointing === undefined
+        ? {}
+        : { fileCheckpointing: spec.profile.fileCheckpointing }),
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
       autoMode: spec.profile.judge === JudgeKind.Native ? renderClaudeAutoMode(spec.policy) : null,
     },

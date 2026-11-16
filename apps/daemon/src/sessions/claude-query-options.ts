@@ -30,6 +30,8 @@ export type ClaudeProfile =
       readonly disallowedTools: readonly string[];
       readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
       readonly setup: ClaudeProfileSetup;
+      /** Whether Claude Code keeps each edited file's earlier versions, so the builder can rewind. */
+      readonly fileCheckpointing?: boolean;
       /**
        * The attended policy as auto mode's rules where the session's judge is native (trust line §8):
        * it then runs in auto mode. Null keeps default mode, in which a call no rule covers is carded.
@@ -51,6 +53,7 @@ export type ClaudeProfileOptions = Pick<
   | 'agents'
   | 'permissionMode'
   | 'includePartialMessages'
+  | 'enableFileCheckpointing'
 > & {
   /** Merged over the session env, before AUTOUPDATE_OFF: the sandbox's env and the scrub switch; {} unsandboxed. */
   readonly sandboxEnv: Readonly<Record<string, string>>;
@@ -139,6 +142,7 @@ function exploreOptions(
         setupAppend === null ? profile.systemPrompt : `${profile.systemPrompt}\n\n${setupAppend}`,
     },
     ...(profile.setup.plugins.length === 0 ? {} : { plugins: localPlugins(profile.setup.plugins) }),
+    ...(profile.fileCheckpointing === true ? { enableFileCheckpointing: true } : {}),
     tools: [...profile.tools],
     allowedTools: [...profile.allowedTools],
     disallowedTools: [...profile.disallowedTools, ...(sandbox?.disallowedTools ?? [])],

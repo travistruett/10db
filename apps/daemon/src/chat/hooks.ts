@@ -116,6 +116,8 @@ export function chatProfile(
     ],
     disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
+    // Only a session with the file tools can edit, so only it keeps file history.
+    fileCheckpointing: sandboxed,
   };
 }
 
