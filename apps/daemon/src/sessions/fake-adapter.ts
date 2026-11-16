@@ -358,6 +358,9 @@ export class FakeAdapter implements AgentAdapter {
   /** The sessions each scripted chat has opened, for the sequence its next one runs. */
   private readonly chatSessions = new Map<string, number>();
 
+  /** The book key each scripted chat session ran, so a session resumed from it runs the key's next script. */
+  private readonly chatKeyOfSession = new Map<string, string>();
+
   /**
    * The book's `Chat: <text>` key a chat's prompt matches: one of its message lines (`[m:<id>] …`)
    * reads `<text>`, or starts with it and a space, as a line with a mention after it does.
@@ -374,7 +377,11 @@ export class FakeAdapter implements AgentAdapter {
   }
 
   private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
-    const chat = this.chatKey(spec.prompt);
+    const resumed =
+      spec.resumeProviderSessionId === null
+        ? undefined
+        : this.chatKeyOfSession.get(spec.resumeProviderSessionId);
+    const chat = this.chatKey(spec.prompt) ?? resumed ?? null;
     if (chat !== null) return this.openScriptedChat(spec, providerSessionId, chat);
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
     const failure = refusal === null ? this.shapeStartFailure(spec) : null;
@@ -427,6 +434,7 @@ export class FakeAdapter implements AgentAdapter {
   ): SessionHandle {
     const sequence = (this.chatSessions.get(key) ?? 0) + 1;
     this.chatSessions.set(key, sequence);
+    this.chatKeyOfSession.set(providerSessionId, key);
     const sent: string[] = [];
     const uuids: (string | null)[] = [];
     const inner = runFakeLaneSession(
