@@ -16,6 +16,7 @@ import { useTasks, useWorkstreams } from '../../daemon/queries';
 import { ExternalLink } from '../board/pull-request-link';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useOpenSession } from './open-session';
+import { draftKey, useSessionDraft } from './session-drafts';
 import { withQuote } from './changes-files';
 import type { Quote } from './quote';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
@@ -24,8 +25,6 @@ import { copyFooter } from './task-tab-words';
 // Sessions UI §8.2, §8.4, §8.5: a separate copy's tab. The chat it came from, the brief as the builder's first
 // message, then the task's thread, and one line for where the run stands. It lands by the project's delivery,
 // so it has no Sign Off.
-
-const NO_REPLIES = '';
 
 export interface CopyTabProps {
   readonly session: TaskSessionDto;
@@ -124,7 +123,11 @@ function CopyFooter({
   readonly footer: ReturnType<typeof copyFooter>;
   readonly quote: Quote | null;
 }) {
-  const [text, setText] = useState(NO_REPLIES);
+  const [draft, setDraft] = useSessionDraft(draftKey.task(session.taskId));
+  const text = draft.text;
+  const setText = (next: string): void => {
+    setDraft({ ...draft, text: next });
+  };
   // A quote from Changes lands in the message once, however often this renders.
   const [quoted, setQuoted] = useState(0);
   if (quote !== null && quote.id !== quoted) {
@@ -156,7 +159,7 @@ function CopyFooter({
               { text: text.trim(), pictures: [] },
               {
                 onSuccess: () => {
-                  setText(NO_REPLIES);
+                  setText('');
                 },
               },
             );

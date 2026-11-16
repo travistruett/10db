@@ -74,7 +74,7 @@ class SessionDrafts {
   private persist(): void {
     const kept: Record<string, { text: string; mentions: readonly string[] }> = {};
     for (const [key, draft] of this.drafts) {
-      if (key.startsWith('chat:') && draft.text !== '')
+      if ((key.startsWith('chat:') || key.startsWith('task:')) && draft.text !== '')
         kept[key] = { text: draft.text, mentions: draft.mentions };
     }
     try {
@@ -96,6 +96,7 @@ const store = new SessionDrafts();
 export const draftKey = {
   chat: (id: string): string => `chat:${id}`,
   fresh: (id: string): string => `fresh:${id}`,
+  task: (id: string): string => `task:${id}`,
 } as const;
 
 /** The draft of the tab `key`, and a way to change it. */

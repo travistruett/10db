@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
 import { useTaskSession } from '../../daemon/task-session-queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { changesChoice } from './changes-choice';
 import { changesTotals } from './changes-files';
 import { ChangesPanel } from './changes-panel';
 import { CopyTab } from './copy-tab';
@@ -59,7 +60,13 @@ function LoadedTaskTab({
   const wide = useMediaQuery(`(min-width: ${String(AUTO_OPEN_PX)}px)`);
   // Until the builder chooses, it opens by itself once there are changes and room; after that their
   // choice holds for the tab.
-  const [choice, setChoice] = useState<boolean | null>(null);
+  const [choice, setChoiceState] = useState<boolean | null>(() =>
+    changesChoice.get(session.taskId),
+  );
+  const setChoice = (open: boolean): void => {
+    changesChoice.set(session.taskId, open);
+    setChoiceState(open);
+  };
   const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
   const hasChanges = totals !== null && totals.files > 0;
   const open = workstreamId !== undefined && (choice ?? (wide && hasChanges));

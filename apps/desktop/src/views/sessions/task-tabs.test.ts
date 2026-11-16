@@ -1,6 +1,7 @@
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { closeTaskTab, openTaskTab, parseTaskTabs, type TaskTab } from './task-tabs';
+import { changesChoice } from './changes-choice';
+import { closeTaskTab, openTaskTab, parseTaskTabs, taskTabs, type TaskTab } from './task-tabs';
 
 const tab = (title: string, position: number): TaskTab => ({
   taskId: mintId('Task'),
@@ -19,6 +20,16 @@ describe('task tabs', () => {
   it('closes by task', () => {
     const [a, b] = [tab('A', 0), tab('B', 1)];
     expect(closeTaskTab([a, b], a.taskId)).toEqual([b]);
+  });
+
+  it('a closed tab forgets whether its Changes was open', () => {
+    const a = tab('A', 0);
+    taskTabs.open(a);
+    changesChoice.set(a.taskId, true);
+    taskTabs.close(a.taskId);
+    expect(changesChoice.get(a.taskId)).toBeNull();
+    taskTabs.reset();
+    localStorage.clear();
   });
 
   it.each([

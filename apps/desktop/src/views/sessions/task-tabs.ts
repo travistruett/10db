@@ -1,6 +1,7 @@
 import { ProjectId, TaskId } from '@10db/contracts';
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
+import { changesChoice } from './changes-choice';
 
 // The task tabs of this window (sessions UI §8.2): a task Do It made takes a tab in the strip. The tabs live
 // in the window, so no migration; a cleared store loses the tab, never the task, which the Board, the
@@ -72,7 +73,10 @@ export const taskTabs = {
   },
   close: (taskId: string): TaskTab | null => {
     const entry = current().find((t) => t.taskId === taskId) ?? null;
-    if (entry !== null) replace(closeTaskTab(current(), taskId));
+    if (entry !== null) {
+      changesChoice.forget(taskId);
+      replace(closeTaskTab(current(), taskId));
+    }
     return entry;
   },
   /** Forgets what was read: the next read goes to storage again. */

@@ -10,7 +10,6 @@ import { ActionIcon, Anchor, Box, Button, Menu, Stack, Text } from '@mantine/cor
 import { IconDots } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { mentionText } from '../../conversation/mention-text';
-import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 import { useAbandonPass, usePassView } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -25,6 +24,7 @@ import { PageStatus } from '../workbench/page-status';
 import { PrButton } from '../workbench/pr-button';
 import { queueRows } from '../workbench/queue-rows';
 import { useOpenSession } from './open-session';
+import { draftKey, useSessionDraft } from './session-drafts';
 import { withQuote } from './changes-files';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
 import type { Quote } from './quote';
@@ -83,7 +83,7 @@ function PassTabBody({ session, project, view, changes, quote }: BodyProps) {
   const inbox = useInbox().data ?? [];
   const openSession = useOpenSession();
   const abandon = useAbandonPass();
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useSessionDraft(draftKey.task(session.taskId));
   // A quote from Changes lands in the composer once, however often this renders.
   const [quoted, setQuoted] = useState(0);
   if (quote !== null && quote.id !== quoted) {

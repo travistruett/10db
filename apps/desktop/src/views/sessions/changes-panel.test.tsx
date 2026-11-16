@@ -6,12 +6,16 @@ import {
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
+import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import { pagesByStatus, PASS_NOW, passHandlers, passViewDto } from '../../test/pass-fixtures';
 import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
 import { resetWindowWidth, windowWidth } from '../../test/window-width';
+import { EMPTY_DRAFT } from '../../conversation/drafts';
+import { changesChoice } from './changes-choice';
+import { draftKey, sessionDrafts } from './session-drafts';
 import { TaskTab } from './task-tab';
 import { TaskTabPlace } from './task-tabs';
 
@@ -48,6 +52,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   resetWindowWidth();
+  // Every test opens the same ready page's task: what one left in the window is not the next one's.
+  changesChoice.forget(ready.taskId);
+  sessionDrafts.set(draftKey.task(ready.taskId), EMPTY_DRAFT);
 });
 
 interface Served {
@@ -84,19 +91,45 @@ async function renderTask(options: {
   );
   const project = projectViewDto({ id: view.pass.projectId });
   await renderWithDaemonAndRouter(
-    <TaskTab
-      tab={{
-        taskId: session.taskId,
-        projectId: project.id,
-        title: session.title,
-        place: TaskTabPlace.Pass,
-        position: 0,
-      }}
-      project={project}
-    />,
+    <AwayAndBack>
+      <TaskTab
+        tab={{
+          taskId: session.taskId,
+          projectId: project.id,
+          title: session.title,
+          place: TaskTabPlace.Pass,
+          position: 0,
+        }}
+        project={project}
+      />
+    </AwayAndBack>,
   );
   return { scopes };
 }
+
+/** The strip unmounts a tab when another is selected; this stands in for the other tab. */
+function AwayAndBack({ children }: { readonly children: ReactNode }) {
+  const [away, setAway] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setAway(!away);
+        }}
+      >
+        Switch tab
+      </button>
+      {away ? <p>Another tab</p> : children}
+    </>
+  );
+}
+
+const switchAwayAndBack = async (): Promise<void> => {
+  fireEvent.click(screen.getByRole('button', { name: 'Switch tab' }));
+  await screen.findByText('Another tab');
+  fireEvent.click(screen.getByRole('button', { name: 'Switch tab' }));
+};
 
 describe('a task’s Changes', () => {
   it('says how much changed in the bar, and opens the panel on a click', async () => {
@@ -117,6 +150,49 @@ describe('a task’s Changes', () => {
     await waitFor(() => {
       expect(screen.queryByRole('complementary', { name: 'Changes' })).toBeNull();
     });
+  });
+
+  it.each([
+    { name: 'closed at 1100 px', width: 1200, open: false },
+    { name: 'opened at 900 px', width: 900, open: true },
+  ])('keeps the builder’s choice across a tab switch: $name', async ({ width, open }) => {
+    windowWidth(width);
+    await renderTask({});
+    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('complementary', { name: 'Changes' }) !== null).toBe(open);
+    });
+    await switchAwayAndBack();
+    await screen.findByRole('button', { name: /^Changes/ });
+    expect(screen.queryByRole('complementary', { name: 'Changes' }) !== null).toBe(open);
+  });
+
+  it('keeps an unsent message across a tab switch', async () => {
+    windowWidth(900);
+    await renderTask({});
+    fireEvent.change(await screen.findByRole('textbox', { name: /Message to/ }), {
+      target: { value: 'half a thought' },
+    });
+    await switchAwayAndBack();
+    expect(await screen.findByRole('textbox', { name: /Message to/ })).toHaveProperty(
+      'value',
+      'half a thought',
+    );
+  });
+
+  it('keeps a separate copy’s unsent message across a tab switch', async () => {
+    windowWidth(900);
+    await renderTask({
+      session: { place: 'copy', passId: null, board: 'in_progress', branch: '10db/x' },
+    });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), {
+      target: { value: 'half a thought' },
+    });
+    await switchAwayAndBack();
+    expect(await screen.findByRole('textbox', { name: 'Message' })).toHaveProperty(
+      'value',
+      'half a thought',
+    );
   });
 
   it('asks for the last turn when Last Turn is picked, and ⌘⇧D toggles the panel', async () => {
