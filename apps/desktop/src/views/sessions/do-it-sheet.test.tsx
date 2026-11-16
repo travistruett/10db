@@ -1,4 +1,4 @@
-import { FolderHolderKind, type ChatDto } from '@10db/contracts';
+import { FolderHolderKind, type ChatDto, type DoItPreviewDto } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -171,6 +171,34 @@ describe('the Do It sheet', () => {
       'checked',
       true,
     );
+  });
+
+  it('keeps the place the builder picked when it stops being offered, and Do It stays off', async () => {
+    let here: DoItPreviewDto['here'] = { offered: true, refusal: null, whenBusy: false };
+    const { queryClient, doIt } = openChat(() => doItPreviewDto({ here }));
+    const sheet = await openSheet();
+    await within(sheet).findByDisplayValue('Retry login once on a 401');
+    fireEvent.click(within(sheet).getByRole('radio', { name: /Your folder, as a pass/ }));
+    here = {
+      offered: false,
+      refusal: { code: 'pass', message: 'Your folder is in use by a pass.', link: null },
+      whenBusy: false,
+    };
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['chats'] });
+    });
+    expect(await within(sheet).findByText('Your folder is in use by a pass.')).toBeTruthy();
+    expect(within(sheet).getByRole('radio', { name: /Your folder, as a pass/ })).toHaveProperty(
+      'checked',
+      true,
+    );
+    const button = within(sheet).getByRole('button', { name: 'Do It' });
+    expect(button).toHaveProperty('disabled', true);
+    fireEvent.keyDown(within(sheet).getByRole('textbox', { name: 'Title' }), {
+      key: 'Enter',
+      metaKey: true,
+    });
+    expect(doIt.requests).toEqual([]);
   });
 
   it.each([

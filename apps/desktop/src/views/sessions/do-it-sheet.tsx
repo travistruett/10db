@@ -135,15 +135,15 @@ export function DoItSheet({
   const offers = (p: DoItPlace): boolean =>
     data === undefined ||
     (p === DoItPlace.Here ? data.here.offered || data.here.whenBusy : data.worktree.offered);
-  // A place that is refused is never the one in force: the sheet falls to the other when only it is offered.
+  // The sheet falls to the other place only while the builder has picked none; a pick that stops being
+  // offered stays, with its refusal, and Do It waits, so the work never goes somewhere unchosen.
   const effective: DoItPlace =
-    picked !== null && offers(picked)
-      ? picked
-      : offers(DoItPlace.Worktree)
-        ? DoItPlace.Worktree
-        : offers(DoItPlace.Here)
-          ? DoItPlace.Here
-          : DoItPlace.Worktree;
+    picked ??
+    (offers(DoItPlace.Worktree)
+      ? DoItPlace.Worktree
+      : offers(DoItPlace.Here)
+        ? DoItPlace.Here
+        : DoItPlace.Worktree);
   const offer =
     data === undefined ? null : effective === DoItPlace.Here ? data.here : data.worktree;
   const busy = effective === DoItPlace.Here && data?.here.whenBusy === true;
