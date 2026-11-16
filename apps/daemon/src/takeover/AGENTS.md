@@ -1,0 +1,20 @@
+# apps/daemon/src/takeover
+
+A chat continued in the builder's own terminal (sessions spec §7.5): Open in Terminal, Copy the Command, a second
+window, Hand Back.
+
+- `service.ts` runs every call for one chat in order on that chat's chain (open, again, command, Hand Back, archive).
+  Messages and Stop go to the engine, which refuses them by state. `stop()` aborts what is preparing or opening and
+  waits for the chains; a chat already taken over stays so, for Again or Hand Back. `recover()` at start removes the
+  files of every chat that isn't `taken_over`.
+- The open takes the folder with `folderHold.takeOver` (blockers re-checked in the same synchronous call as the
+  state write, and the chat's archived row re-read there, since an archived chat has no retired flag after a
+  restart). Hand Back holds the chat's starts, gives the folder back (waiting git work is handed it first), then
+  parks the held messages on the folder.
+- `files.ts`: everything lives in `<data dir>/conversations/<id>/takeover/` (mode 700; the script 700, the rest
+  600). A link at the conversation folder, the takeover folder or a file is refused or unlinked, never followed.
+  `takeover.json` is display data read through zod; nothing runs or is deleted from it.
+- `prepare.ts` writes one set of files per launch and never reads them back: the terminal's agent can write there.
+  Earlier sets stay until Hand Back, since an earlier window may use them.
+- `render.ts` is the pure script and line; the line is for zsh and bash, not fish.
+- `opener.ts` is the only place 10db starts the terminal: `/usr/bin/open -a Terminal|iTerm <script>`.
