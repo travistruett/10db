@@ -120,14 +120,18 @@ export function createTrustServices(deps: {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
 
-  /** The builder's servers, read now: from their files and the plugins a session would load. */
-  const yourServers = (switches: TrustSwitches) => {
-    const roots = laneWritableRoots({
+  /** Every root a lane can write, as the launch judges it: the readers of the builder's config use the same list. */
+  const writableRoots = () =>
+    laneWritableRoots({
       checkouts: allCheckouts(db),
       worktreeBase: deps.worktreeBase,
       sandboxTempRoots: deps.laneWritableRoots,
       systemTempRoots: SYSTEM_TEMP_ROOTS,
     });
+
+  /** The builder's servers, read now: from their files and the plugins a session would load. */
+  const yourServers = (switches: TrustSwitches) => {
+    const roots = writableRoots();
     const plugins = switches.yourPlugins
       ? installedPlugins(deps.builderHome).filter(
           (plugin) => switches.plugins[plugin.id] ?? plugin.enabledInClaude,
@@ -135,7 +139,7 @@ export function createTrustServices(deps: {
       : [];
     const { entries, fileProblems } = readYourMcpConfig({
       home: deps.builderHome,
-      laneWritable: [...allCheckouts(db), ...deps.laneWritableRoots],
+      laneWritable: roots.map((root) => root.path),
       plugins,
     });
     const approvals = mcpApprovals(db, () => {
@@ -217,7 +221,7 @@ export function createTrustServices(deps: {
       home: deps.builderHome,
       checkout: project.repoPath,
       switches,
-      laneWritable: [...checkouts, ...deps.laneWritableRoots],
+      laneWritable: writableRoots().map((root) => root.path),
     });
     const judged =
       deps.laneSandbox === null
