@@ -169,6 +169,7 @@ describe("a pass lane's activity and turns", () => {
       checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
       closeStep: null,
       stackedOn: null,
+      wholeProject: false,
       notices: [
         {
           id: 'turn-check',

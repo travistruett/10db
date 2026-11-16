@@ -70,10 +70,12 @@ export const DEV_UI_READS: readonly string[] = [
   '/shapes/:shapeId/record/:list',
   '/shapes/:shapeId/documents/:documentId/revisions/:number',
   '/tasks/:taskId/plan-context',
+  '/tasks/:taskId/session',
 ];
 
 /** The GETs the dev UI may not make, with why: each writes, runs a command, or hands out a token. */
 export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
+  '/chats/:chatId/do-it': "The Do It preview reads Your folder's changes with git.",
   '/conversations/:conversationId/takeover':
     "A chat's takeover is read from its folder of files, which the builder's terminal agent can write.",
   '/conversations/:conversationId/takeover/preview':
