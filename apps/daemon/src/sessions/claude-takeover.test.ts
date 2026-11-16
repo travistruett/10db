@@ -27,6 +27,8 @@ function spec(launch: TakeoverLaunch, over: Partial<TakeoverSpec> = {}): Takeove
     pluginDirs: ['/setup/plugins/one', '/setup/plugins/two'],
     instructionsFile: '/data/takeover/instructions.md',
     mcpConfigFile: '/data/takeover/mcp.json',
+    codexServers: [],
+    sealedEnvFile: null,
     web: true,
     ...over,
   };

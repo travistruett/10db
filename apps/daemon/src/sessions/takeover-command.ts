@@ -34,6 +34,24 @@ export interface TakeoverCommand {
   readonly argv: readonly TakeoverArg[];
 }
 
+/** One MCP server for Codex's terminal, as the chat's session had it; `extras` are Codex's own keys for it. */
+export type CodexTakeoverServer =
+  | {
+      readonly kind: 'stdio';
+      readonly name: string;
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly extras: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly kind: 'remote';
+      readonly name: string;
+      readonly url: string;
+      /** Each header and the variable that holds its value, read from the sealed file. */
+      readonly headerVariables: readonly { readonly header: string; readonly variable: string }[];
+      readonly extras: Readonly<Record<string, unknown>>;
+    };
+
 /**
  * What a chat's session had, rebuilt for the builder's terminal: the pinned binary, the folder, the agent session
  * to resume, and the setup the chat ran with. Files are the takeover folder's own; nothing here is a secret.
@@ -54,6 +72,10 @@ export interface TakeoverSpec {
   readonly instructionsFile: string | null;
   /** Claude's MCP config file; null when the chat has no servers. */
   readonly mcpConfigFile: string | null;
+  /** Codex's servers; none for Claude. */
+  readonly codexServers: readonly CodexTakeoverServer[];
+  /** A sealed file of `export` lines for the servers' header variables; null when there are none. */
+  readonly sealedEnvFile: string | null;
   /** Whether the project's Web switch is on. */
   readonly web: boolean;
 }

@@ -13,6 +13,7 @@ export {
   isArgFromFile,
   TakeoverRefusedError,
   type ArgFromFile,
+  type CodexTakeoverServer,
   type TakeoverArg,
   type TakeoverCommand,
   type TakeoverSpec,
