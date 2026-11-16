@@ -13,6 +13,13 @@
         "minLength": 1,
         "maxLength": 1024
       }
+    },
+    "folder": {
+      "type": "string",
+      "enum": [
+        "wait",
+        "read_only"
+      ]
     }
   },
   "required": [

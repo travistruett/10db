@@ -86,7 +86,7 @@ export function createConversationServices(deps: {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly shape: Pick<ShapeService, 'send' | 'redo' | 'sendNow'>;
-  readonly chat: Pick<ChatService, 'send' | 'post' | 'sendNow' | 'stop' | 'redo'>;
+  readonly chat: Pick<ChatService, 'send' | 'post' | 'sendNow' | 'stop' | 'redo' | 'waiting'>;
   /** The tracked files of the conversation's checkout an `@` query matches. */
   readonly files: (id: ConversationId, q: string) => Promise<ProjectFileMatchDto[]>;
   readonly dataDir: string;
@@ -152,7 +152,12 @@ export function createConversationServices(deps: {
       };
     },
     conversationLive(id) {
-      return ownerOf(id).kind === 'task' ? deps.laneLive.live(id) : engine.live(id);
+      const owner = ownerOf(id);
+      if (owner.kind === 'task') return deps.laneLive.live(id);
+      return {
+        ...engine.live(id),
+        waitingForFolder: owner.kind === 'chat' && deps.chat.waiting(id),
+      };
     },
     async postConversationMessage(id, message) {
       const owner = ownerOf(id);
@@ -160,7 +165,7 @@ export function createConversationServices(deps: {
         case 'shape':
           return dtoOf(id, deps.shape.send(owner.shapeId, message.text).id);
         case 'chat':
-          return dtoOf(id, deps.chat.send(id, message).id);
+          return dtoOf(id, deps.chat.send(id, message, message.folder).id);
         case 'task': {
           const posted = await deps.task.post(owner.taskId, {
             text: message.text,
@@ -187,11 +192,11 @@ export function createConversationServices(deps: {
         case 'shape':
           return dtoOf(id, (await deps.shape.redo(owner.shapeId, message.text)).id);
         case 'chat': {
-          const edit = await deps.chat.redo(id, {
-            text: message.text,
-            mentions: [],
-            pictures: message.pictures,
-          });
+          const edit = await deps.chat.redo(
+            id,
+            { text: message.text, mentions: [], pictures: message.pictures },
+            message.folder,
+          );
           return dtoOf(id, edit.id);
         }
         // A page's Stop and Redo stops its running turn, then the message goes in (Workbench §6.3).

@@ -112,6 +112,8 @@ export interface ChatService {
   sendNow(conversationId: ConversationId): void;
   /** Stops waiting for Your folder: the queue runs reading only. */
   stopWaiting(chatId: ChatId): void;
+  /** Whether the conversation's message waits for Your folder. */
+  waiting(conversationId: ConversationId): boolean;
   /** Stop, then the edited message as the next turn, with its own choice for a folder in use. */
   redo(
     conversationId: ConversationId,
@@ -276,6 +278,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       }
       engine.sendNow(conversationId);
     },
+
+    waiting: (conversationId) => deps.folderHold.waiting(requireChat(conversationId).id),
 
     stopWaiting: (chatId) => {
       stopWaiting(getChat(state.db, chatId));

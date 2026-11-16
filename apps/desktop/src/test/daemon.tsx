@@ -6,6 +6,7 @@ import {
   KeepAwakeStatus,
   LanePermissionsDto,
   PicturesStatusDto,
+  ProjectId,
   PlanRecordDto,
   PROTOCOL_VERSION,
   SelfUpdateStatusDto,
@@ -33,6 +34,7 @@ import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
+import { folderDto } from './folder-fixtures';
 import { githubStatusDto } from './github-fixtures';
 import { modelMeasuresDto, rolePickDto, rolePicksDto } from './model-fixtures';
 import { playbookDto } from './playbook-fixtures';
@@ -175,7 +177,11 @@ export function baseHandlers(
       }),
     ),
     http.get(daemonUrl('/conversations/:conversationId/live', base), ({ params }) =>
-      HttpResponse.json({ conversationId: params['conversationId'], items: [] }),
+      HttpResponse.json({
+        conversationId: params['conversationId'],
+        items: [],
+        waitingForFolder: false,
+      }),
     ),
     // A conversation asks for its Plan's record, to offer the Record; a conversation holds none.
     http.get(daemonUrl('/shapes/:shapeId/record', base), ({ params }) =>
@@ -242,6 +248,10 @@ export function baseHandlers(
       HttpResponse.json({ notifyReplies: true }),
     ),
     http.get(daemonUrl('/chats', base), () => HttpResponse.json([])),
+    // Your folder is free, on `main`.
+    http.get(daemonUrl('/projects/:projectId/folder', base), ({ params }) =>
+      HttpResponse.json(folderDto({ projectId: ProjectId.parse(params['projectId']) })),
+    ),
     http.get(daemonUrl('/settings/lane-permissions', base), () =>
       HttpResponse.json(LanePermissionsDto.parse({ autoMode: true })),
     ),

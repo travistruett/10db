@@ -53,6 +53,12 @@
               "string",
               "null"
             ]
+          },
+          "words": {
+            "type": "string"
+          },
+          "keepsChatOut": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -60,7 +66,9 @@
           "name",
           "more",
           "chatId",
-          "what"
+          "what",
+          "words",
+          "keepsChatOut"
         ]
       }
     },

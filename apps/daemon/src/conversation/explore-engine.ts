@@ -731,7 +731,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       };
     },
     live(id) {
-      return { conversationId: id, items: runtimeOf(id).session?.open.buffers.snapshot() ?? [] };
+      return {
+        conversationId: id,
+        items: runtimeOf(id).session?.open.buffers.snapshot() ?? [],
+        waitingForFolder: false,
+      };
     },
     busy: () => [...runtimes.values()].filter((rt) => BUSY.has(rt.state)).map((rt) => rt.id),
     parked: (id) => runtimeOf(id).parked,

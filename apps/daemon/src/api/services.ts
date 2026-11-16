@@ -19,6 +19,8 @@ import type {
   ConversationItemId,
   ConversationItemsPage,
   ConversationLiveDto,
+  FolderDto,
+  FolderWhileHeld,
   ConversationOwnerKind,
   Effort,
   KindDto,
@@ -637,6 +639,8 @@ export interface ApiServices extends PlanRecordServices {
       readonly text: string;
       readonly mentions: readonly string[];
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+      /** A chat's choice when Your folder is held; absent reads only. */
+      readonly folder?: FolderWhileHeld;
     },
   ): Promise<ConversationItemDto>;
   /** A picture sent with one of the conversation's messages; NotFoundError for any other file. */
@@ -657,6 +661,10 @@ export interface ApiServices extends PlanRecordServices {
   /** Ends the chat's session in whatever state it is in, then archives it and removes its folder. */
   archiveChat(id: ChatId): Promise<ChatDto>;
   unarchiveChat(id: ChatId): ChatDto;
+  /** Stops a chat's wait for Your folder: what it queued runs reading only. */
+  stopChatWaiting(id: ChatId): ChatDto;
+  /** Who holds the project's checkout now, and the branch it is on. */
+  projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;
   /** Start from: at most three prompts built by rules from the project's state; none when git fails. */
   sessionStarts(projectId: ProjectId): Promise<SessionStartDto[]>;
@@ -672,6 +680,7 @@ export interface ApiServices extends PlanRecordServices {
     message: {
       readonly text: string;
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+      readonly folder?: FolderWhileHeld;
     },
   ): Promise<ConversationItemDto>;
   /** What an item keeps on disk past what it holds; NotFoundError when it keeps nothing. */

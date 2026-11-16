@@ -125,6 +125,7 @@ describe('applyFrame, a call', () => {
           outputOffset: 10_000,
         },
       ],
+      waitingForFolder: false,
     });
     const appended = applyFrame(start, out(14_096, 'z'), none);
     expect(appended.gap).toBe(false);

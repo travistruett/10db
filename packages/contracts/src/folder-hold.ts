@@ -69,12 +69,20 @@ export const FolderLimit = {
 } as const;
 export type FolderLimit = (typeof FolderLimit)[keyof typeof FolderLimit];
 
+/** A holder with the words that name it ("the task ‘Bump vite’ and 2 more"), and whether it keeps a chat's turn out. */
+export const FolderHolderView = FolderHolderDto.extend({
+  words: z.string(),
+  /** A chat's turn can't hold the folder with it: the turn waits or reads only. */
+  keepsChatOut: z.boolean(),
+});
+export type FolderHolderView = z.infer<typeof FolderHolderView>;
+
 /** Who holds a project's checkout now, for the session bar and the composer. */
 export const FolderDto = z.object({
   projectId: ProjectId,
   /** The branch Your folder is on, or null when it can't be read or is detached. */
   branch: z.string().nullable(),
-  holders: z.array(FolderHolderDto),
+  holders: z.array(FolderHolderView),
   limits: z.array(z.enum(FolderLimit)),
   /** The name of the closed pass the limit waits on, when there is one. */
   limitPass: z.string().nullable(),

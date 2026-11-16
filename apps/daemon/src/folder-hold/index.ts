@@ -11,3 +11,4 @@ export {
   type TurnBlocked,
   type TurnTaken,
 } from './hold';
+export { folderView } from './view';

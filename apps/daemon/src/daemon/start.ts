@@ -2243,6 +2243,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chat: createChatApiServices({
       state,
       chat,
+      folderHold,
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),

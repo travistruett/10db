@@ -74,7 +74,11 @@ function planDaemon(
     ),
     http.get(daemonUrl('/conversations/:conversationId/live'), () => {
       world.liveReads += 1;
-      return HttpResponse.json({ conversationId: id, items: world.live });
+      return HttpResponse.json({
+        conversationId: id,
+        items: world.live,
+        waitingForFolder: false,
+      });
     }),
     http.post(daemonUrl('/conversations/:conversationId/messages'), async ({ request }) => {
       const body: unknown = await request.json();
