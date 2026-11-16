@@ -58,7 +58,7 @@ export interface DoItDeps {
     Git,
     'changedEntries' | 'currentBranch' | 'operationInProgress' | 'trackingTip' | 'commitsSince'
   >;
-  readonly chat: Pick<ChatService, 'briefOf' | 'stopForOpen' | 'seal'>;
+  readonly chat: Pick<ChatService, 'briefOf' | 'stopForOpen' | 'seal' | 'underWay'>;
   /** Why a pass of one can't open in the project, from the database alone, or null. */
   readonly openProblem: (db: DbReader, project: ProjectDto) => string | null;
   /** Why the branch HEAD names can't be a pass's return branch, or null. */
@@ -103,8 +103,13 @@ export async function previewDoIt(deps: DoItDeps, chatId: ChatId): Promise<DoItP
   const project = getProject(db, chat.projectId);
   const at = deps.engine.view(chat.conversationId).state;
   const own =
-    refusalOfChat(chat.archivedAt !== null, at, chatId) ?? pendingRefusal(deps, project, chatId);
-  const changed = await deps.git.changedEntries(project.repoPath, DO_IT_CHANGED_MAX);
+    refusalOfChat(chat.archivedAt !== null, at, chatId) ??
+    pendingRefusal(deps, project, chatId) ??
+    underWayRefusal(deps, chatId);
+  // A folder that can't be read lists nothing; the sheet still shows where Do It can go.
+  const changed = await deps.git
+    .changedEntries(project.repoPath, DO_IT_CHANGED_MAX)
+    .catch(() => ({ entries: [], more: 0 }));
   const branch = await deps.git.currentBranch(project.repoPath).catch(() => null);
   return {
     brief: deps.chat.briefOf(chatId),
@@ -149,6 +154,12 @@ function refusalOfChat(
       `${DoItLink.Session}:${chatId}`,
     );
   return null;
+}
+
+function underWayRefusal(deps: Pick<DoItDeps, 'chat'>, chatId: ChatId): DoItRefusalDto | null {
+  return deps.chat.underWay(chatId)
+    ? refusal('under_way', 'Do It is already under way for this chat.', null)
+    : null;
 }
 
 function pendingRefusal(
@@ -415,8 +426,15 @@ export async function finishSeals(deps: FinishSealsDeps): Promise<void> {
     if (chat.taskId === null) continue;
     const taskId = chat.taskId;
     try {
-      if (deps.engine.view(chat.conversationId).state !== ConversationState.Sealed)
-        await deps.chat.seal(chat.id);
+      const sealed = deps.engine.view(chat.conversationId).state === ConversationState.Sealed;
+      // A Do It that finished (sealed, tab closed, task run) has nothing left to do at start-up.
+      if (
+        sealed &&
+        chat.tabPosition === null &&
+        latestWorkstreamOf(deps.state.db, taskId) !== undefined
+      )
+        continue;
+      if (!sealed) await deps.chat.seal(chat.id);
       if (latestWorkstreamOf(deps.state.db, taskId) === undefined) {
         try {
           deps.tasks.start(taskId);

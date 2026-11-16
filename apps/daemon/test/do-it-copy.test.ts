@@ -26,20 +26,40 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { FakeGh } from './fake-gh';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
-import { createTempRepo, isolatedGitEnv, tempDir, waitFor, waitForAsync } from './fixtures';
+import {
+  createTempRepoWithOrigin,
+  githubOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  tempDir,
+  waitFor,
+  waitForAsync,
+} from './fixtures';
 
 // Sessions spec §7.3: Do It in a separate copy, through the real daemon, a real repository and the fake agent.
 
 let data: { path: string; cleanup(): void };
 let worktrees: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
+let network: { global: string; cleanup(): void };
+let gh: FakeGh;
 let daemon: RunningDaemon;
 let adapter: FakeAdapter;
 beforeEach(async () => {
   data = tempDir('do it copy');
   worktrees = tempDir('do it copy worktrees');
-  repo = createTempRepo();
+  // An origin that reads as github.com, so a copy's cut can run and the tests look at copies that exist.
+  const remote = createTempRepoWithOrigin();
+  network = githubOrigin(remote.repo.path, remote.origin.path);
+  repo = {
+    path: remote.repo.path,
+    cleanup: () => {
+      remote.cleanup();
+    },
+  };
+  gh = new FakeGh();
   adapter = new FakeAdapter({});
   daemon = await boot();
 });
@@ -57,11 +77,14 @@ function boot(): Promise<RunningDaemon> {
     watch: false,
     // A tick long enough that no lane starts while the test looks.
     tickMs: 3_600_000,
+    gh,
+    networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
   });
 }
 afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
+  network.cleanup();
   data.cleanup();
   worktrees.cleanup();
 });
@@ -154,8 +177,11 @@ describe('Do It in a separate copy', () => {
         .find((w) => w.id === id);
       return row?.batchId == null ? undefined : getBatch(daemon.state.db, row.batchId);
     });
-    if (batch.worktreePath !== null)
-      expect(existsSync(join(batch.worktreePath, 'notes.md'))).toBe(false);
+    const copy = batch.worktreePath;
+    if (copy === null) throw new Error('the copy has no worktree');
+    // Read once the cut has made it, so the check can see what the copy was cut with.
+    await waitFor(() => existsSync(join(copy, 'README.md')) || undefined);
+    expect(existsSync(join(copy, 'notes.md'))).toBe(false);
   });
 
   it('stops a running turn first, keeping its partial text, and a second submit makes no second task', async () => {
@@ -223,6 +249,22 @@ describe('Do It in a separate copy', () => {
         (i) => i.kind === 'notice' && JSON.stringify(i.body).includes('handed_to'),
       ),
     ).toHaveLength(1);
+  });
+
+  it('leaves a chat whose Do It finished alone at the next start', async () => {
+    const made = await project();
+    const chat = await chatWithReply(made);
+    await api().post(`/chats/${chat.id}/do-it`, DoItResult, request);
+    const before = getChat(daemon.state.db, chat.id).updatedAt;
+    const notices = () =>
+      listItems(daemon.state.db, chat.conversationId).filter((i) => i.kind === 'notice').length;
+    const noticed = notices();
+    await daemon.stop();
+
+    daemon = await boot();
+
+    expect(getChat(daemon.state.db, chat.id).updatedAt).toBe(before);
+    expect(notices()).toBe(noticed);
   });
 
   it('refuses a start the daemon cannot make, leaving the chat as it was and its queue running', async () => {

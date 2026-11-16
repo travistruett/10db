@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Delivery, WorkstreamState, type DoItPreviewDto } from '@10db/contracts';
 import { insertTask, insertWorkstream, schema } from '@10db/db';
@@ -70,6 +70,21 @@ describe('the Do It preview', () => {
     expect(read.changed).toEqual([{ path: 'notes.md', status: '?' }]);
     expect(read).toMatchObject({ more: 0, runningTurn: false, stacksOn: null, leftOut: null });
     expect(read.base).toBe('main');
+  });
+
+  it('offers neither place while a Do It has the chat stopped, and still answers when the folder cannot be read', async () => {
+    world();
+    const chat = w.open();
+    const release = await w.chat.stopForOpen(chat.id);
+
+    const doing = await preview(chat);
+
+    expect(doing.here).toMatchObject({ offered: false, refusal: { code: 'under_way' } });
+    expect(doing.worktree).toMatchObject({ offered: false, refusal: { code: 'under_way' } });
+    release();
+    rmSync(repo.path, { recursive: true, force: true });
+    const unreadable = await preview(chat);
+    expect(unreadable.changed).toEqual([]);
   });
 
   it('refuses here naming a lane in the folder, and offers whenBusy for another chat’s turn only', async () => {
