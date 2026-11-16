@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   mintId,
   TaskMessageAuthor,
   WorkspaceMode,
@@ -9,6 +12,8 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
+  insertChat,
+  insertConversation,
   getBatch,
   getTask,
   getTaskKeptWork,
@@ -95,6 +100,40 @@ describe('an ordinary start of a task with saved UI Workbench work', () => {
     expect(read(h.repo, 'src/api/new.ts')).toBe('new\n');
     expect(getTaskKeptWork(h.store.db, task.id)).toBeNull();
     expect(notices(task)).toEqual(['Put back its saved UI Workbench work: 2 files.']);
+  });
+
+  it('waits for a chat’s turn before it writes in Your folder, and goes back once the turn ends', async () => {
+    h = createDeliveryHarness({ delivery: 'local' } satisfies Partial<ProjectInput>);
+    const task = taskWithSavedWork();
+    const run = startTaskWithPlan(h.state, task.id);
+    const chat = h.state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: run.projectId,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      });
+      return insertChat(ctx, {
+        id,
+        projectId: run.projectId,
+        conversationId: conv.id,
+        title: 'Retry login',
+        tabPosition: 0,
+      }).id;
+    });
+    h.ctx.folderHold.takeTurn(run.projectId, chat);
+    const gate = createKeptWorkGate(h.ctx);
+
+    expect(gate.ready(run)).toBe(false);
+    await h.jobs.idle();
+    // Nothing went back while the chat held the folder, and the gate asks again.
+    expect(read(h.repo, 'src/api/a.ts')).toBe('a\n');
+    h.ctx.folderHold.releaseTurn(chat);
+    expect(gate.ready(run)).toBe(false);
+    await h.jobs.idle();
+    expect(gate.ready(run)).toBe(true);
+    expect(read(h.repo, 'src/api/a.ts')).toBe('kept\n');
   });
 
   it('names a file that does not go back on the thread, keeps it saved, and still lets the run launch', async () => {

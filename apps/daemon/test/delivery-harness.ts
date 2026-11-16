@@ -50,6 +50,7 @@ import {
   type Shipper,
 } from '../src/delivery';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
+import { createFolderHold } from '../src/folder-hold';
 import { createGit, type Git, type GitTrustError } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import type { LoadGuard } from '../src/load';
@@ -341,8 +342,10 @@ export function createDeliveryHarness(
     checkouts: () => [remote.repo.path],
     timeoutMs: opts.gateTimeoutMs ?? 20_000,
   };
+  const folderHold = createFolderHold({ state, bus });
   const ctx: DeliveryContext = {
     state,
+    folderHold,
     git,
     gh,
     inbox,

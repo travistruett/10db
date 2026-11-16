@@ -316,6 +316,7 @@ import {
   type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
+import { createFolderHold } from '../folder-hold';
 import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
 import {
   createDrain,
@@ -679,6 +680,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  const folderHold = createFolderHold({ state, bus });
   const liveFrames =
     opts.liveFrames ??
     createLiveFrames((error) => {
@@ -1246,6 +1248,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const delivery: DeliveryContext = {
     state,
+    folderHold,
     git,
     gh: opts.gh ?? createGh(createSystemGhExec(ghTools)),
     inbox,
@@ -1734,6 +1737,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   runner = createdRunner;
   const createdScheduler = createScheduler({
     state,
+    folderHold,
     runner: createdRunner,
     accounts: {
       ...accounts,
@@ -2063,6 +2067,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keepAwake.refresh();
       watcher?.sync();
     }
+  });
+  // A task waiting for a chat's turn, and a put-back that waited for it, start once the folder frees.
+  const unsubscribeFolderHold = bus.subscribe((event) => {
+    if (event.type === EventType.FolderHoldChanged) createdScheduler.requestTick();
   });
   // A yield the builder chose for a task that then ended is never delivered; drop it.
   const unsubscribeYields = forgetEndedYields(bus, claimWaits);
@@ -2649,6 +2657,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();
+      unsubscribeFolderHold();
+      folderHold.close();
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();

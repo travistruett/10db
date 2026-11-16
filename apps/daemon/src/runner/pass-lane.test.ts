@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { createEventBus } from '../events';
+import { createFolderHold } from '../folder-hold';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -552,6 +554,7 @@ describe("a builder message's hand-over to a warm session", () => {
         (i) => i.detail?.['passCard'] === 'folder',
       );
     const scheduler = createScheduler({
+      folderHold: createFolderHold({ state: engine.state, bus: createEventBus() }),
       state: engine.state,
       clock: engine.clock,
       caps: { global: 4 },
@@ -2085,6 +2088,7 @@ describe('a message to a signed-off page', () => {
     expect(getTask(engine.store.db, task.id).status).toBe('open');
     // The scheduler claims the page for the new run and launches it.
     const scheduler = createScheduler({
+      folderHold: createFolderHold({ state: engine.state, bus: createEventBus() }),
       state: engine.state,
       clock: engine.clock,
       caps: { global: 4 },

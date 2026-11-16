@@ -38,6 +38,9 @@ export const FolderOutcome = {
 } as const;
 export type FolderOutcome = (typeof FolderOutcome)[keyof typeof FolderOutcome];
 
+/** The notice a task in Your folder shows while a chat holds or waits for the folder. */
+export const FOLDER_HOLD_WAIT_NOTICE_KEY = 'folder-hold';
+
 /** What a chat's send does when Your folder is held: wait for it, or run reading only. */
 export const FolderWhileHeld = { Wait: 'wait', ReadOnly: 'read_only' } as const;
 export type FolderWhileHeld = (typeof FolderWhileHeld)[keyof typeof FolderWhileHeld];

@@ -222,6 +222,7 @@ describe('recoverBatches', () => {
     );
     const launched: string[] = [];
     const scheduler = createScheduler({
+      folderHold: h.ctx.folderHold,
       keptWork: createKeptWorkGate(h.ctx),
       state: h.state,
       clock: new ManualClock(),

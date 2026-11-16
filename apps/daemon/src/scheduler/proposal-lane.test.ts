@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createFolderHold } from '../folder-hold';
 import { dirname, join } from 'node:path';
 import { ClaimKind, WorkstreamState, type WorkstreamId } from '@10db/contracts';
 import {
@@ -114,6 +115,7 @@ describe('a lane for a task filed from a proposal', () => {
     const lane = startTaskWithPlan(state, filed.id);
     const launched: WorkstreamId[] = [];
     const scheduler = createScheduler({
+      folderHold: createFolderHold({ state, bus }),
       // No run here has saved Workbench work.
       keptWork: { ready: () => true },
       state,

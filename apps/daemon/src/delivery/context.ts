@@ -2,6 +2,7 @@ import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@
 import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import type { FolderHold } from '../folder-hold';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
 import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox';
@@ -36,6 +37,8 @@ export const DEFAULT_DELIVERY_LIMITS: DeliveryLimits = {
 /** What every delivery step needs. */
 export interface DeliveryContext {
   readonly state: StateStore;
+  /** 10db's own git work reserves Your folder here before it moves HEAD, so a chat's turn is never under it. */
+  readonly folderHold: FolderHold;
   readonly git: Git;
   readonly gh: Gh;
   readonly inbox: InboxService;
