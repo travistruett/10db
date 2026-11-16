@@ -1,5 +1,8 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { claudeTakeoverNotes } from './claude-takeover';
+export { claudeTakeoverMcp, codexTakeoverServers } from './takeover-servers';
+export { tomlString } from './codex-takeover';
+export { setupPromptText } from './setup-prompt';
 export { codexTakeoverNotes } from './codex-takeover';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';

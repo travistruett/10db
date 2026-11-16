@@ -5,7 +5,7 @@ import type { AgentSessionCore, YourSessionServer } from './types';
 const APPROVAL_MODE = 'approve';
 
 /** What `~/.codex/config.toml` sets that only Codex applies, as the entry's own keys, where set. */
-function codexKeys(codex: YourSessionServer['codex']): Record<string, unknown> {
+export function codexKeys(codex: YourSessionServer['codex']): Record<string, unknown> {
   return {
     ...(codex.enabledTools === null ? {} : { enabled_tools: [...codex.enabledTools] }),
     ...(codex.disabledTools.length === 0 ? {} : { disabled_tools: [...codex.disabledTools] }),
@@ -18,7 +18,7 @@ function codexKeys(codex: YourSessionServer['codex']): Record<string, unknown> {
  * The `oauth` block of a `~/.claude.json` entry as Codex's keys: the client id and callback port, and the
  * scopes as a list. `authServerMetadataUrl` and `xaa` have no Codex key, so they are left out.
  */
-function oauthKeys(oauth: YourSessionServer['claudeOAuth']): Record<string, unknown> {
+export function oauthKeys(oauth: YourSessionServer['claudeOAuth']): Record<string, unknown> {
   if (oauth === null) return {};
   const client = {
     ...(oauth.clientId === undefined ? {} : { client_id: oauth.clientId }),

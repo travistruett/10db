@@ -1,6 +1,7 @@
 import { ConversationState } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  openTerminalRefusal,
   reduceExplore,
   type ExploreEffect,
   type ExploreEvent,
@@ -692,5 +693,20 @@ describe('reduceExplore', () => {
               landings.push(`${event} in ${state} lands in ${out.next}`);
           }
     expect(landings).toEqual([]);
+  });
+});
+
+describe('openTerminalRefusal', () => {
+  // The words the reducer refuses Open in Terminal with, asked without making the event.
+  it.each([
+    ['idle_cold with a session', ConversationState.IdleCold, true, null],
+    ['idle_cold with none', ConversationState.IdleCold, false, 'Send a message first'],
+    ['idle_warm', ConversationState.IdleWarm, true, null],
+    ['taken_over (again)', ConversationState.TakenOver, true, null],
+    ['running', ConversationState.Running, true, 'Stop first'],
+    ['starting', ConversationState.Starting, true, 'The session is starting'],
+    ['sealed', ConversationState.Sealed, true, 'This session handed its work to a task'],
+  ] as const)('%s', (_name, state, session, words) => {
+    expect(openTerminalRefusal(state, session)).toBe(words);
   });
 });

@@ -1,4 +1,4 @@
-import { ConversationState, type SteerMode } from '@10db/contracts';
+import { ConversationState, SteerMode } from '@10db/contracts';
 
 // Sessions spec §6.7: an explore conversation's state × event table, as a pure reducer. The engine
 // stores a builder message before it reduces, so "store" is no effect here; every other phrase of a
@@ -321,4 +321,23 @@ export function reduceExplore(
       }
       return stay;
   }
+}
+
+/** The table's words for refusing Open in Terminal in `state`, or null when it would go ahead. */
+export function openTerminalRefusal(
+  state: ConversationState,
+  providerSessionId: boolean,
+): string | null {
+  const outcome = reduceExplore(
+    state,
+    { type: 'open_terminal' },
+    {
+      queued: 0,
+      providerSessionId,
+      restartedWhilePaused: false,
+      steer: SteerMode.Queue,
+      resuming: false,
+    },
+  );
+  return 'refused' in outcome ? outcome.refused : null;
 }

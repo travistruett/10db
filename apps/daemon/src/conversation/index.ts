@@ -11,6 +11,7 @@ export {
   type OutgoingMessage,
 } from './delivery-rules';
 export { BUSY } from './explore-runtime';
+export { openTerminalRefusal } from './explore-state';
 export { createExploreEngine, type ExploreEngine, type ExploreEngineDeps } from './explore-engine';
 export { itemsWithFull, readFullOutput, writeFullOutput } from './full-output';
 export { itemDtoOf } from './item-dto';

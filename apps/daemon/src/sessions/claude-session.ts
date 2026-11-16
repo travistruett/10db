@@ -198,7 +198,7 @@ export function spawnClaude(
  * One of the builder's servers as the SDK takes it, with the `oauth` block its entry declared. The SDK's
  * http and sse types lack that field but the CLI reads it, so it rides on a typed variable, not a literal.
  */
-function toYourSdkServer(server: YourSessionServer): McpServerConfig {
+export function toYourSdkServer(server: YourSessionServer): McpServerConfig {
   const base = toSdkMcpServer(server.connect);
   if (server.claudeOAuth === null || (base.type !== 'http' && base.type !== 'sse')) return base;
   const withOAuth: typeof base & { readonly oauth: ClaudeOAuth } = {
