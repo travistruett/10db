@@ -8,6 +8,6 @@ export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
 export { createChatLiveSessions } from './live-sessions';
 export { createChatService, type ChatService } from './service';
 export { sessionStarts } from './session-starts';
-export { sessionsSettings, setSessionsSettings } from './settings';
+export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';

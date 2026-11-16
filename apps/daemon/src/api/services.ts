@@ -11,6 +11,7 @@ import type {
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
+  SessionsSettingsPatch,
   ConversationDeltaFrame,
   ConversationDto,
   ConversationFullDto,
@@ -670,6 +671,8 @@ export interface ApiServices extends PlanRecordServices {
   sessionStarts(projectId: ProjectId): Promise<SessionStartDto[]>;
   sessionsSettings(): SessionsSettingsDto;
   setSessionsSettings(input: SessionsSettingsDto): SessionsSettingsDto;
+  /** Sets the fields given and keeps the rest. */
+  patchSessionsSettings(input: SessionsSettingsPatch): SessionsSettingsDto;
   /** Sends what waits under "Send now"; ConflictError, with the state's words, when nothing would run. */
   sendConversationNow(id: ConversationId): ConversationDto;
   /** Stops the turn; answers once it is stopping or settled. */

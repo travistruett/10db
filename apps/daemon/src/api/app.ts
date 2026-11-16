@@ -137,6 +137,7 @@ import {
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
+  SessionsSettingsPatch,
   CapacitySettingsDto,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -1868,6 +1869,11 @@ export function createApp(deps: ApiDeps) {
       '/settings/sessions',
       validator('json', (value): SessionsSettingsDto => SessionsSettingsDto.parse(value)),
       (c) => c.json(deps.services.setSessionsSettings(c.req.valid('json'))),
+    )
+    .patch(
+      '/settings/sessions',
+      validator('json', (value): SessionsSettingsPatch => SessionsSettingsPatch.parse(value)),
+      (c) => c.json(deps.services.patchSessionsSettings(c.req.valid('json'))),
     )
     .get('/settings/trust', async (c) => c.json(await deps.services.trustSettings()))
     .put(

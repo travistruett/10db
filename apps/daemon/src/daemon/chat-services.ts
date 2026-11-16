@@ -1,6 +1,7 @@
 import { getProject } from '@10db/db';
 import type { ApiServices } from '../api';
 import {
+  patchSessionsSettings,
   sessionsSettings,
   sessionStarts,
   setSessionsSettings,
@@ -28,6 +29,7 @@ export type ChatApiServices = Pick<
   | 'sessionStarts'
   | 'sessionsSettings'
   | 'setSessionsSettings'
+  | 'patchSessionsSettings'
 >;
 
 export function createChatApiServices(deps: {
@@ -82,5 +84,6 @@ export function createChatApiServices(deps: {
     },
     sessionsSettings: () => sessionsSettings(state.db),
     setSessionsSettings: (input) => setSessionsSettings(state, input),
+    patchSessionsSettings: (input) => patchSessionsSettings(state, input),
   };
 }
