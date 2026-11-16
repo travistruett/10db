@@ -1,15 +1,11 @@
-import { ChatToolName } from '@10db/contracts';
+import { JUDGED_OWN_TOOLS } from '../trust';
 
 /**
  * The chat tools that reach GitHub: a push and a pull request send the builder's work out, a merge writes to a
  * shared branch. None is in `allowedTools`, so the session's judge sees each call; the hook's own answer is a
  * bare allow where a judge runs and a question on the rules floor.
  */
-export const JUDGED_CHAT_TOOLS: ReadonlySet<string> = new Set([
-  ChatToolName.PushBranch,
-  ChatToolName.OpenPullRequest,
-  ChatToolName.MergePullRequest,
-]);
+export const JUDGED_CHAT_TOOLS: ReadonlySet<string> = JUDGED_OWN_TOOLS;
 
 /** What the rules floor asks the builder when a chat reaches for one of them. */
 export const JUDGED_CHAT_TOOL_ASK =

@@ -9,6 +9,7 @@ import {
   readOnlyShellRefusal,
   realPathReadings,
 } from '../guard';
+import { ChatToolName } from '@10db/contracts';
 import { Operands, readCallOf, type ReadCall } from './read-allowlist';
 
 /** What a Codex `apply_patch` hunk does to its file. */
@@ -243,10 +244,22 @@ function overwritesPreExisting(written: string, ctx: FastPathContext): boolean {
   return ctx.preExisting.some((entry) => isWithin(join(ctx.checkout, entry), written));
 }
 
+const OWN_TOOL_PREFIX = 'mcp__10db__';
+
+/**
+ * 10db's own tools that cross a limit: a push and a pull request send the builder's work out, a merge writes to
+ * a shared branch. The fast path never settles them, so a judge reads each call.
+ */
+export const JUDGED_OWN_TOOLS: ReadonlySet<string> = new Set([
+  ChatToolName.PushBranch,
+  ChatToolName.OpenPullRequest,
+  ChatToolName.MergePullRequest,
+]);
+
 /**
  * Whether a call can't cross a limit, so 10db's judge allows it with no model: a read, a listing, an edit in the
  * checkout or the session's temp dir, a listed read command with listed options on files inside, a subagent
- * launch, and 10db's own tools, and never a call that can reach a secret, search a directory, print history or
+ * launch, and 10db's own tools but the ones that send work out or merge, and never a call that can reach a secret, search a directory, print history or
  * the environment, or delete or move a file.
  */
 export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
@@ -255,7 +268,8 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
   // An object is a record of unknown values here; each field is read by its type.
   const fields = input as Readonly<Record<string, unknown>>;
   const tool = call.toolName;
-  if (tool.startsWith('mcp__10db__')) return true;
+  if (tool.startsWith(OWN_TOOL_PREFIX))
+    return !JUDGED_OWN_TOOLS.has(tool.slice(OWN_TOOL_PREFIX.length));
   switch (tool) {
     case 'Task':
     case 'Agent':

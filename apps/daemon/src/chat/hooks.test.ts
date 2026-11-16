@@ -347,6 +347,25 @@ describe("a chat's judge", () => {
     expect(verdict.decision).toBe('ask');
   });
 
+  // The tools that send work out or merge are never settled by the fast path: 10db's judge's model reads each.
+  it.each(['push_branch', 'open_pull_request', 'merge_pull_request'])(
+    "asks 10db's model about %s, which the fast path never settles",
+    async (name) => {
+      const spec = await firstSpec(JudgeKind.Tendb, null, tendbAnswering('writes_live'));
+      const judgeCall = spec.judgeCall;
+      if (judgeCall === undefined) throw new Error('the chat has no session judge');
+      const verdict = await judgeCall({
+        toolName: `mcp__10db__${name}`,
+        input: {},
+        cwd: '/repo',
+        toolUseId: 'toolu_1',
+        signal: new AbortController().signal,
+        hunk: null,
+      });
+      expect(verdict.decision).toBe('ask');
+    },
+  );
+
   it("says in the chat, once, that the judge didn't answer and the rules judge", async () => {
     w = chatWorld({
       prepare: prepared,
