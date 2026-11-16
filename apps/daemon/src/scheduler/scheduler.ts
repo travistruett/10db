@@ -303,10 +303,20 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   /** Shows on a task that it waits for a chat's turn to finish with Your folder, naming the holder. */
-  function waitForFolder(id: WorkstreamId, blockers: readonly FolderBlocker[]): void {
+  function waitForFolder(
+    id: WorkstreamId,
+    projectId: ProjectId,
+    blockers: readonly FolderBlocker[],
+  ): void {
+    // A pass that waits to open holds the folder next, so its name is the answer, not 10db's git work.
+    const opening = opts.folderHold.opening(projectId);
     // 10db's own git work is over in moments, and says nothing the builder acts on.
-    if (blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)) return;
-    const line = `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
+    if (opening === null && blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork))
+      return;
+    const line =
+      opening !== null && blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)
+        ? `Waits for the pass ‘${opening}’, opening`
+        : `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
     const stale = (notice: WorkstreamDto['notice']): boolean =>
       notice === null || (notice.key === FOLDER_HOLD_WAIT_NOTICE_KEY && notice.line !== line);
     if (!stale(getWorkstreamRow(db, id).notice)) return;
@@ -434,7 +444,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (firstInFolder) {
         const held = chatHolders(project.id);
         if (held.length > 0) {
-          waitForFolder(ws.id, held);
+          waitForFolder(ws.id, project.id, held);
           continue;
         }
       }
