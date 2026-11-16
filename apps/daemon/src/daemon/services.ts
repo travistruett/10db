@@ -144,6 +144,7 @@ import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
+import { taskSession } from '../chat';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -726,7 +727,8 @@ export function createServices(deps: {
       await deps.runner.cancel(id);
       return getWorkstream(db, id);
     },
-    workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
+    workstreamChanges: (id, scope) => workstreamChanges({ db, git: deps.git }, id, scope),
+    taskSession: (taskId) => taskSession(db, taskId),
     listWorkstreamSkips(id) {
       getWorkstream(db, id);
       return listSkipsForWorkstream(db, id);

@@ -321,6 +321,18 @@ export function chatsHandedToCopies(db: DbReader): ChatRow[] {
     .all();
 }
 
+/** The chat Do It made the task from: the latest to file it, or undefined for a task no chat filed. */
+export function chatThatMadeTask(db: DbReader, taskId: TaskId): ChatRow | undefined {
+  const link = db
+    .select({ chatId: schema.chatTasks.chatId })
+    .from(schema.chatTasks)
+    .where(eq(schema.chatTasks.taskId, taskId))
+    .orderBy(desc(schema.chatTasks.createdAt))
+    .limit(1)
+    .get();
+  return link === undefined ? undefined : getChat(db, link.chatId);
+}
+
 export function chatMadeTask(db: DbReader, chatId: ChatId, taskId: TaskId): boolean {
   return (
     db

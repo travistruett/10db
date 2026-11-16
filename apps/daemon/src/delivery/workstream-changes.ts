@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import {
+  ChangesScope,
   ConflictError,
   NotFoundError,
   PassCheckDetail,
@@ -10,7 +11,10 @@ import {
 } from '@10db/contracts';
 import {
   getBatch,
+  getTask,
   getWorkstreamRow,
+  listPassTurns,
+  passHoldingTask,
   openItemsForWorkstream,
   type DbReader,
   type WorkstreamRow,
@@ -54,6 +58,31 @@ function shownKeptWork(db: DbReader, row: WorkstreamRow): { base: string; head: 
 }
 
 /**
+ * What a page of a pass shows for `scope`: every turn kept, from where the pass began to the latest kept commit,
+ * or only the latest turn, from the commit kept before it. Null for a task no pass holds, whose work is the
+ * same either way. A turn still working has kept nothing yet, so it is not shown.
+ */
+function keptTurnsRange(
+  db: DbReader,
+  row: WorkstreamRow,
+  scope: ChangesScope,
+): { base: string; head: string } | null {
+  const pass = passHoldingTask(db, getTask(db, row.taskId));
+  if (pass === undefined) return null;
+  const kept = listPassTurns(db, pass.id).filter(
+    (t) => t.taskId === row.taskId && t.ending !== null && t.keptSha !== null,
+  );
+  const latest = kept.at(-1);
+  if (latest?.keptSha == null)
+    throw new ConflictError('No turn of this page has been kept yet, so there is nothing to show');
+  if (scope === ChangesScope.All) return { base: pass.startSha, head: latest.keptSha };
+  return {
+    base: kept.at(-2)?.keptSha ?? latest.keptBaseSha ?? pass.startSha,
+    head: latest.keptSha,
+  };
+}
+
+/**
  * What a workstream changed: the diff from the head it started at to its head, for the builder to
  * check. The head is read once, from the check card the builder is looking at when there is one and
  * from its checkout (its batch's worktree, else the project's) otherwise, and every part of the
@@ -63,8 +92,14 @@ function shownKeptWork(db: DbReader, row: WorkstreamRow): { base: string; head: 
 export async function workstreamChanges(
   deps: { readonly db: DbReader; readonly git: Git },
   id: WorkstreamId,
+  scope?: ChangesScope,
 ): Promise<WorkstreamChangesDto> {
   const row = getWorkstreamRow(deps.db, id);
+  if (scope !== undefined) {
+    const turns = keptTurnsRange(deps.db, row, scope);
+    if (turns)
+      return readChanges(deps.git, checkoutOf(deps.db, row), id, turns.base, turns.head, false);
+  }
   const kept = shownKeptWork(deps.db, row);
   if (kept) return readChanges(deps.git, checkoutOf(deps.db, row), id, kept.base, kept.head, false);
   if (row.baseHead === null)

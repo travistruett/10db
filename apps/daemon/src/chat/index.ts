@@ -24,3 +24,4 @@ export {
   type DoItTasks,
   type FinishSealsDeps,
 } from './do-it';
+export { taskSession } from './task-session';

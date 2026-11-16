@@ -113,6 +113,7 @@ import {
   ConversationFileId,
   TaskScreenId,
   TaskId,
+  ChangesScope,
   TaskInput,
   TaskMessageInput,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
@@ -1795,8 +1796,22 @@ export function createApp(deps: ApiDeps) {
         );
       },
     )
-    .get('/workstreams/:id/changes', async (c) =>
-      c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),
+    .get(
+      '/workstreams/:id/changes',
+      validator('query', (query): { scope?: ChangesScope } => {
+        const scope = query['scope'];
+        return scope === undefined ? {} : { scope: z.enum(ChangesScope).parse(scope) };
+      }),
+      async (c) =>
+        c.json(
+          await deps.services.workstreamChanges(
+            WorkstreamId.parse(c.req.param('id')),
+            c.req.valid('query').scope,
+          ),
+        ),
+    )
+    .get('/tasks/:taskId/session', (c) =>
+      c.json(deps.services.taskSession(TaskId.parse(c.req.param('taskId')))),
     )
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
