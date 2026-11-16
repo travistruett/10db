@@ -396,6 +396,31 @@ describe('Composer while Your folder is held', () => {
     expect(screen.queryByRole('group', { name: 'Your folder is in use' })).toBeNull();
   });
 
+  it('sends nothing from the choices once the composer is locked or cannot send', () => {
+    const onChoose = vi.fn();
+    function Cuts() {
+      const [reason, setReason] = useState<string | null>(null);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setReason('Reconnecting… your message stays here.');
+            }}
+          >
+            Cut
+          </button>
+          <Held held={held(onChoose)} disabledReason={reason} start={typed} />
+        </>
+      );
+    }
+    renderWithTheme(<Cuts />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cut' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wait for It' }));
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
   it('drops the choices when the folder frees', () => {
     function Frees() {
       const [on, setOn] = useState(true);

@@ -220,6 +220,7 @@ export function Composer({
   };
   const choose = (choice: FolderWhileHeld): void => {
     if (held === undefined || choosing === null || busy !== null) return;
+    if (locked || disabledReason !== null) return;
     const how = choosing;
     setChoosing(null);
     void run(
