@@ -103,12 +103,18 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await composer.press('Enter');
   await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
 
-  // The reply, in an article headed by the agent's label, with a read row and a search row.
+  // The reply, in an article headed by the agent's label; its settled work is one Worked row that
+  // opens to a read row and a search row.
   const reply = page
     .getByRole('article')
     .filter({ has: page.getByRole('heading', { name: 'Claude Code' }) });
   await expect(reply.getByRole('heading', { name: 'What I found' })).toBeVisible();
   await expect(reply.getByText('const retry = once;')).toBeVisible();
+  await expect(page.getByText(/Read 1 file/)).toHaveCount(0);
+  await reply
+    .getByRole('button', { name: /^Worked/ })
+    .first()
+    .click();
   await expect(page.getByText(/Read 1 file/).first()).toBeVisible();
   await expect(page.getByText(/searched/i).first()).toBeVisible();
   await scan(page, [1280], 'the conversation');
