@@ -29,6 +29,14 @@ export interface OpenWhenBusyDeps {
 }
 
 /** What the open is for, in the words a refusal and the pending open use. */
+/** Refuses a wait to open while 10db drains for an update, which would cancel it. */
+export function refuseWaitWhileDraining(deps: Pick<OpenWhenBusyDeps, 'draining'>): void {
+  if (deps.draining())
+    throw new ConflictError(
+      "10db is about to update, so a pass can't wait to open; try again after it",
+    );
+}
+
 export interface OpenRequest<T> {
   readonly projectId: ProjectId;
   /** The pass's name. */
@@ -71,10 +79,7 @@ export async function openWhenBusy<T>(
   if (whenBusy === undefined || !onlyChats || chats.length === 0) return request.open();
 
   if (whenBusy === PassWhenBusy.Wait) {
-    if (deps.draining())
-      throw new ConflictError(
-        "10db is about to update, so a pass can't wait to open; try again after it",
-      );
+    refuseWaitWhileDraining(deps);
     request.check?.();
     const signal = deps.pendingOpens.begin(projectId, {
       name: request.name,

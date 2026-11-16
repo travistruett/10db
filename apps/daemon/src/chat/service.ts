@@ -77,9 +77,11 @@ const FIRST_LINE_TITLE_MAX = 40;
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
-/** What Redo, archive and a second Do It are refused with while an open has stopped the chat's turn. */
+/** What Redo, archive and a second Do It are refused with while a pass's open has stopped the chat's turn. */
 export const DO_IT_UNDER_WAY =
   'A pass is opening and has stopped this chat’s turn; try again once it has opened';
+/** The same refusal while Do It makes a task in a separate copy. */
+export const DO_IT_COPY_UNDER_WAY = 'Do It is already under way for this chat';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
 /** What Do It and archive are refused with while a pass waits to open for the chat. */
@@ -201,7 +203,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
   const briefTurns = new Set<ChatId>();
   const refuseWhileDoing = (chatId: ChatId): void => {
-    if (stoppedForOpen.has(chatId)) throw new ConflictError(DO_IT_UNDER_WAY);
+    const place = stoppedForOpen.get(chatId);
+    if (place === undefined) return;
+    throw new ConflictError(place === DoItPlace.Worktree ? DO_IT_COPY_UNDER_WAY : DO_IT_UNDER_WAY);
   };
 
   // A chat sealed into a task of its own has nothing left to archive until that task ends: the tab it

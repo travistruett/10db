@@ -7,6 +7,7 @@ import {
   FolderAsker,
   FolderHolderKind,
   InvalidError,
+  PassWhenBusy,
   WorkspaceMode,
   type ChatId,
   type DoItOfferDto,
@@ -39,6 +40,7 @@ import type { Git } from '../git';
 import type { Logger } from '../log';
 import {
   openWhenBusy,
+  refuseWaitWhileDraining,
   STOPPED_TURNS_DEADLINE_MS,
   type OpenWhenBusyDeps,
   type PendingOpens,
@@ -372,6 +374,9 @@ export async function doItHere(
   const offer = await hereOffer(deps, project, chatId, branch);
   if (!offer.offered && !(offer.whenBusy && input.whenBusy !== undefined))
     throw new ConflictError(offer.refusal?.message ?? 'Your folder is not free for a pass');
+  // A wait that an update would cancel is refused before anything of the chat's is stopped.
+  if (input.whenBusy === PassWhenBusy.Wait && !offer.offered)
+    refuseWaitWhileDraining(deps.openWhenBusy);
   const release = await deps.chat.stopForOpen(chatId, DoItPlace.Here);
   try {
     const opened = await openWhenBusy(deps.openWhenBusy, {
@@ -379,6 +384,11 @@ export async function doItHere(
       name: input.title,
       chatId,
       whenBusy: input.whenBusy,
+      // The folder may have changed while the chat's own turn stopped; a wait is answered only for an open that can run.
+      check: () => {
+        const problem = deps.openProblem(db, project);
+        if (problem !== null) throw new ConflictError(problem);
+      },
       open: async (wait) => {
         try {
           await deps.openWholeProject({
