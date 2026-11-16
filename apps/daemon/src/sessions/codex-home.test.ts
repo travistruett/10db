@@ -74,6 +74,8 @@ describe('codex home', () => {
       agents: { enabled: false },
       skills: { include_instructions: false },
       shell_environment_policy: { inherit: 'none' },
+      // MCP sign-ins are kept in a file in this home, where the account's sessions read them.
+      mcp_oauth_credentials_store: 'file',
     });
     expect(config.permissions.lane.filesystem).toEqual({ ':minimal': 'read' });
     expect(config.hooks.PreToolUse[0]?.hooks[0]).toMatchObject({
@@ -87,6 +89,19 @@ describe('codex home', () => {
     expect(readFileSync(join(home, 'guard-hook.sh'), 'utf8')).toContain(
       '--unix-socket "$TENDB_GUARD_SOCKET"',
     );
+  });
+
+  it('ensureConfig writes the config and the hook and pins no checkout', async () => {
+    const { home, checkout } = setup();
+    const codexHome = codexHomes()(home);
+    await codexHome.ensureConfig();
+    const config = readConfig(home);
+    expect(config.projects).toEqual({});
+    expect(config).toMatchObject({ mcp_oauth_credentials_store: 'file' });
+    expect(statSync(join(home, 'guard-hook.sh')).mode & 0o777).toBe(0o755);
+    // A later prepare still pins its checkout beside what ensureConfig wrote.
+    await codexHome.prepare(checkout);
+    expect(Object.keys(readConfig(home).projects)).toEqual([checkout]);
   });
 
   it('pins the real path of a checkout reached through a link', async () => {

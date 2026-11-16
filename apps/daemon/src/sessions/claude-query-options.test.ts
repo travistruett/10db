@@ -50,6 +50,7 @@ const rendered = renderClaudeAutoMode(
     switches: TRUST_DEFAULTS,
     grants: [],
     yourMcpServers: [],
+    claudeConnectors: false,
   }),
 );
 

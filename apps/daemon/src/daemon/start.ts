@@ -69,6 +69,7 @@ import {
   createAccountService,
   createModelListWait,
   createListRefresh,
+  createMcpSignIns,
   createMoveBack,
   MoveCause,
   moveOpenRouterKey,
@@ -333,7 +334,7 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import type { AgentAdapter } from '../sessions';
+import { connectorProbeRoot, sweepConnectorProbeRoot, type AgentAdapter } from '../sessions';
 import { conversationRun, planConversationModel, routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -619,6 +620,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   }
   const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
+  // A probe that a crash cut off leaves its scratch folders; none is ever reused.
+  await sweepConnectorProbeRoot(connectorProbeRoot(opts.dataDir)).catch((error: unknown) => {
+    logger.warn({ err: error }, 'could not empty the connector probe folder');
+  });
 
   const db = openDatabase(
     join(opts.dataDir, '10db.sqlite'),
@@ -2114,6 +2119,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
     },
   });
+  const { appMcpPlan, ...trust } = createTrustServices({
+    state,
+    builderHome,
+    laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+    worktreeBase: worktreeRoot,
+    login: {
+      configDir: () => launcher.loginConfigDir(),
+      codexHome: () => launcher.loginCodexHome(),
+    },
+    laneSandbox,
+    adapter,
+    judge,
+    log: logger.child({ component: 'trust' }),
+    loginEnv: () => launcher.projectEnv(),
+  });
+  const mcpSignIns = createMcpSignIns({
+    state,
+    adapter,
+    launcher,
+    clock,
+    plan: appMcpPlan,
+    logger: logger.child({ component: 'mcp-sign-ins' }),
+  });
   const services = createServices({
     state,
     github: {
@@ -2163,20 +2191,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
       return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
     },
-    trust: createTrustServices({
-      state,
-      builderHome,
-      laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
-      worktreeBase: worktreeRoot,
-      login: {
-        configDir: () => launcher.loginConfigDir(),
-        codexHome: () => launcher.loginCodexHome(),
-      },
-      laneSandbox,
-      adapter,
-      judge,
-      log: logger.child({ component: 'trust' }),
-    }),
+    trust,
+    mcpSignIns,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
@@ -2624,6 +2640,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       catalogue.stop();
       await listRefresh.stop();
       accountPauses.stop();
+      await mcpSignIns.stopAll().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not stop the mcp sign-ins');
+      });
+      await adapter.stop?.().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not stop the adapter');
+      });
       moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();

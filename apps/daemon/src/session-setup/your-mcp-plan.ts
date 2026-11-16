@@ -4,7 +4,12 @@ import {
   type TrustSwitches,
   type YourMcpServerKey,
 } from '@10db/contracts';
-import { expandFrom, YourMcpExpandError, type CodexServerExtras } from '../sessions';
+import {
+  expandFrom,
+  YourMcpExpandError,
+  type ClaudeOAuth,
+  type CodexServerExtras,
+} from '../sessions';
 import type { LeftOut } from './left-out';
 import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
 
@@ -40,9 +45,13 @@ export interface YourStdioPlan {
 
 /** An http or sse server as one session connects to it, expanded. */
 export interface YourRemotePlan {
+  /** The declaration the server was planned from. */
+  readonly key: YourMcpServerKey;
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>> | null;
+  /** Claude Code's `oauth` block, as the approval covered it. */
+  readonly oauth: ClaudeOAuth | null;
   readonly codex: CodexServerExtras;
 }
 
@@ -51,6 +60,8 @@ export interface YourMcpPlan {
   readonly stdio: Readonly<Record<string, YourStdioPlan>>;
   readonly remote: Readonly<Record<string, YourRemotePlan>>;
   readonly leftOut: readonly LeftOut[];
+  /** Whether the session takes the builder's claude.ai connectors: the same switch as the servers. */
+  readonly connectorsOn: boolean;
 }
 
 const SOURCE_ORDER: Readonly<Record<YourMcpSource, number>> = {
@@ -162,9 +173,11 @@ function remotePlan(
       headers[header] = expanded(value, loginEnv, `header ${header}`);
   }
   return {
+    key: entry.key,
     type: server.transport,
     url,
     headers: Object.keys(headers).length === 0 ? null : headers,
+    oauth: server.oauth,
     codex: server.codex,
   };
 }
@@ -243,7 +256,7 @@ export function planYourMcp(args: {
   const stdio: Record<string, YourStdioPlan> = {};
   const remote: Record<string, YourRemotePlan> = {};
   const leftOut: LeftOut[] = [];
-  if (!args.switches.yourMcpServers) return { stdio, remote, leftOut };
+  if (!args.switches.yourMcpServers) return { stdio, remote, leftOut, connectorsOn: false };
   const taken = new Map<string, YourMcpEntry>();
   const project = new Set(args.projectServerNames);
   const ordered = [...args.entries].sort((a, b) => SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source]);
@@ -258,7 +271,7 @@ export function planYourMcp(args: {
     if (why !== undefined)
       leftOut.push({ what: `your MCP server ${entry.name} (${sourceLabel(entry)})`, why });
   }
-  return { stdio, remote, leftOut };
+  return { stdio, remote, leftOut, connectorsOn: true };
 
   /** Plans the entry and returns null, or returns why it is left out; null too for one switched off. */
   function decide(entry: YourMcpEntry): string | null {

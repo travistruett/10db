@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -39,6 +40,8 @@ import {
   captureLoginEnv,
   createLauncher,
   ensureAgent,
+  loginConfigDirOf,
+  secretFingerprint,
   systemKeychain,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
@@ -61,13 +64,21 @@ import {
   type SetupInput,
   type StdioMcpServer,
 } from '../src/sandbox';
-import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
+import { connectorProbeRoot, createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { bashWrites } from './bash-writes';
-import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG, testPolicy } from './fixtures';
+import {
+  createMemoryKeychain,
+  homeOutsideTemp,
+  isolatedGitEnv,
+  seedWorkstream,
+  TEST_REPO_CONFIG,
+  testPolicy,
+} from './fixtures';
 import { captureLogs } from './log-capture';
 import {
   LANE_WROTE,
   laneProbeScript,
+  liveOAuthServer,
   PROBE_ARG,
   PROBE_TOKEN,
   PROBES_HELD,
@@ -75,7 +86,15 @@ import {
   YOUR_MCP_PROBE_SERVER,
 } from './your-mcp-probe';
 
-const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
+const liveEnv = loadEnv(process.env);
+const live = liveEnv.TENDB_LIVE_CLAUDE === '1';
+
+/** Prints a row's observation, and appends it to `TENDB_LIVE_REPORT` when set: vitest hides console output. */
+function note(text: string): void {
+  console.info(text);
+  const file = liveEnv.TENDB_LIVE_REPORT;
+  if (file !== undefined) appendFileSync(file, `${text}\n`);
+}
 
 /**
  * Marks the daemon's roots as a running daemon's while a describe's tests run, so a test daemon that
@@ -243,10 +262,39 @@ interface LaneRun {
   /** The session's `CLAUDE_ENV_FILE`, and its content and mode once the session ended. */
   readonly envFile: { path: string; content: string; mode: number };
   readonly tmpDir: string;
+  /** Every `claude session mcp status` the adapter logged: server names and statuses, never config. */
+  readonly mcpStatus: readonly { readonly name: string; readonly status: string }[];
+  /** What the connector probe's folder holds once the session is over: nothing when the probe cleaned up. */
+  readonly probeRootLeft: readonly string[];
+  /** The `claude session billing` line: how the session billed, and who Claude Code said it was talking to. */
+  readonly billing: { readonly apiKeySource: unknown; readonly apiProvider: unknown };
   /** The variables the sandbox sets for lane commands, with the daemon's values. */
   readonly commandEnv: Readonly<Record<string, string>>;
   /** The env Claude Code itself, and the git it runs outside the sandbox, are started with. */
   readonly sessionEnv: Readonly<Record<string, string>>;
+}
+
+/** A keyed Claude account a row runs on, with its own config folder and the secret it bills. */
+interface KeyedLiveAccount {
+  readonly kind: 'anthropic_api_key' | 'bedrock';
+  readonly configDir: string;
+  /** The API key or Bedrock bearer token; absent for a Bedrock profile. */
+  readonly secret?: string;
+  readonly settings: Readonly<Record<string, unknown>>;
+  readonly model?: string;
+}
+
+function mcpStatusOf(lines: readonly Record<string, unknown>[]): LaneRun['mcpStatus'] {
+  const line = lines.find((l) => l['msg'] === 'claude session mcp status');
+  const parsed = z
+    .array(z.object({ name: z.string(), status: z.string() }))
+    .safeParse(line?.['mcpServers']);
+  return parsed.success ? parsed.data : [];
+}
+
+function billingOf(lines: readonly Record<string, unknown>[]): LaneRun['billing'] {
+  const line = lines.find((l) => l['msg'] === 'claude session billing');
+  return { apiKeySource: line?.['apiKeySource'], apiProvider: line?.['apiProvider'] };
 }
 
 /**
@@ -290,6 +338,16 @@ async function runLane(opts: {
   readonly claims?: readonly { readonly kind: ClaimKind; readonly name: string }[];
   /** What comes along into the session, as the runner plans it. */
   readonly setup?: SetupInput;
+  /** The account the lane runs on: the builder's plan login unless given. */
+  readonly account?: KeyedLiveAccount;
+  /** Gives the session its claude.ai connectors, read by a probe that keeps its folders under `dataDir`. */
+  readonly connectors?: true;
+  /** The builder's own http servers, as Claude Code connects them. */
+  readonly remoteYourServers?: Readonly<
+    Record<string, { readonly type: 'http' | 'sse'; readonly url: string; readonly headers: null }>
+  >;
+  /** Runs before the session starts, with the account's config folder. */
+  readonly beforeStart?: (configDir: string) => void;
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
   const claudePath = await ensureAgent(AgentTool.Claude);
@@ -300,23 +358,34 @@ async function runLane(opts: {
     logger: logs.logger,
     // Pinned either way: a block that does not ask for auto mode tests default mode.
     lanePermissionMode: opts.autoMode ? ('auto' as const) : ('default' as const),
+    ...(opts.connectors === true
+      ? {
+          connectorProbeRoot: connectorProbeRoot(opts.dataDir),
+          loginConfigDir: () => loginConfigDirOf(login.vars),
+        }
+      : {}),
   });
+  const keyed = opts.account;
   const launcher = createLauncher({
     base: login.vars,
     clientApp: '10db/live-test',
-    keychain: systemKeychain,
+    // A keyed account's secret lives in memory for the run; the plan login is the builder's own.
+    keychain:
+      keyed?.secret === undefined
+        ? systemKeychain
+        : createMemoryKeychain({ 'live-key': keyed.secret }),
   });
-  // The live test runs on the default account; a probe reads who that is.
+  // The default account unless the row names a keyed one; a probe reads who that is.
   const defaultAccount: AccountRow = {
     id: mintId('Account'),
-    kind: 'claude_subscription',
-    label: 'Claude plan',
+    kind: keyed?.kind ?? 'claude_subscription',
+    label: keyed === undefined ? 'Claude plan' : `Live ${keyed.kind}`,
     payer: '',
     expectedIdentity: null,
-    configDir: launcher.loginConfigDir(),
-    secretRef: null,
-    secretFingerprint: null,
-    settings: {},
+    configDir: keyed === undefined ? launcher.loginConfigDir() : keyed.configDir,
+    secretRef: keyed?.secret === undefined ? null : 'live-key',
+    secretFingerprint: keyed?.secret === undefined ? null : secretFingerprint(keyed.secret),
+    settings: keyed?.settings ?? {},
     laneCap: 4,
     monthlyCapUsd: null,
     archived: false,
@@ -328,13 +397,21 @@ async function runLane(opts: {
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });
+  // Bedrock's credentials check compares only `apiProvider`; `expectedIdentity` is an organization name Claude
+  // Code reports for a first-party key. Reading none on Bedrock is normal, so the row asserts the provider.
+  if (keyed?.kind === 'bedrock' && seen.apiProvider !== 'bedrock')
+    throw new Error(
+      `the Bedrock account reads apiProvider ${String(seen.apiProvider)}, not bedrock`,
+    );
+  const identity = keyed === undefined ? seen.email : seen.organization;
   const launch = launcher.session(
-    { ...defaultAccount, expectedIdentity: seen.email ?? null },
-    opts.model ?? 'claude-haiku-5-5',
+    { ...defaultAccount, expectedIdentity: identity ?? null },
+    opts.model ?? keyed?.model ?? 'claude-haiku-5-5',
     [],
   );
   const env = { ...launch.env, ...opts.extraEnv };
   const configDir = env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
+  opts.beforeStart?.(configDir);
 
   const test = createTestStore();
   const state = createStateStore(test.store, createEventBus());
@@ -389,6 +466,7 @@ async function runLane(opts: {
   } finally {
     laneSession?.dispose();
     test.close();
+    await adapter.stop?.();
   }
 
   async function driveSession(run: {
@@ -451,11 +529,16 @@ async function runLane(opts: {
       env,
       account: launch.expect,
       projectMcpServers: lane.mcpServers,
+      ...(opts.connectors === true ? { claudeConnectors: true } : {}),
       yourMcpServers: Object.fromEntries(
-        Object.entries(lane.yourMcpServers ?? {}).map(([name, connect]) => [
+        [
+          ...Object.entries(lane.yourMcpServers ?? {}),
+          ...Object.entries(opts.remoteYourServers ?? {}),
+        ].map(([name, connect]) => [
           name,
           {
             connect,
+            claudeOAuth: null,
             codex: {
               enabledTools: null,
               disabledTools: [],
@@ -539,6 +622,11 @@ async function runLane(opts: {
         mode: statSync(run.envFile).mode & 0o777,
       },
       tmpDir: lane.tmpDir,
+      mcpStatus: mcpStatusOf(logs.lines()),
+      probeRootLeft: existsSync(connectorProbeRoot(opts.dataDir))
+        ? readdirSync(connectorProbeRoot(opts.dataDir))
+        : [],
+      billing: billingOf(logs.lines()),
       commandEnv: lane.commandEnv,
       sessionEnv: lane.spec.env,
     };
@@ -1001,7 +1089,10 @@ describe.skipIf(!live)('lane sandbox, live', () => {
           control.file = file === undefined ? '' : readFileSync(join(filesRoot, file), 'utf8');
         },
         probe: ({ tmpDir }) =>
-          [`exec > '${tmpDir}/probe-out' 2>&1`, laneProbeScript(filesRoot)].join('\n'),
+          [
+            `exec > '${tmpDir}/probe-out' 2>&1`,
+            laneProbeScript(filesRoot, { home: homedir(), tokenFiles: [canary.path] }),
+          ].join('\n'),
         extraAllowedTools: ['mcp__probe__check'],
         allowCardsFor: ['mcp__probe__check'],
         prompt: [
@@ -1642,4 +1733,322 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 300_000);
+});
+
+// ---------------------------------------------------------------------------------------------
+// OAuth MCP servers and claude.ai connectors, on each kind of Claude account. A live turn costs usage:
+// every row runs one short haiku turn (Bedrock: the model its inference profile names).
+
+/**
+ * A folder for a row's data, repo and connector probe that no `.mcp.json` sits above: the probe refuses to
+ * start under one, and the repo's own sits above the test homes and the OS temp dir. Removed by `cleanup`.
+ */
+function cleanFolder(): { readonly path: string; cleanup(): void } {
+  const parent = join(homedir(), 'Library', 'Caches');
+  const path = realpathSync(mkdtempSync(join(parent, '10db-live-')));
+  for (let dir = path; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, '.mcp.json')))
+      throw new Error('a .mcp.json sits above the live folder; the connector probe would refuse');
+    if (dirname(dir) === dir) break;
+  }
+  return {
+    path,
+    cleanup: () => {
+      rmSync(path, { recursive: true, force: true });
+    },
+  };
+}
+
+/** Every `Claude Code-credentials*` keychain service name: attributes only, never an item's data. */
+function claudeKeychainServices(): string[] {
+  const dump = execFileSync('/usr/bin/security', ['dump-keychain'], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return [...dump.matchAll(/"svce"<blob>="(Claude Code-credentials[^"]*)"/g)]
+    .flatMap((m) => (m[1] === undefined ? [] : [m[1]]))
+    .sort();
+}
+
+const AuthStatus = z.looseObject({
+  loggedIn: z.boolean(),
+  authMethod: z.string().optional(),
+  subscriptionType: z.string().optional(),
+});
+
+/**
+ * Whether the builder's shared keychain entry holds a claude.ai plan login: `claude auth status --json` on a
+ * fresh folder, with the keychain lookup pointed where a keyed session points it and no key. Reports no token.
+ */
+async function sharedEntryHoldsPlanLogin(): Promise<boolean> {
+  const login = await captureLoginEnv({ inherited: process.env });
+  const claudePath = await ensureAgent(AgentTool.Claude);
+  const fresh = homeOutsideTemp('live-shared-entry');
+  try {
+    const launcher = createLauncher({
+      base: login.vars,
+      clientApp: '10db/live-test',
+      keychain: systemKeychain,
+    });
+    const rest = Object.fromEntries(
+      Object.entries(launcher.projectEnv()).filter(([name]) => name !== 'ANTHROPIC_API_KEY'),
+    );
+    const out = execFileSync(claudePath, ['auth', 'status', '--json'], {
+      encoding: 'utf8',
+      env: {
+        ...rest,
+        CLAUDE_CONFIG_DIR: fresh.path,
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: launcher.loginConfigDir() ?? '',
+      },
+    });
+    const status = AuthStatus.parse(JSON.parse(out));
+    return (
+      status.loggedIn && status.authMethod === 'claude.ai' && status.subscriptionType !== undefined
+    );
+  } finally {
+    fresh.cleanup();
+  }
+}
+
+/** The key names of a folder's `.claude.json`; values are never read out. */
+function claudeJsonKeys(configDir: string): string[] {
+  const file = join(configDir, '.claude.json');
+  if (!existsSync(file)) return [];
+  return Object.keys(
+    z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(file, 'utf8'))),
+  );
+}
+
+const CONNECTORS_MISSING = "your claude.ai connectors didn't load in this session";
+const PROBE_PROMPT = [
+  'This is a sandbox check. Run this Bash command once: bash probe.sh',
+  'Some steps may be refused; that is expected. Never retry or try another way.',
+  'Then reply with the single word: done',
+].join('\n');
+
+/** One row's folder, repo, data dir and token canary. */
+function oauthRowWorld(): {
+  readonly folder: ReturnType<typeof cleanFolder>;
+  readonly checkout: string;
+  readonly dataDir: string;
+  readonly canary: Canary;
+  cleanup(): void;
+} {
+  const folder = cleanFolder();
+  const checkout = join(folder.path, 'repo');
+  initRepo(checkout);
+  const dataDir = join(folder.path, 'data');
+  mkdirSync(dataDir);
+  const canary = plant('token-file', join(folder.path, 'token-canary'));
+  return {
+    folder,
+    checkout,
+    dataDir,
+    canary,
+    cleanup: () => {
+      rmSync(join(sandboxRoots().files, LANE_WROTE), { force: true });
+      folder.cleanup();
+    },
+  };
+}
+
+const lanesProbe =
+  (canary: Canary) =>
+  ({ tmpDir }: { tmpDir: string }): string =>
+    [
+      `exec > '${tmpDir}/probe-out' 2>&1`,
+      laneProbeScript(sandboxRoots().files, { home: homedir(), tokenFiles: [canary.path] }),
+    ].join('\n');
+
+const apiKeyLive = live && liveEnv.TENDB_LIVE_API_KEY === '1';
+const bedrockLive = live && liveEnv.TENDB_LIVE_BEDROCK === '1';
+
+describe.skipIf(!live)('oauth mcp servers, live', () => {
+  claimRootsWhileRunning();
+
+  // L0: each new probe line prints `ok` outside any sandbox, or the denied rows would prove nothing.
+  it('L0: the keychain and token-file probe lines print ok outside a sandbox', () => {
+    const folder = cleanFolder();
+    try {
+      const token = plant('token-file', join(folder.path, 'token-canary'));
+      const script = laneProbeScript(sandboxRoots().files, {
+        home: homedir(),
+        tokenFiles: [token.path],
+      });
+      const out = execFileSync('/bin/bash', ['-c', script], { encoding: 'utf8' });
+      note(
+        `L0: ${out
+          .split('\n')
+          .filter((l) => /^(KEYCHAINS|SECURITY_|TOKEN_FILE)/.test(l))
+          .join(' ')}`,
+      );
+      for (const line of [
+        'KEYCHAINS=ok',
+        'SECURITY_CLAUDE=ok',
+        'SECURITY_CODEX=ok',
+        'TOKEN_FILE=ok',
+      ])
+        expect.soft(out, line).toContain(line);
+    } finally {
+      rmSync(join(sandboxRoots().files, LANE_WROTE), { force: true });
+      folder.cleanup();
+    }
+  });
+
+  // L1: the builder's plan login on the default folder.
+  it('L1: a plan lane connects the signed-in OAuth server and the claude.ai connectors; the probe loads nothing else and leaves nothing', async () => {
+    const server = liveOAuthServer(liveEnv.TENDB_LIVE_OAUTH_SERVER);
+    const world = oauthRowWorld();
+    const before = claudeKeychainServices();
+    try {
+      const run = await runLane({
+        checkout: world.checkout,
+        dataDir: world.dataDir,
+        extraEnv: {},
+        connectors: true,
+        remoteYourServers: { [server.name]: { type: 'http', url: server.url, headers: null } },
+        probe: lanesProbe(world.canary),
+        prompt: PROBE_PROMPT,
+      });
+      report('oauth-l1', run, [world.canary]);
+      note(`L1 mcp status: ${JSON.stringify(run.mcpStatus)}`);
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expect(run.transcript).not.toContain(CONNECTORS_MISSING);
+      expect(run.mcpStatus.find((s) => s.name === server.name)?.status).toBe('connected');
+      const connectors = run.mcpStatus.filter((s) => s.name !== server.name && s.name !== '10db');
+      expect(connectors.length).toBeGreaterThan(0);
+      for (const connector of connectors)
+        expect.soft(connector.status, connector.name).toBe('connected');
+      expect(run.probeRootLeft).toEqual([]);
+      expect(claudeKeychainServices()).toEqual(before);
+      expect(run.probeOutput).toMatch(PS_RAN);
+      for (const held of PROBES_HELD) expect.soft(run.probeOutput, held).toContain(held);
+    } finally {
+      world.cleanup();
+    }
+  }, 300_000);
+
+  // The probe is a non-strict start: a `.mcp.json` above its folder would run outside any sandbox.
+  it('L1: a .mcp.json above the probe folder refuses the probe, and its stand-in server never starts', async () => {
+    const world = oauthRowWorld();
+    try {
+      const marker = join(world.folder.path, 'marker-written');
+      writeFileSync(
+        join(world.folder.path, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            marker: {
+              command: process.execPath,
+              args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'x')`],
+            },
+          },
+        }),
+      );
+      const run = await runLane({
+        checkout: world.checkout,
+        dataDir: world.dataDir,
+        extraEnv: {},
+        connectors: true,
+        probe: lanesProbe(world.canary),
+        prompt: PROBE_PROMPT,
+      });
+      note(
+        `L1 parent .mcp.json: note shown ${String(run.transcript.includes(CONNECTORS_MISSING))}, marker exists ${String(existsSync(marker))}`,
+      );
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expect(run.transcript).toContain(CONNECTORS_MISSING);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      world.cleanup();
+    }
+  }, 300_000);
+
+  /** The keyed rows' shared steps: the entry holds a plan login first, and still does after. */
+  async function keyedRow(label: string, account: KeyedLiveAccount): Promise<void> {
+    const server = liveOAuthServer(liveEnv.TENDB_LIVE_OAUTH_SERVER);
+    // Step 1: a row on an entry that holds no plan login proves nothing about billing the plan.
+    const holds = await sharedEntryHoldsPlanLogin();
+    note(`${label} step 1: shared entry holds a plan login: ${String(holds)}`);
+    if (!holds)
+      throw new Error(`${label} is inconclusive: the shared entry holds no claude.ai plan login`);
+    const world = oauthRowWorld();
+    const accountDir = homeOutsideTemp(`live-${label}`);
+    try {
+      const run = await runLane({
+        checkout: world.checkout,
+        dataDir: world.dataDir,
+        extraEnv: {},
+        account: { ...account, configDir: accountDir.path },
+        connectors: true,
+        remoteYourServers: { [server.name]: { type: 'http', url: server.url, headers: null } },
+        // A cache naming a server that has since been signed in: the session removes it before it starts.
+        beforeStart: (configDir) => {
+          mkdirSync(configDir, { recursive: true });
+          writeFileSync(
+            join(configDir, 'mcp-needs-auth-cache.json'),
+            JSON.stringify({ [server.name]: { timestamp: Date.now() } }),
+          );
+        },
+        probe: lanesProbe(world.canary),
+        prompt: PROBE_PROMPT,
+      });
+      report(`oauth-${label}`, run, [world.canary]);
+      note(
+        `${label} mcp status: ${JSON.stringify(run.mcpStatus)} billing: ${JSON.stringify(run.billing)}`,
+      );
+      // checkAccount and the init check passed: neither refused the session.
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expect(run.mcpStatus.find((s) => s.name === server.name)?.status).toBe('connected');
+      // No connector is passed to a keyed account.
+      expect(run.mcpStatus.filter((s) => s.name !== server.name && s.name !== '10db')).toEqual([]);
+      if (account.kind === 'bedrock') expect(run.billing.apiProvider).toBe('bedrock');
+      else expect(run.billing.apiKeySource).toBe('ANTHROPIC_API_KEY');
+      // Neither a session nor a probe wrote the plan's login into the keyed folder.
+      expect(claudeJsonKeys(accountDir.path)).not.toContain('oauthAccount');
+      expect(run.probeOutput).toMatch(PS_RAN);
+      for (const held of PROBES_HELD) expect.soft(run.probeOutput, held).toContain(held);
+      // The plan login survived the keyed session sharing its entry: recorded for the PR.
+      note(
+        `${label} step 5: shared entry still holds a plan login: ${String(await sharedEntryHoldsPlanLogin())}`,
+      );
+    } finally {
+      accountDir.cleanup();
+      world.cleanup();
+    }
+  }
+
+  // L2: the builder's own API key. Runs only with the key in the environment, never pasted into a session.
+  it.skipIf(!apiKeyLive)(
+    'L2: an API-key lane connects the signed-in OAuth server, bills the key and writes no plan login',
+    async () => {
+      const key = process.env['ANTHROPIC_API_KEY'];
+      if (key === undefined || key === '') throw new Error('ANTHROPIC_API_KEY is not set');
+      await keyedRow('api-key', {
+        kind: 'anthropic_api_key',
+        configDir: '',
+        secret: key,
+        settings: {},
+      });
+    },
+    300_000,
+  );
+
+  // L3: the builder's Bedrock variables; a profile whose SSO has lapsed ends the row at its first call.
+  it.skipIf(!bedrockLive)(
+    'L3: a Bedrock lane connects the signed-in OAuth server, reads apiProvider bedrock and writes no plan login',
+    async () => {
+      const profile = process.env['AWS_PROFILE'];
+      const token = process.env['AWS_BEARER_TOKEN_BEDROCK'];
+      if (profile === undefined && token === undefined)
+        throw new Error('set AWS_PROFILE or AWS_BEARER_TOKEN_BEDROCK');
+      await keyedRow('bedrock', {
+        kind: 'bedrock',
+        configDir: '',
+        ...(profile === undefined && token !== undefined ? { secret: token } : {}),
+        settings: { region: process.env['AWS_REGION'] ?? 'us-east-1', awsProfile: profile ?? null },
+        model: 'us.anthropic.claude-sonnet-5-5',
+      });
+    },
+    300_000,
+  );
 });

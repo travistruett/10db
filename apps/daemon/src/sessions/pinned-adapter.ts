@@ -29,6 +29,11 @@ export function createPinnedAdapter(
     open: (spec) => current().open(spec),
     probeAccount: (probe) => current().probeAccount(probe),
     startLogin: (login) => current().startLogin(login),
+    startMcpSignIn: (spec) => current().startMcpSignIn(spec),
+    mcpAuthStatus: (spec) => current().mcpAuthStatus(spec),
     readClientUuids: (spec) => current().readClientUuids(spec),
+    stop: async () => {
+      await built?.adapter.stop?.();
+    },
   };
 }

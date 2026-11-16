@@ -82,6 +82,7 @@ function preparing(
       yourMcpServers: {
         mine: {
           connect: { type: 'http', url: 'https://mine.example.com/mcp', headers: null },
+          claudeOAuth: null,
           codex: {
             enabledTools: null,
             disabledTools: [],
@@ -90,6 +91,7 @@ function preparing(
           },
         },
       },
+      claudeConnectors: true,
       note: 'Note from 10db: billing is waiting for your approval.',
       credentialsExpireAt,
       ...setup,
@@ -121,6 +123,8 @@ describe('a conversation’s prepared session', () => {
     expect(Object.keys(spec.projectMcpServers)).toEqual(['docs']);
     expect(Object.keys(spec.yourMcpServers)).toEqual(['mine']);
     expect(spec.policy.environment.join('\n')).toContain('the MCP servers mine are the builder');
+    expect(spec.claudeConnectors).toBe(true);
+    expect(spec.policy.environment.join('\n')).toContain('claude.ai connectors');
     expect(spec.profile.tools).toContain('Bash');
     expect(spec.profile.disallowedTools).not.toContain('Bash');
     expect(spec.profile.agents['code-researcher']?.tools).toContain('Bash');

@@ -16,7 +16,9 @@ import type { WebSearchMode } from './codex-generated/ts/WebSearchMode';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer, YourMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
+import type { ClaudeOAuth } from './claude-oauth';
 import type { AgentCapabilities } from './capabilities';
+import type { McpAuthState } from './codex-mcp-auth';
 import type { RemoteMcpServer } from './project-mcp';
 import type { DeniedCall, PatchHunk, ReportedMode } from '../trust';
 
@@ -84,6 +86,8 @@ export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 export interface YourSessionServer {
   /** A stdio server is 10db's launch from the builder's home; a remote one is its url and headers. */
   readonly connect: YourMcpServer | RemoteMcpServer;
+  /** Claude Code's `oauth` block for a remote server, as the approval covered it. */
+  readonly claudeOAuth: ClaudeOAuth | null;
   readonly codex: CodexServerExtras;
 }
 
@@ -169,6 +173,12 @@ export interface AgentSessionCore {
    * the sandbox with the builder's access, so no allow rule ever names their tools: each call is judged.
    */
   readonly yourMcpServers: Readonly<Record<string, YourSessionServer>>;
+  /**
+   * Whether a Claude plan session takes the builder's claude.ai connectors: the Your MCP servers switch is
+   * on and the account is a plan; absent reads as off. They act outside the sandbox with the builder's access, so each call is
+   * judged like the builder's own servers'. Other agents and accounts ignore it.
+   */
+  readonly claudeConnectors?: boolean;
   /**
    * Runs before every tool call, before permission rules. An explore session's call also names the
    * subagent that made it; a lane's guard answers a plain `GuardVerdict`, which is a `ShapeVerdict`.
@@ -482,6 +492,16 @@ export class AccountLoginError extends Error {
   override readonly name = 'AccountLoginError';
 }
 
+/** An MCP server's sign-in could not start or be read; the message is safe to show the builder. */
+export class McpSignInError extends Error {
+  override readonly name = 'McpSignInError';
+}
+
+/** The agent has no way for 10db to start an MCP server's sign-in. */
+export class McpSignInUnsupportedError extends Error {
+  override readonly name = 'McpSignInUnsupportedError';
+}
+
 /** How a browser sign-in ended. The message never holds what the agent printed. */
 export type AccountLoginOutcome =
   { readonly ok: true } | { readonly ok: false; readonly message: string };
@@ -550,7 +570,34 @@ export class CompletionError extends Error {
   override readonly name = 'CompletionError';
 }
 
+/** One OAuth server of the builder's to sign in, on the account whose env this is. */
+export interface McpSignInSpec {
+  readonly kind: AgentAccountKind;
+  readonly env: Readonly<Record<string, string>>;
+  readonly name: string;
+  readonly server: YourSessionServer;
+}
+
+/** Whether each of these servers is signed in on the account whose env this is. */
+export interface McpAuthSpec {
+  readonly kind: AgentAccountKind;
+  readonly env: Readonly<Record<string, string>>;
+  readonly servers: Readonly<Record<string, YourSessionServer>>;
+}
+
+/** An MCP server's browser sign-in the agent is waiting on. The agent writes the token; 10db only opens the page. */
+export interface McpSignIn {
+  /** Settles once, when the sign-in ends in any way, and never rejects. The agent's process is gone by then. */
+  readonly outcome: Promise<AccountLoginOutcome>;
+  /** Opens the sign-in page again. */
+  reopen(): Promise<void>;
+  /** Abandons the sign-in and frees the agent; `outcome` then settles as a failure. */
+  cancel(): Promise<void>;
+}
+
 export interface AgentAdapter {
+  /** Closes what the adapter started on its own, such as a connector probe in flight; the daemon calls it as it shuts down. */
+  stop?(): Promise<void>;
   /**
    * What this agent can do on the account, and for the model a session opens with (null: none yet).
    * Answers from a table, so it works while the agent's copy is still downloading.
@@ -574,4 +621,11 @@ export interface AgentAdapter {
    * cannot start. Only a kind that signs in with a login has one.
    */
   startLogin(login: AccountProbeSpec): Promise<AccountLogin>;
+  /**
+   * Starts an OAuth MCP server's browser sign-in with the account's own agent and opens its page; rejects
+   * with an `McpSignInError` when it cannot start, or an `McpSignInUnsupportedError` for an agent with none.
+   */
+  startMcpSignIn(spec: McpSignInSpec): Promise<McpSignIn>;
+  /** Whether each server is signed in on the account; an agent with no such read answers none. */
+  mcpAuthStatus(spec: McpAuthSpec): Promise<Readonly<Record<string, McpAuthState>>>;
 }

@@ -86,6 +86,8 @@ export const EventType = {
   BoardColumnSaved: 'board_column.saved',
   BoardColumnDeleted: 'board_column.deleted',
   NetworkHostsChanged: 'network_hosts.changed',
+  /** One account's sign-in to one of the builder's MCP servers changed state (`McpSignInChangedData`); never a url. */
+  McpSignInChanged: 'mcp_sign_in.changed',
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',

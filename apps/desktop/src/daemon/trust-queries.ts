@@ -1,6 +1,8 @@
 import {
   type ApproveYourMcpServer,
   LiveSystemsDto,
+  McpSignInsDto,
+  type StartMcpSignIn,
   ProjectTrustDto,
   TrustGrantDto,
   type TrustGrantId,
@@ -21,6 +23,7 @@ export const trustKeys = {
   project: (projectId: ProjectId) => ['trust', 'project', projectId],
   liveSystems: (projectId: ProjectId) => ['trust', 'live-systems', projectId],
   grants: (projectId: ProjectId) => ['trust', 'grants', projectId],
+  signIns: ['trust', 'mcp-sign-ins'],
 } as const;
 
 /** The app-wide switches and the builder's installed plugins. */
@@ -71,6 +74,32 @@ export function useApproveYourMcpServer() {
     onError: async () => {
       // A stale hash or a server that can't run: the list as it is now shows why.
       await queryClient.invalidateQueries({ queryKey: trustKeys.app });
+    },
+  });
+}
+
+/** Each Codex account's sign-in to each OAuth server, and the commands for Claude plan accounts. */
+export function useMcpSignIns() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.signIns,
+    queryFn: async () =>
+      readJson(await client.settings.trust['mcp-sign-ins'].$get(), McpSignInsDto),
+  });
+}
+
+/** Starts a Codex account's sign-in to one server, or opens its page again; the answer is the rows as they are then. */
+export function useStartMcpSignIn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StartMcpSignIn) =>
+      readJson(await client.settings.trust['mcp-sign-ins'].$post({ json: input }), McpSignInsDto),
+    onSuccess: (signIns) => {
+      queryClient.setQueryData(trustKeys.signIns, signIns);
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: trustKeys.signIns });
     },
   });
 }

@@ -36,6 +36,7 @@ import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { trustKeys } from './trust-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -80,6 +81,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   pass: [passKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
+  // One account's sign-in to one of the builder's MCP servers started, ended or was cancelled.
+  mcp_sign_in: [trustKeys.signIns],
   // gh's login changed under a Sign In; the status and the setup check's gh row read it.
   github: [githubKeys.status, queryKeys.system],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.

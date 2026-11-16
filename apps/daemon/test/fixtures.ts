@@ -443,5 +443,6 @@ export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
     switches: TRUST_DEFAULTS,
     grants: [],
     yourMcpServers: [],
+    claudeConnectors: false,
   });
 }

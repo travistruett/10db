@@ -118,7 +118,7 @@ import {
   offeredText,
   offerToAgent,
 } from '@10db/db';
-import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
+import { MoveCause, type AccountMoves, type AccountService, type McpSignIns } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
@@ -359,6 +359,8 @@ export function createServices(deps: {
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
   readonly trust: TrustServices;
+  /** Settings › Trust's MCP sign-ins. */
+  readonly mcpSignIns: McpSignIns;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
@@ -815,6 +817,8 @@ export function createServices(deps: {
     ...deps.github,
     ...deps.stakeholders,
     ...deps.trust,
+    mcpSignIns: () => deps.mcpSignIns.list(),
+    startMcpSignIn: (input) => deps.mcpSignIns.start(input),
     ...createPlaybookServices(deps.state),
     ...deps.shape,
     ...deps.conversation,

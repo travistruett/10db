@@ -108,6 +108,8 @@ import type {
   TrustSettingsDto,
   TrustSwitches,
   ApproveYourMcpServer,
+  McpSignInsDto,
+  StartMcpSignIn,
   McpServerStatusDto,
   ModelProfileDto,
   ModelMeasuresDto,
@@ -699,6 +701,13 @@ export interface ApiServices extends PlanRecordServices {
    * the page loaded or 10db can't run it, and InvalidError for a plugin's server.
    */
   approveYourMcpServer(input: ApproveYourMcpServer): Promise<TrustSettingsDto>;
+  /** Each Codex account's sign-in to each OAuth server of the builder's, and the commands for Claude accounts. */
+  mcpSignIns(): Promise<McpSignInsDto>;
+  /**
+   * Starts a Codex account's sign-in to one server, or opens its page again; throws NotFoundError for an
+   * unknown account or server and ConflictError for an account that is not Codex or has no folder.
+   */
+  startMcpSignIn(input: StartMcpSignIn): Promise<McpSignInsDto>;
   /** A project's Trust: its overrides, the switches its sessions use, and what would come along; throws NotFoundError. */
   projectTrust(projectId: ProjectId): Promise<ProjectTrustDto>;
   setProjectTrust(projectId: ProjectId, overrides: TrustOverrides): Promise<ProjectTrustDto>;

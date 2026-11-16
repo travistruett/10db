@@ -185,6 +185,7 @@ describe('Settings › project Trust', () => {
       codexOnly: [],
       enabledTools: null,
       disabledTools: [],
+      oauth: [],
       sendsNoHeaders: false,
     };
     const { put } = serve(NOTHING, {}, [], [], [github]);

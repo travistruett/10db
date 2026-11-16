@@ -3,6 +3,7 @@ import type { AccountExpectation } from '../environment';
 import { onProfile } from './agent-profile';
 import { checkAccount, type SeenAccount } from './account-check';
 import { capabilitiesOf, type AgentCapabilities } from './capabilities';
+import { McpAuthState } from './codex-mcp-auth';
 import type { FakeInterrupt, FakeObservation, FakeScriptBook, FakeSent } from './fake-script';
 import {
   fakeEndedSession,
@@ -20,6 +21,9 @@ import {
   type AccountLoginOutcome,
   type AccountProbeSpec,
   type AgentSessionSpec,
+  type McpAuthSpec,
+  type McpSignIn,
+  type McpSignInSpec,
   type CompletionSpec,
   type ConversationReadSpec,
   type InterruptReceipt,
@@ -151,6 +155,25 @@ export class FakeAdapter implements AgentAdapter {
     readonly end: (outcome: AccountLoginOutcome) => void;
     cancelled: boolean;
   }[] = [];
+  /** Every MCP sign-in started here, with a way to end it as the agent would. */
+  readonly mcpSignIns: {
+    readonly spec: McpSignInSpec;
+    readonly end: (outcome: AccountLoginOutcome) => void;
+    reopened: number;
+    cancelled: boolean;
+  }[] = [];
+  /** What `mcpAuthStatus` answers for a server by name; a name not set reads as not signed in. */
+  readonly mcpAuth: Record<string, McpAuthState> = {};
+  /** When true, `mcpAuthStatus` never answers, as a Codex that doesn't. */
+  mcpAuthHangs = false;
+  /** When set, `mcpAuthStatus` rejects with it, as a Codex that can't start. */
+  mcpAuthError: Error | null = null;
+  /** When set, `mcpAuthStatus` answers what the servers read as it was called, once this settles. */
+  mcpAuthGate: Promise<void> | null = null;
+  /** When set, `startMcpSignIn` answers once this settles. */
+  mcpSignInGate: Promise<void> | null = null;
+  /** Every `mcpAuthStatus` call. */
+  readonly mcpAuthReads: McpAuthSpec[] = [];
   /** Every question put to the model by `complete`. */
   readonly completions: CompletionSpec[] = [];
   /** What the model answers; the default has none, so a caller falls back to what it can do without. */
@@ -245,6 +268,52 @@ export class FakeAdapter implements AgentAdapter {
         return Promise.resolve();
       },
     });
+  }
+
+  async startMcpSignIn(spec: McpSignInSpec): Promise<McpSignIn> {
+    await this.mcpSignInGate;
+    let end: (outcome: AccountLoginOutcome) => void = () => undefined;
+    const outcome = new Promise<AccountLoginOutcome>((resolve) => {
+      end = resolve;
+    });
+    const record = { spec, end, reopened: 0, cancelled: false };
+    this.mcpSignIns.push(record);
+    return {
+      outcome,
+      reopen() {
+        record.reopened += 1;
+        return Promise.resolve();
+      },
+      cancel() {
+        record.cancelled = true;
+        end({ ok: false, message: 'The sign-in was cancelled.' });
+        return Promise.resolve();
+      },
+    };
+  }
+
+  /** Ends the latest sign-in of `name` as the browser would: a success also reads as signed in from then on. */
+  completeMcpSignIn(name: string, ok: boolean): void {
+    const record = this.mcpSignIns.findLast((signIn) => signIn.spec.name === name);
+    if (record === undefined) return;
+    if (ok) {
+      this.mcpAuth[name] = McpAuthState.SignedIn;
+      record.end({ ok: true });
+    } else record.end({ ok: false, message: "The sign-in didn't finish. Try Sign in again." });
+  }
+
+  async mcpAuthStatus(spec: McpAuthSpec): Promise<Readonly<Record<string, McpAuthState>>> {
+    this.mcpAuthReads.push(spec);
+    if (this.mcpAuthError !== null) throw this.mcpAuthError;
+    if (this.mcpAuthHangs) return new Promise(() => undefined);
+    const read = Object.fromEntries(
+      Object.keys(spec.servers).map((name) => [
+        name,
+        this.mcpAuth[name] ?? McpAuthState.NotSignedIn,
+      ]),
+    );
+    await this.mcpAuthGate;
+    return read;
   }
 
   /** What each Shape session started here ran with, and what it was sent after its first message. */

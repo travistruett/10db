@@ -6,6 +6,7 @@ import { onProfile } from './agent-profile';
 import { claudeCapabilities } from './capabilities';
 import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
+import { createConnectorDirectory, type ConnectorDirectory } from './claude-connectors';
 import { seenModelsFrom } from './claude-model-list';
 import { userMessage } from './claude-mapping';
 import {
@@ -24,6 +25,7 @@ import {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
+  McpSignInUnsupportedError,
   type AccountProbeSpec,
   type CompletionSpec,
   type LanePermissionMode,
@@ -55,6 +57,13 @@ export interface ClaudeAdapterOptions extends ClaudeSessionDeps {
    * sandboxes every real session, and this adapter refuses one that arrives without a sandbox.
    */
   readonly allowUnsandboxed?: true;
+  /**
+   * The directory a plan session reads its claude.ai connectors from, over `connectorProbeRoot`. Tests pass
+   * one; the daemon names the folder and the adapter makes it.
+   */
+  readonly connectors?: ConnectorDirectory;
+  /** Where the connector probe keeps its scratch folders; absent, with no `connectors`, no session takes connectors. */
+  readonly connectorProbeRoot?: string;
 }
 
 /** Ends the stream so the process exits; anything it throws after the abort means nothing here. */
@@ -195,7 +204,25 @@ async function complete(
 /** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec §3). */
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
+  const connectors: ConnectorDirectory | undefined =
+    opts.connectors ??
+    (opts.connectorProbeRoot === undefined
+      ? undefined
+      : createConnectorDirectory({
+          query: runQuery,
+          claudePath: opts.claudePath,
+          probeRoot: opts.connectorProbeRoot,
+          logger: opts.logger,
+          ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+        }));
+  const sessionDeps: ClaudeAdapterOptions = {
+    ...opts,
+    ...(connectors === undefined ? {} : { connectors }),
+  };
   return {
+    stop: async () => {
+      await connectors?.stop();
+    },
     capabilities: (account, model) => claudeCapabilities(account.kind, model),
     open: (spec) =>
       onProfile(spec, {
@@ -213,7 +240,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
                   signInCheck:
                     opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env)),
                 },
-                opts,
+                sessionDeps,
                 runQuery,
                 LANE_STARTS,
               ),
@@ -235,9 +262,19 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
               ),
             ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
             ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+            ...(opts.loginConfigDir === undefined ? {} : { loginConfigDir: opts.loginConfigDir }),
+            ...(connectors === undefined ? {} : { connectors }),
           }),
       }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
+    // Claude Code has no public way to start an MCP sign-in, and no status read; Settings shows the command.
+    startMcpSignIn: () =>
+      Promise.reject(
+        new McpSignInUnsupportedError(
+          'Claude Code signs an MCP server in only in its own terminal.',
+        ),
+      ),
+    mcpAuthStatus: () => Promise.resolve({}),
     startLogin: (login) =>
       startClaudeLogin(login, {
         claudePath: opts.claudePath,

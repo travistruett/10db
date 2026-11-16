@@ -36,6 +36,8 @@ const CODEX_SEED_TYPES = [
   'v2/TurnInterruptResponse',
   'v2/ReviewStartResponse',
   'v2/ThreadCompactStartResponse',
+  'v2/ListMcpServerStatusResponse',
+  'v2/McpServerOauthLoginResponse',
 ] as const;
 
 /**

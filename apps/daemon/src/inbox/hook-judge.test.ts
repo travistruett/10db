@@ -154,6 +154,7 @@ function hookJudge(
         switches: TRUST_DEFAULTS,
         grants: [],
         yourMcpServers: [],
+        claudeConnectors: false,
       }),
       allowLines: () => grants,
       judgeNow: () => opts.now ?? JudgeKind.Tendb,

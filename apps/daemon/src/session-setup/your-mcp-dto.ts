@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import { prepareYourMcpRun, type LaneWritableRoot } from '../sandbox';
 import type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
-import { shownEnvOf } from './your-mcp-hash';
+import { oauthText, shownEnvOf } from './your-mcp-hash';
 import { serverState } from './your-mcp-plan';
 
 /** The config keys that only a Codex session applies, as `config.toml` spells them. */
@@ -92,6 +92,9 @@ export function yourMcpServerDtos(args: {
                 ...(remote.bearerTokenVar === null ? [] : ['Authorization']),
               ]),
             ].sort(),
+      oauth: remote?.oauth
+        ? Object.entries(oauthText(remote.oauth)).map(([name, value]) => ({ name, value }))
+        : [],
       shownEnv: declared === null ? [] : shownEnvOf(declared),
       configHash: entry.configHash,
       state,

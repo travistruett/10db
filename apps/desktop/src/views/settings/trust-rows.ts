@@ -54,7 +54,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Your MCP servers',
     description: `The MCP servers in your ~/.claude.json, ~/.codex/config.toml and plugins. Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. ${NEXT}`,
     providers:
-      'Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth, and claude.ai connectors, are not here yet.',
+      "Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. On a Gateway account they don't run yet. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
     whileOn: null,
   },
   projectSkills: {

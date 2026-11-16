@@ -58,6 +58,7 @@ import {
   TrustOverrides,
   TrustSwitches,
   ApproveYourMcpServer,
+  StartMcpSignIn,
   ModelProfileId,
   NetworkHostInput,
   Month,
@@ -1858,6 +1859,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/trust/mcp-servers/approve',
       validator('json', (value): ApproveYourMcpServer => ApproveYourMcpServer.parse(value)),
       async (c) => c.json(await deps.services.approveYourMcpServer(c.req.valid('json'))),
+    )
+    .get('/settings/trust/mcp-sign-ins', async (c) => c.json(await deps.services.mcpSignIns()))
+    .post(
+      '/settings/trust/mcp-sign-ins',
+      validator('json', (value): StartMcpSignIn => StartMcpSignIn.parse(value)),
+      async (c) => c.json(await deps.services.startMcpSignIn(c.req.valid('json'))),
     )
     .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
     .put(

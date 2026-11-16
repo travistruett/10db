@@ -18,6 +18,13 @@ export function createRoutedAdapter(
     open: (spec) => by(spec.account).open(spec),
     probeAccount: (probe) => by(probe).probeAccount(probe),
     startLogin: (login) => by(login).startLogin(login),
+    startMcpSignIn: (spec) => by(spec).startMcpSignIn(spec),
+    mcpAuthStatus: (spec) => by(spec).mcpAuthStatus(spec),
     readClientUuids: (spec) => by(spec.account).readClientUuids(spec),
+    stop: async () => {
+      await Promise.all(
+        Object.values(adapters).map((adapter) => adapter.stop?.() ?? Promise.resolve()),
+      );
+    },
   };
 }

@@ -201,7 +201,9 @@ export function createShapePreparer(deps: {
       ...Object.fromEntries(
         Object.entries(launched ?? {}).flatMap(([name, connect]) => {
           const planned = yours.stdio[name];
-          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+          return planned === undefined
+            ? []
+            : [[name, { connect, claudeOAuth: null, codex: planned.codex }]];
         }),
       ),
       ...Object.fromEntries(
@@ -209,6 +211,7 @@ export function createShapePreparer(deps: {
           name,
           {
             connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            claudeOAuth: remote.oauth,
             codex: remote.codex,
           },
         ]),
@@ -240,6 +243,7 @@ export function createShapePreparer(deps: {
         sandbox: null,
         projectMcpServers: {},
         yourMcpServers: {},
+        claudeConnectors: false,
         note: [
           `Note from 10db: this session has no sandbox (${error instanceof Error ? error.message : String(error)}), so it runs no command and has no project MCP server. ${INSTEAD}`,
           leftOutNote([...setupPlan.leftOut, ...yours.leftOut]),
@@ -303,6 +307,7 @@ export function createShapePreparer(deps: {
         },
         projectMcpServers: { ...remote, ...sandboxed.mcpServers },
         yourMcpServers: yourServers(sandboxed.yourMcpServers),
+        claudeConnectors: yours.connectorsOn,
         note:
           [
             problem,

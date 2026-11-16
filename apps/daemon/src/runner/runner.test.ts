@@ -5441,6 +5441,25 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         );
       });
 
+      it("takes the plan account's claude.ai connectors with the switch on, and names them in the policy", async () => {
+        const probe = sandboxProbe();
+        engine = await setupEngine(probe, { Alpha: [[turn]] });
+        const spec = await startOne();
+        expect(spec.claudeConnectors).toBe(true);
+        expect(spec.policy.environment.join('\n')).toContain('claude.ai connectors');
+      });
+
+      it('takes no claude.ai connector when the project turns Your MCP servers off', async () => {
+        const probe = sandboxProbe();
+        engine = await setupEngine(probe, { Alpha: [[turn]] });
+        engine.state.write((ctx) => {
+          setProjectTrustOverrides(ctx, engine.project.id, { yourMcpServers: false });
+        });
+        const spec = await startOne();
+        expect(spec.claudeConnectors).toBe(false);
+        expect(spec.policy.environment.join('\n')).not.toContain('claude.ai connectors');
+      });
+
       it('a project override off drops a server for that project only', async () => {
         const probe = sandboxProbe();
         engine = await setupEngine(probe, { Alpha: [[turn]] });
@@ -5452,7 +5471,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         });
         const spec = await startOne();
         expect(spec.yourMcpServers).toEqual({});
-        expect(spec.policy.environment.join('\n')).not.toContain('Outside the sandbox');
+        expect(spec.policy.environment.join('\n')).not.toContain(
+          'Outside the sandbox: the MCP servers',
+        );
       });
 
       it('the prompt and the log of a session start hold no env value, argument or url text', async () => {

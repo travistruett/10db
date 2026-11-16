@@ -17,6 +17,8 @@ export interface TrustPolicyInput {
   readonly grants: readonly string[];
   /** The names of the builder's own MCP servers in this session; their tools act outside the sandbox. */
   readonly yourMcpServers: readonly string[];
+  /** Whether the session carries the builder's claude.ai connectors, which act outside the sandbox. */
+  readonly claudeConnectors: boolean;
 }
 
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
@@ -55,6 +57,11 @@ function environmentLines(input: TrustPolicyInput): string[] {
     ...(input.yourMcpServers.length > 0
       ? [
           `Outside the sandbox: the MCP servers ${input.yourMcpServers.join(', ')} are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.`,
+        ]
+      : []),
+    ...(input.claudeConnectors
+      ? [
+          "Outside the sandbox: the claude.ai connectors are the builder's own and run with the builder's access. They can read and send the builder's mail, documents and messages, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.",
         ]
       : []),
     ...(input.liveSystems.length > 0

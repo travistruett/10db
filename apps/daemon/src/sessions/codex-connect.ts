@@ -47,7 +47,7 @@ const LoginCompleted = z.looseObject({
 const CancelLoginResponse = z.looseObject({ status: z.string() });
 
 /** What the server says when the sign-in's callback port, a fixed local one, is taken. */
-const PORT_IN_USE = /address already in use|EADDRINUSE/i;
+export const PORT_IN_USE = /address already in use|EADDRINUSE/i;
 
 const PORT_MESSAGE =
   'Codex could not listen for the sign-in: another program, or another Codex sign-in, is using port 1455. Finish or close it and try again.';

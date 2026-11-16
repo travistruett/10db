@@ -1,6 +1,7 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
+export { McpAuthState } from './codex-mcp-auth';
 export { CODEX_COMMANDS } from './codex-commands';
 export { readCheckoutText } from './before-text';
 export { patchPaths } from './codex-guard';
@@ -18,6 +19,7 @@ export {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
+  McpSignInError,
   SessionEndReason,
 } from './types';
 export type {
@@ -33,6 +35,7 @@ export type {
   ExploreSessionSpec,
   LaneProfile,
   LaneSessionSpec,
+  McpSignIn,
   SessionEvent,
   ShapeAgentDefinition,
   SessionHandle,
@@ -76,5 +79,7 @@ export {
 } from './repo-config-file';
 export { streamEventLogFields } from './stream-log';
 export { describeIssuePaths } from './config-issues';
+export { ClaudeOAuth } from './claude-oauth';
+export { connectorProbeRoot, sweepConnectorProbeRoot } from './claude-connectors';
 export { McpServerName } from './mcp-server-name';
 export { toolCallActivity, type ToolTarget } from './tool-target';

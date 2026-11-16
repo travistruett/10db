@@ -16,7 +16,13 @@ import {
   type TrustSettingsDto,
   type TrustSwitches,
 } from '@10db/contracts';
-import { deleteTrustGrant, getAccountRow, getProject, listTrustGrants } from '@10db/db';
+import {
+  deleteTrustGrant,
+  getAccountRow,
+  getProject,
+  listProjects,
+  listTrustGrants,
+} from '@10db/db';
 import type { ApiServices } from '../api';
 import { allCheckouts } from '../delivery';
 import type { StateStore } from '../events';
@@ -36,10 +42,12 @@ import type { AgentAdapter } from '../sessions';
 import {
   InstalledPluginsError,
   planSessionSetup,
+  planYourMcp,
   readInstalledPlugins,
   readYourMcpConfig,
   yourMcpServerDtos,
   type InstalledPlugin,
+  type YourMcpPlan,
 } from '../session-setup';
 import { projectLiveSystems, setProjectLiveSystems } from '../trust';
 import { accountJudges } from './account-judges';
@@ -103,7 +111,12 @@ export function createTrustServices(deps: {
   readonly judge: Pick<Judge, 'ready'>;
   /** Told each stored switch that reads as off for not being a shape 10db reads. */
   readonly log: { warn(fields: object, message: string): void };
-}): TrustServices {
+  /** The login environment without billing switches, as sessions expand `${VAR}` in a server's entry from it. */
+  readonly loginEnv: () => Readonly<Record<string, string>>;
+}): TrustServices & {
+  /** The builder's servers as a session on the app-wide switches would plan them. */
+  readonly appMcpPlan: () => YourMcpPlan;
+} {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
 
@@ -125,16 +138,30 @@ export function createTrustServices(deps: {
       laneWritable: [...allCheckouts(db), ...deps.laneWritableRoots],
       plugins,
     });
+    const approvals = mcpApprovals(db, () => {
+      deps.log.warn({}, 'the stored MCP approvals are not a shape 10db reads, so none holds');
+    });
     const servers = yourMcpServerDtos({
       entries,
       switches,
-      approvals: mcpApprovals(db, () => {
-        deps.log.warn({}, 'the stored MCP approvals are not a shape 10db reads, so none holds');
-      }),
+      approvals,
       home: deps.builderHome,
       laneWritable: roots,
     });
-    return { servers, fileProblems };
+    return { servers, fileProblems, entries, approvals };
+  };
+
+  const appMcpPlan = (): YourMcpPlan => {
+    const switches = appTrustSwitches(db, onInvalid);
+    const { entries, approvals } = yourServers(switches);
+    return planYourMcp({
+      entries,
+      switches,
+      approvals,
+      projectServerNames: [],
+      loginEnv: deps.loginEnv(),
+      localBinding: listProjects(db).some((project) => project.sandboxLoopback),
+    });
   };
 
   /** Said above the servers when the builder's shell points Claude Code or Codex somewhere else. */
@@ -235,6 +262,7 @@ export function createTrustServices(deps: {
   };
 
   return {
+    appMcpPlan,
     trustSettings,
     async setTrustSwitches(switches) {
       deps.state.write((ctx) => {

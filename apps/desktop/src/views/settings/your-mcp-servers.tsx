@@ -1,7 +1,34 @@
-import { YourMcpServerState, YourMcpSource, type YourMcpServerDto } from '@10db/contracts';
-import { Alert, Badge, Button, Group, Modal, Stack, Switch, Text } from '@mantine/core';
+import {
+  McpSignInState,
+  YourMcpServerState,
+  YourMcpSource,
+  type McpSignInRowDto,
+  type McpSignInTerminalDto,
+  type YourMcpServerDto,
+} from '@10db/contracts';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Button,
+  Code,
+  CopyButton,
+  Group,
+  Modal,
+  Stack,
+  Switch,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { useState } from 'react';
-import { useApproveYourMcpServer, useSetTrust, useTrust } from '../../daemon/trust-queries';
+import {
+  useApproveYourMcpServer,
+  useMcpSignIns,
+  useSetTrust,
+  useStartMcpSignIn,
+  useTrust,
+} from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const SOURCE_LABELS: Readonly<Record<YourMcpSource, string>> = {
@@ -16,8 +43,105 @@ function runs(server: YourMcpServerDto): string {
   return `Runs ${[server.command ?? '', ...server.args].join(' ').trim()}`;
 }
 
+/** The `oauth` keys Claude Code reads that Codex has no key for. */
+const CODEX_UNUSED_OAUTH = ['authServerMetadataUrl', 'xaa'];
+
+const COULDNT_READ = "Couldn't read whether it's signed in.";
+
+/** One account's sign-in to one server: what it says and the button that moves it on. */
+function SignInLine({ row }: { readonly row: McpSignInRowDto }) {
+  const start = useStartMcpSignIn();
+  const words = `${row.accountLabel} to ${row.name}`;
+  const begin = (label: string, text: string) => (
+    <Button
+      size="compact-xs"
+      variant="default"
+      aria-label={`${label} ${words}`}
+      loading={start.isPending}
+      onClick={() => {
+        start.mutate({ accountId: row.accountId, key: row.key });
+      }}
+    >
+      {text}
+    </Button>
+  );
+  return (
+    <Group gap="xs" wrap="nowrap" align="center">
+      <Text
+        size="xs"
+        c={row.state === McpSignInState.Failed ? 'red' : 'dimmed'}
+        style={{ wordBreak: 'break-word' }}
+      >
+        {row.accountLabel}:{' '}
+        {row.state === McpSignInState.SignedIn
+          ? 'Signed in'
+          : row.state === McpSignInState.NotSignedIn
+            ? 'Not signed in'
+            : row.state === McpSignInState.SigningIn
+              ? 'Signing in in your browser…'
+              : (row.message ?? COULDNT_READ)}
+      </Text>
+      {row.state === McpSignInState.SignedIn
+        ? null
+        : row.state === McpSignInState.SigningIn
+          ? begin('Open page again for', 'Open page again')
+          : begin('Sign in', 'Sign in')}
+      {start.isError ? (
+        <Text size="xs" c="red">
+          {start.error.message}
+        </Text>
+      ) : null}
+    </Group>
+  );
+}
+
+/** What to run in a terminal to sign a Claude plan account in to a server; there is no sign-in 10db can start for it. */
+function TerminalEntry({ entry }: { readonly entry: McpSignInTerminalDto }) {
+  return (
+    <Stack gap={4} px="md" py="sm">
+      <Text size="sm">
+        To sign {entry.accountLabel} in to a server that signs in with OAuth, run:
+      </Text>
+      <Group gap="xs" wrap="nowrap" align="center">
+        <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {entry.command}
+        </Code>
+        <CopyButton value={entry.command}>
+          {({ copied, copy }) => (
+            <Tooltip label={copied ? 'Copied' : 'Copy command'} withArrow>
+              <ActionIcon
+                size="md"
+                variant="subtle"
+                color={copied ? 'green' : 'gray'}
+                aria-label={copied ? 'Copied' : 'Copy command'}
+                onClick={copy}
+              >
+                {copied ? (
+                  <IconCheck size={20} stroke={1.5} />
+                ) : (
+                  <IconCopy size={20} stroke={1.5} />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </CopyButton>
+      </Group>
+      <Text size="sm">Then run /mcp and sign in.</Text>
+    </Stack>
+  );
+}
+
 /** A server's details: where it comes from, what it runs, what it sets and sends. */
-function ServerText({ server }: { readonly server: YourMcpServerDto }) {
+function ServerText({
+  server,
+  signIns,
+}: {
+  readonly server: YourMcpServerDto;
+  readonly signIns: readonly McpSignInRowDto[];
+}) {
+  const codexUnused = server.oauth
+    .map((entry) => entry.name)
+    .filter((name) => CODEX_UNUSED_OAUTH.includes(name));
   const sourceLabel =
     server.source === YourMcpSource.Plugin && server.pluginId !== null
       ? `Comes with ${server.pluginId}`
@@ -41,6 +165,20 @@ function ServerText({ server }: { readonly server: YourMcpServerDto }) {
         <Text key={entry.name} size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
           {entry.name}={entry.value}
         </Text>
+      ))}
+      {server.oauth.length === 0 ? null : (
+        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+          Signs in with OAuth:{' '}
+          {server.oauth.map((entry) => `${entry.name}=${entry.value}`).join(', ')}
+        </Text>
+      )}
+      {codexUnused.length === 0 ? null : (
+        <Text size="xs" c="dimmed">
+          Codex sessions don't use: {codexUnused.join(', ')}
+        </Text>
+      )}
+      {signIns.map((row) => (
+        <SignInLine key={row.accountId} row={row} />
       ))}
       {server.headerNames.length === 0 ? null : (
         <Text size="xs" c="dimmed">
@@ -101,7 +239,8 @@ function ApproveModal({
         </Text>
         {server.sendsNoHeaders ? (
           <Text size="sm">
-            It sends no headers. If it signs in with OAuth, it won't connect in 10db yet.
+            It sends no headers. If it signs in with OAuth, sign it in as each agent does: in Claude
+            Code, or below for a Codex account.
           </Text>
         ) : null}
         {approve.isError ? <Alert color="red">{approve.error.message}</Alert> : null}
@@ -131,6 +270,7 @@ function ApproveModal({
 /** The builder's own MCP servers: each with Approve until it is approved, then a switch. */
 export function YourMcpServers() {
   const trust = useTrust();
+  const signIns = useMcpSignIns();
   const set = useSetTrust();
   const [asking, setAsking] = useState<YourMcpServerDto | null>(null);
   const data = trust.data;
@@ -155,7 +295,12 @@ export function YourMcpServers() {
           <SettingRow
             key={server.key}
             label={server.name}
-            description={<ServerText server={server} />}
+            description={
+              <ServerText
+                server={server}
+                signIns={(signIns.data?.rows ?? []).filter((row) => row.key === server.key)}
+              />
+            }
           >
             <Group justify="flex-end" gap="xs" wrap="nowrap">
               <StateBadge state={server.state} />
@@ -188,6 +333,9 @@ export function YourMcpServers() {
           </SettingRow>
         );
       })}
+      {(signIns.data?.terminal ?? []).map((entry) => (
+        <TerminalEntry key={entry.accountId} entry={entry} />
+      ))}
       {asking === null ? null : (
         <ApproveModal
           server={asking}

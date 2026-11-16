@@ -141,6 +141,24 @@
         "type": "string"
       }
     },
+    "oauth": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      }
+    },
     "sendsNoHeaders": {
       "type": "boolean"
     }
@@ -165,6 +183,7 @@
     "codexOnly",
     "enabledTools",
     "disabledTools",
+    "oauth",
     "sendsNoHeaders"
   ],
   "additionalProperties": false

@@ -82,7 +82,7 @@ describe('yourMcpForSession', () => {
     test.store.write((ctx) => {
       setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, yourMcpServers: false });
     });
-    expect(planFor(test)).toEqual({ stdio: {}, remote: {}, leftOut: [] });
+    expect(planFor(test)).toEqual({ stdio: {}, remote: {}, leftOut: [], connectorsOn: false });
     test.close();
   });
 

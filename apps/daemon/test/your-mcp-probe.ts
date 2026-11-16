@@ -47,14 +47,29 @@ for await (const line of createInterface({ input: process.stdin })) {
 /** The file the lane's write probe tries to make in the files root; a test removes it if it was made. */
 export const LANE_WROTE = 'lane-wrote-your-mcp';
 
+/** What `laneProbeScript` reaches for beyond the files root. */
+export interface LaneProbeTargets {
+  /** The real home path, never `~`: the keychain lines name a file under it. */
+  readonly home: string;
+  /** Token files a lane must not read; a test plants a canary in each. At least one, or `TOKEN_FILE` prints nothing. */
+  readonly tokenFiles: readonly string[];
+}
+
 /**
  * Shell probes for a lane, one line each, naming what the lane's own commands could learn of an unsandboxed
  * server: its environment and arguments from the process list, its sealed env file, the builder's
- * `~/.claude.json` and `~/.codex/config.toml`, and a write into the files root. A count of matches or `ok` is
- * printed, never a value. `denied` or a zero is what holds.
+ * `~/.claude.json` and `~/.codex/config.toml`, a write into the files root, the login keychain's folder and its
+ * Claude and Codex entries (attribute lookups, never `-w` or `-g`), and each token file. A count of matches or
+ * `ok` is printed, never a value. `denied` or a zero is what holds.
  */
-export function laneProbeScript(filesRoot: string): string {
-  const home = homedir();
+export function laneProbeScript(
+  filesRoot: string,
+  targets: LaneProbeTargets = { home: homedir(), tokenFiles: [] },
+): string {
+  const { home } = targets;
+  const keychain = `${home}/Library/Keychains/login.keychain-db`;
+  const lookup = (service: string): string =>
+    `/usr/bin/security find-generic-password -s '${service}' '${keychain}' >/dev/null 2>&1`;
   return [
     // Whether ps runs at all in the sandbox: it is refused outright, which is what keeps process info closed.
     `[ "$(/bin/ps -o pid= -p $$ 2>/dev/null | wc -l | tr -d ' ')" = 1 ] && echo PS_RAN=ok || echo PS_RAN=denied`,
@@ -64,6 +79,13 @@ export function laneProbeScript(filesRoot: string): string {
     `cat '${home}/.claude.json' >/dev/null 2>&1 && echo CLAUDE_JSON=ok || echo CLAUDE_JSON=denied`,
     `cat '${home}/.codex/config.toml' >/dev/null 2>&1 && echo CODEX_TOML=ok || echo CODEX_TOML=denied`,
     `touch '${filesRoot}/${LANE_WROTE}' 2>/dev/null && echo FILES_WRITE=ok || echo FILES_WRITE=denied`,
+    `ls '${home}/Library/Keychains' >/dev/null 2>&1 && echo KEYCHAINS=ok || echo KEYCHAINS=denied`,
+    `${lookup('Claude Code-credentials')} && echo SECURITY_CLAUDE=ok || echo SECURITY_CLAUDE=denied`,
+    `${lookup('Codex MCP Credentials')} && echo SECURITY_CODEX=ok || echo SECURITY_CODEX=denied`,
+    ...targets.tokenFiles.map(
+      (file) =>
+        `head -c1 '${file}' >/dev/null 2>&1 && echo TOKEN_FILE=ok || echo TOKEN_FILE=denied`,
+    ),
     '',
   ].join('\n');
 }
@@ -79,4 +101,27 @@ export const PROBES_HELD: readonly string[] = [
   'CLAUDE_JSON=denied',
   'CODEX_TOML=denied',
   'FILES_WRITE=denied',
+  'KEYCHAINS=denied',
+  'SECURITY_CLAUDE=denied',
+  'SECURITY_CODEX=denied',
+  'TOKEN_FILE=denied',
 ];
+
+/** The builder's signed-in OAuth server a live row connects: its name and its https address. */
+export interface LiveOAuthServer {
+  readonly name: string;
+  readonly url: string;
+}
+
+/**
+ * Reads `TENDB_LIVE_OAUTH_SERVER`: `<name>` for Linear's server under that name, or `<name>=<https url>`. The
+ * name is part of the keychain key Claude Code stores a sign-in under, so it must be the one the builder
+ * signed in under.
+ */
+export function liveOAuthServer(value: string | undefined): LiveOAuthServer {
+  if (value === undefined || value === '') throw new Error('TENDB_LIVE_OAUTH_SERVER is not set');
+  const [name = '', url = 'https://mcp.linear.app/mcp'] = value.split('=');
+  if (name === '' || !url.startsWith('https://'))
+    throw new Error('TENDB_LIVE_OAUTH_SERVER is <name> or <name>=<https url>');
+  return { name, url };
+}

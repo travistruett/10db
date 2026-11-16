@@ -69,6 +69,18 @@ function recording(name: string): AgentAdapter & { readonly calls: string[] } {
       calls.push('readClientUuids');
       return Promise.resolve([name]);
     },
+    startMcpSignIn: () => {
+      calls.push('startMcpSignIn');
+      return Promise.resolve({
+        outcome: new Promise<never>(() => undefined),
+        reopen: () => Promise.resolve(),
+        cancel: () => Promise.resolve(),
+      });
+    },
+    mcpAuthStatus: () => {
+      calls.push('mcpAuthStatus');
+      return Promise.resolve({});
+    },
   };
 }
 
@@ -98,6 +110,8 @@ const METHODS = [
   'probeAccount',
   'startLogin',
   'readClientUuids',
+  'startMcpSignIn',
+  'mcpAuthStatus',
 ] as const;
 
 async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<void> {
@@ -107,6 +121,13 @@ async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<v
   await adapter.complete({ cwd: '/d', prompt: 'q', model: 'm', env: {}, account: account(kind) });
   await adapter.probeAccount({ cwd: '/d', env: {}, kind });
   await adapter.startLogin({ cwd: '/d', env: {}, kind });
+  const server = {
+    connect: { type: 'http' as const, url: 'https://s.example/mcp', headers: null },
+    claudeOAuth: null,
+    codex: { enabledTools: null, disabledTools: [], startupTimeoutSec: null, toolTimeoutSec: null },
+  };
+  await adapter.startMcpSignIn({ kind, env: {}, name: 's', server });
+  await adapter.mcpAuthStatus({ kind, env: {}, servers: { s: server } });
   await adapter.readClientUuids({
     account: account(kind),
     env: {},

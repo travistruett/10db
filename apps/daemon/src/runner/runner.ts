@@ -2524,7 +2524,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...Object.fromEntries(
         Object.entries(laneSession?.yourMcpServers ?? {}).flatMap(([name, connect]) => {
           const planned = yours.stdio[name];
-          return planned === undefined ? [] : [[name, { connect, codex: planned.codex }]];
+          return planned === undefined
+            ? []
+            : [[name, { connect, claudeOAuth: null, codex: planned.codex }]];
         }),
       ),
       ...Object.fromEntries(
@@ -2532,6 +2534,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           name,
           {
             connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            claudeOAuth: remote.oauth,
             codex: remote.codex,
           },
         ]),
@@ -2567,6 +2570,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             })
           ? 'auto'
           : 'default';
+    // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
+    const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
     const policy = buildTrustPolicy({
       surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
       projectName: project.name,
@@ -2582,6 +2587,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       approved,
       grants: projectGrantLines(db, project.id),
       yourMcpServers: Object.keys(yourServers),
+      claudeConnectors,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3106,6 +3112,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         yourMcpServers: yourServers,
+        claudeConnectors,
         // Codex searches the web live, as Claude Code does, while the Web switch is on.
         webSearch: switches.web ? 'live' : 'disabled',
         sandbox: laneSession?.spec ?? null,

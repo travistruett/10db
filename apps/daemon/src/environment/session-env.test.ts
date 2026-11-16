@@ -50,6 +50,7 @@ describe('stripBillingSwitches', () => {
   it.each([
     ['a billing switch', 'ANTHROPIC_API_KEY'],
     ['a config directory', 'CLAUDE_CONFIG_DIR'],
+    ['a sign-in lookup directory', 'CLAUDE_SECURESTORAGE_CONFIG_DIR'],
     ['an OAuth token', 'CLAUDE_CODE_OAUTH_TOKEN'],
     ['a provider family member', 'CLAUDE_CODE_USE_MANTLE'],
     ['a nested-session marker', 'CLAUDECODE'],

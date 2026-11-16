@@ -4,6 +4,7 @@ import type { SeenAccount } from './account-check';
 import { codexCapabilities } from './capabilities';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
+import { codexMcpAuthStatus, startCodexMcpSignIn } from './codex-mcp-sign-in';
 import { codexHomes } from './codex-home';
 import { InitializeResponse } from './codex-protocol';
 import {
@@ -33,6 +34,8 @@ export interface CodexAdapterOptions {
   readonly socketDir?: string;
   /** Asks whether the account a session runs on is signed in, when a start gets no account. */
   readonly signInCheck?: SignInCheck;
+  /** Opens an MCP sign-in page in the builder's browser; defaults to `/usr/bin/open`. Tests record. */
+  readonly openPage?: (url: string) => Promise<void>;
 }
 
 /** How long a probe waits for the app-server to say who the account is. */
@@ -91,6 +94,8 @@ export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
     capabilities: (account) => codexCapabilities(account.kind),
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
+    startMcpSignIn: (spec) => startCodexMcpSignIn(spec, { ...opts, homes }),
+    mcpAuthStatus: (spec) => codexMcpAuthStatus(spec, { ...opts, homes }),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
     // A lane and an explore conversation open the same session: the sandbox, the guard hook and the
     // judge come with the spec (sessions spec §5.5, the attended profile).

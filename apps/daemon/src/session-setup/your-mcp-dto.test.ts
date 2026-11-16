@@ -152,6 +152,7 @@ describe('yourMcpServerDtos', () => {
       headers: {},
       envHeaders: {},
       bearerTokenVar: null,
+      oauth: null,
       codex: NONE,
     };
     const [a, b] = dtos([
@@ -160,6 +161,27 @@ describe('yourMcpServerDtos', () => {
     ]);
     expect([a?.sendsNoHeaders, b?.sendsNoHeaders]).toEqual([true, false]);
     expect(b?.headerNames).toEqual(['Authorization']);
+  });
+
+  it('lists an oauth block as text, and none as an empty list', () => {
+    const plain: DeclaredYourServer = {
+      transport: 'http',
+      url: 'https://x.example/mcp',
+      headers: {},
+      envHeaders: {},
+      bearerTokenVar: null,
+      oauth: null,
+      codex: NONE,
+    };
+    const [a, b] = dtos([
+      entry('plain', plain),
+      entry('signs', { ...plain, oauth: { clientId: 'x', callbackPort: 8080 } }),
+    ]);
+    expect(a?.oauth).toEqual([]);
+    expect(b?.oauth).toEqual([
+      { name: 'clientId', value: 'x' },
+      { name: 'callbackPort', value: '8080' },
+    ]);
   });
 
   it('names the keys only Codex applies, from config.toml', () => {

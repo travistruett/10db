@@ -132,6 +132,72 @@ export function signInCommand(configDir: string | null): string {
     : `CLAUDE_CONFIG_DIR=${quoted(configDir)} claude /login`;
 }
 
+/**
+ * Claude Code's cache of servers that needed a sign-in, in the session's config folder; null unless the
+ * session reads another folder's sign-ins (both variables set, the lookup one possibly empty). Only an
+ * account that shares the builder's entry has a cache that can be stale against it.
+ */
+export function staleNeedsAuthCache(env: Readonly<Record<string, string>>): string | null {
+  const dir = env['CLAUDE_CONFIG_DIR'];
+  if (dir === undefined || !Object.hasOwn(env, 'CLAUDE_SECURESTORAGE_CONFIG_DIR')) return null;
+  return join(dir, 'mcp-needs-auth-cache.json');
+}
+
+/** Where a builder signs an MCP server in for a Claude session. */
+export const McpSignInWhere = {
+  BuildersClaudeCode: 'builders_claude_code',
+  ThisAccount: 'this_account',
+  NotYet: 'not_yet',
+} as const;
+export type McpSignInWhere = (typeof McpSignInWhere)[keyof typeof McpSignInWhere];
+
+/** The login shell's absolute `CLAUDE_CONFIG_DIR`, or null; a relative path names no one directory. */
+export function loginConfigDirOf(base: Readonly<Record<string, string>>): string | null {
+  const dir = base['CLAUDE_CONFIG_DIR'];
+  return dir !== undefined && isAbsolute(dir) ? dir : null;
+}
+
+/**
+ * A session's environment turned into a connector probe's: the same account and billing variables, on a
+ * fresh `CLAUDE_CONFIG_DIR`, with the keychain lookup pointed at the folder the session itself reads
+ * (the empty string for Claude Code's default). The probe then reads the account's own login and writes
+ * nothing of its own to the keychain.
+ */
+export function connectorProbeEnv(
+  sessionEnv: Readonly<Record<string, string>>,
+  freshDir: string,
+): Record<string, string> {
+  return {
+    ...sessionEnv,
+    CLAUDE_CONFIG_DIR: freshDir,
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: sessionEnv['CLAUDE_CONFIG_DIR'] ?? '',
+  };
+}
+
+/**
+ * Where a Claude session's servers get signed in, from its launch environment: not at all on a Gateway
+ * account, in the builder's own Claude Code when the session reads that entry (the default folder, the login
+ * shell's folder, or a keyed account), and in the account's own folder otherwise. `loginConfigDir` is the
+ * login shell's absolute `CLAUDE_CONFIG_DIR`, or null.
+ */
+export function mcpSignInWhere(
+  kind: AgentAccountKind,
+  env: Readonly<Record<string, string>>,
+  loginConfigDir: string | null,
+): McpSignInWhere {
+  if (kind === AccountKind.Gateway) return McpSignInWhere.NotYet;
+  const dir = env['CLAUDE_CONFIG_DIR'];
+  if (dir !== undefined && dir === loginConfigDir) return McpSignInWhere.BuildersClaudeCode;
+  if (dir !== undefined && !Object.hasOwn(env, 'CLAUDE_SECURESTORAGE_CONFIG_DIR'))
+    return McpSignInWhere.ThisAccount;
+  return McpSignInWhere.BuildersClaudeCode;
+}
+
+/** Starts the unmodified `claude` on an account's own folder, where `/mcp` signs its servers in; the path is one shell word even with spaces. */
+export function claudeMcpSignInCommand(configDir: string): string {
+  return `CLAUDE_CONFIG_DIR=${quoted(configDir)} claude`;
+}
+
 /** Signs a ChatGPT plan in with the unmodified `codex`; the path is one shell word even with spaces. */
 export function codexSignInCommand(home: string): string {
   return `CODEX_HOME=${quoted(home)} codex login`;
@@ -214,6 +280,15 @@ export function createLauncher(opts: {
     return account.kind;
   }
 
+  /**
+   * Where the builder's own Claude Code keeps its sign-ins, as `CLAUDE_SECURESTORAGE_CONFIG_DIR` names it:
+   * the login shell's folder, or the empty string for Claude Code's default. Set, even empty, it points the
+   * keychain lookup at that entry whatever the session's own `CLAUDE_CONFIG_DIR` is.
+   */
+  function sharedEntryDir(): string {
+    return loginConfigDirOf(opts.base) ?? '';
+  }
+
   function build(account: AccountRow): Record<string, string> {
     const kind = agentKindOf(account);
     const login = projectEnv();
@@ -222,7 +297,9 @@ export function createLauncher(opts: {
       [CLIENT_APP_VAR]: opts.clientApp,
     };
     // Every kind runs on its own directory, so a keyed session never meets the default account's saved login;
-    // null is Claude Code's default directory, which only the default account uses.
+    // null is Claude Code's default directory, which only the default account uses. A keyed session still
+    // reads the builder's MCP sign-ins, as its own Claude Code does on Bedrock, and runs as its key: the
+    // preflight's checkAccount and the init check confirm it.
     if (account.configDir !== null)
       env[kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
         account.configDir;
@@ -234,6 +311,7 @@ export function createLauncher(opts: {
       case AccountKind.AnthropicApiKey: {
         ApiKeySettings.parse(account.settings);
         env['ANTHROPIC_API_KEY'] = secretOf(account);
+        env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
         return env;
       }
       case AccountKind.Bedrock: {
@@ -242,6 +320,7 @@ export function createLauncher(opts: {
         env['AWS_REGION'] = settings.region;
         if (settings.awsProfile === null) env['AWS_BEARER_TOKEN_BEDROCK'] = secretOf(account);
         else env['AWS_PROFILE'] = settings.awsProfile;
+        env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
         return env;
       }
       case AccountKind.Gateway: {
@@ -279,9 +358,7 @@ export function createLauncher(opts: {
       return { env: build(account), expect: expectation(account) };
     },
     loginConfigDir() {
-      const dir = opts.base['CLAUDE_CONFIG_DIR'];
-      // A relative path depends on the shell's working directory, so it names no one directory.
-      return dir !== undefined && isAbsolute(dir) ? dir : null;
+      return loginConfigDirOf(opts.base);
     },
     loginCodexHome() {
       const dir = opts.base['CODEX_HOME'];

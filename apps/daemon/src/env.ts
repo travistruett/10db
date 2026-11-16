@@ -65,6 +65,12 @@ const DaemonEnv = z.object({
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
   // Test only: with TENDB_LIVE_CLAUDE, runs auto-mode.live.test.ts's Bedrock rows too.
   TENDB_LIVE_BEDROCK: z.enum(['0', '1']).optional(),
+  // Test only: with TENDB_LIVE_CLAUDE, runs the API-key row of lane-sandbox.live.test.ts's OAuth MCP rows on
+  // the key in ANTHROPIC_API_KEY. A key never goes in a session or a file.
+  TENDB_LIVE_API_KEY: z.enum(['0', '1']).optional(),
+  // Test only: the builder's signed-in OAuth MCP server the live OAuth rows connect: `<name>` (Linear's server
+  // under that name) or `<name>=<https url>`.
+  TENDB_LIVE_OAUTH_SERVER: z.string().min(1).optional(),
   // Test only: a file auto-mode.live.test.ts appends each row's observations to.
   TENDB_LIVE_REPORT: z.string().min(1).optional(),
   // Test only: runs codex.live.test.ts against the real codex on a local fake model, signed in to nothing.

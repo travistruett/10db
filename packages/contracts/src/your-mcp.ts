@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountId } from './ids';
 import { McpConfigEntry, McpTransport } from './system';
 
 // The builder's own MCP servers (Settings › Trust): read from `~/.claude.json`, `~/.codex/config.toml` and
@@ -67,6 +68,8 @@ export const YourMcpServerDto = z.strictObject({
   /** The tool filters an approval covers, as `config.toml` sets them: null where no allow list is set. */
   enabledTools: z.array(z.string()).nullable(),
   disabledTools: z.array(z.string()),
+  /** A remote server's `oauth` block as text, which an approval covers: its keys and values, or none. */
+  oauth: z.array(McpConfigEntry),
   /** A remote server with no header and no bearer token, which likely signs in with OAuth. */
   sendsNoHeaders: z.boolean(),
 });
@@ -78,3 +81,55 @@ export const ApproveYourMcpServer = z.strictObject({
   configHash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type ApproveYourMcpServer = z.infer<typeof ApproveYourMcpServer>;
+
+/** Where one account's sign-in to one OAuth server stands. */
+export const McpSignInState = {
+  SignedIn: 'signed_in',
+  NotSignedIn: 'not_signed_in',
+  SigningIn: 'signing_in',
+  Failed: 'failed',
+  Unknown: 'unknown',
+} as const;
+export type McpSignInState = (typeof McpSignInState)[keyof typeof McpSignInState];
+
+/** One Codex account's sign-in to one of the builder's servers: never a url or a token. */
+export const McpSignInRowDto = z.strictObject({
+  accountId: AccountId,
+  accountLabel: z.string(),
+  key: YourMcpServerKey,
+  name: z.string(),
+  state: z.enum(McpSignInState),
+  /** Why it failed or can't be read; null otherwise. */
+  message: z.string().nullable(),
+});
+export type McpSignInRowDto = z.infer<typeof McpSignInRowDto>;
+
+/** What a Claude plan account in its own folder runs to sign its servers in, in the builder's terminal. */
+export const McpSignInTerminalDto = z.strictObject({
+  accountId: AccountId,
+  accountLabel: z.string(),
+  command: z.string(),
+});
+export type McpSignInTerminalDto = z.infer<typeof McpSignInTerminalDto>;
+
+/** `GET` and `POST /settings/trust/mcp-sign-ins`. */
+export const McpSignInsDto = z.strictObject({
+  rows: z.array(McpSignInRowDto),
+  terminal: z.array(McpSignInTerminalDto),
+});
+export type McpSignInsDto = z.infer<typeof McpSignInsDto>;
+
+/** `POST /settings/trust/mcp-sign-ins`: starts one account's sign-in to one server, or opens its page again. */
+export const StartMcpSignIn = z.strictObject({
+  accountId: AccountId,
+  key: YourMcpServerKey,
+});
+export type StartMcpSignIn = z.infer<typeof StartMcpSignIn>;
+
+/** The data of `mcp_sign_in.changed`: which sign-in moved and where it stands. Entity `mcp_sign_in`; no url. */
+export const McpSignInChangedData = z.strictObject({
+  accountId: AccountId,
+  key: YourMcpServerKey,
+  state: z.enum(McpSignInState),
+});
+export type McpSignInChangedData = z.infer<typeof McpSignInChangedData>;

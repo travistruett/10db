@@ -22,6 +22,11 @@ import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
 import { createClaudeAdapter } from './claude-adapter';
 import {
+  CONNECTOR_WAIT_MS,
+  type ClaudeConnector,
+  type ConnectorDirectory,
+} from './claude-connectors';
+import {
   buildMcpServers,
   buildQueryOptions,
   CLAUDE_MCP_SERVER,
@@ -86,6 +91,7 @@ function spec(overrides: LaneOverrides = {}): LaneSessionSpec {
     },
     projectMcpServers: {},
     yourMcpServers: {},
+    claudeConnectors: false,
     sandbox: null,
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -128,6 +134,7 @@ function shapeSpec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     sandbox: null,
     projectMcpServers: {},
     yourMcpServers: {},
+    claudeConnectors: false,
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () =>
       Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),
@@ -549,7 +556,9 @@ describe('buildQueryOptions', () => {
       const made = mine();
       try {
         const servers = buildMcpServers(
-          spec({ yourMcpServers: { mine: { connect: made.server, codex: noExtras } } }),
+          spec({
+            yourMcpServers: { mine: { connect: made.server, codex: noExtras, claudeOAuth: null } },
+          }),
         );
         expect(servers['mine']).toEqual({
           type: 'stdio',
@@ -568,6 +577,7 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             docs: {
               connect: { type: 'http', url: 'https://docs.example/mcp', headers: { A: 'b' } },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -580,6 +590,31 @@ describe('buildQueryOptions', () => {
       });
     });
 
+    it('passes an oauth block of your http server as the CLI reads it, and none without one', () => {
+      const servers = buildMcpServers(
+        spec({
+          yourMcpServers: {
+            signs: {
+              connect: { type: 'http', url: 'https://a.example/mcp', headers: null },
+              codex: noExtras,
+              claudeOAuth: { clientId: 'x' },
+            },
+            plain: {
+              connect: { type: 'http', url: 'https://b.example/mcp', headers: null },
+              codex: noExtras,
+              claudeOAuth: null,
+            },
+          },
+        }),
+      );
+      expect(servers['signs']).toEqual({
+        type: 'http',
+        url: 'https://a.example/mcp',
+        oauth: { clientId: 'x' },
+      });
+      expect(servers['plain']).not.toHaveProperty('oauth');
+    });
+
     it('writes the project, then yours, then 10db last, so no server takes 10db’s name', () => {
       const servers = buildMcpServers(
         spec({
@@ -589,10 +624,12 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             mine: {
               connect: { type: 'sse', url: 'https://mine.example/sse', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
             [CLAUDE_MCP_SERVER]: {
               connect: { type: 'http', url: 'https://impostor.example/mcp', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -608,6 +645,7 @@ describe('buildQueryOptions', () => {
           yourMcpServers: {
             mine: {
               connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+              claudeOAuth: null,
               codex: noExtras,
             },
           },
@@ -618,9 +656,30 @@ describe('buildQueryOptions', () => {
       expect(JSON.stringify(options.allowedTools)).not.toContain('mcp__mine');
     });
 
-    async function noteFor(status: readonly McpServerStatus[], errors: Record<string, string>) {
+    async function noteFor(
+      status: readonly McpServerStatus[],
+      errors: Record<string, string>,
+      account: {
+        kind?: 'claude_subscription' | 'anthropic_api_key' | 'gateway';
+        env?: Record<string, string>;
+      } = {},
+    ) {
+      const kind = account.kind ?? 'claude_subscription';
+      // What each kind of account reports when it bills what it should.
+      const reports = {
+        claude_subscription: { init: 'none' as const, account: undefined },
+        anthropic_api_key: {
+          init: 'ANTHROPIC_API_KEY' as const,
+          account: { apiProvider: 'firstParty' as const, apiKeySource: 'ANTHROPIC_API_KEY' },
+        },
+        gateway: {
+          init: 'none' as const,
+          account: { apiProvider: 'firstParty' as const, tokenSource: 'ANTHROPIC_AUTH_TOKEN' },
+        },
+      }[kind];
       const fake = fakeQuery({
-        messages: [initMessage()],
+        messages: [initMessage(reports.init)],
+        ...(reports.account === undefined ? {} : { account: reports.account }),
         mcpSet: { added: [CLAUDE_MCP_SERVER], removed: [], errors },
         mcpStatus: status,
       });
@@ -637,13 +696,24 @@ describe('buildQueryOptions', () => {
             projectMcpServers: {
               repo: { type: 'http', url: 'https://repo.example/mcp', headers: null },
             },
+            ...(account.env === undefined
+              ? {}
+              : { env: { PATH: '/usr/bin:/bin', ...account.env } }),
+            account: {
+              accountId: mintId('Account'),
+              label: 'Claude plan',
+              kind: account.kind ?? 'claude_subscription',
+              identity: null,
+            },
             yourMcpServers: {
               mine: {
                 connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+                claudeOAuth: null,
                 codex: noExtras,
               },
               oauthy: {
                 connect: { type: 'http', url: 'https://oauthy.example/mcp', headers: null },
+                claudeOAuth: null,
                 codex: noExtras,
               },
             },
@@ -662,10 +732,253 @@ describe('buildQueryOptions', () => {
       );
     });
 
-    it('names your server that needs OAuth with the OAuth reason', async () => {
-      const prompt = await noteFor([{ name: 'oauthy', status: 'needs-auth' }], {});
-      expect(prompt).toContain("oauthy signs in with OAuth, which 10db doesn't support yet.");
-      expect(prompt).not.toContain('failed to connect');
+    it.each<
+      [
+        string,
+        'claude_subscription' | 'anthropic_api_key' | 'gateway',
+        Record<string, string>,
+        string,
+      ]
+    >([
+      [
+        'a subscription on the default folder',
+        'claude_subscription',
+        {},
+        "oauthy isn't signed in. Sign in to it in Claude Code: run `claude`, then `/mcp`. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'an API key on the builder entry',
+        'anthropic_api_key',
+        { CLAUDE_CONFIG_DIR: '/d', CLAUDE_SECURESTORAGE_CONFIG_DIR: '' },
+        "oauthy isn't signed in. Sign in to it in Claude Code: run `claude`, then `/mcp`. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'a subscription on its own folder',
+        'claude_subscription',
+        { CLAUDE_CONFIG_DIR: '/d' },
+        "oauthy isn't signed in for this account. Settings › Trust shows how to sign in. It is not in this session; don't look for its tools.",
+      ],
+      [
+        'a Gateway',
+        'gateway',
+        { CLAUDE_CONFIG_DIR: '/d' },
+        "oauthy signs in with OAuth, which 10db doesn't run on a Gateway account yet. It is not in this session; don't look for its tools.",
+      ],
+    ])(
+      'names your server that needs OAuth where to sign in: %s',
+      async (_name, kind, env, note) => {
+        const prompt = await noteFor([{ name: 'oauthy', status: 'needs-auth' }], {}, { kind, env });
+        expect(prompt).toContain(note);
+        expect(prompt).not.toContain('failed to connect');
+      },
+    );
+  });
+
+  describe('claude.ai connectors', () => {
+    const gmail: ClaudeConnector = {
+      name: 'claude.ai Gmail',
+      url: 'https://mcp.claude.ai/gmail',
+      id: 'conn_gmail',
+    };
+    const docs: ClaudeConnector = {
+      name: 'claude.ai Docs',
+      url: 'https://mcp.claude.ai/docs',
+      id: 'conn_docs',
+    };
+    const noExtras = {
+      enabledTools: null,
+      disabledTools: [],
+      startupTimeoutSec: null,
+      toolTimeoutSec: null,
+    };
+
+    function directory(
+      answer: () => Promise<readonly ClaudeConnector[] | null>,
+      refused: string | null = null,
+    ) {
+      const calls: { accountId: string; env: Readonly<Record<string, string>> }[] = [];
+      const connectors: ConnectorDirectory = {
+        list: (accountId, env) => {
+          calls.push({ accountId, env });
+          return answer();
+        },
+        refusedPath: () => refused,
+        stop: () => Promise.resolve(),
+      };
+      return { calls, connectors };
+    }
+
+    function open(
+      answer: () => Promise<readonly ClaudeConnector[] | null>,
+      over: LaneOverrides = {},
+      status: readonly McpServerStatus[] = [],
+      clock: Clock = systemClock,
+      refused: string | null = null,
+    ) {
+      const fake = fakeQuery({ messages: [initMessage()], mcpStatus: status });
+      const dir = directory(answer, refused);
+      const adapter = createClaudeAdapter({
+        claudePath: '/usr/local/bin/claude',
+        pluginDir: '/harness',
+        logger: silentLogger,
+        query: fake.query,
+        allowUnsandboxed: true,
+        connectors: dir.connectors,
+        clock,
+      });
+      const done = collect(adapter.open(spec({ claudeConnectors: true, ...over })).events);
+      return { fake, dir, done };
+    }
+
+    it('passes each kept connector as a claudeai-proxy entry, after yours and before 10db', async () => {
+      const { fake, dir, done } = open(() => Promise.resolve([gmail, docs]), {
+        yourMcpServers: {
+          claude_ai_Docs: {
+            connect: { type: 'http', url: 'https://mine.example/mcp', headers: null },
+            claudeOAuth: null,
+            codex: noExtras,
+          },
+        },
+      });
+      await done;
+      const servers = fake.record.mcpCalls[0]?.servers ?? {};
+      expect(Object.keys(servers)).toEqual([
+        'claude_ai_Docs',
+        'claude.ai Gmail',
+        CLAUDE_MCP_SERVER,
+      ]);
+      expect(servers['claude.ai Gmail']).toEqual({
+        type: 'claudeai-proxy',
+        url: gmail.url,
+        id: gmail.id,
+      });
+      expect(dir.calls).toHaveLength(1);
+      expect(dir.calls[0]?.env).toMatchObject({ PATH: '/usr/bin:/bin' });
+    });
+
+    it('never asks the directory with the switch off, or for a keyed account', async () => {
+      for (const over of [
+        { claudeConnectors: false },
+        {
+          // The spec's flag alone must not reach the directory: a keyed account has no claude.ai login.
+          claudeConnectors: true,
+          account: {
+            accountId: mintId('Account'),
+            label: 'Key',
+            kind: 'anthropic_api_key' as const,
+            identity: null,
+          },
+        },
+      ] satisfies LaneOverrides[]) {
+        const fake = fakeQuery({
+          messages: [initMessage(over.account === undefined ? 'none' : 'ANTHROPIC_API_KEY')],
+          ...(over.account === undefined
+            ? {}
+            : {
+                account: { apiProvider: 'firstParty' as const, apiKeySource: 'ANTHROPIC_API_KEY' },
+              }),
+        });
+        const dir = directory(() => Promise.resolve([gmail]));
+        const adapter = createClaudeAdapter({
+          claudePath: '/usr/local/bin/claude',
+          pluginDir: '/harness',
+          logger: silentLogger,
+          query: fake.query,
+          allowUnsandboxed: true,
+          connectors: dir.connectors,
+        });
+        await collect(adapter.open(spec(over)).events);
+        expect(dir.calls).toHaveLength(0);
+        expect(Object.keys(fake.record.mcpCalls[0]?.servers ?? {})).toEqual([CLAUDE_MCP_SERVER]);
+      }
+    });
+
+    it.each<[string, () => Promise<readonly ClaudeConnector[] | null>, boolean]>([
+      ['a failed read', () => Promise.resolve(null), true],
+      ['no connectors', () => Promise.resolve([]), false],
+    ])(
+      'says so when the connectors did not load, and not when there are none: %s',
+      async (_name, answer, noted) => {
+        const { fake, done } = open(answer);
+        await done;
+        const prompt = JSON.stringify(fake.record.inputs[0]?.message.content);
+        expect(prompt.includes("your claude.ai connectors didn't load in this session")).toBe(
+          noted,
+        );
+      },
+    );
+
+    it('names the MCP config that stopped the probe, and keeps the plain note for a failed read', async () => {
+      const { fake, done } = open(
+        () => Promise.resolve(null),
+        {},
+        [],
+        systemClock,
+        '/Users/me/work/.mcp.json',
+      );
+      await done;
+      const prompt = JSON.stringify(fake.record.inputs[0]?.message.content);
+      expect(prompt).toContain(
+        "your claude.ai connectors didn't load: /Users/me/work/.mcp.json is an MCP config 10db won't run beside your sign-in. Move it, and they come back.",
+      );
+      expect(prompt).not.toContain("didn't load in this session");
+    });
+
+    it('says so when the directory does not answer within CONNECTOR_WAIT_MS', async () => {
+      const clock = new ManualClock();
+      const { fake, dir, done } = open(() => new Promise(() => undefined), {}, [], clock);
+      await vi.waitFor(() => {
+        expect(dir.calls).toHaveLength(1);
+      });
+      clock.advance(CONNECTOR_WAIT_MS);
+      await done;
+      expect(JSON.stringify(fake.record.inputs[0]?.message.content)).toContain(
+        "Note from 10db: your claude.ai connectors didn't load in this session.",
+      );
+    });
+
+    it('names a connector that needs a sign-in, and says to sign in on claude.ai', async () => {
+      const { fake, done } = open(() => Promise.resolve([gmail]), {}, [
+        { name: 'claude.ai Gmail', status: 'needs-auth' },
+      ]);
+      await done;
+      expect(JSON.stringify(fake.record.inputs[0]?.message.content)).toContain(
+        "claude.ai Gmail needs you to sign in to it on claude.ai. It is not in this session; don't look for its tools.",
+      );
+    });
+  });
+
+  describe('the needs-auth cache', () => {
+    async function runWith(env: Record<string, string>): Promise<string> {
+      const dir = tempDir('needs-auth-cache');
+      try {
+        const cache = join(dir.path, 'mcp-needs-auth-cache.json');
+        writeFileSync(cache, '{}');
+        const fake = fakeQuery({ messages: [initMessage()] });
+        const adapter = createClaudeAdapter({
+          claudePath: '/usr/local/bin/claude',
+          pluginDir: '/harness',
+          logger: silentLogger,
+          query: fake.query,
+          allowUnsandboxed: true,
+        });
+        await collect(
+          adapter.open(
+            spec({ env: { PATH: '/usr/bin:/bin', CLAUDE_CONFIG_DIR: dir.path, ...env } }),
+          ).events,
+        );
+        return existsSync(cache) ? 'kept' : 'removed';
+      } finally {
+        dir.cleanup();
+      }
+    }
+
+    it('is removed before a session that reads the builder entry', async () => {
+      expect(await runWith({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' })).toBe('removed');
+    });
+
+    it('is left alone for a session on its own entry', async () => {
+      expect(await runWith({})).toBe('kept');
     });
   });
 

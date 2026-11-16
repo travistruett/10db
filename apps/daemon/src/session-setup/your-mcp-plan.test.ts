@@ -38,6 +38,7 @@ function remote(over: Partial<Extract<DeclaredYourServer, { transport: 'http' | 
     headers: {},
     envHeaders: {},
     bearerTokenVar: null,
+    oauth: null,
     codex: NO_EXTRAS,
     ...over,
   };
@@ -125,7 +126,15 @@ describe('planYourMcp', () => {
       stdio: {},
       remote: {},
       leftOut: [],
+      connectorsOn: false,
     });
+  });
+
+  it('claude.ai connectors follow the master switch', () => {
+    expect(plan([]).connectorsOn).toBe(true);
+    expect(plan([], { switches: { ...TRUST_DEFAULTS, yourMcpServers: false } }).connectorsOn).toBe(
+      false,
+    );
   });
 
   it('a server switched off here is not planned and not noted', () => {
@@ -134,6 +143,7 @@ describe('planYourMcp', () => {
       stdio: {},
       remote: {},
       leftOut: [],
+      connectorsOn: true,
     });
   });
 
@@ -178,7 +188,7 @@ describe('planYourMcp', () => {
   it('a plugin server follows its own switch, off here and named nowhere', () => {
     const p = entry('browser', stdio(), { source: YourMcpSource.Plugin, pluginId: 'tools@m' });
     const off = plan([p], { switches: { ...TRUST_DEFAULTS, mcpServers: { [p.key]: false } } });
-    expect(off).toEqual({ stdio: {}, remote: {}, leftOut: [] });
+    expect(off).toEqual({ stdio: {}, remote: {}, leftOut: [], connectorsOn: true });
   });
 
   it('serverState names each state', () => {
@@ -229,9 +239,11 @@ describe('planYourMcp', () => {
     );
     expect(result.stdio['s']?.env).toMatchObject({ KEY: 'k-sk-1', D: 'dflt' });
     expect(result.remote['r']).toEqual({
+      key: entry('r', remote()).key,
       type: 'http',
       url: 'https://mcp.example/mcp',
       headers: { Authorization: 'Bearer sk-1' },
+      oauth: null,
       codex: NO_EXTRAS,
     });
   });

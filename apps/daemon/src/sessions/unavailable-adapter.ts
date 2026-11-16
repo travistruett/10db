@@ -4,6 +4,7 @@ import {
   AccountProbeError,
   CompletionError,
   ConversationUnreadError,
+  McpSignInError,
   type AgentAdapter,
   type SessionEvent,
 } from './types';
@@ -26,6 +27,8 @@ export function createUnavailableAdapter(
     capabilities: (account, model) => capabilities(account, model),
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
     startLogin: () => Promise.reject(new AccountLoginError(message)),
+    startMcpSignIn: () => Promise.reject(new McpSignInError(message)),
+    mcpAuthStatus: () => Promise.reject(new McpSignInError(message)),
     complete: () => Promise.reject(new CompletionError(message)),
     readClientUuids: () => Promise.reject(new ConversationUnreadError(message)),
     open() {

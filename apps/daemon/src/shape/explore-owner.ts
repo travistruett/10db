@@ -13,7 +13,7 @@ import {
   TrustSurface,
   JudgeDecision,
   JudgeKind,
-  type AccountKind,
+  AccountKind,
   type AgentAccountKind,
   type Effort,
   type ProjectId,
@@ -553,6 +553,9 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
       const project = getProject(state.db, shape.projectId);
       // Read as each session starts, as a lane's is: a live system named meanwhile applies from the next.
       const switches = trustSwitchesFor(state.db, project.id, warnInvalidTrust(log));
+      const claudeConnectors =
+        (ready?.claudeConnectors ?? false) &&
+        launch.account.kind === AccountKind.ClaudeSubscription;
       const policy = buildTrustPolicy({
         surface: TrustSurface.Plan,
         projectName: project.name,
@@ -567,6 +570,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
         switches,
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
+        claudeConnectors,
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
@@ -605,6 +609,7 @@ export function createShapeOwner(deps: ShapeOwnerDeps): ExploreOwnerHooks {
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           yourMcpServers: ready?.yourMcpServers ?? {},
+          claudeConnectors,
           canUseTool: (req) =>
             ready === null
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
