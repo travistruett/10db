@@ -20,7 +20,8 @@
   table plus a list render test cover it.
 
 **Calls you might disagree with**
-- Board, Sessions, Plan and an open Workbench pass keep their compact headers: there the content is the work.
+- Sessions, Plan and an open Workbench pass keep their compact headers: there the content is the work. Board
+  takes the page header, with its goal on the toolbar row.
 - The Add Page dialog inside an open pass keeps its search picker; only the start page becomes a list.
 
 - A page that loads shows its header at once and, after 300 ms, quiet placeholder rows in the shape of what
