@@ -966,6 +966,8 @@ export interface Git extends ChatGit {
     readonly branch: string;
     readonly from: string;
     readonly to: string;
+    /** Runs under the repo lock before anything is written; a throw stops the move. */
+    readonly beforeWrite?: () => Promise<void>;
   }): Promise<SwitchBack>;
   /**
    * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
@@ -1365,7 +1367,8 @@ function readIfPresent(path: string): string {
  * fsmonitor, a hook or a submodule's git in the working tree: commits are plumbing over a private
  * index, changes are found by hashing files the daemon reads itself, every call passes
  * `DAEMON_GIT_CONFIG` and a cleaned environment, and the one checkout it makes (a batch's new
- * branch) reads no attributes from the tree. Every call first checks that the checkout's git dirs
+ * branch) reads no attributes from the tree. The chat's calls (`chat-git.ts`) are porcelain in the checkout, so
+ * they pin the config and environment that keep git out of a nested repository's status. Every call first checks that the checkout's git dirs
  * are the ones pinned for it and that it borrows no objects. Fetch and push go only to the URLs
  * pinned with it, with the builder's own transport config.
  */
@@ -3891,6 +3894,7 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly branch: string;
     readonly from: string;
     readonly to: string;
+    readonly beforeWrite?: () => Promise<void>;
   }): Promise<SwitchBack> {
     if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
       throw new InvalidError('A branch is moved between two commit ids');
@@ -3902,6 +3906,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
       const target = await revParse(c, `${input.to}^{commit}`);
       if (target === null) return { kind: 'gone' };
+      await input.beforeWrite?.();
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
       );

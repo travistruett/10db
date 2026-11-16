@@ -22,7 +22,7 @@ export type GhMethod =
   | 'repoView'
   | 'repoAllowsAutoMerge'
   | 'prView'
-  | 'prHead'
+  | 'prBranches'
   | 'prStatus'
   | 'prRequiredChecks'
   | 'prInMergeQueue'
@@ -140,8 +140,14 @@ export class FakeGh implements Gh {
     });
   }
 
-  prHead(input: { readonly repo: string; readonly ref: string }): Promise<string | null> {
-    return this.call('prHead', input, () => this.byRef.get(input.ref)?.head ?? null);
+  prBranches(input: {
+    readonly repo: string;
+    readonly ref: string;
+  }): Promise<{ readonly head: string; readonly base: string } | null> {
+    return this.call('prBranches', input, () => {
+      const found = this.byRef.get(input.ref);
+      return found ? { head: found.head, base: found.baseRef ?? 'main' } : null;
+    });
   }
 
   prStatus(input: {

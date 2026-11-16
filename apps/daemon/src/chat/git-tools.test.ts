@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import {
@@ -36,6 +36,7 @@ import { FakeGh } from '../../test/fake-gh';
 import { createEventBus, createStateStore } from '../events';
 import { createFolderHold, type FolderHold } from '../folder-hold';
 import { createGit } from '../git';
+import { secretFilesIn } from '../sandbox';
 import { createChatLiveSessions } from './live-sessions';
 import { chatGitTools } from './git-tools';
 
@@ -130,7 +131,7 @@ const rg = (...args: string[]) =>
     .trim();
 
 /** A chat's tools in a session of its own, open as the engine opens one. */
-function tools(chat: ReturnType<typeof newChat>, open = true) {
+function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () => void) {
   const live = createChatLiveSessions();
   const sessionId: SessionId = mintId('Session');
   if (open)
@@ -139,14 +140,27 @@ function tools(chat: ReturnType<typeof newChat>, open = true) {
       observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
       signal: new AbortController().signal,
     });
+  const real = createGit();
   return chatGitTools(
     {
-      git: createGit(),
+      // `afterCheck` runs once, right after the tool has read where the folder is: the moment a stop, a lane or
+      // an archive can land between a tool's check and its write.
+      git: {
+        ...real,
+        currentBranch: async (path) => {
+          const branch = await real.currentBranch(path);
+          const run = afterCheck;
+          afterCheck = undefined;
+          run?.();
+          return branch;
+        },
+      },
       folderHold: hold,
       live,
       gh,
       filesDir: () => join(scratch.path, 'files'),
       repoOf: () => repo.path,
+      secretFilesOf: secretFilesIn,
       net: () => ({
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
         timeoutMs: 20_000,
@@ -205,6 +219,16 @@ describe("a chat's git tools", () => {
     await expect(call(tools(me))).rejects.toThrow(/10db's own/);
   });
 
+  // Each name with the words its refusal carries, so a row that passes on git's own failure shows.
+  const REFUSED_BRANCH_NAMES: [name: string, message: RegExp][] = [
+    ['10db/x', /10db's own/],
+    ['10DB/x', /10db's own/],
+    ['-c', /never starts with - or \+/],
+    ['+x', /never starts with - or \+/],
+    ['@{-1}', /@\{/],
+    ['topic@{-2}', /@\{/],
+  ];
+
   it.each([
     ['make_branch', (t: Tools, name: string) => t.make_branch({ name })],
     ['switch_branch', (t: Tools, name: string) => t.switch_branch({ name })],
@@ -212,9 +236,29 @@ describe("a chat's git tools", () => {
     const me = newChat('Me');
     hold.takeTurn(project.id, me.id);
     const t = tools(me);
-    for (const name of ['10db/x', '10DB/x', '-c', '+x'])
-      await expect(call(t, name)).rejects.toThrow();
+    // `@{-1}` would name the 10db branch the folder was on before.
+    rg('switch', '-q', '-c', '10db/batch-abc123');
+    rg('switch', '-q', 'main');
+    for (const [name, message] of REFUSED_BRANCH_NAMES)
+      await expect(call(t, name)).rejects.toThrow(message);
     expect(rg('branch', '--show-current')).toBe('main');
+  });
+
+  // The kernel denies the session the file but not git's objects, so a commit would hand it over.
+  it.each([
+    ['an env file no ignore rule covers', { secret: '.env.local', paths: undefined }],
+    ['a file an env link points at', { secret: 'config/prod.txt', paths: ['config/prod.txt'] }],
+  ])('commit_changes refuses %s and names it', async (_what, { secret, paths }) => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    write(secret, 'TOKEN=1\n');
+    if (secret !== '.env.local') symlinkSync(secret, join(repo.path, '.env.link'));
+    write('src/a.ts', 'a\n');
+    const before = rg('rev-parse', 'HEAD');
+    await expect(
+      tools(me).commit_changes({ message: 'x', ...(paths === undefined ? {} : { paths }) }),
+    ).rejects.toThrow(secret);
+    expect(rg('rev-parse', 'HEAD')).toBe(before);
   });
 
   it('branches, then commits only the named files, with a path as the agent wrote it', async () => {
@@ -251,6 +295,45 @@ describe("a chat's git tools", () => {
     expect(
       await tools(me).commit_changes({ message: 'Mine', paths: ['b.txt'] }),
     ).not.toHaveProperty('warning');
+  });
+
+  // The hold is checked once before the work; a stop or a lane's start between that check and the write must not
+  // let the write land in a folder the turn no longer holds.
+  describe('when the turn loses Your folder after the tool checked it', () => {
+    it.each([
+      ['make_branch', (t: Tools) => t.make_branch({ name: 'topic' })],
+      ['switch_branch', (t: Tools) => t.switch_branch({ name: 'other' })],
+      ['pull', (t: Tools) => t.pull({})],
+      ['commit_changes', (t: Tools) => t.commit_changes({ message: 'x' })],
+    ])('%s writes nothing', async (_name, call) => {
+      rg('branch', 'other');
+      rg('branch', '--set-upstream-to=origin/main', 'main');
+      const clone = createTempClone(pair.origin.path);
+      writeFileSync(join(clone.path, 'remote.txt'), 'r\n');
+      execFileSync('git', ['-C', clone.path, 'add', '-A'], { env: isolatedGitEnv() });
+      execFileSync('git', ['-C', clone.path, 'commit', '-q', '-m', 'Remote'], {
+        env: isolatedGitEnv(),
+      });
+      execFileSync('git', ['-C', clone.path, 'push', '-q', 'origin', 'main'], {
+        env: { ...isolatedGitEnv(), ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
+      });
+      clone.cleanup();
+      write('mine.txt', 'mine\n');
+      const me = newChat('Me');
+      hold.takeTurn(project.id, me.id);
+      const head = rg('rev-parse', 'HEAD');
+      await expect(
+        call(
+          tools(me, true, () => {
+            hold.releaseTurn(me.id);
+          }),
+        ),
+      ).rejects.toThrow(/does not hold Your folder/);
+      expect(rg('rev-parse', 'HEAD')).toBe(head);
+      expect(rg('branch', '--show-current')).toBe('main');
+      expect(rg('branch', '--list', 'topic')).toBe('');
+      expect(rg('status', '--porcelain')).toBe('?? mine.txt');
+    });
   });
 
   it('pulls, and says when a branch is behind or has no upstream', async () => {
@@ -348,6 +431,17 @@ describe("a chat's tools that reach GitHub", () => {
     await expect(
       t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(batch)?.[1]) }),
     ).rejects.toThrow(/10db's own/);
+    // A pull request into one of 10db's branches would merge into it, whoever opened it.
+    const intoPass = await gh.prCreate({
+      repo: 'acme/widgets',
+      base: '10db/pass-abc123',
+      head: 'topic-x',
+      title: 'Into a pass',
+      bodyFile: join(scratch.path, 'b.md'),
+    });
+    await expect(
+      t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(intoPass)?.[1]) }),
+    ).rejects.toThrow(/merges into 10db\/pass-abc123, which is 10db's own/);
     await expect(t.merge_pull_request({ number: 99 })).rejects.toThrow('no pull request #99');
     expect(gh.merged).toEqual([]);
     const number = Number(/\/pull\/(\d+)$/.exec(mine.url)?.[1]);

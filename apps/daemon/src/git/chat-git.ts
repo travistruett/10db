@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, normalize, sep } from 'node:path';
+import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
+import { foldPathCase, isSecretFileName } from '../guard';
 import type { NetworkCall, NetworkRun } from './network';
 import { GitError } from './run';
 import { isGitComponent } from './worktree-files';
@@ -48,12 +49,20 @@ export interface ChatGitContext<C extends ChatSite> {
   isAncestor(c: C, ancestor: string, tip: string): Promise<boolean>;
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   moveCheckedOutBranch(input: {
+    /** Runs under the repo lock before anything is written; a throw stops the move. */
+    readonly beforeWrite?: BeforeWrite;
     readonly repo: string;
     readonly branch: string;
     readonly from: string;
     readonly to: string;
   }): Promise<PullMoved>;
 }
+
+/**
+ * Run under the repo lock, after the call's own checks and before its first write: the caller's last look at
+ * whether the write is still allowed. A throw stops the call with nothing written.
+ */
+export type BeforeWrite = () => Promise<void>;
 
 /** What moving a checked-out branch answers when it did not move it. */
 export type PullMoved =
@@ -74,23 +83,62 @@ export type PullResult =
 
 export interface ChatGit {
   /** Creates `name` at HEAD and points HEAD at it; the files and the index stay as they are. */
-  makeBranchHere(repo: string, name: string): Promise<void>;
+  makeBranchHere(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /**
    * Commits `paths` (staged first, so an untracked path counts, and only those: other staged files stay
    * staged), or every change with no paths. Resolves with the new commit.
    */
   commitInFolder(
     repo: string,
-    input: { readonly message: string; readonly paths?: readonly string[] },
+    input: {
+      readonly message: string;
+      readonly paths?: readonly string[];
+      /** The session's secret files, absolute; with every `.env*` file, a commit holding one is refused. */
+      readonly secretFiles?: readonly string[];
+      readonly beforeWrite?: BeforeWrite;
+    },
   ): Promise<{ readonly sha: string }>;
   /** Checks out the local branch `name`, keeping changes git can carry, and refusing what it would overwrite. */
-  switchBranch(repo: string, name: string): Promise<void>;
+  switchBranch(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /** Fetches the branch's upstream and moves the checked-out branch to it when that is a fast-forward. */
-  pullFastForward(repo: string, net: NetworkCall): Promise<PullResult>;
+  pullFastForward(repo: string, net: NetworkCall, beforeWrite?: BeforeWrite): Promise<PullResult>;
+}
+
+/**
+ * The paths among `paths` (relative to the checkout, which `roots` name as given and as resolved) that a sandboxed session may not read: a `.env*` file, or
+ * one of `secretFiles`. A commit would put them in git's objects, which the session can read.
+ */
+function secretsAmong(
+  roots: readonly string[],
+  paths: readonly string[],
+  secretFiles: readonly string[],
+): string[] {
+  const listed = secretFiles.map(foldPathCase);
+  return paths.filter(
+    (path) =>
+      isSecretFileName(basename(path)) ||
+      roots.some((root) => {
+        const folded = foldPathCase(join(root, path));
+        // A listed folder holds everything under it, as the sandbox's read rule for it does.
+        return listed.some((secret) => folded === secret || folded.startsWith(`${secret}/`));
+      }),
+  );
+}
+
+function refuseSecrets(secrets: readonly string[]): void {
+  if (secrets.length === 0) return;
+  throw new InvalidError(
+    `${secrets.join(', ')} ${secrets.length === 1 ? 'is a secret file' : 'are secret files'} the session may not read, so ${secrets.length === 1 ? 'it is' : 'they are'} never committed. Add ${secrets.length === 1 ? 'it' : 'them'} to .gitignore, or name the paths to commit.`,
+  );
 }
 
 const LITERAL = { GIT_LITERAL_PATHSPECS: '1' } as const;
 const NO_SUBMODULES = ['-c', 'submodule.recurse=false'] as const;
+/**
+ * A nested repository's own state is never read: its status would run in a git dir the agent can write. A
+ * moved gitlink still shows; only what is dirty inside it is left unread.
+ */
+const NO_NESTED_STATUS = ['-c', 'diff.ignoreSubmodules=dirty', ...NO_SUBMODULES] as const;
 
 /** Files whose presence in the git dir says an operation is half done. */
 const OPERATION_FILES = [
@@ -156,15 +204,20 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       () => ctx.git(c, ['check-ref-format', '--branch', name]),
       `${name} is not a branch name`,
     );
-    return checked.trim();
+    const branch = checked.trim();
+    // `--branch` expands `@{-N}` to the branch the folder was on; a caller's checks read the text it passed.
+    if (branch !== name)
+      throw new InvalidError(`${name} is a reference git expands (@{), not a branch name`);
+    return branch;
   }
 
   return {
-    makeBranchHere(repo, name) {
+    makeBranchHere(repo, name, beforeWrite) {
       return ctx.lock(repo, async () => {
         const c = await ctx.pinned(repo);
         noOperation(c);
         const branch = await localBranch(c, name);
+        await beforeWrite?.();
         const head = await ctx.revParse(c, 'HEAD^{commit}');
         if (head === null) throw new InvalidError('Your folder has no commit to branch from');
         const ref = `refs/heads/${branch}`;
@@ -187,24 +240,36 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         const changed = await ctx.changes(c, named);
         if (changed.length === 0 && named === undefined)
           throw new InvalidError('Nothing has changed');
+        await input.beforeWrite?.();
+        const secretFiles = input.secretFiles ?? [];
+        refuseSecrets(secretsAmong([repo, c.real], changed, secretFiles));
         refuseFilters(await ctx.worktreeFilters(c, changed));
         const sign = await ctx.signing(c);
         const flags = sign.flags.length > 0 ? sign.flags : ['--no-gpg-sign'];
-        if (named === undefined) await said(() => ctx.git(c, ['add', '-A']), 'git add failed');
-        else
-          await said(() => ctx.git(c, ['add', '--', ...named], { env: LITERAL }), 'git add failed');
+        // Exactly the paths checked above are staged, never a sweep: a file that appeared since is left out.
+        await said(
+          () =>
+            ctx.git(c, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], {
+              input: changed.map((path) => `${path}\0`).join(''),
+              env: LITERAL,
+              config: NO_NESTED_STATUS,
+            }),
+          'git add failed',
+        );
         const staged = (
           await ctx.git(
             c,
             ['diff', '--cached', '--name-only', '-z', ...(named ? ['--', ...named] : [])],
             {
               env: LITERAL,
+              config: NO_NESTED_STATUS,
             },
           )
         )
           .split('\0')
           .filter(Boolean);
         if (staged.length === 0) throw new InvalidError('Nothing has changed there');
+        refuseSecrets(secretsAmong([repo, c.real], staged, secretFiles));
         await said(
           () =>
             ctx.git(
@@ -217,7 +282,11 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
                 ...flags,
                 ...(named === undefined ? [] : ['--', ...named]),
               ],
-              { input: `${message}\n`, env: LITERAL, config: sign.config },
+              {
+                input: `${message}\n`,
+                env: LITERAL,
+                config: [...NO_NESTED_STATUS, ...sign.config],
+              },
             ),
           'git commit failed',
         );
@@ -227,11 +296,12 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       });
     },
 
-    switchBranch(repo, name) {
+    switchBranch(repo, name, beforeWrite) {
       return ctx.lock(repo, async () => {
         const c = await ctx.pinned(repo);
         noOperation(c);
         const branch = await localBranch(c, name);
+        await beforeWrite?.();
         const tip = await ctx.revParse(c, `refs/heads/${branch}^{commit}`);
         if (tip === null) throw new InvalidError(`There is no local branch named ${branch}`);
         if ((await ctx.currentBranch(c)) === branch) return;
@@ -239,14 +309,14 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         await said(
           () =>
             ctx.git(c, ['switch', '--no-guess', '--no-recurse-submodules', '--', branch], {
-              config: NO_SUBMODULES,
+              config: NO_NESTED_STATUS,
             }),
           `Git could not switch to ${branch}`,
         );
       });
     },
 
-    async pullFastForward(repo, net) {
+    async pullFastForward(repo, net, beforeWrite) {
       const first = await ctx.pinned(repo);
       const branch = await ctx.currentBranch(first);
       if (branch === null) throw new InvalidError('Your folder is on no branch (a detached HEAD)');
@@ -269,7 +339,13 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       if (await ctx.isAncestor(c, to, from)) return { kind: 'ahead' };
       if (!(await ctx.isAncestor(c, from, to))) return { kind: 'diverged' };
       refuseFilters(await ctx.treeFilters(c, to));
-      const moved = await ctx.moveCheckedOutBranch({ repo, branch, from, to });
+      const moved = await ctx.moveCheckedOutBranch({
+        repo,
+        branch,
+        from,
+        to,
+        ...(beforeWrite === undefined ? {} : { beforeWrite }),
+      });
       return moved.kind === 'switched' ? { kind: 'pulled', from, to } : moved;
     },
   };

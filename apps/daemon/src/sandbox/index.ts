@@ -28,6 +28,7 @@ export {
   type LaneProcessSetup,
   type LedgerSweep,
 } from './lane-processes';
+export { secretFilesIn } from './project-access';
 export { systemProcessTable, type ProcessRow } from './process-table';
 export {
   claudeCodeTmpPath,

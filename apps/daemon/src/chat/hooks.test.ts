@@ -85,13 +85,21 @@ const prepared = (): Promise<ShapePrepared> =>
     },
     endJobs: () => {
       jobs.ends += 1;
+      return jobs.stopping ?? Promise.resolve();
+    },
+    release: () => {
+      jobs.releases += 1;
       return Promise.resolve();
     },
-    release: () => Promise.resolve(),
   });
 
-/** What the session's preparation was told about its jobs. */
-const jobs = { marks: 0, ends: 0 };
+/** What the session's preparation was told about its jobs, and how the stop of them answers. */
+const jobs: {
+  marks: number;
+  ends: number;
+  releases: number;
+  stopping: Promise<void> | null;
+} = { marks: 0, ends: 0, releases: 0, stopping: null };
 
 let w: ChatWorld;
 afterEach(async () => {
@@ -247,6 +255,80 @@ describe("a chat's background jobs", () => {
   });
 });
 
+// The folder goes back only once the jobs a turn left have stopped: a lane that took it while they ran would find
+// a writable process in its checkout.
+describe("a chat's hold while its jobs stop", () => {
+  const free = (): boolean => w.folderHold.reserveGit(w.project.id, 'probe').reserved;
+
+  async function endedTurn(stopping: Promise<void>) {
+    jobs.ends = 0;
+    jobs.releases = 0;
+    jobs.stopping = stopping;
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'Fix login', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    await waitFor(() => (jobs.ends === 1 ? true : undefined));
+    return chat;
+  }
+  afterEach(() => {
+    jobs.stopping = null;
+  });
+
+  it('is kept until the jobs have stopped, then given back', async () => {
+    let stopped: () => void = () => undefined;
+    await endedTurn(
+      new Promise<void>((resolve) => {
+        stopped = resolve;
+      }),
+    );
+    expect(free()).toBe(false);
+    stopped();
+    await waitFor(() => (free() ? true : undefined));
+  });
+
+  it("is kept by the chat's next turn, which cancels the pending release", async () => {
+    let stopped: () => void = () => undefined;
+    const chat = await endedTurn(
+      new Promise<void>((resolve) => {
+        stopped = resolve;
+      }),
+    );
+    let finish: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          finish = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    w.chat.send(chat.conversationId, { text: 'and again', mentions: [], pictures: [] });
+    await started;
+    stopped();
+    // Let the stop's continuation run: the second turn's hold must outlive it.
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(free()).toBe(false);
+    finish();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('is given back after the warm session is closed when the jobs cannot be stopped', async () => {
+    let failed: (error: Error) => void = () => undefined;
+    await endedTurn(
+      new Promise<void>((_resolve, reject) => {
+        failed = reject;
+      }),
+    );
+    expect(free()).toBe(false);
+    expect(jobs.releases).toBe(0);
+    failed(new Error('ps failed'));
+    await waitFor(() => (free() ? true : undefined));
+    expect(jobs.releases).toBe(1);
+  });
+});
+
 describe("a chat's older session", () => {
   it('keeps no call of its own once a newer session of the chat holds Your folder', async () => {
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
@@ -346,6 +428,25 @@ describe("a chat's judge", () => {
     });
     expect(verdict.decision).toBe('ask');
   });
+
+  // The tools that send work out or merge are never settled by the fast path: 10db's judge's model reads each.
+  it.each(['push_branch', 'open_pull_request', 'merge_pull_request'])(
+    "asks 10db's model about %s, which the fast path never settles",
+    async (name) => {
+      const spec = await firstSpec(JudgeKind.Tendb, null, tendbAnswering('writes_live'));
+      const judgeCall = spec.judgeCall;
+      if (judgeCall === undefined) throw new Error('the chat has no session judge');
+      const verdict = await judgeCall({
+        toolName: `mcp__10db__${name}`,
+        input: {},
+        cwd: '/repo',
+        toolUseId: 'toolu_1',
+        signal: new AbortController().signal,
+        hunk: null,
+      });
+      expect(verdict.decision).toBe('ask');
+    },
+  );
 
   it("says in the chat, once, that the judge didn't answer and the rules judge", async () => {
     w = chatWorld({

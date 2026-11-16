@@ -139,6 +139,47 @@ describe('commitInFolder', () => {
     expect(rg('rev-list', '--count', 'HEAD')).toBe('2');
   });
 
+  // Git's objects stay readable to a sandboxed session though the kernel denies it the file, so a commit of a
+  // secret would hand it over.
+  describe('with files the session may not read', () => {
+    it.each([
+      ['an env file the folder does not ignore', '.env.local', undefined],
+      ['an env file in a folder', 'app/.env.prod', undefined],
+      ['a file the session lists as secret', 'config/prod.txt', ['config/prod.txt']],
+      ['a file under a folder the session lists as secret', 'vault/deep/a.txt', ['vault']],
+    ])('refuses %s, names it and commits nothing', async (_what, secret, listed) => {
+      write(secret, 'TOKEN=1\n');
+      write('README.md', '# edited\n');
+      const before = rg('rev-parse', 'HEAD');
+      const input = {
+        message: 'x',
+        ...(listed === undefined ? {} : { secretFiles: listed.map((f) => join(repo, f)) }),
+      };
+      await expect(git.commitInFolder(repo, input)).rejects.toThrow(secret);
+      await expect(git.commitInFolder(repo, { ...input, paths: [secret] })).rejects.toThrow(secret);
+      expect(rg('rev-parse', 'HEAD')).toBe(before);
+      expect(rg('diff', '--cached', '--name-only')).toBe('');
+    });
+
+    // The refusal comes before anything is staged: a staged file is an object in .git, which the session reads.
+    it('leaves no object for a refused secret, with a path named or not', async () => {
+      write('.env.local', 'TOKEN=only-here-4f2a\n');
+      const oid = rg('hash-object', '.env.local');
+      await expect(git.commitInFolder(repo, { message: 'x' })).rejects.toThrow('.env.local');
+      await expect(
+        git.commitInFolder(repo, { message: 'x', paths: ['.env.local'] }),
+      ).rejects.toThrow('.env.local');
+      expect(() => rg('cat-file', '-e', oid)).toThrow();
+    });
+
+    it('commits the named files that are not secret even when a secret sits beside them', async () => {
+      write('.env.local', 'TOKEN=1\n');
+      write('README.md', '# edited\n');
+      await git.commitInFolder(repo, { message: 'readme', paths: ['README.md'] });
+      expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('README.md');
+    });
+  });
+
   it('refuses a path outside the folder, git state, an empty message and nothing changed', async () => {
     write('a.txt', 'a\n');
     for (const paths of [['../outside.txt'], ['/etc/hosts'], ['.git/config'], ['sub/.GIT/x']])
@@ -178,6 +219,44 @@ describe('commitInFolder', () => {
   });
 });
 
+// A repository the agent made inside the folder is its own: its config is the agent's to write, so no call here
+// may run a git in it.
+describe('a nested repository the agent controls', () => {
+  /** A committed gitlink whose own config runs a marker program on any status, and a change inside it. */
+  function plantNested(): string {
+    const marker = join(scratch.path, 'fsmonitor-ran');
+    const program = join(scratch.path, 'monitor.sh');
+    writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\n`);
+    chmodSync(program, 0o755);
+    mkdirSync(join(repo, 'sub'));
+    raw(join(repo, 'sub'), 'init', '-q');
+    raw(join(repo, 'sub'), 'config', 'user.email', 'a@b.invalid');
+    raw(join(repo, 'sub'), 'config', 'user.name', 'a');
+    raw(join(repo, 'sub'), 'config', 'commit.gpgsign', 'false');
+    write('f.txt', 'one\n', join(repo, 'sub'));
+    raw(join(repo, 'sub'), 'add', '-A');
+    raw(join(repo, 'sub'), 'commit', '-q', '-m', 'one');
+    rg('add', 'sub');
+    rg('commit', '-q', '-m', 'Add the gitlink');
+    raw(join(repo, 'sub'), 'config', 'core.fsmonitor', program);
+    // A clean filter its own attributes select, which a status of it would run on the changed file.
+    raw(join(repo, 'sub'), 'config', 'filter.mark.clean', `${program} %f; cat`);
+    write('.gitattributes', '*.txt filter=mark\n', join(repo, 'sub'));
+    write('f.txt', 'two\n', join(repo, 'sub'));
+    return marker;
+  }
+
+  it('is never asked for its status by a commit, a switch or a branch', async () => {
+    const marker = plantNested();
+    rg('branch', 'other');
+    write('mine.txt', 'mine\n');
+    await git.commitInFolder(repo, { message: 'Mine' });
+    await git.switchBranch(repo, 'other');
+    await git.makeBranchHere(repo, 'topic');
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe('switchBranch', () => {
   beforeEach(() => {
     rg('switch', '-q', '-c', 'other');
@@ -207,6 +286,18 @@ describe('switchBranch', () => {
     await expect(git.switchBranch(repo, '--detach')).rejects.toThrow();
     expect(rg('branch', '--show-current')).toBe('main');
   });
+
+  // `@{-1}` names the branch the folder was on before; a chat's name check reads the text it was given, so git
+  // must not act on what the name expands to.
+  it.each([['makeBranchHere'], ['switchBranch']] as const)(
+    '%s refuses a name that git expands to another branch',
+    async (method) => {
+      rg('switch', '-q', '-c', '10db/batch-x');
+      rg('switch', '-q', 'main');
+      await expect(git[method](repo, '@{-1}')).rejects.toThrow(/@\{/);
+      expect(rg('branch', '--show-current')).toBe('main');
+    },
+  );
 
   it('refuses a branch whose tree asks for a filter', async () => {
     rg('switch', '-q', 'other');

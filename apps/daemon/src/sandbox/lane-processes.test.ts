@@ -608,6 +608,19 @@ describe('the jobs a session leaves at the end of a turn', () => {
     expect(world.has(200)).toBe(true);
   });
 
+  it('leaves a late server alone when the daemon itself runs under a shell, as `pnpm dev` starts it', async () => {
+    world.add(50, 1, 50, T0, '/bin/zsh');
+    world.rows = world.rows.map((r) => (r.pid === DAEMON ? { ...r, ppid: 50 } : r));
+    const watch = session();
+    await watch.track(ROOT);
+    watch.markOwn();
+    command();
+    world.add(600, 200, 600, T1, '/usr/local/bin/node'); // an MCP server that started late
+    await watch.endJobs();
+    for (const pid of [300, 400, 401]) expect(world.has(pid)).toBe(false);
+    expect(world.has(600)).toBe(true);
+  });
+
   it('never signals the agent’s process group, even where a job shares it', async () => {
     const watch = session();
     await watch.track(ROOT);
