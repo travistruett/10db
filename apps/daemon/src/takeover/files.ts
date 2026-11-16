@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { ConversationId, TerminalAppSchema } from '@10db/contracts';
 import { z } from 'zod';
+import { capNote } from './note-cap';
 
 // Sessions spec §7.5: the folder a chat's takeover files live in, `<data dir>/takeovers/<conversation id>/`,
 // outside the chat's own files, which its session may read and its sandbox lists.
@@ -26,6 +27,8 @@ export class TakeoverFilesError extends Error {
 /** The folder under the data dir that holds every chat's takeover folder. */
 export const TAKEOVERS = 'takeovers';
 const RECORD_FILE = 'takeover.json';
+/** The most notes one record keeps. */
+const MAX_NOTES = 50;
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** What `takeover.json` holds: display data, never read to run or delete anything. */
@@ -34,6 +37,11 @@ export const TakeoverRecord = z.object({
   app: TerminalAppSchema,
   /** The temp dirs of every set's servers, for the startup sweep to leave alone while the takeover lives. */
   tempDirs: z.array(z.string()),
+  /** What the latest launch left out, for the banner; cut on read, since the agent can write the file. */
+  notes: z
+    .array(z.string().transform(capNote))
+    .max(MAX_NOTES)
+    .default(() => []),
 });
 export type TakeoverRecord = z.infer<typeof TakeoverRecord>;
 

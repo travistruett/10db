@@ -1723,14 +1723,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
+  const NO_SANDBOX_NOTE =
+    "The sandbox is unavailable, so this terminal has none of the chat's MCP servers or setup.";
   const NO_SANDBOX_SERVERS: TakeoverServers = {
     instructions: null,
     pluginDirs: [],
     projectMcpServers: {},
     yourMcpServers: {},
-    notes: [
-      "The sandbox is unavailable, so this terminal has none of the chat's MCP servers or setup.",
-    ],
+    notes: [NO_SANDBOX_NOTE],
     tempDirs: [],
     remove: () => undefined,
   };
@@ -1777,6 +1777,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         signal,
       ),
     notesOf: (kind) => adapter.takeoverNotes({ kind }),
+    setupNotes: () => (takeoverServers === null ? [NO_SANDBOX_NOTE] : []),
     changedPaths: (checkout) => git.changedPaths(checkout),
   });
   takeoverService = takeover;

@@ -365,6 +365,24 @@ describe('the notes the builder is shown', () => {
     for (const note of answer.notes) expect(note.length).toBeLessThanOrEqual(1000);
     expect(answer.notes.join('')).toContain('left out:');
   });
+
+  it('that an open made reach the banner after a reload, capped', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.terminal.serverNotes = ['Left out: docs.', `long:${'y'.repeat(5000)}`];
+    await w.takeover.open(chat.conversationId);
+    const notes = w.takeover.takeoverOf(chat.conversationId)?.notes ?? [];
+    expect(notes).toContain('Left out: docs.');
+    expect(notes.join('\n')).toContain('long:');
+    for (const note of notes) expect(note.length).toBeLessThanOrEqual(801);
+  });
+
+  it('say, in the preview, what the setup lacks before anything is prepared', async () => {
+    w = chatWorld();
+    w.terminal.setupNotes = ['No sandbox here.'];
+    const chat = await talked();
+    expect((await w.takeover.preview(chat.conversationId)).notes).toContain('No sandbox here.');
+  });
 });
 
 describe('Open while a task holds Your folder', () => {

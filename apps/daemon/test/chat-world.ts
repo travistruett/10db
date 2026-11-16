@@ -66,6 +66,7 @@ export interface ChatWorld {
     removeFails: boolean;
     /** What the servers' preparation says it left out. */
     serverNotes: string[];
+    setupNotes: string[];
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
   launchOn(kind: AgentAccountKind): void;
@@ -203,6 +204,7 @@ export function chatWorld(
     changedFails: null,
     removeFails: false,
     serverNotes: [],
+    setupNotes: [],
   };
   const opened: { app: string; script: string }[] = [];
   const takeover = createTakeoverService({
@@ -272,6 +274,7 @@ export function chatWorld(
         signal,
       ),
     notesOf: () => adapter.takeoverNotes(),
+    setupNotes: () => terminal.setupNotes,
     changedPaths: () =>
       terminal.changedFails === null
         ? Promise.resolve(terminal.changed)

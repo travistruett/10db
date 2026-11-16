@@ -38,6 +38,7 @@ import {
   writeTakeoverRecord,
   type TakeoverRecord,
 } from './files';
+import { capNote } from './note-cap';
 import type { TerminalOpener } from './opener';
 import type { PrepareInput, PreparedTakeover, TakeoverSource } from './prepare';
 import { settingFilesChanged } from './setting-files';
@@ -50,10 +51,6 @@ const NOT_IN_TERMINAL = 'Not in your terminal';
 const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
-/** A note's longest length: a list of left-out skills can run to hundreds of lines. */
-const NOTE_MAX = 800;
-const capNote = (note: string): string =>
-  note.length <= NOTE_MAX ? note : `${note.slice(0, NOTE_MAX)}…`;
 const closedPassNote = (name: string): string =>
   `The pass ‘${name}’ is closed and waits for its pull request to merge: a commit made in the terminal makes its settle ask you.`;
 
@@ -75,6 +72,8 @@ export interface TakeoverServiceDeps {
   prepare(input: PrepareInput, signal: AbortSignal): Promise<PreparedTakeover>;
   /** What the agent's terminal does and doesn't have, in words. */
   notesOf(kind: AgentAccountKind): string[];
+  /** What the daemon's setup lacks whatever the chat, known without preparing a set (no sandbox runtime). */
+  setupNotes(): readonly string[];
   /** The paths of the checkout that differ from HEAD, relative to it. */
   changedPaths(checkout: string): Promise<string[]>;
 }
@@ -213,6 +212,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
       since: earlier?.since ?? deps.now().toISOString(),
       app,
       tempDirs,
+      notes: set.notes.map(capNote),
     };
     try {
       writeTakeoverRecord(folder, record);
@@ -361,6 +361,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         .holders(chat.projectId)
         .find((holder) => holder.kind === FolderHolderKind.PassClosed);
       if (closed !== undefined) notes.push(closedPassNote(closed.name));
+      notes.push(...deps.setupNotes());
       try {
         const paths = await deps.changedPaths(project.repoPath).catch((error: unknown) => {
           // A git failure costs the list of changed files, not the terminal.
@@ -393,6 +394,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         since: deps.now().toISOString(),
         app: deps.app(),
         tempDirs: [],
+        notes: [],
       };
       let notes: string[] = [];
       try {
@@ -400,7 +402,8 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
       } catch {
         // An account that can't start a session has no notes to show; the banner still reads.
       }
-      return dto(record ?? fallback, notes, null);
+      const shown = record ?? fallback;
+      return dto(shown, [...new Set([...notes, ...shown.notes])], null);
     },
 
     serialized: (chatId, job) => run(chatId, () => job()),

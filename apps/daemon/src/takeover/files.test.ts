@@ -112,9 +112,21 @@ describe('takeover.json', () => {
       since: '2026-11-16T10:00:00.000Z',
       app: TerminalApp.Copy,
       tempDirs: ['/tmp/10db/a'],
+      notes: ['Left out: docs.'],
     };
     writeTakeoverRecord(folder, record);
     expect(readTakeoverRecord(folder)).toEqual(record);
+    // A note the agent made long is cut on read, and a record without notes reads as none.
+    writeFileSync(
+      join(folder, 'takeover.json'),
+      JSON.stringify({ ...record, notes: ['z'.repeat(5000)] }),
+    );
+    expect(readTakeoverRecord(folder)?.notes[0]?.length).toBe(801);
+    writeFileSync(
+      join(folder, 'takeover.json'),
+      JSON.stringify({ since: record.since, app: record.app, tempDirs: [] }),
+    );
+    expect(readTakeoverRecord(folder)?.notes).toEqual([]);
     writeFileSync(join(folder, 'takeover.json'), '{"since":3}');
     expect(readTakeoverRecord(folder)).toBeNull();
     writeFileSync(join(folder, 'takeover.json'), 'not json');
