@@ -1,16 +1,5 @@
 import type { ProjectId } from '@10db/contracts';
-import {
-  AppShell,
-  Badge,
-  Box,
-  Burger,
-  Group,
-  NavLink,
-  ScrollArea,
-  Stack,
-  Text,
-  VisuallyHidden,
-} from '@mantine/core';
+import { AppShell, Box, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAdjustments,
@@ -31,6 +20,7 @@ import { useDesktopSync } from '../desktop/sync';
 import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
+import { CountBadge, CountTone } from './count-badge';
 import { AgentDownloadStatus } from './agent-download-status';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
@@ -81,21 +71,13 @@ const TRAFFIC_LIGHTS_WIDTH = 72;
 /** Sessions draws its tab strip from just after the traffic lights (a measure the header's slot keeps). */
 const SESSIONS_STRIP_START = 88;
 
-/** A count on a sidebar item, read by assistive tech as `phrase`. */
-function CountBadge({ count, phrase }: { readonly count: number; readonly phrase: string }) {
-  return (
-    <Badge size="sm" circle>
-      {/* The name computation drops a leading space inside VisuallyHidden, so the number is hidden
-          from assistive tech and the hidden text carries the whole phrase. */}
-      <span aria-hidden="true">{count}</span>
-      <VisuallyHidden>{phrase}</VisuallyHidden>
-    </Badge>
-  );
-}
-
 function InboxBadge({ count }: { readonly count: number }) {
   return (
-    <CountBadge count={count} phrase={`${String(count)} open card${count === 1 ? '' : 's'}`} />
+    <CountBadge
+      count={count}
+      tone={CountTone.Attention}
+      phrase={`${String(count)} open card${count === 1 ? '' : 's'}`}
+    />
   );
 }
 
@@ -140,6 +122,7 @@ function SessionsBadge() {
     >
       <CountBadge
         count={count}
+        tone={CountTone.Attention}
         phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
       />
     </span>
@@ -151,7 +134,11 @@ function WorkbenchBadge({ projectId }: { readonly projectId: ProjectId }) {
   const count = useWorkbenchWaitingCount(projectId);
   if (count === 0) return null;
   return (
-    <CountBadge count={count} phrase={`${String(count)} page${count === 1 ? '' : 's'} waiting`} />
+    <CountBadge
+      count={count}
+      tone={CountTone.Attention}
+      phrase={`${String(count)} page${count === 1 ? '' : 's'} waiting`}
+    />
   );
 }
 

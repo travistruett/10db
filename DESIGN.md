@@ -159,6 +159,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   beside the label in a control that has none; a row with a line of its own says it in words there ("4
   goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`. The Sessions badge
   counts the tabs that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
+  A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
+  (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
+  Inbox's Open tab, the Sessions and Workbench needs-you counts.
 - **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
   it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
   the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate

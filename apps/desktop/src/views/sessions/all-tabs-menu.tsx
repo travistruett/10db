@@ -1,6 +1,6 @@
 import { Box, Group, Menu, Text, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
-import { CountBadge } from '../../shell/count-badge';
+import { CountBadge, CountTone } from '../../shell/count-badge';
 import { ProjectTile } from '../../shell/project-tile';
 import type { ClosedTab } from './closed-tabs';
 import { tabName, type TabInfo } from './tab-info';
@@ -80,7 +80,9 @@ export function AllTabsMenu({
                 </>
               )}
               <IconChevronDown size={16} stroke={1.5} />
-              {hiddenNeedingYou === 0 ? null : <CountBadge count={hiddenNeedingYou} />}
+              {hiddenNeedingYou === 0 ? null : (
+                <CountBadge count={hiddenNeedingYou} tone={CountTone.Attention} />
+              )}
             </Group>
           </UnstyledButton>
         </Menu.Target>

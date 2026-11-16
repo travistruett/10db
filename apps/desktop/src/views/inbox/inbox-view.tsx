@@ -4,7 +4,7 @@ import {
   type InboxItemDto,
   type ProjectId,
 } from '@10db/contracts';
-import { Alert, Badge, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
@@ -28,7 +28,7 @@ import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
 import { WaitingInbox } from './waiting-inbox';
-import { CountBadge } from '../../shell/count-badge';
+import { CountBadge, CountTone } from '../../shell/count-badge';
 import { systemCards, type SystemCard } from './system-cards';
 import { stakeholderMode, StakeholderMode } from './route-line';
 import { useInboxKeys } from './use-inbox-keys';
@@ -84,7 +84,9 @@ export function InboxView() {
                 label: (
                   <Group gap={6} wrap="nowrap">
                     Open
-                    {openTotal === null ? null : <CountBadge count={openTotal} />}
+                    {openTotal === null ? null : (
+                      <CountBadge count={openTotal} tone={CountTone.Attention} />
+                    )}
                   </Group>
                 ),
               },
@@ -94,11 +96,7 @@ export function InboxView() {
                   <Group gap={6} wrap="nowrap">
                     Waiting
                     {/* Nothing in it needs the builder, so its count is neutral. */}
-                    {waitingItems.length === 0 ? null : (
-                      <Badge size="sm" variant="default" circle={waitingItems.length < 10}>
-                        {waitingItems.length}
-                      </Badge>
-                    )}
+                    {waitingItems.length === 0 ? null : <CountBadge count={waitingItems.length} />}
                   </Group>
                 ),
               },

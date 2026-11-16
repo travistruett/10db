@@ -102,7 +102,7 @@ describe('the Waiting tab', () => {
       if (!found) throw new Error('no Waiting count yet');
       return found;
     });
-    expect(badge.getAttribute('data-variant')).toBe('default');
+    expect(badge.getAttribute('data-variant')).toBe('light');
   });
 
   it('says nothing is out with anyone when empty', async () => {
