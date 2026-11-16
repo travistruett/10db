@@ -67,6 +67,69 @@ describe('parseChanges', () => {
   });
 });
 
+describe('parseChanges file headers', () => {
+  const onePath = (header: string, extra: readonly string[] = []): string | undefined =>
+    parseChanges(
+      [header, ...extra, '--- a/x', '+++ b/x', '@@ -1,1 +1,1 @@', '-a', '+b', ''].join('\n'),
+    )[0]?.path;
+  it.each([
+    {
+      name: 'a quoted non-ASCII path (git quotes it as octal bytes)',
+      header: 'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"',
+      path: 'café.ts',
+    },
+    {
+      name: 'a quoted path with a tab and a quote',
+      header: 'diff --git "a/a\\tb\\"c.ts" "b/a\\tb\\"c.ts"',
+      path: 'a\tb"c.ts',
+    },
+    {
+      name: 'a path that contains " b/"',
+      header: 'diff --git a/dir b/file.ts b/dir b/file.ts',
+      path: 'dir b/file.ts',
+    },
+    {
+      name: 'a path with a space',
+      header: 'diff --git a/my notes.md b/my notes.md',
+      path: 'my notes.md',
+    },
+  ])('reads $name', ({ header, path }) => {
+    expect(onePath(header)).toBe(path);
+  });
+
+  it('keeps a quoted file’s hunks with it, not with the file before', () => {
+    const files = parseChanges(
+      [
+        'diff --git a/a.ts b/a.ts',
+        '@@ -1,1 +1,1 @@',
+        '-1',
+        '+2',
+        'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"',
+        '@@ -1,1 +1,1 @@',
+        '-x',
+        '+y',
+        '',
+      ].join('\n'),
+    );
+    expect(files.map((f) => [f.path, f.hunks.length])).toEqual([
+      ['a.ts', 1],
+      ['café.ts', 1],
+    ]);
+  });
+
+  it('names a rename by its target, quoted or not', () => {
+    expect(
+      onePath('diff --git a/old.ts b/new.ts', ['rename from old.ts', 'rename to new.ts']),
+    ).toBe('new.ts');
+    expect(
+      onePath('diff --git "a/o\\303\\251.ts" "b/n\\303\\251.ts"', [
+        'rename from "o\\303\\251.ts"',
+        'rename to "n\\303\\251.ts"',
+      ]),
+    ).toBe('né.ts');
+  });
+});
+
 describe('changesTotals', () => {
   it('sums the files’ counts, ignoring a binary file’s missing ones', () => {
     expect(
