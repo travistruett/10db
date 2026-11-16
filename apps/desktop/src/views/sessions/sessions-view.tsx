@@ -17,7 +17,7 @@ import {
   writeFreshTabs,
   type FreshTab as FreshTabState,
 } from './fresh-tabs';
-import { draftKey, sessionDrafts } from './session-drafts';
+import { draftKey, sessionDrafts, type SendRequest } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
 import { useClosedTabs } from './closed-tabs';
 import { useTabClosing } from './use-tab-closing';
@@ -162,9 +162,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   };
 
   /** The chat takes the fresh tab's place; its draft, and a send asked for, go with it. */
-  const chatMade = (tab: FreshTabState, chat: ChatDto, send: boolean): void => {
+  const chatMade = (tab: FreshTabState, chat: ChatDto, send: SendRequest | null): void => {
     sessionDrafts.move(draftKey.fresh(tab.id), draftKey.chat(chat.id));
-    if (send) sessionDrafts.requestSend(draftKey.chat(chat.id));
+    if (send !== null) sessionDrafts.requestSend(draftKey.chat(chat.id), send);
     dropFresh(tab.id);
     onSearch({ chat: chat.id }, true);
   };

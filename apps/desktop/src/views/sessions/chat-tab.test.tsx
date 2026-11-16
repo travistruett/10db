@@ -478,6 +478,39 @@ describe('ChatTab: the composer and Your folder', () => {
     },
   );
 
+  it('Allow This with the folder held puts "Go ahead" in the composer, so it asks before it runs', async () => {
+    const { served } = openChat(
+      {},
+      (chat) => [
+        builderItem(chat.conversationId, 'Fetch it'),
+        toolItem(
+          chat.conversationId,
+          commandCall({
+            id: 'held',
+            title: 'curl example.com',
+            command: 'curl example.com',
+            status: 'denied',
+            deniedBy: 'judge',
+            limit: 'sends_data_out',
+            soft: true,
+            refusal: null,
+          }),
+        ),
+      ],
+      [http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane()))],
+    );
+    await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’');
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow This' }));
+    const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+    expect(field.value).toBe('Go ahead: curl example.com');
+    expect(served.messages).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Wait for It' }));
+    await waitFor(() => {
+      expect(bodies(served)).toEqual([{ text: 'Go ahead: curl example.com', folder: 'wait' }]);
+    });
+  });
+
   it('shows the waiting row for a message that waits, and Send Now Reading Only runs it', async () => {
     const chat = chatDto({ projectId: project.id });
     const waiting = folderDto({

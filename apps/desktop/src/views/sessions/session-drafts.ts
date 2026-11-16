@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import type { FolderWhileHeld } from '@10db/contracts';
 import { z } from 'zod';
 import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 
@@ -9,6 +10,11 @@ import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 // on restart, as the Workbench's are.
 
 export const DRAFTS_KEY = 'tendb.sessions.drafts';
+
+/** A send a fresh tab asked its chat to make: how it runs when Your folder is held, when it was asked. */
+export interface SendRequest {
+  readonly folder?: FolderWhileHeld;
+}
 
 const Stored = z.record(z.string(), z.object({ text: z.string(), mentions: z.array(z.string()) }));
 
@@ -26,7 +32,7 @@ function readStored(): Map<string, Draft> {
 
 class SessionDrafts {
   private readonly drafts = readStored();
-  private readonly sends = new Set<string>();
+  private readonly sends = new Map<string, SendRequest>();
   private readonly listeners = new Set<() => void>();
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -54,13 +60,15 @@ class SessionDrafts {
   }
 
   /** The tab `key` should send its draft as soon as it is drawn. */
-  requestSend(key: string): void {
-    this.sends.add(key);
+  requestSend(key: string, request: SendRequest = {}): void {
+    this.sends.set(key, request);
   }
 
-  /** Whether `key` was asked to send; asking answers once. */
-  takeSendRequest(key: string): boolean {
-    return this.sends.delete(key);
+  /** The send `key` was asked to make, or null; asking answers once. */
+  takeSendRequest(key: string): SendRequest | null {
+    const request = this.sends.get(key) ?? null;
+    this.sends.delete(key);
+    return request;
   }
 
   private persist(): void {
@@ -109,8 +117,8 @@ export const sessionDrafts = {
   move: (from: string, to: string): void => {
     store.move(from, to);
   },
-  requestSend: (key: string): void => {
-    store.requestSend(key);
+  requestSend: (key: string, request?: SendRequest): void => {
+    store.requestSend(key, request);
   },
-  takeSendRequest: (key: string): boolean => store.takeSendRequest(key),
+  takeSendRequest: (key: string): SendRequest | null => store.takeSendRequest(key),
 };

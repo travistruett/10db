@@ -20,9 +20,9 @@ function andJoin(parts: readonly string[]): string {
 const wordsOf = (holder: FolderHolderView): string => holder.words;
 
 /** The holders that keep this chat's turn from writing, as a sentence part; null when none does. */
-export function keepingWords(chat: ChatDto, folder: FolderDto | null): string | null {
+export function keepingWords(chat: ChatDto | null, folder: FolderDto | null): string | null {
   const keeping = (folder?.holders ?? []).filter(
-    (holder) => holder.chatId !== chat.id && holder.keepsChatOut,
+    (holder) => holder.chatId !== chat?.id && holder.keepsChatOut,
   );
   return keeping.length === 0 ? null : andJoin(keeping.map(wordsOf));
 }

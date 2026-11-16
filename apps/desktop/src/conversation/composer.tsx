@@ -45,8 +45,8 @@ export interface ComposerHeld {
     choice: FolderWhileHeld,
     how: 'send' | 'redo',
   ) => Promise<void> | void;
-  /** File as Tasks: the standing request goes, and the draft stays. */
-  readonly onFileAsTasks: () => Promise<void> | void;
+  /** File as Tasks: the standing request goes, and the draft stays; a tab with no conversation has none. */
+  readonly onFileAsTasks?: () => Promise<void> | void;
 }
 
 export interface ComposerProps {
@@ -412,16 +412,19 @@ export function Composer({
               >
                 Send Reading Only
               </Button>
-              <Button
-                size="xs"
-                variant="subtle"
-                onClick={() => {
-                  setChoosing(null);
-                  void run('send', held.onFileAsTasks, false);
-                }}
-              >
-                File as Tasks
-              </Button>
+              {held.onFileAsTasks === undefined ? null : (
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  onClick={() => {
+                    setChoosing(null);
+                    if (held.onFileAsTasks !== undefined)
+                      void run('send', held.onFileAsTasks, false);
+                  }}
+                >
+                  File as Tasks
+                </Button>
+              )}
             </Group>
             <Text size="xs" c="dimmed" pt={4}>
               Wait for It runs this once Your folder is free, ahead of any task that hasn&apos;t

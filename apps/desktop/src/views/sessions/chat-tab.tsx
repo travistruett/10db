@@ -170,8 +170,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
   // draft here, so the next send goes to this conversation and never to a second chat.
   useEffect(() => {
-    if (!sessionDrafts.takeSendRequest(key)) return;
-    post(sessionDrafts.get(key))
+    const request = sessionDrafts.takeSendRequest(key);
+    if (request === null) return;
+    post(sessionDrafts.get(key), request.folder)
       .then(() => {
         sessionDrafts.set(key, EMPTY_DRAFT);
       })
@@ -243,8 +244,17 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.state]);
 
+  // While Your folder is held the go-ahead is a message like any other: it waits in the composer, whose Send
+  // asks how it runs.
   const allow = (call: ToolCallView): void => {
-    send.mutate({ conversationId: chat.conversationId, text: `Go ahead: ${call.title}` });
+    const text = `Go ahead: ${call.title}`;
+    if (keeping === null) {
+      send.mutate({ conversationId: chat.conversationId, text });
+      return;
+    }
+    const current = sessionDrafts.get(key);
+    setDraft({ ...current, text: current.text === '' ? text : `${current.text}\n${text}` });
+    input.current?.focus();
   };
 
   const entries = chatEntries(
