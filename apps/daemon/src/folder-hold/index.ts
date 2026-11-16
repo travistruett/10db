@@ -6,6 +6,7 @@ export {
   type FolderHold,
   type FolderHoldDeps,
   type GitReservation,
+  type ServeResult,
   type TurnBlocked,
   type TurnTaken,
 } from './hold';

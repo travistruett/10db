@@ -11,7 +11,7 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import { folderLanes, getChat, passHoldingFolder, takenOverChats } from '@10db/db';
-import type { StateStore } from '../events';
+import type { EventBus, StateStore } from '../events';
 import { exclusion, limitsOf } from './exclusion';
 
 /** Who is asking: a lane's first start, 10db's own git work, or an attended chat's turn or takeover. */
@@ -47,7 +47,34 @@ export type GitReservation =
 interface TurnEntry {
   readonly projectId: ProjectId;
   readonly chatId: ChatId;
+  /** Put on a waiter that was served: its turn has not begun, and goes at once if none does. */
+  reserved: boolean;
 }
+interface Waiter {
+  readonly projectId: ProjectId;
+  readonly chatId: ChatId;
+  serve: () => ServeResult;
+}
+
+/**
+ * What serving a waiter did: its turn `began`; it `kept` waiting because nothing could start (the account is
+ * paused, or the update hold is on); or it is `dropped` (the chat was retired, or nothing was left to send).
+ */
+export type ServeResult = 'began' | 'kept' | 'dropped';
+
+/** Events after which a waiter's turn may be able to start. */
+const SERVE_AFTER: ReadonlySet<string> = new Set([
+  EventType.WorkstreamChanged,
+  EventType.BatchUpdated,
+  EventType.PassOpened,
+  EventType.PassChanged,
+  EventType.PassClosed,
+  EventType.PassSettled,
+  EventType.ConversationState,
+  EventType.AccountSaved,
+  EventType.AccountResumed,
+  EventType.AccountCapReached,
+]);
 interface GitEntry {
   readonly projectId: ProjectId;
   readonly what: string;
@@ -70,15 +97,30 @@ export interface FolderHold {
   /** Reserves the folder for 10db's own git work, or says who is in the way. */
   reserveGit(projectId: ProjectId, what: string): GitReservation;
   releaseGit(token: symbol): void;
+  /**
+   * Parks the chat's message until the folder frees. Each time it can run, `serve` is called with the folder
+   * reserved for the chat; a chat already waiting keeps its place. Served at once when nothing is in the way.
+   */
+  wait(projectId: ProjectId, chatId: ChatId, serve: () => ServeResult): void;
+  /** Stops waiting, and gives back a reservation whose turn never began. Idempotent. */
+  cancelWait(chatId: ChatId): void;
+  waiting(chatId: ChatId): boolean;
+  /** Serves every waiter that can run now: after an account or the update hold changes. */
+  serveWaiters(): void;
+  /** Stops listening to the bus. */
+  close(): void;
 }
 
 export interface FolderHoldDeps {
   readonly state: StateStore;
+  /** Serves waiters when a lane, a pass, a batch or an account changes. */
+  readonly bus: EventBus;
 }
 
 export function createFolderHold(deps: FolderHoldDeps): FolderHold {
   const turns = new Map<ChatId, TurnEntry>();
   const gits = new Map<symbol, GitEntry>();
+  const waiters: Waiter[] = [];
 
   const changed = (projectId: ProjectId): void => {
     deps.state.write((ctx) => {
@@ -136,6 +178,15 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
           chatId: null,
           what: entry.what,
         });
+    for (const entry of waiters)
+      if (entry.projectId === projectId && entry.chatId !== except && !turns.has(entry.chatId))
+        out.push({
+          kind: FolderHolderKind.WaitingChat,
+          name: chatTitle(entry.chatId),
+          more: 0,
+          chatId: entry.chatId,
+          what: null,
+        });
     for (const entry of turns.values())
       if (entry.projectId === projectId && entry.chatId !== except)
         out.push({
@@ -154,16 +205,95 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
       return outcome === FolderOutcome.Shares ? [] : [{ holder, outcome }];
     });
 
+  let serving = false;
+  let again = false;
+  // Read through a function: a serve that reenters sets it, which the loop's own flow can't see.
+  const askedAgain = (): boolean => again;
+  /** Serves each waiter, oldest first, that nothing now keeps out, holding the folder for it meanwhile. */
+  const serveWaiters = (): void => {
+    if (serving) {
+      again = true;
+      return;
+    }
+    serving = true;
+    try {
+      do {
+        again = false;
+        for (const waiter of [...waiters]) {
+          if (!waiters.includes(waiter)) continue;
+          if (
+            blockers(waiter.projectId, { kind: FolderAsker.ChatTurn, chatId: waiter.chatId })
+              .length > 0
+          )
+            continue;
+          turns.set(waiter.chatId, {
+            projectId: waiter.projectId,
+            chatId: waiter.chatId,
+            reserved: true,
+          });
+          // A serve that throws leaves the chat waiting and gives the reservation back.
+          const served: { result: ServeResult | 'threw' } = { result: 'threw' };
+          try {
+            served.result = waiter.serve();
+          } finally {
+            if (served.result !== 'began' && turns.get(waiter.chatId)?.reserved === true)
+              turns.delete(waiter.chatId);
+            if (served.result === 'dropped' || served.result === 'began') {
+              const at = waiters.indexOf(waiter);
+              if (at >= 0) waiters.splice(at, 1);
+            }
+            changed(waiter.projectId);
+          }
+        }
+      } while (askedAgain());
+    } finally {
+      serving = false;
+    }
+  };
+  const unsubscribe = deps.bus.subscribe((event) => {
+    if (SERVE_AFTER.has(event.type)) serveWaiters();
+  });
+
   return {
     holders,
     blockers,
+    serveWaiters,
+    close: unsubscribe,
+    wait(projectId, chatId, serve) {
+      const mine = waiters.find((w) => w.chatId === chatId);
+      if (mine) mine.serve = serve;
+      else {
+        waiters.push({ projectId, chatId, serve });
+        changed(projectId);
+      }
+      serveWaiters();
+    },
+    cancelWait(chatId) {
+      const at = waiters.findIndex((w) => w.chatId === chatId);
+      const reservation = turns.get(chatId);
+      if (at < 0 && reservation?.reserved !== true) return;
+      const projectId = at >= 0 ? waiters[at]?.projectId : reservation?.projectId;
+      if (at >= 0) waiters.splice(at, 1);
+      if (reservation?.reserved === true) turns.delete(chatId);
+      if (projectId) changed(projectId);
+      serveWaiters();
+    },
+    waiting: (chatId) => waiters.some((w) => w.chatId === chatId),
     takeTurn(projectId, chatId) {
       const mine = turns.get(chatId);
       const others = holders(projectId, chatId);
       if (!mine) {
         const blocked = blockers(projectId, { kind: FolderAsker.ChatTurn, chatId });
         if (blocked.length > 0) return { taken: false, blockers: blocked };
-        turns.set(chatId, { projectId, chatId });
+        turns.set(chatId, { projectId, chatId, reserved: false });
+        changed(projectId);
+      }
+      const reservation = turns.get(chatId);
+      if (reservation) reservation.reserved = false;
+      // A chat that takes the folder is no longer waiting for it.
+      const waiter = waiters.findIndex((w) => w.chatId === chatId);
+      if (waiter >= 0) {
+        waiters.splice(waiter, 1);
         changed(projectId);
       }
       const limits = [...new Set(others.flatMap((h) => limitsOf(h.kind)))];
@@ -181,6 +311,7 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
       if (!mine) return;
       turns.delete(chatId);
       changed(mine.projectId);
+      serveWaiters();
     },
     holdsTurn: (chatId) => turns.has(chatId),
     reserveGit(projectId, what) {
@@ -196,6 +327,7 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
       if (!mine) return;
       gits.delete(token);
       changed(mine.projectId);
+      serveWaiters();
     },
   };
 }

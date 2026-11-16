@@ -99,7 +99,8 @@ export interface ExploreEngine {
   sendNow(id: ConversationId): void;
   modelChanged(id: ConversationId, model: string | null): Promise<void>;
   holdStarts(id: ConversationId): void;
-  releaseStarts(id: ConversationId): void;
+  /** Lets parked starters run; whether a turn began, which it doesn't when nothing waits or the update hold is on. */
+  releaseStarts(id: ConversationId): boolean;
   view(id: ConversationId): ConversationDto;
   live(id: ConversationId): ConversationLiveDto;
   /** Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. */
@@ -492,13 +493,15 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (runs(reduce(rt, { type: 'builder_message' }))) turns.resolveSendNow(rt);
   };
 
-  const release = (rt: Runtime): void => {
-    if (closed || holding(rt) || !rt.parked) return;
+  /** Runs what a hold parked; whether a turn began. */
+  const release = (rt: Runtime): boolean => {
+    if (closed || holding(rt) || !rt.parked) return false;
     rt.parked = false;
-    if (unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' })))
-      turns.resolveSendNow(rt);
+    const began = unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' }));
+    if (began) turns.resolveSendNow(rt);
     const conv = conversation(rt.id);
     hooksOf(conv).onParked?.(conv, false);
+    return began;
   };
 
   /**
@@ -666,7 +669,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     releaseStarts(id) {
       const rt = runtimeOf(id);
       rt.held = false;
-      release(rt);
+      return release(rt);
     },
     view(id) {
       const rt = runtimeOf(id);

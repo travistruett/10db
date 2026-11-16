@@ -25,7 +25,7 @@ import {
 } from '@10db/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createEventBus, createStateStore, type StateStore } from '../events';
+import { createEventBus, createStateStore, type EventBus, type StateStore } from '../events';
 import { holderWords } from './exclusion';
 import { createFolderHold, type FolderAskerInput, type FolderHold } from './hold';
 
@@ -37,10 +37,11 @@ let close: () => void;
 let state: StateStore;
 let project: ProjectDto;
 let events: DaemonEvent[];
+let bus: EventBus;
 
 beforeEach(() => {
   ({ store, close } = createTestStore());
-  const bus = createEventBus();
+  bus = createEventBus();
   events = [];
   bus.subscribe((e) => events.push(e));
   state = createStateStore(store, bus);
@@ -50,7 +51,7 @@ afterEach(() => {
   close();
 });
 
-const newHold = (): FolderHold => createFolderHold({ state });
+const newHold = (): FolderHold => createFolderHold({ state, bus });
 
 function chat(
   title: string,
@@ -265,5 +266,125 @@ describe('a restart', () => {
     expect(before.reserveGit(project.id, 'cutting a branch').reserved).toBe(true);
     expect(before.holders(project.id)).toHaveLength(1);
     expect(newHold().holders(project.id)).toEqual([]);
+  });
+});
+
+describe('waiting', () => {
+  /** A lane ends and says so, as the runner's transition does. */
+  function laneEnds(): void {
+    state.write((ctx) => {
+      ctx.tx
+        .update(schema.workstreams)
+        .set({ state: WorkstreamState.Done })
+        .where(eq(schema.workstreams.state, WorkstreamState.Running))
+        .run();
+      ctx.emit({
+        type: EventType.WorkstreamChanged,
+        entityType: 'workstream',
+        entityId: 'wst_x',
+        data: {},
+      });
+    });
+  }
+  const began = () => 'began' as const;
+
+  it('serves a waiter inside the lane’s change, holding the folder for it first', () => {
+    lane('Bump vite');
+    const hold = newHold();
+    const a = chat('A');
+    const seen: string[][] = [];
+    hold.wait(project.id, a, () => {
+      seen.push(
+        hold
+          .blockers(project.id, { kind: FolderAsker.LaneStart })
+          .map((b) => holderWords(b.holder)),
+      );
+      return 'began';
+    });
+    expect(hold.waiting(a)).toBe(true);
+    // A lane's first start waits behind a waiting chat, naming it.
+    expect(words(hold, { kind: FolderAsker.LaneStart })).toEqual(['the chat \u2018A\u2019']);
+    laneEnds();
+    expect(seen).toEqual([['the chat \u2018A\u2019']]);
+    expect(hold.waiting(a)).toBe(false);
+    expect(hold.holdsTurn(a)).toBe(true);
+    hold.releaseTurn(a);
+    expect(hold.holders(project.id)).toEqual([]);
+  });
+
+  it('serves two waiters in the order they waited', () => {
+    lane('Bump vite');
+    const hold = newHold();
+    const a = chat('A');
+    const b = chat('B');
+    const order: string[] = [];
+    hold.wait(project.id, a, () => (order.push('A'), began()));
+    hold.wait(project.id, b, () => (order.push('B'), began()));
+    laneEnds();
+    expect(order).toEqual(['A', 'B']);
+  });
+
+  it.each([
+    ['a retired chat is dropped', 'dropped' as const, false],
+    [
+      'a chat whose turn can’t start (paused account, update hold) keeps waiting',
+      'kept' as const,
+      true,
+    ],
+  ])('%s, and the reservation goes at once', (_name, result, stillWaiting) => {
+    lane('Bump vite');
+    const hold = newHold();
+    const a = chat('A');
+    hold.wait(project.id, a, () => result);
+    laneEnds();
+    expect(hold.holdsTurn(a)).toBe(false);
+    expect(hold.waiting(a)).toBe(stillWaiting);
+    expect(words(hold, { kind: FolderAsker.GitWork })).toEqual([]);
+  });
+
+  it('serves a kept waiter again when an account resumes', () => {
+    const hold = newHold();
+    const a = chat('A');
+    let paused = true;
+    hold.wait(project.id, a, () => (paused ? 'kept' : 'began'));
+    expect(hold.waiting(a)).toBe(true);
+    paused = false;
+    state.write((ctx) => {
+      ctx.emit({
+        type: EventType.AccountResumed,
+        entityType: 'account',
+        entityId: 'acc_x',
+        data: {},
+      });
+    });
+    expect(hold.holdsTurn(a)).toBe(true);
+    expect(hold.waiting(a)).toBe(false);
+  });
+
+  it('serves at once a waiter that only chats are in front of', () => {
+    const hold = newHold();
+    const a = chat('A');
+    const b = chat('B');
+    hold.takeTurn(project.id, a);
+    hold.wait(project.id, b, began);
+    expect(hold.holdsTurn(b)).toBe(true);
+  });
+
+  it('is cleared when its chat takes the folder, and cancelling after serving releases', () => {
+    lane('Bump vite');
+    const hold = newHold();
+    const a = chat('A');
+    hold.wait(project.id, a, () => 'kept');
+    laneEnds();
+    expect(hold.takeTurn(project.id, a).taken).toBe(true);
+    expect(hold.waiting(a)).toBe(false);
+    hold.releaseTurn(a);
+
+    const b = chat('B');
+    hold.wait(project.id, b, began);
+    expect(hold.holdsTurn(b)).toBe(true);
+    hold.cancelWait(b);
+    expect(hold.holdsTurn(b)).toBe(false);
+    hold.cancelWait(b);
   });
 });

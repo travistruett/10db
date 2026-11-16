@@ -195,11 +195,17 @@ describe('a turn from a queued message to a warm session', () => {
     expect(w.engine.parked(w.conv.id)).toBe(true);
     expect(w.engine.busy()).toEqual([]);
     expect(w.engine.view(w.conv.id).queued).toBe(1);
-    w.engine.releaseStarts(w.conv.id);
+    expect(w.engine.releaseStarts(w.conv.id)).toBe(true);
     await w.engine.settled(w.conv.id);
     expect(w.engine.parked(w.conv.id)).toBe(false);
     expect(w.adapter.shapeSessions).toHaveLength(1);
     expect(w.stateOf()).toBe('idle_warm');
+  });
+
+  it('says no turn began when a release finds nothing parked', () => {
+    w = exploreWorld();
+    w.engine.holdStarts(w.conv.id);
+    expect(w.engine.releaseStarts(w.conv.id)).toBe(false);
   });
 
   it('lets a running turn end warm under a hold taken meanwhile, and pushes the next at the release', async () => {
