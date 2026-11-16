@@ -123,13 +123,21 @@ export function lanePermissions(sandbox: LaneSandboxSpec): Record<string, unknow
 }
 
 /**
- * The profile of an explore conversation that has no lane sandbox: the checkout read and nothing written, and
- * every host blocked. Its guard hook refuses every command such a session asks for, so Codex only reads.
+ * The profile of an explore conversation that has no lane sandbox: the checkout read, its secret files denied
+ * as the lane's own profile denies them, nothing written, and every host blocked. Its guard hook refuses every
+ * command such a session asks for, so Codex only reads.
  */
-export function readOnlyPermissions(checkout: string): Record<string, unknown> {
+export function readOnlyPermissions(
+  checkout: string,
+  secretFiles: readonly string[],
+): Record<string, unknown> {
   return {
     lane: {
-      filesystem: { [MINIMAL]: 'read', [realOrSelf(checkout)]: 'read' },
+      filesystem: {
+        [MINIMAL]: 'read',
+        [realOrSelf(checkout)]: 'read',
+        ...Object.fromEntries(secretFiles.map((file) => [realOrSelf(file), 'deny'])),
+      },
       network: {
         enabled: true,
         mode: 'full',

@@ -499,6 +499,38 @@ describe('the start checks', () => {
     await handle.stop();
   });
 
+  it('a read-only explore session denies the secret files of the checkout, nested ones too', async () => {
+    await mkdir(join(checkout, 'app'));
+    await writeFile(join(checkout, '.env'), 'K=1\n');
+    await writeFile(join(checkout, 'app', '.env.local'), 'K=2\n');
+    const server = fakeAppServer({ ...FINE });
+    const handle = startCodexSession(
+      {
+        ...specOf({ sandbox: null }),
+        profile: {
+          kind: 'explore',
+          judge: JudgeKind.Tendb,
+          systemPrompt: 'You are a chat.',
+          tools: [],
+          allowedTools: [],
+          disallowedTools: [],
+          agents: {},
+        },
+      },
+      depsOf(server),
+    );
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    const config = (sentParams(server, 'thread/start') as { config: Record<string, unknown> })
+      .config;
+    const lane = (config['permissions'] as Record<string, Record<string, unknown>>)['lane'];
+    const filesystem = lane?.['filesystem'] as Record<string, string>;
+    const real = await realpath(checkout);
+    expect(filesystem[join(real, '.env')]).toBe('deny');
+    expect(filesystem[join(real, 'app', '.env.local')]).toBe('deny');
+    expect(filesystem[real]).toBe('read');
+    await handle.stop();
+  });
+
   it('refuses a session with no CODEX_HOME, spawning nothing', async () => {
     const spawn = vi.fn();
     const { handle } = startWith({}, { env: { PATH: '/usr/bin' } }, { spawn });

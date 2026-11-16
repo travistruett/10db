@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
 import { checkAccount, missingAccountRefusal, modelMatches, noAccountWhy } from './account-check';
-import { YourMcpServer } from '../sandbox';
+import { secretFilesIn, YourMcpServer } from '../sandbox';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount, type CodexCall } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
@@ -501,11 +501,22 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const developerInstructions = codexDeveloperInstructions(spec);
+    // With no lane sandbox the profile is read-only over the checkout, whose secret files it denies.
+    let secretFiles: string[] = [];
+    if ((spec.sandbox ?? null) === null) {
+      try {
+        secretFiles = await secretFilesIn(spec.cwd);
+      } catch {
+        throw sandboxRefused(
+          "The checkout's secret files could not be listed, so none could be denied.",
+        );
+      }
+    }
     const params = {
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
-      config: codexThreadConfig(spec),
+      config: codexThreadConfig(spec, secretFiles),
       ...(developerInstructions === null ? {} : { developerInstructions }),
     };
     const resumeId = spec.resumeProviderSessionId;

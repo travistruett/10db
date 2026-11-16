@@ -35,11 +35,15 @@ function projectServer(server: SessionMcpServer): Record<string, unknown> {
 
 /**
  * The per-session `config` for `thread/start` and `thread/resume`: a lane's, or an explore
- * conversation's on its read-only sandbox, whose checkout the profile makes `read`. The project's servers come
+ * conversation's on its read-only sandbox, whose checkout the profile makes `read`; with no lane sandbox it is
+ * read-only too, `secretFiles` of the checkout denied. The project's servers come
  * first, then the builder's, then 10db's. It travels over stdin, never on a
  * command line, and holds the name of the token variable, never the token.
  */
-export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknown> {
+export function codexThreadConfig(
+  spec: AgentSessionSpec,
+  secretFiles: readonly string[] = [],
+): Record<string, unknown> {
   const projects = Object.fromEntries(
     Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
   );
@@ -54,7 +58,8 @@ export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknow
   const skills = (spec.setup?.skillRoots ?? []).length > 0;
   return {
     ...(skills ? { skills: { include_instructions: true } } : {}),
-    permissions: sandbox === null ? readOnlyPermissions(spec.cwd) : lanePermissions(sandbox),
+    permissions:
+      sandbox === null ? readOnlyPermissions(spec.cwd, secretFiles) : lanePermissions(sandbox),
     // The thread's own setting over the home's `disabled`.
     web_search: spec.webSearch ?? 'disabled',
     shell_environment_policy: { inherit: 'none', set: { ...sandbox?.shellEnv } },
