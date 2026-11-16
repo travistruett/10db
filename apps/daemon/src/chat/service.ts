@@ -252,7 +252,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
       // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
       if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
-      if (folder === FolderWhileHeld.ReadOnly) deps.folderHold.chooseReadOnly(chat.id);
+      // A running turn's chained successor inherits its profile and starts without asking the folder, so a
+      // choice made then would wait for some later turn.
+      if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
+        deps.folderHold.chooseReadOnly(chat.id);
       // Starts are held before the queue is asked, so the message parks.
       if (parks) engine.holdStarts(conversationId);
       engine.queued(conversationId);

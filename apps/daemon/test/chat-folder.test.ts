@@ -241,6 +241,33 @@ describe('a message that waits for Your folder', () => {
     await w.engine.settled(chat.conversationId);
   });
 
+  it('does not carry a reading-only choice made during a running turn into a later send', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
+        return { text: 'Understood.' };
+      };
+    });
+    say(chat, 'look');
+    await started;
+    // The chained turn inherits the running turn's profile, so the choice is never taken by a turn start.
+    sayWith(chat, 'look again', FolderWhileHeld.ReadOnly);
+    laneEnds();
+    release();
+    await w.engine.settled(chat.conversationId);
+    say(chat, 'now edit it');
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
+    await w.engine.settled(chat.conversationId);
+  });
+
   it('runs reading only under Send Now', async () => {
     w = chatWorld();
     runningTask('Bump vite');
