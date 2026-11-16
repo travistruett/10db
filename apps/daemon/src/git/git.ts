@@ -966,6 +966,8 @@ export interface Git extends ChatGit {
     readonly branch: string;
     readonly from: string;
     readonly to: string;
+    /** Runs under the repo lock before anything is written; a throw stops the move. */
+    readonly beforeWrite?: () => Promise<void>;
   }): Promise<SwitchBack>;
   /**
    * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
@@ -3891,6 +3893,7 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly branch: string;
     readonly from: string;
     readonly to: string;
+    readonly beforeWrite?: () => Promise<void>;
   }): Promise<SwitchBack> {
     if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
       throw new InvalidError('A branch is moved between two commit ids');
@@ -3902,6 +3905,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
       const target = await revParse(c, `${input.to}^{commit}`);
       if (target === null) return { kind: 'gone' };
+      await input.beforeWrite?.();
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
       );

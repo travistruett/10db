@@ -131,7 +131,7 @@ const rg = (...args: string[]) =>
     .trim();
 
 /** A chat's tools in a session of its own, open as the engine opens one. */
-function tools(chat: ReturnType<typeof newChat>, open = true) {
+function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () => void) {
   const live = createChatLiveSessions();
   const sessionId: SessionId = mintId('Session');
   if (open)
@@ -140,9 +140,21 @@ function tools(chat: ReturnType<typeof newChat>, open = true) {
       observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
       signal: new AbortController().signal,
     });
+  const real = createGit();
   return chatGitTools(
     {
-      git: createGit(),
+      // `afterCheck` runs once, right after the tool has read where the folder is: the moment a stop, a lane or
+      // an archive can land between a tool's check and its write.
+      git: {
+        ...real,
+        currentBranch: async (path) => {
+          const branch = await real.currentBranch(path);
+          const run = afterCheck;
+          afterCheck = undefined;
+          run?.();
+          return branch;
+        },
+      },
       folderHold: hold,
       live,
       gh,
@@ -283,6 +295,45 @@ describe("a chat's git tools", () => {
     expect(
       await tools(me).commit_changes({ message: 'Mine', paths: ['b.txt'] }),
     ).not.toHaveProperty('warning');
+  });
+
+  // The hold is checked once before the work; a stop or a lane's start between that check and the write must not
+  // let the write land in a folder the turn no longer holds.
+  describe('when the turn loses Your folder after the tool checked it', () => {
+    it.each([
+      ['make_branch', (t: Tools) => t.make_branch({ name: 'topic' })],
+      ['switch_branch', (t: Tools) => t.switch_branch({ name: 'other' })],
+      ['pull', (t: Tools) => t.pull({})],
+      ['commit_changes', (t: Tools) => t.commit_changes({ message: 'x' })],
+    ])('%s writes nothing', async (_name, call) => {
+      rg('branch', 'other');
+      rg('branch', '--set-upstream-to=origin/main', 'main');
+      const clone = createTempClone(pair.origin.path);
+      writeFileSync(join(clone.path, 'remote.txt'), 'r\n');
+      execFileSync('git', ['-C', clone.path, 'add', '-A'], { env: isolatedGitEnv() });
+      execFileSync('git', ['-C', clone.path, 'commit', '-q', '-m', 'Remote'], {
+        env: isolatedGitEnv(),
+      });
+      execFileSync('git', ['-C', clone.path, 'push', '-q', 'origin', 'main'], {
+        env: { ...isolatedGitEnv(), ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
+      });
+      clone.cleanup();
+      write('mine.txt', 'mine\n');
+      const me = newChat('Me');
+      hold.takeTurn(project.id, me.id);
+      const head = rg('rev-parse', 'HEAD');
+      await expect(
+        call(
+          tools(me, true, () => {
+            hold.releaseTurn(me.id);
+          }),
+        ),
+      ).rejects.toThrow(/does not hold Your folder/);
+      expect(rg('rev-parse', 'HEAD')).toBe(head);
+      expect(rg('branch', '--show-current')).toBe('main');
+      expect(rg('branch', '--list', 'topic')).toBe('');
+      expect(rg('status', '--porcelain')).toBe('?? mine.txt');
+    });
   });
 
   it('pulls, and says when a branch is behind or has no upstream', async () => {

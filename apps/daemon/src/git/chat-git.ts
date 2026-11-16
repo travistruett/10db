@@ -49,12 +49,20 @@ export interface ChatGitContext<C extends ChatSite> {
   isAncestor(c: C, ancestor: string, tip: string): Promise<boolean>;
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   moveCheckedOutBranch(input: {
+    /** Runs under the repo lock before anything is written; a throw stops the move. */
+    readonly beforeWrite?: BeforeWrite;
     readonly repo: string;
     readonly branch: string;
     readonly from: string;
     readonly to: string;
   }): Promise<PullMoved>;
 }
+
+/**
+ * Run under the repo lock, after the call's own checks and before its first write: the caller's last look at
+ * whether the write is still allowed. A throw stops the call with nothing written.
+ */
+export type BeforeWrite = () => Promise<void>;
 
 /** What moving a checked-out branch answers when it did not move it. */
 export type PullMoved =
@@ -75,7 +83,7 @@ export type PullResult =
 
 export interface ChatGit {
   /** Creates `name` at HEAD and points HEAD at it; the files and the index stay as they are. */
-  makeBranchHere(repo: string, name: string): Promise<void>;
+  makeBranchHere(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /**
    * Commits `paths` (staged first, so an untracked path counts, and only those: other staged files stay
    * staged), or every change with no paths. Resolves with the new commit.
@@ -87,12 +95,13 @@ export interface ChatGit {
       readonly paths?: readonly string[];
       /** The session's secret files, absolute; with every `.env*` file, a commit holding one is refused. */
       readonly secretFiles?: readonly string[];
+      readonly beforeWrite?: BeforeWrite;
     },
   ): Promise<{ readonly sha: string }>;
   /** Checks out the local branch `name`, keeping changes git can carry, and refusing what it would overwrite. */
-  switchBranch(repo: string, name: string): Promise<void>;
+  switchBranch(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /** Fetches the branch's upstream and moves the checked-out branch to it when that is a fast-forward. */
-  pullFastForward(repo: string, net: NetworkCall): Promise<PullResult>;
+  pullFastForward(repo: string, net: NetworkCall, beforeWrite?: BeforeWrite): Promise<PullResult>;
 }
 
 /**
@@ -194,11 +203,12 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
   }
 
   return {
-    makeBranchHere(repo, name) {
+    makeBranchHere(repo, name, beforeWrite) {
       return ctx.lock(repo, async () => {
         const c = await ctx.pinned(repo);
         noOperation(c);
         const branch = await localBranch(c, name);
+        await beforeWrite?.();
         const head = await ctx.revParse(c, 'HEAD^{commit}');
         if (head === null) throw new InvalidError('Your folder has no commit to branch from');
         const ref = `refs/heads/${branch}`;
@@ -221,6 +231,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         const changed = await ctx.changes(c, named);
         if (changed.length === 0 && named === undefined)
           throw new InvalidError('Nothing has changed');
+        await input.beforeWrite?.();
         const secretFiles = input.secretFiles ?? [];
         refuseSecrets(secretsAmong([repo, c.real], changed, secretFiles));
         refuseFilters(await ctx.worktreeFilters(c, changed));
@@ -264,11 +275,12 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       });
     },
 
-    switchBranch(repo, name) {
+    switchBranch(repo, name, beforeWrite) {
       return ctx.lock(repo, async () => {
         const c = await ctx.pinned(repo);
         noOperation(c);
         const branch = await localBranch(c, name);
+        await beforeWrite?.();
         const tip = await ctx.revParse(c, `refs/heads/${branch}^{commit}`);
         if (tip === null) throw new InvalidError(`There is no local branch named ${branch}`);
         if ((await ctx.currentBranch(c)) === branch) return;
@@ -283,7 +295,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       });
     },
 
-    async pullFastForward(repo, net) {
+    async pullFastForward(repo, net, beforeWrite) {
       const first = await ctx.pinned(repo);
       const branch = await ctx.currentBranch(first);
       if (branch === null) throw new InvalidError('Your folder is on no branch (a detached HEAD)');
@@ -306,7 +318,13 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       if (await ctx.isAncestor(c, to, from)) return { kind: 'ahead' };
       if (!(await ctx.isAncestor(c, from, to))) return { kind: 'diverged' };
       refuseFilters(await ctx.treeFilters(c, to));
-      const moved = await ctx.moveCheckedOutBranch({ repo, branch, from, to });
+      const moved = await ctx.moveCheckedOutBranch({
+        repo,
+        branch,
+        from,
+        to,
+        ...(beforeWrite === undefined ? {} : { beforeWrite }),
+      });
       return moved.kind === 'switched' ? { kind: 'pulled', from, to } : moved;
     },
   };

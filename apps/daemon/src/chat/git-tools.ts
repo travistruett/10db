@@ -107,6 +107,14 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
     };
   }
 
+  /**
+   * The same checks again, run by the git call under the repo lock right before it writes: a stop, a lane's
+   * start or an archive can land between the first check and the lock, and a write must not follow it.
+   */
+  const stillHolding = async (): Promise<void> => {
+    await holding();
+  };
+
   /** The checkout, on a branch of the builder's own: not detached, not under 10db/. */
   async function onBranch(): Promise<{ repo: string; branch: string }> {
     const { repo } = await holding();
@@ -127,7 +135,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const { name } = ChatToolInputs.make_branch.parse(args);
       const branch = chatBranchName(name);
       const { repo } = await holding();
-      await deps.git.makeBranchHere(repo, branch);
+      await deps.git.makeBranchHere(repo, branch, stillHolding);
       return {
         done: true,
         branch,
@@ -138,13 +146,13 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const { name } = ChatToolInputs.switch_branch.parse(args);
       const branch = chatBranchName(name);
       const { repo } = await holding();
-      await deps.git.switchBranch(repo, branch);
+      await deps.git.switchBranch(repo, branch, stillHolding);
       return { done: true, branch };
     },
     [ChatToolName.Pull]: async (args: unknown) => {
       ChatToolInputs.pull.parse(args);
       const { repo } = await holding();
-      return { done: true, ...(await deps.git.pullFastForward(repo, deps.net())) };
+      return { done: true, ...(await deps.git.pullFastForward(repo, deps.net(), stillHolding)) };
     },
     [ChatToolName.PushBranch]: async (args: unknown) => {
       ChatToolInputs.push_branch.parse(args);
@@ -206,6 +214,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const { sha } = await deps.git.commitInFolder(repo, {
         message: input.message,
         secretFiles: await deps.secretFilesOf(repo),
+        beforeWrite: stillHolding,
         ...(paths === undefined ? {} : { paths }),
       });
       return {
