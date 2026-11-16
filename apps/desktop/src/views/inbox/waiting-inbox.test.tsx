@@ -103,6 +103,8 @@ describe('the Waiting tab', () => {
       return found;
     });
     expect(badge.getAttribute('data-variant')).toBe('light');
+    // Nothing needs the builder, so Open shows no count rather than an attention-coloured 0.
+    expect(tabs().getByText('Open').parentElement?.textContent).toBe('Open');
   });
 
   it('says nothing is out with anyone when empty', async () => {

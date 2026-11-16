@@ -24,9 +24,7 @@ export function CountBadge({
       size="xs"
       fw={600}
       px={5}
-      h="1.1em"
-      lh={1}
-      miw="1.1em"
+      miw={16}
       variant={attention ? 'filled' : 'light'}
       color={attention ? 'blue' : 'gray'}
     >

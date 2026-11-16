@@ -88,7 +88,7 @@ export function InboxView() {
                   label: (
                     <Group gap={6} wrap="nowrap">
                       Open
-                      {openTotal === null ? null : (
+                      {openTotal === null || openTotal === 0 ? null : (
                         <CountBadge count={openTotal} tone={CountTone.Attention} />
                       )}
                     </Group>
