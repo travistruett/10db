@@ -128,8 +128,9 @@ export function judgeChatCall(
   if (call.toolName.startsWith(OWN_PREFIX)) {
     const own = call.toolName.slice(OWN_PREFIX.length);
     if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
-    // A judge sees these; with none, the builder is asked.
-    if (JUDGED_CHAT_TOOLS.has(own) && access.judge === JudgeKind.Rules)
+    // Only 10db's judge settles these. Claude's auto mode lets a push, a pull request and a merge through unasked,
+    // so on it, and on the rules floor, the builder is asked.
+    if (JUDGED_CHAT_TOOLS.has(own) && access.judge !== JudgeKind.Tendb)
       return { decision: 'ask', reason: JUDGED_CHAT_TOOL_ASK };
     return ALLOW;
   }

@@ -45,8 +45,8 @@
   and `gh -R` on the pinned repository: the push names one qualified ref and never forces, a pull request opens only for a branch
   pushed at its commit with its body in a file under the chat's folder that is removed after, and a merge builds its address from
   the pinned repository and the number and refuses a pull request whose head or base is under `10db/`. They are out of `allowedTools` so
-  the session's judge sees each call (`JUDGED_OWN_TOOLS` in `trust/fast-path.ts`, which the fast path never settles; `JUDGED_CHAT_TOOLS` in `git-rule.ts`); the hook answers a bare allow where a judge runs and
-  asks on the rules floor, and the chat's trust policy tells the judge a push and a pull request send data out and a merge writes
+  the session's judge sees each call (`JUDGED_OWN_TOOLS` in `trust/fast-path.ts`, which the fast path never settles; `JUDGED_CHAT_TOOLS` in `git-rule.ts`); the hook answers a bare allow only where 10db's judge runs: Claude's auto mode approved all three
+  unasked in a live check, so on it and on the rules floor the hook asks, and the chat's trust policy tells the judge a push and a pull request send data out and a merge writes
   to a live system.
 - The folder routes (sessions spec §7.3): `GET /projects/:projectId/folder` (`FolderDto`, built by `folderView` in
   `folder-hold/view.ts` with each holder's words and whether it keeps a chat out; the branch is `symbolic-ref`, null

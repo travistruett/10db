@@ -1,6 +1,14 @@
-import { appendFileSync, chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { loadEnv } from '../src/env';
 import {
   addProject,
@@ -8,9 +16,12 @@ import {
   gitIn,
   localClaude,
   mcpCalls,
+  itemsOf,
+  openCards,
   openChat,
   sendAndWait,
   startLiveDaemon,
+  until,
 } from './live-chat-daemon';
 
 /**
@@ -26,6 +37,22 @@ function note(text: string): void {
   console.info(text);
   const file = liveEnv.TENDB_LIVE_REPORT;
   if (file !== undefined) appendFileSync(file, `${text}\n`);
+}
+
+/** The data dir's log lines that match, whatever the log files are called. */
+function logLines(root: string, pattern: RegExp): string {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.log'))
+        for (const line of readFileSync(path, 'utf8').split('\n'))
+          if (pattern.test(line)) found.push(line.slice(0, 900));
+    }
+  };
+  walk(join(root, 'data'));
+  return found.join('\n');
 }
 
 describe.skipIf(!live)('a chat that writes in Your folder, live, Claude plan', () => {
@@ -60,6 +87,51 @@ describe.skipIf(!live)('a chat that writes in Your folder, live, Claude plan', (
       expect(author).toEqual([builder.name, builder.email]);
       expect(existsSync(join(daemon.repo, '.git/hook-marker'))).toBe(false);
       note('LC1 pre-commit marker present: false');
+    } finally {
+      await daemon.stop();
+    }
+  }, 420_000);
+
+  it('asks the builder before a push, with auto mode as the judge', async () => {
+    const daemon = await startLiveDaemon('lc2', {
+      claudePath: localClaude(),
+      prepareRepo: (repo) => {
+        // A GitHub address no one owns: a push that got past every check would still reach nothing.
+        gitIn(
+          repo,
+          'remote',
+          'add',
+          'origin',
+          'https://github.com/tendb-live-check/does-not-exist.git',
+        );
+      },
+    });
+    try {
+      const project = await addProject(daemon, null);
+      const chat = await openChat(daemon, project.id, null);
+      await daemon.api(z.looseObject({}), `/conversations/${chat.conversationId}/messages`, {
+        method: 'POST',
+        body: {
+          text: 'Do these in order with your own tools, one call each: make_branch named lc2-work; create the file lc2.txt containing ok; commit_changes with message "lc2"; push_branch.',
+          folder: 'wait',
+        },
+      });
+      const card = await until(
+        'a card for the push',
+        240_000,
+        async () => (await openCards(daemon)).find((c) => c.kind === 'permission') ?? null,
+      );
+      note(`LC2 card: ${JSON.stringify([card.kind, card.title, card.body.slice(0, 300)])}`);
+      const items = await itemsOf(daemon, chat.conversationId);
+      const calls = mcpCalls(items);
+      note(`LC2 calls so far: ${JSON.stringify(calls.map((c) => [c.tool, c.status]))}`);
+      expect(`${card.title} ${card.body}`).toContain('push_branch');
+      // The push waits on the builder: git has not been asked to push yet.
+      expect(logLines(daemon.work.path, /GitNetworkError/)).toBe('');
+      note('LC2 pushes attempted before the answer: none');
+      await daemon.api(z.looseObject({}), `/conversations/${chat.conversationId}/stop`, {
+        method: 'POST',
+      });
     } finally {
       await daemon.stop();
     }
