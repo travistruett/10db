@@ -42,6 +42,7 @@ import {
   listBoardColumns,
   patchTask,
   schema,
+  seedProject,
   setTaskKeptWork,
   transitionWorkstream,
 } from '@10db/db';
@@ -856,6 +857,40 @@ describe('a pass of one', () => {
     expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/')).toBe(
       'refs/heads/10db/stray',
     );
+  });
+
+  it('refuses task ids or pages beside the whole project, and a chat of another project', async () => {
+    harness();
+    const mine = chat();
+    const people = page('People: UI work', ['people']);
+    const other = seedProject(h.store, { name: 'beta' });
+    const stranger = h.store.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: other.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      });
+      return insertChat(ctx, {
+        id,
+        projectId: other.id,
+        conversationId: conv.id,
+        title: 'Elsewhere',
+        tabPosition: 0,
+      });
+    }).value;
+
+    await expect(
+      openPass(h.ctx, { ...wholeOf(mine.id), taskIds: [people.id] }, LEASE),
+    ).rejects.toThrow(/whole project/);
+    await expect(
+      openPass(h.ctx, { ...wholeOf(mine.id), pages: ['people'] }, LEASE),
+    ).rejects.toThrow(/whole project/);
+
+    await expect(openPass(h.ctx, wholeOf(stranger.id), LEASE)).rejects.toThrow(/another project/);
+
+    expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
   });
 
   it.each([

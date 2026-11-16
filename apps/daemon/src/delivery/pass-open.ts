@@ -38,6 +38,7 @@ import {
   copyHazardNames,
   findOpenPass,
   findUnfinishedBatch,
+  getChat,
   getGoal,
   getProject,
   getTask,
@@ -260,6 +261,12 @@ export async function openPass(
     throw new InvalidError(`A pass holds from 1 to ${String(PASS_PAGE_CAP_MAX)} pages`);
   const pageCap = cap.data;
   const whole = input.wholeProject;
+  if (whole !== undefined) {
+    if (input.taskIds.length > 0 || (input.pages?.length ?? 0) > 0)
+      throw new InvalidError('A pass of one holds the whole project; it takes no other pages');
+    if (getChat(db, whole.chatId).projectId !== project.id)
+      throw new InvalidError('That chat belongs to another project');
+  }
   const tasks = input.taskIds.map((id) => getTask(db, id));
   const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
   refuseOpen(db, project, tasks, pageCap, newPages, whole !== undefined);
