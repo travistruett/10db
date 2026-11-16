@@ -19,8 +19,9 @@ narrows, so it can ship ahead of M6.
 
 - Plan mode is held in the daemon's memory, not stored, so a daemon restart puts a chat back in its normal mode.
   The composer chip shows the mode, so a restart is visible. Cost if wrong: one Shift+Tab.
-- Codex plan mode rests on an experimental `turn/start` field (`collaborationMode`). The pin is checked by a
-  protocol test and a live check; if the field is refused the capability reads "not available" and the chip says
+- Codex plan mode rests on an experimental `turn/start` field (`collaborationMode`). 10db's Codex client
+  initializes without `capabilities.experimentalApi`, so the session opts in at `initialize` before sending it. The
+  pin is checked by a protocol test and a live check; if the field is refused the capability reads "not available" and the chip says
   so, never silently.
 - Fork of a chat with pictures copies the text history and not the picture files; the agent still has the
   pictures in its own forked context. A fork's picture budget starts clean.
@@ -52,7 +53,7 @@ Plan mode (`P` = planMode flag on the conversation's runtime, never stored).
 | idle (warm) | flips `P`; Claude applies to the open session at once; Codex on the next turn | allowed | no turn: nothing | starts a turn under `P` | n/a |
 | idle (cold) | flips `P`; the next start opens in it | allowed (has a provider session) | nothing | the start opens under `P` | n/a |
 | starting | flips `P`; the session opens with `P` as it is when it opens (read at open) | refused: "a turn is running" | cancels the start | queued | n/a |
-| turn running | flips `P`; Claude applies live, so the rest of the turn runs under the new mode; Codex next turn | refused | stops the turn; `P` kept | injected into the turn, under the mode the turn began with | `P` kept for the next turn |
+| turn running | flips `P`; Claude applies live, so the rest of the turn runs under the new mode; Codex next turn | refused | stops the turn; `P` kept | injected into the turn: on Claude under the mode now set (the toggle is live), on Codex under the mode the turn began with | `P` kept for the next turn |
 | stopping | flips `P`; applies as in running | refused | already stopping | queued | `P` kept |
 | sealed / archived | refused (409) | refused | n/a | refused | n/a |
 | daemon restart | `P` is gone: normal mode | needs a stored provider session: kept | n/a | n/a | n/a |
