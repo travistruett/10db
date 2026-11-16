@@ -1,5 +1,6 @@
 import {
   EventType,
+  BackgroundTaskKind,
   type BackgroundTaskDto,
   type ConversationId,
   type ConversationItemId,
@@ -28,6 +29,15 @@ export interface SessionSink {
   rateLimited(resetsAt: Date | null): void;
   turnComplete(event: TurnComplete): void;
   ended(event: Ended): void;
+}
+
+/** Claude Code's task type read as what the builder sees: a shell, a monitor or a subagent. */
+export function taskKind(type: string | undefined): BackgroundTaskKind {
+  const t = type?.toLowerCase() ?? '';
+  if (t.includes('agent')) return BackgroundTaskKind.Agent;
+  if (t.includes('monitor')) return BackgroundTaskKind.Monitor;
+  if (t.includes('bash') || t.includes('shell')) return BackgroundTaskKind.Shell;
+  return BackgroundTaskKind.Other;
 }
 
 export interface OpenSession {
@@ -159,7 +169,12 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         return;
       // A turn's text is in its `message` events; the rest is for the lanes.
       case 'background_tasks':
-        backgroundTasks = event.tasks.map((t) => ({ id: t.id, description: t.description }));
+        backgroundTasks = event.tasks.map((t) => ({
+          id: t.id,
+          description: t.description,
+          kind: taskKind(t.kind),
+          agent: t.agent ?? null,
+        }));
         // Not stored: the view reads it from the open session, and this tells the screen to read the view.
         state.write((ctx) => {
           ctx.emit({

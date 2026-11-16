@@ -73,7 +73,19 @@ export const FakeStep = z.discriminatedUnion('do', [
     toolUseId: z.string().optional(),
   }),
   /** The commands running in the background now (none: they all finished). */
-  z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),
+  z.object({
+    do: z.literal('background'),
+    tasks: z.array(
+      z.union([
+        z.string(),
+        z.object({
+          description: z.string(),
+          kind: z.string().optional(),
+          agent: z.string().optional(),
+        }),
+      ]),
+    ),
+  }),
   z.object({ do: z.literal('crash'), message: z.string() }),
   z.object({ do: z.literal('billing_refused'), message: z.string() }),
   /** The account cannot run the model the session was launched on; `wording` is an error's text alone. */

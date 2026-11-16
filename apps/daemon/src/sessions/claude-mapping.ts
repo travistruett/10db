@@ -124,7 +124,12 @@ export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEv
           type: 'background_tasks',
           tasks: msg.tasks
             .filter((t) => t.ambient !== true)
-            .map((t) => ({ id: t.task_id, description: t.description })),
+            .map((t) => ({
+              id: t.task_id,
+              description: t.description,
+              kind: t.task_type,
+              ...(t.subagent_type === undefined ? {} : { agent: t.subagent_type }),
+            })),
         },
       ];
     return [];

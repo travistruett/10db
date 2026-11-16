@@ -537,10 +537,15 @@ export function runFakeLaneSession(
       case 'background':
         emit({
           type: 'background_tasks',
-          tasks: step.tasks.map((description, i) => ({
-            id: `fake-task-${String(i)}`,
-            description,
-          })),
+          tasks: step.tasks.map((task, i) => {
+            const named = typeof task === 'string' ? { description: task } : task;
+            return {
+              id: `fake-task-${String(i)}`,
+              description: named.description,
+              ...('kind' in named && named.kind !== undefined ? { kind: named.kind } : {}),
+              ...('agent' in named && named.agent !== undefined ? { agent: named.agent } : {}),
+            };
+          }),
         });
         return 'continue';
       case 'crash':

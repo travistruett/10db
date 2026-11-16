@@ -453,14 +453,18 @@ describe('ChatTab: background tasks', () => {
     openChat({
       conversation: {
         backgroundTasks: [
-          { id: 'a', description: 'npm run build' },
-          { id: 'b', description: 'tsc --watch' },
+          { id: 'a', description: 'npm run build', kind: 'shell', agent: null },
+          { id: 'b', description: 'Find the failing test', kind: 'agent', agent: 'Explore' },
+          { id: 'c', description: 'tail the server log', kind: 'monitor', agent: null },
         ],
       },
     });
-    expect(await screen.findByText('Running in the background · 2')).toBeTruthy();
+    expect(await screen.findByText('Running in the background · 3')).toBeTruthy();
     expect(screen.getByText('npm run build')).toBeTruthy();
-    expect(screen.getByText('tsc --watch')).toBeTruthy();
+    expect(screen.getByText('Command')).toBeTruthy();
+    expect(screen.getByText('Subagent · Explore')).toBeTruthy();
+    expect(screen.getByText('Find the failing test')).toBeTruthy();
+    expect(screen.getByText('Monitor')).toBeTruthy();
   });
 
   it('says what an agent that reports none lacks, and draws no empty panel for one that does', async () => {

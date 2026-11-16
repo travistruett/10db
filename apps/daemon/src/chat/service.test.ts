@@ -131,7 +131,15 @@ describe('a chat view: background tasks', () => {
         'Chat: build it': [
           [
             { do: 'consume' },
-            { do: 'background', tasks: ['npm run build', 'tsc --watch'] },
+            {
+              do: 'background',
+              tasks: [
+                { description: 'npm run build', kind: 'local_bash' },
+                { description: 'Find the failing test', kind: 'local_agent', agent: 'Explore' },
+                { description: 'tail the server log', kind: 'monitor_mcp' },
+                'tsc --watch',
+              ],
+            },
             { do: 'await_signal', name: 'hold' },
             { do: 'turn_complete' },
           ],
@@ -141,10 +149,14 @@ describe('a chat view: background tasks', () => {
     const chat = w.open();
     expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
     w.chat.send(chat.conversationId, { text: 'build it', mentions: [], pictures: [] });
-    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 2);
-    expect(w.chat.get(chat.id).conversation.backgroundTasks.map((t) => t.description)).toEqual([
-      'npm run build',
-      'tsc --watch',
+    await waitFor(() => w.chat.get(chat.id).conversation.backgroundTasks.length === 4);
+    expect(
+      w.chat.get(chat.id).conversation.backgroundTasks.map((t) => [t.kind, t.agent, t.description]),
+    ).toEqual([
+      ['shell', null, 'npm run build'],
+      ['agent', 'Explore', 'Find the failing test'],
+      ['monitor', null, 'tail the server log'],
+      ['other', null, 'tsc --watch'],
     ]);
     expect(w.events.some((e) => e.type === 'conversation.state' && e.data['backgroundTasks'])).toBe(
       true,
