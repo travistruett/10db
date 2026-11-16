@@ -380,6 +380,17 @@ describe("a chat's tools that reach GitHub", () => {
     await expect(
       t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(batch)?.[1]) }),
     ).rejects.toThrow(/10db's own/);
+    // A pull request into one of 10db's branches would merge into it, whoever opened it.
+    const intoPass = await gh.prCreate({
+      repo: 'acme/widgets',
+      base: '10db/pass-abc123',
+      head: 'topic-x',
+      title: 'Into a pass',
+      bodyFile: join(scratch.path, 'b.md'),
+    });
+    await expect(
+      t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(intoPass)?.[1]) }),
+    ).rejects.toThrow(/merges into 10db\/pass-abc123, which is 10db's own/);
     await expect(t.merge_pull_request({ number: 99 })).rejects.toThrow('no pull request #99');
     expect(gh.merged).toEqual([]);
     const number = Number(/\/pull\/(\d+)$/.exec(mine.url)?.[1]);

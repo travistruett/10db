@@ -35,7 +35,7 @@ export interface ChatGitToolsDeps {
     | 'remoteTrackingCommit'
     | 'pinnedPushUrl'
   >;
-  readonly gh: Pick<Gh, 'prCreate' | 'prMerge' | 'prHead'>;
+  readonly gh: Pick<Gh, 'prCreate' | 'prMerge' | 'prBranches'>;
   /** A folder of the chat's own, where a pull request's body is written for the call. */
   readonly filesDir: (conversationId: ConversationId) => string;
   readonly folderHold: FolderHold;
@@ -185,11 +185,16 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       // The address comes from the pinned repository and the number alone, so another repository's pull
       // request cannot be named.
       const url = `https://github.com/${slug}/pull/${String(number)}`;
-      const head = await deps.gh.prHead({ repo: slug, ref: url }, deps.net());
-      if (head === null) throw new InvalidError(`${slug} has no pull request #${String(number)}`);
-      if (isTenDbBranch(head))
+      const branches = await deps.gh.prBranches({ repo: slug, ref: url }, deps.net());
+      if (branches === null)
+        throw new InvalidError(`${slug} has no pull request #${String(number)}`);
+      if (isTenDbBranch(branches.head))
         throw new ConflictError(
-          `Pull request #${String(number)} comes from ${head}, which is 10db's own; 10db merges those, not a chat.`,
+          `Pull request #${String(number)} comes from ${branches.head}, which is 10db's own; 10db merges those, not a chat.`,
+        );
+      if (isTenDbBranch(branches.base))
+        throw new ConflictError(
+          `Pull request #${String(number)} merges into ${branches.base}, which is 10db's own; 10db merges into those, not a chat.`,
         );
       await deps.gh.prMerge({ repo: slug, url }, deps.net());
       return { done: true, url };
