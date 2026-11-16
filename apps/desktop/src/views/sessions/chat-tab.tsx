@@ -1,5 +1,6 @@
 import {
   ConversationState,
+  Delivery,
   DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
@@ -551,7 +552,8 @@ export function ChatTab({
                       onFileAsTasks: async () => {
                         await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
                       },
-                      ...(doItReason === null
+                      // A project that lands locally has no separate copies to offer.
+                      ...(doItReason === null && project.delivery !== Delivery.Local
                         ? {
                             onDoItSeparately: (d: Draft) => {
                               setDoIt({ place: DoItPlace.Worktree, draft: d.text });

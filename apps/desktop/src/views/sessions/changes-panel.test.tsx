@@ -222,6 +222,26 @@ describe('a task’s Changes', () => {
     expect(box).toHaveProperty('value', expect.stringContaining('@src/api/client.ts:42'));
   });
 
+  it.each([
+    {
+      name: 'a removed line is named as the old file’s',
+      label: 'Quote removed line 43 of src/api/client.ts',
+      quote: '@src/api/client.ts (line 43 before the change, removed)\n> if (res.status === 401) {',
+    },
+    {
+      name: 'an added line is the new file’s',
+      label: 'Quote added line 43 of src/api/client.ts',
+      quote: '@src/api/client.ts:43\n> if (res.status === 401 && req.retried) {',
+    },
+  ])('quotes $name, with a button of its own', async ({ label, quote }) => {
+    windowWidth(900);
+    await renderTask({});
+    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
+    fireEvent.click(await screen.findByRole('button', { name: label }));
+    const box = await screen.findByRole('textbox', { name: /Message to/ });
+    expect(box).toHaveProperty('value', expect.stringContaining(quote));
+  });
+
   it('says a finished copy is gone and points at its pull request', async () => {
     windowWidth(900);
     await renderTask({

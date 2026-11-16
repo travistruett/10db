@@ -9,6 +9,7 @@ import { doItPreviewDto, doItServer } from '../../test/do-it-fixtures';
 import { inboxItemDto, projectViewDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { pagesByStatus, passHandlers, passViewDto } from '../../test/pass-fixtures';
 import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
+import { failureLine } from '../board/task-state';
 import { taskTabs, TASK_TABS_KEY } from './task-tabs';
 import { closedTabs } from './closed-tabs';
 
@@ -303,23 +304,20 @@ describe('a separate copy’s tab', () => {
 
   it('failed, it says what happened and offers the Board', async () => {
     const workstreamId = mintId('Workstream');
+    const failed = workstreamDto({
+      id: workstreamId,
+      taskId,
+      projectId: project.id,
+      state: 'FAILED',
+      failureKind: 'session_failed',
+      failureReason: 'it stopped',
+    });
     openCopy({ board: 'blocked', workstreamId }, [
-      http.get(daemonUrl('/workstreams'), () =>
-        HttpResponse.json([
-          workstreamDto({
-            id: workstreamId,
-            taskId,
-            projectId: project.id,
-            state: 'FAILED',
-            failureKind: 'session_failed',
-            failureReason: 'it stopped',
-          }),
-        ]),
-      ),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([failed])),
     ]);
     await screen.findByText('From chat: Login fails');
     expect(
-      await screen.findByText(/stopped|failed|session/i, { selector: '[role=status] *' }),
+      await screen.findByText(failureLine(failed, false), { selector: '[role=status] *' }),
     ).toBeTruthy();
     expect(screen.getAllByRole('link', { name: 'Open on Board' })).toHaveLength(2);
   });

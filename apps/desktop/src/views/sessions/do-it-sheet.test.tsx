@@ -336,6 +336,21 @@ describe('the Do It sheet', () => {
     expect(doIt.requests).toEqual([]);
   });
 
+  it.each([
+    { name: 'the preview can’t be read', method: 'get', path: '/chats/:chatId/do-it' },
+    { name: 'the brief can’t be asked for', method: 'post', path: '/chats/:chatId/brief' },
+  ] as const)('says so when $name, instead of staying blank', async ({ method, path }) => {
+    openChat(doItPreviewDto(), {
+      handlers: [
+        http[method](daemonUrl(path), () =>
+          HttpResponse.json({ error: 'internal', message: 'The daemon is down.' }, { status: 500 }),
+        ),
+      ],
+    });
+    const sheet = await openSheet();
+    expect(await within(sheet).findByText('The daemon is down.')).toBeTruthy();
+  });
+
   it('a refusal at submit is said beside Do It, and the sheet keeps the brief', async () => {
     openChat(doItPreviewDto(), { refusal: 'Your folder changed since the sheet opened.' });
     const sheet = await openSheet();
@@ -406,6 +421,24 @@ describe('Do It Here when only chats’ turns hold the folder', () => {
 });
 
 describe('the fourth choice', () => {
+  it('is not offered on a project that lands locally, which has no separate copies', async () => {
+    openChat(doItPreviewDto(), {
+      project: projectViewDto({ id: project.id, name: 'ampsio', delivery: 'local' }),
+      handlers: [
+        http.get(daemonUrl('/projects/:projectId/folder'), () =>
+          HttpResponse.json(
+            folderDto({ holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')] }),
+          ),
+        ),
+      ],
+    });
+    const field = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(field, { target: { value: 'knock out the retry' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('button', { name: 'Send Reading Only' });
+    expect(screen.queryByRole('button', { name: 'Do It in a Separate Copy' })).toBeNull();
+  });
+
   it('a message sent while the folder is held offers Do It in a Separate Copy, which opens the sheet with the draft', async () => {
     const { doIt } = openChat(doItPreviewDto(), {
       handlers: [

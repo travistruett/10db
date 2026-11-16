@@ -13,7 +13,7 @@ import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { PASS_NOW, passStartDto } from '../../test/pass-fixtures';
 import { StartPass } from './start-pass';
 
-// B10 on the Workbench: a Start Pass refused only because chats' turns hold Your folder has two ways out.
+// Start Pass on the Workbench: a Start Pass refused only because chats' turns hold Your folder has two ways out.
 
 const areas: AreaDef[] = [
   { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },

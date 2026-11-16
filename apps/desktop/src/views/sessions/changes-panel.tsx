@@ -12,6 +12,7 @@ import {
 import { IconX } from '@tabler/icons-react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { HunkDiff } from '../../conversation/hunk-diff';
+import type { GutterLine } from '../../conversation/hunk-gutter';
 import { ExternalLink } from '../board/pull-request-link';
 import { changesTotals, parseChanges } from './changes-files';
 
@@ -39,9 +40,22 @@ export interface ChangesPanelProps {
   readonly onClose: () => void;
 }
 
-/** `@path:42` and the line, as a quote the agent reads. */
-function quoteOf(path: string, number: number, text: string): string {
-  return `@${path}:${String(number)}\n> ${text}\n`;
+/**
+ * `@path:42` and the line, as a quote the agent reads. A removed line's number counts the old file, so it
+ * says so instead of pointing at a line the file no longer has.
+ */
+function quoteOf(path: string, line: GutterLine): string {
+  const at =
+    line.kind === 'removed'
+      ? `@${path} (line ${String(line.number)} before the change, removed)`
+      : `@${path}:${String(line.number)}`;
+  return `${at}\n> ${line.text}\n`;
+}
+
+/** What a line's number button is called: removed and added lines of one number are told apart. */
+function quoteLabelOf(path: string, line: GutterLine): string {
+  const kind = line.kind === 'context' ? '' : `${line.kind} `;
+  return `Quote ${kind}line ${String(line.number)} of ${path}`;
 }
 
 function Files({
@@ -199,9 +213,9 @@ export function ChangesPanel({
                       hunk={hunk}
                       first={index === 0}
                       onQuote={(line) => {
-                        onQuote(quoteOf(file.path, line.number, line.text));
+                        onQuote(quoteOf(file.path, line));
                       }}
-                      quoteLabel={(line) => `Quote line ${String(line.number)} of ${file.path}`}
+                      quoteLabel={(line) => quoteLabelOf(file.path, line)}
                     />
                   ))}
                 </Stack>

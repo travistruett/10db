@@ -149,7 +149,7 @@ export function DoItSheet({
   const brief = data?.brief;
   const title = typedTitle ?? brief?.title ?? '';
   const text = typedBrief ?? brief?.text ?? '';
-  // A place offered, or Your folder refused only because chats' turns hold it (B10: stop them, or wait).
+  // A place offered, or Your folder refused only because chats' turns hold it (stop them, or wait).
   const offers = (p: DoItPlace): boolean =>
     data === undefined ||
     (p === DoItPlace.Here ? data.here.offered || data.here.whenBusy : data.worktree.offered);
@@ -218,7 +218,7 @@ export function DoItSheet({
       onClose={close}
       title="Do It"
       size={560}
-      error={error}
+      error={error ?? ask.error?.message ?? preview.error?.message ?? null}
       actions={
         <>
           <Button variant="default" disabled={doIt.isPending} onClick={close}>

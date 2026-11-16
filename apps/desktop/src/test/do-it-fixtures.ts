@@ -1,10 +1,10 @@
 import {
+  BriefRequest,
   DoItBriefDto,
   DoItPreviewDto,
   DoItRequest,
   DoItResult,
   mintId,
-  type BriefRequest,
   type TaskId,
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
@@ -80,7 +80,7 @@ export function doItServer(opts: DoItServerOptions): DoItServer {
   server.handlers.push(
     http.get(daemonUrl('/chats/:chatId/do-it'), () => HttpResponse.json(current())),
     http.post(daemonUrl('/chats/:chatId/brief'), async ({ request }) => {
-      server.briefAsks.push((await request.json()) as BriefRequest);
+      server.briefAsks.push(BriefRequest.parse(await request.json()));
       return HttpResponse.json(current().brief);
     }),
     http.delete(daemonUrl('/chats/:chatId/brief'), ({ params }) => {
