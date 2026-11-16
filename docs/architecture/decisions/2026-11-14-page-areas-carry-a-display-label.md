@@ -18,7 +18,7 @@
 - **A label alone is never a new page.** `areas.pages` holds only pages whose name matches no page area
   of the project, so unticking a row can never demote a page the project has; a label difference is offered
   through the rebuild and both `sameArea` functions compare it.
-- **The picker notices new pages.** With page areas Set Up is always in the picker's header, badged with the new
+- **The picker notices new pages.** With page areas Workbench Settings (called Set Up when this was decided) is always on the start page's title row, badged with the new
   pages not left out plus the settings, and a line under the Pages field names them. The rebuild starts ticked
   when one is counted. A page unticked at Apply is stored in `ProjectDto.leftOutPages`, still shows unticked in
   the rebuild, and is not counted again; ticking it removes it from the list.

@@ -169,8 +169,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
-  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), static when
-  the builder prefers reduced motion. A page never shows a lone spinner as its whole content; a spinner
+  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
+  with no shimmer. A page never shows a lone spinner as its whole content; a spinner
   stays inside a button or a row.
 - **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
   rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it

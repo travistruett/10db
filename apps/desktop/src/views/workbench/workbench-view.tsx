@@ -14,7 +14,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Button, Stack, Text, Title } from '@mantine/core';
+import { Button, Stack, Text } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -49,6 +49,35 @@ import { WorkbenchSetup } from './setup/workbench-setup';
 import { newPagesOf, setUpCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
+
+/**
+ * The start page's header, the same while it loads, when it fails and once drawn. Workbench Settings
+ * opens the setup; it is disabled until the screen can show it.
+ */
+function StartPageHeader({
+  count,
+  onOpen,
+}: {
+  readonly count: number;
+  readonly onOpen?: () => void;
+}) {
+  return (
+    <PageHeader
+      title="UI Workbench"
+      description="Work through pages with the agents, live."
+      actions={
+        <Button
+          variant="default"
+          disabled={onOpen === undefined}
+          rightSection={count === 0 ? null : <CountBadge count={count} />}
+          {...(onOpen === undefined ? {} : { onClick: onOpen })}
+        >
+          Workbench Settings
+        </Button>
+      }
+    />
+  );
+}
 
 /** What the Workbench asks of the daemon; each answers once its route has. */
 export interface WorkbenchActions {
@@ -129,15 +158,12 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   });
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
   const loading = <PageLoading shape={PageLoadingShape.List} label="Loading the pages" />;
-  const header = (
-    <PageHeader title="UI Workbench" description="Work through pages with the agents, live." />
-  );
   if (!hasPages) return <WorkbenchSetup project={project} />;
   // The header is known before the data, so it draws while the pass is read.
   if (live === undefined)
     return (
       <Stack gap="md">
-        {header}
+        <StartPageHeader count={0} />
         {loading}
       </Stack>
     );
@@ -147,20 +173,11 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
-        <PageHeader
-          title="UI Workbench"
-          description="Work through pages with the agents, live."
-          actions={
-            <Button
-              variant="default"
-              rightSection={setupCount === 0 ? null : <CountBadge count={setupCount} />}
-              onClick={() => {
-                setDialog('setup');
-              }}
-            >
-              Workbench Settings
-            </Button>
-          }
+        <StartPageHeader
+          count={setupCount}
+          onOpen={() => {
+            setDialog('setup');
+          }}
         />
         {closed === null ? null : (
           <Text size="sm" role="status">
@@ -321,7 +338,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   if (failed !== null)
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <StartPageHeader count={0} />
         <Text size="sm" c="red">{`The UI Workbench could not be read: ${failed.message}`}</Text>
       </Stack>
     );
@@ -352,7 +369,7 @@ export function WorkbenchView() {
   if (project === null)
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <StartPageHeader count={0} />
       </Stack>
     );
   return <ProjectWorkbench key={project.id} project={project} />;

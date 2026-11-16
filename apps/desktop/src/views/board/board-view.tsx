@@ -591,21 +591,19 @@ export function BoardView() {
         toolbar={
           goalList.length === 0 ? undefined : (
             <Group gap="md" align="center">
-              {goalList.length > 0 ? (
-                <Select
-                  aria-label="Goal"
-                  w={220}
-                  allowDeselect={false}
-                  data={[
-                    { value: ALL_GOALS, label: 'All goals' },
-                    ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-                  ]}
-                  value={filterGoal?.goal.id ?? ALL_GOALS}
-                  onChange={(id) => {
-                    setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
-                  }}
-                />
-              ) : null}
+              <Select
+                aria-label="Goal"
+                w={220}
+                allowDeselect={false}
+                data={[
+                  { value: ALL_GOALS, label: 'All goals' },
+                  ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
+                ]}
+                value={filterGoal?.goal.id ?? ALL_GOALS}
+                onChange={(id) => {
+                  setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+                }}
+              />
               {filterGoal ? (
                 <GoalLine
                   summary={filterGoal}

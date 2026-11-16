@@ -6,9 +6,10 @@ import {
   type PrincipleDto,
   type ProposalDto,
 } from '@10db/contracts';
-import { Alert, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Stack, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useProposals, type TracedRecord } from '../../daemon/knowledge-queries';
 import {
   firstColumnFiltering,
@@ -84,7 +85,8 @@ export function ProposalList({
         {proposals.error.message}
       </Alert>
     );
-  if (proposals.isPending) return <Loader size="sm" aria-label="Loading proposals" />;
+  if (proposals.isPending)
+    return <PageLoading shape={PageLoadingShape.List} label="Loading proposals" />;
   const pending = pendingPrinciples(proposals.data);
   const rows = sortRows(
     pending.filter((row) => matches(row, filter)),

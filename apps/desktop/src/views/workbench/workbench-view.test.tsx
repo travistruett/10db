@@ -151,6 +151,7 @@ describe('WorkbenchScreen', () => {
   it('waits for the picker until what Start Pass says has loaded', async () => {
     await draw({ start: undefined });
     expect(await screen.findByRole('status', { name: 'Loading the pages' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'UI Workbench' })).toBeTruthy();
   });
 
   it('sends Start Pass and says its refusal beside the button', async () => {

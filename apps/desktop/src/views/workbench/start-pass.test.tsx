@@ -180,6 +180,19 @@ describe('StartPass', () => {
     expect(screen.getByText('1 page')).toBeTruthy();
   });
 
+  it('says which task holds a page that is held', async () => {
+    await draw({
+      start: passStartDto({
+        pages: start.pages.map((page) =>
+          page.area === 'people'
+            ? { ...page, heldBy: { taskId: mintId('Task'), title: 'Fix the roster' } }
+            : page,
+        ),
+      }),
+    });
+    expect(screen.getByText('Waits for Fix the roster')).toBeTruthy();
+  });
+
   it("says the daemon's refusal beside Start Pass", async () => {
     await draw({ error: 'A lane is running in the folder: Fix login' });
     const refusal = screen.getByText('A lane is running in the folder: Fix login');

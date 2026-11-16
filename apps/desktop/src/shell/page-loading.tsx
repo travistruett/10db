@@ -1,5 +1,4 @@
 import { Group, Paper, Skeleton, Stack } from '@mantine/core';
-import { useReducedMotion } from '@mantine/hooks';
 import { useEffect, useState } from 'react';
 
 /** A load faster than this shows nothing, so a quick page never flashes placeholders. */
@@ -17,25 +16,25 @@ const DEFAULT_ROWS: Readonly<Record<PageLoadingShape, number>> = {
 /** The widths of a transcript's placeholder lines. */
 const LINE_WIDTHS = ['90%', '70%', '80%'] as const;
 
-function ListRow({ animate }: { readonly animate: boolean }) {
+function ListRow() {
   return (
     <Group gap="sm" wrap="nowrap" align="flex-start">
-      <Skeleton height={18} width={18} radius="sm" animate={animate} />
+      <Skeleton height={18} width={18} radius="sm" animate={false} />
       <Stack gap={6} style={{ flex: 1 }}>
-        <Skeleton height={12} width="40%" animate={animate} />
-        <Skeleton height={10} width="65%" animate={animate} />
+        <Skeleton height={12} width="40%" animate={false} />
+        <Skeleton height={10} width="65%" animate={false} />
       </Stack>
     </Group>
   );
 }
 
-function CardOutline({ animate }: { readonly animate: boolean }) {
+function CardOutline() {
   return (
     <Paper withBorder p="md">
       <Stack gap="xs">
-        <Skeleton height={14} width="35%" animate={animate} />
-        <Skeleton height={10} width="80%" animate={animate} />
-        <Skeleton height={10} width="55%" animate={animate} />
+        <Skeleton height={14} width="35%" animate={false} />
+        <Skeleton height={10} width="80%" animate={false} />
+        <Skeleton height={10} width="55%" animate={false} />
       </Stack>
     </Paper>
   );
@@ -43,8 +42,7 @@ function CardOutline({ animate }: { readonly animate: boolean }) {
 
 /**
  * What a page shows in place of its content while it loads, under a header that is already drawn: quiet
- * placeholder rows in the shape of what is coming, after a short delay, never a lone spinner. They do
- * not shimmer when the builder prefers reduced motion.
+ * static placeholder rows in the shape of what is coming, after a short delay, never a lone spinner.
  */
 export function PageLoading({
   shape,
@@ -58,7 +56,6 @@ export function PageLoading({
   readonly label: string;
 }) {
   const [late, setLate] = useState(false);
-  const reducedMotion = useReducedMotion();
   useEffect(() => {
     const timer = setTimeout(() => {
       setLate(true);
@@ -68,23 +65,22 @@ export function PageLoading({
     };
   }, []);
   if (!late) return null;
-  const animate = !reducedMotion;
   const placeholders = Array.from({ length: rows ?? DEFAULT_ROWS[shape] }, (_, i) => i);
   return (
     <Stack gap="md" role="status" aria-label={label}>
       {placeholders.map((i) => {
         switch (shape) {
           case PageLoadingShape.List:
-            return <ListRow key={i} animate={animate} />;
+            return <ListRow key={i} />;
           case PageLoadingShape.Cards:
-            return <CardOutline key={i} animate={animate} />;
+            return <CardOutline key={i} />;
           case PageLoadingShape.Lines:
             return (
               <Skeleton
                 key={i}
                 height={12}
                 width={LINE_WIDTHS[i % LINE_WIDTHS.length] ?? '80%'}
-                animate={animate}
+                animate={false}
               />
             );
         }
