@@ -388,6 +388,10 @@ describe('the hook judge, attended', () => {
       settled: 'The builder allowed this very call in this project.',
     });
     expect(await run(judgeCall, bash('/w/release.sh'))).toEqual({ decision: 'allow' });
+    // Two tools that share one input never share a grant.
+    expect(await run(judgeCall, request('Write', { file_path: '/w/release.sh' }))).toEqual({
+      decision: 'allow',
+    });
   });
 
   it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {

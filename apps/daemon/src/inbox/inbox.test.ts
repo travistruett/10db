@@ -1926,6 +1926,29 @@ describe('limit cards', () => {
     }
   });
 
+  it('an Edit grant never answers a Write with the same input', async () => {
+    const ws = seedWorkstream(base);
+    const input = { file_path: '/w/release.sh' };
+    const call = (toolName: string) => ({
+      toolName,
+      input,
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(call('Edit'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    limits.note('t1', WRITES_LIVE);
+    expect(await broker(ws)(call('Edit'))).toEqual({ behavior: 'allow' });
+    limits.note('t1', WRITES_LIVE);
+    const pending = broker(ws)(call('Write'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    expect((await pending).behavior).toBe('deny');
+  });
+
   it("a grant with the builder's note is a line every judge reads", async () => {
     const ws = seedWorkstream(base);
     limits.note('t1', WRITES_LIVE);

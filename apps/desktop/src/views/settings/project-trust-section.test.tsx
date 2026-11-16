@@ -118,6 +118,25 @@ describe('Settings › project Trust', () => {
     ).toBeTruthy();
   });
 
+  it('lists a quoted call saved before grants named their tool as one to grant again, not as live', async () => {
+    const grant: TrustGrantDto = {
+      id: mintId('TrustGrant'),
+      projectId: project.id,
+      limit: null,
+      target: 'the call "pnpm test"',
+      createdAt: '2026-11-14T10:00:00.000Z',
+    };
+    serve(NOTHING, {}, [], [grant]);
+    renderApp('/settings/project-trust');
+    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
+    expect(
+      await within(region).findByText(
+        /^Grant again: this was saved before grants named their tool · /,
+      ),
+    ).toBeTruthy();
+    expect(within(region).queryByText(/^Any limit · /)).toBeNull();
+  });
+
   it('shows the empty line', async () => {
     serve(NOTHING);
     renderApp('/settings/project-trust');
