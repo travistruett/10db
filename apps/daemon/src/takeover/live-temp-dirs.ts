@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConversationId, ConversationState } from '@10db/contracts';
 import { getConversation, type DbReader } from '@10db/db';
-import { readTakeoverRecord, takeoverFolderOf } from './files';
+import { readTakeoverRecord, takeoverFolderOf, TAKEOVERS } from './files';
 
 /**
  * The temp dirs the servers of every chat still in the builder's terminal use, for the startup sweep to leave alone.
@@ -13,7 +13,7 @@ export function liveTakeoverTempDirs(db: DbReader, dataDir: string): Set<string>
   const kept = new Set<string>();
   let names: string[];
   try {
-    names = readdirSync(join(dataDir, 'conversations'));
+    names = readdirSync(join(dataDir, TAKEOVERS));
   } catch {
     return kept;
   }

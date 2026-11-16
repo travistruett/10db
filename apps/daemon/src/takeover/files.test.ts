@@ -7,9 +7,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { mintId, TerminalApp } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
+import { chatFolder } from '../chat';
 import { tempDir } from '../../test/fixtures';
 import {
   createTakeoverFolder,
@@ -71,23 +72,16 @@ describe('the takeover folder', () => {
 
   it.each([
     {
-      name: 'the conversation folder',
-      plant: (w: ReturnType<typeof world>) => {
-        mkdirSync(join(w.data, 'conversations'));
-        symlinkSync(w.target, join(w.data, 'conversations', w.id));
-      },
-    },
-    {
       name: 'the takeover folder',
       plant: (w: ReturnType<typeof world>) => {
-        mkdirSync(join(w.data, 'conversations', w.id), { recursive: true });
-        symlinkSync(w.target, join(w.data, 'conversations', w.id, 'takeover'));
+        mkdirSync(join(w.data, 'takeovers'));
+        symlinkSync(w.target, join(w.data, 'takeovers', w.id));
       },
     },
     {
-      name: 'the conversations folder',
+      name: 'the takeovers folder',
       plant: (w: ReturnType<typeof world>) => {
-        symlinkSync(w.outside, join(w.data, 'conversations'));
+        symlinkSync(w.outside, join(w.data, 'takeovers'));
       },
     },
   ])('refuses a link at $name, and a remove leaves its target', ({ plant }) => {
@@ -125,5 +119,13 @@ describe('takeover.json', () => {
     expect(readTakeoverRecord(folder)).toBeNull();
     writeFileSync(join(folder, 'takeover.json'), 'not json');
     expect(readTakeoverRecord(folder)).toBeNull();
+  });
+});
+
+describe('where the folder is', () => {
+  it('is outside the chat’s own files, which the chat’s session may read and its sandbox lists', () => {
+    const w = world();
+    const own = chatFolder(w.data, w.id);
+    expect(`${takeoverFolderOf(w.data, w.id)}${sep}`.startsWith(`${own}${sep}`)).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import {
   ConversationId,
   ConversationState,
   FolderAsker,
+  FolderHolderKind,
   TerminalApp,
   UpstreamError,
   type AgentAccountKind,
@@ -33,6 +34,7 @@ import {
   readTakeoverRecord,
   removeTakeoverFolder,
   takeoverFolderOf,
+  TAKEOVERS,
   writeTakeoverRecord,
   type TakeoverRecord,
 } from './files';
@@ -48,6 +50,8 @@ const NOT_IN_TERMINAL = 'Not in your terminal';
 const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
+const closedPassNote = (name: string): string =>
+  `The pass ‘${name}’ is closed and waits for its pull request to merge: a commit made in the terminal makes its settle ask you.`;
 
 export interface TakeoverServiceDeps {
   readonly state: StateStore;
@@ -166,11 +170,24 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
     }
   }
 
-  /** Removes everything of the chat's takeover: its sets' servers and the folder. */
+  /**
+   * Removes everything of the chat's takeover: its sets' servers and the folder. One set that won't go is
+   * logged and the rest still go, so the folder, which holds sealed headers, never stays for want of another.
+   */
   function release(chat: ChatRow): void {
-    for (const set of live.get(chat.id)?.sets ?? []) set.remove();
+    const sets = live.get(chat.id)?.sets ?? [];
     live.delete(chat.id);
-    removeTakeoverFolder(deps.dataDir, chat.conversationId);
+    try {
+      for (const set of sets) {
+        try {
+          set.remove();
+        } catch (error) {
+          deps.log.warn({ err: error, chatId: chat.id }, 'a takeover set was not removed');
+        }
+      }
+    } finally {
+      removeTakeoverFolder(deps.dataDir, chat.conversationId);
+    }
   }
 
   const notesFor = (chat: ChatRow, extra: readonly string[] = []): string[] => {
@@ -336,13 +353,23 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
       const refusal = refusalOf(chat);
       const project = getProject(state.db, chat.projectId);
       const notes = [FOLDER_HELD_NOTE];
+      const closed = deps.folderHold
+        .holders(chat.projectId)
+        .find((holder) => holder.kind === FolderHolderKind.PassClosed);
+      if (closed !== undefined) notes.push(closedPassNote(closed.name));
       try {
-        const changed = settingFilesChanged(
-          await deps.changedPaths(project.repoPath),
-          project.repoPath,
-        );
-        if (changed.length > 0)
-          notes.push(`These project files changed and won't be loaded: ${changed.join(', ')}.`);
+        const paths = await deps.changedPaths(project.repoPath).catch((error: unknown) => {
+          // A git failure costs the list of changed files, not the terminal.
+          deps.log.warn({ err: error, chatId: chat.id }, 'the changed files could not be read');
+          return null;
+        });
+        if (paths === null)
+          notes.push("Which project files changed couldn't be read, so none are listed here.");
+        else {
+          const changed = settingFilesChanged(paths, project.repoPath);
+          if (changed.length > 0)
+            notes.push(`These project files changed and won't be loaded: ${changed.join(', ')}.`);
+        }
         notes.push(...notesFor(chat));
       } catch (error) {
         // An account that can't start a session is a reason, not a crash.
@@ -376,15 +403,12 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
 
     ended(chatId) {
       const chat = getChat(state.db, chatId);
-      const had =
-        live.has(chatId) ||
-        readTakeoverRecord(takeoverFolderOf(deps.dataDir, chat.conversationId)) !== null;
-      if (had) folderHold.handBack(chat.projectId, chatId, () => undefined);
+      folderHold.handBack(chat.projectId, chatId, () => undefined);
       release(chat);
     },
 
     recover() {
-      const root = join(deps.dataDir, 'conversations');
+      const root = join(deps.dataDir, TAKEOVERS);
       let names: string[];
       try {
         names = readdirSync(root);

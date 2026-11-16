@@ -60,6 +60,10 @@ export interface ChatWorld {
     prepareGate: Promise<void> | null;
     /** What the project's checkout differs from HEAD in. */
     changed: string[];
+    /** Reading what changed fails with this (a git failure). */
+    changedFails: Error | null;
+    /** Removing a set's servers throws. */
+    removeFails: boolean;
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
   launchOn(kind: AgentAccountKind): void;
@@ -194,6 +198,8 @@ export function chatWorld(
     openerFails: null,
     prepareGate: null,
     changed: [],
+    changedFails: null,
+    removeFails: false,
   };
   const opened: { app: string; script: string }[] = [];
   const takeover = createTakeoverService({
@@ -251,7 +257,9 @@ export function chatWorld(
               },
               notes: [],
               tempDirs: [join(dir.path, 'server-temp')],
-              remove: () => undefined,
+              remove: () => {
+                if (terminal.removeFails) throw new Error('could not remove a set');
+              },
             };
           },
           onboard: () => Promise.resolve(),
@@ -261,7 +269,10 @@ export function chatWorld(
         signal,
       ),
     notesOf: () => adapter.takeoverNotes(),
-    changedPaths: () => Promise.resolve(terminal.changed),
+    changedPaths: () =>
+      terminal.changedFails === null
+        ? Promise.resolve(terminal.changed)
+        : Promise.reject(terminal.changedFails),
   });
   takeoverService = takeover;
   return {

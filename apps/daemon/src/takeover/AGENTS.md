@@ -11,9 +11,11 @@ window, Hand Back.
   state write, and the chat's archived row re-read there, since an archived chat has no retired flag after a
   restart). Hand Back holds the chat's starts, gives the folder back (waiting git work is handed it first), then
   parks the held messages on the folder.
-- `files.ts`: everything lives in `<data dir>/conversations/<id>/takeover/` (mode 700; the script 700, the rest
-  600). A link at the conversation folder, the takeover folder or a file is refused or unlinked, never followed.
+- `files.ts`: everything lives in `<data dir>/takeovers/<conversation id>/` (outside the chat's own files, which its session may read; mode 700; the script 700, the rest
+  600). A link at the takeovers folder, the takeover folder or a file is refused or unlinked, never followed.
   `takeover.json` is display data read through zod; nothing runs or is deleted from it.
+- Hand Back and archive remove each set in turn and log one that won't go; the folder is always removed. `ended()`
+  hands the hold back for any chat, since the agent-writable folder says nothing the row doesn't.
 - `prepare.ts` writes one set of files per launch and never reads them back: the terminal's agent can write there.
   Earlier sets stay until Hand Back, since an earlier window may use them.
 - `render.ts` is the pure script and line; the line is for zsh and bash, not fish.

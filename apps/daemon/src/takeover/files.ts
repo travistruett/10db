@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { ConversationId, TerminalAppSchema } from '@10db/contracts';
 import { z } from 'zod';
 
-// Sessions spec §7.5: the folder a chat's takeover files live in, `<data dir>/conversations/<id>/takeover/`.
+// Sessions spec §7.5: the folder a chat's takeover files live in, `<data dir>/takeovers/<conversation id>/`,
+// outside the chat's own files, which its session may read and its sandbox lists.
 // The terminal's agent can write there, so every step names what it expects and never follows a link.
 
 /** A takeover file or folder could not be made safely. */
@@ -22,6 +23,8 @@ export class TakeoverFilesError extends Error {
   override readonly name = 'TakeoverFilesError';
 }
 
+/** The folder under the data dir that holds every chat's takeover folder. */
+export const TAKEOVERS = 'takeovers';
 const RECORD_FILE = 'takeover.json';
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -36,7 +39,7 @@ export type TakeoverRecord = z.infer<typeof TakeoverRecord>;
 
 /** The folder a chat's takeover files go in. */
 export const takeoverFolderOf = (dataDir: string, conversationId: ConversationId): string =>
-  join(dataDir, 'conversations', ConversationId.parse(conversationId), 'takeover');
+  join(dataDir, TAKEOVERS, ConversationId.parse(conversationId));
 
 const isMissing = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -60,8 +63,7 @@ function ensureRealDirectory(path: string, mode: number): void {
 /** Makes the chat's takeover folder, mode 700, and answers its path. Refuses a link on the way. */
 export function createTakeoverFolder(dataDir: string, conversationId: ConversationId): string {
   const root = realpathSync(dataDir);
-  ensureRealDirectory(join(root, 'conversations'), 0o755);
-  ensureRealDirectory(join(root, 'conversations', conversationId), 0o755);
+  ensureRealDirectory(join(root, TAKEOVERS), 0o700);
   const folder = takeoverFolderOf(root, conversationId);
   ensureRealDirectory(folder, 0o700);
   chmodSync(folder, 0o700);
@@ -70,7 +72,7 @@ export function createTakeoverFolder(dataDir: string, conversationId: Conversati
 
 /**
  * Removes the chat's takeover folder with everything in it. A link at the folder is removed as a link; one at
- * the conversation folder or above it is left alone, with whatever it leads to. Safe to repeat.
+ * the takeovers folder or above it is left alone, with whatever it leads to. Safe to repeat.
  */
 export function removeTakeoverFolder(dataDir: string, conversationId: ConversationId): void {
   let root: string;
@@ -80,11 +82,7 @@ export function removeTakeoverFolder(dataDir: string, conversationId: Conversati
     if (isMissing(error)) return;
     throw error;
   }
-  if (
-    realDirectory(join(root, 'conversations')) !== true ||
-    realDirectory(join(root, 'conversations', conversationId)) !== true
-  )
-    return;
+  if (realDirectory(join(root, TAKEOVERS)) !== true) return;
   const folder = takeoverFolderOf(root, conversationId);
   const kind = realDirectory(folder);
   if (kind === null) return;

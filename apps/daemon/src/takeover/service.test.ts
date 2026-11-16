@@ -1,7 +1,23 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, ConversationItemKind, UpstreamError, type ChatDto } from '@10db/contracts';
-import { getConversation, listItems } from '@10db/db';
+import {
+  ConflictError,
+  ConversationItemKind,
+  mintId,
+  PassState,
+  UpstreamError,
+  WorkstreamState,
+  type ChatDto,
+} from '@10db/contracts';
+import {
+  getConversation,
+  insertPass,
+  insertTask,
+  insertWorkstream,
+  listItems,
+  schema,
+} from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
@@ -182,19 +198,16 @@ describe('Hand Back', () => {
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
     // 10db's git work waits for the terminal.
     const controller = new AbortController();
-    let token: symbol | null = null;
-    const waiting = w.folderHold
-      .reserveGitWhenFree(w.project.id, 'a switch back', controller.signal)
-      .then((t) => {
-        token = t;
-      });
+    const waiting = w.folderHold.reserveGitWhenFree(
+      w.project.id,
+      'a switch back',
+      controller.signal,
+    );
     await w.takeover.handBack(chat.conversationId);
-    await waiting;
     // The git work holds the folder first; the held message is not running yet.
-    const handed = token as symbol | null;
-    expect(handed).not.toBeNull();
+    const handed = await waiting;
     expect(stateOf(chat)).toBe('idle_cold');
-    if (handed !== null) w.folderHold.releaseGit(handed);
+    w.folderHold.releaseGit(handed);
     await waitFor(() => w.folderHold.holdsTurn(chat.id));
     await w.engine.settled(chat.conversationId);
     // The turn held the folder, so it wrote rather than read.
@@ -321,4 +334,98 @@ describe('the popover’s preview', () => {
     w.folderHold.reserveGit(w.project.id, 'a switch back');
     expect((await w.takeover.preview(chat.conversationId)).refusal).toMatch(/in use by/);
   });
+
+  it('names a closed pass, which allows Open but makes a terminal commit ask at its settle', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    addPass('Settings pass', PassState.Closed);
+    const preview = await w.takeover.preview(chat.conversationId);
+    expect(preview.refusal).toBeNull();
+    expect(preview.notes.join('\n')).toContain('Settings pass');
+    expect(preview.notes.join('\n')).toContain('closed');
+  });
+
+  it('says a failed read of the changed files in a note and does not refuse', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.terminal.changedFails = new Error('git is not answering');
+    const preview = await w.takeover.preview(chat.conversationId);
+    expect(preview.refusal).toBeNull();
+    expect(preview.notes.join('\n')).toContain("couldn't be read");
+    expect(preview.notes).toContain('Your folder is held until you hand back.');
+  });
 });
+
+describe('Open while a task holds Your folder', () => {
+  it('is refused with the task named, and nothing is written', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    addLane('Bump vite');
+    await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(
+      /Your folder is in use by the task ‘Bump vite’/,
+    );
+    expect(stateOf(chat)).toBe('idle_warm');
+    expect(existsSync(folderOf(chat))).toBe(false);
+  });
+});
+
+describe('Hand Back when a set will not go', () => {
+  it('still gives the chat back, removes the folder and answers', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    await w.takeover.open(chat.conversationId);
+    w.terminal.removeFails = true;
+    await w.takeover.handBack(chat.conversationId);
+    expect(stateOf(chat)).toBe('idle_cold');
+    expect(existsSync(folderOf(chat))).toBe(false);
+    expect(w.folderHold.reserveGit(w.project.id, 'free').reserved).toBe(true);
+  });
+});
+
+/** A pass in this world's project, in `passState`. */
+function addPass(name: string, passState: PassState): void {
+  w.store.write((ctx) => {
+    const task = insertTask(ctx, w.project.id, {
+      title: 'Page',
+      acceptanceCriteria: ['x'],
+      areas: ['api'],
+    });
+    const opened = insertPass(ctx, {
+      id: mintId('Pass'),
+      projectId: w.project.id,
+      name,
+      pageCap: 4,
+      returnBranch: 'main',
+      startSha: 'a'.repeat(40),
+      branch: '10db/pass-abc123',
+      baseBranch: 'main',
+      repo: null,
+      taskIds: [task.id],
+      dirt: [],
+    });
+    ctx.tx
+      .update(schema.passes)
+      .set({ state: passState })
+      .where(eq(schema.passes.id, opened.pass.id))
+      .run();
+  });
+}
+
+/** A task running in Your folder. */
+function addLane(title: string): void {
+  w.store.write((ctx) => {
+    const task = insertTask(ctx, w.project.id, {
+      title,
+      acceptanceCriteria: ['x'],
+      areas: ['api'],
+    });
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ state: WorkstreamState.Running, workspaceMode: 'shared' })
+      .where(eq(schema.workstreams.id, ws.id))
+      .run();
+  });
+}
