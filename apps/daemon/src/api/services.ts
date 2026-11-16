@@ -127,7 +127,7 @@ import type {
   WorkbenchSetupDto,
   PassDto,
   PassId,
-  PassOpenedDto,
+  PassOpenResponse,
   PassAbandonedDto,
   PassCloseAnswerDto,
   PassCloseContinueDto,
@@ -382,7 +382,9 @@ export interface ApiServices extends PlanRecordServices {
    * given, else the task's description when it has one. Refused (409) for whatever the open itself
    * refuses. A pass runs on the project's own account, Claude or Codex.
    */
-  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
+  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenResponse>;
+  /** Cancels the open that waits for chats' turns; whether there was one. */
+  cancelPendingOpen(projectId: ProjectId): boolean;
   /** The pass as the Workbench reads it: its pages and every turn's timing. */
   passView(passId: PassId): PassViewDto;
   /**

@@ -246,6 +246,7 @@ import {
   closeGateOf,
   createPassCloses,
   discardKeptWork,
+  createPendingOpens,
   joinPass,
   putBackKeptWork,
   resumePassWork,
@@ -684,6 +685,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     bus,
   );
   const folderHold = createFolderHold({ state, bus });
+  // Opens of a pass that wait for chats' turns: memory only, so a restart drops them.
+  const pendingOpens = createPendingOpens({ state });
   const liveFrames =
     opts.liveFrames ??
     createLiveFrames((error) => {
@@ -2250,6 +2253,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       chat,
       folderHold,
+      pendingOpens,
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2271,6 +2275,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     sizing,
     sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
+    openWhenBusy: {
+      folderHold,
+      pendingOpens,
+      stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
+      logger: logger.child({ component: 'pass-open' }),
+    },
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
@@ -2412,6 +2422,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         drain: {
           begin: (since) => {
             updateDrain.begin(since);
+            // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
+            pendingOpens.cancelAll();
           },
           end: () => {
             updateDrain.end();

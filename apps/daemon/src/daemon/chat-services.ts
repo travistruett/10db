@@ -11,6 +11,7 @@ import {
 import type { StateStore } from '../events';
 import { folderView, type FolderHold } from '../folder-hold';
 import type { Logger } from '../log';
+import type { PendingOpens } from '../pass';
 
 // Sessions spec §10: a chat's own routes. Its conversation is served by the conversation routes.
 
@@ -36,6 +37,7 @@ export function createChatApiServices(deps: {
   readonly state: StateStore;
   readonly chat: ChatService;
   readonly folderHold: FolderHold;
+  readonly pendingOpens: Pick<PendingOpens, 'view'>;
   readonly git: StartGit;
   readonly now: () => Date;
   readonly log: Logger;
@@ -75,6 +77,7 @@ export function createChatApiServices(deps: {
         projectId,
         branch === '' ? null : branch,
         deps.folderHold.holders(projectId),
+        deps.pendingOpens.view(projectId),
       );
     },
     chatModels: (projectId) => chat.models(projectId),

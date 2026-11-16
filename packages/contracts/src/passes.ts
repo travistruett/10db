@@ -480,6 +480,10 @@ export const PassOpenedDto = z.object({
 });
 export type PassOpenedDto = z.infer<typeof PassOpenedDto>;
 
+/** What `POST /projects/:projectId/passes` answers: the pass, or `pending` for an open that waits for chats' turns. */
+export const PassOpenResponse = z.union([PassOpenedDto, z.object({ pending: z.literal(true) })]);
+export type PassOpenResponse = z.infer<typeof PassOpenResponse>;
+
 /** What a take-out did (spec §5.4). */
 export const TakeOutResultDto = z.object({
   taskId: TaskId,

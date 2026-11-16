@@ -57,3 +57,10 @@ export {
 } from './move-copy';
 export { reopenSignedOffPage } from './reopen';
 export { subscribeMergedPasses } from './merged-open';
+export {
+  openWhenBusy,
+  STOPPED_TURNS_DEADLINE_MS,
+  type OpenPending,
+  type OpenWhenBusyDeps,
+} from './open-when-busy';
+export { createPendingOpens, type PendingOpen, type PendingOpens } from './pending-open';

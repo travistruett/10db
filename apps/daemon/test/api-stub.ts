@@ -163,6 +163,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     startBatch: track('startBatch'),
     listBatches: track('listBatches'),
     openPass: track('openPass'),
+    cancelPendingOpen: track('cancelPendingOpen'),
     passView: track('passView'),
     takeOutPage: track('takeOutPage'),
     takeOutPreview: track('takeOutPreview'),

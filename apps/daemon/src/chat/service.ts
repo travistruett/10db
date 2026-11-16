@@ -69,6 +69,8 @@ const FIRST_LINE_TITLE_MAX = 40;
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
+/** What Redo and archive are refused with while Do It, or an open that stopped the chat's turn, is under way. */
+export const DO_IT_UNDER_WAY = 'Do It is already under way for this chat';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
@@ -138,6 +140,12 @@ export interface ChatService {
   cancelBrief(chatId: ChatId): Promise<void>;
   /** The brief the sheet shows now. */
   briefOf(chatId: ChatId): DoItBriefDto;
+  /**
+   * Stops the chat's turn so a pass can open under it, keeping its queued messages parked: its starts stay
+   * held, its Stop answers at once and changes nothing, and Redo and archive are refused until the returned
+   * `release` runs, which lets what is queued run. Refused when the chat is already stopped for one.
+   */
+  stopForOpen(chatId: ChatId): Promise<() => void>;
 }
 
 export interface ChatServiceDeps {
@@ -164,6 +172,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const offered = (projectId: ProjectId, model: string): void => {
     if (!deps.modelsOf(projectId).offered.some((m) => m.model === model))
       throw new InvalidError(MODEL_NOT_OFFERED);
+  };
+
+  // Chats a pass's open has stopped, until it is done: Stop must not give back the starts it holds.
+  const stoppedForOpen = new Set<ChatId>();
+  const refuseWhileDoing = (chatId: ChatId): void => {
+    if (stoppedForOpen.has(chatId)) throw new ConflictError(DO_IT_UNDER_WAY);
   };
 
   return {
@@ -244,6 +258,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     async archive(id) {
       const chat = getChat(state.db, id);
       if (chat.archivedAt !== null) return dtoOf(id);
+      refuseWhileDoing(id);
       // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
       // does lands after the chat is archived; then the folder made only from its id goes.
       deps.folderHold.cancelWait(id);
@@ -290,6 +305,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async stop(conversationId) {
       const chat = requireChat(conversationId);
+      // The turn is already stopping, and the open's hold on its starts is not Stop's to undo.
+      if (stoppedForOpen.has(chat.id)) return;
       // The parked start is dropped by the stop; the hold on new starts goes with the wait.
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
@@ -315,6 +332,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
+      refuseWhileDoing(chat.id);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
@@ -327,6 +345,27 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     post: (conversationId, input) => post(conversationId, input),
+
+    async stopForOpen(chatId) {
+      const chat = getChat(state.db, chatId);
+      refuseWhileDoing(chatId);
+      stoppedForOpen.add(chatId);
+      // Starts are held first, so a chained or queued message parks instead of beginning a turn.
+      engine.holdStarts(chat.conversationId);
+      try {
+        deps.folderHold.cancelWait(chatId);
+        await engine.stop(chat.conversationId);
+        await engine.settled(chat.conversationId);
+      } catch (error) {
+        stoppedForOpen.delete(chatId);
+        engine.releaseStarts(chat.conversationId);
+        throw error;
+      }
+      return () => {
+        if (!stoppedForOpen.delete(chatId)) return;
+        engine.releaseStarts(chat.conversationId);
+      };
+    },
 
     askBrief(chatId, draft) {
       const chat = getChat(state.db, chatId);

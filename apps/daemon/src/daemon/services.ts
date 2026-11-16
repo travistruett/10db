@@ -154,12 +154,14 @@ import {
   goalPassPages,
   livePassViews,
   openTurn,
+  openWhenBusy,
   passStartPreview,
   passView,
   sharedUnlanded,
   TakeOutWithin,
   taskTurns,
   turnLog,
+  type OpenWhenBusyDeps,
   type PassCloses,
   type PassJoined,
   type TakeOutInput,
@@ -318,6 +320,8 @@ export function createServices(deps: {
   readonly sizing: Pick<SizingService, 'settled'>;
   /** How long that wait is at most. */
   readonly sizingWaitMs: number;
+  /** What `openPass` with `whenBusy` needs: who holds the folder, the open that waits, and a chat's stop. */
+  readonly openWhenBusy: OpenWhenBusyDeps;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
@@ -516,33 +520,44 @@ export function createServices(deps: {
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
-    async openPass(projectId, input) {
-      let opened: PassOpened;
-      try {
-        opened = await deps.openPass({
-          projectId,
-          name: input.name,
-          taskIds: input.taskIds,
-          ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
-          ...(input.pages === undefined ? {} : { pages: input.pages }),
-          ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
-        });
-      } catch (error) {
-        if (error instanceof GitError)
-          throw new ConflictError(`Your folder could not be opened for a pass: ${error.message}`);
-        throw error;
-      }
-      // Each page's first turn starts from a message: the builder's, else the task's description. A
-      // page the open made a task for has none, so it waits for the builder's first word.
-      deps.state.write((ctx) => {
-        for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
-          const body = input.firstMessage ?? task.description;
-          if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
-        }
-      });
-      deps.scheduler.requestTick();
-      return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
-    },
+    openPass: (projectId, input) =>
+      openWhenBusy(deps.openWhenBusy, {
+        projectId,
+        name: input.name,
+        chatId: null,
+        whenBusy: input.whenBusy,
+        open: async (wait) => {
+          let opened: PassOpened;
+          try {
+            opened = await deps.openPass({
+              projectId,
+              name: input.name,
+              taskIds: input.taskIds,
+              ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+              ...(input.pages === undefined ? {} : { pages: input.pages }),
+              ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
+              ...(wait === undefined ? {} : { wait }),
+            });
+          } catch (error) {
+            if (error instanceof GitError)
+              throw new ConflictError(
+                `Your folder could not be opened for a pass: ${error.message}`,
+              );
+            throw error;
+          }
+          // Each page's first turn starts from a message: the builder's, else the task's description. A
+          // page the open made a task for has none, so it waits for the builder's first word.
+          deps.state.write((ctx) => {
+            for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
+              const body = input.firstMessage ?? task.description;
+              if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
+            }
+          });
+          deps.scheduler.requestTick();
+          return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
+        },
+      }),
+    cancelPendingOpen: (projectId) => deps.openWhenBusy.pendingOpens.cancel(projectId),
     passView: (passId) => passView(db, passId),
     async takeOutPage(passId, taskId, input) {
       const pass = getPass(db, passId);

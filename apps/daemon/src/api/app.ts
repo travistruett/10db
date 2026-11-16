@@ -1115,6 +1115,11 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .delete('/projects/:projectId/pending-open', async (c) => {
+      const projectId = ProjectId.parse(c.req.param('projectId'));
+      deps.services.cancelPendingOpen(projectId);
+      return c.json(await deps.services.projectFolder(projectId));
+    })
     .get('/passes/:passId', (c) =>
       c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
     )
