@@ -14,7 +14,7 @@ export function isTenDbBranch(name: string): boolean {
 
 /**
  * A branch name a chat's tool may create or switch to: not 10db's, not an option (`-`) or a refspec force
- * (`+`), no whitespace or control character, and short. Git's own rules (`check-ref-format`) run after this.
+ * (`+`), no `@{`, no whitespace or control character, and short. Git's own rules (`check-ref-format`) run after this.
  */
 export function chatBranchName(name: string): string {
   if (name.length === 0 || name.length > MAX_NAME)
@@ -24,6 +24,11 @@ export function chatBranchName(name: string): string {
   // eslint-disable-next-line no-control-regex
   if (/[\s\u0000-\u001f\u007f]/u.test(name))
     throw new InvalidError('A branch name holds no space or control character');
+  // `@{-1}` and `@{upstream}` are read by git as other refs, so the 10db check would be on the wrong text.
+  if (name.includes('@{'))
+    throw new InvalidError(
+      'A branch name holds no @{, which git reads as a reference to another branch',
+    );
   if (isTenDbBranch(name))
     throw new InvalidError(
       `${BRANCH_PREFIX}… is 10db's own: its batches and passes live there, so a chat never makes or switches to one`,

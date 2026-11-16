@@ -205,6 +205,16 @@ describe("a chat's git tools", () => {
     await expect(call(tools(me))).rejects.toThrow(/10db's own/);
   });
 
+  // Each name with the words its refusal carries, so a row that passes on git's own failure shows.
+  const REFUSED_BRANCH_NAMES: [name: string, message: RegExp][] = [
+    ['10db/x', /10db's own/],
+    ['10DB/x', /10db's own/],
+    ['-c', /never starts with - or \+/],
+    ['+x', /never starts with - or \+/],
+    ['@{-1}', /@\{/],
+    ['topic@{-2}', /@\{/],
+  ];
+
   it.each([
     ['make_branch', (t: Tools, name: string) => t.make_branch({ name })],
     ['switch_branch', (t: Tools, name: string) => t.switch_branch({ name })],
@@ -212,8 +222,11 @@ describe("a chat's git tools", () => {
     const me = newChat('Me');
     hold.takeTurn(project.id, me.id);
     const t = tools(me);
-    for (const name of ['10db/x', '10DB/x', '-c', '+x'])
-      await expect(call(t, name)).rejects.toThrow();
+    // `@{-1}` would name the 10db branch the folder was on before.
+    rg('switch', '-q', '-c', '10db/batch-abc123');
+    rg('switch', '-q', 'main');
+    for (const [name, message] of REFUSED_BRANCH_NAMES)
+      await expect(call(t, name)).rejects.toThrow(message);
     expect(rg('branch', '--show-current')).toBe('main');
   });
 

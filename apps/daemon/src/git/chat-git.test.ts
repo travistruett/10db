@@ -208,6 +208,18 @@ describe('switchBranch', () => {
     expect(rg('branch', '--show-current')).toBe('main');
   });
 
+  // `@{-1}` names the branch the folder was on before; a chat's name check reads the text it was given, so git
+  // must not act on what the name expands to.
+  it.each([['makeBranchHere'], ['switchBranch']] as const)(
+    '%s refuses a name that git expands to another branch',
+    async (method) => {
+      rg('switch', '-q', '-c', '10db/batch-x');
+      rg('switch', '-q', 'main');
+      await expect(git[method](repo, '@{-1}')).rejects.toThrow(/@\{/);
+      expect(rg('branch', '--show-current')).toBe('main');
+    },
+  );
+
   it('refuses a branch whose tree asks for a filter', async () => {
     rg('switch', '-q', 'other');
     write('.gitattributes', '*.bin filter=lfs\n');

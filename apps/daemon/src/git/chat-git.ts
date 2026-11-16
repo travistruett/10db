@@ -156,7 +156,11 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
       () => ctx.git(c, ['check-ref-format', '--branch', name]),
       `${name} is not a branch name`,
     );
-    return checked.trim();
+    const branch = checked.trim();
+    // `--branch` expands `@{-N}` to the branch the folder was on; a caller's checks read the text it passed.
+    if (branch !== name)
+      throw new InvalidError(`${name} is a reference git expands (@{), not a branch name`);
+    return branch;
   }
 
   return {
