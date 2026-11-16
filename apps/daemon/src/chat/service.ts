@@ -325,9 +325,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (briefTurnRunning(chat)) {
         briefTurns.delete(chat.id);
         engine.holdStarts(conversationId);
-        void stopHeld(conversationId, () => {
-          dispatch(chat, conversationId, folder);
-        });
+        void stopHeld(conversationId, () => dispatch(chat, conversationId, folder));
         return item;
       }
       dispatch(chat, conversationId, folder);
@@ -493,9 +491,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
   /**
    * Stops the turn with starts held, runs `next` (the queue's half of the send, so its folder choice is made
-   * before anything starts), then lets the starts go unless an open holds them.
+   * before anything starts, and whether it parked the message), then lets the starts go unless an open holds
+   * them or the message waits for the folder.
    */
-  async function stopHeld(conversationId: ConversationId, next: () => void): Promise<void> {
+  async function stopHeld(conversationId: ConversationId, next: () => boolean): Promise<void> {
     const chat = chatOfConversation(state.db, conversationId);
     try {
       await engine.stop(conversationId);
@@ -503,8 +502,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     } catch {
       // A stop that fails leaves the turn as it was; the message still runs after it.
     }
+    let parked = false;
     try {
-      next();
+      parked = next();
     } catch (error) {
       deps.log.warn(
         { conversationId, err: error instanceof Error ? error.message : String(error) },
@@ -512,7 +512,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       );
     } finally {
       // The starts of a chat an open stopped are held for the open, which gives them back itself.
-      if (chat === null || !stoppedForOpen.has(chat.id)) engine.releaseStarts(conversationId);
+      // A message that waits for the folder keeps its starts held; the wait releases them.
+      if (!parked && (chat === null || !stoppedForOpen.has(chat.id)))
+        engine.releaseStarts(conversationId);
     }
   }
 
@@ -529,7 +531,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     chat: ChatRow,
     conversationId: ConversationId,
     folder: FolderWhileHeld | undefined,
-  ): void {
+  ): boolean {
     const waiting = deps.folderHold.waiting(chat.id);
     const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
     // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
@@ -543,6 +545,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     engine.queued(conversationId);
     if (parks) watchFolder(chat);
     else if (waiting) engine.releaseStarts(conversationId);
+    return parks;
   }
 
   function requireChat(conversationId: ConversationId): ChatRow {
