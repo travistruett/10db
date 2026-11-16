@@ -262,7 +262,8 @@ export function DoItSheet({
       <Box
         {...{ [OWNS_ESCAPE_ATTRIBUTE]: '' }}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          // ⌘⇧↩ opens this sheet; held again inside it, it is not a submit.
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
             event.preventDefault();
             if (!busy) submit();
           }

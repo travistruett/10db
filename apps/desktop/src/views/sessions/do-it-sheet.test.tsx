@@ -326,6 +326,16 @@ describe('the Do It sheet', () => {
     });
   });
 
+  it('⌘⇧↩ in the sheet does not submit', async () => {
+    const { doIt } = openChat(doItPreviewDto());
+    const sheet = await openSheet();
+    const title = await within(sheet).findByDisplayValue('Retry login once on a 401');
+    fireEvent.keyDown(title, { key: 'Enter', metaKey: true, shiftKey: true });
+    // A submit puts the sheet in its pending state at once, which turns Cancel off.
+    expect(within(sheet).getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', false);
+    expect(doIt.requests).toEqual([]);
+  });
+
   it('a refusal at submit is said beside Do It, and the sheet keeps the brief', async () => {
     openChat(doItPreviewDto(), { refusal: 'Your folder changed since the sheet opened.' });
     const sheet = await openSheet();
