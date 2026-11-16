@@ -76,6 +76,9 @@ const TodoInput = z.looseObject({
   todos: z.array(z.looseObject({ content: Text, status: z.enum(PlanStepStatus) })),
 });
 const TextBlock = z.looseObject({ type: z.literal('text'), text: Text });
+const AskInput = z.looseObject({
+  questions: z.array(z.looseObject({ question: Text })).min(1),
+});
 
 /** The tools whose target's previous text an edit card diffs against. */
 const DIFFED = new Set(['Write', 'Edit', 'MultiEdit']);
@@ -386,6 +389,18 @@ function untitled(
         agent: input.data.subagent_type,
         promptPreview: input.data.prompt.slice(0, PREVIEW_CHARS),
         model: input.data.model ?? null,
+      };
+    }
+    case 'AskUserQuestion': {
+      // The answer form beside the call shows the options; its row needs only the questions.
+      const input = AskInput.safeParse(use.input);
+      if (!input.success) return other;
+      return {
+        ...other,
+        inputPreview: input.data.questions
+          .map((q) => q.question)
+          .join(' · ')
+          .slice(0, PREVIEW_CHARS),
       };
     }
     case 'WebFetch': {
