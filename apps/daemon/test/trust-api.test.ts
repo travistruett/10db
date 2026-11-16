@@ -20,12 +20,13 @@ import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
-import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from './fixtures';
+import { createTempRepo, FAKE_SRT, homeOutsideTemp, SANDBOXED, type TempDir } from './fixtures';
 
 // Settings › Trust (trust spec §6, §9): app-wide switches with a per-project override, the builder's
 // installed plugins, and a preview of what comes along into a project's next session.
 
 let base: string;
+let homeDir: TempDir;
 let home: string;
 let repo: TempDir;
 let other: TempDir;
@@ -66,7 +67,9 @@ function writeHome(): void {
 beforeEach(async () => {
   // A short base: a lane temp directory's whole path must fit the sandbox's limit.
   base = realpathSync(mkdtempSync('/tmp/sbt-'));
-  home = join(base, 'home');
+  // Outside every temp root, which 10db counts as lane-writable and leaves the builder's files out of.
+  homeDir = homeOutsideTemp('sbt');
+  home = join(homeDir.path, 'home');
   mkdirSync(home);
   writeHome();
   repo = createTempRepo();
@@ -96,6 +99,7 @@ afterEach(async () => {
   repo.cleanup();
   other.cleanup();
   rmSync(base, { recursive: true, force: true });
+  homeDir.cleanup();
 });
 
 const api = () => apiClient(daemon.url, daemon.token);

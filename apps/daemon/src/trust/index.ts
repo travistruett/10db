@@ -21,6 +21,7 @@ export {
   grantCallSummary,
   grantLine,
   grantTargetOf,
+  isGrantedCall,
   projectGrantedCalls,
   projectGrantLines,
 } from './grants';

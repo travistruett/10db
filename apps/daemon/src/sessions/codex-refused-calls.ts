@@ -14,6 +14,34 @@ export function refusedToolCalls(
   hook: HookInput,
   denial: ClaudeDenial,
   atMs: number,
+  seq: number,
+): readonly ToolCallView[] {
+  const calls = refusedCallsOf(hook, denial, atMs);
+  const id = hook.tool_use_id;
+  if (!id?.startsWith(CODE_MODE_ITEM)) return calls;
+  return calls.map((call) => ({
+    ...call,
+    id: `${call.id}#${String(seq)}`,
+    parentId: id,
+    title: `${IN_SCRIPT}: ${call.title}`.slice(0, TITLE_MAX),
+    refusal: call.refusal === null ? null : `Refused inside a code-mode script. ${call.refusal}`,
+  }));
+}
+
+/**
+ * The prefix of the item id Codex gives a code-mode script, whose nested calls all carry it. Unverified: it is
+ * what a live check saw, and no research note records it. A call outside code mode that carried such an id
+ * would show twice, once from the hook's input and once as the item Codex reports.
+ */
+const CODE_MODE_ITEM = 'exec-';
+const IN_SCRIPT = 'In a code-mode script';
+/** The longest title a view keeps. */
+const TITLE_MAX = 120;
+
+function refusedCallsOf(
+  hook: HookInput,
+  denial: ClaudeDenial,
+  atMs: number,
 ): readonly ToolCallView[] {
   const id = hook.tool_use_id;
   if (id === undefined || id === '') return [];

@@ -101,7 +101,20 @@ export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {
 };
 
 export const GRANTS_DESCRIPTION =
-  "10db's judge reads a change from the next call; auto mode from the next session.";
+  "A line that quotes one call applies, and stops, from the next call. A line in your own words is read by 10db's judge from the next call and by auto mode from the next session.";
 
 export const GRANTS_EMPTY =
-  'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched only by 10db\'s own judge, never by Claude\'s auto mode.';
+  "Nothing yet. \"Always in this project\" on a card adds a line here. Every judge reads a line that describes a kind of call. A line that quotes one call lets exactly that call through in Claude's auto mode and under 10db's judge, with no judge reading it; Codex's own Auto-review can still refuse it.";
+
+/** A quoted call stored before grants named their tool: it matches no call, so it must be granted again. */
+const UNNAMED_QUOTED_CALL = /^the call ".*"$/s;
+
+/** The line under a grant: what it holds and when, or that it no longer applies. */
+export function grantDescription(
+  grant: { readonly limit: LimitName | null; readonly target: string },
+  date: string,
+): string {
+  if (UNNAMED_QUOTED_CALL.test(grant.target))
+    return `Grant again: this was saved before grants named their tool · ${date}`;
+  return `${grant.limit === null ? 'Any limit' : GRANT_LIMIT_LABELS[grant.limit]} · ${date}`;
+}

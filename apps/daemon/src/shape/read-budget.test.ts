@@ -594,7 +594,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(told[0]).toMatch(/won't be able to Read/);
       // The session is out of room, not the image: a smaller copy goes as a path and is refused too.
       expect(told[0]).toMatch(/out of room for pictures/);
-      expect(told[0]).toMatch(/Tell Claude which picture matters most/);
+      expect(told[0]).toMatch(/Tell the agent which picture matters most/);
       expect(told[0]).toMatch(/new conversation/);
       expect(told[0]).not.toMatch(/smaller copy|too large/);
     });
