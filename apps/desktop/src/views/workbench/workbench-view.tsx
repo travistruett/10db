@@ -14,7 +14,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Button, Stack, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -31,6 +31,7 @@ import {
 import { useInbox, useTasks } from '../../daemon/queries';
 import { CountBadge } from '../../shell/count-badge';
 import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
@@ -127,13 +128,19 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
     mutationFn: (request: PassOpenRequest) => actions.start(request),
   });
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
-  const loading = (
-    <Group>
-      <Loader size="sm" role="status" aria-label="Loading the pages" />
-    </Group>
+  const loading = <PageLoading shape={PageLoadingShape.List} label="Loading the pages" />;
+  const header = (
+    <PageHeader title="UI Workbench" description="Work through pages with the agents, live." />
   );
   if (!hasPages) return <WorkbenchSetup project={project} />;
-  if (live === undefined) return loading;
+  // The header is known before the data, so it draws while the pass is read.
+  if (live === undefined)
+    return (
+      <Stack gap="md">
+        {header}
+        {loading}
+      </Stack>
+    );
   // A pass that has closed and not settled is one line above the picker: the next pass may stack on it.
   if ((live === null || !passHoldsTasks(live.pass.state)) && dialog === 'setup')
     return <WorkbenchSetup project={project} onBack={closeDialog} onApplied={closeDialog} />;

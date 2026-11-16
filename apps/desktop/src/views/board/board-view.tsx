@@ -14,7 +14,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, Select, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Menu, Select, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -32,6 +32,7 @@ import {
   useWorkstreams,
 } from '../../daemon/queries';
 import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
@@ -662,7 +663,9 @@ export function BoardView() {
           {linked.error.message}
         </Alert>
       ) : null}
-      {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
+      {projects.isPending ? (
+        <PageLoading shape={PageLoadingShape.Cards} label="Loading projects" />
+      ) : null}
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           key={project.id}

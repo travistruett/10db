@@ -167,6 +167,11 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   view's actions at the right end; row 2 is an optional one-line dimmed byline; row 3 is an optional toolbar,
   tabs left and filters right. A row that is absent takes no space. Workspaces, where the content is the
   work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
+- **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
+  of waiting, quiet placeholder rows in the shape of what is coming take the content's place
+  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), static when
+  the builder prefers reduced motion. A page never shows a lone spinner as its whole content; a spinner
+  stays inside a button or a row.
 - **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
   rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
   (`views/workbench/page-list.tsx`).

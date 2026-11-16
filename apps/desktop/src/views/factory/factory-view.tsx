@@ -1,5 +1,5 @@
 import { passHoldsTasks, type GoalId, type ProjectId, type ProjectViewDto } from '@10db/contracts';
-import { Alert, Box, Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Alert, Box, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useId } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
@@ -7,6 +7,7 @@ import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
 import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -135,7 +136,9 @@ function ProjectGoals({
             {goals.error.message}
           </Alert>
         ) : null}
-        {goals.isLoading ? <Loader size="sm" aria-label="Loading goals" /> : null}
+        {goals.isLoading ? (
+          <PageLoading shape={PageLoadingShape.List} rows={2} label="Loading goals" />
+        ) : null}
         {goals.isSuccess && goals.data.goals.length === 0 ? (
           <Text size="sm" c="dimmed">
             Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude
